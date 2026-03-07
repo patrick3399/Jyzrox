@@ -1,6 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import Script from 'next/script'
-import { NavBar } from '@/components/NavBar'
+import { LayoutShell } from '@/components/LayoutShell'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -14,6 +14,11 @@ export const metadata: Metadata = {
 
 export const viewport: Viewport = {
   themeColor: '#6366f1',
+  width: 'device-width',
+  initialScale: 1,
+  maximumScale: 1,
+  userScalable: false,
+  viewportFit: 'cover',
 }
 
 export default function RootLayout({
@@ -44,10 +49,7 @@ export default function RootLayout({
             `,
           }}
         />
-        <NavBar />
-        <main className="pt-14 min-h-screen bg-vault-bg">
-          {children}
-        </main>
+        <LayoutShell>{children}</LayoutShell>
       </body>
     </html>
   )

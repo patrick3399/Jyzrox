@@ -11,12 +11,6 @@ function readerReducer(state: ReaderState, action: ReaderAction): ReaderState {
       return { ...state, currentPage: action.page }
     case 'SET_VIEW_MODE':
       return { ...state, viewMode: action.mode }
-    case 'TOGGLE_FULLSCREEN':
-      return { ...state, isFullscreen: !state.isFullscreen }
-    case 'SET_BRIGHTNESS':
-      return { ...state, brightness: Math.max(0.3, Math.min(1.0, action.value)) }
-    case 'SET_BG_COLOR':
-      return { ...state, bgColor: action.color }
     case 'TOGGLE_OVERLAY':
       return { ...state, showOverlay: !state.showOverlay }
     case 'SHOW_OVERLAY':
@@ -32,9 +26,6 @@ export function useReaderState(initialPage: number, totalPages: number) {
   const [state, dispatch] = useReducer(readerReducer, {
     currentPage: initialPage,
     viewMode: 'single',
-    isFullscreen: false,
-    brightness: 1.0,
-    bgColor: '#000000',
     showOverlay: false,
   } as ReaderState)
 
@@ -61,21 +52,6 @@ export function useReaderState(initialPage: number, totalPages: number) {
     []
   )
 
-  const toggleFullscreen = useCallback(
-    () => dispatch({ type: 'TOGGLE_FULLSCREEN' }),
-    []
-  )
-
-  const setBrightness = useCallback(
-    (value: number) => dispatch({ type: 'SET_BRIGHTNESS', value }),
-    []
-  )
-
-  const setBgColor = useCallback(
-    (color: string) => dispatch({ type: 'SET_BG_COLOR', color }),
-    []
-  )
-
   const toggleOverlay = useCallback(
     () => dispatch({ type: 'TOGGLE_OVERLAY' }),
     []
@@ -87,9 +63,6 @@ export function useReaderState(initialPage: number, totalPages: number) {
     nextPage,
     prevPage,
     setViewMode,
-    toggleFullscreen,
-    setBrightness,
-    setBgColor,
     toggleOverlay,
   }
 }
@@ -226,7 +199,6 @@ export function useTouchGesture(
 export function useKeyboardNav(
   onNext: () => void,
   onPrev: () => void,
-  onFullscreen: () => void
 ) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -242,15 +214,11 @@ export function useKeyboardNav(
           e.preventDefault()
           onPrev()
           break
-        case 'f':
-        case 'F':
-          onFullscreen()
-          break
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onNext, onPrev, onFullscreen])
+  }, [onNext, onPrev])
 }
 
 // ── useProgressSave ───────────────────────────────────────────────────
@@ -259,6 +227,9 @@ export function useProgressSave(galleryId: number, currentPage: number) {
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
 
   useEffect(() => {
+    // Skip progress save for proxy-only browsing (galleryId === 0)
+    if (!galleryId) return
+
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
       api.library.saveProgress(galleryId, currentPage).catch(() => {
@@ -270,27 +241,3 @@ export function useProgressSave(galleryId: number, currentPage: number) {
   }, [galleryId, currentPage])
 }
 
-// ── useFullscreen ─────────────────────────────────────────────────────
-
-export function useFullscreen(containerRef: React.RefObject<HTMLElement | null>) {
-  const [isFullscreen, setIsFullscreen] = useState(false)
-
-  const toggle = useCallback(() => {
-    if (!document.fullscreenElement) {
-      containerRef.current?.requestFullscreen().catch(() => {
-        // iOS Safari fallback: track state manually, CSS handles the layout
-        setIsFullscreen(true)
-      })
-    } else {
-      document.exitFullscreen().catch(() => setIsFullscreen(false))
-    }
-  }, [containerRef])
-
-  useEffect(() => {
-    const handler = () => setIsFullscreen(!!document.fullscreenElement)
-    document.addEventListener('fullscreenchange', handler)
-    return () => document.removeEventListener('fullscreenchange', handler)
-  }, [])
-
-  return { isFullscreen, toggle }
-}

@@ -63,3 +63,23 @@ export function useEhGalleryImages(gid: number | null, token: string | null) {
     { revalidateOnFocus: false }
   )
 }
+
+export function useEhFavorites(
+  params: { favcat?: string; q?: string; next?: string; prev?: string },
+  enabled = true
+) {
+  return useSWR(
+    enabled ? ['eh/favorites', params] : null,
+    () => api.eh.getFavorites(params),
+    { revalidateOnFocus: false }
+  )
+}
+
+/** Lightweight hook — only fetches first detail page for ~20 preview thumbs */
+export function useEhGalleryPreviews(gid: number | null, token: string | null) {
+  return useSWR(
+    gid && token ? ['eh/previews', gid, token] : null,
+    () => api.eh.getPreviews(gid!, token!),
+    { revalidateOnFocus: false }
+  )
+}

@@ -25,8 +25,7 @@ async def verify_api_token(x_api_token: str = Header(...)):
         token = result.fetchone()
         
     if not token:
-        # Fallback to dev mode if table is empty just for demonstration of structural success
-        return {"user_id": 1}
+        raise HTTPException(status_code=401, detail="Invalid or expired API token")
         
     return {"user_id": token.user_id, "token_id": token.id}
 

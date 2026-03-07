@@ -3,6 +3,20 @@
 import { useState, FormEvent, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
+function Logo() {
+  return (
+    <svg width="80" height="80" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
+      <path d="M50 50 C50 30, 65 15, 50 5 C35 15, 50 30, 50 50Z" fill="#F44336" />
+      <path d="M50 50 C65 40, 85 40, 90 25 C75 25, 65 35, 50 50Z" fill="#FF9800" />
+      <path d="M50 50 C65 55, 80 65, 90 55 C80 45, 65 45, 50 50Z" fill="#4CAF50" />
+      <path d="M50 50 C55 65, 60 85, 50 95 C40 85, 45 65, 50 50Z" fill="#2196F3" />
+      <path d="M50 50 C35 60, 20 65, 10 55 C20 45, 35 45, 50 50Z" fill="#E91E63" />
+      <path d="M50 50 C35 40, 20 30, 10 40 C20 50, 35 50, 50 50Z" fill="#9C27B0" />
+      <circle cx="50" cy="50" r="6" fill="#0a0a0a" />
+    </svg>
+  )
+}
+
 export default function SetupPage() {
   const router = useRouter()
   const [username, setUsername] = useState('')
@@ -29,11 +43,11 @@ export default function SetupPage() {
     setError('')
 
     if (password !== confirm) {
-      setError('Passwords do not match.')
+      setError('密碼不一致')
       return
     }
     if (password.length < 8) {
-      setError('Password must be at least 8 characters.')
+      setError('密碼至少需要 8 個字元')
       return
     }
 
@@ -49,10 +63,10 @@ export default function SetupPage() {
         window.location.href = '/login'
       } else {
         const data = await res.json().catch(() => ({}))
-        setError(data?.detail ?? 'Setup failed. Please try again.')
+        setError(data?.detail ?? '設定失敗，請重試。')
       }
     } catch {
-      setError('Network error. Please check your connection.')
+      setError('網路錯誤，請確認連線。')
     } finally {
       setLoading(false)
     }
@@ -60,27 +74,31 @@ export default function SetupPage() {
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-vault-bg flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-vault-accent border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-[#4250af] border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-vault-bg flex items-center justify-center px-4">
+    <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <div className="bg-vault-card border border-vault-border rounded-2xl p-8 shadow-xl shadow-black/50">
-          <div className="mb-8 text-center">
-            <h1 className="text-2xl font-bold text-neutral-100 tracking-tight">
-              Jyzrox
+        <div className="bg-[#0f1118] border border-[#1e2030] rounded-3xl px-8 py-10 shadow-2xl shadow-black/60">
+          {/* Logo + title */}
+          <div className="flex flex-col items-center mb-8">
+            <Logo />
+            <h1 className="mt-4 text-2xl font-semibold text-[#8ba4d6]">
+              初始化設定
             </h1>
-            <p className="mt-1 text-sm text-neutral-500">Create your admin account to get started</p>
+            <p className="mt-2 text-sm text-[#6b7280] text-center">
+              建立管理員帳號以開始使用
+            </p>
           </div>
 
-          <form onSubmit={handleSubmit} className="flex flex-col gap-4">
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="username" className="text-xs font-medium text-neutral-400 uppercase tracking-wide">
-                Username
+          <form onSubmit={handleSubmit} className="flex flex-col gap-5">
+            <div className="flex flex-col gap-2">
+              <label htmlFor="username" className="text-sm text-[#9ca3af]">
+                使用者名稱
               </label>
               <input
                 id="username"
@@ -92,13 +110,13 @@ export default function SetupPage() {
                 required
                 disabled={loading}
                 placeholder="admin"
-                className="w-full bg-black/40 border border-vault-border rounded-lg px-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-vault-accent focus:ring-1 focus:ring-vault-accent/50 transition-colors disabled:opacity-50"
+                className="w-full bg-[#1a1f2e] border border-[#2a2f3e] rounded-xl px-4 py-3 text-sm text-white placeholder-[#444] focus:outline-none focus:border-[#4250af] transition-colors disabled:opacity-50"
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="password" className="text-xs font-medium text-neutral-400 uppercase tracking-wide">
-                Password
+            <div className="flex flex-col gap-2">
+              <label htmlFor="password" className="text-sm text-[#9ca3af]">
+                密碼
               </label>
               <input
                 id="password"
@@ -108,14 +126,14 @@ export default function SetupPage() {
                 autoComplete="new-password"
                 required
                 disabled={loading}
-                placeholder="••••••••"
-                className="w-full bg-black/40 border border-vault-border rounded-lg px-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-vault-accent focus:ring-1 focus:ring-vault-accent/50 transition-colors disabled:opacity-50"
+                placeholder="至少 8 個字元"
+                className="w-full bg-[#1a1f2e] border border-[#2a2f3e] rounded-xl px-4 py-3 text-sm text-white placeholder-[#444] focus:outline-none focus:border-[#4250af] transition-colors disabled:opacity-50"
               />
             </div>
 
-            <div className="flex flex-col gap-1.5">
-              <label htmlFor="confirm" className="text-xs font-medium text-neutral-400 uppercase tracking-wide">
-                Confirm Password
+            <div className="flex flex-col gap-2">
+              <label htmlFor="confirm" className="text-sm text-[#9ca3af]">
+                確認密碼
               </label>
               <input
                 id="confirm"
@@ -125,13 +143,12 @@ export default function SetupPage() {
                 autoComplete="new-password"
                 required
                 disabled={loading}
-                placeholder="••••••••"
-                className="w-full bg-black/40 border border-vault-border rounded-lg px-4 py-2.5 text-sm text-neutral-100 placeholder-neutral-600 focus:outline-none focus:border-vault-accent focus:ring-1 focus:ring-vault-accent/50 transition-colors disabled:opacity-50"
+                className="w-full bg-[#1a1f2e] border border-[#2a2f3e] rounded-xl px-4 py-3 text-sm text-white placeholder-[#444] focus:outline-none focus:border-[#4250af] transition-colors disabled:opacity-50"
               />
             </div>
 
             {error && (
-              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-lg px-3 py-2">
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
                 {error}
               </p>
             )}
@@ -139,9 +156,9 @@ export default function SetupPage() {
             <button
               type="submit"
               disabled={loading || !username || !password || !confirm}
-              className="mt-2 w-full bg-vault-accent hover:bg-indigo-500 disabled:opacity-50 disabled:cursor-not-allowed text-white font-semibold rounded-lg py-2.5 text-sm transition-colors"
+              className="mt-2 w-full bg-[#c5daf6] hover:bg-[#b0cdf0] active:bg-[#9ec0ea] disabled:opacity-40 disabled:cursor-not-allowed text-[#1a1a2e] font-semibold rounded-full py-3.5 text-sm transition-colors"
             >
-              {loading ? 'Creating account...' : 'Create Account'}
+              {loading ? '建立中…' : '建立帳號'}
             </button>
           </form>
         </div>

@@ -1,10 +1,11 @@
 import type {
   Gallery, GalleryImage, GallerySearchParams,
-  EhGallery, EhSearchResult, EhImageMap, EhSearchParams,
+  EhGallery, EhSearchResult, EhFavoritesResult, EhImageMap, EhSearchParams,
   DownloadJob, JobListParams,
   Credentials, EhAccount,
   ReadProgress,
   SystemHealth, SystemInfo,
+  TagItem, TagAlias, TagImplication,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -69,9 +70,22 @@ const eh = {
   getImages: (gid: number, token: string) =>
     apiFetch<EhImageMap>(`/api/eh/gallery/${gid}/${token}/images`),
 
+  /** Lightweight: only scrapes page 0 for ~20 preview thumbnails */
+  getPreviews: (gid: number, token: string) =>
+    apiFetch<{ gid: number; previews: Record<string, string> }>(
+      `/api/eh/gallery/${gid}/${token}/previews`
+    ),
+
   /** Returns the URL string — caller uses it as <img src> */
   imageProxyUrl: (gid: number, page: number): string =>
     `/api/eh/image-proxy/${gid}/${page}`,
+
+  /** Proxy an EH CDN thumbnail through our server */
+  thumbProxyUrl: (url: string): string =>
+    `/api/eh/thumb-proxy?url=${encodeURIComponent(url)}`,
+
+  getFavorites: (params: { favcat?: string; q?: string; next?: string; prev?: string } = {}) =>
+    apiFetch<EhFavoritesResult>(`/api/eh/favorites${qs(params as Record<string, unknown>)}`),
 }
 
 // ── Library ───────────────────────────────────────────────────────────
@@ -171,6 +185,51 @@ const system = {
   info: () => apiFetch<SystemInfo>('/api/system/info'),
 }
 
+// ── Tags ─────────────────────────────────────────────────────────────
+
+const tags = {
+  list: (params: { prefix?: string; namespace?: string; limit?: number; offset?: number } = {}) =>
+    apiFetch<{ total: number; tags: TagItem[] }>(
+      `/api/tags/${qs(params as Record<string, unknown>)}`
+    ),
+
+  listAliases: (params: { tag_id?: number; limit?: number } = {}) =>
+    apiFetch<TagAlias[]>(`/api/tags/aliases${qs(params as Record<string, unknown>)}`),
+
+  createAlias: (alias_namespace: string, alias_name: string, canonical_id: number) =>
+    apiFetch<{ status: string }>('/api/tags/aliases', {
+      method: 'POST',
+      body: JSON.stringify({ alias_namespace, alias_name, canonical_id }),
+    }),
+
+  deleteAlias: (alias_namespace: string, alias_name: string) =>
+    apiFetch<{ status: string }>(
+      `/api/tags/aliases${qs({ alias_namespace, alias_name })}`,
+      { method: 'DELETE' }
+    ),
+
+  listImplications: (params: { tag_id?: number; limit?: number } = {}) =>
+    apiFetch<TagImplication[]>(`/api/tags/implications${qs(params as Record<string, unknown>)}`),
+
+  createImplication: (antecedent_id: number, consequent_id: number) =>
+    apiFetch<{ status: string }>('/api/tags/implications', {
+      method: 'POST',
+      body: JSON.stringify({ antecedent_id, consequent_id }),
+    }),
+
+  deleteImplication: (antecedent_id: number, consequent_id: number) =>
+    apiFetch<{ status: string }>(
+      `/api/tags/implications${qs({ antecedent_id, consequent_id })}`,
+      { method: 'DELETE' }
+    ),
+}
+
+// ── Export ────────────────────────────────────────────────────────────
+
+const exportApi = {
+  kohyaUrl: (galleryId: number): string => `/api/export/kohya/${galleryId}`,
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
-export const api = { auth, eh, library, download, settings, system }
+export const api = { auth, eh, library, download, settings, system, tags, export: exportApi }

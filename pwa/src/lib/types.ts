@@ -15,6 +15,7 @@ export interface Gallery {
   favorited: boolean
   uploader: string
   download_status: 'proxy_only' | 'partial' | 'complete'
+  import_mode: string | null
   tags_array: string[]
 }
 
@@ -25,10 +26,11 @@ export interface GalleryImage {
   filename: string | null
   width: number | null
   height: number | null
-  file_path: string | null   // e.g. /data/gallery/ehentai/1234567/0001.jpg
-  thumb_path: string | null  // e.g. /data/thumbs/ab/abcdef.../thumb_160.webp
+  file_path: string | null
+  thumb_path: string | null
   file_size: number | null
   file_hash: string | null
+  media_type: 'image' | 'video' | 'gif'
 }
 
 export interface ReadProgress {
@@ -60,9 +62,26 @@ export interface EhSearchResult {
   page: number
 }
 
+export interface EhFavCategory {
+  index: number
+  name: string
+  count: number
+}
+
+export interface EhFavoritesResult {
+  galleries: EhGallery[]
+  total: number
+  has_next: boolean
+  has_prev: boolean
+  next_cursor: string | null
+  prev_cursor: string | null
+  categories: EhFavCategory[]
+}
+
 export interface EhImageMap {
   gid: number
-  images: Record<string, string>  // { "1": "image_page_token", ... }
+  images: Record<string, string>   // { "1": "image_page_token", ... }
+  previews: Record<string, string> // { "1": "thumb_url" or "sprite_url|offsetX|w|h", ... }
 }
 
 // ── Download ──────────────────────────────────────────────────────────
@@ -76,6 +95,30 @@ export interface DownloadJob {
   error: string | null
   created_at: string
   finished_at: string | null
+}
+
+// ── Tags ─────────────────────────────────────────────────────────────
+
+export interface TagItem {
+  id: number
+  namespace: string
+  name: string
+  count: number
+}
+
+export interface TagAlias {
+  alias_namespace: string
+  alias_name: string
+  canonical_id: number
+  canonical_namespace: string
+  canonical_name: string
+}
+
+export interface TagImplication {
+  antecedent_id: number
+  consequent_id: number
+  antecedent: string     // "namespace:name"
+  consequent: string     // "namespace:name"
 }
 
 // ── Settings ──────────────────────────────────────────────────────────

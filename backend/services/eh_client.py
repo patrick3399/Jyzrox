@@ -38,6 +38,25 @@ ALL_CATS = sum(CATEGORY_MASK.values())  # 1023
 
 _GALLERY_URL_RE = re.compile(r"e[x\-]hentai\.org/g/(\d+)/([a-f0-9]{10})/")
 _TOTAL_COUNT_RE = re.compile(r"Showing .+? of ([\d,]+)")
+# Matches preview page links: /s/{ptoken}/{gid}-{page}
+_PTOKEN_RE = re.compile(r"/s/([0-9a-f]{10})/(\d+)-(\d+)")
+# Matches showkey in page HTML: var showkey="...";
+_SHOWKEY_RE = re.compile(r'var\s+showkey\s*=\s*"([0-9a-z]+)"')
+# Large preview: <div class="gdtl"...><a href="..."><img alt="N" src="THUMB_URL"...>
+_LARGE_PREVIEW_RE = re.compile(
+    r'<div class="gdtl"[^>]*>.*?<a[^>]*href="[^"]*"[^>]*>'
+    r'<img[^>]*alt="(\d+)"[^>]*src="([^"]+)"',
+    re.DOTALL,
+)
+# Normal preview: <div class="gdtm" style="...background:...url(SPRITE) -Xpx...;width:Wpx;height:Hpx">
+# We extract the sprite URL, offset, width, height AND the page number from the /s/ link inside
+_NORMAL_PREVIEW_RE = re.compile(
+    r'<div[^>]*class="gdtm"[^>]*style="[^"]*'
+    r'url\(([^)]+)\)\s*(-?\d+)px[^"]*'
+    r'width:\s*(\d+)px;\s*height:\s*(\d+)px[^"]*"[^>]*>'
+    r'.*?/s/[0-9a-f]+/\d+-(\d+)',
+    re.DOTALL,
+)
 
 
 def _chunks(lst: list, n: int):
@@ -147,7 +166,13 @@ class EhClient:
 
         matches = list({(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)})
         total_match = _TOTAL_COUNT_RE.search(resp.text)
-        total = int(total_match.group(1).replace(",", "")) if total_match else 0
+        if total_match:
+            total = int(total_match.group(1).replace(",", ""))
+        else:
+            # EH sometimes shows "Showing X results" or no count at all
+            # Also try a broader pattern
+            alt_match = re.search(r"([\d,]+)\s+result", resp.text)
+            total = int(alt_match.group(1).replace(",", "")) if alt_match else len(matches)
 
         if not matches:
             return {"galleries": [], "total": total, "page": page}
@@ -174,23 +199,89 @@ class EhClient:
             raise ValueError(f"Gallery {gid}/{token} not found or expunged")
         return results[0]
 
-    async def get_image_tokens(
-        self, gid: int, token: str, total_pages: int
+    def _parse_detail_html(
+        self, html: str
+    ) -> tuple[dict[int, str], dict[int, str]]:
+        """Parse a single gallery detail page HTML for pTokens + preview thumbnails."""
+        token_map: dict[int, str] = {}
+        preview_map: dict[int, str] = {}
+
+        # Extract pTokens from preview links
+        for match in _PTOKEN_RE.finditer(html):
+            ptoken = match.group(1)
+            page_num = int(match.group(3))
+            token_map[page_num] = ptoken
+
+        # Extract preview thumbnails — try large previews first
+        large_matches = list(_LARGE_PREVIEW_RE.finditer(html))
+        if large_matches:
+            for match in large_matches:
+                page_num = int(match.group(1))
+                thumb_url = match.group(2)
+                preview_map[page_num] = thumb_url
+        else:
+            # Normal previews (CSS sprite sheets)
+            # Store as "url|offsetX|width|height" for frontend to render
+            for match in _NORMAL_PREVIEW_RE.finditer(html):
+                sprite_url = match.group(1)
+                offset_x = int(match.group(2))
+                width = int(match.group(3))
+                height = int(match.group(4))
+                page_num = int(match.group(5))
+                preview_map[page_num] = (
+                    f"{sprite_url}|{offset_x}|{width}|{height}"
+                )
+
+        return token_map, preview_map
+
+    async def get_previews(
+        self, gid: int, token: str
     ) -> dict[int, str]:
         """
-        Get image page tokens for all pages via gtoken API.
-        Returns {page_num: image_page_token}.
+        Fetch ONLY the first gallery detail page (p=0) to extract
+        ~20 preview thumbnail URLs.  Very fast — single HTTP request.
+        Used for the gallery detail/info page before the user reads.
         """
-        page_list = [[gid, token, p] for p in range(1, total_pages + 1)]
+        url = f"{self.base_url}/g/{gid}/{token}/?p=0"
+        resp = await self._http.get(url)
+        resp.raise_for_status()
+        self._check_auth(resp.text)
+
+        _, preview_map = self._parse_detail_html(resp.text)
+        return preview_map
+
+    async def get_image_tokens(
+        self, gid: int, token: str, total_pages: int
+    ) -> tuple[dict[int, str], dict[int, str]]:
+        """
+        Get image page tokens (pTokens) and preview thumbnail URLs by
+        scraping gallery detail pages.  Matches EhViewer's approach.
+
+        Returns (token_map, preview_map):
+          token_map:   {page_num: ptoken}
+          preview_map: {page_num: thumbnail_url}
+        """
+        import asyncio
+
         token_map: dict[int, str] = {}
+        preview_map: dict[int, str] = {}
+        pages_per_detail = 20  # EH shows ~20 previews per detail page
 
-        for chunk in _chunks(page_list, 1000):
-            resp = await self._api({"method": "gtoken", "pagelist": chunk})
-            for i, item in enumerate(resp.get("tokenlist", [])):
-                page_num = chunk[i][2]
-                token_map[page_num] = item["pt"]
+        detail_pages = (total_pages + pages_per_detail - 1) // pages_per_detail
+        for dp in range(detail_pages):
+            if dp > 0:
+                await asyncio.sleep(0.3)
 
-        return token_map
+            url = f"{self.base_url}/g/{gid}/{token}/?p={dp}"
+            resp = await self._http.get(url)
+            resp.raise_for_status()
+            self._check_auth(resp.text)
+
+            page_tokens, page_previews = self._parse_detail_html(resp.text)
+            token_map.update(page_tokens)
+            preview_map.update(page_previews)
+
+        return token_map, preview_map
 
     async def get_image_url(
         self, image_page_token: str, gid: int, page: int
@@ -215,6 +306,132 @@ class EhClient:
         resp.raise_for_status()
         data = resp.content
         return data, _detect_media_type(data)
+
+    async def get_favorites(
+        self,
+        favcat: int | str = "all",
+        search: str = "",
+        next_cursor: str = "",
+        prev_cursor: str = "",
+    ) -> dict:
+        """
+        Scrape E-H favorites page using cursor-based pagination.
+        EH favorites uses `next={gid}-{timestamp}` / `prev={gid}-{timestamp}` params,
+        NOT page numbers (page=N only works for 0 and 1).
+
+        Returns: {"galleries": [...], "total": N, "has_next": bool, "has_prev": bool,
+                  "next_cursor": str|null, "prev_cursor": str|null,
+                  "categories": [{name, count, index}]}
+        """
+        params: dict[str, Any] = {}
+        if favcat != "all":
+            params["favcat"] = int(favcat)
+        if search:
+            params["f_search"] = search
+        if next_cursor:
+            params["next"] = next_cursor
+        elif prev_cursor:
+            params["prev"] = prev_cursor
+
+        resp = await self._http.get(
+            f"{self.base_url}/favorites.php?{urlencode(params)}"
+        )
+        resp.raise_for_status()
+        self._check_auth(resp.text)
+
+        # Parse gallery links
+        matches = list(
+            {(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)}
+        )
+
+        soup = BeautifulSoup(resp.text, "lxml")
+
+        # Parse next/prev cursors from #unext and #uprev elements
+        # When enabled: <a id="unext" href="...?next=GID">; disabled: <span id="unext">
+        has_next = False
+        has_prev = False
+        out_next_cursor: str | None = None
+        out_prev_cursor: str | None = None
+
+        unext = soup.find(id="unext")
+        if unext and unext.name == "a":
+            has_next = True
+            href = unext.get("href", "")
+            m = re.search(r"[?&]next=([^&]+)", href)
+            if m:
+                out_next_cursor = m.group(1)
+
+        uprev = soup.find(id="uprev")
+        if uprev and uprev.name == "a":
+            has_prev = True
+            href = uprev.get("href", "")
+            m = re.search(r"[?&]prev=([^&]+)", href)
+            if m:
+                out_prev_cursor = m.group(1)
+
+        # Parse favorite category names and counts from sidebar (.fp divs)
+        # Structure: <div class="fp" onclick="document.location='...?favcat=N'">
+        #   <div>COUNT</div>
+        #   <div class="i" title="Category Name">...</div>
+        # </div>
+        categories: list[dict] = []
+        for div in soup.select(".fp"):
+            onclick = div.get("onclick", "")
+            idx_match = re.search(r"favcat=(\d+)", onclick)
+            if not idx_match:
+                continue
+            idx = int(idx_match.group(1))
+            # Count is the first numeric text
+            count = 0
+            for text in div.stripped_strings:
+                if text.isdigit():
+                    count = int(text)
+                    break
+            # Name from .i div title attribute, fallback to last text
+            i_div = div.find(class_="i")
+            name = ""
+            if i_div and i_div.get("title"):
+                name = i_div["title"]
+            else:
+                texts = list(div.stripped_strings)
+                name = texts[-1] if len(texts) > 1 else f"Favorites {idx}"
+            categories.append({"index": idx, "name": name, "count": count})
+
+        # Compute total from category counts (more reliable than regex on favorites page)
+        if categories:
+            if favcat == "all":
+                total = sum(c["count"] for c in categories)
+            else:
+                cat_idx = int(favcat)
+                cat = next((c for c in categories if c["index"] == cat_idx), None)
+                total = cat["count"] if cat else len(matches)
+        else:
+            total = len(matches)
+
+        # Fallback: if parsing found nothing, provide default 0-9 categories
+        if not categories:
+            _DEFAULT_FAV_NAMES = [
+                "Favorites 0", "Favorites 1", "Favorites 2", "Favorites 3",
+                "Favorites 4", "Favorites 5", "Favorites 6", "Favorites 7",
+                "Favorites 8", "Favorites 9",
+            ]
+            for i in range(10):
+                categories.append({"index": i, "name": _DEFAULT_FAV_NAMES[i], "count": 0})
+
+        galleries: list[dict] = []
+        if matches:
+            gid_list = [[gid, tok] for gid, tok in matches]
+            galleries = await self._gdata(gid_list)
+
+        return {
+            "galleries": galleries,
+            "total": total,
+            "has_next": has_next,
+            "has_prev": has_prev,
+            "next_cursor": out_next_cursor,
+            "prev_cursor": out_prev_cursor,
+            "categories": categories,
+        }
 
     async def check_cookies(self) -> bool:
         """Verify that the current cookies give authenticated access."""

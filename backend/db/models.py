@@ -19,6 +19,19 @@ from sqlalchemy.types import DateTime
 from core.database import Base
 
 
+class User(Base):
+    __tablename__ = "users"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(Text, nullable=False)
+    role: Mapped[str] = mapped_column(Text, default="admin")
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+
+
 class Gallery(Base):
     __tablename__ = "galleries"
 
@@ -41,6 +54,7 @@ class Gallery(Base):
         BigInteger, ForeignKey("galleries.id")
     )
     download_status: Mapped[str] = mapped_column(Text, default="proxy_only")
+    import_mode: Mapped[str | None] = mapped_column(Text)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
 
     images: Mapped[list["Image"]] = relationship(
@@ -70,6 +84,7 @@ class Image(Base):
     file_size: Mapped[int | None] = mapped_column(BigInteger)
     file_hash: Mapped[str | None] = mapped_column(Text)
     media_type: Mapped[str] = mapped_column(Text, default="image")
+    duration: Mapped[float | None] = mapped_column(Float)
     duplicate_of: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("images.id"))
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
 
@@ -86,6 +101,32 @@ class Tag(Base):
     namespace: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     count: Mapped[int] = mapped_column(Integer, default=0)
+
+
+class TagAlias(Base):
+    __tablename__ = "tag_aliases"
+
+    alias_namespace: Mapped[str] = mapped_column(Text, primary_key=True)
+    alias_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    canonical_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False
+    )
+
+    canonical: Mapped["Tag"] = relationship()
+
+
+class TagImplication(Base):
+    __tablename__ = "tag_implications"
+
+    antecedent_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+    )
+    consequent_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
+    )
+
+    antecedent: Mapped["Tag"] = relationship(foreign_keys=[antecedent_id])
+    consequent: Mapped["Tag"] = relationship(foreign_keys=[consequent_id])
 
 
 class GalleryTag(Base):
@@ -158,3 +199,19 @@ class Credential(Base):
     value_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
     expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     last_verified: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+
+
+class ApiToken(Base):
+    __tablename__ = "api_tokens"
+
+    id: Mapped[uuid.UUID] = mapped_column(
+        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    name: Mapped[str | None] = mapped_column(Text)
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    created_at: Mapped[DateTime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now()
+    )
+    last_used_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))

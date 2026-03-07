@@ -14,14 +14,16 @@ build/
 # gallery-dl live config (contains credentials)
 config/gallery-dl/config.json
 
-# Node (Phase 3 PWA)
+# Node / PWA
 pwa/node_modules/
 pwa/.next/
+pwa/tsconfig.tsbuildinfo
 
 # OS
 .DS_Store
 Thumbs.db
 
-# Local Data
+# Local Data & Dev
 data/
 .claude/
+docker-compose.override.yml

@@ -3,8 +3,9 @@
 import os
 import zipfile
 from io import BytesIO
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
+from core.auth import require_auth
 from core.database import async_session
 from sqlalchemy import text
 from typing import List
@@ -12,7 +13,7 @@ from typing import List
 router = APIRouter(tags=["export"])
 
 @router.get("/kohya/{gallery_id}")
-async def export_kohya(gallery_id: int):
+async def export_kohya(gallery_id: int, _: dict = Depends(require_auth)):
     """Generates a zip file containing images and corresponding .txt files with tags."""
     
     async with async_session() as session:

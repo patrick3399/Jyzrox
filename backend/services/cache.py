@@ -9,8 +9,10 @@ from core.redis_client import get_redis
 logger = logging.getLogger(__name__)
 
 # TTLs (seconds)
-_TTL_GALLERY = 3600       # 1h  — gallery metadata
-_TTL_IMAGELIST = 3600     # 1h  — image token list
+# EhViewer caches gallery detail in LruCache (no TTL, 25 entries) and
+# pTokens persistently on disk.  We use generous Redis TTLs to match.
+_TTL_GALLERY = 86400      # 24h — gallery metadata (rarely changes)
+_TTL_IMAGELIST = 604800   # 7d  — image token list (pTokens are stable)
 _TTL_PROXY_IMAGE = 86400  # 24h — proxied image bytes
 _TTL_SEARCH = 300         # 5m  — search results
 
@@ -56,6 +58,15 @@ async def get_imagelist_cache(gid: int) -> dict | None:
 
 async def set_imagelist_cache(gid: int, data: dict) -> None:
     await set_json(f"eh:imagelist:{gid}", data, _TTL_IMAGELIST)
+
+
+async def get_preview_cache(gid: int) -> dict | None:
+    """Returns {str(page_num): preview_url_or_sprite_info} or None."""
+    return await get_json(f"eh:previews:{gid}")
+
+
+async def set_preview_cache(gid: int, data: dict) -> None:
+    await set_json(f"eh:previews:{gid}", data, _TTL_IMAGELIST)
 
 
 async def get_proxied_image(gid: int, page: int) -> bytes | None:

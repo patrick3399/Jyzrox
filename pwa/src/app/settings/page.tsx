@@ -7,7 +7,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { AlertBanner } from '@/components/AlertBanner'
 import type { SystemHealth, SystemInfo, EhAccount, Credentials } from '@/lib/types'
 
-type SectionKey = 'ehentai' | 'pixiv' | 'system' | 'account'
+type SectionKey = 'ehentai' | 'pixiv' | 'system' | 'account' | 'browse'
 
 function SectionHeader({
   title,
@@ -41,6 +41,76 @@ function StatusIndicator({ configured }: { configured: boolean }) {
   )
 }
 
+// ── Browse Settings sub-component ────────────────────────────────────
+
+function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
+  const historyEnabled = typeof window !== 'undefined' && localStorage.getItem('eh_search_history_enabled') !== 'false'
+  const loadMode = typeof window !== 'undefined' ? (localStorage.getItem('browse_load_mode') || 'pagination') : 'pagination'
+  const perPage = typeof window !== 'undefined' ? (localStorage.getItem('browse_per_page') || '25') : '25'
+
+  return (
+    <div className="px-5 pb-5 border-t border-[#1e1e1e]">
+      {/* Search History toggle */}
+      <div className="mt-4 flex items-center justify-between">
+        <div>
+          <p className="text-sm text-white">Search History</p>
+          <p className="text-xs text-gray-600 mt-0.5">Save recent searches (last 10)</p>
+        </div>
+        <button
+          onClick={() => {
+            const next = localStorage.getItem('eh_search_history_enabled') === 'false'
+            localStorage.setItem('eh_search_history_enabled', next ? 'true' : 'false')
+            if (!next) localStorage.removeItem('eh_search_history')
+            onForceRerender()
+          }}
+          className={`relative w-11 h-6 rounded-full transition-colors ${historyEnabled ? 'bg-blue-600' : 'bg-[#333]'}`}
+        >
+          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${historyEnabled ? 'translate-x-5' : ''}`} />
+        </button>
+      </div>
+
+      {/* Load mode: Pagination vs Infinite Scroll */}
+      <div className="mt-5 flex items-center justify-between">
+        <div>
+          <p className="text-sm text-white">Load Mode</p>
+          <p className="text-xs text-gray-600 mt-0.5">Pagination or infinite scroll</p>
+        </div>
+        <div className="flex bg-[#1a1a1a] border border-[#2a2a2a] rounded overflow-hidden">
+          <button
+            onClick={() => { localStorage.setItem('browse_load_mode', 'pagination'); onForceRerender() }}
+            className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'pagination' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            Pagination
+          </button>
+          <button
+            onClick={() => { localStorage.setItem('browse_load_mode', 'scroll'); onForceRerender() }}
+            className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'scroll' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+          >
+            Infinite Scroll
+          </button>
+        </div>
+      </div>
+
+      {/* Per page (library) */}
+      <div className="mt-5 flex items-center justify-between">
+        <div>
+          <p className="text-sm text-white">Per Page</p>
+          <p className="text-xs text-gray-600 mt-0.5">Number of items per page</p>
+        </div>
+        <select
+          value={perPage}
+          onChange={(e) => { localStorage.setItem('browse_per_page', e.target.value); onForceRerender() }}
+          className="bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-1.5 text-sm text-white focus:outline-none"
+        >
+          <option value="25">25</option>
+          <option value="50">50</option>
+          <option value="100">100</option>
+        </select>
+      </div>
+    </div>
+  )
+}
+
 export default function SettingsPage() {
   const { logout } = useAuth()
   const [activeSection, setActiveSection] = useState<SectionKey | null>('ehentai')
@@ -62,6 +132,7 @@ export default function SettingsPage() {
   const [ehPassHash, setEhPassHash] = useState('')
   const [ehSk, setEhSk] = useState('')
   const [ehSaving, setEhSaving] = useState(false)
+  const [showPassHash, setShowPassHash] = useState(false)
   const [ehSuccess, setEhSuccess] = useState<string | null>(null)
   const [ehError, setEhError] = useState<string | null>(null)
   const [ehAccount, setEhAccount] = useState<EhAccount | null>(null)
@@ -290,22 +361,45 @@ export default function SettingsPage() {
                 {/* Cookie login */}
                 {ehLoginMode === 'cookie' && (
                   <div className="mt-4 space-y-3">
-                    {[
-                      { label: 'ipb_member_id', value: ehMemberId, setter: setEhMemberId },
-                      { label: 'ipb_pass_hash', value: ehPassHash, setter: setEhPassHash },
-                      { label: 'sk', value: ehSk, setter: setEhSk },
-                    ].map(({ label, value, setter }) => (
-                      <div key={label}>
-                        <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">ipb_member_id</label>
+                      <input
+                        type="text"
+                        value={ehMemberId}
+                        onChange={(e) => setEhMemberId(e.target.value)}
+                        placeholder="Enter ipb_member_id"
+                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">ipb_pass_hash</label>
+                      <div className="relative">
                         <input
-                          type="password"
-                          value={value}
-                          onChange={(e) => setter(e.target.value)}
-                          placeholder={`Enter ${label}`}
-                          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                          type={showPassHash ? 'text' : 'password'}
+                          value={ehPassHash}
+                          onChange={(e) => setEhPassHash(e.target.value)}
+                          placeholder="Enter ipb_pass_hash"
+                          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 pr-10 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
                         />
+                        <button
+                          type="button"
+                          onClick={() => setShowPassHash((v) => !v)}
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-sm transition-colors px-1"
+                        >
+                          {showPassHash ? 'Hide' : 'Show'}
+                        </button>
                       </div>
-                    ))}
+                    </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">sk</label>
+                      <input
+                        type="text"
+                        value={ehSk}
+                        onChange={(e) => setEhSk(e.target.value)}
+                        placeholder="Enter sk"
+                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                      />
+                    </div>
                     <div className="flex gap-2">
                       <button
                         onClick={handleEhSave}
@@ -493,6 +587,22 @@ export default function SettingsPage() {
                   </div>
                 )}
               </div>
+            )}
+          </div>
+
+          {/* ── Browse Settings ── */}
+          <div className="bg-[#111111] border border-[#2a2a2a] rounded-xl overflow-hidden">
+            <SectionHeader
+              title="Browse"
+              sectionKey="browse"
+              activeSection={activeSection}
+              onToggle={toggleSection}
+            />
+            {activeSection === 'browse' && (
+              <BrowseSettings onForceRerender={() => {
+                setActiveSection(null)
+                setTimeout(() => setActiveSection('browse'), 0)
+              }} />
             )}
           </div>
 

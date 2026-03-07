@@ -2,31 +2,60 @@
 @tailwind components;
 @tailwind utilities;
 
-:root {
-  --reader-brightness: 1;
-  --reader-bg: #000000;
-}
-
 html, body {
   background-color: #0a0a0a;
   color: #e5e5e5;
   min-height: 100vh;
+  min-height: 100dvh;
 }
 
 /* Prevent iOS Safari bounce/overscroll */
 html {
   overscroll-behavior: none;
+  -webkit-text-size-adjust: 100%;
 }
 
-/* Reader fullscreen */
-.reader-fullscreen {
+/* ── Reader ─────────────────────────────────────────────────────────── */
+
+/* Reader container — fixed fullscreen, covers NavBar */
+.reader-container {
   position: fixed;
   inset: 0;
-  z-index: 9999;
-  background: var(--reader-bg);
+  z-index: 100;                 /* above NavBar (z-50) */
+  overflow: hidden;
+  overscroll-behavior: none;
+  -webkit-touch-callout: none;  /* prevent iOS long-press popup on images */
+  -webkit-user-select: none;
+  user-select: none;
 }
 
-/* Image brightness filter */
-.reader-image {
-  filter: brightness(var(--reader-brightness));
+/* Single / double page tap zones — block touch scroll so taps work cleanly */
+.reader-tap-zone {
+  touch-action: none;
+}
+
+/* Webtoon scroll area — only vertical scroll, hide scrollbar */
+.reader-webtoon-scroll {
+  overflow-y: auto;
+  overflow-x: hidden;
+  overscroll-behavior-y: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-y;         /* allow vertical scroll only */
+  scrollbar-width: none;       /* Firefox */
+}
+.reader-webtoon-scroll::-webkit-scrollbar {
+  display: none;               /* Chrome / Safari */
+}
+
+/* Thumbnail strip — horizontal scroll, hide scrollbar */
+.reader-thumb-strip {
+  overflow-x: auto;
+  overflow-y: hidden;
+  overscroll-behavior-x: contain;
+  -webkit-overflow-scrolling: touch;
+  touch-action: pan-x;
+  scrollbar-width: none;
+}
+.reader-thumb-strip::-webkit-scrollbar {
+  display: none;
 }
