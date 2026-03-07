@@ -43,7 +43,7 @@ async def system_health():
 async def system_info():
     """Return non-sensitive runtime configuration."""
     return {
-        "version": "1.0.0",
+        "version": "2.0.0",
         "eh_max_concurrency": settings.eh_max_concurrency,
         "tag_model_enabled": settings.tag_model_enabled,
     }

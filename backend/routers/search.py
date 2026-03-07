@@ -1,9 +1,10 @@
 """Unified search endpoint for galleries."""
 
 from typing import List, Optional
-from fastapi import APIRouter, Query
+from fastapi import APIRouter, Depends, Query
 from pydantic import BaseModel
 from core.database import async_session
+from core.auth import require_auth
 from sqlalchemy import text
 
 router = APIRouter(tags=["search"])
@@ -19,7 +20,8 @@ async def search_galleries(
     q: str = Query("", description="Search query supporting tags (e.g. character:rem) and text (e.g. title:\"re zero\")"),
     sort: str = "added_at",
     page: int = 1,
-    limit: int = 24
+    limit: int = 24,
+    _: dict = Depends(require_auth),
 ):
     # Parse query into tags array and text search
     # This is a simplified parser for phase 2.

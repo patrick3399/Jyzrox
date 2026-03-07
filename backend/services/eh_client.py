@@ -120,9 +120,7 @@ class EhClient:
         return data
 
     def _check_auth(self, html: str) -> None:
-        if "You do not have access" in html or (
-            "Login" in html[:300] and "ipb_member_id" not in str(self.cookies)
-        ):
+        if "You do not have access" in html:
             raise PermissionError("EH cookie invalid or expired")
 
     # ── Public API ───────────────────────────────────────────────────

@@ -44,14 +44,17 @@ function qs(params: Record<string, unknown>): string {
 // ── Auth ─────────────────────────────────────────────────────────────
 
 const auth = {
-  login: (password: string) =>
-    apiFetch<{ status: string }>('/api/auth/login', {
+  login: (username: string, password: string) =>
+    apiFetch<{ status: string; role: string }>('/api/auth/login', {
       method: 'POST',
-      body: JSON.stringify({ password }),
+      body: JSON.stringify({ username, password }),
     }),
 
   logout: () =>
     apiFetch<{ status: string }>('/api/auth/logout', { method: 'POST' }),
+
+  needsSetup: () =>
+    apiFetch<{ needs_setup: boolean }>('/api/auth/needs-setup'),
 }
 
 // ── E-Hentai ─────────────────────────────────────────────────────────
@@ -131,6 +134,12 @@ const download = {
 const settings = {
   getCredentials: () =>
     apiFetch<Credentials>('/api/settings/credentials'),
+
+  ehLogin: (username: string, password: string) =>
+    apiFetch<{ status: string; account: EhAccount }>(
+      '/api/settings/credentials/ehentai/login',
+      { method: 'POST', body: JSON.stringify({ username, password }) }
+    ),
 
   setEhCookies: (data: {
     ipb_member_id: string

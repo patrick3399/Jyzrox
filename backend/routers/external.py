@@ -1,10 +1,13 @@
 """External API endpoints for third-party integrations."""
 
-from fastapi import APIRouter, Depends, HTTPException, Header
-from core.database import async_session
-from sqlalchemy import text
-import psutil
 import os
+import shutil
+
+import psutil
+from fastapi import APIRouter, Depends, HTTPException, Header
+from sqlalchemy import text
+
+from core.database import async_session
 
 router = APIRouter(tags=["external"])
 

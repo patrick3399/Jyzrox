@@ -15,15 +15,14 @@ from services.credential import get_credential
 from services.eh_client import EhClient
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/eh", tags=["e-hentai"])
+router = APIRouter(tags=["e-hentai"])
 
 
 async def _make_client() -> EhClient:
-    """Load EH cookies from DB and return a configured client (not yet entered)."""
+    """Load EH cookies from DB and return a configured client (guest if no creds)."""
     cred_json = await get_credential("ehentai")
-    if not cred_json:
-        raise HTTPException(status_code=503, detail="E-Hentai credentials not configured")
-    return EhClient(cookies=json.loads(cred_json))
+    cookies = json.loads(cred_json) if cred_json else {}
+    return EhClient(cookies=cookies)
 
 
 # ── Search ───────────────────────────────────────────────────────────

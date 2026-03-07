@@ -49,6 +49,14 @@ export default function SettingsPage() {
   const [credentials, setCredentials] = useState<Credentials | null>(null)
   const [credLoading, setCredLoading] = useState(true)
 
+  // EH login mode
+  const [ehLoginMode, setEhLoginMode] = useState<'password' | 'cookie'>('password')
+
+  // EH password login
+  const [ehUsername, setEhUsername] = useState('')
+  const [ehPassword, setEhPassword] = useState('')
+  const [ehLoginSaving, setEhLoginSaving] = useState(false)
+
   // EH Cookie form
   const [ehMemberId, setEhMemberId] = useState('')
   const [ehPassHash, setEhPassHash] = useState('')
@@ -83,6 +91,24 @@ export default function SettingsPage() {
   const toggleSection = useCallback((key: SectionKey) => {
     setActiveSection((prev) => (prev === key ? null : key))
   }, [])
+
+  // EH: Login with username/password
+  const handleEhLogin = useCallback(async () => {
+    if (!ehUsername.trim() || !ehPassword.trim()) return
+    setEhLoginSaving(true)
+    setEhError(null)
+    setEhSuccess(null)
+    try {
+      const result = await api.settings.ehLogin(ehUsername.trim(), ehPassword.trim())
+      setEhSuccess('E-Hentai login successful')
+      setEhAccount(result.account)
+      setCredentials((prev) => prev ? { ...prev, ehentai: { configured: true } } : prev)
+    } catch (err) {
+      setEhError(err instanceof Error ? err.message : 'Login failed')
+    } finally {
+      setEhLoginSaving(false)
+    }
+  }, [ehUsername, ehPassword])
 
   // EH: Save cookies
   const handleEhSave = useCallback(async () => {
@@ -169,12 +195,12 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-bold mb-6 text-white">Settings</h1>
 
         <div className="space-y-3">
-          {/* ── E-Hentai Cookies ── */}
+          {/* ── E-Hentai ── */}
           <div className="bg-[#111111] border border-[#2a2a2a] rounded-xl overflow-hidden">
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <SectionHeader
-                  title="E-Hentai Cookies"
+                  title="E-Hentai"
                   sectionKey="ehentai"
                   activeSection={activeSection}
                   onToggle={toggleSection}
@@ -200,41 +226,104 @@ export default function SettingsPage() {
                   </div>
                 )}
 
-                <div className="mt-4 space-y-3">
-                  {[
-                    { label: 'ipb_member_id', value: ehMemberId, setter: setEhMemberId },
-                    { label: 'ipb_pass_hash', value: ehPassHash, setter: setEhPassHash },
-                    { label: 'sk', value: ehSk, setter: setEhSk },
-                  ].map(({ label, value, setter }) => (
-                    <div key={label}>
-                      <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                {/* Mode toggle */}
+                <div className="flex mt-4 bg-[#1a1a1a] border border-[#2a2a2a] rounded overflow-hidden">
+                  <button
+                    onClick={() => setEhLoginMode('password')}
+                    className={`flex-1 px-3 py-2 text-sm transition-colors ${ehLoginMode === 'password' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                  >
+                    Username / Password
+                  </button>
+                  <button
+                    onClick={() => setEhLoginMode('cookie')}
+                    className={`flex-1 px-3 py-2 text-sm transition-colors ${ehLoginMode === 'cookie' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                  >
+                    Cookie (Advanced)
+                  </button>
+                </div>
+
+                {/* Password login */}
+                {ehLoginMode === 'password' && (
+                  <div className="mt-4 space-y-3">
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Username</label>
                       <input
-                        type="password"
-                        value={value}
-                        onChange={(e) => setter(e.target.value)}
-                        placeholder={`Enter ${label}`}
+                        type="text"
+                        value={ehUsername}
+                        onChange={(e) => setEhUsername(e.target.value)}
+                        placeholder="E-Hentai username"
+                        autoComplete="username"
                         className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
                       />
                     </div>
-                  ))}
-                </div>
+                    <div>
+                      <label className="block text-xs text-gray-500 mb-1">Password</label>
+                      <input
+                        type="password"
+                        value={ehPassword}
+                        onChange={(e) => setEhPassword(e.target.value)}
+                        placeholder="E-Hentai password"
+                        autoComplete="current-password"
+                        onKeyDown={(e) => e.key === 'Enter' && handleEhLogin()}
+                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                      />
+                    </div>
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleEhLogin}
+                        disabled={ehLoginSaving}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 disabled:text-blue-600 rounded text-white text-sm font-medium transition-colors"
+                      >
+                        {ehLoginSaving ? 'Logging in...' : 'Log In'}
+                      </button>
+                      <button
+                        onClick={handleEhRefresh}
+                        disabled={ehAccountLoading}
+                        className="px-4 py-2 bg-[#1a1a1a] border border-[#2a2a2a] hover:border-[#444] rounded text-gray-400 text-sm transition-colors"
+                      >
+                        {ehAccountLoading ? 'Refreshing...' : 'Refresh Account'}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
-                <div className="flex gap-2 mt-4">
-                  <button
-                    onClick={handleEhSave}
-                    disabled={ehSaving}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 disabled:text-blue-600 rounded text-white text-sm font-medium transition-colors"
-                  >
-                    {ehSaving ? 'Saving...' : 'Save Credentials'}
-                  </button>
-                  <button
-                    onClick={handleEhRefresh}
-                    disabled={ehAccountLoading}
-                    className="px-4 py-2 bg-[#1a1a1a] border border-[#2a2a2a] hover:border-[#444] rounded text-gray-400 text-sm transition-colors"
-                  >
-                    {ehAccountLoading ? 'Refreshing...' : 'Refresh Account Info'}
-                  </button>
-                </div>
+                {/* Cookie login */}
+                {ehLoginMode === 'cookie' && (
+                  <div className="mt-4 space-y-3">
+                    {[
+                      { label: 'ipb_member_id', value: ehMemberId, setter: setEhMemberId },
+                      { label: 'ipb_pass_hash', value: ehPassHash, setter: setEhPassHash },
+                      { label: 'sk', value: ehSk, setter: setEhSk },
+                    ].map(({ label, value, setter }) => (
+                      <div key={label}>
+                        <label className="block text-xs text-gray-500 mb-1">{label}</label>
+                        <input
+                          type="password"
+                          value={value}
+                          onChange={(e) => setter(e.target.value)}
+                          placeholder={`Enter ${label}`}
+                          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                        />
+                      </div>
+                    ))}
+                    <div className="flex gap-2">
+                      <button
+                        onClick={handleEhSave}
+                        disabled={ehSaving}
+                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 disabled:text-blue-600 rounded text-white text-sm font-medium transition-colors"
+                      >
+                        {ehSaving ? 'Saving...' : 'Save Cookies'}
+                      </button>
+                      <button
+                        onClick={handleEhRefresh}
+                        disabled={ehAccountLoading}
+                        className="px-4 py-2 bg-[#1a1a1a] border border-[#2a2a2a] hover:border-[#444] rounded text-gray-400 text-sm transition-colors"
+                      >
+                        {ehAccountLoading ? 'Refreshing...' : 'Refresh Account'}
+                      </button>
+                    </div>
+                  </div>
+                )}
 
                 {/* Account Info */}
                 {ehAccount && (

@@ -40,9 +40,9 @@ export function useUpdateGallery(id: number) {
 // ── E-Hentai ──────────────────────────────────────────────────────────
 
 export function useEhSearch(params: EhSearchParams) {
-  const enabled = params.q !== undefined || params.category !== undefined
+  // Always fire — empty params = EH homepage (like EhViewer default behaviour)
   return useSWR(
-    enabled ? ['eh/search', params] : null,
+    ['eh/search', params],
     () => api.eh.search(params),
     { revalidateOnFocus: false }
   )

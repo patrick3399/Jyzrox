@@ -4,11 +4,12 @@ import os
 import shutil
 import hashlib
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, BackgroundTasks
+from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import List, Optional
 
 from core.database import async_session
+from core.auth import require_auth
 from sqlalchemy import text
 from core.config import settings
 
@@ -49,7 +50,7 @@ async def process_import_task(req: ImportRequest, gallery_id: int):
             dest_path = str(f)
             if req.mode == "copy" and not duplicate_of:
                 # copy to storage
-                dest_dir = Path(settings.storage_dir) / str(gallery_id)
+                dest_dir = Path(settings.data_gallery_path) / "local" / str(gallery_id)
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 dest_path = str(dest_dir / f.name)
                 shutil.copy2(f, dest_path)
@@ -74,7 +75,11 @@ async def process_import_task(req: ImportRequest, gallery_id: int):
         await session.commit()
 
 @router.post("/")
-async def start_import(req: ImportRequest, background_tasks: BackgroundTasks):
+async def start_import(
+    req: ImportRequest,
+    background_tasks: BackgroundTasks,
+    _: dict = Depends(require_auth),
+):
     if req.mode not in ("link", "copy"):
         raise HTTPException(status_code=400, detail="Invalid import mode")
     

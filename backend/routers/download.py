@@ -13,7 +13,7 @@ from core.database import get_db
 from db.models import DownloadJob
 
 logger = logging.getLogger(__name__)
-router = APIRouter(prefix="/download", tags=["download"])
+router = APIRouter(tags=["download"])
 
 
 class DownloadRequest(BaseModel):

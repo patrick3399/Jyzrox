@@ -9,7 +9,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import engine
 from core.redis_client import close_redis, init_redis
-from routers import auth, download, eh, library, system, ws, search, tag, import_router, external
+from routers import auth, download, eh, export, library, system, ws, search, tag, import_router, external
 from routers import settings as settings_router
 
 logging.basicConfig(
@@ -59,6 +59,7 @@ app.include_router(ws.router,              prefix="/api/ws")
 app.include_router(search.router,          prefix="/api/search")
 app.include_router(tag.router,             prefix="/api/tags")
 app.include_router(import_router.router,   prefix="/api/import")
+app.include_router(export.router,          prefix="/api/export")
 app.include_router(external.router,        prefix="/api/external/v1")
 
 @app.get("/api/health")

@@ -1,9 +1,10 @@
 """Tag, Alias, and Implication management endpoints."""
 
 from typing import List, Optional
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from core.database import async_session
+from core.auth import require_auth
 from sqlalchemy import text
 
 router = APIRouter(tags=["tags"])
@@ -15,7 +16,11 @@ class TagResponse(BaseModel):
     count: int
 
 @router.get("/")
-async def list_tags(prefix: Optional[str] = None, limit: int = 20):
+async def list_tags(
+    prefix: Optional[str] = None,
+    limit: int = 20,
+    _: dict = Depends(require_auth),
+):
     async with async_session() as session:
         if prefix:
             result = await session.execute(
@@ -36,7 +41,7 @@ class AliasRequest(BaseModel):
     canonical_id: int
 
 @router.post("/alias")
-async def create_alias(req: AliasRequest):
+async def create_alias(req: AliasRequest, _: dict = Depends(require_auth)):
     async with async_session() as session:
         await session.execute(
             text("""
@@ -54,7 +59,7 @@ class ImplicationRequest(BaseModel):
     consequent_id: int
 
 @router.post("/implication")
-async def create_implication(req: ImplicationRequest):
+async def create_implication(req: ImplicationRequest, _: dict = Depends(require_auth)):
     async with async_session() as session:
         await session.execute(
             text("""
