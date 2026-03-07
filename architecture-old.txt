@@ -1,0 +1,679 @@
+================================================================================
+  DOUJIN VAULT — 系統架構文件
+  終極單人圖片瀏覽 / 下載 / 管理平台
+  rev. 1.1 / 2026-03
+================================================================================
+
+  變更紀錄 (rev 1.0 → 1.1)
+  ─────────────────────────
+  [+] E-Hentai 併發限制器設計（Redis Semaphore）
+  [+] PWA Reader 改為序列化預載（Sequential Prefetch）
+  [+] PostgreSQL Schema 新增 tags_array + GIN 索引
+  [+] ZFS / Docker PUID/PGID 權限對應規範（獨立章節）
+  [~] WORKER C tag_worker 改為 stub 架構（WD14 暫緩，介面預留）
+  [-] 移除 Meilisearch 作為預設服務（GIN 索引已足夠，降為選配）
+
+
+────────────────────────────────────────────────────────────────────────────────
+  OVERVIEW
+────────────────────────────────────────────────────────────────────────────────
+
+一個以 Docker Compose 為核心的自架平台，透過 PWA 提供跨裝置瀏覽體驗。
+前端負責顯示與操作，所有重活（下載、解析、標記、儲存）交由後端處理。
+
+設計原則：
+  - 單人使用，不考慮多租戶複雜性
+  - 後端無狀態邏輯，狀態全存 DB / Redis
+  - 來源可擴充，新增來源不影響核心架構
+  - 儲存路徑一開始定好，不再搬遷
+  - 對外部來源的所有請求，後端永遠是唯一出口（前端不直連外部）
+
+
+────────────────────────────────────────────────────────────────────────────────
+  LAYER 1 — CLIENT
+────────────────────────────────────────────────────────────────────────────────
+
+  [ PWA (Progressive Web App) ]
+
+  框架     : Next.js (App Router)
+  部署     : Docker 容器，Nginx 靜態服務
+  安裝     : iOS / Android「加入主畫面」，桌機瀏覽器直連
+
+  核心頁面：
+    /           首頁 Dashboard（最近新增、下載狀態、快捷入口）
+    /browse     來源瀏覽（E-Hentai / Pixiv / Danbooru 等，依 source 切換）
+    /library    本地圖庫（已下載，tag 搜尋 / 過濾）
+    /reader     閱讀器
+    /queue      下載佇列管理
+    /tags       Tag 管理 / 統計
+    /export     訓練資料匯出
+    /settings   系統設定（cookie、token、來源設定）
+
+  Reader 功能（EhViewer-style）：
+    - 左右觸控翻頁 / 鍵盤方向鍵
+    - 縱向捲動模式（webtoon）
+    - 雙頁並排模式
+    - 閱讀進度自動記憶（per gallery）
+    - 亮度 / 背景色調整
+    - 全螢幕模式（iOS Safari 支援）
+
+  Reader 預載策略（重要）：
+    ┌────────────────────────────────────────────────────────┐
+    │  Sequential Prefetch（序列化預載）                      │
+    │                                                        │
+    │  前端同一時間只發出 1 個圖片預載請求。                   │
+    │  當前頁載完 → 發出 (current+1) 的請求                   │
+    │  (current+1) 載完 → 發出 (current+2) 的請求            │
+    │                                                        │
+    │  原因：若同時預載 N 張，等同於後端對 E-H 同時發出        │
+    │        N 個外部請求，極易觸發 IP 暫封。                  │
+    │        序列化後，後端對 E-H 的請求永遠是 1 個在途。      │
+    │                                                        │
+    │  讀本地已下載圖片時：無此限制，可並發讀取。              │
+    └────────────────────────────────────────────────────────┘
+
+  PWA 功能：
+    - Service Worker 快取縮圖（離線可看已快取內容）
+    - 背景同步（下載佇列狀態）
+    - WebSocket 連線：接收後端即時推送（下載進度、新圖入庫通知）
+
+
+────────────────────────────────────────────────────────────────────────────────
+  LAYER 2 — API GATEWAY
+────────────────────────────────────────────────────────────────────────────────
+
+  [ Nginx / Nginx Proxy Manager ]
+
+  - SSL 終止（Let's Encrypt 或自簽）
+  - 路由：/api/* → FastAPI；/* → Next.js PWA
+  - 靜態圖檔服務：/media/* → 直接讀 ZFS Volume（繞過 FastAPI，效能佳）
+  - Nginx 層 rate limit（最後防線，非主要限速機制）：
+      limit_req_zone $binary_remote_addr zone=eh_proxy:10m rate=5r/s;
+      僅防止客戶端 bug 導致的異常爆發，正常使用不應觸及此限制。
+
+  [ Auth Middleware（FastAPI 層） ]
+
+  - JWT（HS256），單用戶 token 即可
+  - token 存 httpOnly cookie，PWA 自動帶入
+  - /settings 等敏感端點需驗證
+
+
+────────────────────────────────────────────────────────────────────────────────
+  LAYER 3 — APPLICATION SERVICES (FastAPI)
+────────────────────────────────────────────────────────────────────────────────
+
+  單一 FastAPI 應用，依模組拆分 router：
+
+  ┌─────────────────────────────────────────────────────┐
+  │  router/eh.py        E-Hentai API 代理              │
+  │  router/pixiv.py     Pixiv API 代理                 │
+  │  router/source.py    通用來源介面（Source Adapter）  │
+  │  router/library.py   本地圖庫 CRUD                  │
+  │  router/download.py  下載任務管理                   │
+  │  router/tag.py       Tag 管理 / 搜尋                │
+  │  router/export.py    訓練資料匯出                   │
+  │  router/system.py    設定 / 健康檢查 / 統計         │
+  └─────────────────────────────────────────────────────┘
+
+  -- E-Hentai 代理 (router/eh.py) --
+
+    參考來源：EhViewer 源碼 (EhEngine.kt)
+    協定    ：POST JSON 到 https://api.e-hentai.org/api.php
+
+    實作方法：
+      method: gdata   → 取得 gallery metadata（tag、標題、語言等）
+      method: gtoken  → 取得圖片 token（用於拼出圖片頁 URL）
+
+    端點：
+      GET  /api/eh/search?q=...&page=...&category=...
+      GET  /api/eh/gallery/{gid}/{token}
+      GET  /api/eh/gallery/{gid}/{token}/images
+      GET  /api/eh/image-proxy/{gid}/{page}   ← 代理圖片（帶快取，節省 GP）
+
+    Cookie 管理：
+      - ipb_member_id + ipb_pass_hash + sk 存 DB（加密儲存）
+      - 每次請求自動注入 cookie header
+      - 偵測 cookie 失效（回應含 "You do not have access"）→ 推送通知
+
+  ── E-Hentai 併發限制器（核心安全機制）────────────────────────
+
+    問題根源：
+      PWA Reader 即使改為序列化預載，在邊緣情境（快速翻頁、重試、
+      多 tab）仍可能短時間觸發多個 /image-proxy 請求。後端必須有
+      獨立的全域限流，確保對 E-H 的外發請求永遠在安全範圍內。
+
+    實作：Redis-based Global Semaphore
+
+      EH_MAX_CONCURRENCY = 2        # 外發 E-H 圖片請求同時上限
+      EH_REQUEST_TIMEOUT = 30       # 單張圖片請求 timeout（秒）
+      EH_ACQUIRE_TIMEOUT = 60       # 等待 semaphore 的最長時間（秒）
+
+      async def image_proxy_handler(gid, page):
+          # 1. 查 Redis 快取，有則直接回傳（不消耗 semaphore）
+          cached = await redis.get(f"thumb:proxied:{gid}:{page}")
+          if cached:
+              return cached
+
+          # 2. 嘗試取得 semaphore，等待最多 EH_ACQUIRE_TIMEOUT 秒
+          async with eh_semaphore:
+              # 3. 此區域內，全域最多 EH_MAX_CONCURRENCY 個請求並存
+              img_data = await fetch_from_eh(gid, page)
+
+          # 4. 寫入快取（TTL 24h）
+          await redis.setex(f"thumb:proxied:{gid}:{page}", 86400, img_data)
+          return img_data
+
+    額外說明：
+      - gallery metadata / image token 請求（api.php）不受圖片限速管制
+        （此類請求量少且非圖片流量，不會觸發 E-H 圖片 IP 封鎖）
+      - EH_MAX_CONCURRENCY 存於環境變數，可調整不需重建映像
+
+  -- Source Adapter 設計 --
+
+    所有來源實作共同介面：
+
+      class SourceAdapter:
+        search(query, page, filters) -> List[GalleryItem]
+        get_gallery(id)              -> GalleryDetail
+        get_images(id)               -> List[ImageItem]
+        get_download_url(id)         -> str   ← 交給 gallery-dl
+
+    已實作：EhHentaiAdapter、ExHentaiAdapter、PixivAdapter
+    可擴充：DanbooruAdapter、NhentaiAdapter、TwitterAdapter
+
+
+────────────────────────────────────────────────────────────────────────────────
+  LAYER 4 — WORKER SERVICES
+────────────────────────────────────────────────────────────────────────────────
+
+  Job Queue：Redis + ARQ (Async Redis Queue, Python)
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  WORKER A：download_worker                               │
+  │                                                          │
+  │  觸發：POST /api/download { url, source, options }       │
+  │  執行：呼叫 gallery-dl CLI（subprocess）                  │
+  │  輸出：圖檔存入對應目錄，metadata JSON 旁置               │
+  │  完成：發送 job_done 事件 → WebSocket 推送前端            │
+  │  失敗：記錄錯誤，標記可重試，前端顯示失敗原因              │
+  │                                                          │
+  │  gallery-dl 設定（config.toml）：                        │
+  │    - E-Hentai cookie                                     │
+  │    - Pixiv refresh_token                                 │
+  │    - --write-metadata（輸出 gallery JSON）               │
+  │    - --write-tags（輸出 tags.txt，可直接用於訓練）        │
+  │    - 輸出路徑規則（見 STORAGE 章節）                      │
+  └──────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  WORKER B：import_worker                                 │
+  │                                                          │
+  │  觸發：Watchdog 監控 /data/imports/ 目錄（新檔偵測）      │
+  │        或 download_worker 完成後直接呼叫                  │
+  │  執行：解壓 ZIP / CBZ / CBR → 讀 metadata → 入 DB        │
+  │  縮圖：生成 WebP 縮圖（Pillow），存 /data/thumbs/         │
+  │  Tag  ：                                                 │
+  │    若 metadata.json / tags.txt 存在 → 直接解析入 DB      │
+  │    否則 → 加入 tag_worker 佇列（目前為 stub，排隊不執行） │
+  └──────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  WORKER C：tag_worker  [STUB — 介面預留，WD14 暫緩]       │
+  │                                                          │
+  │  狀態：佇列與 DB 介面完整實作，模型推論部分為 stub         │
+  │                                                          │
+  │  現在的行為：                                            │
+  │    接收 job → 記錄 pending 狀態 → 不執行 → 標記 skipped  │
+  │    前端 /tags 頁顯示「AI Tagging：未啟用」                │
+  │                                                          │
+  │  未來啟用 WD14 時只需：                                   │
+  │    1. 掛載 WD14 ONNX 模型檔至容器                        │
+  │    2. 實作 TagModel.predict(image_path) -> List[Tag]     │
+  │    3. 設定環境變數 TAG_MODEL_ENABLED=true                 │
+  │    佇列、DB 寫入、信心度欄位、手動覆寫邏輯不需更動         │
+  │                                                          │
+  │  介面規格（已定義，供未來實作）：                         │
+  │    input : { image_id, image_path }                      │
+  │    output: { tags: [{name, namespace, confidence}] }     │
+  │    DB 寫入: image_tags（source='wd14'）                  │
+  └──────────────────────────────────────────────────────────┘
+
+  ┌──────────────────────────────────────────────────────────┐
+  │  WORKER D：thumbnail_worker                              │
+  │                                                          │
+  │  觸發：新圖入庫後自動排入                                 │
+  │  執行：Pillow 生成多尺寸縮圖（160px / 360px / 720px）     │
+  │  格式：WebP（品質 85）                                    │
+  │  快取：Nginx 直接服務 /data/thumbs/，不經 FastAPI         │
+  └──────────────────────────────────────────────────────────┘
+
+
+────────────────────────────────────────────────────────────────────────────────
+  LAYER 5 — STORAGE
+────────────────────────────────────────────────────────────────────────────────
+
+  -- 資料庫：PostgreSQL --
+
+    ── Schema 設計重點：tags_array + GIN 索引 ──────────────────
+
+      傳統 JOIN 的效能問題：
+        「character_a AND blue_hair NOT sketch」這類複合 tag 搜尋
+        需要多次 JOIN gallery_tags + tags，在 10 萬本以上查詢極慢。
+
+      解法：在 galleries / images 表增加 tags_array 欄位，
+            利用 PostgreSQL 原生陣列操作符搭配 GIN 索引。
+            gallery_tags 關聯表保留，用於 tag 統計與來源記錄，
+            但高頻搜尋查 tags_array，不走 JOIN。
+
+    galleries
+      id              BIGSERIAL PRIMARY KEY
+      source          TEXT          -- 'ehentai' / 'pixiv' / 'import'
+      source_id       TEXT          -- gallery ID in source system
+      title           TEXT
+      title_jpn       TEXT
+      category        TEXT
+      language        TEXT
+      pages           INT
+      posted_at       TIMESTAMPTZ
+      added_at        TIMESTAMPTZ   DEFAULT now()
+      rating          SMALLINT      -- 0–5 stars
+      favorited       BOOLEAN       DEFAULT false
+      uploader        TEXT
+      parent_id       BIGINT        REFERENCES galleries(id)
+      download_status TEXT          -- 'proxy_only'/'partial'/'complete'
+      tags_array      TEXT[]        -- ['character:rem', 'general:blue_hair', ...]
+                                    -- 格式：'{namespace}:{tag_name}'
+      UNIQUE (source, source_id)
+
+    images
+      id              BIGSERIAL PRIMARY KEY
+      gallery_id      BIGINT        REFERENCES galleries(id) ON DELETE CASCADE
+      page_num        INT
+      filename        TEXT
+      width           INT
+      height          INT
+      file_path       TEXT
+      thumb_path      TEXT
+      file_size       BIGINT
+      file_hash       TEXT          -- SHA256，用於去重
+      tags_array      TEXT[]        -- 單圖層級 tag（WD14 啟用後填入，現為空陣列）
+
+    tags
+      id              BIGSERIAL PRIMARY KEY
+      namespace       TEXT          -- 'character'/'general'/'artist'/'copyright'
+      name            TEXT
+      count           INT           DEFAULT 0
+      UNIQUE (namespace, name)
+
+    gallery_tags      -- 保留作統計 / 來源記錄，不用於高頻搜尋
+      gallery_id      BIGINT        REFERENCES galleries(id) ON DELETE CASCADE
+      tag_id          BIGINT        REFERENCES tags(id)
+      confidence      REAL          -- 1.0 for metadata, 0.0–1.0 for WD14
+      source          TEXT          -- 'manual' / 'metadata' / 'wd14'
+      PRIMARY KEY (gallery_id, tag_id)
+
+    image_tags        -- WD14 啟用後使用，現階段保持空表
+      image_id        BIGINT        REFERENCES images(id) ON DELETE CASCADE
+      tag_id          BIGINT        REFERENCES tags(id)
+      confidence      REAL
+      PRIMARY KEY (image_id, tag_id)
+
+    download_jobs
+      id              UUID          PRIMARY KEY DEFAULT gen_random_uuid()
+      url             TEXT
+      source          TEXT
+      status          TEXT          -- 'queued'/'running'/'done'/'failed'/'cancelled'
+      progress        JSONB         -- { current_page, total_pages, speed_kbps }
+      error           TEXT
+      created_at      TIMESTAMPTZ   DEFAULT now()
+      finished_at     TIMESTAMPTZ
+
+    read_progress
+      gallery_id      BIGINT        PRIMARY KEY REFERENCES galleries(id)
+      last_page       INT
+      last_read_at    TIMESTAMPTZ
+
+    credentials
+      source          TEXT          PRIMARY KEY
+      credential_type TEXT          -- 'cookie' / 'oauth_token' / 'api_key'
+      value_encrypted BYTEA         -- AES-256-GCM，key 來自環境變數
+      expires_at      TIMESTAMPTZ
+      last_verified   TIMESTAMPTZ
+
+    ── 索引規範 ─────────────────────────────────────────────────
+
+      -- GIN 索引（核心搜尋效能）
+      CREATE INDEX idx_galleries_tags_gin ON galleries USING GIN (tags_array);
+      CREATE INDEX idx_images_tags_gin    ON images    USING GIN (tags_array);
+
+      -- 一般索引
+      CREATE INDEX idx_galleries_source    ON galleries (source, source_id);
+      CREATE INDEX idx_galleries_added_at  ON galleries (added_at DESC);
+      CREATE INDEX idx_galleries_rating    ON galleries (rating);
+      CREATE INDEX idx_galleries_favorited ON galleries (favorited)
+                                            WHERE favorited = true;
+      CREATE INDEX idx_images_gallery      ON images (gallery_id, page_num);
+      CREATE INDEX idx_images_hash         ON images (file_hash);
+
+    ── 搜尋查詢範例 ─────────────────────────────────────────────
+
+      -- character:rem AND blue_hair NOT sketch（複合 AND/NOT）
+      SELECT * FROM galleries
+      WHERE tags_array @> ARRAY['character:rem', 'general:blue_hair']
+        AND NOT (tags_array && ARRAY['general:sketch'])
+      ORDER BY added_at DESC;
+
+      -- Tag autocomplete（前綴搜尋）
+      SELECT namespace, name, count FROM tags
+      WHERE name LIKE 'blue%'
+      ORDER BY count DESC LIMIT 20;
+
+  -- 快取：Redis --
+
+    session:{token}                → 用戶 session
+    job:{job_id}                   → 下載任務狀態（JSON）
+    eh:gallery:{gid}               → E-H gallery 資料快取（TTL 1h）
+    eh:imagelist:{gid}             → 圖片 token 列表快取（TTL 1h）
+    thumb:proxied:{gid}:{page}     → 代理圖片快取（TTL 24h，節省 GP）
+    eh:semaphore                   → 全域併發計數（Semaphore 實作）
+    system:alerts                  → 系統警告列表（cookie 失效等）
+
+  -- 檔案系統（ZFS Volume 掛載）--
+
+    /data/
+    ├── gallery/
+    │   ├── ehentai/{gid}/
+    │   │   ├── {page:04d}.jpg
+    │   │   ├── metadata.json     ← gallery-dl 輸出
+    │   │   └── tags.txt          ← gallery-dl 輸出
+    │   ├── pixiv/{artist_id}/{work_id}/
+    │   │   ├── {work_id}_p0.jpg
+    │   │   └── metadata.json
+    │   └── imports/              ← 監控目錄，放 ZIP/CBZ 自動匯入
+    ├── thumbs/
+    │   └── {hash[:2]}/{hash}/    ← hash 分散 inode，160/360/720px WebP
+    └── training/
+        └── {dataset_name}/
+            ├── {image}.jpg
+            └── {image}.txt       ← caption（Kohya 格式）
+
+  -- 搜尋：Meilisearch（選配）--
+
+    GIN 索引已能滿足結構化 tag 搜尋（AND/OR/NOT）。
+    引入 Meilisearch 的時機：
+      - tag 數量超過 100 萬條，autocomplete 效能下降時
+      - 需要標題模糊搜尋（typo tolerance）時
+      - 現階段不部署，省記憶體開銷
+
+
+────────────────────────────────────────────────────────────────────────────────
+  ZFS / DOCKER 權限對應規範
+────────────────────────────────────────────────────────────────────────────────
+
+  背景：
+    TrueNAS Scale 的 ZFS Dataset 預設使用 POSIX ACL 或 NFSv4 ACL。
+    若 Docker 容器以 root（UID 0）寫入，實體檔案變成 root:root，
+    導致 TrueNAS GUI、SMB、rsync 腳本無法讀寫，且無法透過
+    TrueNAS 管理介面修改權限。
+
+  解法：固定服務帳號 UID/GID，映射至 ZFS Dataset 擁有者
+
+    步驟 1 — TrueNAS 側
+      在 TrueNAS 建立專用帳號：
+        使用者名稱：doujin-vault
+        UID        ：1042（自選，避免與系統保留帳號衝突）
+        GID        ：1042
+      將以下 ZFS Dataset 擁有者設為 1042:1042，權限 755：
+        gallery_data / thumbs_data / training_data
+
+    步驟 2 — Dockerfile 側
+      FROM python:3.12-slim
+      RUN groupadd -g 1042 appgroup && \
+          useradd -u 1042 -g appgroup -s /bin/sh appuser
+      USER appuser
+      # 確保 gallery-dl 與 Pillow 都以 appuser 身份執行
+
+    步驟 3 — docker-compose.yml 側
+      services:
+        api:
+          user: "1042:1042"
+          volumes:
+            - /mnt/vault/gallery:/data/gallery
+            - /mnt/vault/thumbs:/data/thumbs
+            - /mnt/vault/training:/data/training
+
+        worker:
+          user: "1042:1042"
+          volumes:
+            - /mnt/vault/gallery:/data/gallery
+            - /mnt/vault/thumbs:/data/thumbs
+            - /mnt/vault/training:/data/training
+
+      注意：使用 user: "1042:1042" 比 PUID/PGID 環境變數更直接可靠。
+            PUID/PGID 環境變數方案依賴映像內的 entrypoint 腳本支援
+            （如 linuxserver.io 系列），自建映像建議直接用 user 欄位。
+
+    步驟 4 — Phase 1 驗證
+      docker compose exec worker id
+      # 應輸出：uid=1042(appuser) gid=1042(appgroup)
+
+      docker compose exec worker touch /data/gallery/test_write
+      # 應成功，且在 TrueNAS 上該檔案擁有者為 1042:1042
+
+  結果：
+    - gallery-dl 下載的所有檔案   → 擁有者 1042:1042
+    - Pillow 生成的所有縮圖        → 擁有者 1042:1042
+    - TrueNAS SMB / rsync 正常讀寫 → 不再有 permission denied
+    - TrueNAS GUI 可直接管理檔案   → 不需進容器 chown
+
+
+────────────────────────────────────────────────────────────────────────────────
+  LAYER 6 — EXTERNAL SOURCES
+────────────────────────────────────────────────────────────────────────────────
+
+  E-Hentai / ExHentai
+    認證  ：ipb_member_id + ipb_pass_hash + sk (cookie)
+    瀏覽  ：FastAPI 代理 api.e-hentai.org/api.php
+    下載  ：gallery-dl（原生支援，自帶限速與 token 解析）
+    限速  ：後端 Redis Semaphore（EH_MAX_CONCURRENCY=2，見 LAYER 3）
+    注意  ：GP 配額限制；cookie 需定期更新；ExHentai 需 Hath 帳號
+
+  Pixiv
+    認證  ：OAuth2 refresh_token（pixivpy3 管理）
+    瀏覽  ：pixivpy3 API（搜尋、追蹤、書籤）
+    下載  ：gallery-dl（支援原圖、Ugoira 轉 GIF/MP4）
+    特色  ：可設定追蹤畫師自動下載新作
+
+  其他（gallery-dl 支援，按需啟用）
+    Danbooru / Gelbooru / Sankaku
+    nhentai
+    Twitter / X（需 auth_token cookie）
+    ArtStation / DeviantArt
+    自定義 URL（gallery-dl 通用模式）
+
+
+────────────────────────────────────────────────────────────────────────────────
+  FEATURE：TRAINING DATA EXPORT
+────────────────────────────────────────────────────────────────────────────────
+
+  目標：從圖庫中篩選出符合條件的圖片，匯出為 AI 訓練資料集
+
+  篩選維度：
+    - 來源（e-hentai / pixiv / 指定畫師）
+    - Tag（include / exclude，利用 tags_array @> 查詢）
+    - 評分（≥ N 星）
+    - 已收藏
+    - 圖片尺寸（最小寬高限制）
+    - 日期範圍
+
+  匯出格式：
+    Kohya/sd-scripts（最常用）
+      {image}.jpg + {image}.txt（逗號分隔 tag）
+
+    JSONL
+      每行一筆 {"image_path": "...", "caption": "...", "tags": [...]}
+
+    ZIP 打包下載或直接寫入 /data/training/{name}/
+
+  Tag 來源優先級：
+    1. 人工修正的 tag（source='manual'，最高優先）
+    2. gallery-dl metadata tags（source='metadata'，E-H / Pixiv 原始 tag）
+    3. WD14 自動 tag（source='wd14'，啟用後補充無來源 tag 的圖）
+
+  caption 生成規則（可設定）：
+    - 去除 meta tag（highres / absurdres 等）
+    - tag 命名空間過濾（只保留 character / general，排除 copyright）
+    - 隨機 shuffle tag 順序（訓練常用技巧）
+    - 加入觸發詞（trigger word）前置
+
+
+────────────────────────────────────────────────────────────────────────────────
+  FEATURE：SMART SOURCE SWITCHING
+────────────────────────────────────────────────────────────────────────────────
+
+  當 PWA Reader 開啟一個 gallery 時：
+
+    1. 以 source_id (gid) 查詢本地 DB，讀取 download_status 欄位
+    2. status = 'complete'   → 讀本地檔案（不消耗 GP，無限速）
+    3. status = 'partial'    → 已有頁讀本地，缺頁走代理（受 Semaphore 限速）
+    4. status = 'proxy_only' → 全走 E-H API 代理（受 Semaphore 限速）
+
+  序列化預載僅在 proxy_only / partial 模式啟用。
+  complete 模式下可並發讀取，無需限速。
+
+  UI 顯示：Gallery 詳情頁顯示「本地」/「代理」/「未下載」狀態標籤。
+
+
+────────────────────────────────────────────────────────────────────────────────
+  FEATURE：CREDENTIAL MANAGEMENT UI
+────────────────────────────────────────────────────────────────────────────────
+
+  /settings 頁面提供圖形介面管理所有認證資訊，不需 SSH：
+
+    E-Hentai
+      [ 貼上 cookie 字串 ] → 後端驗證（呼叫帳號頁確認有效）
+      顯示：帳號名稱 / GP 餘額 / Hath 狀態 / cookie 有效性
+      自動更新 credentials 表 + gallery-dl config.toml
+
+    Pixiv
+      [ 輸入 refresh_token ] → pixivpy3 驗證
+      顯示：帳號名稱 / 追蹤數 / token 有效性
+
+    Cookie 失效偵測：
+      後端每次請求若偵測到認證失敗
+        → 寫入 Redis system:alerts
+        → PWA 首頁顯示警告橫幅（WebSocket 推送）
+
+
+────────────────────────────────────────────────────────────────────────────────
+  DOCKER COMPOSE 服務清單
+────────────────────────────────────────────────────────────────────────────────
+
+  services:
+    nginx          Nginx（靜態服務 + 反代 + 圖片服務）
+    pwa            Next.js PWA
+    api            FastAPI 主服務（user: "1042:1042"）
+    worker         ARQ Worker（download / import / tag-stub / thumbnail）
+                   （user: "1042:1042"）
+    postgres       PostgreSQL 15
+    redis          Redis 7
+    meilisearch    Meilisearch（選配，tag 數 > 100 萬時引入）
+
+  volumes:
+    postgres_data              ← named volume，Docker 管理
+    redis_data                 ← named volume，Docker 管理
+    /mnt/vault/gallery         ← bind mount → TrueNAS ZFS Dataset
+    /mnt/vault/thumbs          ← bind mount → TrueNAS ZFS Dataset
+    /mnt/vault/training        ← bind mount → TrueNAS ZFS Dataset
+
+  network:
+    internal（api / worker / postgres / redis 互通，不對外）
+    external（nginx / pwa 對外）
+
+  關鍵環境變數：
+    EH_MAX_CONCURRENCY    = 2       ← E-H 外發圖片請求上限
+    EH_REQUEST_TIMEOUT    = 30
+    TAG_MODEL_ENABLED     = false   ← WD14 啟用開關（現為 false）
+    CREDENTIAL_ENCRYPT_KEY= <32-byte secret>
+    DATABASE_URL          = postgresql://...
+    REDIS_URL             = redis://redis:6379
+
+
+────────────────────────────────────────────────────────────────────────────────
+  BUILD SEQUENCE（開發順序建議）
+────────────────────────────────────────────────────────────────────────────────
+
+  Phase 1  Docker 骨架 + 權限驗證 + gallery-dl                2–3 天
+           docker-compose 跑通；確認 user: "1042:1042" 正確；
+           gallery-dl 手動下載測試；驗證 ZFS 檔案擁有者為 1042:1042；
+           TrueNAS SMB 確認可讀寫；PostgreSQL schema 初始化
+
+  Phase 2  FastAPI + E-Hentai API 代理 + Redis Semaphore      5–8 天
+           建立完整 DB schema（含 tags_array + GIN index）；
+           移植 EhViewer EhEngine.kt 邏輯至 Python；
+           實作 Redis Semaphore 限速器；
+           search / gallery / image-proxy 端點；
+           cookie 管理 UI + GP 餘額顯示
+
+  Phase 3  PWA Frontend + Reader                              5–7 天
+           Next.js 基礎頁面；Reader 元件；
+           序列化預載邏輯（proxy 模式）；並發讀取（local 模式）；
+           下載佇列 UI；WebSocket 進度推送；
+           iOS Safari 手勢測試；PWA manifest + Service Worker
+
+  Phase 4  Pixiv + Tag 搜尋 + 評分 / 收藏                    4–6 天
+           gallery-dl Pixiv source；追蹤畫師自動下載；
+           tags_array 搜尋介面（GIN 查詢測試）；
+           評分 / 收藏系統；Tag 統計頁
+
+  Phase 5  訓練匯出 + 統計 Dashboard                          2–3 天
+           篩選 UI；caption 生成；ZIP 匯出；
+           統計 widget（可接 Homepage dashboard）
+
+  Phase 6  WD14 Tag（未來，TAG_MODEL_ENABLED=true 時）        3–4 天
+           實作 TagModel.predict()；掛載 ONNX 模型；
+           tag_worker stub → 真實推論；批次重新標記介面
+
+  總計估算（Phase 1–5）：約 3–4 週 (Vibe Coding 加速)
+
+
+────────────────────────────────────────────────────────────────────────────────
+  RISK REGISTER
+────────────────────────────────────────────────────────────────────────────────
+
+  HIGH    E-Hentai IP 暫封（併發過高）
+          緩解：Redis Semaphore（EH_MAX_CONCURRENCY=2）
+                PWA Sequential Prefetch
+                Nginx 最終限速防線（5r/s）
+
+  HIGH    E-Hentai cookie 失效
+          緩解：credential 管理 UI + 失效自動偵測通知
+                cookie 更新後同步寫入 gallery-dl config.toml
+
+  MEDIUM  GP 配額耗盡
+          緩解：代理圖片後端快取（Redis TTL 24h）
+                Smart Source Switching 優先讀本地
+                GP 餘額顯示 + 低額預警
+
+  MEDIUM  ZFS 權限問題（root:root 鎖死）
+          緩解：user: "1042:1042" 規範（見 ZFS/Docker 章節）
+                Phase 1 即驗證，不留至後期
+
+  MEDIUM  PWA iOS 觸控手勢限制
+          緩解：使用原生 Touch API；避免 iOS Safari 預設手勢衝突；
+                全螢幕模式下測試 swipe / pinch-to-zoom
+
+  LOW     PostgreSQL 大量 tag JOIN 效能下降
+          緩解：tags_array + GIN 索引，高頻搜尋不走 JOIN
+                Meilisearch 作為 100 萬條 tag 後的升級選項
+
+  LOW     ZFS 目錄結構後期變動
+          緩解：Phase 1 即確認最終路徑規範，不再更動
+
+  LOW     Pixiv ToS
+          自用私有部署，不對外開放，風險極低
+
+
+────────────────────────────────────────────────────────────────────────────────
+  END OF DOCUMENT
+================================================================================

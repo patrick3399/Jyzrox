@@ -1,0 +1,27 @@
+# Environment secrets
+.env
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+.venv/
+*.egg-info/
+dist/
+build/
+
+# gallery-dl live config (contains credentials)
+config/gallery-dl/config.json
+
+# Node (Phase 3 PWA)
+pwa/node_modules/
+pwa/.next/
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Local Data
+data/
+.claude/

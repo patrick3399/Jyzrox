@@ -1,0 +1,50 @@
+{
+    "extractor": {
+        "base-directory": "/data/gallery/",
+        "archive": "/data/gallery/.archive.sqlite3",
+
+        "ehentai": {
+            "cookies": {
+                "ipb_member_id": "",
+                "ipb_pass_hash": "",
+                "sk": ""
+            },
+            "directory": ["ehentai", "{gid}"],
+            "filename": "{num:>04}.{extension}",
+            "metadata": true,
+            "sleep-request": 1.5
+        },
+
+        "exhentai": {
+            "cookies": {
+                "ipb_member_id": "",
+                "ipb_pass_hash": "",
+                "sk": ""
+            },
+            "directory": ["ehentai", "{gid}"],
+            "filename": "{num:>04}.{extension}",
+            "metadata": true,
+            "sleep-request": 1.5
+        },
+
+        "pixiv": {
+            "refresh-token": "",
+            "directory": ["pixiv", "{user[id]}", "{id}"],
+            "filename": "{id}_p{num}.{extension}",
+            "metadata": true
+        }
+    },
+
+    "downloader": {
+        "http": {
+            "rate": "1M",
+            "retries": 3,
+            "timeout": 30
+        }
+    },
+
+    "output": {
+        "mode": "auto",
+        "shorten": false
+    }
+}

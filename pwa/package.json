@@ -1,0 +1,32 @@
+{
+  "name": "doujin-vault-pwa",
+  "version": "1.0.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev --port 3000",
+    "build": "next build",
+    "start": "next start --port 3000",
+    "test": "vitest run",
+    "test:watch": "vitest"
+  },
+  "dependencies": {
+    "clsx": "^2.1.0",
+    "next": "^15.0.0",
+    "react": "^18.3.0",
+    "react-dom": "^18.3.0",
+    "swr": "^2.3.0"
+  },
+  "devDependencies": {
+    "@testing-library/react": "^16.0.0",
+    "@types/node": "^22",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "@vitest/coverage-v8": "^2.0.0",
+    "autoprefixer": "^10.4.0",
+    "jsdom": "^25.0.0",
+    "postcss": "^8.5.0",
+    "tailwindcss": "^3.4.0",
+    "typescript": "5.9.3",
+    "vitest": "^2.0.0"
+  }
+}
