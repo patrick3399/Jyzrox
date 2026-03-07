@@ -9,6 +9,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { RatingStars } from '@/components/RatingStars'
+import { Search as SearchIcon, X as XIcon } from 'lucide-react'
 import type { EhGallery, Credentials } from '@/lib/types'
 
 // ── Search history (localStorage) ─────────────────────────────────────
@@ -387,6 +388,10 @@ function BrowsePage() {
   const [history, setHistory]           = useState<string[]>([])
   const searchBoxRef = useRef<HTMLDivElement>(null)
 
+  // Mobile search expand
+  const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
+  const mobileInputRef = useRef<HTMLInputElement>(null)
+
   // EH credentials (for favorites tab)
   const [ehConfigured, setEhConfigured] = useState(false)
   useEffect(() => {
@@ -598,8 +603,79 @@ function BrowsePage() {
       <div className="max-w-5xl mx-auto px-4 py-5 space-y-4">
 
         {/* ── Search bar with history dropdown ── */}
-        <div className="flex gap-2">
-          <div ref={searchBoxRef} className="relative flex-1">
+
+        {/* Mobile: expanded search overlay */}
+        {mobileSearchOpen && (
+          <div className="sm:hidden flex gap-2">
+            <div ref={searchBoxRef} className="relative flex-1">
+              <input
+                ref={mobileInputRef}
+                type="text"
+                value={inputValue}
+                onChange={(e) => handleInputChange(e.target.value)}
+                onKeyDown={(e) => { handleKeyDown(e); if (e.key === 'Enter') setMobileSearchOpen(false) }}
+                onFocus={() => { refreshHistory(); setShowHistory(true) }}
+                placeholder={t('browse.searchPlaceholder')}
+                autoFocus
+                className="w-full bg-vault-card border border-vault-border rounded-lg px-4 py-2.5 text-sm
+                           text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors"
+              />
+
+              {/* History dropdown */}
+              {showHistory && history.length > 0 && (
+                <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-vault-card border border-vault-border rounded-lg shadow-xl overflow-hidden max-h-[min(320px,50vh)]">
+                  <div className="flex items-center justify-between px-3 py-1.5 border-b border-vault-border">
+                    <span className="text-[11px] text-vault-text-muted uppercase tracking-wide">{t('browse.recent')}</span>
+                    <button
+                      onClick={() => { clearSearchHistory(); setHistory([]) }}
+                      className="text-[11px] text-vault-text-muted hover:text-red-400 transition-colors"
+                    >
+                      {t('browse.clearAll')}
+                    </button>
+                  </div>
+                  {history.map((q) => (
+                    <button
+                      key={q}
+                      onClick={() => { handleHistorySelect(q); setMobileSearchOpen(false) }}
+                      className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-vault-text
+                                 hover:bg-vault-card-hover transition-colors group"
+                    >
+                      <span className="text-vault-text-muted text-xs">&#x1F50D;</span>
+                      <span className="flex-1 truncate">{q}</span>
+                      <span
+                        onClick={(e) => handleHistoryRemove(q, e)}
+                        className="text-vault-text-muted hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity px-1"
+                        title="Remove"
+                      >
+                        ✕
+                      </span>
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
+            <button
+              onClick={() => { setMobileSearchOpen(false); setShowHistory(false) }}
+              className="px-3 py-2.5 text-sm text-vault-text-secondary hover:text-vault-text transition-colors shrink-0"
+            >
+              <XIcon size={18} />
+            </button>
+          </div>
+        )}
+
+        {/* Desktop + mobile compact row */}
+        <div className={`flex gap-2 ${mobileSearchOpen ? 'hidden sm:flex' : ''}`}>
+          {/* Mobile search icon button */}
+          <button
+            onClick={() => setMobileSearchOpen(true)}
+            className="sm:hidden p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-text transition-colors shrink-0"
+            aria-label={t('browse.search')}
+          >
+            <SearchIcon size={18} />
+          </button>
+
+          {/* Desktop search input */}
+          <div ref={!mobileSearchOpen ? searchBoxRef : undefined} className="relative flex-1 hidden sm:block">
             <input
               type="text"
               value={inputValue}
@@ -647,7 +723,7 @@ function BrowsePage() {
 
           <button
             onClick={() => { if (debounceRef.current) clearTimeout(debounceRef.current); commitSearch(inputValue) }}
-            className="px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
+            className="hidden sm:block px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
           >
             {t('browse.search')}
           </button>
