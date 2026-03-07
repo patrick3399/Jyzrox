@@ -11,9 +11,7 @@ class Settings(BaseSettings):
     redis_url: str = "redis://redis:6379"
 
     # Security
-    jwt_secret: str
     credential_encrypt_key: str
-    vault_password: str = "changeme"
 
     # E-Hentai limits
     eh_max_concurrency: int = 2

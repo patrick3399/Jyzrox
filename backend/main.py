@@ -21,7 +21,7 @@ logger = logging.getLogger(__name__)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    logger.info("Starting Doujin Vault API rev 2.0...")
+    logger.info("Starting Jyzrox API rev 2.0...")
     await init_redis()
     app.state.arq = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     logger.info("Redis + ARQ pool ready")
@@ -34,7 +34,7 @@ async def lifespan(app: FastAPI):
 
 
 app = FastAPI(
-    title="Doujin Vault API",
+    title="Jyzrox API",
     version="2.0.0",
     lifespan=lifespan,
 )

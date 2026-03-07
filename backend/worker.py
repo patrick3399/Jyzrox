@@ -39,7 +39,7 @@ _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"}
 # ── Lifecycle ────────────────────────────────────────────────────────
 
 async def startup(ctx: dict) -> None:
-    logger.info("ARQ Worker started — Doujin Vault")
+    logger.info("ARQ Worker started — Jyzrox")
 
 
 async def shutdown(ctx: dict) -> None:

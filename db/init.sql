@@ -1,4 +1,4 @@
--- Doujin Vault — PostgreSQL Schema
+-- Jyzrox — PostgreSQL Schema
 -- rev 1.1 / 2026-03
 
 -- ── Tables ──────────────────────────────────────────────────────────
@@ -12,10 +12,7 @@ CREATE TABLE IF NOT EXISTS users (
     last_login_at   TIMESTAMPTZ
 );
 
--- Default user: admin / vault
-INSERT INTO users (username, password_hash, role)
-VALUES ('admin', '$2b$12$3of5H6.Homv27J6cagEaG.TBKCBLtS910j3s.XQxNMxGCdjOj2PZK', 'admin')
-ON CONFLICT (username) DO NOTHING;
+-- No default user: first-run setup is done via POST /api/auth/setup
 
 CREATE TABLE IF NOT EXISTS galleries (
     id              BIGSERIAL PRIMARY KEY,

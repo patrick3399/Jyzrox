@@ -21,7 +21,7 @@ def _get_key() -> bytes:
         kdf = HKDF(
             algorithm=hashes.SHA256(),
             length=32,
-            salt=b"doujin-vault-v1",
+            salt=b"jyzrox-v1",
             info=b"credential-encryption",
         )
         _KEY = kdf.derive(settings.credential_encrypt_key.encode())

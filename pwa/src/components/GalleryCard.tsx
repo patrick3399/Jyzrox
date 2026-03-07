@@ -48,7 +48,7 @@ export function EhGalleryCard({ gallery, onClick }: EhCardProps) {
       {/* Thumbnail */}
       <div className="relative aspect-[3/4] bg-gray-900 overflow-hidden">
         <img
-          src={gallery.thumb}
+          src={gallery.thumb ? `/api/eh/thumb-proxy?url=${encodeURIComponent(gallery.thumb)}` : ''}
           alt={gallery.title}
           className="w-full h-full object-cover"
           loading="lazy"

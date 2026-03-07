@@ -1,12 +1,14 @@
 """E-Hentai / ExHentai API proxy endpoints."""
 
+import hashlib
 import json
 import logging
 
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from core.auth import require_auth
-from core.redis_client import eh_semaphore
+from core.redis_client import eh_semaphore, get_redis
 from services import cache
 from services.cache import push_system_alert
 from services.credential import get_credential
@@ -161,3 +163,32 @@ async def image_proxy(
 
     await cache.set_proxied_image(gid, page, image_bytes)
     return Response(content=image_bytes, media_type=media_type)
+
+
+# ── Thumbnail proxy ───────────────────────────────────────────────────
+
+@router.get("/thumb-proxy")
+async def thumb_proxy(
+    url: str,
+    _: dict = Depends(require_auth),
+):
+    """Proxy EH thumbnail CDN images so the frontend never calls external URLs."""
+    cache_key = f"thumb:cdn:{hashlib.md5(url.encode()).hexdigest()}"
+    cached_bytes = await get_redis().get(cache_key)
+    if cached_bytes:
+        return Response(content=cached_bytes, media_type="image/jpeg")
+
+    cred_json = await get_credential("ehentai")
+    cookies = json.loads(cred_json) if cred_json else {}
+
+    try:
+        async with httpx.AsyncClient(cookies=cookies, timeout=15) as client:
+            resp = await client.get(url, headers={"Referer": "https://e-hentai.org/"})
+            resp.raise_for_status()
+            content = resp.content
+            media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
+    except httpx.HTTPError as exc:
+        raise HTTPException(status_code=502, detail=f"Thumbnail fetch failed: {exc}")
+
+    await get_redis().setex(cache_key, 86400, content)  # 24h
+    return Response(content=content, media_type=media_type)

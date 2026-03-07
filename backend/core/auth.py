@@ -1,39 +1,24 @@
-"""Single-user JWT authentication."""
+"""Session-based authentication (Redis)."""
 
-from datetime import datetime, timedelta, timezone
-
-import jwt
 from fastapi import Cookie, HTTPException, status
 
-from core.config import settings
-
-_ALGORITHM = "HS256"
-_TOKEN_EXPIRE_DAYS = 30
-
-
-def create_token() -> str:
-    """Issue a JWT for the single user."""
-    now = datetime.now(timezone.utc)
-    return jwt.encode(
-        {"sub": "user", "iat": now, "exp": now + timedelta(days=_TOKEN_EXPIRE_DAYS)},
-        settings.jwt_secret,
-        algorithm=_ALGORITHM,
-    )
-
-
-def verify_token(token: str) -> dict:
-    try:
-        return jwt.decode(token, settings.jwt_secret, algorithms=[_ALGORITHM])
-    except jwt.ExpiredSignatureError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Token expired")
-    except jwt.InvalidTokenError:
-        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid token")
+from core.redis_client import get_redis
 
 
 async def require_auth(
-    vault_token: str | None = Cookie(default=None),
+    vault_session: str | None = Cookie(default=None),
 ) -> dict:
-    """FastAPI dependency: require valid auth cookie."""
-    if not vault_token:
+    """FastAPI dependency: require valid session cookie."""
+    if not vault_session:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Not authenticated")
-    return verify_token(vault_token)
+
+    try:
+        user_id_str, token = vault_session.split(":", 1)
+    except ValueError:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Invalid session")
+
+    session_data = await get_redis().get(f"session:{user_id_str}:{token}")
+    if not session_data:
+        raise HTTPException(status.HTTP_401_UNAUTHORIZED, detail="Session expired")
+
+    return {"user_id": int(user_id_str)}

@@ -246,7 +246,7 @@ export default function BrowsePage() {
               <div className="flex-shrink-0">
                 {selectedGallery.thumb ? (
                   <img
-                    src={selectedGallery.thumb}
+                    src={`/api/eh/thumb-proxy?url=${encodeURIComponent(selectedGallery.thumb)}`}
                     alt={selectedGallery.title}
                     className="w-32 h-44 object-cover rounded"
                   />
