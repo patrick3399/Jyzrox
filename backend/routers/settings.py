@@ -2,12 +2,14 @@
 
 import json
 import logging
+from typing import Optional
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 from core.auth import require_auth
+from core.config import settings as app_settings
 from services.cache import get_system_alerts, push_system_alert
 from services.credential import get_credential, set_credential
 from services.eh_client import EhClient
@@ -31,6 +33,10 @@ class EhLoginRequest(BaseModel):
 
 class PixivTokenRequest(BaseModel):
     refresh_token: str
+
+
+class RateLimitPatch(BaseModel):
+    enabled: Optional[bool] = None
 
 
 # ── Credentials ──────────────────────────────────────────────────────
@@ -143,6 +149,31 @@ async def eh_account_info(_: dict = Depends(require_auth)):
         info = await client.get_account_info()
 
     return {"valid": True, **info}
+
+
+# ── Rate Limiting ────────────────────────────────────────────────
+
+@router.get("/rate-limit")
+async def get_rate_limit_settings(_: dict = Depends(require_auth)):
+    """Get current rate limiting status."""
+    return {
+        "enabled": app_settings.rate_limit_enabled,
+        "login_max": app_settings.rate_limit_login,
+        "window": app_settings.rate_limit_window,
+    }
+
+
+@router.patch("/rate-limit")
+async def patch_rate_limit_settings(
+    req: RateLimitPatch,
+    _: dict = Depends(require_auth),
+):
+    """Toggle rate limiting on/off at runtime."""
+    if req.enabled is not None:
+        app_settings.rate_limit_enabled = req.enabled
+    return {
+        "enabled": app_settings.rate_limit_enabled,
+    }
 
 
 # ── Alerts ───────────────────────────────────────────────────────────

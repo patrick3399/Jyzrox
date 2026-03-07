@@ -39,12 +39,17 @@ app = FastAPI(
     lifespan=lifespan,
 )
 
+# CORS: restrict to configured origin, or same-origin only
+_cors_origins: list[str] = []
+if settings.cors_origin:
+    _cors_origins = [o.strip() for o in settings.cors_origin.split(",") if o.strip()]
+
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=_cors_origins,
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=["GET", "POST", "PATCH", "DELETE"],
+    allow_headers=["Content-Type"],
 )
 
 app.include_router(auth.router,            prefix="/api/auth")

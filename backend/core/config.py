@@ -12,6 +12,14 @@ class Settings(BaseSettings):
 
     # Security
     credential_encrypt_key: str
+    cors_origin: str = ""  # e.g. "https://vault.example.com" — empty = same-origin only
+    cookie_secure: bool = True  # Set to False only for local HTTP dev
+    trusted_proxies: str = "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"  # comma-separated CIDRs/IPs
+
+    # Rate limiting
+    rate_limit_enabled: bool = True
+    rate_limit_login: int = 5       # max attempts per window
+    rate_limit_window: int = 300    # window in seconds (5 min)
 
     # E-Hentai limits
     eh_max_concurrency: int = 2

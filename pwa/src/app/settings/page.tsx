@@ -5,7 +5,7 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { AlertBanner } from '@/components/AlertBanner'
-import type { SystemHealth, SystemInfo, EhAccount, Credentials } from '@/lib/types'
+import type { SystemHealth, SystemInfo, EhAccount, Credentials, SessionInfo } from '@/lib/types'
 
 type SectionKey = 'ehentai' | 'pixiv' | 'system' | 'account' | 'browse'
 
@@ -151,6 +151,15 @@ export default function SettingsPage() {
   const [systemLoading, setSystemLoading] = useState(false)
   const [systemError, setSystemError] = useState<string | null>(null)
 
+  // Rate limiting
+  const [rateLimitEnabled, setRateLimitEnabled] = useState<boolean | null>(null)
+  const [rateLimitToggling, setRateLimitToggling] = useState(false)
+
+  // Sessions
+  const [sessions, setSessions] = useState<SessionInfo[]>([])
+  const [sessionsLoading, setSessionsLoading] = useState(false)
+  const [revokingToken, setRevokingToken] = useState<string | null>(null)
+
   // Load credentials on mount
   useEffect(() => {
     api.settings.getCredentials()
@@ -239,9 +248,10 @@ export default function SettingsPage() {
     setSystemLoading(true)
     setSystemError(null)
     try {
-      const [h, i] = await Promise.all([api.system.health(), api.system.info()])
+      const [h, i, rl] = await Promise.all([api.system.health(), api.system.info(), api.settings.getRateLimit()])
       setHealth(h)
       setSystemInfo(i)
+      setRateLimitEnabled(rl.enabled)
     } catch (err) {
       setSystemError(err instanceof Error ? err.message : 'Failed to load system info')
     } finally {
@@ -249,11 +259,51 @@ export default function SettingsPage() {
     }
   }, [])
 
+  const handleToggleRateLimit = useCallback(async () => {
+    if (rateLimitEnabled === null) return
+    setRateLimitToggling(true)
+    try {
+      const result = await api.settings.setRateLimit(!rateLimitEnabled)
+      setRateLimitEnabled(result.enabled)
+    } catch {
+      // revert on failure
+    } finally {
+      setRateLimitToggling(false)
+    }
+  }, [rateLimitEnabled])
+
+  const handleLoadSessions = useCallback(async () => {
+    setSessionsLoading(true)
+    try {
+      const result = await api.auth.getSessions()
+      setSessions(result.sessions)
+    } catch {
+      // ignore
+    } finally {
+      setSessionsLoading(false)
+    }
+  }, [])
+
+  const handleRevokeSession = useCallback(async (tokenPrefix: string) => {
+    setRevokingToken(tokenPrefix)
+    try {
+      await api.auth.revokeSession(tokenPrefix)
+      setSessions((prev) => prev.filter((s) => s.token_prefix !== tokenPrefix))
+    } catch {
+      // ignore
+    } finally {
+      setRevokingToken(null)
+    }
+  }, [])
+
   useEffect(() => {
     if (activeSection === 'system' && !health && !systemLoading) {
       handleLoadSystem()
     }
-  }, [activeSection, health, systemLoading, handleLoadSystem])
+    if (activeSection === 'account' && sessions.length === 0 && !sessionsLoading) {
+      handleLoadSessions()
+    }
+  }, [activeSection, health, systemLoading, handleLoadSystem, sessions.length, sessionsLoading, handleLoadSessions])
 
   const serviceStatusClass = (status: string) =>
     status === 'ok' || status === 'healthy'
@@ -578,6 +628,26 @@ export default function SettingsPage() {
                       </div>
                     </div>
 
+                    {/* Rate Limiting */}
+                    <div>
+                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Security</p>
+                      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <p className="text-sm text-white">Rate Limiting</p>
+                            <p className="text-xs text-gray-600 mt-0.5">Protect login and API endpoints</p>
+                          </div>
+                          <button
+                            onClick={handleToggleRateLimit}
+                            disabled={rateLimitToggling || rateLimitEnabled === null}
+                            className={`relative w-11 h-6 rounded-full transition-colors ${rateLimitEnabled ? 'bg-blue-600' : 'bg-[#333]'}`}
+                          >
+                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${rateLimitEnabled ? 'translate-x-5' : ''}`} />
+                          </button>
+                        </div>
+                      </div>
+                    </div>
+
                     <button
                       onClick={handleLoadSystem}
                       className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
@@ -616,15 +686,84 @@ export default function SettingsPage() {
             />
             {activeSection === 'account' && (
               <div className="px-5 pb-5 border-t border-[#1e1e1e]">
-                <p className="text-sm text-gray-500 mt-4 mb-4">
-                  You are authenticated via the vault password cookie.
-                </p>
-                <button
-                  onClick={logout}
-                  className="px-4 py-2 bg-red-900/40 border border-red-700/50 hover:bg-red-900/60 text-red-400 rounded text-sm font-medium transition-colors"
-                >
-                  Log Out
-                </button>
+                {/* Active Sessions */}
+                <div className="mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-gray-500 uppercase tracking-wide">Active Sessions</p>
+                    <button
+                      onClick={handleLoadSessions}
+                      disabled={sessionsLoading}
+                      className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+                    >
+                      {sessionsLoading ? 'Loading...' : 'Refresh'}
+                    </button>
+                  </div>
+
+                  {sessionsLoading && sessions.length === 0 ? (
+                    <div className="flex justify-center py-4">
+                      <LoadingSpinner />
+                    </div>
+                  ) : (
+                    <div className="space-y-2">
+                      {sessions.map((s) => (
+                        <div
+                          key={s.token_prefix}
+                          className={`bg-[#1a1a1a] border rounded-lg px-3 py-2.5 ${
+                            s.is_current ? 'border-blue-600/50' : 'border-[#2a2a2a]'
+                          }`}
+                        >
+                          <div className="flex items-start justify-between gap-2">
+                            <div className="min-w-0 flex-1">
+                              <div className="flex items-center gap-2">
+                                <span className="text-sm text-white font-mono">{s.token_prefix}...</span>
+                                {s.is_current && (
+                                  <span className="text-[10px] bg-blue-600/30 text-blue-400 px-1.5 py-0.5 rounded">
+                                    Current
+                                  </span>
+                                )}
+                              </div>
+                              <p className="text-xs text-gray-600 mt-1 truncate" title={s.user_agent}>
+                                {s.user_agent || 'Unknown device'}
+                              </p>
+                              <div className="flex items-center gap-3 mt-1">
+                                <span className="text-xs text-gray-600">{s.ip}</span>
+                                {s.created_at && (
+                                  <span className="text-xs text-gray-600">
+                                    {new Date(s.created_at).toLocaleDateString()}
+                                  </span>
+                                )}
+                                <span className="text-xs text-gray-600">
+                                  Expires in {Math.ceil(s.ttl / 86400)}d
+                                </span>
+                              </div>
+                            </div>
+                            {!s.is_current && (
+                              <button
+                                onClick={() => handleRevokeSession(s.token_prefix)}
+                                disabled={revokingToken === s.token_prefix}
+                                className="text-xs text-red-400/70 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
+                              >
+                                {revokingToken === s.token_prefix ? '...' : 'Revoke'}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      ))}
+                      {sessions.length === 0 && !sessionsLoading && (
+                        <p className="text-xs text-gray-600 py-2">No active sessions found.</p>
+                      )}
+                    </div>
+                  )}
+                </div>
+
+                <div className="mt-5 pt-4 border-t border-[#1e1e1e]">
+                  <button
+                    onClick={logout}
+                    className="px-4 py-2 bg-red-900/40 border border-red-700/50 hover:bg-red-900/60 text-red-400 rounded text-sm font-medium transition-colors"
+                  >
+                    Log Out
+                  </button>
+                </div>
               </div>
             )}
           </div>

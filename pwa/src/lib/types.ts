@@ -139,6 +139,17 @@ export interface EhAccount {
   error?: string
 }
 
+// ── Sessions ─────────────────────────────────────────────────────
+
+export interface SessionInfo {
+  token_prefix: string
+  ip: string
+  user_agent: string
+  created_at: string | null
+  ttl: number
+  is_current: boolean
+}
+
 // ── System ────────────────────────────────────────────────────────────
 
 export interface SystemHealth {

@@ -3,6 +3,7 @@
 import hashlib
 import json
 import logging
+from urllib.parse import urlparse
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
@@ -277,12 +278,23 @@ async def get_favorites(
 
 # ── Thumbnail proxy ───────────────────────────────────────────────────
 
+_ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "ul.ehgt.org"}
+
+
 @router.get("/thumb-proxy")
 async def thumb_proxy(
     url: str,
     _: dict = Depends(require_auth),
 ):
     """Proxy EH thumbnail CDN images so the frontend never calls external URLs."""
+    parsed = urlparse(url)
+    if parsed.scheme not in ("http", "https"):
+        raise HTTPException(status_code=400, detail="Invalid URL scheme")
+    host = parsed.hostname or ""
+    # Allow exact match or subdomain of allowed hosts
+    if not any(host == h or host.endswith(f".{h}") for h in _ALLOWED_THUMB_HOSTS):
+        raise HTTPException(status_code=403, detail="URL domain not allowed")
+
     cache_key = f"thumb:cdn:{hashlib.md5(url.encode()).hexdigest()}"
     cached_bytes = await get_redis().get(cache_key)
     if cached_bytes:

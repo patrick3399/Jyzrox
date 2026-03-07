@@ -2,7 +2,7 @@ import type {
   Gallery, GalleryImage, GallerySearchParams,
   EhGallery, EhSearchResult, EhFavoritesResult, EhImageMap, EhSearchParams,
   DownloadJob, JobListParams,
-  Credentials, EhAccount,
+  Credentials, EhAccount, SessionInfo,
   ReadProgress,
   SystemHealth, SystemInfo,
   TagItem, TagAlias, TagImplication,
@@ -56,6 +56,14 @@ const auth = {
 
   needsSetup: () =>
     apiFetch<{ needs_setup: boolean }>('/api/auth/needs-setup'),
+
+  getSessions: () =>
+    apiFetch<{ sessions: SessionInfo[] }>('/api/auth/sessions'),
+
+  revokeSession: (tokenPrefix: string) =>
+    apiFetch<{ status: string }>(`/api/auth/sessions/${tokenPrefix}`, {
+      method: 'DELETE',
+    }),
 }
 
 // ── E-Hentai ─────────────────────────────────────────────────────────
@@ -176,6 +184,15 @@ const settings = {
 
   getAlerts: () =>
     apiFetch<{ alerts: string[] }>('/api/settings/alerts'),
+
+  getRateLimit: () =>
+    apiFetch<{ enabled: boolean; login_max: number; window: number }>('/api/settings/rate-limit'),
+
+  setRateLimit: (enabled: boolean) =>
+    apiFetch<{ enabled: boolean }>('/api/settings/rate-limit', {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
 }
 
 // ── System ────────────────────────────────────────────────────────────
