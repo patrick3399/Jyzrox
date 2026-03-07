@@ -28,15 +28,18 @@ const navLinks = [
   { href: '/settings', label: () => t('nav.settings'), icon: Settings },
 ]
 
-const themeOptions = [
-  { value: 'light', icon: Sun, label: () => t('common.light') },
-  { value: 'dark', icon: Moon, label: () => t('common.dark') },
-  { value: 'system', icon: Monitor, label: () => t('common.system') },
-]
+const themeCycle = ['light', 'dark', 'system'] as const
+const themeIcon = { light: Sun, dark: Moon, system: Monitor }
+const themeLabel = { light: () => t('common.light'), dark: () => t('common.dark'), system: () => t('common.system') }
 
 export function Sidebar() {
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
+
+  const cycleTheme = () => {
+    const idx = themeCycle.indexOf(theme as typeof themeCycle[number])
+    setTheme(themeCycle[(idx + 1) % themeCycle.length])
+  }
 
   async function handleLogout() {
     await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
@@ -76,27 +79,21 @@ export function Sidebar() {
 
       {/* Bottom section */}
       <div className="px-3 py-3 border-t border-vault-border space-y-2">
-        {/* Theme switcher */}
-        <div className="flex items-center gap-1 bg-vault-input rounded-lg p-1">
-          {themeOptions.map((opt) => {
-            const Icon = opt.icon
-            const isActive = theme === opt.value
-            return (
-              <button
-                key={opt.value}
-                onClick={() => setTheme(opt.value)}
-                title={opt.label()}
-                className={`flex-1 flex items-center justify-center gap-1.5 py-1.5 rounded text-xs transition-colors ${
-                  isActive
-                    ? 'bg-vault-card-hover text-vault-text shadow-sm'
-                    : 'text-vault-text-muted hover:text-vault-text-secondary'
-                }`}
-              >
-                <Icon size={14} />
-              </button>
-            )
-          })}
-        </div>
+        {/* Theme toggle */}
+        {(() => {
+          const key = (theme as keyof typeof themeIcon) || 'system'
+          const Icon = themeIcon[key] ?? Monitor
+          return (
+            <button
+              onClick={cycleTheme}
+              className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
+              title={themeLabel[key]?.() ?? ''}
+            >
+              <Icon size={18} />
+              <span>{themeLabel[key]?.() ?? t('common.theme')}</span>
+            </button>
+          )
+        })()}
 
         {/* Logout */}
         <button
