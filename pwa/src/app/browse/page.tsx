@@ -6,7 +6,8 @@ import { useEhSearch, useEhFavorites } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
 import { Pagination } from '@/components/Pagination'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import { AlertBanner } from '@/components/AlertBanner'
+import { toast } from 'sonner'
+import { t } from '@/lib/i18n'
 import { RatingStars } from '@/components/RatingStars'
 import type { EhGallery, Credentials } from '@/lib/types'
 
@@ -87,11 +88,11 @@ function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
   return (
     <article
       onClick={onClick}
-      className="flex gap-3 p-3 bg-[#111111] border border-[#252525] rounded-lg cursor-pointer
-                 hover:border-[#3a3a3a] hover:bg-[#161616] transition-colors active:bg-[#1e1e1e]"
+      className="flex gap-3 p-3 bg-vault-card border border-vault-border rounded-lg cursor-pointer
+                 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors active:bg-vault-card-hover"
     >
       {/* Thumbnail */}
-      <div className="flex-shrink-0 w-[90px] h-[120px] bg-[#1a1a1a] rounded overflow-hidden">
+      <div className="flex-shrink-0 w-[90px] h-[120px] bg-vault-input rounded overflow-hidden">
         {thumbSrc ? (
           <img
             src={thumbSrc}
@@ -109,15 +110,15 @@ function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
       {/* Content */}
       <div className="flex flex-col flex-1 min-w-0 gap-1.5">
         {/* Title */}
-        <h3 className="text-sm font-medium text-gray-100 line-clamp-2 leading-snug">
+        <h3 className="text-sm font-medium text-vault-text line-clamp-2 leading-snug">
           {gallery.title || gallery.title_jpn}
         </h3>
         {gallery.title_jpn && gallery.title && (
-          <p className="text-xs text-gray-500 line-clamp-1">{gallery.title_jpn}</p>
+          <p className="text-xs text-vault-text-muted line-clamp-1">{gallery.title_jpn}</p>
         )}
 
         {/* Uploader */}
-        <p className="text-xs text-gray-500">{gallery.uploader}</p>
+        <p className="text-xs text-vault-text-muted">{gallery.uploader}</p>
 
         {/* Bottom row */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-auto">
@@ -133,8 +134,8 @@ function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
           <RatingStars rating={gallery.rating} readonly />
 
           {/* Meta */}
-          <span className="text-xs text-gray-600 ml-auto">{gallery.pages}P</span>
-          <span className="text-xs text-gray-600">{formatDate(gallery.posted_at)}</span>
+          <span className="text-xs text-vault-text-muted ml-auto">{gallery.pages}P</span>
+          <span className="text-xs text-vault-text-muted">{formatDate(gallery.posted_at)}</span>
         </div>
       </div>
     </article>
@@ -152,8 +153,8 @@ function GridCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
   return (
     <article
       onClick={onClick}
-      className="relative aspect-[3/4] bg-[#1a1a1a] rounded-lg overflow-hidden cursor-pointer
-                 border border-[#252525] hover:border-[#444] transition-colors group"
+      className="relative aspect-[3/4] bg-vault-input rounded-lg overflow-hidden cursor-pointer
+                 border border-vault-border hover:border-vault-border-hover transition-colors group"
     >
       {/* Thumbnail */}
       {thumbSrc ? (
@@ -220,7 +221,7 @@ function GalleryModal({
       onClick={onClose}
     >
       <div
-        className="bg-[#111111] border border-[#2a2a2a] rounded-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto shadow-2xl"
+        className="bg-vault-card border border-vault-border rounded-xl max-w-2xl w-full mx-4 max-h-[90vh] overflow-y-auto shadow-2xl"
         onClick={(e) => e.stopPropagation()}
       >
         <div className="flex gap-4 p-5">
@@ -244,9 +245,9 @@ function GalleryModal({
 
           {/* Info */}
           <div className="flex-1 min-w-0 flex flex-col gap-2">
-            <h2 className="text-base font-semibold text-white leading-snug">{gallery.title}</h2>
+            <h2 className="text-base font-semibold text-vault-text leading-snug">{gallery.title}</h2>
             {gallery.title_jpn && (
-              <p className="text-sm text-gray-400 -mt-1">{gallery.title_jpn}</p>
+              <p className="text-sm text-vault-text-secondary -mt-1">{gallery.title_jpn}</p>
             )}
 
             {/* Meta chips */}
@@ -257,14 +258,14 @@ function GalleryModal({
               >
                 {label}
               </span>
-              <span className="px-2 py-0.5 rounded bg-[#1a1a1a] border border-[#333] text-gray-400">
+              <span className="px-2 py-0.5 rounded bg-vault-input border border-vault-border text-vault-text-secondary">
                 {gallery.pages} pages
               </span>
-              <span className="px-2 py-0.5 rounded bg-[#1a1a1a] border border-[#333] text-gray-400">
+              <span className="px-2 py-0.5 rounded bg-vault-input border border-vault-border text-vault-text-secondary">
                 {formatDate(gallery.posted_at)}
               </span>
               {gallery.uploader && (
-                <span className="px-2 py-0.5 rounded bg-[#1a1a1a] border border-[#333] text-gray-400">
+                <span className="px-2 py-0.5 rounded bg-vault-input border border-vault-border text-vault-text-secondary">
                   {gallery.uploader}
                 </span>
               )}
@@ -273,7 +274,7 @@ function GalleryModal({
             {/* Rating */}
             <div className="flex items-center gap-2">
               <RatingStars rating={gallery.rating} readonly />
-              <span className="text-xs text-gray-500">{gallery.rating.toFixed(1)}</span>
+              <span className="text-xs text-vault-text-muted">{gallery.rating.toFixed(1)}</span>
             </div>
 
             {/* Tags */}
@@ -285,9 +286,9 @@ function GalleryModal({
                   <span
                     key={tag}
                     className="text-[11px] px-1.5 py-0.5 rounded border font-mono
-                               bg-[#1a1a1a] border-[#333] text-gray-400"
+                               bg-vault-input border-vault-border text-vault-text-secondary"
                   >
-                    {isNs && <span className="text-gray-600">{ns}:</span>}
+                    {isNs && <span className="text-vault-text-muted">{ns}:</span>}
                     {isNs ? rest.join(':') : tag}
                   </span>
                 )
@@ -304,7 +305,7 @@ function GalleryModal({
               </button>
               <button
                 onClick={onClose}
-                className="px-4 py-2 bg-[#1a1a1a] border border-[#333] hover:border-[#555] rounded text-gray-400 text-sm transition-colors"
+                className="px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors"
               >
                 Close
               </button>
@@ -360,7 +361,6 @@ function BrowsePage() {
   const [selectedGallery, setSelectedGallery] = useState<EhGallery | null>(null)
   const [downloadUrl, setDownloadUrl]       = useState('')
   const [downloadSource, setDownloadSource] = useState('ehentai')
-  const [downloadMsg, setDownloadMsg]       = useState<{ text: string; ok: boolean } | null>(null)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Favorites state (cursor-based pagination — EH favorites uses next/prev cursors, not page numbers)
@@ -568,24 +568,22 @@ function BrowsePage() {
 
   const handleDownload = useCallback(async (gallery: EhGallery) => {
     const url = `https://e-hentai.org/g/${gallery.gid}/${gallery.token}/`
-    setDownloadMsg(null)
     try {
       const res = await api.download.enqueue(url, 'ehentai')
-      setDownloadMsg({ text: `已加入佇列 (job: ${res.job_id})`, ok: true })
+      toast.success(`已加入佇列 (job: ${res.job_id})`)
     } catch (err) {
-      setDownloadMsg({ text: err instanceof Error ? err.message : 'Failed', ok: false })
+      toast.error(err instanceof Error ? err.message : 'Failed')
     }
   }, [])
 
   const handleUrlDownload = useCallback(async () => {
     if (!downloadUrl.trim()) return
-    setDownloadMsg(null)
     try {
       const res = await api.download.enqueue(downloadUrl.trim(), downloadSource)
-      setDownloadMsg({ text: `已加入佇列 (job: ${res.job_id})`, ok: true })
+      toast.success(`已加入佇列 (job: ${res.job_id})`)
       setDownloadUrl('')
     } catch (err) {
-      setDownloadMsg({ text: err instanceof Error ? err.message : 'Failed', ok: false })
+      toast.error(err instanceof Error ? err.message : 'Failed')
     }
   }, [downloadUrl, downloadSource])
 
@@ -596,7 +594,7 @@ function BrowsePage() {
   // ── Render ─────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <div className="min-h-screen bg-vault-bg text-vault-text">
       <div className="max-w-5xl mx-auto px-4 py-5 space-y-4">
 
         {/* ── Search bar with history dropdown ── */}
@@ -608,35 +606,35 @@ function BrowsePage() {
               onChange={(e) => handleInputChange(e.target.value)}
               onKeyDown={handleKeyDown}
               onFocus={() => { refreshHistory(); setShowHistory(true) }}
-              placeholder="Search E-Hentai…"
-              className="w-full bg-[#111] border border-[#2a2a2a] rounded-lg px-4 py-2.5 text-sm
-                         text-white placeholder-gray-600 focus:outline-none focus:border-[#555] transition-colors"
+              placeholder={t('browse.searchPlaceholder')}
+              className="w-full bg-vault-card border border-vault-border rounded-lg px-4 py-2.5 text-sm
+                         text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors"
             />
 
             {/* History dropdown */}
             {showHistory && history.length > 0 && (
-              <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-[#151515] border border-[#2a2a2a] rounded-lg shadow-xl overflow-hidden max-h-[min(320px,50vh)]">
-                <div className="flex items-center justify-between px-3 py-1.5 border-b border-[#222]">
-                  <span className="text-[11px] text-gray-600 uppercase tracking-wide">Recent</span>
+              <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-vault-card border border-vault-border rounded-lg shadow-xl overflow-hidden max-h-[min(320px,50vh)]">
+                <div className="flex items-center justify-between px-3 py-1.5 border-b border-vault-border">
+                  <span className="text-[11px] text-vault-text-muted uppercase tracking-wide">{t('browse.recent')}</span>
                   <button
                     onClick={() => { clearSearchHistory(); setHistory([]) }}
-                    className="text-[11px] text-gray-600 hover:text-red-400 transition-colors"
+                    className="text-[11px] text-vault-text-muted hover:text-red-400 transition-colors"
                   >
-                    Clear all
+                    {t('browse.clearAll')}
                   </button>
                 </div>
                 {history.map((q) => (
                   <button
                     key={q}
                     onClick={() => handleHistorySelect(q)}
-                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-gray-300
-                               hover:bg-[#1e1e1e] transition-colors group"
+                    className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-vault-text
+                               hover:bg-vault-card-hover transition-colors group"
                   >
-                    <span className="text-gray-600 text-xs">&#x1F50D;</span>
+                    <span className="text-vault-text-muted text-xs">&#x1F50D;</span>
                     <span className="flex-1 truncate">{q}</span>
                     <span
                       onClick={(e) => handleHistoryRemove(q, e)}
-                      className="text-gray-700 hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity px-1"
+                      className="text-vault-text-muted hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity px-1"
                       title="Remove"
                     >
                       ✕
@@ -649,23 +647,23 @@ function BrowsePage() {
 
           <button
             onClick={() => { if (debounceRef.current) clearTimeout(debounceRef.current); commitSearch(inputValue) }}
-            className="px-4 py-2.5 bg-[#1a6edf] hover:bg-[#1559b3] rounded-lg text-white text-sm font-medium transition-colors shrink-0"
+            className="px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
           >
-            Search
+            {t('browse.search')}
           </button>
           {/* View toggle */}
-          <div className="flex border border-[#2a2a2a] rounded-lg overflow-hidden shrink-0">
+          <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
             <button
               onClick={() => setViewMode('list')}
               title="List view"
-              className={`px-3 py-2.5 text-sm transition-colors ${viewMode === 'list' ? 'bg-[#1a1a1a] text-white' : 'text-gray-500 hover:text-gray-300'}`}
+              className={`px-3 py-2.5 text-sm transition-colors ${viewMode === 'list' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
             >
               ☰
             </button>
             <button
               onClick={() => setViewMode('grid')}
               title="Grid view"
-              className={`px-3 py-2.5 text-sm transition-colors ${viewMode === 'grid' ? 'bg-[#1a1a1a] text-white' : 'text-gray-500 hover:text-gray-300'}`}
+              className={`px-3 py-2.5 text-sm transition-colors ${viewMode === 'grid' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
             >
               ⊞
             </button>
@@ -674,26 +672,26 @@ function BrowsePage() {
 
         {/* ── Tab switcher (Search / Favorites) ── */}
         {ehConfigured && (
-          <div className="flex gap-1 border-b border-[#1a1a1a]">
+          <div className="flex gap-1 border-b border-vault-border">
             <button
               onClick={() => { setActiveTab('search'); setPage(0) }}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === 'search'
-                  ? 'border-[#1a6edf] text-white'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
+                  ? 'border-vault-accent text-vault-text'
+                  : 'border-transparent text-vault-text-muted hover:text-vault-text'
               }`}
             >
-              Search
+              {t('browse.searchTab')}
             </button>
             <button
               onClick={() => { setActiveTab('favorites'); setFavCursor({}) }}
               className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === 'favorites'
-                  ? 'border-[#e91e63] text-white'
-                  : 'border-transparent text-gray-500 hover:text-gray-300'
+                  ? 'border-[#e91e63] text-vault-text'
+                  : 'border-transparent text-vault-text-muted hover:text-vault-text'
               }`}
             >
-              Favorites
+              {t('browse.favoritesTab')}
             </button>
           </div>
         )}
@@ -707,11 +705,11 @@ function BrowsePage() {
             onClick={() => handleCategoryClick(null)}
             className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
               category === null
-                ? 'bg-white text-black border-white'
-                : 'bg-transparent text-gray-400 border-[#333] hover:border-[#555] hover:text-gray-200'
+                ? 'bg-vault-text text-vault-bg border-vault-text'
+                : 'bg-transparent text-vault-text-secondary border-vault-border hover:border-vault-border-hover hover:text-vault-text'
             }`}
           >
-            All
+            {t('common.all')}
           </button>
           {CATEGORIES.map((cat) => (
             <button
@@ -720,7 +718,7 @@ function BrowsePage() {
               className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-all ${
                 category === cat.value
                   ? 'border-transparent'
-                  : 'bg-transparent text-gray-400 border-[#333] hover:text-white hover:border-transparent'
+                  : 'bg-transparent text-vault-text-secondary border-vault-border hover:text-white hover:border-transparent'
               }`}
               style={
                 category === cat.value
@@ -747,17 +745,9 @@ function BrowsePage() {
           ))}
         </div>
 
-        {/* ── Status / alerts ── */}
-        {downloadMsg && (
-          <AlertBanner
-            alerts={[downloadMsg.text]}
-            onDismiss={() => setDownloadMsg(null)}
-          />
-        )}
-
         {/* ── Results header ── */}
         {data && !isLoading && (
-          <div className="flex items-center justify-between text-xs text-gray-600">
+          <div className="flex items-center justify-between text-xs text-vault-text-muted">
             <span>{data.total.toLocaleString()} results{searchQuery && ` for "${searchQuery}"`}</span>
             <span>Page {page + 1}</span>
           </div>
@@ -813,7 +803,7 @@ function BrowsePage() {
             {loadMode === 'scroll' && (
               <div ref={scrollSentinelRef} className="flex justify-center py-4">
                 {(scrollLoading || isLoading) && <LoadingSpinner />}
-                {!scrollHasMore && <span className="text-xs text-gray-600">No more results</span>}
+                {!scrollHasMore && <span className="text-xs text-vault-text-muted">{t('browse.noMoreResults')}</span>}
               </div>
             )}
           </>
@@ -821,8 +811,8 @@ function BrowsePage() {
 
         {/* ── Empty state ── */}
         {!isLoading && !error && data && displayGalleries.length === 0 && (
-          <div className="text-center py-20 text-gray-600">
-            No results found.
+          <div className="text-center py-20 text-vault-text-muted">
+            {t('browse.noResults')}
           </div>
         )}
 
@@ -837,11 +827,11 @@ function BrowsePage() {
             onClick={() => { setFavCat('all'); setFavCursor({}); setFavScrollGalleries([]); setFavScrollNextCursor(undefined); setFavScrollHasMore(true) }}
             className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
               favCat === 'all'
-                ? 'bg-white text-black border-white'
-                : 'bg-transparent text-gray-400 border-[#333] hover:border-[#555] hover:text-gray-200'
+                ? 'bg-vault-text text-vault-bg border-vault-text'
+                : 'bg-transparent text-vault-text-secondary border-vault-border hover:border-vault-border-hover hover:text-vault-text'
             }`}
           >
-            All
+            {t('common.all')}
           </button>
           {Array.from({ length: 10 }, (_, i) => {
             const catData = favData?.categories?.find((c) => c.index === i)
@@ -856,7 +846,7 @@ function BrowsePage() {
                 className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                   isActive
                     ? 'text-white border-transparent'
-                    : 'bg-transparent text-gray-400 border-[#333] hover:border-[#555] hover:text-gray-200'
+                    : 'bg-transparent text-vault-text-secondary border-vault-border hover:border-vault-border-hover hover:text-vault-text'
                 }`}
                 style={isActive ? { backgroundColor: color, borderColor: color } : undefined}
               >
@@ -871,14 +861,14 @@ function BrowsePage() {
           type="text"
           value={favSearch}
           onChange={(e) => { setFavSearch(e.target.value); setFavCursor({}) }}
-          placeholder="Filter favorites…"
-          className="w-full bg-[#111] border border-[#2a2a2a] rounded-lg px-4 py-2 text-sm
-                     text-white placeholder-gray-600 focus:outline-none focus:border-[#555] transition-colors"
+          placeholder={t('browse.filterFavorites')}
+          className="w-full bg-vault-card border border-vault-border rounded-lg px-4 py-2 text-sm
+                     text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors"
         />
 
         {/* Favorites results header */}
         {favData && !favLoading && (
-          <div className="flex items-center justify-between text-xs text-gray-600">
+          <div className="flex items-center justify-between text-xs text-vault-text-muted">
             <span>{favData.total.toLocaleString()} favorited{favSearch && ` matching "${favSearch}"`}</span>
           </div>
         )}
@@ -925,10 +915,10 @@ function BrowsePage() {
                       window.scrollTo(0, 0)
                     }
                   }}
-                  className="rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] px-4 py-2 text-sm text-white
-                             hover:bg-[#222] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  className="rounded-lg bg-vault-card border border-vault-border px-4 py-2 text-sm text-vault-text
+                             hover:bg-vault-card-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
-                  ← Prev
+                  {t('common.prev')}
                 </button>
                 <button
                   disabled={!favData?.has_next}
@@ -938,10 +928,10 @@ function BrowsePage() {
                       window.scrollTo(0, 0)
                     }
                   }}
-                  className="rounded-lg bg-[#1a1a1a] border border-[#2a2a2a] px-4 py-2 text-sm text-white
-                             hover:bg-[#222] disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                  className="rounded-lg bg-vault-card border border-vault-border px-4 py-2 text-sm text-vault-text
+                             hover:bg-vault-card-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                 >
-                  Next →
+                  {t('common.next')}
                 </button>
               </div>
             )}
@@ -950,7 +940,7 @@ function BrowsePage() {
             {loadMode === 'scroll' && (
               <div ref={favScrollSentinelRef} className="flex justify-center py-4">
                 {(favScrollLoading || favLoading) && <LoadingSpinner />}
-                {!favScrollHasMore && <span className="text-xs text-gray-600">No more favorites</span>}
+                {!favScrollHasMore && <span className="text-xs text-vault-text-muted">{t('browse.noMoreFavorites')}</span>}
               </div>
             )}
           </>
@@ -958,8 +948,8 @@ function BrowsePage() {
 
         {/* Favorites empty */}
         {!favLoading && !favError && favData && favDisplayGalleries.length === 0 && (
-          <div className="text-center py-20 text-gray-600">
-            No favorites found.
+          <div className="text-center py-20 text-vault-text-muted">
+            {t('browse.noFavorites')}
           </div>
         )}
 
@@ -967,8 +957,8 @@ function BrowsePage() {
 
 
         {/* ── Quick URL download ── */}
-        <div className="mt-4 pt-4 border-t border-[#1a1a1a]">
-          <p className="text-xs text-gray-600 uppercase tracking-wide mb-2">Quick Download by URL</p>
+        <div className="mt-4 pt-4 border-t border-vault-border">
+          <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('browse.quickDownload')}</p>
           <div className="flex gap-2">
             <input
               type="text"
@@ -976,13 +966,13 @@ function BrowsePage() {
               onChange={(e) => setDownloadUrl(e.target.value)}
               onKeyDown={(e) => e.key === 'Enter' && handleUrlDownload()}
               placeholder="https://e-hentai.org/g/…"
-              className="flex-1 bg-[#111] border border-[#2a2a2a] rounded-lg px-3 py-2 text-white
-                         placeholder-gray-700 text-sm focus:outline-none focus:border-[#444] transition-colors"
+              className="flex-1 bg-vault-card border border-vault-border rounded-lg px-3 py-2 text-vault-text
+                         placeholder-vault-text-muted text-sm focus:outline-none focus:border-vault-accent transition-colors"
             />
             <select
               value={downloadSource}
               onChange={(e) => setDownloadSource(e.target.value)}
-              className="bg-[#111] border border-[#2a2a2a] rounded-lg px-2 py-2 text-white text-sm focus:outline-none"
+              className="bg-vault-card border border-vault-border rounded-lg px-2 py-2 text-vault-text text-sm focus:outline-none"
             >
               <option value="ehentai">E-Hentai</option>
               <option value="pixiv">Pixiv</option>
@@ -992,7 +982,7 @@ function BrowsePage() {
               disabled={!downloadUrl.trim()}
               className="px-4 py-2 bg-green-800 hover:bg-green-700 disabled:opacity-40 rounded-lg text-white text-sm font-medium transition-colors"
             >
-              Add
+              {t('browse.add')}
             </button>
           </div>
         </div>

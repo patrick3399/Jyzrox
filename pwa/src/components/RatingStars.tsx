@@ -26,7 +26,7 @@ export function RatingStars({ rating, readonly = false, onChange }: RatingStarsP
             <span
               key={i}
               className={`text-base leading-none select-none ${
-                isFilled ? 'text-yellow-400' : 'text-gray-700'
+                isFilled ? 'text-yellow-400' : 'text-vault-text-muted/40'
               }`}
               aria-hidden="true"
             >
@@ -43,7 +43,7 @@ export function RatingStars({ rating, readonly = false, onChange }: RatingStarsP
             onMouseEnter={() => setHovered(starIndex)}
             onMouseLeave={() => setHovered(null)}
             className={`text-base leading-none transition-colors duration-100 cursor-pointer ${
-              isFilled ? 'text-yellow-400 hover:text-yellow-300' : 'text-gray-700 hover:text-yellow-500'
+              isFilled ? 'text-yellow-400 hover:text-yellow-300' : 'text-vault-text-muted/40 hover:text-yellow-500'
             }`}
             aria-label={`Rate ${starIndex} out of 5`}
           >

@@ -2,23 +2,25 @@
 
 import { useState, useCallback, useRef } from 'react'
 import Link from 'next/link'
+import { BookOpen, Plus, Minus } from 'lucide-react'
 import { useLibraryGalleries } from '@/hooks/useGalleries'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { Pagination } from '@/components/Pagination'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import { TagBadge } from '@/components/TagBadge'
+import { EmptyState } from '@/components/EmptyState'
+import { t } from '@/lib/i18n'
 
 const SORT_OPTIONS = [
-  { value: 'added_at', label: 'Date Added' },
-  { value: 'rating', label: 'Rating' },
-  { value: 'pages', label: 'Pages' },
+  { value: 'added_at', label: () => t('library.dateAdded') },
+  { value: 'rating', label: () => t('library.rating') },
+  { value: 'pages', label: () => t('library.pagesSort') },
 ] as const
 
 const SOURCE_OPTIONS = [
-  { value: '', label: 'All Sources' },
-  { value: 'ehentai', label: 'E-Hentai' },
-  { value: 'pixiv', label: 'Pixiv' },
-  { value: 'import', label: 'Import' },
+  { value: '', label: () => t('library.allSources') },
+  { value: 'ehentai', label: () => 'E-Hentai' },
+  { value: 'pixiv', label: () => 'Pixiv' },
+  { value: 'import', label: () => 'Import' },
 ]
 
 const PAGE_SIZE = 24
@@ -97,30 +99,26 @@ export default function LibraryPage() {
   const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <div className="min-h-screen">
       <div className="max-w-7xl mx-auto px-4 py-6">
-        <h1 className="text-2xl font-bold mb-6 text-white">Library</h1>
+        <h1 className="text-2xl font-bold mb-6">{t('library.title')}</h1>
 
         {/* Filters Panel */}
-        <div className="bg-[#111111] border border-[#2a2a2a] rounded-lg p-4 mb-6 space-y-4">
-          {/* Search */}
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={searchInput}
-              onChange={(e) => handleSearchChange(e.target.value)}
-              onKeyDown={handleSearchKeyDown}
-              placeholder="Search titles..."
-              className="flex-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-500 focus:outline-none focus:border-[#444] text-sm"
-            />
-          </div>
+        <div className="bg-vault-card border border-vault-border rounded-lg p-4 mb-6 space-y-4">
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => handleSearchChange(e.target.value)}
+            onKeyDown={handleSearchKeyDown}
+            placeholder={t('library.searchPlaceholder')}
+            className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
+          />
 
           {/* Tag Filters */}
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {/* Include Tags */}
             <div>
-              <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">
-                Include Tags
+              <label className="block text-xs text-vault-text-muted uppercase tracking-wide mb-1">
+                {t('library.includeTags')}
               </label>
               <div className="flex gap-1 mb-2">
                 <input
@@ -129,13 +127,10 @@ export default function LibraryPage() {
                   onChange={(e) => setIncludeInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addIncludeTag()}
                   placeholder="character:rem"
-                  className="flex-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                  className="flex-1 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
                 />
-                <button
-                  onClick={addIncludeTag}
-                  className="px-2 py-1 bg-green-800 hover:bg-green-700 rounded text-white text-sm transition-colors"
-                >
-                  +
+                <button onClick={addIncludeTag} className="p-1.5 bg-green-600 hover:bg-green-700 rounded text-white transition-colors">
+                  <Plus size={14} />
                 </button>
               </div>
               <div className="flex flex-wrap gap-1">
@@ -143,19 +138,17 @@ export default function LibraryPage() {
                   <button
                     key={tag}
                     onClick={() => removeIncludeTag(tag)}
-                    className="flex items-center gap-1 px-2 py-0.5 bg-green-900/40 border border-green-700/50 text-green-400 rounded text-xs hover:bg-red-900/40 hover:border-red-700/50 hover:text-red-400 transition-colors"
+                    className="flex items-center gap-1 px-2 py-0.5 bg-green-500/10 border border-green-500/30 text-green-400 rounded text-xs hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-colors"
                   >
-                    {tag}
-                    <span className="text-xs">×</span>
+                    {tag} <span className="text-xs">×</span>
                   </button>
                 ))}
               </div>
             </div>
 
-            {/* Exclude Tags */}
             <div>
-              <label className="block text-xs text-gray-500 uppercase tracking-wide mb-1">
-                Exclude Tags
+              <label className="block text-xs text-vault-text-muted uppercase tracking-wide mb-1">
+                {t('library.excludeTags')}
               </label>
               <div className="flex gap-1 mb-2">
                 <input
@@ -164,13 +157,10 @@ export default function LibraryPage() {
                   onChange={(e) => setExcludeInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addExcludeTag()}
                   placeholder="tag:value"
-                  className="flex-1 bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                  className="flex-1 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
                 />
-                <button
-                  onClick={addExcludeTag}
-                  className="px-2 py-1 bg-red-800 hover:bg-red-700 rounded text-white text-sm transition-colors"
-                >
-                  -
+                <button onClick={addExcludeTag} className="p-1.5 bg-red-600 hover:bg-red-700 rounded text-white transition-colors">
+                  <Minus size={14} />
                 </button>
               </div>
               <div className="flex flex-wrap gap-1">
@@ -178,10 +168,9 @@ export default function LibraryPage() {
                   <button
                     key={tag}
                     onClick={() => removeExcludeTag(tag)}
-                    className="flex items-center gap-1 px-2 py-0.5 bg-red-900/40 border border-red-700/50 text-red-400 rounded text-xs hover:bg-green-900/40 hover:border-green-700/50 hover:text-green-400 transition-colors"
+                    className="flex items-center gap-1 px-2 py-0.5 bg-red-500/10 border border-red-500/30 text-red-400 rounded text-xs hover:bg-green-500/10 hover:border-green-500/30 hover:text-green-400 transition-colors"
                   >
-                    -{tag}
-                    <span className="text-xs">×</span>
+                    -{tag} <span className="text-xs">×</span>
                   </button>
                 ))}
               </div>
@@ -190,53 +179,40 @@ export default function LibraryPage() {
 
           {/* Additional Filters */}
           <div className="flex flex-wrap gap-4 items-center">
-            {/* Min Rating */}
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 uppercase tracking-wide">Min Rating</label>
+              <label className="text-xs text-vault-text-muted uppercase tracking-wide">{t('library.minRating')}</label>
               <select
                 value={minRating ?? ''}
-                onChange={(e) => {
-                  setMinRating(e.target.value ? Number(e.target.value) : undefined)
-                  setPage(0)
-                }}
-                className="bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white text-sm focus:outline-none"
+                onChange={(e) => { setMinRating(e.target.value ? Number(e.target.value) : undefined); setPage(0) }}
+                className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
               >
-                <option value="">Any</option>
-                {[1, 2, 3, 4, 5].map((n) => (
-                  <option key={n} value={n}>{n}+</option>
-                ))}
+                <option value="">{t('library.any')}</option>
+                {[1, 2, 3, 4, 5].map((n) => (<option key={n} value={n}>{n}+</option>))}
               </select>
             </div>
 
-            {/* Source */}
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 uppercase tracking-wide">Source</label>
+              <label className="text-xs text-vault-text-muted uppercase tracking-wide">{t('library.source')}</label>
               <select
                 value={source}
                 onChange={(e) => { setSource(e.target.value); setPage(0) }}
-                className="bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white text-sm focus:outline-none"
+                className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
               >
-                {SOURCE_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
+                {SOURCE_OPTIONS.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label()}</option>))}
               </select>
             </div>
 
-            {/* Sort */}
             <div className="flex items-center gap-2">
-              <label className="text-xs text-gray-500 uppercase tracking-wide">Sort</label>
+              <label className="text-xs text-vault-text-muted uppercase tracking-wide">{t('library.sort')}</label>
               <select
                 value={sort}
                 onChange={(e) => { setSort(e.target.value as typeof sort); setPage(0) }}
-                className="bg-[#1a1a1a] border border-[#2a2a2a] rounded px-2 py-1 text-white text-sm focus:outline-none"
+                className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
               >
-                {SORT_OPTIONS.map((opt) => (
-                  <option key={opt.value} value={opt.value}>{opt.label}</option>
-                ))}
+                {SORT_OPTIONS.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label()}</option>))}
               </select>
             </div>
 
-            {/* Favorited Toggle */}
             <label className="flex items-center gap-2 cursor-pointer">
               <input
                 type="checkbox"
@@ -244,33 +220,27 @@ export default function LibraryPage() {
                 onChange={(e) => { setOnlyFavorited(e.target.checked); setPage(0) }}
                 className="w-4 h-4 accent-yellow-500"
               />
-              <span className="text-sm text-gray-400">Favorites only</span>
+              <span className="text-sm text-vault-text-secondary">{t('library.favoritesOnly')}</span>
             </label>
           </div>
         </div>
 
-        {/* Results Count */}
         {data && (
-          <div className="text-sm text-gray-500 mb-4">
-            {data.total.toLocaleString()} galleries
+          <div className="text-sm text-vault-text-muted mb-4">
+            {data.total.toLocaleString()} {t('library.galleries')}
           </div>
         )}
 
-        {/* Loading */}
         {isLoading && (
-          <div className="flex justify-center py-20">
-            <LoadingSpinner />
-          </div>
+          <div className="flex justify-center py-20"><LoadingSpinner /></div>
         )}
 
-        {/* Error */}
         {error && (
-          <div className="bg-red-900/30 border border-red-700 rounded-lg p-4 mb-4 text-red-400">
-            {error.message || 'Failed to load library'}
+          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4 text-red-400">
+            {error.message || t('common.failedToLoad')}
           </div>
         )}
 
-        {/* Gallery Grid */}
         {!isLoading && data && data.galleries.length > 0 && (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
@@ -280,20 +250,12 @@ export default function LibraryPage() {
                 </Link>
               ))}
             </div>
-            {totalPages > 1 && (
-              <Pagination
-                page={page}
-                total={data.total}
-                onChange={setPage}
-              />
-            )}
+            {totalPages > 1 && <Pagination page={page} total={data.total} onChange={setPage} />}
           </>
         )}
 
         {!isLoading && data && data.galleries.length === 0 && (
-          <div className="text-center py-20 text-gray-500">
-            No galleries found. Try adjusting your filters.
-          </div>
+          <EmptyState icon={BookOpen} title={t('library.noGalleries')} />
         )}
       </div>
     </div>

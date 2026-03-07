@@ -1,5 +1,6 @@
 import type { Metadata, Viewport } from 'next'
 import Script from 'next/script'
+import { ThemeProvider } from '@/components/ThemeProvider'
 import { LayoutShell } from '@/components/LayoutShell'
 import './globals.css'
 
@@ -27,13 +28,13 @@ export default function RootLayout({
   children: React.ReactNode
 }) {
   return (
-    <html lang="zh-TW" className="dark">
+    <html lang="en" suppressHydrationWarning>
       <head>
         <link rel="manifest" href="/manifest.json" />
         <meta name="apple-mobile-web-app-capable" content="yes" />
         <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
       </head>
-      <body className="bg-vault-bg text-neutral-200 min-h-screen">
+      <body className="bg-vault-bg text-vault-text min-h-screen">
         <Script
           id="sw-register"
           strategy="afterInteractive"
@@ -49,7 +50,9 @@ export default function RootLayout({
             `,
           }}
         />
-        <LayoutShell>{children}</LayoutShell>
+        <ThemeProvider>
+          <LayoutShell>{children}</LayoutShell>
+        </ThemeProvider>
       </body>
     </html>
   )

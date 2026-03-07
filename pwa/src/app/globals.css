@@ -2,9 +2,34 @@
 @tailwind components;
 @tailwind utilities;
 
+@layer base {
+  :root {
+    --color-bg: 255 255 255;
+    --color-card: 245 245 245;
+    --color-card-hover: 235 235 235;
+    --color-border: 229 229 229;
+    --color-border-hover: 200 200 200;
+    --color-text: 23 23 23;
+    --color-text-secondary: 115 115 115;
+    --color-text-muted: 163 163 163;
+    --color-accent: 99 102 241;
+    --color-input: 245 245 245;
+  }
+  .dark {
+    --color-bg: 10 10 10;
+    --color-card: 17 17 17;
+    --color-card-hover: 22 22 22;
+    --color-border: 42 42 42;
+    --color-border-hover: 68 68 68;
+    --color-text: 229 229 229;
+    --color-text-secondary: 163 163 163;
+    --color-text-muted: 115 115 115;
+    --color-accent: 99 102 241;
+    --color-input: 26 26 26;
+  }
+}
+
 html, body {
-  background-color: #0a0a0a;
-  color: #e5e5e5;
   min-height: 100vh;
   min-height: 100dvh;
 }

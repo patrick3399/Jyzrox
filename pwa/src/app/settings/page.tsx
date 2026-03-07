@@ -1,10 +1,12 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { ChevronUp, ChevronDown, Eye, EyeOff, RefreshCw, Shield, Monitor } from 'lucide-react'
+import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import { AlertBanner } from '@/components/AlertBanner'
+import { t } from '@/lib/i18n'
 import type { SystemHealth, SystemInfo, EhAccount, Credentials, SessionInfo } from '@/lib/types'
 
 type SectionKey = 'ehentai' | 'pixiv' | 'system' | 'account' | 'browse'
@@ -24,19 +26,19 @@ function SectionHeader({
   return (
     <button
       onClick={() => onToggle(sectionKey)}
-      className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-[#161616] transition-colors"
+      className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-vault-card-hover transition-colors"
     >
-      <span className="font-medium text-white text-sm">{title}</span>
-      <span className="text-gray-500 text-sm">{isOpen ? '▲' : '▼'}</span>
+      <span className="font-medium text-vault-text text-sm">{title}</span>
+      {isOpen ? <ChevronUp size={16} className="text-vault-text-muted" /> : <ChevronDown size={16} className="text-vault-text-muted" />}
     </button>
   )
 }
 
 function StatusIndicator({ configured }: { configured: boolean }) {
   return (
-    <span className={`inline-flex items-center gap-1 text-xs ${configured ? 'text-green-400' : 'text-gray-600'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${configured ? 'bg-green-400' : 'bg-gray-600'}`} />
-      {configured ? 'Configured' : 'Not configured'}
+    <span className={`inline-flex items-center gap-1 text-xs ${configured ? 'text-green-500' : 'text-vault-text-muted'}`}>
+      <span className={`w-1.5 h-1.5 rounded-full ${configured ? 'bg-green-500' : 'bg-vault-text-muted'}`} />
+      {configured ? t('settings.configured') : t('settings.notConfigured')}
     </span>
   )
 }
@@ -49,12 +51,12 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
   const perPage = typeof window !== 'undefined' ? (localStorage.getItem('browse_per_page') || '25') : '25'
 
   return (
-    <div className="px-5 pb-5 border-t border-[#1e1e1e]">
+    <div className="px-5 pb-5 border-t border-vault-border">
       {/* Search History toggle */}
       <div className="mt-4 flex items-center justify-between">
         <div>
-          <p className="text-sm text-white">Search History</p>
-          <p className="text-xs text-gray-600 mt-0.5">Save recent searches (last 10)</p>
+          <p className="text-sm text-vault-text">{t('settings.searchHistory')}</p>
+          <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.searchHistoryDesc')}</p>
         </div>
         <button
           onClick={() => {
@@ -63,7 +65,7 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
             if (!next) localStorage.removeItem('eh_search_history')
             onForceRerender()
           }}
-          className={`relative w-11 h-6 rounded-full transition-colors ${historyEnabled ? 'bg-blue-600' : 'bg-[#333]'}`}
+          className={`relative w-11 h-6 rounded-full transition-colors ${historyEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
         >
           <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${historyEnabled ? 'translate-x-5' : ''}`} />
         </button>
@@ -72,21 +74,21 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
       {/* Load mode: Pagination vs Infinite Scroll */}
       <div className="mt-5 flex items-center justify-between">
         <div>
-          <p className="text-sm text-white">Load Mode</p>
-          <p className="text-xs text-gray-600 mt-0.5">Pagination or infinite scroll</p>
+          <p className="text-sm text-vault-text">{t('settings.loadMode')}</p>
+          <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.loadModeDesc')}</p>
         </div>
-        <div className="flex bg-[#1a1a1a] border border-[#2a2a2a] rounded overflow-hidden">
+        <div className="flex bg-vault-input border border-vault-border rounded overflow-hidden">
           <button
             onClick={() => { localStorage.setItem('browse_load_mode', 'pagination'); onForceRerender() }}
-            className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'pagination' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+            className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'pagination' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
           >
-            Pagination
+            {t('settings.pagination')}
           </button>
           <button
             onClick={() => { localStorage.setItem('browse_load_mode', 'scroll'); onForceRerender() }}
-            className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'scroll' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+            className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'scroll' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
           >
-            Infinite Scroll
+            {t('settings.infiniteScroll')}
           </button>
         </div>
       </div>
@@ -94,13 +96,13 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
       {/* Per page (library) */}
       <div className="mt-5 flex items-center justify-between">
         <div>
-          <p className="text-sm text-white">Per Page</p>
-          <p className="text-xs text-gray-600 mt-0.5">Number of items per page</p>
+          <p className="text-sm text-vault-text">{t('settings.perPage')}</p>
+          <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.perPageDesc')}</p>
         </div>
         <select
           value={perPage}
           onChange={(e) => { localStorage.setItem('browse_per_page', e.target.value); onForceRerender() }}
-          className="bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-1.5 text-sm text-white focus:outline-none"
+          className="bg-vault-input border border-vault-border rounded px-3 py-1.5 text-sm text-vault-text focus:outline-none"
         >
           <option value="25">25</option>
           <option value="50">50</option>
@@ -133,23 +135,18 @@ export default function SettingsPage() {
   const [ehSk, setEhSk] = useState('')
   const [ehSaving, setEhSaving] = useState(false)
   const [showPassHash, setShowPassHash] = useState(false)
-  const [ehSuccess, setEhSuccess] = useState<string | null>(null)
-  const [ehError, setEhError] = useState<string | null>(null)
   const [ehAccount, setEhAccount] = useState<EhAccount | null>(null)
   const [ehAccountLoading, setEhAccountLoading] = useState(false)
 
   // Pixiv Token form
   const [pixivToken, setPixivToken] = useState('')
   const [pixivSaving, setPixivSaving] = useState(false)
-  const [pixivSuccess, setPixivSuccess] = useState<string | null>(null)
-  const [pixivError, setPixivError] = useState<string | null>(null)
   const [pixivUsername, setPixivUsername] = useState<string | null>(null)
 
   // System info
   const [health, setHealth] = useState<SystemHealth | null>(null)
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
   const [systemLoading, setSystemLoading] = useState(false)
-  const [systemError, setSystemError] = useState<string | null>(null)
 
   // Rate limiting
   const [rateLimitEnabled, setRateLimitEnabled] = useState<boolean | null>(null)
@@ -176,15 +173,13 @@ export default function SettingsPage() {
   const handleEhLogin = useCallback(async () => {
     if (!ehUsername.trim() || !ehPassword.trim()) return
     setEhLoginSaving(true)
-    setEhError(null)
-    setEhSuccess(null)
     try {
       const result = await api.settings.ehLogin(ehUsername.trim(), ehPassword.trim())
-      setEhSuccess('E-Hentai login successful')
+      toast.success(t('settings.ehLoginSuccess'))
       setEhAccount(result.account)
       setCredentials((prev) => prev ? { ...prev, ehentai: { configured: true } } : prev)
     } catch (err) {
-      setEhError(err instanceof Error ? err.message : 'Login failed')
+      toast.error(err instanceof Error ? err.message : t('settings.ehLoginFailed'))
     } finally {
       setEhLoginSaving(false)
     }
@@ -194,19 +189,17 @@ export default function SettingsPage() {
   const handleEhSave = useCallback(async () => {
     if (!ehMemberId.trim() || !ehPassHash.trim() || !ehSk.trim()) return
     setEhSaving(true)
-    setEhError(null)
-    setEhSuccess(null)
     try {
       const result = await api.settings.setEhCookies({
         ipb_member_id: ehMemberId.trim(),
         ipb_pass_hash: ehPassHash.trim(),
         sk: ehSk.trim(),
       })
-      setEhSuccess('E-Hentai credentials saved successfully')
+      toast.success(t('settings.ehCookiesSaved'))
       setEhAccount(result.account)
       setCredentials((prev) => prev ? { ...prev, ehentai: { configured: true } } : prev)
     } catch (err) {
-      setEhError(err instanceof Error ? err.message : 'Failed to save credentials')
+      toast.error(err instanceof Error ? err.message : t('settings.ehCookiesFailed'))
     } finally {
       setEhSaving(false)
     }
@@ -219,7 +212,7 @@ export default function SettingsPage() {
       const account = await api.settings.getEhAccount()
       setEhAccount(account)
     } catch (err) {
-      setEhError(err instanceof Error ? err.message : 'Failed to fetch account info')
+      toast.error(err instanceof Error ? err.message : t('settings.ehRefreshFailed'))
     } finally {
       setEhAccountLoading(false)
     }
@@ -229,15 +222,13 @@ export default function SettingsPage() {
   const handlePixivSave = useCallback(async () => {
     if (!pixivToken.trim()) return
     setPixivSaving(true)
-    setPixivError(null)
-    setPixivSuccess(null)
     try {
       const result = await api.settings.setPixivToken(pixivToken.trim())
-      setPixivSuccess(`Pixiv credentials saved. Account: ${result.username}`)
+      toast.success(`${t('settings.pixivSaved')}: ${result.username}`)
       setPixivUsername(result.username)
       setCredentials((prev) => prev ? { ...prev, pixiv: { configured: true } } : prev)
     } catch (err) {
-      setPixivError(err instanceof Error ? err.message : 'Failed to save Pixiv token')
+      toast.error(err instanceof Error ? err.message : t('settings.pixivFailed'))
     } finally {
       setPixivSaving(false)
     }
@@ -246,14 +237,13 @@ export default function SettingsPage() {
   // System: Load health + info
   const handleLoadSystem = useCallback(async () => {
     setSystemLoading(true)
-    setSystemError(null)
     try {
       const [h, i, rl] = await Promise.all([api.system.health(), api.system.info(), api.settings.getRateLimit()])
       setHealth(h)
       setSystemInfo(i)
       setRateLimitEnabled(rl.enabled)
     } catch (err) {
-      setSystemError(err instanceof Error ? err.message : 'Failed to load system info')
+      toast.error(err instanceof Error ? err.message : t('settings.systemLoadFailed'))
     } finally {
       setSystemLoading(false)
     }
@@ -289,6 +279,7 @@ export default function SettingsPage() {
     try {
       await api.auth.revokeSession(tokenPrefix)
       setSessions((prev) => prev.filter((s) => s.token_prefix !== tokenPrefix))
+      toast.success(t('settings.sessionRevoked'))
     } catch {
       // ignore
     } finally {
@@ -310,18 +301,22 @@ export default function SettingsPage() {
       ? 'text-green-400'
       : 'text-red-400'
 
+  const inputClass = 'w-full bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent text-sm'
+  const btnPrimary = 'px-4 py-2 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-sm font-medium transition-colors'
+  const btnSecondary = 'px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors'
+
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <div className="min-h-screen bg-vault-bg text-vault-text">
       <div className="max-w-2xl mx-auto px-4 py-6">
-        <h1 className="text-2xl font-bold mb-6 text-white">Settings</h1>
+        <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settings.title')}</h1>
 
         <div className="space-y-3">
           {/* ── E-Hentai ── */}
-          <div className="bg-[#111111] border border-[#2a2a2a] rounded-xl overflow-hidden">
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <SectionHeader
-                  title="E-Hentai"
+                  title={t('settings.ehentai')}
                   sectionKey="ehentai"
                   activeSection={activeSection}
                   onToggle={toggleSection}
@@ -335,31 +330,20 @@ export default function SettingsPage() {
             </div>
 
             {activeSection === 'ehentai' && (
-              <div className="px-5 pb-5 border-t border-[#1e1e1e]">
-                {ehSuccess && (
-                  <div className="mt-4">
-                    <AlertBanner alerts={[ehSuccess]} onDismiss={() => setEhSuccess(null)} />
-                  </div>
-                )}
-                {ehError && (
-                  <div className="mt-4">
-                    <AlertBanner alerts={[ehError]} onDismiss={() => setEhError(null)} />
-                  </div>
-                )}
-
+              <div className="px-5 pb-5 border-t border-vault-border">
                 {/* Mode toggle */}
-                <div className="flex mt-4 bg-[#1a1a1a] border border-[#2a2a2a] rounded overflow-hidden">
+                <div className="flex mt-4 bg-vault-input border border-vault-border rounded overflow-hidden">
                   <button
                     onClick={() => setEhLoginMode('password')}
-                    className={`flex-1 px-3 py-2 text-sm transition-colors ${ehLoginMode === 'password' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                    className={`flex-1 px-3 py-2 text-sm transition-colors ${ehLoginMode === 'password' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
                   >
-                    Username / Password
+                    {t('settings.usernamePassword')}
                   </button>
                   <button
                     onClick={() => setEhLoginMode('cookie')}
-                    className={`flex-1 px-3 py-2 text-sm transition-colors ${ehLoginMode === 'cookie' ? 'bg-blue-600 text-white' : 'text-gray-500 hover:text-gray-300'}`}
+                    className={`flex-1 px-3 py-2 text-sm transition-colors ${ehLoginMode === 'cookie' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
                   >
-                    Cookie (Advanced)
+                    {t('settings.cookieAdvanced')}
                   </button>
                 </div>
 
@@ -367,18 +351,18 @@ export default function SettingsPage() {
                 {ehLoginMode === 'password' && (
                   <div className="mt-4 space-y-3">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Username</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">{t('settings.username')}</label>
                       <input
                         type="text"
                         value={ehUsername}
                         onChange={(e) => setEhUsername(e.target.value)}
                         placeholder="E-Hentai username"
                         autoComplete="username"
-                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                        className={inputClass}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">Password</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">{t('settings.password')}</label>
                       <input
                         type="password"
                         value={ehPassword}
@@ -386,23 +370,15 @@ export default function SettingsPage() {
                         placeholder="E-Hentai password"
                         autoComplete="current-password"
                         onKeyDown={(e) => e.key === 'Enter' && handleEhLogin()}
-                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                        className={inputClass}
                       />
                     </div>
                     <div className="flex gap-2">
-                      <button
-                        onClick={handleEhLogin}
-                        disabled={ehLoginSaving}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 disabled:text-blue-600 rounded text-white text-sm font-medium transition-colors"
-                      >
-                        {ehLoginSaving ? 'Logging in...' : 'Log In'}
+                      <button onClick={handleEhLogin} disabled={ehLoginSaving} className={btnPrimary}>
+                        {ehLoginSaving ? t('settings.loggingIn') : t('settings.logIn')}
                       </button>
-                      <button
-                        onClick={handleEhRefresh}
-                        disabled={ehAccountLoading}
-                        className="px-4 py-2 bg-[#1a1a1a] border border-[#2a2a2a] hover:border-[#444] rounded text-gray-400 text-sm transition-colors"
-                      >
-                        {ehAccountLoading ? 'Refreshing...' : 'Refresh Account'}
+                      <button onClick={handleEhRefresh} disabled={ehAccountLoading} className={btnSecondary}>
+                        {ehAccountLoading ? t('settings.refreshing') : t('settings.refreshAccount')}
                       </button>
                     </div>
                   </div>
@@ -412,58 +388,50 @@ export default function SettingsPage() {
                 {ehLoginMode === 'cookie' && (
                   <div className="mt-4 space-y-3">
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">ipb_member_id</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">ipb_member_id</label>
                       <input
                         type="text"
                         value={ehMemberId}
                         onChange={(e) => setEhMemberId(e.target.value)}
                         placeholder="Enter ipb_member_id"
-                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                        className={inputClass}
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">ipb_pass_hash</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">ipb_pass_hash</label>
                       <div className="relative">
                         <input
                           type={showPassHash ? 'text' : 'password'}
                           value={ehPassHash}
                           onChange={(e) => setEhPassHash(e.target.value)}
                           placeholder="Enter ipb_pass_hash"
-                          className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 pr-10 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                          className={`${inputClass} pr-10`}
                         />
                         <button
                           type="button"
                           onClick={() => setShowPassHash((v) => !v)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-gray-500 hover:text-gray-300 text-sm transition-colors px-1"
+                          className="absolute right-2 top-1/2 -translate-y-1/2 text-vault-text-muted hover:text-vault-text transition-colors px-1"
                         >
-                          {showPassHash ? 'Hide' : 'Show'}
+                          {showPassHash ? <EyeOff size={14} /> : <Eye size={14} />}
                         </button>
                       </div>
                     </div>
                     <div>
-                      <label className="block text-xs text-gray-500 mb-1">sk</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">sk</label>
                       <input
                         type="text"
                         value={ehSk}
                         onChange={(e) => setEhSk(e.target.value)}
                         placeholder="Enter sk"
-                        className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                        className={inputClass}
                       />
                     </div>
                     <div className="flex gap-2">
-                      <button
-                        onClick={handleEhSave}
-                        disabled={ehSaving}
-                        className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 disabled:text-blue-600 rounded text-white text-sm font-medium transition-colors"
-                      >
-                        {ehSaving ? 'Saving...' : 'Save Cookies'}
+                      <button onClick={handleEhSave} disabled={ehSaving} className={btnPrimary}>
+                        {ehSaving ? t('settings.saving') : t('settings.saveCookies')}
                       </button>
-                      <button
-                        onClick={handleEhRefresh}
-                        disabled={ehAccountLoading}
-                        className="px-4 py-2 bg-[#1a1a1a] border border-[#2a2a2a] hover:border-[#444] rounded text-gray-400 text-sm transition-colors"
-                      >
-                        {ehAccountLoading ? 'Refreshing...' : 'Refresh Account'}
+                      <button onClick={handleEhRefresh} disabled={ehAccountLoading} className={btnSecondary}>
+                        {ehAccountLoading ? t('settings.refreshing') : t('settings.refreshAccount')}
                       </button>
                     </div>
                   </div>
@@ -471,25 +439,25 @@ export default function SettingsPage() {
 
                 {/* Account Info */}
                 {ehAccount && (
-                  <div className="mt-4 bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg p-3">
-                    <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Account Status</p>
+                  <div className="mt-4 bg-vault-input border border-vault-border rounded-lg p-3">
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('settings.accountStatus')}</p>
                     <div className="space-y-1">
                       <div className="flex justify-between text-sm">
-                        <span className="text-gray-500">Valid</span>
+                        <span className="text-vault-text-muted">{t('settings.valid')}</span>
                         <span className={ehAccount.valid ? 'text-green-400' : 'text-red-400'}>
-                          {ehAccount.valid ? 'Yes' : 'No'}
+                          {ehAccount.valid ? t('settings.yes') : t('settings.no')}
                         </span>
                       </div>
                       {ehAccount.credits !== undefined && (
                         <div className="flex justify-between text-sm">
-                          <span className="text-gray-500">Credits</span>
-                          <span className="text-gray-200">{ehAccount.credits.toLocaleString()}</span>
+                          <span className="text-vault-text-muted">{t('settings.credits')}</span>
+                          <span className="text-vault-text-secondary">{ehAccount.credits.toLocaleString()}</span>
                         </div>
                       )}
                       {ehAccount.hath_perks !== undefined && (
                         <div className="flex justify-between text-sm">
-                          <span className="text-gray-500">H@H Perks</span>
-                          <span className="text-gray-200">{ehAccount.hath_perks}</span>
+                          <span className="text-vault-text-muted">{t('settings.hathPerks')}</span>
+                          <span className="text-vault-text-secondary">{ehAccount.hath_perks}</span>
                         </div>
                       )}
                       {ehAccount.error && (
@@ -503,11 +471,11 @@ export default function SettingsPage() {
           </div>
 
           {/* ── Pixiv Token ── */}
-          <div className="bg-[#111111] border border-[#2a2a2a] rounded-xl overflow-hidden">
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <SectionHeader
-                  title="Pixiv Token"
+                  title={t('settings.pixivToken')}
                   sectionKey="pixiv"
                   activeSection={activeSection}
                   onToggle={toggleSection}
@@ -521,46 +489,31 @@ export default function SettingsPage() {
             </div>
 
             {activeSection === 'pixiv' && (
-              <div className="px-5 pb-5 border-t border-[#1e1e1e]">
-                {pixivSuccess && (
-                  <div className="mt-4">
-                    <AlertBanner alerts={[pixivSuccess]} onDismiss={() => setPixivSuccess(null)} />
-                  </div>
-                )}
-                {pixivError && (
-                  <div className="mt-4">
-                    <AlertBanner alerts={[pixivError]} onDismiss={() => setPixivError(null)} />
-                  </div>
-                )}
-
+              <div className="px-5 pb-5 border-t border-vault-border">
                 <div className="mt-4">
-                  <label className="block text-xs text-gray-500 mb-1">refresh_token</label>
+                  <label className="block text-xs text-vault-text-muted mb-1">{t('settings.pixivRefreshToken')}</label>
                   <input
                     type="password"
                     value={pixivToken}
                     onChange={(e) => setPixivToken(e.target.value)}
                     placeholder="Enter Pixiv refresh token"
-                    className="w-full bg-[#1a1a1a] border border-[#2a2a2a] rounded px-3 py-2 text-white placeholder-gray-600 focus:outline-none focus:border-[#444] text-sm"
+                    className={inputClass}
                   />
-                  <p className="text-xs text-gray-600 mt-1">
-                    Obtain via <code className="text-gray-500">pixivpy</code> or the Pixiv OAuth flow.
+                  <p className="text-xs text-vault-text-muted mt-1">
+                    {t('settings.pixivHint')}
                   </p>
                 </div>
 
                 {pixivUsername && (
                   <div className="mt-3 flex items-center gap-2 text-sm">
-                    <span className="text-gray-500">Account:</span>
-                    <span className="text-gray-200">{pixivUsername}</span>
+                    <span className="text-vault-text-muted">{t('settings.pixivAccount')}:</span>
+                    <span className="text-vault-text-secondary">{pixivUsername}</span>
                   </div>
                 )}
 
                 <div className="mt-4">
-                  <button
-                    onClick={handlePixivSave}
-                    disabled={pixivSaving}
-                    className="px-4 py-2 bg-blue-600 hover:bg-blue-700 disabled:bg-blue-900 disabled:text-blue-600 rounded text-white text-sm font-medium transition-colors"
-                  >
-                    {pixivSaving ? 'Saving...' : 'Save Token'}
+                  <button onClick={handlePixivSave} disabled={pixivSaving} className={btnPrimary}>
+                    {pixivSaving ? t('settings.saving') : t('settings.saveToken')}
                   </button>
                 </div>
               </div>
@@ -568,37 +521,34 @@ export default function SettingsPage() {
           </div>
 
           {/* ── System Info ── */}
-          <div className="bg-[#111111] border border-[#2a2a2a] rounded-xl overflow-hidden">
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
             <SectionHeader
-              title="System"
+              title={t('settings.system')}
               sectionKey="system"
               activeSection={activeSection}
               onToggle={toggleSection}
             />
 
             {activeSection === 'system' && (
-              <div className="px-5 pb-5 border-t border-[#1e1e1e]">
+              <div className="px-5 pb-5 border-t border-vault-border">
                 {systemLoading && (
                   <div className="flex justify-center py-8">
                     <LoadingSpinner />
                   </div>
                 )}
-                {systemError && (
-                  <div className="mt-4 text-red-400 text-sm">{systemError}</div>
-                )}
                 {!systemLoading && health && systemInfo && (
                   <div className="mt-4 space-y-4">
                     {/* Health */}
                     <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Service Health</p>
-                      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg divide-y divide-[#1e1e1e]">
+                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('settings.serviceHealth')}</p>
+                      <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
                         {[
-                          { label: 'Overall', value: health.status },
+                          { label: t('settings.overall'), value: health.status },
                           { label: 'PostgreSQL', value: health.services.postgres },
                           { label: 'Redis', value: health.services.redis },
                         ].map(({ label, value }) => (
                           <div key={label} className="flex justify-between items-center px-3 py-2">
-                            <span className="text-sm text-gray-500">{label}</span>
+                            <span className="text-sm text-vault-text-muted">{label}</span>
                             <span className={`text-sm font-medium ${serviceStatusClass(value)}`}>
                               {value}
                             </span>
@@ -609,20 +559,20 @@ export default function SettingsPage() {
 
                     {/* Info */}
                     <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Configuration</p>
-                      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg divide-y divide-[#1e1e1e]">
+                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('settings.configuration')}</p>
+                      <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
                         {[
-                          { label: 'Version', value: systemInfo.version },
-                          { label: 'EH Max Concurrency', value: String(systemInfo.eh_max_concurrency) },
+                          { label: t('settings.version'), value: systemInfo.version },
+                          { label: t('settings.ehMaxConcurrency'), value: String(systemInfo.eh_max_concurrency) },
                           {
-                            label: 'AI Tagging',
-                            value: systemInfo.tag_model_enabled ? 'Enabled' : 'Disabled',
-                            valueClass: systemInfo.tag_model_enabled ? 'text-green-400' : 'text-gray-500',
+                            label: t('settings.aiTagging'),
+                            value: systemInfo.tag_model_enabled ? t('settings.enabled') : t('settings.disabled'),
+                            valueClass: systemInfo.tag_model_enabled ? 'text-green-400' : 'text-vault-text-muted',
                           },
                         ].map(({ label, value, valueClass }) => (
                           <div key={label} className="flex justify-between items-center px-3 py-2">
-                            <span className="text-sm text-gray-500">{label}</span>
-                            <span className={`text-sm font-medium ${valueClass ?? 'text-gray-200'}`}>{value}</span>
+                            <span className="text-sm text-vault-text-muted">{label}</span>
+                            <span className={`text-sm font-medium ${valueClass ?? 'text-vault-text-secondary'}`}>{value}</span>
                           </div>
                         ))}
                       </div>
@@ -630,17 +580,17 @@ export default function SettingsPage() {
 
                     {/* Rate Limiting */}
                     <div>
-                      <p className="text-xs text-gray-500 uppercase tracking-wide mb-2">Security</p>
-                      <div className="bg-[#1a1a1a] border border-[#2a2a2a] rounded-lg px-3 py-2">
+                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('settings.security')}</p>
+                      <div className="bg-vault-input border border-vault-border rounded-lg px-3 py-2">
                         <div className="flex items-center justify-between">
                           <div>
-                            <p className="text-sm text-white">Rate Limiting</p>
-                            <p className="text-xs text-gray-600 mt-0.5">Protect login and API endpoints</p>
+                            <p className="text-sm text-vault-text">{t('settings.rateLimiting')}</p>
+                            <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.rateLimitDesc')}</p>
                           </div>
                           <button
                             onClick={handleToggleRateLimit}
                             disabled={rateLimitToggling || rateLimitEnabled === null}
-                            className={`relative w-11 h-6 rounded-full transition-colors ${rateLimitEnabled ? 'bg-blue-600' : 'bg-[#333]'}`}
+                            className={`relative w-11 h-6 rounded-full transition-colors ${rateLimitEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
                           >
                             <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${rateLimitEnabled ? 'translate-x-5' : ''}`} />
                           </button>
@@ -650,9 +600,9 @@ export default function SettingsPage() {
 
                     <button
                       onClick={handleLoadSystem}
-                      className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+                      className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
                     >
-                      Refresh
+                      {t('settings.refresh')}
                     </button>
                   </div>
                 )}
@@ -661,9 +611,9 @@ export default function SettingsPage() {
           </div>
 
           {/* ── Browse Settings ── */}
-          <div className="bg-[#111111] border border-[#2a2a2a] rounded-xl overflow-hidden">
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
             <SectionHeader
-              title="Browse"
+              title={t('settings.browse')}
               sectionKey="browse"
               activeSection={activeSection}
               onToggle={toggleSection}
@@ -677,25 +627,25 @@ export default function SettingsPage() {
           </div>
 
           {/* ── Account / Logout ── */}
-          <div className="bg-[#111111] border border-[#2a2a2a] rounded-xl overflow-hidden">
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
             <SectionHeader
-              title="Account"
+              title={t('settings.account')}
               sectionKey="account"
               activeSection={activeSection}
               onToggle={toggleSection}
             />
             {activeSection === 'account' && (
-              <div className="px-5 pb-5 border-t border-[#1e1e1e]">
+              <div className="px-5 pb-5 border-t border-vault-border">
                 {/* Active Sessions */}
                 <div className="mt-4">
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-gray-500 uppercase tracking-wide">Active Sessions</p>
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide">{t('settings.activeSessions')}</p>
                     <button
                       onClick={handleLoadSessions}
                       disabled={sessionsLoading}
-                      className="text-xs text-gray-600 hover:text-gray-400 transition-colors"
+                      className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
                     >
-                      {sessionsLoading ? 'Loading...' : 'Refresh'}
+                      {sessionsLoading ? t('settings.loading') : t('settings.refresh')}
                     </button>
                   </div>
 
@@ -708,32 +658,32 @@ export default function SettingsPage() {
                       {sessions.map((s) => (
                         <div
                           key={s.token_prefix}
-                          className={`bg-[#1a1a1a] border rounded-lg px-3 py-2.5 ${
-                            s.is_current ? 'border-blue-600/50' : 'border-[#2a2a2a]'
+                          className={`bg-vault-input border rounded-lg px-3 py-2.5 ${
+                            s.is_current ? 'border-vault-accent/50' : 'border-vault-border'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
-                                <span className="text-sm text-white font-mono">{s.token_prefix}...</span>
+                                <span className="text-sm text-vault-text font-mono">{s.token_prefix}...</span>
                                 {s.is_current && (
-                                  <span className="text-[10px] bg-blue-600/30 text-blue-400 px-1.5 py-0.5 rounded">
-                                    Current
+                                  <span className="text-[10px] bg-vault-accent/30 text-vault-accent px-1.5 py-0.5 rounded">
+                                    {t('settings.current')}
                                   </span>
                                 )}
                               </div>
-                              <p className="text-xs text-gray-600 mt-1 truncate" title={s.user_agent}>
-                                {s.user_agent || 'Unknown device'}
+                              <p className="text-xs text-vault-text-muted mt-1 truncate" title={s.user_agent}>
+                                {s.user_agent || t('settings.unknownDevice')}
                               </p>
                               <div className="flex items-center gap-3 mt-1">
-                                <span className="text-xs text-gray-600">{s.ip}</span>
+                                <span className="text-xs text-vault-text-muted">{s.ip}</span>
                                 {s.created_at && (
-                                  <span className="text-xs text-gray-600">
+                                  <span className="text-xs text-vault-text-muted">
                                     {new Date(s.created_at).toLocaleDateString()}
                                   </span>
                                 )}
-                                <span className="text-xs text-gray-600">
-                                  Expires in {Math.ceil(s.ttl / 86400)}d
+                                <span className="text-xs text-vault-text-muted">
+                                  {t('settings.expiresIn')} {Math.ceil(s.ttl / 86400)}{t('settings.days')}
                                 </span>
                               </div>
                             </div>
@@ -743,25 +693,25 @@ export default function SettingsPage() {
                                 disabled={revokingToken === s.token_prefix}
                                 className="text-xs text-red-400/70 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
                               >
-                                {revokingToken === s.token_prefix ? '...' : 'Revoke'}
+                                {revokingToken === s.token_prefix ? '...' : t('settings.revoke')}
                               </button>
                             )}
                           </div>
                         </div>
                       ))}
                       {sessions.length === 0 && !sessionsLoading && (
-                        <p className="text-xs text-gray-600 py-2">No active sessions found.</p>
+                        <p className="text-xs text-vault-text-muted py-2">{t('settings.noSessions')}</p>
                       )}
                     </div>
                   )}
                 </div>
 
-                <div className="mt-5 pt-4 border-t border-[#1e1e1e]">
+                <div className="mt-5 pt-4 border-t border-vault-border">
                   <button
                     onClick={logout}
                     className="px-4 py-2 bg-red-900/40 border border-red-700/50 hover:bg-red-900/60 text-red-400 rounded text-sm font-medium transition-colors"
                   >
-                    Log Out
+                    {t('settings.logOut')}
                   </button>
                 </div>
               </div>
