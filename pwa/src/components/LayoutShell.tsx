@@ -1,7 +1,9 @@
 'use client'
 
 import { usePathname } from 'next/navigation'
-import { NavBar } from './NavBar'
+import { Sidebar } from './Sidebar'
+import { MobileNav } from './MobileNav'
+import { Toaster } from 'sonner'
 
 const AUTH_PATHS = ['/login', '/setup']
 
@@ -10,15 +12,28 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   const isAuth = AUTH_PATHS.includes(pathname)
 
   if (isAuth) {
-    return <>{children}</>
+    return (
+      <>
+        {children}
+        <Toaster position="bottom-right" theme="dark" richColors />
+      </>
+    )
   }
 
   return (
     <>
-      <NavBar />
-      <main className="pt-14 min-h-screen bg-vault-bg">
+      {/* Desktop sidebar — hidden on mobile */}
+      <Sidebar />
+
+      {/* Mobile top nav — hidden on desktop */}
+      <MobileNav />
+
+      {/* Main content */}
+      <main className="pt-14 lg:pt-0 lg:pl-56 min-h-screen bg-vault-bg text-vault-text">
         {children}
       </main>
+
+      <Toaster position="bottom-right" richColors />
     </>
   )
 }

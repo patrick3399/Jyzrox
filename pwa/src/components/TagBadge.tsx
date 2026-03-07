@@ -15,7 +15,7 @@ function getNamespaceStyles(namespace: string): string {
       return 'text-green-300 bg-green-900/30 border-green-700'
     case 'general':
     default:
-      return 'text-gray-300 bg-gray-800 border-gray-600'
+      return 'text-vault-text-secondary bg-vault-input border-vault-border'
   }
 }
 

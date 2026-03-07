@@ -6,6 +6,7 @@ import { useLibraryGallery, useGalleryImages, useUpdateGallery } from '@/hooks/u
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { TagBadge } from '@/components/TagBadge'
 import { RatingStars } from '@/components/RatingStars'
+import { t } from '@/lib/i18n'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
   character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
@@ -15,7 +16,7 @@ const TAG_NAMESPACE_COLORS: Record<string, string> = {
   language: 'bg-teal-900/40 border-teal-700/50 text-teal-300',
   male: 'bg-cyan-900/40 border-cyan-700/50 text-cyan-300',
   female: 'bg-pink-900/40 border-pink-700/50 text-pink-300',
-  general: 'bg-[#1a1a1a] border-[#2a2a2a] text-gray-400',
+  general: 'bg-vault-input border-vault-border text-vault-text-secondary',
 }
 
 function getTagColor(tag: string): string {
@@ -72,7 +73,7 @@ export default function GalleryDetailPage() {
 
   if (galleryLoading) {
     return (
-      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+      <div className="min-h-screen bg-vault-bg flex items-center justify-center">
         <LoadingSpinner />
       </div>
     )
@@ -80,15 +81,15 @@ export default function GalleryDetailPage() {
 
   if (galleryError) {
     return (
-      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
+      <div className="min-h-screen bg-vault-bg flex items-center justify-center">
         <div className="bg-red-900/30 border border-red-700 rounded-lg p-6 text-red-400 max-w-md text-center">
-          <p className="font-semibold mb-2">Failed to load gallery</p>
+          <p className="font-semibold mb-2">{t('library.failedToLoad')}</p>
           <p className="text-sm">{galleryError.message}</p>
           <button
             onClick={() => router.back()}
-            className="mt-4 px-4 py-2 bg-[#1a1a1a] border border-[#2a2a2a] rounded text-gray-400 text-sm hover:text-white transition-colors"
+            className="mt-4 px-4 py-2 bg-vault-input border border-vault-border rounded text-vault-text-secondary text-sm hover:text-vault-text transition-colors"
           >
-            Go Back
+            {t('common.goBack')}
           </button>
         </div>
       </div>
@@ -102,18 +103,18 @@ export default function GalleryDetailPage() {
   const statusInfo = DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <div className="min-h-screen bg-vault-bg text-vault-text">
       <div className="max-w-6xl mx-auto px-4 py-6">
         {/* Back */}
         <button
           onClick={() => router.back()}
-          className="text-sm text-gray-500 hover:text-gray-300 mb-4 flex items-center gap-1 transition-colors"
+          className="text-sm text-vault-text-muted hover:text-vault-text-secondary mb-4 flex items-center gap-1 transition-colors"
         >
-          ← Back to Library
+          {t('library.backToLibrary')}
         </button>
 
         {/* Header */}
-        <div className="bg-[#111111] border border-[#2a2a2a] rounded-xl p-5 mb-5">
+        <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
           <div className="flex flex-col md:flex-row gap-5">
             {/* Thumbnail preview from first image */}
             <div className="flex-shrink-0">
@@ -124,8 +125,8 @@ export default function GalleryDetailPage() {
                   className="w-40 h-56 object-cover rounded"
                 />
               ) : (
-                <div className="w-40 h-56 bg-[#1a1a1a] rounded flex items-center justify-center text-gray-600 text-xs">
-                  No Cover
+                <div className="w-40 h-56 bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
+                  {t('library.noCover')}
                 </div>
               )}
             </div>
@@ -133,13 +134,13 @@ export default function GalleryDetailPage() {
             {/* Meta */}
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between gap-2 mb-1">
-                <h1 className="text-xl font-bold text-white leading-tight">{gallery.title}</h1>
+                <h1 className="text-xl font-bold text-vault-text leading-tight">{gallery.title}</h1>
                 <span className={`flex-shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}>
                   {statusInfo.label}
                 </span>
               </div>
               {gallery.title_jpn && (
-                <p className="text-sm text-gray-400 mb-3">{gallery.title_jpn}</p>
+                <p className="text-sm text-vault-text-secondary mb-3">{gallery.title_jpn}</p>
               )}
 
               {/* Meta grid */}
@@ -159,21 +160,21 @@ export default function GalleryDetailPage() {
                     : []),
                 ].map(({ label, value }) => (
                   <div key={label}>
-                    <span className="text-gray-500">{label}: </span>
-                    <span className="text-gray-200">{value}</span>
+                    <span className="text-vault-text-muted">{label}: </span>
+                    <span className="text-vault-text">{value}</span>
                   </div>
                 ))}
               </div>
 
               {/* Rating */}
               <div className="flex items-center gap-3 mb-4">
-                <span className="text-sm text-gray-500">Rating:</span>
+                <span className="text-sm text-vault-text-muted">Rating:</span>
                 <RatingStars
                   rating={gallery.rating}
                   readonly={false}
                   onChange={handleRatingChange}
                 />
-                <span className="text-sm text-gray-400">{gallery.rating.toFixed(1)}</span>
+                <span className="text-sm text-vault-text-secondary">{gallery.rating.toFixed(1)}</span>
               </div>
 
               {/* Action Buttons */}
@@ -182,7 +183,7 @@ export default function GalleryDetailPage() {
                   href={`/reader/${gallery.id}`}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-medium transition-colors"
                 >
-                  Read
+                  {t('browse.read')}
                 </Link>
                 <button
                   onClick={handleFavoriteToggle}
@@ -190,7 +191,7 @@ export default function GalleryDetailPage() {
                   className={`px-4 py-2 rounded text-sm font-medium border transition-colors ${
                     gallery.favorited
                       ? 'bg-yellow-900/40 border-yellow-600 text-yellow-400 hover:bg-yellow-900/60'
-                      : 'bg-[#1a1a1a] border-[#2a2a2a] text-gray-400 hover:border-yellow-600 hover:text-yellow-400'
+                      : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
                   }`}
                 >
                   {gallery.favorited ? '★ Favorited' : '☆ Favorite'}
@@ -201,15 +202,15 @@ export default function GalleryDetailPage() {
         </div>
 
         {/* Tags */}
-        <div className="bg-[#111111] border border-[#2a2a2a] rounded-xl p-5 mb-5">
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">Tags</h2>
+        <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
+          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide mb-3">{t('common.tags')}</h2>
           {Object.keys(tagGroups).length === 0 ? (
-            <p className="text-sm text-gray-600">No tags</p>
+            <p className="text-sm text-vault-text-muted">{t('library.noTags')}</p>
           ) : (
             <div className="space-y-2">
               {Object.entries(tagGroups).map(([namespace, values]) => (
                 <div key={namespace} className="flex flex-wrap gap-1 items-start">
-                  <span className="text-xs text-gray-600 w-20 flex-shrink-0 pt-0.5 capitalize">
+                  <span className="text-xs text-vault-text-muted w-20 flex-shrink-0 pt-0.5 capitalize">
                     {namespace}:
                   </span>
                   <div className="flex flex-wrap gap-1">
@@ -232,9 +233,9 @@ export default function GalleryDetailPage() {
         </div>
 
         {/* Image Thumbnails */}
-        <div className="bg-[#111111] border border-[#2a2a2a] rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide mb-3">
-            Images ({gallery.pages} pages)
+        <div className="bg-vault-card border border-vault-border rounded-xl p-5">
+          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide mb-3">
+            {t('library.images')} ({gallery.pages} pages)
           </h2>
 
           {imagesLoading && (
@@ -255,10 +256,10 @@ export default function GalleryDetailPage() {
                     <img
                       src={image.thumb_path}
                       alt={`Page ${image.page_num}`}
-                      className="w-full aspect-[3/4] object-cover rounded border border-[#2a2a2a] group-hover:border-[#555] transition-colors"
+                      className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
                     />
                   ) : (
-                    <div className="w-full aspect-[3/4] bg-[#1a1a1a] rounded border border-[#2a2a2a] group-hover:border-[#555] flex items-center justify-center text-gray-700 text-xs transition-colors">
+                    <div className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border group-hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors">
                       {image.page_num}
                     </div>
                   )}
@@ -271,7 +272,7 @@ export default function GalleryDetailPage() {
                   <Link
                     key={i}
                     href={`/reader/${gallery.id}?page=${i + 1}`}
-                    className="w-full aspect-[3/4] bg-[#1a1a1a] rounded border border-[#2a2a2a] hover:border-[#555] flex items-center justify-center text-gray-700 text-xs transition-colors"
+                    className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors"
                   >
                     {i + 1}
                   </Link>

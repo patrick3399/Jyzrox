@@ -1,12 +1,13 @@
 'use client'
 
-import { useMemo, useCallback, useState } from 'react'
+import { useMemo, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useEhGallery, useEhGalleryPreviews } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
-import { AlertBanner } from '@/components/AlertBanner'
+import { toast } from 'sonner'
+import { t } from '@/lib/i18n'
 
 // ── Namespace colours (EhViewer style) ─────────────────────────────────
 
@@ -55,8 +56,6 @@ export default function EhGalleryDetailPage() {
 
   const { data: gallery, error: galleryError } = useEhGallery(gid, token)
   const { data: previewData } = useEhGalleryPreviews(gid, token)
-
-  const [downloadMsg, setDownloadMsg] = useState<{ text: string; ok: boolean } | null>(null)
 
   // Group tags by namespace
   const tagGroups = useMemo(() => {
@@ -113,13 +112,12 @@ export default function EhGalleryDetailPage() {
 
   const handleDownload = useCallback(async () => {
     if (!gallery) return
-    setDownloadMsg(null)
     try {
       const url = `https://e-hentai.org/g/${gallery.gid}/${gallery.token}/`
       const res = await api.download.enqueue(url, 'ehentai')
-      setDownloadMsg({ text: `Added to queue (job: ${res.job_id})`, ok: true })
+      toast.success(`Added to queue (job: ${res.job_id})`)
     } catch (err) {
-      setDownloadMsg({ text: err instanceof Error ? err.message : 'Failed', ok: false })
+      toast.error(err instanceof Error ? err.message : 'Failed')
     }
   }, [gallery])
 
@@ -131,11 +129,11 @@ export default function EhGalleryDetailPage() {
 
   if (galleryError) {
     return (
-      <div className="min-h-screen bg-[#0a0a0a] text-white flex items-center justify-center">
+      <div className="min-h-screen bg-vault-bg text-vault-text flex items-center justify-center">
         <div className="text-center">
           <p className="text-red-400 text-lg font-semibold">Failed to load gallery</p>
-          <p className="text-sm text-gray-500 mt-1">{galleryError.message}</p>
-          <button onClick={() => router.back()} className="mt-4 px-4 py-2 bg-neutral-800 rounded text-sm hover:bg-neutral-700">
+          <p className="text-sm text-vault-text-muted mt-1">{galleryError.message}</p>
+          <button onClick={() => router.back()} className="mt-4 px-4 py-2 bg-vault-card rounded text-sm hover:bg-vault-card-hover">
             Go back
           </button>
         </div>
@@ -145,7 +143,7 @@ export default function EhGalleryDetailPage() {
 
   if (!gallery) {
     return (
-      <div className="min-h-screen bg-[#0a0a0a] text-white flex items-center justify-center">
+      <div className="min-h-screen bg-vault-bg text-vault-text flex items-center justify-center">
         <LoadingSpinner />
       </div>
     )
@@ -157,21 +155,16 @@ export default function EhGalleryDetailPage() {
     : ''
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] text-white">
+    <div className="min-h-screen bg-vault-bg text-vault-text">
       <div className="max-w-5xl mx-auto px-4 py-5 space-y-6">
 
         {/* Back button */}
         <button
           onClick={() => router.back()}
-          className="text-sm text-gray-500 hover:text-gray-300 transition-colors"
+          className="text-sm text-vault-text-muted hover:text-vault-text-secondary transition-colors"
         >
-          &larr; Back to browse
+          {t('browse.backToBrowse')}
         </button>
-
-        {/* Alert */}
-        {downloadMsg && (
-          <AlertBanner alerts={[downloadMsg.text]} onDismiss={() => setDownloadMsg(null)} />
-        )}
 
         {/* ── Header section ── */}
         <div className="flex gap-5 flex-col sm:flex-row">
@@ -185,7 +178,7 @@ export default function EhGalleryDetailPage() {
                 onClick={() => handleRead(1)}
               />
             ) : (
-              <div className="w-48 h-64 rounded-lg bg-neutral-800 flex items-center justify-center">
+              <div className="w-48 h-64 rounded-lg bg-vault-card flex items-center justify-center">
                 <span className="text-4xl font-bold" style={{ color: catColor }}>
                   {gallery.category[0]}
                 </span>
@@ -197,7 +190,7 @@ export default function EhGalleryDetailPage() {
           <div className="flex-1 min-w-0 space-y-3">
             <h1 className="text-xl font-bold leading-snug">{gallery.title}</h1>
             {gallery.title_jpn && (
-              <p className="text-sm text-gray-400">{gallery.title_jpn}</p>
+              <p className="text-sm text-vault-text-secondary">{gallery.title_jpn}</p>
             )}
 
             {/* Meta row */}
@@ -208,37 +201,37 @@ export default function EhGalleryDetailPage() {
               >
                 {gallery.category}
               </span>
-              <span className="px-2 py-1 rounded bg-neutral-800 border border-neutral-700 text-gray-400">
+              <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
                 {gallery.pages} pages
               </span>
               {gallery.uploader && (
-                <span className="px-2 py-1 rounded bg-neutral-800 border border-neutral-700 text-gray-400">
+                <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
                   {gallery.uploader}
                 </span>
               )}
-              <span className="px-2 py-1 rounded bg-neutral-800 border border-neutral-700 text-gray-400">
+              <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
                 {formatDate(gallery.posted_at)}
               </span>
             </div>
 
             <div className="flex items-center gap-2">
               <RatingStars rating={gallery.rating} readonly />
-              <span className="text-sm text-gray-500">{gallery.rating.toFixed(2)}</span>
+              <span className="text-sm text-vault-text-muted">{gallery.rating.toFixed(2)}</span>
             </div>
 
             {/* Action buttons */}
             <div className="flex gap-3 pt-1">
               <button
                 onClick={() => handleRead(1)}
-                className="px-6 py-2.5 bg-[#1a6edf] hover:bg-[#1559b3] rounded-lg text-white text-sm font-medium transition-colors"
+                className="px-6 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors"
               >
-                Read
+                {t('browse.read')}
               </button>
               <button
                 onClick={handleDownload}
                 className="px-6 py-2.5 bg-green-700 hover:bg-green-600 rounded-lg text-white text-sm font-medium transition-colors"
               >
-                Download
+                {t('browse.download')}
               </button>
             </div>
           </div>
@@ -246,7 +239,7 @@ export default function EhGalleryDetailPage() {
 
         {/* ── Tags section (grouped by namespace) ── */}
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">Tags</h2>
+          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">{t('common.tags')}</h2>
           <div className="space-y-2">
             {tagGroups.map(([ns, names]) => {
               const style = nsStyle(ns)
@@ -278,15 +271,15 @@ export default function EhGalleryDetailPage() {
         {/* ── Preview thumbnails (6 max) ── */}
         {previewThumbs.length > 0 && (
           <div className="space-y-3">
-            <h2 className="text-sm font-semibold text-gray-400 uppercase tracking-wide">
-              Preview ({gallery.pages} pages)
+            <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
+              {t('browse.preview')} ({gallery.pages} pages)
             </h2>
             <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
               {previewThumbs.map((thumb) => (
                 <button
                   key={thumb.page}
                   onClick={() => handleRead(thumb.page)}
-                  className="relative aspect-[3/4] bg-neutral-900 rounded-lg overflow-hidden border border-neutral-800
+                  className="relative aspect-[3/4] bg-vault-bg rounded-lg overflow-hidden border border-vault-border
                              hover:border-blue-500 hover:brightness-110 transition-all cursor-pointer"
                 >
                   {thumb.isSprite ? (

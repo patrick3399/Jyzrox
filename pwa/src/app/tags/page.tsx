@@ -1,8 +1,11 @@
 "use client";
 import { useState, useCallback } from "react";
+import { Tags, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
 import useSWR from "swr";
 import { api } from "@/lib/api";
-import type { TagItem, TagAlias, TagImplication } from "@/lib/types";
+import { EmptyState } from "@/components/EmptyState";
+import { t } from "@/lib/i18n";
+import type { TagItem } from "@/lib/types";
 
 export default function TagsPage() {
   const [search, setSearch] = useState("");
@@ -10,28 +13,23 @@ export default function TagsPage() {
   const [page, setPage] = useState(0);
   const limit = 50;
 
-  // Selected tag for alias/implication panel
   const [selectedTag, setSelectedTag] = useState<TagItem | null>(null);
 
-  // Tags list
-  const { data: tagData, mutate: mutateTags } = useSWR(
+  const { data: tagData } = useSWR(
     ["tags", search, nsFilter, page],
     () => api.tags.list({ prefix: search || undefined, namespace: nsFilter || undefined, limit, offset: page * limit })
   );
 
-  // Aliases for selected tag
   const { data: aliases, mutate: mutateAliases } = useSWR(
     selectedTag ? ["aliases", selectedTag.id] : null,
     () => api.tags.listAliases({ tag_id: selectedTag!.id })
   );
 
-  // Implications for selected tag
   const { data: implications, mutate: mutateImplications } = useSWR(
     selectedTag ? ["implications", selectedTag.id] : null,
     () => api.tags.listImplications({ tag_id: selectedTag!.id })
   );
 
-  // ── Alias form state ──
   const [aliasNs, setAliasNs] = useState("");
   const [aliasName, setAliasName] = useState("");
 
@@ -56,7 +54,6 @@ export default function TagsPage() {
     }
   }, [mutateAliases]);
 
-  // ── Implication form state ──
   const [implTargetId, setImplTargetId] = useState("");
   const [implDirection, setImplDirection] = useState<"implies" | "implied_by">("implies");
 
@@ -89,197 +86,171 @@ export default function TagsPage() {
   const totalPages = tagData ? Math.ceil(tagData.total / limit) : 0;
 
   return (
-    <div className="p-8 text-white min-h-screen bg-neutral-900">
-      <h1 className="text-3xl font-bold mb-6">Tag Management</h1>
+    <div className="min-h-screen">
+      <div className="max-w-7xl mx-auto px-4 py-6">
+        <h1 className="text-2xl font-bold mb-6">{t('tags.title')}</h1>
 
-      {/* Filters */}
-      <div className="mb-6 flex gap-3 flex-wrap">
-        <input
-          type="text"
-          placeholder="Search by name..."
-          className="p-3 w-64 bg-neutral-800 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-          value={search}
-          onChange={(e) => { setSearch(e.target.value); setPage(0); }}
-        />
-        <input
-          type="text"
-          placeholder="Namespace filter..."
-          className="p-3 w-48 bg-neutral-800 rounded-lg outline-none focus:ring-2 focus:ring-blue-500"
-          value={nsFilter}
-          onChange={(e) => { setNsFilter(e.target.value); setPage(0); }}
-        />
-      </div>
+        {/* Filters */}
+        <div className="mb-6 flex gap-3 flex-wrap">
+          <input
+            type="text"
+            placeholder={t('tags.searchPlaceholder')}
+            className="px-3 py-2 w-64 bg-vault-input border border-vault-border rounded-lg text-vault-text placeholder-vault-text-muted outline-none focus:border-vault-border-hover text-sm"
+            value={search}
+            onChange={(e) => { setSearch(e.target.value); setPage(0); }}
+          />
+          <input
+            type="text"
+            placeholder={t('tags.namespacePlaceholder')}
+            className="px-3 py-2 w-48 bg-vault-input border border-vault-border rounded-lg text-vault-text placeholder-vault-text-muted outline-none focus:border-vault-border-hover text-sm"
+            value={nsFilter}
+            onChange={(e) => { setNsFilter(e.target.value); setPage(0); }}
+          />
+        </div>
 
-      <div className="flex gap-6 flex-col lg:flex-row">
-        {/* Tag table */}
-        <div className="flex-1">
-          <div className="bg-neutral-800 rounded-xl overflow-hidden">
-            <table className="w-full text-left">
-              <thead className="bg-neutral-700">
-                <tr>
-                  <th className="p-3 text-sm">ID</th>
-                  <th className="p-3 text-sm">Namespace</th>
-                  <th className="p-3 text-sm">Name</th>
-                  <th className="p-3 text-sm">Count</th>
-                </tr>
-              </thead>
-              <tbody>
-                {tagData?.tags.map((t) => (
-                  <tr
-                    key={t.id}
-                    className={`border-t border-neutral-700/50 cursor-pointer transition-colors ${
-                      selectedTag?.id === t.id ? "bg-blue-900/30" : "hover:bg-neutral-700/30"
-                    }`}
-                    onClick={() => setSelectedTag(t)}
-                  >
-                    <td className="p-3 text-neutral-500 text-sm">{t.id}</td>
-                    <td className="p-3 text-neutral-400 text-sm">{t.namespace}</td>
-                    <td className="p-3 font-mono text-blue-400">{t.name}</td>
-                    <td className="p-3">{t.count}</td>
+        <div className="flex gap-6 flex-col lg:flex-row">
+          {/* Tag table */}
+          <div className="flex-1">
+            <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+              <table className="w-full text-left">
+                <thead className="bg-vault-card-hover">
+                  <tr>
+                    <th className="p-3 text-sm text-vault-text-muted font-medium">{t('tags.id')}</th>
+                    <th className="p-3 text-sm text-vault-text-muted font-medium">{t('tags.namespace')}</th>
+                    <th className="p-3 text-sm text-vault-text-muted font-medium">{t('tags.name')}</th>
+                    <th className="p-3 text-sm text-vault-text-muted font-medium">{t('tags.count')}</th>
                   </tr>
-                ))}
-                {tagData?.tags.length === 0 && (
-                  <tr><td className="p-4 text-neutral-500" colSpan={4}>No tags found</td></tr>
-                )}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {tagData?.tags.map((tag) => (
+                    <tr
+                      key={tag.id}
+                      className={`border-t border-vault-border cursor-pointer transition-colors ${
+                        selectedTag?.id === tag.id ? "bg-vault-accent/10" : "hover:bg-vault-card-hover"
+                      }`}
+                      onClick={() => setSelectedTag(tag)}
+                    >
+                      <td className="p-3 text-vault-text-muted text-sm">{tag.id}</td>
+                      <td className="p-3 text-vault-text-secondary text-sm">{tag.namespace}</td>
+                      <td className="p-3 font-mono text-vault-accent">{tag.name}</td>
+                      <td className="p-3 text-sm">{tag.count}</td>
+                    </tr>
+                  ))}
+                  {tagData?.tags.length === 0 && (
+                    <tr><td className="p-4 text-vault-text-muted" colSpan={4}>{t('tags.noTags')}</td></tr>
+                  )}
+                </tbody>
+              </table>
+            </div>
+
+            {totalPages > 1 && (
+              <div className="flex gap-2 mt-4 items-center">
+                <button
+                  onClick={() => setPage(Math.max(0, page - 1))}
+                  disabled={page === 0}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-vault-card border border-vault-border hover:bg-vault-card-hover disabled:opacity-30 text-sm transition-colors"
+                >
+                  <ChevronLeft size={14} /> {t('tags.prev')}
+                </button>
+                <span className="text-sm text-vault-text-secondary">
+                  {page + 1} / {totalPages} ({tagData?.total} tags)
+                </span>
+                <button
+                  onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
+                  disabled={page >= totalPages - 1}
+                  className="flex items-center gap-1 px-3 py-1.5 rounded-lg bg-vault-card border border-vault-border hover:bg-vault-card-hover disabled:opacity-30 text-sm transition-colors"
+                >
+                  {t('tags.next')} <ChevronRight size={14} />
+                </button>
+              </div>
+            )}
           </div>
 
-          {/* Pagination */}
-          {totalPages > 1 && (
-            <div className="flex gap-2 mt-4 items-center">
-              <button
-                onClick={() => setPage(Math.max(0, page - 1))}
-                disabled={page === 0}
-                className="px-3 py-1 rounded bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30"
-              >
-                Prev
-              </button>
-              <span className="text-sm text-neutral-400">
-                {page + 1} / {totalPages} ({tagData?.total} tags)
-              </span>
-              <button
-                onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-                disabled={page >= totalPages - 1}
-                className="px-3 py-1 rounded bg-neutral-700 hover:bg-neutral-600 disabled:opacity-30"
-              >
-                Next
-              </button>
+          {/* Detail panel */}
+          {selectedTag && (
+            <div className="w-full lg:w-96 space-y-4">
+              <div className="bg-vault-card border border-vault-border rounded-xl p-4">
+                <h2 className="text-lg font-semibold mb-2">
+                  <span className="text-vault-text-secondary">{selectedTag.namespace}:</span>{selectedTag.name}
+                </h2>
+                <p className="text-sm text-vault-text-muted">{t('tags.id')}: {selectedTag.id} | {t('tags.count')}: {selectedTag.count}</p>
+              </div>
+
+              {/* Aliases */}
+              <div className="bg-vault-card border border-vault-border rounded-xl p-4">
+                <h3 className="text-md font-semibold mb-3">{t('tags.aliases')}</h3>
+                {aliases && aliases.length > 0 ? (
+                  <ul className="space-y-1 mb-3">
+                    {aliases.map((a) => (
+                      <li key={`${a.alias_namespace}:${a.alias_name}`} className="flex items-center justify-between text-sm">
+                        <span className="font-mono">
+                          <span className="text-vault-text-muted">{a.alias_namespace}:</span>{a.alias_name}
+                        </span>
+                        <button
+                          onClick={() => handleDeleteAlias(a.alias_namespace, a.alias_name)}
+                          className="p-1 text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-vault-text-muted mb-3">{t('tags.noAliases')}</p>
+                )}
+                <div className="flex gap-2">
+                  <input type="text" placeholder="ns" className="p-2 w-16 bg-vault-input border border-vault-border rounded text-sm outline-none text-vault-text" value={aliasNs} onChange={(e) => setAliasNs(e.target.value)} />
+                  <input type="text" placeholder="alias name" className="p-2 flex-1 bg-vault-input border border-vault-border rounded text-sm outline-none text-vault-text" value={aliasName} onChange={(e) => setAliasName(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddAlias()} />
+                  <button onClick={handleAddAlias} className="flex items-center gap-1 px-3 py-2 bg-vault-accent hover:bg-vault-accent/90 rounded text-white text-sm font-medium transition-colors">
+                    <Plus size={14} /> {t('tags.add')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Implications */}
+              <div className="bg-vault-card border border-vault-border rounded-xl p-4">
+                <h3 className="text-md font-semibold mb-3">{t('tags.implications')}</h3>
+                {implications && implications.length > 0 ? (
+                  <ul className="space-y-1 mb-3">
+                    {implications.map((imp) => (
+                      <li key={`${imp.antecedent_id}-${imp.consequent_id}`} className="flex items-center justify-between text-sm">
+                        <span className="font-mono">
+                          <span className="text-orange-400">{imp.antecedent}</span>
+                          <span className="text-vault-text-muted mx-1">&rarr;</span>
+                          <span className="text-green-400">{imp.consequent}</span>
+                        </span>
+                        <button
+                          onClick={() => handleDeleteImplication(imp.antecedent_id, imp.consequent_id)}
+                          className="p-1 text-red-400 hover:bg-red-500/10 rounded transition-colors"
+                        >
+                          <Trash2 size={14} />
+                        </button>
+                      </li>
+                    ))}
+                  </ul>
+                ) : (
+                  <p className="text-sm text-vault-text-muted mb-3">{t('tags.noImplications')}</p>
+                )}
+                <div className="flex gap-2">
+                  <select className="p-2 bg-vault-input border border-vault-border rounded text-sm outline-none text-vault-text" value={implDirection} onChange={(e) => setImplDirection(e.target.value as "implies" | "implied_by")}>
+                    <option value="implies">{t('tags.implies')} &rarr;</option>
+                    <option value="implied_by">&larr; {t('tags.impliedBy')}</option>
+                  </select>
+                  <input type="number" placeholder={t('tags.targetTagId')} className="p-2 flex-1 bg-vault-input border border-vault-border rounded text-sm outline-none text-vault-text" value={implTargetId} onChange={(e) => setImplTargetId(e.target.value)} onKeyDown={(e) => e.key === "Enter" && handleAddImplication()} />
+                  <button onClick={handleAddImplication} className="flex items-center gap-1 px-3 py-2 bg-vault-accent hover:bg-vault-accent/90 rounded text-white text-sm font-medium transition-colors">
+                    <Plus size={14} /> {t('tags.add')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {!selectedTag && (
+            <div className="w-full lg:w-96">
+              <EmptyState icon={Tags} title="Select a tag to view details" />
             </div>
           )}
         </div>
-
-        {/* Detail panel */}
-        {selectedTag && (
-          <div className="w-full lg:w-96 space-y-6">
-            {/* Selected tag info */}
-            <div className="bg-neutral-800 rounded-xl p-4">
-              <h2 className="text-lg font-semibold mb-2">
-                <span className="text-neutral-400">{selectedTag.namespace}:</span>{selectedTag.name}
-              </h2>
-              <p className="text-sm text-neutral-400">ID: {selectedTag.id} | Count: {selectedTag.count}</p>
-            </div>
-
-            {/* Aliases */}
-            <div className="bg-neutral-800 rounded-xl p-4">
-              <h3 className="text-md font-semibold mb-3">Aliases</h3>
-              {aliases && aliases.length > 0 ? (
-                <ul className="space-y-1 mb-3">
-                  {aliases.map((a) => (
-                    <li key={`${a.alias_namespace}:${a.alias_name}`} className="flex items-center justify-between text-sm">
-                      <span className="font-mono">
-                        <span className="text-neutral-400">{a.alias_namespace}:</span>{a.alias_name}
-                      </span>
-                      <button
-                        onClick={() => handleDeleteAlias(a.alias_namespace, a.alias_name)}
-                        className="text-red-400 hover:text-red-300 text-xs px-2 py-0.5 rounded bg-red-900/20"
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-neutral-500 mb-3">No aliases</p>
-              )}
-
-              <div className="flex gap-2">
-                <input
-                  type="text"
-                  placeholder="ns"
-                  className="p-2 w-16 bg-neutral-700 rounded text-sm outline-none"
-                  value={aliasNs}
-                  onChange={(e) => setAliasNs(e.target.value)}
-                />
-                <input
-                  type="text"
-                  placeholder="alias name"
-                  className="p-2 flex-1 bg-neutral-700 rounded text-sm outline-none"
-                  value={aliasName}
-                  onChange={(e) => setAliasName(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddAlias()}
-                />
-                <button
-                  onClick={handleAddAlias}
-                  className="px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium"
-                >
-                  Add
-                </button>
-              </div>
-            </div>
-
-            {/* Implications */}
-            <div className="bg-neutral-800 rounded-xl p-4">
-              <h3 className="text-md font-semibold mb-3">Implications</h3>
-              {implications && implications.length > 0 ? (
-                <ul className="space-y-1 mb-3">
-                  {implications.map((imp) => (
-                    <li key={`${imp.antecedent_id}-${imp.consequent_id}`} className="flex items-center justify-between text-sm">
-                      <span className="font-mono">
-                        <span className="text-orange-400">{imp.antecedent}</span>
-                        <span className="text-neutral-500 mx-1">&rarr;</span>
-                        <span className="text-green-400">{imp.consequent}</span>
-                      </span>
-                      <button
-                        onClick={() => handleDeleteImplication(imp.antecedent_id, imp.consequent_id)}
-                        className="text-red-400 hover:text-red-300 text-xs px-2 py-0.5 rounded bg-red-900/20"
-                      >
-                        Remove
-                      </button>
-                    </li>
-                  ))}
-                </ul>
-              ) : (
-                <p className="text-sm text-neutral-500 mb-3">No implications</p>
-              )}
-
-              <div className="flex gap-2">
-                <select
-                  className="p-2 bg-neutral-700 rounded text-sm outline-none"
-                  value={implDirection}
-                  onChange={(e) => setImplDirection(e.target.value as "implies" | "implied_by")}
-                >
-                  <option value="implies">implies &rarr;</option>
-                  <option value="implied_by">&larr; implied by</option>
-                </select>
-                <input
-                  type="number"
-                  placeholder="Target tag ID"
-                  className="p-2 flex-1 bg-neutral-700 rounded text-sm outline-none"
-                  value={implTargetId}
-                  onChange={(e) => setImplTargetId(e.target.value)}
-                  onKeyDown={(e) => e.key === "Enter" && handleAddImplication()}
-                />
-                <button
-                  onClick={handleAddImplication}
-                  className="px-3 py-2 bg-blue-600 hover:bg-blue-500 rounded text-sm font-medium"
-                >
-                  Add
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
       </div>
     </div>
   );

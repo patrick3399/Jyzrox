@@ -14,7 +14,7 @@ export function LoadingSpinner({ size = 'md', className = '' }: LoadingSpinnerPr
     <div
       className={`
         inline-block rounded-full
-        border-gray-600 border-t-purple-500
+        border-vault-border border-t-vault-accent
         animate-spin
         ${sizeMap[size]}
         ${className}
@@ -27,7 +27,7 @@ export function LoadingSpinner({ size = 'md', className = '' }: LoadingSpinnerPr
 
 export function LoadingPage() {
   return (
-    <div className="flex items-center justify-center w-full h-full min-h-screen bg-[#111111]">
+    <div className="flex items-center justify-center w-full h-full min-h-screen bg-vault-card">
       <LoadingSpinner size="lg" />
     </div>
   )

@@ -2,6 +2,7 @@
 
 import { useState, FormEvent, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { t } from '@/lib/i18n'
 
 function Logo() {
   return (
@@ -12,7 +13,7 @@ function Logo() {
       <path d="M50 50 C55 65, 60 85, 50 95 C40 85, 45 65, 50 50Z" fill="#2196F3" />
       <path d="M50 50 C35 60, 20 65, 10 55 C20 45, 35 45, 50 50Z" fill="#E91E63" />
       <path d="M50 50 C35 40, 20 30, 10 40 C20 50, 35 50, 50 50Z" fill="#9C27B0" />
-      <circle cx="50" cy="50" r="6" fill="#0a0a0a" />
+      <circle cx="50" cy="50" r="6" fill="currentColor" className="text-vault-bg" />
     </svg>
   )
 }
@@ -29,11 +30,8 @@ export default function SetupPage() {
     fetch('/api/auth/needs-setup')
       .then((r) => r.json())
       .then((data) => {
-        if (!data.needs_setup) {
-          router.replace('/login')
-        } else {
-          setLoading(false)
-        }
+        if (!data.needs_setup) router.replace('/login')
+        else setLoading(false)
       })
       .catch(() => setLoading(false))
   }, [router])
@@ -41,16 +39,8 @@ export default function SetupPage() {
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
     e.preventDefault()
     setError('')
-
-    if (password !== confirm) {
-      setError('密碼不一致')
-      return
-    }
-    if (password.length < 8) {
-      setError('密碼至少需要 8 個字元')
-      return
-    }
-
+    if (password !== confirm) { setError(t('setup.passwordMismatch')); return }
+    if (password.length < 8) { setError(t('setup.passwordTooShort')); return }
     setLoading(true)
     try {
       const res = await fetch('/api/auth/setup', {
@@ -58,107 +48,54 @@ export default function SetupPage() {
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ username, password }),
       })
-
-      if (res.ok) {
-        window.location.href = '/login'
-      } else {
+      if (res.ok) { window.location.href = '/login' }
+      else {
         const data = await res.json().catch(() => ({}))
-        setError(data?.detail ?? '設定失敗，請重試。')
+        setError(data?.detail ?? t('setup.failed'))
       }
-    } catch {
-      setError('網路錯誤，請確認連線。')
-    } finally {
-      setLoading(false)
-    }
+    } catch { setError(t('setup.networkError')) }
+    finally { setLoading(false) }
   }
 
   if (loading) {
     return (
-      <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center">
-        <div className="w-6 h-6 border-2 border-[#4250af] border-t-transparent rounded-full animate-spin" />
+      <div className="min-h-screen bg-vault-bg flex items-center justify-center">
+        <div className="w-6 h-6 border-2 border-vault-accent border-t-transparent rounded-full animate-spin" />
       </div>
     )
   }
 
   return (
-    <div className="min-h-screen bg-[#0a0a0a] flex items-center justify-center px-4">
+    <div className="min-h-screen bg-vault-bg flex items-center justify-center px-4">
       <div className="w-full max-w-sm">
-        <div className="bg-[#0f1118] border border-[#1e2030] rounded-3xl px-8 py-10 shadow-2xl shadow-black/60">
-          {/* Logo + title */}
+        <div className="bg-vault-card border border-vault-border rounded-3xl px-8 py-10 shadow-2xl">
           <div className="flex flex-col items-center mb-8">
             <Logo />
-            <h1 className="mt-4 text-2xl font-semibold text-[#8ba4d6]">
-              初始化設定
-            </h1>
-            <p className="mt-2 text-sm text-[#6b7280] text-center">
-              建立管理員帳號以開始使用
-            </p>
+            <h1 className="mt-4 text-2xl font-semibold text-vault-accent">{t('setup.title')}</h1>
+            <p className="mt-2 text-sm text-vault-text-muted text-center">{t('setup.subtitle')}</p>
           </div>
-
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
             <div className="flex flex-col gap-2">
-              <label htmlFor="username" className="text-sm text-[#9ca3af]">
-                使用者名稱
-              </label>
-              <input
-                id="username"
-                type="text"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-                autoComplete="username"
-                autoFocus
-                required
-                disabled={loading}
-                placeholder="admin"
-                className="w-full bg-[#1a1f2e] border border-[#2a2f3e] rounded-xl px-4 py-3 text-sm text-white placeholder-[#444] focus:outline-none focus:border-[#4250af] transition-colors disabled:opacity-50"
-              />
+              <label htmlFor="username" className="text-sm text-vault-text-secondary">{t('setup.username')}</label>
+              <input id="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus required disabled={loading} placeholder="admin"
+                className="w-full bg-vault-input border border-vault-border rounded-xl px-4 py-3 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors disabled:opacity-50" />
             </div>
-
             <div className="flex flex-col gap-2">
-              <label htmlFor="password" className="text-sm text-[#9ca3af]">
-                密碼
-              </label>
-              <input
-                id="password"
-                type="password"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-                autoComplete="new-password"
-                required
-                disabled={loading}
-                placeholder="至少 8 個字元"
-                className="w-full bg-[#1a1f2e] border border-[#2a2f3e] rounded-xl px-4 py-3 text-sm text-white placeholder-[#444] focus:outline-none focus:border-[#4250af] transition-colors disabled:opacity-50"
-              />
+              <label htmlFor="password" className="text-sm text-vault-text-secondary">{t('setup.password')}</label>
+              <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="new-password" required disabled={loading} placeholder={t('setup.passwordHint')}
+                className="w-full bg-vault-input border border-vault-border rounded-xl px-4 py-3 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors disabled:opacity-50" />
             </div>
-
             <div className="flex flex-col gap-2">
-              <label htmlFor="confirm" className="text-sm text-[#9ca3af]">
-                確認密碼
-              </label>
-              <input
-                id="confirm"
-                type="password"
-                value={confirm}
-                onChange={(e) => setConfirm(e.target.value)}
-                autoComplete="new-password"
-                required
-                disabled={loading}
-                className="w-full bg-[#1a1f2e] border border-[#2a2f3e] rounded-xl px-4 py-3 text-sm text-white placeholder-[#444] focus:outline-none focus:border-[#4250af] transition-colors disabled:opacity-50"
-              />
+              <label htmlFor="confirm" className="text-sm text-vault-text-secondary">{t('setup.confirmPassword')}</label>
+              <input id="confirm" type="password" value={confirm} onChange={(e) => setConfirm(e.target.value)} autoComplete="new-password" required disabled={loading}
+                className="w-full bg-vault-input border border-vault-border rounded-xl px-4 py-3 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors disabled:opacity-50" />
             </div>
-
             {error && (
-              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
-                {error}
-              </p>
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">{error}</p>
             )}
-
-            <button
-              type="submit"
-              disabled={loading || !username || !password || !confirm}
-              className="mt-2 w-full bg-[#c5daf6] hover:bg-[#b0cdf0] active:bg-[#9ec0ea] disabled:opacity-40 disabled:cursor-not-allowed text-[#1a1a2e] font-semibold rounded-full py-3.5 text-sm transition-colors"
-            >
-              {loading ? '建立中…' : '建立帳號'}
+            <button type="submit" disabled={loading || !username || !password || !confirm}
+              className="mt-2 w-full bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-full py-3.5 text-sm transition-colors">
+              {loading ? t('setup.submitting') : t('setup.submit')}
             </button>
           </form>
         </div>
