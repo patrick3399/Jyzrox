@@ -21,7 +21,7 @@
 - [x] 手機版 Saved Searches UI（目前書籤按鈕 `hidden sm:block`，手機版不可見）
 
 ### 搜尋增強
-- [ ] 感知雜湊（perceptual hash）去重（目前僅 SHA256 完全相同）
+- [x] 感知雜湊（perceptual hash）去重（目前僅 SHA256 完全相同）
 - [ ] 搜尋語法：`sort:posted_at`、`sort:title` 後端已支援，前端 UI 可增加排序選項
 
 ---

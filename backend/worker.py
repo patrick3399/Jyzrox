@@ -860,6 +860,7 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
 
 async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
     """Generate 160/360/720px WebP thumbnails for all images in a gallery."""
+    import imagehash
     from PIL import Image as PILImage
 
     logger.info("[thumbnail] gallery_id=%d", gallery_id)
@@ -889,6 +890,7 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
                 with PILImage.open(src) as pil:
                     # Store actual dimensions
                     img.width, img.height = pil.size
+                    img.phash = str(imagehash.phash(pil))
                     rgb = pil.convert("RGB")
                     for size in sizes:
                         dest = thumb_dir / f"thumb_{size}.webp"

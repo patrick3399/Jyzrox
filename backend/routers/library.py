@@ -9,6 +9,7 @@ from typing import Literal
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import ARRAY, Text, and_, cast, desc, func, not_, or_, select
+from sqlalchemy.sql import text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -367,6 +368,79 @@ async def save_progress(
     await db.execute(stmt)
     await db.commit()
     return {"status": "ok"}
+
+
+# ── Similar images ───────────────────────────────────────────────────
+
+
+@router.get("/images/{image_id}/similar")
+async def find_similar_images(
+    image_id: int,
+    threshold: int = Query(default=10, ge=0, le=32),
+    limit: int = Query(default=20, ge=1, le=100),
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Find visually similar images by perceptual hash Hamming distance.
+
+    Uses PostgreSQL 15 bit_count() on the XOR of two 64-bit pHash values
+    (stored as hex strings) to compute Hamming distance in pure SQL.
+    Threshold 0 = exact match, 10 = visually similar (recommended default),
+    32 = very loose match.
+    """
+    img = await db.get(Image, image_id)
+    if not img:
+        raise HTTPException(status_code=404, detail="Image not found")
+    if not img.phash:
+        raise HTTPException(status_code=400, detail="Image has no perceptual hash")
+
+    stmt = sql_text("""
+        SELECT id, gallery_id, filename, file_path, thumb_path, phash,
+               bit_count(
+                   ('x' || lpad(:phash, 16, '0'))::bit(64)
+                   #
+                   ('x' || lpad(phash, 16, '0'))::bit(64)
+               )::int AS distance
+        FROM images
+        WHERE phash IS NOT NULL
+          AND id != :image_id
+          AND bit_count(
+                  ('x' || lpad(:phash, 16, '0'))::bit(64)
+                  #
+                  ('x' || lpad(phash, 16, '0'))::bit(64)
+              )::int <= :threshold
+        ORDER BY distance ASC
+        LIMIT :limit
+    """)
+
+    results = (
+        await db.execute(
+            stmt,
+            {
+                "phash": img.phash,
+                "image_id": image_id,
+                "threshold": threshold,
+                "limit": limit,
+            },
+        )
+    ).all()
+
+    return {
+        "image_id": image_id,
+        "phash": img.phash,
+        "similar": [
+            {
+                "id": r.id,
+                "gallery_id": r.gallery_id,
+                "filename": r.filename,
+                "file_path": _to_url(r.file_path, "/data/gallery/", "/media/gallery/"),
+                "thumb_path": _to_url(r.thumb_path, "/data/thumbs/", "/media/thumbs/"),
+                "phash": r.phash,
+                "distance": r.distance,
+            }
+            for r in results
+        ],
+    }
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

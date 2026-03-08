@@ -72,6 +72,7 @@ class Image(Base):
     thumb_path: Mapped[str | None] = mapped_column(Text)
     file_size: Mapped[int | None] = mapped_column(BigInteger)
     file_hash: Mapped[str | None] = mapped_column(Text)
+    phash: Mapped[str | None] = mapped_column(Text)
     media_type: Mapped[str] = mapped_column(Text, default="image")
     duration: Mapped[float | None] = mapped_column(Float)
     duplicate_of: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("images.id"))

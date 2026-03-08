@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS images (
     thumb_path      TEXT,
     file_size       BIGINT,
     file_hash       TEXT,
+    phash           TEXT,
     media_type      TEXT DEFAULT 'image',
     duration        REAL,
     duplicate_of    BIGINT REFERENCES images(id),
@@ -145,6 +146,7 @@ CREATE INDEX IF NOT EXISTS idx_galleries_favorited ON galleries (favorited) WHER
 CREATE INDEX IF NOT EXISTS idx_images_gallery      ON images (gallery_id, page_num);
 CREATE INDEX IF NOT EXISTS idx_images_hash         ON images (file_hash);
 CREATE INDEX IF NOT EXISTS idx_images_duplicate    ON images (duplicate_of) WHERE duplicate_of IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_images_phash        ON images (phash) WHERE phash IS NOT NULL;
 
 -- #4: galleries.source (single-column) — used in WHERE source = 'pixiv' filters
 -- Note: idx_galleries_source above covers (source, source_id); this covers source-only lookups.
