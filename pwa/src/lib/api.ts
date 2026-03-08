@@ -195,6 +195,20 @@ const eh = {
 
   getComments: (gid: number, token: string) =>
     apiFetch<{ comments: EhComment[] }>(`/api/eh/gallery/${gid}/${token}/comments`),
+
+  /** Paginated image token fetch — avoids loading all tokens upfront for large galleries */
+  getImagesPaginated: (
+    gid: number,
+    token: string,
+    startPage: number = 0,
+    count: number = 20,
+  ) =>
+    apiFetch<{
+      images: Array<{ page: number; token: string }>
+      previews: Record<string, string>
+      has_more: boolean
+      total: number
+    }>(`/api/eh/gallery/${gid}/${token}/images-paginated?start_page=${startPage}&count=${count}`),
 }
 
 // ── Library ───────────────────────────────────────────────────────────

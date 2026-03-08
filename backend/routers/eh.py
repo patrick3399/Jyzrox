@@ -375,6 +375,151 @@ async def get_gallery_images(
     )
 
 
+# ── Paginated image token list ───────────────────────────────────────
+
+
+@router.get("/gallery/{gid}/{token}/images-paginated")
+async def get_gallery_images_paginated(
+    gid: int,
+    token: str,
+    start_page: int = Query(0, ge=0, description="0-based index of the first image"),
+    count: int = Query(20, ge=1, le=100, description="Number of images to return"),
+    _: dict = Depends(require_auth),
+):
+    """
+    Return pTokens and preview thumbnails for a single window of images.
+
+    Unlike /images (which fetches all pages upfront), this endpoint makes only
+    the one or two EH detail-page HTTP requests needed for the requested window.
+    Suitable for lazy-loading large galleries page by page.
+
+    Cache key: ``eh:imgpage:{gid}:{detail_page}`` (per EH detail page, TTL 24 h).
+    Returns: {gid, images: [{page, token}], previews: {page: url}, has_more, total}
+    """
+    THUMBS_PER_DETAIL = 20
+
+    # Resolve total page count — gallery cache first.
+    gallery = await cache.get_gallery_cache(gid)
+    if not gallery:
+        client = await _make_client()
+        async with client:
+            try:
+                gallery = await client.get_gallery_metadata(gid, token)
+            except PermissionError as e:
+                detail = str(e)
+                await push_system_alert(detail)
+                status = 403 if "Sad Panda" in detail or "509" in detail else 401
+                raise HTTPException(status_code=status, detail=detail)
+            except ValueError as e:
+                raise HTTPException(status_code=503, detail=str(e))
+        await cache.set_gallery_cache(gid, gallery)
+
+    total_pages: int = gallery["pages"]
+
+    # Clamp check before any network work.
+    if total_pages == 0 or start_page >= total_pages:
+        return JSONResponse(
+            content={"gid": gid, "images": [], "previews": {}, "has_more": False, "total": total_pages},
+            headers={"Cache-Control": "private, max-age=86400"},
+        )
+
+    end_page_excl = min(start_page + count, total_pages)
+    first_dp = start_page // THUMBS_PER_DETAIL
+    last_dp = (end_page_excl - 1) // THUMBS_PER_DETAIL
+
+    # Check per-detail-page Redis cache before making HTTP requests.
+    token_map: dict[str, str] = {}
+    preview_map: dict[str, str] = {}
+    missing_dps: list[int] = []
+
+    for dp in range(first_dp, last_dp + 1):
+        ck = f"eh:imgpage:{gid}:{dp}"
+        cached_dp = await cache.get_json(ck)
+        if cached_dp:
+            token_map.update(cached_dp.get("tokens", {}))
+            preview_map.update(cached_dp.get("previews", {}))
+        else:
+            missing_dps.append(dp)
+
+    if missing_dps:
+        import asyncio
+
+        import httpx as _httpx
+
+        client = await _make_client()
+        async with client:
+            try:
+                for i, dp in enumerate(missing_dps):
+                    if i > 0:
+                        await asyncio.sleep(0.3)
+
+                    url_html = f"{client.base_url}/g/{gid}/{token}/?p={dp}"
+                    resp = await client._http.get(url_html)
+                    resp.raise_for_status()
+                    client._check_auth(resp.text, resp)
+
+                    page_tokens, page_previews = client._parse_detail_html(resp.text)
+
+                    str_tokens = {str(k): v for k, v in page_tokens.items()}
+                    str_prevs = {str(k): v for k, v in page_previews.items()}
+
+                    ck = f"eh:imgpage:{gid}:{dp}"
+                    await cache.set_json(ck, {"tokens": str_tokens, "previews": str_prevs}, 86400)
+
+                    token_map.update(str_tokens)
+                    preview_map.update(str_prevs)
+
+            except PermissionError as e:
+                detail = str(e)
+                await push_system_alert(detail)
+                status = 403 if "Sad Panda" in detail or "509" in detail else 401
+                raise HTTPException(status_code=status, detail=detail)
+            except _httpx.HTTPError as e:
+                logger.error("Failed to fetch image tokens for %s dp=%s: %s", gid, missing_dps, e)
+                raise HTTPException(status_code=502, detail=f"EH request failed: {e}")
+            except ValueError as e:
+                raise HTTPException(status_code=503, detail=str(e))
+
+    # Build ordered result list for the requested window.
+    images = []
+    for img_idx in range(start_page, end_page_excl):
+        page_num = img_idx + 1  # EH page numbers are 1-based
+        pt = token_map.get(str(page_num))
+        if pt:
+            images.append({"page": page_num, "token": pt})
+
+    # Keep only previews inside the requested window.
+    # EH page numbers are 1-based; start_page is 0-based, so the 1-based range is
+    # [start_page+1, end_page_excl] (end_page_excl is exclusive in 0-based terms,
+    # but in 1-based terms the last valid page is end_page_excl).
+    window_previews = {
+        k: v
+        for k, v in preview_map.items()
+        if start_page + 1 <= int(k) <= end_page_excl
+    }
+
+    # Merge tokens into imagelist:{gid} so image-proxy can resolve them.
+    existing = await cache.get_imagelist_cache(gid) or {}
+    existing.update({str(img["page"]): img["token"] for img in images})
+    await cache.set_imagelist_cache(gid, existing)
+
+    # Merge previews into preview cache for consistency.
+    existing_prev = await cache.get_preview_cache(gid) or {}
+    existing_prev.update(window_previews)
+    await cache.set_preview_cache(gid, existing_prev)
+
+    return JSONResponse(
+        content={
+            "gid": gid,
+            "images": images,
+            "previews": window_previews,
+            "has_more": end_page_excl < total_pages,
+            "total": total_pages,
+        },
+        headers={"Cache-Control": "private, max-age=86400"},
+    )
+
+
 # ── Image proxy ──────────────────────────────────────────────────────
 
 

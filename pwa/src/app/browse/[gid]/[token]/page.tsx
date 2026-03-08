@@ -33,6 +33,8 @@ function PreviewGrid({
   const [spriteNaturalSizes, setSpriteNaturalSizes] = useState<
     Record<string, { w: number; h: number }>
   >({})
+  // Fixed cell height — tall enough for portrait; landscape gets letterboxed with object-contain logic.
+  const CELL_H = 180
 
   useEffect(() => {
     const grid = gridRef.current
@@ -77,29 +79,41 @@ function PreviewGrid({
       )}
       <div ref={gridRef} className="grid grid-cols-3 sm:grid-cols-6 gap-2">
         {thumbs.map((thumb) => {
-          // Scale based on width only — backend normalizes sprite heights.
+          // object-contain scale: fit entire cell within container, no cropping.
+          // This handles both portrait and landscape images correctly.
           const tw = thumb.width ?? 200
           const th = thumb.height ?? 300
-          const scale = cellW ? cellW / tw : 1
+          const scaleX = cellW ? cellW / tw : 1
+          // Use fixed CELL_H for consistent grid rows regardless of image orientation.
+          const scaleY = CELL_H / th
+          // Use Math.max (cover) so images fill the cell on both axes;
+          // overflow is clipped by the container's overflow-hidden.
+          const scale = Math.max(scaleX, scaleY)
           const naturalSize = spriteNaturalSizes[thumb.url]
           // Use exact pixel dimensions once the sprite is loaded; fall back to auto
           // until then. This prevents sub-pixel rounding from bleeding adjacent cells.
           const bgSize = naturalSize
             ? `${naturalSize.w * scale}px ${naturalSize.h * scale}px`
-            : `auto ${th * scale}px`
+            : `${tw * scale}px ${th * scale}px`
+          // Background-position: shift the sprite left so that the desired cell
+          // starts at the container's origin, then add centering offset so the
+          // (smaller) cell is centered horizontally within the container.
+          const scaledCellW = tw * scale
+          const bgPosX = (thumb.offsetX ?? 0) * scale + (cellW - scaledCellW) / 2
           return (
             <button
               key={thumb.page}
               onClick={() => onRead(thumb.page)}
-              className="relative aspect-[3/4] bg-vault-bg rounded-lg overflow-hidden border border-vault-border
-                         hover:border-blue-500 hover:brightness-110 transition-all cursor-pointer"
+              className="relative bg-vault-bg rounded-lg overflow-hidden border border-vault-border
+                         hover:border-blue-500 hover:brightness-110 transition-all cursor-pointer flex items-center justify-center"
+              style={{ height: CELL_H }}
             >
               {thumb.isSprite ? (
                 <div
                   className="w-full h-full"
                   style={{
                     backgroundImage: `url(${thumb.url})`,
-                    backgroundPosition: `${(thumb.offsetX ?? 0) * scale}px center`,
+                    backgroundPosition: `${bgPosX}px top`,
                     backgroundSize: bgSize,
                     backgroundRepeat: 'no-repeat',
                   }}

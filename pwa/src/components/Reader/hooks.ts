@@ -120,7 +120,12 @@ export function useReaderState(initialPage: number, totalPages: number, galleryI
 }
 
 // ── useSequentialPrefetch ─────────────────────────────────────────────
-// Core feature: serialised prefetch control
+// Core feature: prefetch control with parallel slots + per-image timeout
+
+/** Max concurrent in-flight prefetch requests in proxy mode */
+const PROXY_PREFETCH_CONCURRENCY = 2
+/** Timeout (ms) per image in proxy mode before giving up and moving on */
+const PROXY_PREFETCH_TIMEOUT_MS = 2000
 
 export function useSequentialPrefetch(
   images: ReaderImage[],
@@ -128,7 +133,8 @@ export function useSequentialPrefetch(
   isProxyMode: boolean,
 ): Set<number> {
   const [prefetched, setPrefetched] = useState<Set<number>>(new Set())
-  const inflightRef = useRef(false)
+  // Number of requests currently in flight (proxy mode)
+  const inflightCountRef = useRef(0)
   const prefetchedRef = useRef<Set<number>>(new Set())
   // Track active Image elements for cleanup on unmount / page change
   const activeImagesRef = useRef<Set<HTMLImageElement>>(new Set())
@@ -176,15 +182,28 @@ export function useSequentialPrefetch(
       if (!img || prefetchedRef.current.has(pageNum)) return
 
       if (isProxyMode) {
-        // Proxy mode: strict 1-at-a-time — never start while another is in flight
-        if (inflightRef.current) return
-        inflightRef.current = true
+        // Proxy mode: allow up to PROXY_PREFETCH_CONCURRENCY concurrent requests.
+        // Each request has a timeout; on timeout it is treated as done and the
+        // chain continues to the next page so a slow image never blocks the queue.
+        if (inflightCountRef.current >= PROXY_PREFETCH_CONCURRENCY) return
 
-        const capturedEpoch = epochRef.current // snapshot epoch for this request
+        inflightCountRef.current += 1
+        const capturedEpoch = epochRef.current
 
         const el = new window.Image()
         activeImagesRef.current.add(el)
+
+        // Timeout: if image hasn't loaded within threshold, skip and continue chain
+        const timeoutId = setTimeout(() => {
+          cleanupImage(el)
+          if (unmountedRef.current || capturedEpoch !== epochRef.current) return
+          inflightCountRef.current = Math.max(0, inflightCountRef.current - 1)
+          // Skip this page (don't add to prefetched) and try next
+          prefetchPageRef.current(pageNum + 1)
+        }, PROXY_PREFETCH_TIMEOUT_MS)
+
         el.onload = el.onerror = () => {
+          clearTimeout(timeoutId)
           cleanupImage(el)
 
           // If unmounted or the user has moved to a different page since this
@@ -193,8 +212,8 @@ export function useSequentialPrefetch(
 
           prefetchedRef.current = new Set([...prefetchedRef.current, pageNum])
           setPrefetched(new Set(prefetchedRef.current))
-          inflightRef.current = false
-          // Chain: immediately try the next page
+          inflightCountRef.current = Math.max(0, inflightCountRef.current - 1)
+          // Chain: immediately try the next page in sequence
           prefetchPageRef.current(pageNum + 1)
         }
         el.src = img.url
@@ -224,15 +243,18 @@ export function useSequentialPrefetch(
     // Advance epoch so any stale in-flight callback from the previous page
     // will detect a mismatch and abort its chain.
     epochRef.current += 1
-    // Reset inflight flag so the new chain can start immediately even if the
-    // old request hasn't fired its callback yet.
-    inflightRef.current = false
+    // Reset inflight count so the new chain can start immediately even if the
+    // old requests haven't fired their callbacks yet.
+    inflightCountRef.current = 0
     // Clean up any in-flight Image objects from the previous page
     cleanupAllImages()
 
     if (isProxyMode) {
-      // Start sequential chain from current+1
-      prefetchPage(currentPage + 1)
+      // Start parallel prefetch chains — fire PROXY_PREFETCH_CONCURRENCY starting
+      // pages so we have multiple requests in flight without strict serialisation.
+      for (let slot = 0; slot < PROXY_PREFETCH_CONCURRENCY; slot++) {
+        prefetchPage(currentPage + 1 + slot)
+      }
     } else {
       // Local: prefetch current+1, current+2, current+3 concurrently
       for (let i = 1; i <= 3; i++) {

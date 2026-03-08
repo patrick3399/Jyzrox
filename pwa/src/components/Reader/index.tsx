@@ -143,6 +143,10 @@ interface ReaderProps {
   initialPage?: number
   /** EH preview thumbnail map: { "1": "url" or "url|ox|w|h" } */
   previews?: Record<string, string>
+  /** Called when the current page changes — used by EH proxy reader for paginated token loading */
+  onPageChange?: (page: number) => void
+  /** Called when user seeks to a page that may not have tokens yet — triggers eager batch fetch */
+  onSeekToPage?: (page: number) => Promise<void>
 }
 
 // ── SinglePageView ────────────────────────────────────────────────────
@@ -719,6 +723,11 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
           let thumbSrc: string | null = null
           let spriteStyle: React.CSSProperties | null = null
 
+          // Thumb container dimensions — portrait default; landscape cells get
+          // a wider button so the image is never cropped or squashed.
+          let thumbW = 48
+          let thumbH = 64
+
           if (previewRaw) {
             if (previewRaw.includes('|')) {
               const parts = previewRaw.split('|')
@@ -726,8 +735,21 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
               const ox = Number(parts[1])
               const cellW = Number(parts[2]) || 200
               const cellH = Number(parts[3]) || 300
-              // Scale based on width only — backend normalizes sprite heights.
-              const scale = 48 / cellW
+              // Scale to fit within a fixed 64px tall strip. Width adapts to
+              // the cell's aspect ratio: portrait gets narrower, landscape gets wider.
+              // Cap at 80px wide so extremely wide cells don't overflow the strip.
+              const maxH = 64
+              const maxW = 80
+              const scaleByH = maxH / cellH
+              const scaleByW = maxW / cellW
+              const scale = Math.min(scaleByH, scaleByW)
+              // Compute actual rendered cell dimensions after scaling.
+              const renderedW = Math.round(cellW * scale)
+              const renderedH = Math.round(cellH * scale)
+              thumbW = renderedW
+              thumbH = renderedH
+              // Center the sprite cell within its rendered box (ox is already
+              // the left edge of this cell within the sprite sheet).
               const scaledOx = ox * scale
               const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
               const naturalSize = spriteNaturalSizes[proxyUrl]
@@ -736,7 +758,7 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
                 : `auto ${cellH * scale}px`
               spriteStyle = {
                 backgroundImage: `url(${proxyUrl})`,
-                backgroundPosition: `${scaledOx}px center`,
+                backgroundPosition: `${scaledOx}px 0px`,
                 backgroundSize: bgSize,
                 backgroundRepeat: 'no-repeat',
                 width: '100%',
@@ -757,7 +779,7 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
               className={`relative flex-shrink-0 overflow-hidden rounded transition-all ${
                 isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
               }`}
-              style={{ width: 48, height: 64 }}
+              style={{ width: thumbW, height: thumbH }}
               title={`Page ${img.pageNum}`}
             >
               {spriteStyle ? (
@@ -766,7 +788,7 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
                 <img
                   src={thumbSrc}
                   alt={`Thumb ${img.pageNum}`}
-                  className="h-full w-full object-cover"
+                  className="h-full w-full object-contain"
                 />
               ) : (
                 <div className="h-full w-full bg-neutral-800 flex items-center justify-center">
@@ -925,6 +947,8 @@ export default function Reader({
   totalPages,
   initialPage = 1,
   previews,
+  onPageChange,
+  onSeekToPage,
 }: ReaderProps) {
   const router = useRouter()
   const isProxyMode = downloadStatus !== 'complete'
@@ -1031,6 +1055,20 @@ export default function Reader({
     setPageLoading(false)
   }, [])
 
+  // Notify parent of page changes (used for paginated token loading in EH proxy mode)
+  useEffect(() => {
+    onPageChange?.(state.currentPage)
+  }, [state.currentPage, onPageChange])
+
+  // Wrapped setPage that also triggers eager token fetch for large jumps
+  const setPageWithPrefetch = useCallback(
+    (page: number) => {
+      setPage(page)
+      onSeekToPage?.(page)
+    },
+    [setPage, onSeekToPage],
+  )
+
   useSequentialPrefetch(images, state.currentPage, isProxyMode)
   useProgressSave(galleryId, state.currentPage)
 
@@ -1133,7 +1171,7 @@ export default function Reader({
         {state.viewMode === 'webtoon' && (
           <WebtoonView
             images={images}
-            onPageChange={setPage}
+            onPageChange={setPageWithPrefetch}
             onToggleOverlay={handleToggleOverlay}
             scrollToPage={state.currentPage}
           />
@@ -1144,8 +1182,8 @@ export default function Reader({
             leftImage={currentImage}
             rightImage={nextImage}
             isLoading={pageLoading}
-            onNext={() => setPage(state.currentPage + 2)}
-            onPrev={() => setPage(state.currentPage - 2)}
+            onNext={() => setPageWithPrefetch(state.currentPage + 2)}
+            onPrev={() => setPageWithPrefetch(state.currentPage - 2)}
             onToggleOverlay={handleToggleOverlay}
             onImageLoaded={handleImageLoaded}
             scaleMode={state.scaleMode}
@@ -1159,7 +1197,7 @@ export default function Reader({
         <ThumbnailStrip
           images={images}
           currentPage={state.currentPage}
-          onPageSelect={setPage}
+          onPageSelect={setPageWithPrefetch}
           previews={previews}
         />
       )}

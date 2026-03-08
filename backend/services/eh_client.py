@@ -32,7 +32,7 @@ CATEGORY_MASK: dict[str, int] = {
     "image_set": 32,
     "cosplay": 64,
     "asian_porn": 128,
-    "non_h": 256,
+    "non-h": 256,
     "western": 512,
 }
 ALL_CATS = sum(CATEGORY_MASK.values())  # 1023
@@ -307,24 +307,6 @@ class EhClient:
                 # Always store as sprite format — even offset 0 is part of the sprite sheet
                 preview_map[page_num] = f"{thumb_url}|{offset_x}|{width}|{height}"
 
-            # Normalize cell heights per sprite URL — the sprite image has a single
-            # height, but CSS may declare different heights for individual cells
-            # (e.g., cover page 150px vs normal 278px). Use max height per sprite.
-            sprite_heights: dict[str, int] = defaultdict(int)
-            for _page_num, val in preview_map.items():
-                parts = val.split('|')
-                if len(parts) == 4:
-                    sprite_url = parts[0]
-                    h = int(parts[3])
-                    if h > sprite_heights[sprite_url]:
-                        sprite_heights[sprite_url] = h
-            for page_num in list(preview_map.keys()):
-                parts = preview_map[page_num].split('|')
-                if len(parts) == 4:
-                    sprite_url = parts[0]
-                    max_h = sprite_heights[sprite_url]
-                    if int(parts[3]) != max_h:
-                        preview_map[page_num] = f"{parts[0]}|{parts[1]}|{parts[2]}|{max_h}"
         else:
             # Legacy large previews: <div class="gdtl"><img alt="N" src="URL">
             large_matches = list(_LARGE_PREVIEW_RE.finditer(html))
@@ -390,6 +372,88 @@ class EhClient:
             preview_map.update(page_previews)
 
         return token_map, preview_map
+
+    async def get_image_tokens_paginated(
+        self,
+        gid: int,
+        token: str,
+        total_pages: int,
+        start_page: int = 0,
+        count: int = 20,
+    ) -> dict:
+        """
+        Fetch image pTokens and preview thumbnails for a single window of pages.
+
+        EH detail pages show 20 thumbnails each (p=0 has pages 1-20,
+        p=1 has pages 21-40, etc.).  This method maps ``start_page``
+        (0-based image index) to the minimal set of EH detail pages
+        needed to satisfy ``count`` images and performs only those
+        HTTP requests.
+
+        Args:
+            gid:         Gallery numeric ID.
+            token:       Gallery token string.
+            total_pages: Total image count (used to compute ``has_more``
+                         and to clamp out-of-range requests).
+            start_page:  0-based image index of the first image wanted.
+            count:       Number of images to return (1-100).
+
+        Returns:
+            {
+                "images":   [{"page": int, "token": str}, ...],
+                "previews": {"<page>": "<thumb_url|sprite>", ...},
+                "has_more": bool,
+                "total":    int,
+            }
+        """
+        import asyncio
+
+        THUMBS_PER_DETAIL = 20  # EH always shows 20 thumbnails per detail page
+
+        # Clamp start_page to valid range.
+        if total_pages == 0 or start_page >= total_pages:
+            return {"images": [], "previews": {}, "has_more": False, "total": total_pages}
+
+        end_page_excl = min(start_page + count, total_pages)  # exclusive upper bound
+
+        # Detail page numbers (0-based) that cover [start_page, end_page_excl).
+        first_dp = start_page // THUMBS_PER_DETAIL
+        last_dp = (end_page_excl - 1) // THUMBS_PER_DETAIL
+
+        token_map: dict[int, str] = {}
+        preview_map: dict[int, str] = {}
+
+        for dp in range(first_dp, last_dp + 1):
+            if dp > first_dp:
+                await asyncio.sleep(0.3)  # polite delay between requests
+
+            url = f"{self.base_url}/g/{gid}/{token}/?p={dp}"
+            resp = await self._http.get(url)
+            resp.raise_for_status()
+            self._check_auth(resp.text, resp)
+
+            page_tokens, page_previews = self._parse_detail_html(resp.text)
+            token_map.update(page_tokens)
+            preview_map.update(page_previews)
+
+        # Build ordered list for the requested window (1-based page numbers on EH).
+        # EH page numbers in the HTML are 1-based; start_page here is 0-based index.
+        images = []
+        for img_idx in range(start_page, end_page_excl):
+            page_num = img_idx + 1  # EH is 1-based
+            pt = token_map.get(page_num)
+            if pt:
+                images.append({"page": page_num, "token": pt})
+
+        # EH page keys are 1-based; start_page is 0-based.
+        str_previews = {str(k): v for k, v in preview_map.items() if start_page + 1 <= k <= end_page_excl}
+
+        return {
+            "images": images,
+            "previews": str_previews,
+            "has_more": end_page_excl < total_pages,
+            "total": total_pages,
+        }
 
     async def get_image_url(self, image_page_token: str, gid: int, page: int) -> str:
         """
