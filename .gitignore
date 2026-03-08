@@ -25,5 +25,6 @@ Thumbs.db
 
 # Local Data & Dev
 data/
-.claude/
+# Claude Code — keep skills/docs/agents, ignore local settings
+.claude/settings.local.json
 docker-compose.override.yml
