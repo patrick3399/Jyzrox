@@ -44,6 +44,10 @@ class PixivTokenRequest(BaseModel):
     refresh_token: str
 
 
+class PixivCookieRequest(BaseModel):
+    phpsessid: str
+
+
 class PixivOAuthCallbackRequest(BaseModel):
     code: str
     code_verifier: str
@@ -247,6 +251,97 @@ async def pixiv_oauth_callback(
 
     await set_credential("pixiv", refresh_token, "oauth_token")
     return {"status": "ok", "username": username}
+
+
+@router.post("/credentials/pixiv/cookie")
+async def set_pixiv_cookie_credentials(
+    req: PixivCookieRequest,
+    _: dict = Depends(require_auth),
+):
+    """
+    Simulate Pixiv OAuth flow using a session cookie (PHPSESSID).
+    Catches the 302 redirect to grab the code and exchange it.
+    """
+    code_verifier = secrets.token_urlsafe(32)
+    code_challenge_bytes = hashlib.sha256(code_verifier.encode("utf-8")).digest()
+    code_challenge = base64.urlsafe_b64encode(code_challenge_bytes).decode("utf-8").rstrip("=")
+
+    client_id = app_settings.pixiv_client_id
+    redirect_uri = "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback"
+    auth_url = (
+        f"https://accounts.pixiv.net/login"
+        f"?client_id={client_id}"
+        f"&redirect_uri={urllib.parse.quote(redirect_uri, safe='')}"
+        f"&response_type=code"
+        f"&code_challenge={code_challenge}"
+        f"&code_challenge_method=S256"
+    )
+
+    try:
+        # Step 1: Hit the OAuth URL with the provided PHPSESSID cookie
+        # follow_redirects=False is crucial here to capture the 302 response
+        cookies = {"PHPSESSID": req.phpsessid}
+        headers = {
+            "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
+        }
+        
+        async with httpx.AsyncClient(follow_redirects=False) as client:
+            resp = await client.get(auth_url, cookies=cookies, headers=headers)
+            
+            # The expected success response is a 302 redirect back to the app-api.pixiv.net URL
+            if resp.status_code != 302:
+                raise ValueError("Invalid session cookie or user not logged in. (Expected 302 redirect)")
+                
+            location = resp.headers.get("Location")
+            if not location or "code=" not in location:
+                raise ValueError("No authorization code found in redirect URL")
+                
+            # Extract code from location
+            parsed = urllib.parse.urlparse(location)
+            qs = urllib.parse.parse_qs(parsed.query)
+            if "code" not in qs:
+                raise ValueError("Failed to extract code from callback URL")
+                
+            code = qs["code"][0]
+
+        # Step 2: Exchange the code for a refresh_token (same as OAuth callback)
+        client_secret = app_settings.pixiv_client_secret
+        data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "code_verifier": code_verifier,
+            "grant_type": "authorization_code",
+            "redirect_uri": redirect_uri,
+            "include_policy": "true",
+        }
+        headers_exchange = {
+            "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
+            "App-OS-Version": "11",
+            "App-OS": "android",
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post(
+                "https://oauth.secure.pixiv.net/auth/token", 
+                data=data, 
+                headers=headers_exchange
+            )
+            resp.raise_for_status()
+            token_data = resp.json()
+            refresh_token = token_data.get("refresh_token")
+            username = token_data.get("user", {}).get("name", "Unknown")
+
+            if not refresh_token:
+                raise ValueError("No refresh token in response")
+
+    except Exception as exc:
+        logger.error("Pixiv cookie auth failed: %s", exc)
+        raise HTTPException(status_code=400, detail=f"Pixiv cookie auth failed: {exc}")
+
+    # Step 3: Save the credential
+    await set_credential("pixiv", refresh_token, "oauth_token")
+    return {"status": "ok", "username": username}
+
 
 
 @router.delete("/credentials/{source}")

@@ -172,8 +172,9 @@ export default function SettingsPage() {
   const [ehAccountLoading, setEhAccountLoading] = useState(false)
 
   // Pixiv Token form
-  const [pixivLoginMode, setPixivLoginMode] = useState<'oauth' | 'token'>('oauth')
+  const [pixivLoginMode, setPixivLoginMode] = useState<'oauth' | 'token' | 'cookie'>('oauth')
   const [pixivToken, setPixivToken] = useState('')
+  const [pixivCookie, setPixivCookie] = useState('')
   const [pixivSaving, setPixivSaving] = useState(false)
   const [pixivUsername, setPixivUsername] = useState<string | null>(null)
   const [pixivOauthUrl, setPixivOauthUrl] = useState('')
@@ -300,6 +301,23 @@ export default function SettingsPage() {
       setPixivSaving(false)
     }
   }, [pixivToken])
+
+  // Pixiv: Save cookie
+  const handlePixivCookieSave = useCallback(async () => {
+    if (!pixivCookie.trim()) return
+    setPixivSaving(true)
+    try {
+      const result = await api.settings.setPixivCookie(pixivCookie.trim())
+      toast.success(`${t('settings.pixivSaved')}: ${result.username}`)
+      setPixivUsername(result.username)
+      setCredentials((prev) => (prev ? { ...prev, pixiv: { configured: true } } : prev))
+      setPixivCookie('')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('settings.pixivFailed'))
+    } finally {
+      setPixivSaving(false)
+    }
+  }, [pixivCookie])
 
   // Pixiv: Get OAuth URL
   const handlePixivGetOauth = useCallback(async () => {
@@ -824,13 +842,19 @@ export default function SettingsPage() {
                     onClick={() => setPixivLoginMode('oauth')}
                     className={`flex-1 px-3 py-2 text-sm transition-colors ${pixivLoginMode === 'oauth' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
                   >
-                    Web Login (Recommended)
+                    Web Login
+                  </button>
+                  <button
+                    onClick={() => setPixivLoginMode('cookie')}
+                    className={`flex-1 px-3 py-2 text-sm transition-colors ${pixivLoginMode === 'cookie' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
+                  >
+                    Session Cookie (New)
                   </button>
                   <button
                     onClick={() => setPixivLoginMode('token')}
                     className={`flex-1 px-3 py-2 text-sm transition-colors ${pixivLoginMode === 'token' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
                   >
-                    Refresh Token (Advanced)
+                    Refresh Token (Adv)
                   </button>
                 </div>
 
@@ -871,6 +895,42 @@ export default function SettingsPage() {
                         </button>
                       </div>
                     )}
+                  </div>
+                )}
+
+                {pixivLoginMode === 'cookie' && (
+                  <div className="mt-4 space-y-3">
+                    <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg p-3 text-xs text-blue-300/90 space-y-1.5">
+                      <p className="font-semibold">使用 Session Cookie 自動獲取：</p>
+                      <p>Web Login 若跳轉太快無法複製 URL，可使用此方法。系統會自動幫您完成交換。</p>
+                      <ul className="list-disc list-inside mt-1 ml-1">
+                        <li>在瀏覽器開啟並登入 Pixiv (https://www.pixiv.net)</li>
+                        <li>按 F12 開啟開發者工具 → Application (或 Storage)</li>
+                        <li>在 Cookies 中找到 <code className="bg-black/30 px-1 rounded">PHPSESSID</code></li>
+                        <li>複製該值，貼到底下欄位即可</li>
+                      </ul>
+                    </div>
+                    <div>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        PHPSESSID (Session Cookie)
+                      </label>
+                      <input
+                        type="password"
+                        value={pixivCookie}
+                        onChange={(e) => setPixivCookie(e.target.value)}
+                        placeholder="e.g. 12345678_abcd..."
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <button
+                        onClick={handlePixivCookieSave}
+                        disabled={pixivSaving || !pixivCookie.trim()}
+                        className={btnPrimary}
+                      >
+                        {pixivSaving ? t('settings.saving') : 'Verify & Save Token'}
+                      </button>
+                    </div>
                   </div>
                 )}
 

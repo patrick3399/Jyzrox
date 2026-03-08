@@ -51,7 +51,7 @@ jobs:
           cache: 'npm'
           cache-dependency-path: pwa/package-lock.json
       - run: npm ci
-      - run: npx next lint
+      - run: npm run lint
       - run: npx prettier --check "src/**/*.{ts,tsx,js,json,css}"
 
   frontend-test:

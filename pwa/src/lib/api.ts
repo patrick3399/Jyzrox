@@ -288,6 +288,12 @@ const settings = {
       body: JSON.stringify({ refresh_token }),
     }),
 
+  setPixivCookie: (phpsessid: string) =>
+    apiFetch<{ status: string; username: string }>('/api/settings/credentials/pixiv/cookie', {
+      method: 'POST',
+      body: JSON.stringify({ phpsessid }),
+    }),
+
   getPixivOAuthUrl: () =>
     apiFetch<{ url: string; code_verifier: string }>('/api/settings/credentials/pixiv/oauth-url'),
 
