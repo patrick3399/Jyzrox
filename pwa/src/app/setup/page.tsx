@@ -2,6 +2,7 @@
 
 import { useState, FormEvent, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 
 function Logo() {
@@ -27,8 +28,7 @@ export default function SetupPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/auth/needs-setup')
-      .then((r) => r.json())
+    api.auth.needsSetup()
       .then((data) => {
         if (!data.needs_setup) router.replace('/login')
         else setLoading(false)
@@ -43,17 +43,9 @@ export default function SetupPage() {
     if (password.length < 8) { setError(t('setup.passwordTooShort')); return }
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/setup', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-      if (res.ok) { window.location.href = '/login' }
-      else {
-        const data = await res.json().catch(() => ({}))
-        setError(data?.detail ?? t('setup.failed'))
-      }
-    } catch { setError(t('setup.networkError')) }
+      await api.auth.setup(username, password)
+      window.location.href = '/login'
+    } catch (err) { setError(err instanceof Error ? err.message : t('setup.failed')) }
     finally { setLoading(false) }
   }
 

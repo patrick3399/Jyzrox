@@ -28,8 +28,8 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       {/* Mobile top nav — hidden on desktop */}
       <MobileNav />
 
-      {/* Main content */}
-      <main className="pt-14 lg:pt-0 lg:pl-56 min-h-screen bg-vault-bg text-vault-text">
+      {/* Main content — safe-main-pt handles iOS safe area on mobile, reset on desktop */}
+      <main className="safe-main-pt lg:pl-56 min-h-screen bg-vault-bg text-vault-text">
         {children}
       </main>
 

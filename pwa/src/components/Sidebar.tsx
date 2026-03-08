@@ -16,6 +16,8 @@ import {
   Monitor,
   PackageOpen,
 } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
+import { useProfile } from '@/hooks/useProfile'
 import { t } from '@/lib/i18n'
 
 const navLinks = [
@@ -35,15 +37,12 @@ const themeLabel = { light: () => t('common.light'), dark: () => t('common.dark'
 export function Sidebar() {
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
+  const { logout } = useAuth()
+  const { data: profile } = useProfile()
 
   const cycleTheme = () => {
     const idx = themeCycle.indexOf(theme as typeof themeCycle[number])
     setTheme(themeCycle[(idx + 1) % themeCycle.length])
-  }
-
-  async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
-    window.location.href = '/login'
   }
 
   return (
@@ -79,6 +78,15 @@ export function Sidebar() {
 
       {/* Bottom section */}
       <div className="px-3 py-3 border-t border-vault-border space-y-2">
+        {/* User avatar + name */}
+        {profile && (
+          <div className="flex items-center gap-3 px-3 py-2">
+            {/* eslint-disable-next-line @next/next/no-img-element */}
+            <img src={profile.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover bg-vault-input shrink-0" />
+            <span className="text-sm text-vault-text truncate">{profile.username}</span>
+          </div>
+        )}
+
         {/* Theme toggle */}
         {(() => {
           const key = (theme as keyof typeof themeIcon) || 'system'
@@ -97,7 +105,7 @@ export function Sidebar() {
 
         {/* Logout */}
         <button
-          onClick={handleLogout}
+          onClick={logout}
           className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-vault-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors"
         >
           <LogOut size={18} />

@@ -33,6 +33,7 @@ class Settings(BaseSettings):
     data_gallery_path: str  = "/data/gallery"
     data_thumbs_path: str   = "/data/thumbs"
     data_training_path: str = "/data/training"
+    data_avatars_path: str  = "/data/avatars"
 
     # gallery-dl config (bind-mounted)
     gallery_dl_config: str = "/home/appuser/.config/gallery-dl/config.json"

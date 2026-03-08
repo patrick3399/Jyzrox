@@ -361,7 +361,6 @@ function BrowsePage() {
   const [viewMode, setViewMode]             = useState<ViewMode>('grid')
   const [selectedGallery, setSelectedGallery] = useState<EhGallery | null>(null)
   const [downloadUrl, setDownloadUrl]       = useState('')
-  const [downloadSource, setDownloadSource] = useState('ehentai')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Favorites state (cursor-based pagination — EH favorites uses next/prev cursors, not page numbers)
@@ -584,13 +583,13 @@ function BrowsePage() {
   const handleUrlDownload = useCallback(async () => {
     if (!downloadUrl.trim()) return
     try {
-      const res = await api.download.enqueue(downloadUrl.trim(), downloadSource)
+      const res = await api.download.enqueue(downloadUrl.trim())
       toast.success(`已加入佇列 (job: ${res.job_id})`)
       setDownloadUrl('')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed')
     }
-  }, [downloadUrl, downloadSource])
+  }, [downloadUrl])
 
   const displayGalleries = loadMode === 'scroll' ? scrollGalleries : (data?.galleries ?? [])
   const favDisplayGalleries = loadMode === 'scroll' ? favScrollGalleries : (favData?.galleries ?? [])
@@ -1045,14 +1044,6 @@ function BrowsePage() {
               className="flex-1 bg-vault-card border border-vault-border rounded-lg px-3 py-2 text-vault-text
                          placeholder-vault-text-muted text-sm focus:outline-none focus:border-vault-accent transition-colors"
             />
-            <select
-              value={downloadSource}
-              onChange={(e) => setDownloadSource(e.target.value)}
-              className="bg-vault-card border border-vault-border rounded-lg px-2 py-2 text-vault-text text-sm focus:outline-none"
-            >
-              <option value="ehentai">E-Hentai</option>
-              <option value="pixiv">Pixiv</option>
-            </select>
             <button
               onClick={handleUrlDownload}
               disabled={!downloadUrl.trim()}

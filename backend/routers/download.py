@@ -18,8 +18,17 @@ router = APIRouter(tags=["download"])
 
 class DownloadRequest(BaseModel):
     url: str
-    source: str = ""
+    source: str = ""  # ignored; kept for backward compat
     options: dict = {}
+
+
+def _detect_source(url: str) -> str:
+    """Auto-detect source from URL domain."""
+    if "pixiv.net" in url:
+        return "pixiv"
+    if "e-hentai.org" in url or "exhentai.org" in url:
+        return "ehentai"
+    return "unknown"
 
 
 @router.post("/")
@@ -31,9 +40,10 @@ async def enqueue_download(
 ):
     """Create a DB download record and enqueue an ARQ job."""
     job_id = uuid.uuid4()
+    source = _detect_source(req.url)
 
     # DB record
-    job = DownloadJob(id=job_id, url=req.url, source=req.source, status="queued")
+    job = DownloadJob(id=job_id, url=req.url, source=source, status="queued")
     db.add(job)
     await db.commit()
 
@@ -42,7 +52,7 @@ async def enqueue_download(
     await arq.enqueue_job(
         "download_job",
         req.url,
-        req.source,
+        source,
         req.options,
         str(job_id),       # db_job_id parameter
         _job_id=str(job_id),

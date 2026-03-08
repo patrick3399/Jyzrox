@@ -2,6 +2,7 @@
 
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
+import { toast } from 'sonner'
 import { useLibraryGallery, useGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { TagBadge } from '@/components/TagBadge'
@@ -36,10 +37,10 @@ function groupTagsByNamespace(tags: string[]): Record<string, string[]> {
   return groups
 }
 
-const DOWNLOAD_STATUS_LABELS: Record<string, { label: string; className: string }> = {
-  complete: { label: 'Complete', className: 'bg-green-900/40 border-green-700/50 text-green-400' },
-  partial: { label: 'Partial', className: 'bg-yellow-900/40 border-yellow-700/50 text-yellow-400' },
-  proxy_only: { label: 'Proxy Only', className: 'bg-gray-800 border-gray-600 text-gray-400' },
+const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: string }> = {
+  complete: { labelKey: 'library.statusComplete', className: 'bg-green-900/40 border-green-700/50 text-green-400' },
+  partial: { labelKey: 'library.statusPartial', className: 'bg-yellow-900/40 border-yellow-700/50 text-yellow-400' },
+  proxy_only: { labelKey: 'library.statusProxyOnly', className: 'bg-gray-800 border-gray-600 text-gray-400' },
 }
 
 export default function GalleryDetailPage() {
@@ -57,7 +58,7 @@ export default function GalleryDetailPage() {
       const updated = await updateGallery({ favorited: !gallery.favorited })
       if (updated) mutateGallery(updated, false)
     } catch {
-      // silently fail
+      toast.error(t('library.favoriteError'))
     }
   }
 
@@ -67,7 +68,7 @@ export default function GalleryDetailPage() {
       const updated = await updateGallery({ rating: newRating })
       if (updated) mutateGallery(updated, false)
     } catch {
-      // silently fail
+      toast.error(t('library.ratingError'))
     }
   }
 
@@ -136,7 +137,7 @@ export default function GalleryDetailPage() {
               <div className="flex items-start justify-between gap-2 mb-1">
                 <h1 className="text-xl font-bold text-vault-text leading-tight">{gallery.title}</h1>
                 <span className={`flex-shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}>
-                  {statusInfo.label}
+                  {t(statusInfo.labelKey)}
                 </span>
               </div>
               {gallery.title_jpn && (

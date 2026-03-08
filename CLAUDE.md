@@ -164,6 +164,14 @@ download_job → import_job → thumbnail_job
 
 ---
 
+## 網路架構
+
+- Nginx 容器僅監聽 HTTP（port 80），**設計上透過外部反向代理（如 Caddy / Traefik / cloud LB）終止 TLS**
+- 外部代理負責 HTTPS 憑證、HTTP→HTTPS 重導向
+- `cookie_secure` 預設 `True`，在外部代理提供 HTTPS 時正常運作；純 HTTP 開發時需設 `COOKIE_SECURE=false`
+
+---
+
 ## 部署操作
 
 ### 更新服務

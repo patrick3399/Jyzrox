@@ -1,12 +1,16 @@
 """Authentication endpoints (session-based, rev 2.0)."""
 
+import hashlib
+import io
 import json
 import bcrypt
 import logging
 import secrets
 from datetime import datetime, timezone
+from pathlib import Path
 
-from fastapi import APIRouter, Cookie, Depends, HTTPException, Request, Response
+from fastapi import APIRouter, Cookie, Depends, File, HTTPException, Request, Response, UploadFile
+from PIL import Image, ImageOps
 from pydantic import BaseModel
 
 from core.auth import require_auth
@@ -22,9 +26,32 @@ logger = logging.getLogger(__name__)
 _SESSION_TTL = 30 * 24 * 3600  # 30 days
 
 
+def _is_https(request: Request) -> bool:
+    """Detect if the client connection is over HTTPS (direct or via reverse proxy)."""
+    proto = request.headers.get("x-forwarded-proto", request.url.scheme)
+    return proto.lower() == "https"
+
+
 class LoginRequest(BaseModel):
-    username: str
+    username: str  # accepts username or email
     password: str
+
+
+class ChangePasswordRequest(BaseModel):
+    current_password: str
+    new_password: str
+
+
+class UpdateProfileRequest(BaseModel):
+    email: str | None = None
+    avatar_style: str | None = None
+
+
+def _avatar_url(user_id: int, username: str, email: str | None, avatar_style: str) -> str:
+    if avatar_style == "manual":
+        return f"/media/avatars/{user_id}.webp"
+    digest = hashlib.md5((email or username).lower().encode()).hexdigest()
+    return f"https://www.gravatar.com/avatar/{digest}?d=retro&s=160"
 
 
 @router.get("/needs-setup")
@@ -68,9 +95,13 @@ async def login(req: LoginRequest, request: Request, response: Response):
     await check_rate_limit(f"login:{client_ip}")
 
     async with async_session() as session:
+        # Allow login by username or email
         result = await session.execute(
-            text("SELECT id, password_hash, role FROM users WHERE username = :uname"),
-            {"uname": req.username},
+            text(
+                "SELECT id, password_hash, role FROM users "
+                "WHERE username = :login OR (email IS NOT NULL AND email = :login)"
+            ),
+            {"login": req.username},
         )
         user = result.fetchone()
 
@@ -94,8 +125,8 @@ async def login(req: LoginRequest, request: Request, response: Response):
         key="vault_session",
         value=f"{user.id}:{token}",
         httponly=True,
-        secure=settings.cookie_secure,
-        samesite="strict",
+        secure=settings.cookie_secure and _is_https(request),
+        samesite="strict" if _is_https(request) else "lax",
         path="/",
         max_age=_SESSION_TTL,
     )
@@ -232,4 +263,160 @@ async def logout(
             pass
 
     response.delete_cookie("vault_session", path="/")
+    return {"status": "ok"}
+
+
+@router.get("/profile")
+async def get_profile(auth: dict = Depends(require_auth)):
+    """Return current user's profile info."""
+    async with async_session() as session:
+        result = await session.execute(
+            text("SELECT username, email, role, created_at, avatar_style FROM users WHERE id = :uid"),
+            {"uid": auth["user_id"]},
+        )
+        user = result.fetchone()
+    if not user:
+        raise HTTPException(status_code=404, detail="User not found")
+    avatar_style = user.avatar_style or "gravatar"
+    return {
+        "username": user.username,
+        "email": user.email,
+        "role": user.role,
+        "created_at": user.created_at.isoformat() if user.created_at else None,
+        "avatar_style": avatar_style,
+        "avatar_url": _avatar_url(auth["user_id"], user.username, user.email, avatar_style),
+    }
+
+
+@router.patch("/profile")
+async def update_profile(req: UpdateProfileRequest, auth: dict = Depends(require_auth)):
+    """Update current user's profile (email, avatar_style)."""
+    updates = []
+    params: dict = {"uid": auth["user_id"]}
+
+    if req.email is not None:
+        email = req.email.strip() or None
+        params["email"] = email
+        if email:
+            async with async_session() as session:
+                existing = await session.execute(
+                    text("SELECT id FROM users WHERE email = :email AND id != :uid"),
+                    {"email": email, "uid": auth["user_id"]},
+                )
+                if existing.fetchone():
+                    raise HTTPException(status_code=409, detail="Email already in use")
+        updates.append("email = :email")
+
+    if req.avatar_style is not None:
+        if req.avatar_style not in ("gravatar", "manual"):
+            raise HTTPException(status_code=400, detail="avatar_style must be 'gravatar' or 'manual'")
+        params["avatar_style"] = req.avatar_style
+        updates.append("avatar_style = :avatar_style")
+
+    if not updates:
+        return {"status": "ok"}
+
+    async with async_session() as session:
+        await session.execute(
+            text(f"UPDATE users SET {', '.join(updates)} WHERE id = :uid"),
+            params,
+        )
+        await session.commit()
+    return {"status": "ok"}
+
+
+_MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2 MB
+
+
+@router.put("/avatar")
+async def upload_avatar(
+    file: UploadFile = File(...),
+    auth: dict = Depends(require_auth),
+):
+    """Upload a custom avatar image. Resized to 160x160 WebP."""
+    if not file.content_type or not file.content_type.startswith("image/"):
+        raise HTTPException(status_code=400, detail="Only image files are accepted")
+
+    data = await file.read()
+    if len(data) > _MAX_AVATAR_SIZE:
+        raise HTTPException(status_code=400, detail="File too large (max 2 MB)")
+
+    try:
+        img = Image.open(io.BytesIO(data))
+        img = ImageOps.fit(img, (160, 160))
+        img = img.convert("RGB")
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid image file")
+
+    avatars_dir = Path(settings.data_avatars_path)
+    avatars_dir.mkdir(parents=True, exist_ok=True)
+    out_path = avatars_dir / f"{auth['user_id']}.webp"
+    img.save(str(out_path), "WEBP", quality=85)
+
+    async with async_session() as session:
+        await session.execute(
+            text("UPDATE users SET avatar_style = 'manual' WHERE id = :uid"),
+            {"uid": auth["user_id"]},
+        )
+        await session.commit()
+
+    return {
+        "status": "ok",
+        "avatar_url": f"/media/avatars/{auth['user_id']}.webp",
+        "avatar_style": "manual",
+    }
+
+
+@router.delete("/avatar")
+async def delete_avatar(auth: dict = Depends(require_auth)):
+    """Remove custom avatar and revert to Gravatar."""
+    avatar_file = Path(settings.data_avatars_path) / f"{auth['user_id']}.webp"
+    if avatar_file.exists():
+        avatar_file.unlink()
+
+    async with async_session() as session:
+        await session.execute(
+            text("UPDATE users SET avatar_style = 'gravatar' WHERE id = :uid"),
+            {"uid": auth["user_id"]},
+        )
+        result = await session.execute(
+            text("SELECT username, email FROM users WHERE id = :uid"),
+            {"uid": auth["user_id"]},
+        )
+        user = result.fetchone()
+        await session.commit()
+
+    avatar_url = _avatar_url(auth["user_id"], user.username, user.email, "gravatar") if user else ""
+    return {"status": "ok", "avatar_url": avatar_url, "avatar_style": "gravatar"}
+
+
+@router.post("/change-password")
+async def change_password(req: ChangePasswordRequest, auth: dict = Depends(require_auth)):
+    """Change the current user's password."""
+    if len(req.new_password) < 8:
+        raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
+
+    async with async_session() as session:
+        result = await session.execute(
+            text("SELECT password_hash FROM users WHERE id = :uid"),
+            {"uid": auth["user_id"]},
+        )
+        user = result.fetchone()
+
+    if not user or not bcrypt.checkpw(
+        req.current_password.encode("utf-8"), user.password_hash.encode("utf-8")
+    ):
+        raise HTTPException(status_code=401, detail="Current password is incorrect")
+
+    new_hash = bcrypt.hashpw(
+        req.new_password.encode("utf-8"), bcrypt.gensalt(rounds=12)
+    ).decode("utf-8")
+
+    async with async_session() as session:
+        await session.execute(
+            text("UPDATE users SET password_hash = :phash WHERE id = :uid"),
+            {"phash": new_hash, "uid": auth["user_id"]},
+        )
+        await session.commit()
+
     return {"status": "ok"}

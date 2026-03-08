@@ -26,6 +26,7 @@ from sqlalchemy.sql import select
 from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import DownloadJob, Gallery, GalleryTag, Image, Tag
+from services.credential import get_credential
 
 logging.basicConfig(
     level=logging.INFO,
@@ -60,6 +61,13 @@ async def download_job(
 
     await _set_job_status(db_job_id, "running")
 
+    # Pre-flight: check credentials for the source
+    cred_error = await _check_credentials(url)
+    if cred_error:
+        logger.error("[download] %s", cred_error)
+        await _set_job_status(db_job_id, "failed", cred_error)
+        return {"status": "failed", "error": cred_error}
+
     cmd = [
         "gallery-dl",
         "--config", settings.gallery_dl_config,
@@ -90,6 +98,22 @@ async def download_job(
 
     await _set_job_status(db_job_id, "done")
     return {"status": "done"}
+
+
+async def _check_credentials(url: str) -> str | None:
+    """Return an error message if required credentials are missing, else None."""
+    is_pixiv = "pixiv.net" in url
+    is_eh = "e-hentai.org" in url or "exhentai.org" in url
+
+    if is_pixiv:
+        cred = await get_credential("pixiv")
+        if not cred:
+            return "Pixiv credentials not configured. Go to Settings to add your refresh token."
+    elif is_eh:
+        cred = await get_credential("ehentai")
+        if not cred:
+            return "E-Hentai credentials not configured. Go to Settings to add cookies."
+    return None
 
 
 def _resolve_gallery_dir(url: str) -> Path | None:

@@ -19,6 +19,8 @@ import {
   X,
   PackageOpen,
 } from 'lucide-react'
+import { useAuth } from '@/hooks/useAuth'
+import { useProfile } from '@/hooks/useProfile'
 import { t } from '@/lib/i18n'
 
 const navLinks = [
@@ -42,6 +44,8 @@ const themeLabel: Record<string, () => string> = {
 export function MobileNav() {
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
+  const { logout } = useAuth()
+  const { data: profile } = useProfile()
   const [open, setOpen] = useState(false)
 
   // Close drawer on route change
@@ -62,18 +66,13 @@ export function MobileNav() {
     setTheme(themeCycle[(idx + 1) % themeCycle.length])
   }, [theme, setTheme])
 
-  async function handleLogout() {
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' })
-    window.location.href = '/login'
-  }
-
   const ThemeIcon = themeIcon[theme ?? 'system'] ?? Monitor
   const key = (theme as keyof typeof themeLabel) || 'system'
 
   return (
     <>
-      {/* Top bar */}
-      <nav className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-vault-card border-b border-vault-border h-14 flex items-center px-3 gap-2">
+      {/* Top bar — pt accounts for iOS safe area (notch / Dynamic Island) */}
+      <nav className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-vault-card border-b border-vault-border h-14 flex items-center px-3 gap-2" style={{ paddingTop: 'var(--sat)', height: 'calc(3.5rem + var(--sat))' }}>
         <button
           onClick={() => setOpen(true)}
           className="p-2 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
@@ -94,7 +93,7 @@ export function MobileNav() {
           <ThemeIcon size={18} />
         </button>
         <button
-          onClick={handleLogout}
+          onClick={logout}
           className="p-2 rounded-lg text-vault-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors"
           title={t('nav.logout')}
         >
@@ -116,9 +115,15 @@ export function MobileNav() {
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
-        {/* Drawer header */}
-        <div className="flex items-center justify-between px-4 h-14 shrink-0 border-b border-vault-border">
-          <span className="text-vault-accent font-bold text-lg tracking-wide">Jyzrox</span>
+        {/* Drawer header — pt for iOS safe area */}
+        <div className="flex items-center justify-between px-4 shrink-0 border-b border-vault-border" style={{ paddingTop: 'var(--sat)', minHeight: 'calc(3.5rem + var(--sat))' }}>
+          <div className="flex items-center gap-2">
+            {profile && (
+              /* eslint-disable-next-line @next/next/no-img-element */
+              <img src={profile.avatar_url} alt="" className="w-7 h-7 rounded-full object-cover bg-vault-input shrink-0" />
+            )}
+            <span className="text-vault-accent font-bold text-lg tracking-wide">Jyzrox</span>
+          </div>
           <button
             onClick={() => setOpen(false)}
             className="p-1.5 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
@@ -160,7 +165,7 @@ export function MobileNav() {
             <span>{themeLabel[key]?.() ?? t('common.theme')}</span>
           </button>
           <button
-            onClick={handleLogout}
+            onClick={logout}
             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-vault-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors"
           >
             <LogOut size={18} />

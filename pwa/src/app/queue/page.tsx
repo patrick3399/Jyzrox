@@ -17,11 +17,6 @@ const STATUS_STYLES: Record<string, string> = {
   cancelled: 'bg-vault-card border-vault-border text-vault-text-muted',
 }
 
-const SOURCE_OPTIONS = [
-  { value: 'ehentai', label: 'E-Hentai' },
-  { value: 'pixiv', label: 'Pixiv' },
-]
-
 function StatusBadge({ status }: { status: string }) {
   return (
     <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs font-medium ${STATUS_STYLES[status] ?? STATUS_STYLES.cancelled}`}>
@@ -87,7 +82,6 @@ function JobRow({
 
 export default function QueuePage() {
   const [urlInput, setUrlInput] = useState('')
-  const [sourceInput, setSourceInput] = useState('ehentai')
   const [completedOpen, setCompletedOpen] = useState(false)
 
   const { data, isLoading, error, mutate } = useDownloadJobs({})
@@ -98,21 +92,21 @@ export default function QueuePage() {
     const url = urlInput.trim()
     if (!url) return
     try {
-      const result = await enqueue({ url, source: sourceInput })
+      const result = await enqueue({ url })
       toast.success(`${t('queue.queuedSuccess')} (job: ${result.job_id})`)
       setUrlInput('')
       mutate()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to enqueue download')
     }
-  }, [urlInput, sourceInput, enqueue, mutate])
+  }, [urlInput, enqueue, mutate])
 
   const handleCancel = useCallback(async (id: string) => {
     try {
       await cancelJob(id)
       mutate()
     } catch {
-      // silently ignore
+      toast.error(t('queue.cancelError'))
     }
   }, [cancelJob, mutate])
 
@@ -148,15 +142,6 @@ export default function QueuePage() {
               placeholder={t('queue.urlPlaceholder')}
               className="flex-1 bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
             />
-            <select
-              value={sourceInput}
-              onChange={(e) => setSourceInput(e.target.value)}
-              className="bg-vault-input border border-vault-border rounded-lg px-2 py-2 text-vault-text text-sm focus:outline-none"
-            >
-              {SOURCE_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>{opt.label}</option>
-              ))}
-            </select>
             <button
               onClick={handleEnqueue}
               disabled={isEnqueuing || !urlInput.trim()}

@@ -2,6 +2,7 @@
 
 import { useState, FormEvent, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
+import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 
 function Logo() {
@@ -26,13 +27,18 @@ export default function LoginPage() {
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
-    fetch('/api/auth/needs-setup')
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.needs_setup) router.replace('/setup')
-        else setLoading(false)
+    // If we already have a valid session, go straight to dashboard
+    api.auth.check()
+      .then(() => { window.location.href = '/' })
+      .catch(() => {
+        // Session invalid or missing — check if first-run setup needed
+        api.auth.needsSetup()
+          .then((data) => {
+            if (data.needs_setup) router.replace('/setup')
+            else setLoading(false)
+          })
+          .catch(() => setLoading(false))
       })
-      .catch(() => setLoading(false))
   }, [router])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {
@@ -40,19 +46,10 @@ export default function LoginPage() {
     setError('')
     setLoading(true)
     try {
-      const res = await fetch('/api/auth/login', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ username, password }),
-      })
-      if (res.ok) {
-        window.location.href = '/'
-      } else {
-        const data = await res.json().catch(() => ({}))
-        setError(data?.detail ?? t('login.invalidCredentials'))
-      }
-    } catch {
-      setError(t('login.networkError'))
+      await api.auth.login(username, password)
+      window.location.href = '/'
+    } catch (err) {
+      setError(err instanceof Error ? err.message : t('login.invalidCredentials'))
     } finally {
       setLoading(false)
     }
@@ -77,7 +74,7 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
             <div className="flex flex-col gap-2">
-              <label htmlFor="username" className="text-sm text-vault-text-secondary">{t('login.email')}</label>
+              <label htmlFor="username" className="text-sm text-vault-text-secondary">{t('login.accountOrEmail')}</label>
               <input id="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus required disabled={loading}
                 className="w-full bg-vault-input border border-vault-border rounded-xl px-4 py-3 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors disabled:opacity-50" />
             </div>

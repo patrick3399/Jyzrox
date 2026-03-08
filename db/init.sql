@@ -6,10 +6,12 @@
 CREATE TABLE IF NOT EXISTS users (
     id              BIGSERIAL PRIMARY KEY,
     username        TEXT UNIQUE NOT NULL,
+    email           TEXT UNIQUE,
     password_hash   TEXT NOT NULL,
     role            TEXT DEFAULT 'admin',
     created_at      TIMESTAMPTZ DEFAULT now(),
-    last_login_at   TIMESTAMPTZ
+    last_login_at   TIMESTAMPTZ,
+    avatar_style    TEXT DEFAULT 'gravatar'
 );
 
 -- No default user: first-run setup is done via POST /api/auth/setup

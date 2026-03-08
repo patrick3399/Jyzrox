@@ -1,6 +1,7 @@
 "use client";
 import { useState, useCallback } from "react";
 import { Tags, ChevronLeft, ChevronRight, Plus, Trash2 } from "lucide-react";
+import { toast } from "sonner";
 import useSWR from "swr";
 import { api } from "@/lib/api";
 import { EmptyState } from "@/components/EmptyState";
@@ -40,8 +41,8 @@ export default function TagsPage() {
       setAliasNs("");
       setAliasName("");
       mutateAliases();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }, [selectedTag, aliasNs, aliasName, mutateAliases]);
 
@@ -49,8 +50,8 @@ export default function TagsPage() {
     try {
       await api.tags.deleteAlias(ns, name);
       mutateAliases();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }, [mutateAliases]);
 
@@ -69,8 +70,8 @@ export default function TagsPage() {
       }
       setImplTargetId("");
       mutateImplications();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }, [selectedTag, implTargetId, implDirection, mutateImplications]);
 
@@ -78,8 +79,8 @@ export default function TagsPage() {
     try {
       await api.tags.deleteImplication(antId, conId);
       mutateImplications();
-    } catch (e: any) {
-      alert(e.message);
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : String(e));
     }
   }, [mutateImplications]);
 
@@ -247,7 +248,7 @@ export default function TagsPage() {
 
           {!selectedTag && (
             <div className="w-full lg:w-96">
-              <EmptyState icon={Tags} title="Select a tag to view details" />
+              <EmptyState icon={Tags} title={t('tags.selectTag')} />
             </div>
           )}
         </div>

@@ -24,12 +24,14 @@ class User(Base):
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     username: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    email: Mapped[str | None] = mapped_column(Text, unique=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, default="admin")
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )
     last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    avatar_style: Mapped[str] = mapped_column(Text, default="gravatar")
 
 
 class Gallery(Base):

@@ -21,6 +21,14 @@ async function apiFetch<T>(
   })
 
   if (!res.ok) {
+    // Stale session → redirect to login (skip if already on /login or /setup)
+    if (res.status === 401 && typeof window !== 'undefined') {
+      const p = window.location.pathname
+      if (p !== '/login' && p !== '/setup') {
+        window.location.href = '/login'
+        return new Promise(() => {}) as T // never resolves; page is navigating
+      }
+    }
     const body = await res.json().catch(() => ({}))
     const msg = body?.detail || `HTTP ${res.status}`
     throw new Error(msg)
@@ -57,12 +65,56 @@ const auth = {
   needsSetup: () =>
     apiFetch<{ needs_setup: boolean }>('/api/auth/needs-setup'),
 
+  setup: (username: string, password: string) =>
+    apiFetch<{ status: string }>('/api/auth/setup', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
+
   getSessions: () =>
     apiFetch<{ sessions: SessionInfo[] }>('/api/auth/sessions'),
 
   revokeSession: (tokenPrefix: string) =>
     apiFetch<{ status: string }>(`/api/auth/sessions/${tokenPrefix}`, {
       method: 'DELETE',
+    }),
+
+  check: () =>
+    apiFetch<{ status: string }>('/api/auth/check'),
+
+  getProfile: () =>
+    apiFetch<{ username: string; email: string | null; role: string; created_at: string | null; avatar_url: string; avatar_style: string }>('/api/auth/profile'),
+
+  updateProfile: (data: { email?: string | null; avatar_style?: string }) =>
+    apiFetch<{ status: string }>('/api/auth/profile', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  uploadAvatar: async (file: File): Promise<{ status: string; avatar_url: string; avatar_style: string }> => {
+    const form = new FormData()
+    form.append('file', file)
+    const res = await fetch('/api/auth/avatar', {
+      method: 'PUT',
+      credentials: 'include',
+      body: form,
+    })
+    if (!res.ok) {
+      const body = await res.json().catch(() => ({}))
+      throw new Error(body?.detail || `HTTP ${res.status}`)
+    }
+    return res.json()
+  },
+
+  deleteAvatar: () =>
+    apiFetch<{ status: string; avatar_url: string; avatar_style: string }>('/api/auth/avatar', {
+      method: 'DELETE',
+    }),
+
+  changePassword: (current_password: string, new_password: string) =>
+    apiFetch<{ status: string }>('/api/auth/change-password', {
+      method: 'POST',
+      body: JSON.stringify({ current_password, new_password }),
     }),
 }
 
@@ -131,10 +183,10 @@ const library = {
 // ── Download ──────────────────────────────────────────────────────────
 
 const download = {
-  enqueue: (url: string, source = '', options: Record<string, unknown> = {}) =>
+  enqueue: (url: string, source?: string, options: Record<string, unknown> = {}) =>
     apiFetch<{ job_id: string; status: string }>('/api/download/', {
       method: 'POST',
-      body: JSON.stringify({ url, source, options }),
+      body: JSON.stringify({ url, ...(source && { source }), ...((Object.keys(options).length > 0) && { options }) }),
     }),
 
   getJobs: (params: JobListParams = {}) =>

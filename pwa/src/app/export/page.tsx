@@ -2,6 +2,7 @@
 import { useState, useCallback } from "react";
 import useSWR from "swr";
 import { api } from "@/lib/api";
+import { LoadingSpinner } from "@/components/LoadingSpinner";
 import { t } from "@/lib/i18n";
 
 export default function ExportPage() {
@@ -95,7 +96,7 @@ export default function ExportPage() {
               <tr><td className="p-4 text-vault-text-muted" colSpan={6}>{t('common.noResults')}</td></tr>
             )}
             {!data && (
-              <tr><td className="p-4 text-vault-text-muted" colSpan={6}>{t('common.loading')}</td></tr>
+              <tr><td className="p-4" colSpan={6}><div className="flex justify-center"><LoadingSpinner /></div></td></tr>
             )}
           </tbody>
         </table>

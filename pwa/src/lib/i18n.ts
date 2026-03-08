@@ -201,10 +201,36 @@ const dict: Record<string, Record<string, string>> = {
     'settings.pixivFailed': 'Failed to save Pixiv token',
     'settings.systemLoadFailed': 'Failed to load system info',
     'settings.sessionRevoked': 'Session revoked',
+    'settings.profile': 'Profile',
+    'settings.email': 'E-mail',
+    'settings.emailPlaceholder': 'your@email.com',
+    'settings.emailSaved': 'Email updated',
+    'settings.emailFailed': 'Failed to update email',
+    'settings.changePassword': 'Change Password',
+    'settings.currentPassword': 'Current Password',
+    'settings.newPassword': 'New Password',
+    'settings.confirmNewPassword': 'Confirm New Password',
+    'settings.passwordChanged': 'Password changed successfully',
+    'settings.passwordChangeFailed': 'Failed to change password',
+    'settings.passwordMismatch': 'Passwords do not match',
+    'settings.passwordTooShort': 'At least 8 characters',
+    'settings.save': 'Save',
+    'settings.update': 'Update',
+    'settings.avatar': 'Avatar',
+    'settings.avatarGravatar': 'Gravatar',
+    'settings.avatarCustom': 'Custom',
+    'settings.avatarGravatarDesc': 'Uses your email via gravatar.com',
+    'settings.avatarUpload': 'Upload Image',
+    'settings.avatarUploading': 'Uploading...',
+    'settings.avatarUploaded': 'Avatar uploaded',
+    'settings.avatarUploadFailed': 'Failed to upload avatar',
+    'settings.avatarRemove': 'Remove',
+    'settings.avatarRemoved': 'Avatar removed',
+    'settings.avatarMaxSize': 'Max 2 MB, will be resized to 160×160',
 
     // ── Login / Setup ──
     'login.title': 'Login',
-    'login.email': 'Email',
+    'login.accountOrEmail': 'Account / E-mail',
     'login.password': 'Password',
     'login.submit': 'Login',
     'login.submitting': 'Logging in...',
@@ -234,6 +260,19 @@ const dict: Record<string, Record<string, string>> = {
     'export.kohyaDesc2': 'Tags include both gallery-level and image-level tags',
     'export.kohyaDesc3': 'Only locally downloaded images are included in the export',
     'export.kohyaDesc4': 'Compatible with Kohya_ss, EveryDream2, and other fine-tuning tools',
+
+    // ── Library Detail ──
+    'library.statusComplete': 'Complete',
+    'library.statusPartial': 'Partial',
+    'library.statusProxyOnly': 'Proxy Only',
+    'library.favoriteError': 'Failed to update favorite',
+    'library.ratingError': 'Failed to update rating',
+
+    // ── Queue ──  (extra)
+    'queue.cancelError': 'Failed to cancel job',
+
+    // ── Tags ── (extra)
+    'tags.selectTag': 'Select a tag to view details',
 
     // ── Common ──
     'common.prev': 'Prev',

@@ -6,12 +6,12 @@ export function middleware(request: NextRequest) {
   const session = request.cookies.get('vault_session')
   const { pathname } = request.nextUrl
 
+  // No cookie → redirect to login (except public paths)
   if (!session && !PUBLIC_PATHS.includes(pathname)) {
     return NextResponse.redirect(new URL('/login', request.url))
   }
-  if (session && PUBLIC_PATHS.includes(pathname)) {
-    return NextResponse.redirect(new URL('/', request.url))
-  }
+  // Don't redirect /login→/ based on cookie alone — the session may be
+  // stale (revoked/expired in Redis). Let the login page validate instead.
   return NextResponse.next()
 }
 

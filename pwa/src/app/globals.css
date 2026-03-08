@@ -34,10 +34,30 @@ html, body {
   min-height: 100dvh;
 }
 
+/* ── iOS PWA safe area ─────────────────────────────────────────────── */
+/* env(safe-area-inset-*) is set when viewport-fit=cover on notched devices */
+
+:root {
+  --sat: env(safe-area-inset-top, 0px);
+  --sab: env(safe-area-inset-bottom, 0px);
+  --sal: env(safe-area-inset-left, 0px);
+  --sar: env(safe-area-inset-right, 0px);
+}
+
 /* Prevent iOS Safari bounce/overscroll */
 html {
   overscroll-behavior: none;
   -webkit-text-size-adjust: 100%;
+}
+
+/* Mobile main content offset: nav height + safe area top */
+.safe-main-pt {
+  padding-top: calc(3.5rem + var(--sat));
+}
+@media (min-width: 1024px) {
+  .safe-main-pt {
+    padding-top: 0;
+  }
 }
 
 /* ── Reader ─────────────────────────────────────────────────────────── */
