@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
@@ -17,6 +17,7 @@ export default function ReaderPage() {
 
   const [data, setData] = useState<LoadedData | null>(null)
   const [error, setError] = useState<string | null>(null)
+  const historyRecordedRef = useRef(false)
 
   useEffect(() => {
     if (!id || isNaN(id)) {
@@ -40,6 +41,25 @@ export default function ReaderPage() {
             images: imagesResp.images,
             progress,
           })
+
+          // Record browse history — fire and forget
+          if (!historyRecordedRef.current) {
+            try {
+              if (localStorage.getItem('history_enabled') !== 'false') {
+                historyRecordedRef.current = true
+                api.history
+                  .record({
+                    source: gallery.source || 'local',
+                    source_id: String(gallery.id),
+                    title: gallery.title,
+                    thumb: gallery.cover_thumb || '',
+                  })
+                  .catch(() => {})
+              }
+            } catch {
+              // localStorage may be unavailable in some contexts
+            }
+          }
         }
       } catch (e) {
         if (!cancelled) {

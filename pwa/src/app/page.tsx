@@ -2,7 +2,8 @@
 
 import Link from 'next/link'
 import useSWR from 'swr'
-import { Search, BookOpen, Download, Tags, Settings, ArrowRight, BookMarked } from 'lucide-react'
+import { useState } from 'react'
+import { Search, BookOpen, Download, Tags, Settings, ArrowRight, BookMarked, X } from 'lucide-react'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -42,6 +43,92 @@ const QUICK_LINKS = [
   },
 ]
 
+const DISMISSED_KEY = 'dashboard:dismissed_alerts'
+
+function alertSeverity(msg: string): 'error' | 'warning' | 'info' {
+  const lower = msg.toLowerCase()
+  if (
+    lower.includes('invalid') ||
+    lower.includes('failed') ||
+    lower.includes('sad panda') ||
+    lower.includes('error') ||
+    lower.includes('unauthorized')
+  )
+    return 'error'
+  if (lower.includes('expir') || lower.includes('warning') || lower.includes('expiring'))
+    return 'warning'
+  return 'info'
+}
+
+function alertStyles(severity: 'error' | 'warning' | 'info') {
+  if (severity === 'error')
+    return {
+      wrap: 'bg-red-500/10 border-red-500/30 text-red-300',
+      btn: 'text-red-400 hover:text-red-200',
+    }
+  if (severity === 'warning')
+    return {
+      wrap: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-300',
+      btn: 'text-yellow-400 hover:text-yellow-200',
+    }
+  return {
+    wrap: 'bg-blue-500/10 border-blue-500/30 text-blue-300',
+    btn: 'text-blue-400 hover:text-blue-200',
+  }
+}
+
+function SystemAlerts({ alerts }: { alerts: string[] }) {
+  const [dismissed, setDismissed] = useState<Set<string>>(() => {
+    if (typeof window === 'undefined') return new Set()
+    try {
+      const stored = sessionStorage.getItem(DISMISSED_KEY)
+      return stored ? new Set(JSON.parse(stored) as string[]) : new Set()
+    } catch {
+      return new Set()
+    }
+  })
+
+  const dismiss = (msg: string) => {
+    setDismissed((prev) => {
+      const next = new Set(prev)
+      next.add(msg)
+      try {
+        sessionStorage.setItem(DISMISSED_KEY, JSON.stringify([...next]))
+      } catch {
+        // sessionStorage unavailable — dismiss only for this render
+      }
+      return next
+    })
+  }
+
+  const visible = alerts.filter((a) => !dismissed.has(a))
+  if (visible.length === 0) return null
+
+  return (
+    <div className="space-y-2">
+      {visible.map((msg) => {
+        const severity = alertSeverity(msg)
+        const styles = alertStyles(severity)
+        return (
+          <div
+            key={msg}
+            className={`flex items-center justify-between gap-3 border rounded-lg px-4 py-3 text-sm ${styles.wrap}`}
+          >
+            <span className="leading-snug">{msg}</span>
+            <button
+              onClick={() => dismiss(msg)}
+              className={`flex-shrink-0 p-0.5 rounded transition-colors ${styles.btn}`}
+              aria-label="Dismiss alert"
+            >
+              <X size={14} />
+            </button>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 function GalleryThumb({ gallery }: { gallery: Gallery }) {
   return (
     <Link href={`/library/${gallery.id}`} className="group block">
@@ -78,6 +165,14 @@ export default function Dashboard() {
     focusThrottleInterval: 10000,
   })
 
+  const { data: alertsData } = useSWR(
+    'dashboard/alerts',
+    () => api.settings.getAlerts(),
+    { revalidateOnFocus: false, dedupingInterval: 60000 },
+  )
+
+  const alerts = alertsData?.alerts ?? []
+
   const activeJobs = (jobsData?.jobs ?? []).filter(
     (j: DownloadJob) => j.status === 'queued' || j.status === 'running',
   )
@@ -91,6 +186,9 @@ export default function Dashboard() {
             <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
           </div>
         </div>
+
+        {/* System Alerts */}
+        {alerts.length > 0 && <SystemAlerts alerts={alerts} />}
 
         {/* Quick Links */}
         <div className="grid grid-cols-2 md:grid-cols-5 gap-3">

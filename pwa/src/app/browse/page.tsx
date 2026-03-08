@@ -2,15 +2,15 @@
 
 import { useState, useRef, useCallback, useEffect, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
-import { useEhSearch, useEhFavorites } from '@/hooks/useGalleries'
+import { useEhSearch, useEhFavorites, useEhPopular, useEhToplist } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
 import { Pagination } from '@/components/Pagination'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { RatingStars } from '@/components/RatingStars'
-import { Search as SearchIcon, X as XIcon, ChevronDown, ChevronUp } from 'lucide-react'
-import type { EhGallery, Credentials } from '@/lib/types'
+import { Search as SearchIcon, X as XIcon, ChevronDown, ChevronUp, Bookmark, BookmarkCheck } from 'lucide-react'
+import type { EhGallery, Credentials, SavedSearch } from '@/lib/types'
 
 // ── IntersectionObserver-based lazy image ──────────────────────────────
 
@@ -351,8 +351,16 @@ function GalleryModal({
 // ── Main page ──────────────────────────────────────────────────────────
 
 type ViewMode = 'list' | 'grid'
-type BrowseTab = 'search' | 'favorites'
+type BrowseTab = 'search' | 'favorites' | 'popular' | 'toplist'
 type LoadMode = 'pagination' | 'scroll'
+
+// Toplist time-period IDs (EH convention)
+const TOPLIST_OPTIONS: { tl: number; label: string }[] = [
+  { tl: 11, label: 'browse.allTime' },
+  { tl: 12, label: 'browse.pastYear' },
+  { tl: 13, label: 'browse.pastMonth' },
+  { tl: 14, label: 'browse.yesterday' },
+]
 
 const EH_PAGE_SIZE = 25 // EH always returns ~25 per page
 
@@ -410,7 +418,9 @@ function BrowsePage() {
 
   const initialQ = searchParams.get('q') || ''
   const initialPage = Number(searchParams.get('page') || '0')
-  const initialTab = (searchParams.get('tab') as BrowseTab) || 'search'
+  const rawTab = searchParams.get('tab')
+  const initialTab: BrowseTab =
+    rawTab === 'favorites' || rawTab === 'popular' || rawTab === 'toplist' ? rawTab : 'search'
   const initialFavCat = searchParams.get('favcat') || 'all'
   const initialFavSearch = searchParams.get('favsearch') || ''
 
@@ -451,6 +461,17 @@ function BrowsePage() {
   const [favScrollHasMore, setFavScrollHasMore] = useState(true)
   const favScrollSentinelRef = useRef<HTMLDivElement>(null)
 
+  // Toplist state
+  const [toplistTl, setToplistTl] = useState(11)
+  const [toplistPage, setToplistPage] = useState(0)
+
+  // Saved searches state
+  const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([])
+  const [showSavedSearches, setShowSavedSearches] = useState(false)
+  const [saveSearchName, setSaveSearchName] = useState('')
+  const [showSaveInput, setShowSaveInput] = useState(false)
+  const savedSearchesRef = useRef<HTMLDivElement>(null)
+
   // Search history
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory] = useState<string[]>([])
@@ -467,6 +488,30 @@ function BrowsePage() {
       .getCredentials()
       .then((c: Credentials) => setEhConfigured(c.ehentai.configured))
       .catch(() => {})
+  }, [])
+
+  // Load saved searches
+  const refreshSavedSearches = useCallback(() => {
+    api.savedSearches
+      .list()
+      .then((r) => setSavedSearches(r.searches))
+      .catch(() => {})
+  }, [])
+
+  useEffect(() => {
+    refreshSavedSearches()
+  }, [refreshSavedSearches])
+
+  // Close saved searches dropdown on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (savedSearchesRef.current && !savedSearchesRef.current.contains(e.target as Node)) {
+        setShowSavedSearches(false)
+        setShowSaveInput(false)
+      }
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
   }, [])
 
   // Load history on focus
@@ -510,9 +555,11 @@ function BrowsePage() {
     if (activeTab !== 'search') params.set('tab', activeTab)
     if (activeTab === 'favorites' && favCat !== 'all') params.set('favcat', favCat)
     if (activeTab === 'favorites' && favSearch) params.set('favsearch', favSearch)
+    if (activeTab === 'toplist' && toplistTl !== 11) params.set('tl', String(toplistTl))
+    if (activeTab === 'toplist' && toplistPage > 0) params.set('tlpage', String(toplistPage))
     const qs = params.toString()
     router.replace(qs ? `/browse?${qs}` : '/browse', { scroll: false })
-  }, [searchQuery, page, activeTab, favCat, favSearch]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchQuery, page, activeTab, favCat, favSearch, toplistTl, toplistPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Compute f_cats bitmask from selected categories (multi-select)
   const computedFCats = (() => {
@@ -557,6 +604,18 @@ function BrowsePage() {
     { favcat: favCat, q: favSearch || undefined, ...favCursor },
     activeTab === 'favorites' && ehConfigured,
   )
+
+  const {
+    data: popularData,
+    isLoading: popularLoading,
+    error: popularError,
+  } = useEhPopular()
+
+  const {
+    data: toplistData,
+    isLoading: toplistLoading,
+    error: toplistError,
+  } = useEhToplist(toplistTl, toplistPage)
 
   // Restore scroll position after back-navigation (once data is loaded)
   const scrollRestoredRef = useRef(false)
@@ -764,6 +823,43 @@ function BrowsePage() {
     }
   }, [downloadUrl])
 
+  const handleSaveSearch = useCallback(async () => {
+    const name = saveSearchName.trim() || searchQuery || 'Search'
+    try {
+      await api.savedSearches.create({ name, query: searchQuery, params: {} })
+      toast.success(t('browse.saveSearchSaved'))
+      setSaveSearchName('')
+      setShowSaveInput(false)
+      refreshSavedSearches()
+    } catch {
+      toast.error(t('browse.saveSearchFailed'))
+    }
+  }, [saveSearchName, searchQuery, refreshSavedSearches])
+
+  const handleDeleteSavedSearch = useCallback(
+    async (id: number, e: React.MouseEvent) => {
+      e.stopPropagation()
+      try {
+        await api.savedSearches.delete(id)
+        toast.success(t('browse.saveSearchDeleted'))
+        refreshSavedSearches()
+      } catch {
+        toast.error(t('browse.saveSearchDeleteFailed'))
+      }
+    },
+    [refreshSavedSearches],
+  )
+
+  const handleLoadSavedSearch = useCallback(
+    (s: SavedSearch) => {
+      setInputValue(s.query)
+      commitSearch(s.query)
+      setActiveTab('search')
+      setShowSavedSearches(false)
+    },
+    [commitSearch],
+  )
+
   const displayGalleries = loadMode === 'scroll' ? scrollGalleries : (data?.galleries ?? [])
   const favDisplayGalleries =
     loadMode === 'scroll' ? favScrollGalleries : (favData?.galleries ?? [])
@@ -930,6 +1026,91 @@ function BrowsePage() {
           >
             {t('browse.search')}
           </button>
+
+          {/* Saved Searches button (desktop) */}
+          <div ref={savedSearchesRef} className="relative hidden sm:block shrink-0">
+            <button
+              onClick={() => {
+                setShowSavedSearches((v) => !v)
+                setShowSaveInput(false)
+              }}
+              title={t('browse.savedSearches')}
+              className="p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-text transition-colors"
+            >
+              {savedSearches.length > 0 ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
+            </button>
+
+            {/* Saved searches dropdown */}
+            {showSavedSearches && (
+              <div className="absolute right-0 top-full mt-1 z-30 w-64 bg-vault-card border border-vault-border rounded-lg shadow-xl overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-vault-border">
+                  <span className="text-xs font-medium text-vault-text">
+                    {t('browse.savedSearches')}
+                  </span>
+                  {searchQuery && (
+                    <button
+                      onClick={() => setShowSaveInput((v) => !v)}
+                      className="text-xs text-vault-accent hover:text-vault-accent/80 transition-colors"
+                    >
+                      {t('browse.saveSearch')}
+                    </button>
+                  )}
+                </div>
+
+                {/* Save current search input */}
+                {showSaveInput && searchQuery && (
+                  <div className="px-3 py-2 border-b border-vault-border flex gap-2">
+                    <input
+                      type="text"
+                      value={saveSearchName}
+                      onChange={(e) => setSaveSearchName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSaveSearch()}
+                      placeholder={t('browse.saveSearchName')}
+                      autoFocus
+                      className="flex-1 min-w-0 bg-vault-input border border-vault-border rounded px-2 py-1 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
+                    />
+                    <button
+                      onClick={handleSaveSearch}
+                      className="px-2 py-1 bg-vault-accent hover:bg-vault-accent/80 rounded text-white text-xs font-medium transition-colors shrink-0"
+                    >
+                      {t('browse.saveSearch')}
+                    </button>
+                  </div>
+                )}
+
+                {/* List of saved searches */}
+                <div className="max-h-60 overflow-y-auto">
+                  {savedSearches.length === 0 ? (
+                    <p className="px-3 py-4 text-xs text-vault-text-muted text-center">
+                      {t('browse.noSavedSearches')}
+                    </p>
+                  ) : (
+                    savedSearches.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => handleLoadSavedSearch(s)}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-vault-text hover:bg-vault-card-hover transition-colors group"
+                      >
+                        <span className="flex-1 truncate text-xs">{s.name}</span>
+                        {s.query && (
+                          <span className="text-[10px] text-vault-text-muted truncate max-w-[80px]">
+                            {s.query}
+                          </span>
+                        )}
+                        <span
+                          onClick={(e) => handleDeleteSavedSearch(s.id, e)}
+                          className="text-vault-text-muted hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity px-1 shrink-0"
+                          title="Delete"
+                        >
+                          ✕
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
           {/* View toggle */}
           <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
             <button
@@ -949,28 +1130,28 @@ function BrowsePage() {
           </div>
         </div>
 
-        {/* ── Tab switcher (Search / Favorites) ── */}
-        {ehConfigured && (
-          <div className="flex gap-1 border-b border-vault-border">
-            <button
-              onClick={() => {
-                setActiveTab('search')
-                setPage(0)
-              }}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'search'
-                  ? 'border-vault-accent text-vault-text'
-                  : 'border-transparent text-vault-text-muted hover:text-vault-text'
-              }`}
-            >
-              {t('browse.searchTab')}
-            </button>
+        {/* ── Tab switcher ── */}
+        <div className="flex gap-1 border-b border-vault-border overflow-x-auto scrollbar-hide">
+          <button
+            onClick={() => {
+              setActiveTab('search')
+              setPage(0)
+            }}
+            className={`flex-shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'search'
+                ? 'border-vault-accent text-vault-text'
+                : 'border-transparent text-vault-text-muted hover:text-vault-text'
+            }`}
+          >
+            {t('browse.searchTab')}
+          </button>
+          {ehConfigured && (
             <button
               onClick={() => {
                 setActiveTab('favorites')
                 setFavCursor({})
               }}
-              className={`px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              className={`flex-shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === 'favorites'
                   ? 'border-[#e91e63] text-vault-text'
                   : 'border-transparent text-vault-text-muted hover:text-vault-text'
@@ -978,8 +1159,31 @@ function BrowsePage() {
             >
               {t('browse.favoritesTab')}
             </button>
-          </div>
-        )}
+          )}
+          <button
+            onClick={() => setActiveTab('popular')}
+            className={`flex-shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'popular'
+                ? 'border-orange-400 text-vault-text'
+                : 'border-transparent text-vault-text-muted hover:text-vault-text'
+            }`}
+          >
+            {t('browse.popularTab')}
+          </button>
+          <button
+            onClick={() => {
+              setActiveTab('toplist')
+              setToplistPage(0)
+            }}
+            className={`flex-shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+              activeTab === 'toplist'
+                ? 'border-yellow-400 text-vault-text'
+                : 'border-transparent text-vault-text-muted hover:text-vault-text'
+            }`}
+          >
+            {t('browse.toplistTab')}
+          </button>
+        </div>
 
         {/* ════════ SEARCH TAB ════════ */}
         {activeTab === 'search' && (
@@ -1170,7 +1374,22 @@ function BrowsePage() {
                 <span>
                   {data.total.toLocaleString()} results{searchQuery && ` for "${searchQuery}"`}
                 </span>
-                <span>Page {page + 1}</span>
+                <div className="flex items-center gap-2">
+                  {searchQuery && (
+                    <button
+                      onClick={() => {
+                        setShowSaveInput(true)
+                        setShowSavedSearches(true)
+                      }}
+                      className="flex items-center gap-1 text-vault-text-muted hover:text-vault-accent transition-colors"
+                      title={t('browse.saveSearch')}
+                    >
+                      <Bookmark size={12} />
+                      {t('browse.saveSearch')}
+                    </button>
+                  )}
+                  <span>Page {page + 1}</span>
+                </div>
               </div>
             )}
 
@@ -1423,6 +1642,148 @@ function BrowsePage() {
               <div className="text-center py-20 text-vault-text-muted">
                 {t('browse.noFavorites')}
               </div>
+            )}
+          </>
+        )}
+
+        {/* ════════ POPULAR TAB ════════ */}
+        {activeTab === 'popular' && (
+          <>
+            {popularLoading && (
+              <div className="flex justify-center py-20">
+                <LoadingSpinner />
+              </div>
+            )}
+
+            {popularError && !popularLoading && (
+              <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
+                <p className="text-red-400">{popularError.message || 'Failed to load popular'}</p>
+              </div>
+            )}
+
+            {popularData && !popularLoading && (
+              <>
+                <div className="text-xs text-vault-text-muted">
+                  {popularData.galleries.length} {t('browse.results')}
+                </div>
+
+                {viewMode === 'list' ? (
+                  <div className="space-y-2">
+                    {popularData.galleries.map((g) => (
+                      <ListCard
+                        key={`${g.gid}-${g.token}`}
+                        gallery={g}
+                        onClick={() => navigateToGallery(g)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                    {popularData.galleries.map((g) => (
+                      <GridCard
+                        key={`${g.gid}-${g.token}`}
+                        gallery={g}
+                        onClick={() => navigateToGallery(g)}
+                      />
+                    ))}
+                  </div>
+                )}
+              </>
+            )}
+
+            {!popularLoading && !popularError && popularData?.galleries.length === 0 && (
+              <div className="text-center py-20 text-vault-text-muted">{t('common.noResults')}</div>
+            )}
+          </>
+        )}
+
+        {/* ════════ TOPLIST TAB ════════ */}
+        {activeTab === 'toplist' && (
+          <>
+            {/* Time-period sub-filter */}
+            <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
+              {TOPLIST_OPTIONS.map(({ tl, label }) => (
+                <button
+                  key={tl}
+                  onClick={() => {
+                    setToplistTl(tl)
+                    setToplistPage(0)
+                  }}
+                  className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    toplistTl === tl
+                      ? 'bg-yellow-500 text-black border-yellow-500'
+                      : 'bg-transparent text-vault-text-secondary border-vault-border hover:border-vault-border-hover hover:text-vault-text'
+                  }`}
+                >
+                  {t(label)}
+                </button>
+              ))}
+            </div>
+
+            {toplistLoading && (
+              <div className="flex justify-center py-20">
+                <LoadingSpinner />
+              </div>
+            )}
+
+            {toplistError && !toplistLoading && (
+              <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
+                <p className="text-red-400">{toplistError.message || 'Failed to load top lists'}</p>
+              </div>
+            )}
+
+            {toplistData && !toplistLoading && (
+              <>
+                <div className="flex items-center justify-between text-xs text-vault-text-muted">
+                  <span>
+                    {toplistData.total.toLocaleString()} {t('browse.results')}
+                  </span>
+                  <span>
+                    {t('browse.page')} {toplistPage + 1}
+                  </span>
+                </div>
+
+                {viewMode === 'list' ? (
+                  <div className="space-y-2">
+                    {toplistData.galleries.map((g) => (
+                      <ListCard
+                        key={`${g.gid}-${g.token}`}
+                        gallery={g}
+                        onClick={() => navigateToGallery(g)}
+                      />
+                    ))}
+                  </div>
+                ) : (
+                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
+                    {toplistData.galleries.map((g) => (
+                      <GridCard
+                        key={`${g.gid}-${g.token}`}
+                        gallery={g}
+                        onClick={() => navigateToGallery(g)}
+                      />
+                    ))}
+                  </div>
+                )}
+
+                {/* Toplist pagination */}
+                {toplistData.galleries.length > 0 && (
+                  <div className="pt-2">
+                    <Pagination
+                      page={toplistPage}
+                      total={toplistData.total}
+                      pageSize={EH_PAGE_SIZE}
+                      onChange={(p) => {
+                        setToplistPage(p)
+                        window.scrollTo(0, 0)
+                      }}
+                    />
+                  </div>
+                )}
+              </>
+            )}
+
+            {!toplistLoading && !toplistError && toplistData?.galleries.length === 0 && (
+              <div className="text-center py-20 text-vault-text-muted">{t('common.noResults')}</div>
             )}
           </>
         )}

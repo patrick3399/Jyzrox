@@ -236,6 +236,29 @@ export default function EhGalleryDetailPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
+  // Record browse history once when gallery data is loaded
+  const historyRecordedRef = useRef(false)
+  useEffect(() => {
+    if (!gallery || historyRecordedRef.current) return
+    try {
+      if (localStorage.getItem('history_enabled') !== 'false') {
+        historyRecordedRef.current = true
+        api.history
+          .record({
+            source: 'ehentai',
+            source_id: String(gid),
+            title: gallery.title_jpn || gallery.title,
+            thumb: gallery.thumb,
+            gid: Number(gid),
+            token,
+          })
+          .catch(() => {})
+      }
+    } catch {
+      // localStorage may be unavailable in some contexts
+    }
+  }, [gallery, gid, token])
+
   const handleAddFavorite = useCallback(
     async (favcat: number) => {
       if (!gallery) return

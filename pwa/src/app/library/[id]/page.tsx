@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -68,6 +68,27 @@ export default function GalleryDetailPage() {
   const { data: imagesData, isLoading: imagesLoading } = useGalleryImages(id)
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(id ?? 0)
   const [isDeleting, setIsDeleting] = useState(false)
+
+  // Record browse history once when gallery data is loaded
+  const historyRecordedRef = useRef(false)
+  useEffect(() => {
+    if (!gallery || historyRecordedRef.current) return
+    try {
+      if (localStorage.getItem('history_enabled') !== 'false') {
+        historyRecordedRef.current = true
+        api.history
+          .record({
+            source: 'local',
+            source_id: String(gallery.id),
+            title: gallery.title,
+            thumb: gallery.cover_thumb || '',
+          })
+          .catch(() => {})
+      }
+    } catch {
+      // localStorage may be unavailable in some contexts
+    }
+  }, [gallery])
 
   const handleDelete = async () => {
     if (!gallery || !id) return

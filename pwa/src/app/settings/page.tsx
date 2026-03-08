@@ -7,7 +7,7 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
-import { Copy, Key, BookOpen } from 'lucide-react'
+import { Copy, Key, BookOpen, X, Plus, Tag } from 'lucide-react'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
 import type {
@@ -17,9 +17,19 @@ import type {
   Credentials,
   SessionInfo,
   ApiTokenInfo,
+  BlockedTag,
+  CacheStats,
 } from '@/lib/types'
 
-type SectionKey = 'ehentai' | 'pixiv' | 'system' | 'account' | 'browse' | 'apiTokens' | 'reader'
+type SectionKey =
+  | 'ehentai'
+  | 'pixiv'
+  | 'system'
+  | 'account'
+  | 'browse'
+  | 'apiTokens'
+  | 'reader'
+  | 'blockedTags'
 
 function SectionHeader({
   title,
@@ -143,6 +153,36 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
           <option value="100">100</option>
         </select>
       </div>
+
+      {/* Browse History toggle */}
+      <BrowseHistoryToggle onForceRerender={onForceRerender} />
+    </div>
+  )
+}
+
+// ── Browse History Toggle sub-component ──────────────────────────────
+
+function BrowseHistoryToggle({ onForceRerender }: { onForceRerender: () => void }) {
+  const historyEnabled =
+    typeof window !== 'undefined' && localStorage.getItem('history_enabled') !== 'false'
+  return (
+    <div className="mt-5 flex items-center justify-between">
+      <div>
+        <p className="text-sm text-vault-text">瀏覽記錄</p>
+        <p className="text-xs text-vault-text-muted mt-0.5">記錄瀏覽過的畫廊</p>
+      </div>
+      <button
+        onClick={() => {
+          const next = localStorage.getItem('history_enabled') === 'false'
+          localStorage.setItem('history_enabled', next ? 'true' : 'false')
+          onForceRerender()
+        }}
+        className={`relative w-11 h-6 rounded-full transition-colors ${historyEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
+      >
+        <span
+          className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${historyEnabled ? 'translate-x-5' : ''}`}
+        />
+      </button>
     </div>
   )
 }
@@ -378,6 +418,20 @@ export default function SettingsPage() {
   const [rateLimitEnabled, setRateLimitEnabled] = useState<boolean | null>(null)
   const [rateLimitToggling, setRateLimitToggling] = useState(false)
 
+  // Cache stats
+  const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
+  const [cacheLoading, setCacheLoading] = useState(false)
+  const [cacheClearingAll, setCacheClearingAll] = useState(false)
+  const [cacheClearingCategory, setCacheClearingCategory] = useState<string | null>(null)
+
+  // Blocked Tags
+  const [blockedTags, setBlockedTags] = useState<BlockedTag[]>([])
+  const [blockedTagsLoaded, setBlockedTagsLoaded] = useState(false)
+  const [blockedTagsLoading, setBlockedTagsLoading] = useState(false)
+  const [newBlockedTag, setNewBlockedTag] = useState('')
+  const [blockingTag, setBlockingTag] = useState(false)
+  const [removingBlockedTagId, setRemovingBlockedTagId] = useState<number | null>(null)
+
   // Profile
   const [profileUsername, setProfileUsername] = useState('')
   const [profileEmail, setProfileEmail] = useState('')
@@ -564,24 +618,133 @@ export default function SettingsPage() {
     }
   }
 
-  // System: Load health + info
+  // System: Load health + info + cache
   const handleLoadSystem = useCallback(async () => {
     setSystemLoading(true)
     try {
-      const [h, i, rl] = await Promise.all([
+      const [h, i, rl, cs] = await Promise.all([
         api.system.health(),
         api.system.info(),
         api.settings.getRateLimit(),
+        api.system.getCache(),
       ])
       setHealth(h)
       setSystemInfo(i)
       setRateLimitEnabled(rl.enabled)
+      setCacheStats(cs)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.systemLoadFailed'))
     } finally {
       setSystemLoading(false)
     }
   }, [])
+
+  // Cache: Refresh stats only
+  const handleRefreshCache = useCallback(async () => {
+    setCacheLoading(true)
+    try {
+      const cs = await api.system.getCache()
+      setCacheStats(cs)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
+    } finally {
+      setCacheLoading(false)
+    }
+  }, [])
+
+  // Cache: Clear all
+  const handleClearAllCache = useCallback(async () => {
+    if (!window.confirm(t('settings.clearCacheConfirm'))) return
+    setCacheClearingAll(true)
+    try {
+      const result = await api.system.clearCache()
+      toast.success(t('settings.clearCacheSuccess', { count: result.deleted_keys }))
+      await handleRefreshCache()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('settings.clearCacheFailed'))
+    } finally {
+      setCacheClearingAll(false)
+    }
+  }, [handleRefreshCache])
+
+  // Cache: Clear category
+  const handleClearCacheCategory = useCallback(
+    async (category: string) => {
+      if (!window.confirm(`清除 ${category} 快取？`)) return
+      setCacheClearingCategory(category)
+      try {
+        const result = await api.system.clearCacheCategory(category)
+        toast.success(t('settings.clearCacheSuccess', { count: result.deleted_keys }))
+        await handleRefreshCache()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t('settings.clearCacheFailed'))
+      } finally {
+        setCacheClearingCategory(null)
+      }
+    },
+    [handleRefreshCache],
+  )
+
+  // Blocked Tags: Load
+  const handleLoadBlockedTags = useCallback(async () => {
+    setBlockedTagsLoading(true)
+    try {
+      const items = await api.tags.listBlocked()
+      setBlockedTags(items)
+      setBlockedTagsLoaded(true)
+    } catch {
+      toast.error(t('common.failedToLoad'))
+      setBlockedTagsLoaded(true)
+    } finally {
+      setBlockedTagsLoading(false)
+    }
+  }, [])
+
+  // Blocked Tags: Add
+  const handleAddBlockedTag = useCallback(async () => {
+    const raw = newBlockedTag.trim()
+    if (!raw) return
+    // accept "namespace:name" or fall back to "tag:name"
+    const colonIdx = raw.indexOf(':')
+    let namespace: string
+    let name: string
+    if (colonIdx > 0) {
+      namespace = raw.slice(0, colonIdx).trim()
+      name = raw.slice(colonIdx + 1).trim()
+    } else {
+      namespace = 'tag'
+      name = raw
+    }
+    if (!name) return
+    setBlockingTag(true)
+    try {
+      await api.tags.addBlocked(namespace, name)
+      toast.success(t('settings.tagBlockAdded'))
+      setNewBlockedTag('')
+      await handleLoadBlockedTags()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('settings.tagBlockAddFailed'))
+    } finally {
+      setBlockingTag(false)
+    }
+  }, [newBlockedTag, handleLoadBlockedTags])
+
+  // Blocked Tags: Remove
+  const handleRemoveBlockedTag = useCallback(
+    async (id: number) => {
+      setRemovingBlockedTagId(id)
+      try {
+        await api.tags.removeBlocked(id)
+        toast.success(t('settings.tagBlockRemoved'))
+        setBlockedTags((prev) => prev.filter((bt) => bt.id !== id))
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t('settings.tagBlockRemoveFailed'))
+      } finally {
+        setRemovingBlockedTagId(null)
+      }
+    },
+    [],
+  )
 
   const handleToggleRateLimit = useCallback(async () => {
     if (rateLimitEnabled === null) return
@@ -768,6 +931,9 @@ export default function SettingsPage() {
     if (activeSection === 'apiTokens' && !apiTokensLoaded && !apiTokensLoading) {
       handleLoadApiTokens()
     }
+    if (activeSection === 'blockedTags' && !blockedTagsLoaded && !blockedTagsLoading) {
+      handleLoadBlockedTags()
+    }
   }, [
     activeSection,
     health,
@@ -781,6 +947,9 @@ export default function SettingsPage() {
     apiTokensLoaded,
     apiTokensLoading,
     handleLoadApiTokens,
+    blockedTagsLoaded,
+    blockedTagsLoading,
+    handleLoadBlockedTags,
   ])
 
   const serviceStatusClass = (status: string) =>
@@ -1278,6 +1447,88 @@ export default function SettingsPage() {
                       </div>
                     </div>
 
+                    {/* Cache Management */}
+                    <div>
+                      <div className="flex items-center justify-between mb-2">
+                        <p className="text-xs text-vault-text-muted uppercase tracking-wide">
+                          {t('settings.cache')}
+                        </p>
+                        <button
+                          onClick={handleRefreshCache}
+                          disabled={cacheLoading}
+                          className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+                        >
+                          {cacheLoading ? t('settings.loading') : t('settings.cacheRefresh')}
+                        </button>
+                      </div>
+                      {cacheStats && (
+                        <div className="space-y-2">
+                          <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
+                            <div className="flex justify-between items-center px-3 py-2">
+                              <span className="text-sm text-vault-text-muted">
+                                {t('settings.cacheMemory')}
+                              </span>
+                              <span className="text-sm font-medium text-vault-text-secondary">
+                                {cacheStats.total_memory}
+                              </span>
+                            </div>
+                            <div className="flex justify-between items-center px-3 py-2">
+                              <span className="text-sm text-vault-text-muted">
+                                {t('settings.cacheKeys')}
+                              </span>
+                              <span className="text-sm font-medium text-vault-text-secondary">
+                                {cacheStats.total_keys}
+                              </span>
+                            </div>
+                          </div>
+
+                          {/* Breakdown by category */}
+                          {Object.keys(cacheStats.breakdown).length > 0 && (
+                            <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
+                              {Object.entries(cacheStats.breakdown).map(([cat, count]) => {
+                                const catLabels: Record<string, string> = {
+                                  eh_search: 'EH 搜尋快取',
+                                  eh_gallery: 'EH 畫廊快取',
+                                  eh_image: 'EH 圖片快取',
+                                  thumbs: '縮圖快取',
+                                }
+                                return (
+                                  <div
+                                    key={cat}
+                                    className="flex items-center justify-between px-3 py-2 gap-2"
+                                  >
+                                    <span className="text-sm text-vault-text-muted flex-1">
+                                      {catLabels[cat] ?? cat}
+                                    </span>
+                                    <span className="text-sm text-vault-text-secondary tabular-nums">
+                                      {count}
+                                    </span>
+                                    <button
+                                      onClick={() => handleClearCacheCategory(cat)}
+                                      disabled={cacheClearingCategory === cat || cacheClearingAll}
+                                      className="text-xs text-red-400/70 hover:text-red-400 transition-colors px-2 py-0.5 disabled:opacity-40"
+                                    >
+                                      {cacheClearingCategory === cat
+                                        ? '...'
+                                        : t('settings.clearCategory')}
+                                    </button>
+                                  </div>
+                                )
+                              })}
+                            </div>
+                          )}
+
+                          <button
+                            onClick={handleClearAllCache}
+                            disabled={cacheClearingAll || cacheClearingCategory !== null}
+                            className="mt-1 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                          >
+                            {cacheClearingAll ? '清除中...' : t('settings.clearCache')}
+                          </button>
+                        </div>
+                      )}
+                    </div>
+
                     <button
                       onClick={handleLoadSystem}
                       className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
@@ -1305,6 +1556,106 @@ export default function SettingsPage() {
                   setTimeout(() => setActiveSection('browse'), 0)
                 }}
               />
+            )}
+          </div>
+
+          {/* ── Blocked Tags ── */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <SectionHeader
+                  title={t('settings.blockedTags')}
+                  sectionKey="blockedTags"
+                  activeSection={activeSection}
+                  onToggle={toggleSection}
+                />
+              </div>
+              {blockedTags.length > 0 && (
+                <div className="pr-5">
+                  <span className="inline-flex items-center gap-1 text-xs text-vault-text-muted">
+                    <Tag size={12} />
+                    {blockedTags.length}
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {activeSection === 'blockedTags' && (
+              <div className="px-5 pb-5 border-t border-vault-border">
+                <p className="text-xs text-vault-text-muted mt-4 mb-3">
+                  {t('settings.tagBlockingDesc')}
+                </p>
+
+                {/* Add new blocked tag */}
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={newBlockedTag}
+                    onChange={(e) => setNewBlockedTag(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleAddBlockedTag()}
+                    placeholder="artist:xxx 或 tag:xxx"
+                    className={inputClass + ' flex-1'}
+                  />
+                  <button
+                    onClick={handleAddBlockedTag}
+                    disabled={blockingTag || !newBlockedTag.trim()}
+                    className={btnPrimary + ' flex items-center gap-1.5 shrink-0'}
+                  >
+                    <Plus size={14} />
+                    {blockingTag ? t('settings.saving') : t('settings.addBlockedTag')}
+                  </button>
+                </div>
+
+                {/* Blocked tag list */}
+                <div className="mt-4">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide">
+                      {t('settings.blockedTags')}
+                    </p>
+                    <button
+                      onClick={handleLoadBlockedTags}
+                      disabled={blockedTagsLoading}
+                      className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+                    >
+                      {blockedTagsLoading ? t('settings.loading') : t('settings.refresh')}
+                    </button>
+                  </div>
+
+                  {blockedTagsLoading && blockedTags.length === 0 ? (
+                    <div className="flex justify-center py-4">
+                      <LoadingSpinner />
+                    </div>
+                  ) : blockedTags.length === 0 ? (
+                    <p className="text-xs text-vault-text-muted py-2">
+                      {t('settings.noBlockedTags')}
+                    </p>
+                  ) : (
+                    <div className="flex flex-wrap gap-2">
+                      {blockedTags.map((bt) => (
+                        <div
+                          key={bt.id}
+                          className="inline-flex items-center gap-1.5 bg-vault-input border border-vault-border rounded-full px-3 py-1 text-sm text-vault-text"
+                        >
+                          <span className="text-vault-text-muted text-xs">{bt.namespace}:</span>
+                          <span>{bt.name}</span>
+                          <button
+                            onClick={() => handleRemoveBlockedTag(bt.id)}
+                            disabled={removingBlockedTagId === bt.id}
+                            className="ml-0.5 text-vault-text-muted hover:text-red-400 transition-colors disabled:opacity-40"
+                            title="Unblock"
+                          >
+                            {removingBlockedTagId === bt.id ? (
+                              <span className="text-[10px]">...</span>
+                            ) : (
+                              <X size={12} />
+                            )}
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              </div>
             )}
           </div>
 
