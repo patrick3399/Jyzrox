@@ -21,14 +21,19 @@ function PreviewGrid({
   onRead: (page: number) => void
 }) {
   const gridRef = useRef<HTMLDivElement>(null)
-  const [cellSize, setCellSize] = useState({ w: 0, h: 0 })
+  const [cellW, setCellW] = useState(0)
+  // Cache natural sprite dimensions per URL to compute pixel-perfect background-size.
+  const [spriteNaturalSizes, setSpriteNaturalSizes] = useState<Record<string, { w: number; h: number }>>({})
 
   useEffect(() => {
     const grid = gridRef.current
     if (!grid) return
     const measure = () => {
       const first = grid.firstElementChild as HTMLElement | null
-      if (first) setCellSize({ w: first.offsetWidth, h: first.offsetHeight })
+      if (first) {
+        // Use getBoundingClientRect for sub-pixel accuracy (offsetWidth rounds to integer).
+        setCellW(first.getBoundingClientRect().width)
+      }
     }
     measure()
     const obs = new ResizeObserver(measure)
@@ -36,45 +41,75 @@ function PreviewGrid({
     return () => obs.disconnect()
   }, [thumbs.length])
 
+  const spriteUrls = useMemo(
+    () => [...new Set(thumbs.filter((t) => t.isSprite).map((t) => t.url))],
+    [thumbs],
+  )
+
   return (
-    <div ref={gridRef} className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-      {thumbs.map((thumb) => {
-        // Scale based on width only — backend normalizes sprite heights.
-        const tw = thumb.width ?? 200
-        const th = thumb.height ?? 300
-        const scale = cellSize.w ? cellSize.w / tw : 1
-        const scaledH = th * scale
-        return (
-          <button
-            key={thumb.page}
-            onClick={() => onRead(thumb.page)}
-            className="relative aspect-[3/4] bg-vault-bg rounded-lg overflow-hidden border border-vault-border
-                       hover:border-blue-500 hover:brightness-110 transition-all cursor-pointer"
-          >
-            {thumb.isSprite ? (
-              <div
-                className="w-full h-full"
-                style={{
-                  backgroundImage: `url(${thumb.url})`,
-                  backgroundPosition: `${(thumb.offsetX ?? 0) * scale}px center`,
-                  backgroundSize: `auto ${scaledH}px`,
-                  backgroundRepeat: 'no-repeat',
-                }}
-              />
-            ) : (
-              <img
-                src={thumb.url}
-                alt={`Page ${thumb.page}`}
-                className="w-full h-full object-cover"
-              />
-            )}
-            <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-center text-[10px] text-white py-0.5">
-              {thumb.page}
-            </span>
-          </button>
-        )
-      })}
-    </div>
+    <>
+      {/* Hidden imgs load the sprite's natural dimensions so we can set an exact
+          background-size. Without this, `auto` relies on the browser's aspect-ratio
+          calculation which may differ from the encoded cell dimensions by a pixel,
+          causing cumulative offset errors that bleed adjacent cells into view. */}
+      {spriteUrls.map((url) =>
+        !spriteNaturalSizes[url] ? (
+          <img
+            key={url}
+            src={url}
+            style={{ display: 'none' }}
+            alt=""
+            onLoad={(e) => {
+              const { naturalWidth: w, naturalHeight: h } = e.currentTarget
+              setSpriteNaturalSizes((prev) => (prev[url] ? prev : { ...prev, [url]: { w, h } }))
+            }}
+          />
+        ) : null,
+      )}
+      <div ref={gridRef} className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+        {thumbs.map((thumb) => {
+          // Scale based on width only — backend normalizes sprite heights.
+          const tw = thumb.width ?? 200
+          const th = thumb.height ?? 300
+          const scale = cellW ? cellW / tw : 1
+          const naturalSize = spriteNaturalSizes[thumb.url]
+          // Use exact pixel dimensions once the sprite is loaded; fall back to auto
+          // until then. This prevents sub-pixel rounding from bleeding adjacent cells.
+          const bgSize = naturalSize
+            ? `${naturalSize.w * scale}px ${naturalSize.h * scale}px`
+            : `auto ${th * scale}px`
+          return (
+            <button
+              key={thumb.page}
+              onClick={() => onRead(thumb.page)}
+              className="relative aspect-[3/4] bg-vault-bg rounded-lg overflow-hidden border border-vault-border
+                         hover:border-blue-500 hover:brightness-110 transition-all cursor-pointer"
+            >
+              {thumb.isSprite ? (
+                <div
+                  className="w-full h-full"
+                  style={{
+                    backgroundImage: `url(${thumb.url})`,
+                    backgroundPosition: `${(thumb.offsetX ?? 0) * scale}px center`,
+                    backgroundSize: bgSize,
+                    backgroundRepeat: 'no-repeat',
+                  }}
+                />
+              ) : (
+                <img
+                  src={thumb.url}
+                  alt={`Page ${thumb.page}`}
+                  className="w-full h-full object-cover"
+                />
+              )}
+              <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-center text-[10px] text-white py-0.5">
+                {thumb.page}
+              </span>
+            </button>
+          )
+        })}
+      </div>
+    </>
   )
 }
 

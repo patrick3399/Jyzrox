@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import { X } from 'lucide-react'
 import type { GalleryImage } from '@/lib/types'
@@ -637,6 +637,17 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
   const activeRef = useRef<HTMLButtonElement | null>(null)
   const stripRef = useRef<HTMLDivElement | null>(null)
   const userScrollingRef = useRef(false)
+  // Cache natural sprite dimensions per URL for pixel-perfect background-size.
+  const [spriteNaturalSizes, setSpriteNaturalSizes] = useState<Record<string, { w: number; h: number }>>({})
+
+  const spriteUrls = useMemo(() => {
+    if (!previews) return []
+    const urls = new Set<string>()
+    for (const raw of Object.values(previews)) {
+      if (raw.includes('|')) urls.add(`/api/eh/thumb-proxy?url=${encodeURIComponent(raw.split('|')[0])}`)
+    }
+    return [...urls]
+  }, [previews])
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>()
 
   useEffect(() => {
@@ -663,10 +674,28 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
   }, [currentPage])
 
   return (
-    <div
-      ref={stripRef}
-      className="reader-thumb-strip absolute bottom-0 left-0 right-0 z-20 flex gap-1 bg-black/70 px-2 py-2 backdrop-blur-sm"
-    >
+    <>
+      {/* Hidden imgs to load natural sprite dimensions for pixel-perfect background-size. */}
+      {spriteUrls.map((proxyUrl) =>
+        !spriteNaturalSizes[proxyUrl] ? (
+          <img
+            key={proxyUrl}
+            src={proxyUrl}
+            style={{ display: 'none' }}
+            alt=""
+            onLoad={(e) => {
+              const { naturalWidth: w, naturalHeight: h } = e.currentTarget
+              setSpriteNaturalSizes((prev) =>
+                prev[proxyUrl] ? prev : { ...prev, [proxyUrl]: { w, h } },
+              )
+            }}
+          />
+        ) : null,
+      )}
+      <div
+        ref={stripRef}
+        className="reader-thumb-strip absolute bottom-0 left-0 right-0 z-20 flex gap-1 bg-black/70 px-2 py-2 backdrop-blur-sm"
+      >
       {images.map((img) => {
         const isActive = img.pageNum === currentPage
         const previewRaw = previews?.[String(img.pageNum)]
@@ -684,10 +713,15 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
             // Scale based on width only — backend normalizes sprite heights.
             const scale = 48 / cellW
             const scaledOx = ox * scale
+            const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
+            const naturalSize = spriteNaturalSizes[proxyUrl]
+            const bgSize = naturalSize
+              ? `${naturalSize.w * scale}px ${naturalSize.h * scale}px`
+              : `auto ${cellH * scale}px`
             spriteStyle = {
-              backgroundImage: `url(/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)})`,
+              backgroundImage: `url(${proxyUrl})`,
               backgroundPosition: `${scaledOx}px center`,
-              backgroundSize: `auto ${cellH * scale}px`,
+              backgroundSize: bgSize,
               backgroundRepeat: 'no-repeat',
               width: '100%',
               height: '100%',
@@ -729,7 +763,8 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
           </button>
         )
       })}
-    </div>
+      </div>
+    </>
   )
 }
 
