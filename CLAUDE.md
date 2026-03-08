@@ -32,7 +32,7 @@
 
 ## 部署操作
 
-> 也可使用 `/preflight` 預檢 + `/deploy` 一鍵部署
+> 部署相關 skill 定義在 `.claude/skills/deploy/` 和 `.claude/skills/preflight/`
 
 ### 更新服務
 ```bash
