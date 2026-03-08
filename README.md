@@ -1,16 +1,18 @@
 # Jyzrox
 
 > **Work in Progress** — This project is under active development. Features may be incomplete or change without notice.
+>
+> **WARNING** — This project is created via Vibe Coding and may contain unknown security risks. Using this program may result in your account being banned on external websites.
 
 A self-hosted gallery management platform built with Docker Compose. Browse, download, organize, and read galleries from various sources with a modern PWA interface.
 
 ## Features
 
 - **Gallery Browser** — Search and browse E-Hentai with favorites sync
-- **Download Engine** — Queue-based downloads via gallery-dl with progress tracking
+- **Download Engine** — Queue-based downloads (native for E-Hentai, gallery-dl for others) with progress tracking
 - **Reader** — Single page, double page, and webtoon (scroll) modes with touch/keyboard navigation
 - **Library** — Local gallery management with tag filtering, rating, and read progress
-- **Tag System** — Namespace-based tags with alias and implication support
+- **Tag System** — Namespace-based tags (alias and implication support currently API-only)
 - **PWA** — Installable, mobile-friendly, works offline for local content
 
 ## Tech Stack
@@ -39,7 +41,7 @@ docker compose up -d
 
 ## Roadmap
 
-- [ ] Pixiv source integration
+- [x] Pixiv source integration (API & basic download implemented)
 - [ ] AI-based auto-tagging (WD14)
 - [ ] Duplicate detection and management
 - [ ] Batch operations (tag editing, export)
