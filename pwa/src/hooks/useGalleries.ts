@@ -106,6 +106,9 @@ export function useEhGalleryImagesPaginated(
   const fetchingRef = useRef(false)
   // Mounted guard
   const mountedRef = useRef(true)
+  // fetchUpTo single-instance guards
+  const fetchUpToTargetRef = useRef(0)
+  const fetchUpToActiveRef = useRef(false)
 
   useEffect(() => {
     mountedRef.current = true
@@ -122,6 +125,8 @@ export function useEhGalleryImagesPaginated(
     nextStartRef.current = 0
     doneRef.current = false
     fetchingRef.current = false
+    fetchUpToTargetRef.current = 0
+    fetchUpToActiveRef.current = false
   }, [gid, token])
 
   const fetchNextBatch = useCallback(async () => {
@@ -171,10 +176,12 @@ export function useEhGalleryImagesPaginated(
    * Called by the reader when the current page changes.
    * Triggers the next batch fetch when within `prefetchThreshold` pages
    * of the last fetched page.
+   * Skips if fetchUpTo is actively running — it will handle any needed fetches.
    */
   const onPageChange = useCallback(
     (currentPage: number) => {
       if (doneRef.current || fetchingRef.current) return
+      if (fetchUpToActiveRef.current) return
       const fetchedUpTo = nextStartRef.current // already fetched count (0-indexed count = highest page index)
       if (currentPage >= fetchedUpTo - prefetchThreshold) {
         fetchNextBatch()
@@ -185,14 +192,29 @@ export function useEhGalleryImagesPaginated(
 
   /**
    * Imperatively ensure tokens are available up to `targetPage`.
-   * Used when user seeks far ahead (e.g., taps a thumbnail for page 50
-   * but only 20 tokens are loaded). Fetches batches until targetPage
-   * is covered or the gallery is exhausted.
+   * Single-instance: if already running, the active loop picks up the
+   * latest target via fetchUpToTargetRef instead of spawning a second loop.
    */
   const fetchUpTo = useCallback(
     async (targetPage: number) => {
-      while (!doneRef.current && nextStartRef.current < targetPage) {
-        await fetchNextBatch()
+      // Update target — latest/highest caller wins
+      fetchUpToTargetRef.current = Math.max(fetchUpToTargetRef.current, targetPage)
+
+      // If already running, the active loop will pick up the new target
+      if (fetchUpToActiveRef.current) return
+      fetchUpToActiveRef.current = true
+
+      try {
+        while (!doneRef.current && nextStartRef.current < fetchUpToTargetRef.current) {
+          if (fetchingRef.current) {
+            // Wait for the in-flight batch to finish before attempting the next
+            await new Promise<void>((r) => setTimeout(r, 100))
+            continue
+          }
+          await fetchNextBatch()
+        }
+      } finally {
+        fetchUpToActiveRef.current = false
       }
     },
     [fetchNextBatch],

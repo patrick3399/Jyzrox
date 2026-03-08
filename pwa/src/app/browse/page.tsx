@@ -359,7 +359,7 @@ const TOPLIST_OPTIONS: { tl: number; label: string }[] = [
   { tl: 11, label: 'browse.allTime' },
   { tl: 12, label: 'browse.pastYear' },
   { tl: 13, label: 'browse.pastMonth' },
-  { tl: 14, label: 'browse.yesterday' },
+  { tl: 15, label: 'browse.yesterday' },
 ]
 
 const EH_PAGE_SIZE = 25 // EH always returns ~25 per page
@@ -461,9 +461,15 @@ function BrowsePage() {
   const [favScrollHasMore, setFavScrollHasMore] = useState(true)
   const favScrollSentinelRef = useRef<HTMLDivElement>(null)
 
-  // Toplist state
-  const [toplistTl, setToplistTl] = useState(11)
-  const [toplistPage, setToplistPage] = useState(0)
+  // Toplist state — initialised from URL so back-navigation preserves the selection
+  const [toplistTl, setToplistTl] = useState(() => {
+    const tl = searchParams.get('tl')
+    return tl ? Number(tl) : 11
+  })
+  const [toplistPage, setToplistPage] = useState(() => {
+    const p = searchParams.get('tlpage')
+    return p ? Number(p) : 0
+  })
 
   // Saved searches state
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([])

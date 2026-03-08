@@ -168,12 +168,12 @@ async def get_popular(
 # ── Top Lists ─────────────────────────────────────────────────────────
 
 
-_VALID_TL = {11, 12, 13, 14, 15}
+_VALID_TL = {11, 12, 13, 15}
 
 
 @router.get("/toplists")
 async def get_toplist(
-    tl: int = Query(default=11, description="11=All-Time, 12=Past Year, 13=Past Month, 14=Yesterday, 15=Past Hour"),
+    tl: int = Query(default=11, description="11=All-Time, 12=Past Year, 13=Past Month, 15=Yesterday"),
     page: int = Query(default=0, ge=0),
     auth: dict = Depends(require_auth),
 ):

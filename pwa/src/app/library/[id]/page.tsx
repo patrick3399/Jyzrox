@@ -81,7 +81,7 @@ export default function GalleryDetailPage() {
             source: 'local',
             source_id: String(gallery.id),
             title: gallery.title,
-            thumb: gallery.cover_thumb || '',
+            thumb: gallery.cover_thumb || undefined,
           })
           .catch(() => {})
       }

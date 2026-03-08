@@ -1,7 +1,6 @@
 'use client'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { X } from 'lucide-react'
 import type { GalleryImage } from '@/lib/types'
 import type { ReaderImage, ViewMode, ScaleMode, ReadingDirection, ReaderSettings } from './types'
 import { DEFAULT_READER_SETTINGS } from './types'
@@ -204,17 +203,17 @@ function SinglePageView({
         <>
           <div
             className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
-            onClick={onPrev}
+            onClick={(e) => { e.stopPropagation(); onPrev() }}
             aria-label="Previous page"
           />
           <div
             className="reader-tap-zone absolute top-[30%] left-0 w-full h-[40%] cursor-pointer select-none"
-            onClick={onToggleOverlay}
+            onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
             aria-label="Toggle controls"
           />
           <div
             className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
-            onClick={onNext}
+            onClick={(e) => { e.stopPropagation(); onNext() }}
             aria-label="Next page"
           />
         </>
@@ -222,17 +221,17 @@ function SinglePageView({
         <>
           <div
             className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
-            onClick={leftAction}
+            onClick={(e) => { e.stopPropagation(); leftAction() }}
             aria-label={readingDirection === 'rtl' ? 'Next page' : 'Previous page'}
           />
           <div
             className="reader-tap-zone absolute left-[30%] top-0 h-full w-[40%] cursor-pointer select-none"
-            onClick={onToggleOverlay}
+            onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
             aria-label="Toggle controls"
           />
           <div
             className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
-            onClick={rightAction}
+            onClick={(e) => { e.stopPropagation(); rightAction() }}
             aria-label={readingDirection === 'rtl' ? 'Previous page' : 'Next page'}
           />
         </>
@@ -258,6 +257,10 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
   const lastPage = images.length > 0 ? images[images.length - 1].pageNum : 0
   // Tracks the last page number reported by the IntersectionObserver (i.e. from scrolling).
   const lastReportedPage = useRef<number>(0)
+  // Suppresses IntersectionObserver callbacks during programmatic scrolls to
+  // prevent the observer from triggering onPageChange → fetchUpTo re-entry.
+  const isProgrammaticScrollRef = useRef(false)
+  const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout>>()
 
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return
@@ -270,6 +273,8 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
 
     const observer = new IntersectionObserver(
       (entries) => {
+        // Ignore observer callbacks fired as a result of programmatic scrollIntoView
+        if (isProgrammaticScrollRef.current) return
         let topmost: IntersectionObserverEntry | null = null
         for (const entry of entries) {
           if (entry.isIntersecting) {
@@ -303,10 +308,22 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
     if (scrollToPage != null && scrollToPage !== lastReportedPage.current) {
       const el = elRefs.current.get(scrollToPage)
       if (el) {
-        el.scrollIntoView({ behavior: 'smooth', block: 'start' })
+        // Set the flag before scrollIntoView so the IntersectionObserver
+        // callbacks that fire during the scroll animation are suppressed.
+        isProgrammaticScrollRef.current = true
+        clearTimeout(programmaticScrollTimerRef.current)
+        programmaticScrollTimerRef.current = setTimeout(() => {
+          isProgrammaticScrollRef.current = false
+        }, 500)
+        el.scrollIntoView({ behavior: 'instant', block: 'start' })
       }
     }
   }, [scrollToPage])
+
+  // Cleanup programmatic scroll timer on unmount
+  useEffect(() => {
+    return () => clearTimeout(programmaticScrollTimerRef.current)
+  }, [])
 
   const handleImageLoaded = useCallback((pageNum: number) => {
     setLoadedPages((prev) => new Set([...prev, pageNum]))
@@ -339,7 +356,7 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
       <button
         type="button"
         className="fixed top-1/3 left-1/4 w-1/2 h-1/3 z-10 cursor-pointer bg-transparent border-none p-0"
-        onClick={onToggleOverlay}
+        onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
         aria-label="Toggle controls"
         tabIndex={0}
       />
@@ -431,17 +448,17 @@ function DoublePageView({
         <>
           <div
             className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
-            onClick={onPrev}
+            onClick={(e) => { e.stopPropagation(); onPrev() }}
             aria-label="Previous page"
           />
           <div
             className="reader-tap-zone absolute top-[30%] left-0 w-full h-[40%] cursor-pointer select-none"
-            onClick={onToggleOverlay}
+            onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
             aria-label="Toggle controls"
           />
           <div
             className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
-            onClick={onNext}
+            onClick={(e) => { e.stopPropagation(); onNext() }}
             aria-label="Next page"
           />
         </>
@@ -449,17 +466,17 @@ function DoublePageView({
         <>
           <div
             className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
-            onClick={leftAction}
+            onClick={(e) => { e.stopPropagation(); leftAction() }}
             aria-label={readingDirection === 'rtl' ? 'Next page' : 'Previous page'}
           />
           <div
             className="reader-tap-zone absolute left-[30%] top-0 h-full w-[40%] cursor-pointer select-none"
-            onClick={onToggleOverlay}
+            onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
             aria-label="Toggle controls"
           />
           <div
             className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
-            onClick={rightAction}
+            onClick={(e) => { e.stopPropagation(); rightAction() }}
             aria-label={readingDirection === 'rtl' ? 'Previous page' : 'Next page'}
           />
         </>
@@ -485,6 +502,7 @@ interface ReaderOverlayProps {
   onAutoAdvanceToggle: () => void
   onAutoAdvanceIntervalChange: (s: number) => void
   onShowHelp: () => void
+  onPageSelect: (page: number) => void
 }
 
 function ReaderOverlay({
@@ -502,109 +520,162 @@ function ReaderOverlay({
   onAutoAdvanceToggle,
   onAutoAdvanceIntervalChange,
   onShowHelp,
+  onPageSelect,
 }: ReaderOverlayProps) {
-  const VIEW_MODES: { mode: ViewMode; label: string }[] = [
-    { mode: 'single', label: t('reader.viewModeSingle') },
-    { mode: 'webtoon', label: t('reader.viewModeWebtoon') },
-    { mode: 'double', label: t('reader.viewModeDouble') },
+  const VIEW_MODES: { mode: ViewMode; icon: string; label: string }[] = [
+    { mode: 'single', icon: '▣', label: '單頁' },
+    { mode: 'webtoon', icon: '▥', label: '條漫' },
+    { mode: 'double', icon: '◫', label: '雙頁' },
   ]
 
-  const SCALE_MODES: { mode: ScaleMode; label: string }[] = [
-    { mode: 'fit-both', label: t('reader.scaleFitBoth') },
-    { mode: 'fit-width', label: t('reader.scaleFitWidth') },
-    { mode: 'fit-height', label: t('reader.scaleFitHeight') },
-    { mode: 'original', label: t('reader.scaleOriginal') },
+  const SCALE_MODES: { mode: ScaleMode; icon: string; label: string }[] = [
+    { mode: 'fit-both', icon: '⊞', label: '適合' },
+    { mode: 'fit-width', icon: '↔', label: '寬度' },
+    { mode: 'fit-height', icon: '↕', label: '高度' },
+    { mode: 'original', icon: '1:1', label: '原圖' },
   ]
 
-  const DIRECTIONS: { dir: ReadingDirection; label: string }[] = [
-    { dir: 'ltr', label: t('reader.dirLtr') },
-    { dir: 'rtl', label: t('reader.dirRtl') },
-    { dir: 'vertical', label: t('reader.dirVertical') },
+  const DIRECTIONS: { dir: ReadingDirection; icon: string; label: string }[] = [
+    { dir: 'ltr', icon: '→', label: '左→右' },
+    { dir: 'rtl', icon: '←', label: '右→左' },
+    { dir: 'vertical', icon: '↓', label: '直向' },
   ]
 
-  const btnActive = 'bg-white text-black'
-  const btnInactive = 'bg-white/10 hover:bg-white/20 text-white'
+  const cycleViewMode = () => {
+    const idx = VIEW_MODES.findIndex((v) => v.mode === viewMode)
+    onViewModeChange(VIEW_MODES[(idx + 1) % VIEW_MODES.length].mode)
+  }
+
+  const cycleScaleMode = () => {
+    const idx = SCALE_MODES.findIndex((s) => s.mode === scaleMode)
+    onScaleModeChange(SCALE_MODES[(idx + 1) % SCALE_MODES.length].mode)
+  }
+
+  const cycleDirection = () => {
+    const idx = DIRECTIONS.findIndex((d) => d.dir === readingDirection)
+    onReadingDirectionChange(DIRECTIONS[(idx + 1) % DIRECTIONS.length].dir)
+  }
+
+  const currentView = VIEW_MODES.find((v) => v.mode === viewMode) ?? VIEW_MODES[0]
+  const currentScale = SCALE_MODES.find((s) => s.mode === scaleMode) ?? SCALE_MODES[0]
+  const currentDir = DIRECTIONS.find((d) => d.dir === readingDirection) ?? DIRECTIONS[0]
+
+  const cycleBtnClass =
+    'rounded p-2 text-base font-medium transition-colors bg-white/10 hover:bg-white/20 text-white border border-white/20 flex items-center justify-center'
+
+  // Page jump dialog
+  const [showJump, setShowJump] = useState(false)
+  const [jumpInput, setJumpInput] = useState('')
+  const jumpInputRef = useRef<HTMLInputElement>(null)
+
+  const openJump = () => {
+    setJumpInput(String(currentPage))
+    setShowJump(true)
+  }
+
+  const closeJump = () => setShowJump(false)
+
+  const commitJump = () => {
+    const page = parseInt(jumpInput, 10)
+    if (!isNaN(page) && page >= 1 && page <= totalPages) {
+      onPageSelect(page)
+    }
+    closeJump()
+  }
+
+  useEffect(() => {
+    if (showJump) {
+      // Focus input after render
+      const t = setTimeout(() => jumpInputRef.current?.select(), 50)
+      return () => clearTimeout(t)
+    }
+  }, [showJump])
+
+  useEffect(() => {
+    if (!showJump) return
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape') closeJump()
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [showJump])
 
   return (
     <div
-      className="absolute top-0 left-0 right-0 z-20 bg-black/70 text-white text-sm backdrop-blur-sm"
+      className="bg-black/70 text-white text-sm backdrop-blur-sm"
       style={{ paddingTop: 'env(safe-area-inset-top)' }}
     >
       {/* Row 1: page indicator (left) + help + close (right) */}
       <div className="flex items-center gap-2 px-4 py-2">
-        <span className="font-mono tabular-nums whitespace-nowrap text-xs">
-          {currentPage} / {totalPages}
-        </span>
+        <div className="relative">
+          <button
+            onClick={openJump}
+            className="font-mono tabular-nums whitespace-nowrap text-xs bg-white/10 hover:bg-white/20 rounded px-1.5 py-0.5 transition-colors"
+            title="Jump to page"
+          >
+            {currentPage} / {totalPages}
+          </button>
+          {showJump && (
+            <>
+              {/* Backdrop to close on outside click */}
+              <div className="fixed inset-0 z-30" onClick={closeJump} />
+              <div className="absolute top-full left-0 mt-1 z-40 bg-black/90 border border-white/20 rounded-lg p-3 flex items-center gap-2 shadow-xl min-w-[140px]">
+                <input
+                  ref={jumpInputRef}
+                  type="number"
+                  min={1}
+                  max={totalPages}
+                  value={jumpInput}
+                  onChange={(e) => setJumpInput(e.target.value)}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') commitJump()
+                    else if (e.key === 'Escape') closeJump()
+                    e.stopPropagation()
+                  }}
+                  className="w-16 bg-white/10 border border-white/20 rounded px-2 py-1 text-xs text-white text-center tabular-nums focus:outline-none focus:border-white/50"
+                />
+                <button
+                  onClick={commitJump}
+                  className="bg-white text-black rounded px-2 py-1 text-xs font-medium hover:bg-white/90 shrink-0"
+                >
+                  Go
+                </button>
+              </div>
+            </>
+          )}
+        </div>
 
         <div className="flex-1" />
 
-        <button
-          onClick={onShowHelp}
-          className="rounded bg-white/10 px-2 py-1 text-[11px] hover:bg-white/20 shrink-0"
-          title={t('reader.helpButton')}
-        >
-          ?
-        </button>
-
-        <button
-          onClick={onBack}
-          className="rounded bg-white/10 p-1.5 hover:bg-white/20 shrink-0"
-          title="Go back"
-        >
-          <X size={14} />
-        </button>
+        <div className="flex items-center gap-1.5 shrink-0">
+          <button
+            onClick={onShowHelp}
+            className="rounded bg-white/10 hover:bg-white/20 border border-white/20 px-3 py-1.5 text-sm text-white/80 hover:text-white transition-colors"
+            title={t('reader.helpButton')}
+          >
+            ?
+          </button>
+          <button
+            onClick={onBack}
+            className="rounded bg-white/10 hover:bg-white/20 border border-white/20 px-3 py-1.5 text-sm text-red-300 hover:text-red-200 transition-colors"
+            title="Go back"
+          >
+            ✕
+          </button>
+        </div>
       </div>
 
-      {/* Row 2: scrollable controls — view / scale / direction */}
-      <div
-        className="flex items-center gap-3 px-4 pb-2 border-t border-white/10 pt-2 overflow-x-auto"
-        style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-      >
-        {/* View mode group */}
-        <div className="flex gap-0.5 shrink-0">
-          {VIEW_MODES.map(({ mode, label }) => (
-            <button
-              key={mode}
-              onClick={() => onViewModeChange(mode)}
-              className={`rounded px-2 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${viewMode === mode ? btnActive : btnInactive}`}
-              title={label}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <span className="text-white/30 shrink-0 select-none">|</span>
-
-        {/* Scale mode group */}
-        <div className="flex gap-0.5 shrink-0">
-          {SCALE_MODES.map(({ mode, label }) => (
-            <button
-              key={mode}
-              onClick={() => onScaleModeChange(mode)}
-              className={`rounded px-2 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${scaleMode === mode ? btnActive : btnInactive}`}
-              title={label}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
-
-        <span className="text-white/30 shrink-0 select-none">|</span>
-
-        {/* Direction group */}
-        <div className="flex gap-0.5 shrink-0">
-          {DIRECTIONS.map(({ dir, label }) => (
-            <button
-              key={dir}
-              onClick={() => onReadingDirectionChange(dir)}
-              className={`rounded px-2 py-1 text-[11px] font-medium transition-colors whitespace-nowrap ${readingDirection === dir ? btnActive : btnInactive}`}
-              title={label}
-            >
-              {label}
-            </button>
-          ))}
-        </div>
+      {/* Row 2: cycle buttons — view / scale / direction */}
+      <div className="flex items-center gap-2 px-4 pb-2 border-t border-white/10 pt-2">
+        <button onClick={cycleViewMode} className={cycleBtnClass} title={currentView.label}>
+          <span>{currentView.icon}</span>
+        </button>
+        <button onClick={cycleScaleMode} className={cycleBtnClass} title={currentScale.label}>
+          <span>{currentScale.icon}</span>
+        </button>
+        <button onClick={cycleDirection} className={cycleBtnClass} title={currentDir.label}>
+          <span>{currentDir.icon}</span>
+        </button>
       </div>
 
       {/* Row 3: Auto advance controls */}
@@ -648,9 +719,20 @@ interface ThumbnailStripProps {
   onPageSelect: (page: number) => void
   /** Preview thumbs from EH CDN: { "1": "url" or "url|ox|w|h" } */
   previews?: Record<string, string>
+  /** Called with the rightmost visible page when the strip is scrolled — used to load more EH previews */
+  onScrollToPage?: (page: number) => void
+  /** Whether the strip is currently visible. scrollIntoView is suppressed when false. */
+  isVisible?: boolean
 }
 
-function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: ThumbnailStripProps) {
+function ThumbnailStrip({
+  images,
+  currentPage,
+  onPageSelect,
+  previews,
+  onScrollToPage,
+  isVisible,
+}: ThumbnailStripProps) {
   const activeRef = useRef<HTMLButtonElement | null>(null)
   const stripRef = useRef<HTMLDivElement | null>(null)
   const userScrollingRef = useRef(false)
@@ -669,6 +751,12 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
     return [...urls]
   }, [previews])
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const scrollNotifyThrottleRef = useRef<ReturnType<typeof setTimeout>>()
+  const lastScrollNotifyPageRef = useRef(0)
+  const onScrollToPageRef = useRef(onScrollToPage)
+  useEffect(() => {
+    onScrollToPageRef.current = onScrollToPage
+  }, [onScrollToPage])
 
   useEffect(() => {
     const el = stripRef.current
@@ -679,19 +767,57 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
       scrollTimerRef.current = setTimeout(() => {
         userScrollingRef.current = false
       }, 1500)
+
+      // Determine the rightmost thumbnail button that is (at least partially)
+      // within the visible scroll area and notify the parent so it can load
+      // more EH preview pages if needed.
+      // Throttled to max once per 500 ms to prevent re-render loops triggered
+      // by preview images loading and causing DOM mutation → scroll event.
+      if (onScrollToPageRef.current) {
+        const visibleRight = el.scrollLeft + el.clientWidth
+        let maxPage = 1
+        for (const child of el.children) {
+          const btn = child as HTMLElement
+          if (btn.offsetLeft < visibleRight) {
+            const pageAttr = btn.getAttribute('title')
+            if (pageAttr) {
+              const page = parseInt(pageAttr.replace('Page ', ''), 10)
+              if (!isNaN(page) && page > maxPage) maxPage = page
+            }
+          }
+        }
+        if (maxPage > lastScrollNotifyPageRef.current) {
+          lastScrollNotifyPageRef.current = maxPage
+          clearTimeout(scrollNotifyThrottleRef.current)
+          scrollNotifyThrottleRef.current = setTimeout(() => {
+            onScrollToPageRef.current?.(lastScrollNotifyPageRef.current)
+          }, 500)
+        }
+      }
     }
+
+    const onWheel = (e: WheelEvent) => {
+      if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+        e.preventDefault()
+        el.scrollLeft += e.deltaY
+      }
+    }
+
     el.addEventListener('scroll', onScroll, { passive: true })
+    el.addEventListener('wheel', onWheel, { passive: false })
     return () => {
       el.removeEventListener('scroll', onScroll)
+      el.removeEventListener('wheel', onWheel)
       clearTimeout(scrollTimerRef.current)
+      clearTimeout(scrollNotifyThrottleRef.current)
     }
   }, [])
 
   useEffect(() => {
-    if (!userScrollingRef.current) {
-      activeRef.current?.scrollIntoView({ behavior: 'smooth', inline: 'center', block: 'nearest' })
+    if (!userScrollingRef.current && isVisible) {
+      activeRef.current?.scrollIntoView({ behavior: 'instant', inline: 'center', block: 'nearest' })
     }
-  }, [currentPage])
+  }, [currentPage, isVisible])
 
   return (
     <>
@@ -714,7 +840,7 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
       )}
       <div
         ref={stripRef}
-        className="reader-thumb-strip absolute bottom-0 left-0 right-0 z-20 flex gap-1 bg-black/70 px-2 py-2 backdrop-blur-sm"
+        className="reader-thumb-strip flex gap-1 bg-black/70 px-2 py-2 backdrop-blur-sm overflow-x-auto"
       >
         {images.map((img) => {
           const isActive = img.pageNum === currentPage
@@ -806,6 +932,122 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
   )
 }
 
+// ── SeekBar ───────────────────────────────────────────────────────────
+
+function SeekBar({
+  currentPage,
+  totalPages,
+  onSeek,
+}: {
+  currentPage: number
+  totalPages: number
+  onSeek: (page: number) => void
+}) {
+  const barRef = useRef<HTMLDivElement>(null)
+  const [dragging, setDragging] = useState(false)
+  const [previewPage, setPreviewPage] = useState<number | null>(null)
+  const draggingRef = useRef(false)
+
+  const getPageFromX = useCallback(
+    (clientX: number) => {
+      if (!barRef.current) return currentPage
+      const rect = barRef.current.getBoundingClientRect()
+      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      return Math.max(1, Math.round(ratio * totalPages))
+    },
+    [currentPage, totalPages],
+  )
+
+  const handleClick = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    onSeek(getPageFromX(e.clientX))
+  }
+
+  const handleMouseDown = (e: React.MouseEvent) => {
+    e.stopPropagation()
+    draggingRef.current = true
+    setDragging(true)
+    setPreviewPage(getPageFromX(e.clientX))
+    e.preventDefault()
+  }
+
+  useEffect(() => {
+    if (!dragging) return
+    const handleMouseMove = (e: MouseEvent) => {
+      if (draggingRef.current) setPreviewPage(getPageFromX(e.clientX))
+    }
+    const handleMouseUp = (e: MouseEvent) => {
+      if (draggingRef.current) {
+        const page = getPageFromX(e.clientX)
+        onSeek(page)
+      }
+      draggingRef.current = false
+      setDragging(false)
+      setPreviewPage(null)
+    }
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [dragging, getPageFromX, onSeek])
+
+  const handleTouchStart = (e: React.TouchEvent) => {
+    e.stopPropagation()
+    draggingRef.current = true
+    setDragging(true)
+    setPreviewPage(getPageFromX(e.touches[0].clientX))
+  }
+
+  const handleTouchMove = (e: React.TouchEvent) => {
+    e.stopPropagation()
+    if (draggingRef.current) setPreviewPage(getPageFromX(e.touches[0].clientX))
+  }
+
+  const handleTouchEnd = (e: React.TouchEvent) => {
+    e.stopPropagation()
+    if (previewPage != null) onSeek(previewPage)
+    draggingRef.current = false
+    setDragging(false)
+    setPreviewPage(null)
+  }
+
+  const displayPage = previewPage ?? currentPage
+  const progress = totalPages > 1 ? ((displayPage - 1) / (totalPages - 1)) * 100 : 0
+
+  return (
+    <div
+      ref={barRef}
+      className="flex-1 relative cursor-pointer py-2 -my-2 select-none"
+      onClick={handleClick}
+      onMouseDown={handleMouseDown}
+      onTouchStart={handleTouchStart}
+      onTouchMove={handleTouchMove}
+      onTouchEnd={handleTouchEnd}
+    >
+      <div className="h-1.5 rounded-full bg-white/20 relative">
+        <div
+          className="h-full rounded-full bg-white/70"
+          style={{ width: `${progress}%` }}
+        />
+        <div
+          className="absolute w-3 h-3 rounded-full bg-white shadow"
+          style={{ left: `${progress}%`, top: '50%', transform: 'translate(-50%, -50%)' }}
+        />
+      </div>
+      {previewPage != null && (
+        <div
+          className="absolute -top-8 bg-black/80 text-white text-xs px-2 py-1 rounded pointer-events-none"
+          style={{ left: `${progress}%`, transform: 'translateX(-50%)' }}
+        >
+          {previewPage}
+        </div>
+      )}
+    </div>
+  )
+}
+
 // ── StatusBar ─────────────────────────────────────────────────────────
 
 interface StatusBarProps {
@@ -814,6 +1056,7 @@ interface StatusBarProps {
   settings: ReaderSettings
   countdown: number
   autoAdvanceEnabled: boolean
+  onPageSelect: (page: number) => void
 }
 
 function StatusBar({
@@ -822,16 +1065,15 @@ function StatusBar({
   settings,
   countdown,
   autoAdvanceEnabled,
+  onPageSelect,
 }: StatusBarProps) {
   const clock = useStatusBarClock(settings.statusBarEnabled && settings.statusBarShowClock)
 
   if (!settings.statusBarEnabled) return null
 
-  const progress = totalPages > 0 ? (currentPage / totalPages) * 100 : 0
-
   return (
     <div
-      className="reader-status-bar absolute bottom-0 left-0 right-0 z-10 flex items-center gap-3 px-3"
+      className="reader-status-bar flex items-center gap-3 px-3"
       style={{ height: 24, background: 'rgba(0,0,0,0.55)' }}
     >
       {settings.statusBarShowClock && clock && (
@@ -839,12 +1081,7 @@ function StatusBar({
       )}
 
       {settings.statusBarShowProgress && (
-        <div className="flex-1 h-1.5 bg-white/20 rounded-full overflow-hidden">
-          <div
-            className="h-full bg-white/70 rounded-full transition-all duration-300"
-            style={{ width: `${progress}%` }}
-          />
-        </div>
+        <SeekBar currentPage={currentPage} totalPages={totalPages} onSeek={onPageSelect} />
       )}
 
       {settings.statusBarShowPageCount && (
@@ -1128,13 +1365,14 @@ export default function Reader({
   const currentImage = images.find((i) => i.pageNum === state.currentPage)
   const nextImage = images.find((i) => i.pageNum === state.currentPage + 1) ?? null
 
-  // Offset for status bar (don't overlap thumbnail strip or overlay)
-  const statusBarBottomOffset = state.showOverlay ? 80 : 0
-
   return (
     <div ref={containerRef} className="reader-container relative flex flex-col bg-black">
-      {/* Top overlay */}
-      {state.showOverlay && (
+      {/* Top overlay — always rendered, slides in/out */}
+      <div
+        className={`absolute top-0 left-0 right-0 z-20 transition-transform duration-300 ${
+          state.showOverlay ? 'translate-y-0' : '-translate-y-full'
+        } ${!state.showOverlay ? 'pointer-events-none' : ''}`}
+      >
         <ReaderOverlay
           currentPage={state.currentPage}
           totalPages={totalPages}
@@ -1150,8 +1388,9 @@ export default function Reader({
           onAutoAdvanceToggle={handleAutoAdvanceToggle}
           onAutoAdvanceIntervalChange={handleAutoAdvanceInterval}
           onShowHelp={handleShowHelp}
+          onPageSelect={setPageWithPrefetch}
         />
-      )}
+      </div>
 
       {/* Main content */}
       <div className="flex-1 overflow-hidden">
@@ -1192,28 +1431,33 @@ export default function Reader({
         )}
       </div>
 
-      {/* Bottom thumbnail strip (shown with overlay) */}
-      {state.showOverlay && (
+      {/* Bottom thumbnail strip — always rendered, slides in/out */}
+      <div
+        className={`absolute bottom-0 left-0 right-0 z-20 transition-transform duration-300 ${
+          state.showOverlay ? 'translate-y-0' : 'translate-y-full'
+        } ${!state.showOverlay ? 'pointer-events-none' : ''}`}
+      >
         <ThumbnailStrip
           images={images}
           currentPage={state.currentPage}
           onPageSelect={setPageWithPrefetch}
           previews={previews}
+          onScrollToPage={onSeekToPage}
+          isVisible={state.showOverlay}
         />
-      )}
+      </div>
 
-      {/* Status bar (always visible unless disabled, offset when overlay+strip shown) */}
-      {!state.showOverlay && (
-        <div className="absolute left-0 right-0 z-10" style={{ bottom: statusBarBottomOffset }}>
-          <StatusBar
-            currentPage={state.currentPage}
-            totalPages={totalPages}
-            settings={readerSettings}
-            countdown={countdown}
-            autoAdvanceEnabled={autoAdvanceEnabled}
-          />
-        </div>
-      )}
+      {/* Status bar — always visible (thumbnail strip at z-20 covers it when overlay is shown) */}
+      <div className="absolute left-0 right-0 bottom-0 z-10" onClick={(e) => e.stopPropagation()}>
+        <StatusBar
+          currentPage={state.currentPage}
+          totalPages={totalPages}
+          settings={readerSettings}
+          countdown={countdown}
+          autoAdvanceEnabled={autoAdvanceEnabled}
+          onPageSelect={setPageWithPrefetch}
+        />
+      </div>
 
       {/* Help overlay */}
       {showHelp && (

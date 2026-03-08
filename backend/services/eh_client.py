@@ -763,7 +763,7 @@ class EhClient:
         """
         Scrape E-H top list page.
         GET {base_url}/toplist.php?tl={tl}&p={page}
-        tl: 11=All-Time, 12=Past Year, 13=Past Month, 14=Yesterday, 15=Past Hour
+        tl: 11=All-Time, 12=Past Year, 13=Past Month, 15=Yesterday
         """
         resp = await self._http.get(f"{self.base_url}/toplist.php?tl={tl}&p={page}")
         resp.raise_for_status()

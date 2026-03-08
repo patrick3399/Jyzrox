@@ -49,10 +49,10 @@ export default function ReaderPage() {
                 historyRecordedRef.current = true
                 api.history
                   .record({
-                    source: gallery.source || 'local',
+                    source: 'local',
                     source_id: String(gallery.id),
                     title: gallery.title,
-                    thumb: gallery.cover_thumb || '',
+                    thumb: gallery.cover_thumb || undefined,
                   })
                   .catch(() => {})
               }
