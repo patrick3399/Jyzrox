@@ -681,13 +681,14 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
             const ox = Number(parts[1])
             const cellW = Number(parts[2]) || 200
             const cellH = Number(parts[3]) || 300
-            // Scale based on width only — backend normalizes sprite heights.
-            const scale = 48 / cellW
-            const scaledOx = ox * scale
+            // Scale based on container height (64px) — auto 100% forces sprite
+            // height to match the container, so X offset must use the same ratio.
+            const hScale = 64 / cellH
+            const scaledOx = ox * hScale
             spriteStyle = {
               backgroundImage: `url(/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)})`,
-              backgroundPosition: `${scaledOx}px center`,
-              backgroundSize: `auto ${cellH * scale}px`,
+              backgroundPosition: `${scaledOx}px 0px`,
+              backgroundSize: `auto 100%`,
               backgroundRepeat: 'no-repeat',
               width: '100%',
               height: '100%',

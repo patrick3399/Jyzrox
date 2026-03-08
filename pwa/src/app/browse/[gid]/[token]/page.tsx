@@ -39,11 +39,10 @@ function PreviewGrid({
   return (
     <div ref={gridRef} className="grid grid-cols-3 sm:grid-cols-6 gap-2">
       {thumbs.map((thumb) => {
-        // Scale based on width only — backend normalizes sprite heights.
-        const tw = thumb.width ?? 200
+        // Scale X offset using height-based ratio — auto 100% forces sprite
+        // height to match the container, so X offset must use the same ratio.
         const th = thumb.height ?? 300
-        const scale = cellSize.w ? cellSize.w / tw : 1
-        const scaledH = th * scale
+        const hScale = cellSize.h ? cellSize.h / th : 1
         return (
           <button
             key={thumb.page}
@@ -56,8 +55,8 @@ function PreviewGrid({
                 className="w-full h-full"
                 style={{
                   backgroundImage: `url(${thumb.url})`,
-                  backgroundPosition: `${(thumb.offsetX ?? 0) * scale}px center`,
-                  backgroundSize: `auto ${scaledH}px`,
+                  backgroundPosition: `${(thumb.offsetX ?? 0) * hScale}px 0px`,
+                  backgroundSize: `auto 100%`,
                   backgroundRepeat: 'no-repeat',
                 }}
               />
