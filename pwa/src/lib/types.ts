@@ -176,6 +176,54 @@ export interface SystemInfo {
   tag_model_enabled: boolean
 }
 
+// ── EH Comments ──────────────────────────────────────────────────────
+
+export interface EhComment {
+  poster: string
+  posted_at: string
+  text: string
+  score: number | null
+}
+
+// ── Browse History ────────────────────────────────────────────────────
+
+export interface BrowseHistoryItem {
+  id: number
+  source: string
+  source_id: string
+  title: string
+  thumb: string | null
+  gid: number | null
+  token: string | null
+  viewed_at: string
+}
+
+// ── Saved Searches ────────────────────────────────────────────────────
+
+export interface SavedSearch {
+  id: number
+  name: string
+  query: string
+  params: Record<string, unknown>
+  created_at: string
+}
+
+// ── Tag Blocking ──────────────────────────────────────────────────────
+
+export interface BlockedTag {
+  id: number
+  namespace: string
+  name: string
+}
+
+// ── Cache Stats ───────────────────────────────────────────────────────
+
+export interface CacheStats {
+  total_memory: string
+  total_keys: number
+  breakdown: Record<string, number>
+}
+
 // ── WebSocket ────────────────────────────────────────────────────────
 
 export interface WsMessage {

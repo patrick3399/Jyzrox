@@ -10,6 +10,7 @@ from sqlalchemy import (
     LargeBinary,
     SmallInteger,
     Text,
+    UniqueConstraint,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -177,3 +178,49 @@ class ApiToken(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_used_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+
+
+class BrowseHistory(Base):
+    __tablename__ = "browse_history"
+    __table_args__ = (UniqueConstraint("user_id", "source", "source_id"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_id: Mapped[str] = mapped_column(Text, nullable=False)
+    title: Mapped[str | None] = mapped_column(Text)
+    thumb: Mapped[str | None] = mapped_column(Text)
+    gid: Mapped[int | None] = mapped_column(BigInteger)
+    token: Mapped[str | None] = mapped_column(Text)
+    viewed_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SavedSearch(Base):
+    __tablename__ = "saved_searches"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    query: Mapped[str] = mapped_column(Text, default="")
+    params: Mapped[dict] = mapped_column(JSONB, default=dict)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class TagTranslation(Base):
+    __tablename__ = "tag_translations"
+    __table_args__ = (UniqueConstraint("namespace", "name", "language"),)
+
+    namespace: Mapped[str] = mapped_column(Text, primary_key=True)
+    name: Mapped[str] = mapped_column(Text, primary_key=True)
+    language: Mapped[str] = mapped_column(Text, primary_key=True, default="zh")
+    translation: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class BlockedTag(Base):
+    __tablename__ = "blocked_tags"
+    __table_args__ = (UniqueConstraint("user_id", "namespace", "name"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    namespace: Mapped[str] = mapped_column(Text, nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)

@@ -4,11 +4,12 @@ import base64
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
+from pydantic import BaseModel
 from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, func, or_, select
 
 from core.auth import require_auth
 from core.database import async_session
-from db.models import Gallery
+from db.models import Gallery, SavedSearch
 
 router = APIRouter(tags=["search"])
 
@@ -249,4 +250,112 @@ async def search_galleries(
         "page": page,
         "query": q,
         "items": [_row_to_item(r) for r in rows],
+    }
+
+
+# ── Saved Searches ────────────────────────────────────────────────────
+
+
+class SavedSearchCreate(BaseModel):
+    name: str
+    query: str = ""
+    params: dict = {}
+
+
+class SavedSearchRename(BaseModel):
+    name: str
+
+
+@router.get("/saved")
+async def list_saved_searches(
+    auth: dict = Depends(require_auth),
+):
+    """List saved searches for the current user."""
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                select(SavedSearch)
+                .where(SavedSearch.user_id == user_id)
+                .order_by(desc(SavedSearch.created_at))
+            )
+        ).scalars().all()
+    return {"searches": [_ss(r) for r in rows]}
+
+
+@router.post("/saved", status_code=201)
+async def create_saved_search(
+    body: SavedSearchCreate,
+    auth: dict = Depends(require_auth),
+):
+    """Save a search for the current user."""
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        row = SavedSearch(
+            user_id=user_id,
+            name=body.name,
+            query=body.query,
+            params=body.params,
+        )
+        session.add(row)
+        await session.commit()
+        await session.refresh(row)
+    return _ss(row)
+
+
+@router.delete("/saved/{saved_id}")
+async def delete_saved_search(
+    saved_id: int,
+    auth: dict = Depends(require_auth),
+):
+    """Delete a saved search."""
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                select(SavedSearch).where(
+                    SavedSearch.id == saved_id,
+                    SavedSearch.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Saved search not found")
+        await session.delete(row)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.patch("/saved/{saved_id}")
+async def rename_saved_search(
+    saved_id: int,
+    body: SavedSearchRename,
+    auth: dict = Depends(require_auth),
+):
+    """Rename a saved search."""
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                select(SavedSearch).where(
+                    SavedSearch.id == saved_id,
+                    SavedSearch.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Saved search not found")
+        row.name = body.name
+        await session.commit()
+        await session.refresh(row)
+    return _ss(row)
+
+
+def _ss(r: SavedSearch) -> dict:
+    return {
+        "id": r.id,
+        "name": r.name,
+        "query": r.query,
+        "params": r.params or {},
+        "created_at": r.created_at.isoformat() if r.created_at else None,
     }

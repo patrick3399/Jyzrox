@@ -12,6 +12,25 @@ import { RatingStars } from '@/components/RatingStars'
 import { Search as SearchIcon, X as XIcon, ChevronDown, ChevronUp } from 'lucide-react'
 import type { EhGallery, Credentials } from '@/lib/types'
 
+// ── IntersectionObserver-based lazy image ──────────────────────────────
+
+function LazyImage({ src, alt, className }: { src: string; alt: string; className: string }) {
+  const [error, setError] = useState(false)
+
+  if (error) {
+    return <div className={`${className} bg-vault-input`} />
+  }
+
+  return (
+    <img
+      src={src}
+      alt={alt}
+      className={className}
+      onError={() => setError(true)}
+    />
+  )
+}
+
 // ── Search history (localStorage) ─────────────────────────────────────
 
 const HISTORY_KEY = 'eh_search_history'
@@ -105,12 +124,7 @@ function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
       {/* Thumbnail */}
       <div className="flex-shrink-0 w-[90px] h-[120px] bg-vault-input rounded overflow-hidden">
         {thumbSrc ? (
-          <img
-            src={thumbSrc}
-            alt={gallery.title}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
+          <LazyImage src={thumbSrc} alt={gallery.title} className="w-full h-full object-cover" />
         ) : (
           <div
             className="w-full h-full flex items-center justify-center"
@@ -174,12 +188,7 @@ function GridCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
     >
       {/* Thumbnail */}
       {thumbSrc ? (
-        <img
-          src={thumbSrc}
-          alt={gallery.title}
-          className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
-          loading="lazy"
-        />
+        <LazyImage src={thumbSrc} alt={gallery.title} className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300" />
       ) : (
         <div
           className="w-full h-full flex items-center justify-center"
@@ -401,13 +410,18 @@ export default function BrowsePageWrapper() {
 function BrowsePage() {
   const router = useRouter()
   const searchParams = useSearchParams()
-  const initialQ = searchParams.get('q') || ''
 
-  const [activeTab, setActiveTab] = useState<BrowseTab>('search')
+  const initialQ = searchParams.get('q') || ''
+  const initialPage = Number(searchParams.get('page') || '0')
+  const initialTab = (searchParams.get('tab') as BrowseTab) || 'search'
+  const initialFavCat = searchParams.get('favcat') || 'all'
+  const initialFavSearch = searchParams.get('favsearch') || ''
+
+  const [activeTab, setActiveTab] = useState<BrowseTab>(initialTab)
   const [inputValue, setInputValue] = useState(initialQ)
   const [searchQuery, setSearchQuery] = useState(initialQ)
   const [category, setCategory] = useState<string | null>(null)
-  const [page, setPage] = useState(0)
+  const [page, setPage] = useState(initialPage)
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [selectedGallery, setSelectedGallery] = useState<EhGallery | null>(null)
   const [downloadUrl, setDownloadUrl] = useState('')
@@ -422,9 +436,9 @@ function BrowsePage() {
   const [pageTo, setPageTo] = useState<string>('')
 
   // Favorites state (cursor-based pagination — EH favorites uses next/prev cursors, not page numbers)
-  const [favCat, setFavCat] = useState<string>('all')
+  const [favCat, setFavCat] = useState<string>(initialFavCat)
   const [favCursor, setFavCursor] = useState<{ next?: string; prev?: string }>({})
-  const [favSearch, setFavSearch] = useState('')
+  const [favSearch, setFavSearch] = useState(initialFavSearch)
 
   // Infinite scroll state
   const [loadMode] = useState<LoadMode>(getLoadMode)
@@ -475,14 +489,33 @@ function BrowsePage() {
   }, [])
 
   // Sync URL ?q= changes (e.g. from tag clicks in detail page)
+  // Only react to the q param itself, not to other searchParams changes (page, tab, etc.)
+  // to avoid a feedback loop where the URL sync effect resets page to 0.
+  const urlQ = searchParams.get('q') || ''
   useEffect(() => {
-    const q = searchParams.get('q') || ''
-    if (q !== searchQuery) {
-      setInputValue(q)
-      setSearchQuery(q)
+    if (urlQ !== searchQuery) {
+      setInputValue(urlQ)
+      setSearchQuery(urlQ)
       setPage(0)
     }
-  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [urlQ]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist browse state in URL so back-navigation restores it
+  const isFirstRender = useRef(true)
+  useEffect(() => {
+    if (isFirstRender.current) {
+      isFirstRender.current = false
+      return
+    }
+    const params = new URLSearchParams()
+    if (searchQuery) params.set('q', searchQuery)
+    if (page > 0) params.set('page', String(page))
+    if (activeTab !== 'search') params.set('tab', activeTab)
+    if (activeTab === 'favorites' && favCat !== 'all') params.set('favcat', favCat)
+    if (activeTab === 'favorites' && favSearch) params.set('favsearch', favSearch)
+    const qs = params.toString()
+    router.replace(qs ? `/browse?${qs}` : '/browse', { scroll: false })
+  }, [searchQuery, page, activeTab, favCat, favSearch]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Compute f_cats bitmask from selected categories (multi-select)
   const computedFCats = (() => {
@@ -527,6 +560,24 @@ function BrowsePage() {
     { favcat: favCat, q: favSearch || undefined, ...favCursor },
     activeTab === 'favorites' && ehConfigured,
   )
+
+  // Restore scroll position after back-navigation (once data is loaded)
+  const scrollRestoredRef = useRef(false)
+  useEffect(() => {
+    if (scrollRestoredRef.current) return
+    const hasData = activeTab === 'search' ? !!data : !!favData
+    if (!hasData) return
+    const savedY = sessionStorage.getItem('browse_scrollY')
+    if (savedY) {
+      scrollRestoredRef.current = true
+      sessionStorage.removeItem('browse_scrollY')
+      requestAnimationFrame(() => {
+        window.scrollTo(0, Number(savedY))
+      })
+    } else {
+      scrollRestoredRef.current = true
+    }
+  }, [data, favData, activeTab])
 
   // ── Infinite scroll: reset when search changes ─────────
   useEffect(() => {
@@ -689,6 +740,7 @@ function BrowsePage() {
 
   const navigateToGallery = useCallback(
     (g: EhGallery) => {
+      sessionStorage.setItem('browse_scrollY', String(window.scrollY))
       router.push(`/browse/${g.gid}/${g.token}`)
     },
     [router],

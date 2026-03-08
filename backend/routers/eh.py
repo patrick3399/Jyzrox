@@ -1,5 +1,6 @@
 """E-Hentai / ExHentai API proxy endpoints."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -8,10 +9,13 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy import select
 
 from core.auth import require_auth
 from core.config import settings as app_settings
+from core.database import async_session
 from core.redis_client import eh_semaphore, get_redis
+from db.models import BlockedTag
 from services import cache
 from services.cache import push_system_alert
 from services.credential import get_credential
@@ -19,6 +23,27 @@ from services.eh_client import EhClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["e-hentai"])
+
+
+# ── Blocked tag helpers ───────────────────────────────────────────────
+
+
+async def _get_blocked_tags(user_id: int) -> set[str]:
+    """Return set of 'namespace:name' blocked tag strings for the user."""
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == user_id)
+            )
+        ).all()
+    return {f"{r.namespace}:{r.name}" for r in rows}
+
+
+def _filter_blocked(galleries: list[dict], blocked: set[str]) -> list[dict]:
+    """Filter out galleries that contain any blocked tag."""
+    if not blocked:
+        return galleries
+    return [g for g in galleries if not blocked.intersection(set(g.get("tags", [])))]
 
 
 async def _make_client() -> EhClient:
@@ -44,19 +69,31 @@ async def search(
     min_rating: int | None = Query(default=None, ge=2, le=5),
     page_from: int | None = Query(default=None),
     page_to: int | None = Query(default=None),
-    _: dict = Depends(require_auth),
+    language: str | None = Query(default=None),
+    auth: dict = Depends(require_auth),
 ):
     """Search E-Hentai galleries (scrape + gdata batch)."""
-    cache_key = f"eh:search:{q}:{page}:{category}:{f_cats}:{advance}:{adv_search}:{min_rating}:{page_from}:{page_to}"
+    # Prepend language filter to query if specified
+    effective_q = q
+    if language:
+        lang_tag = f"language:{language}"
+        effective_q = f"{lang_tag} {q}".strip() if q else lang_tag
+
+    cache_key = f"eh:search:{effective_q}:{page}:{category}:{f_cats}:{advance}:{adv_search}:{min_rating}:{page_from}:{page_to}"
     cached = await cache.get_json(cache_key)
     if cached:
+        # Apply blocked tag filter from cache too
+        user_id = auth["user_id"]
+        blocked = await _get_blocked_tags(user_id)
+        if blocked and cached.get("galleries"):
+            cached["galleries"] = _filter_blocked(cached["galleries"], blocked)
         return cached
 
     client = await _make_client()
     async with client:
         try:
             result = await client.search(
-                query=q,
+                query=effective_q,
                 page=page,
                 category=category,
                 f_cats=f_cats,
@@ -77,7 +114,135 @@ async def search(
             raise HTTPException(status_code=503, detail=str(e))
 
     await cache.set_json(cache_key, result, 300)
+
+    # Filter blocked tags after caching (cache stores unfiltered, filter per user)
+    user_id = auth["user_id"]
+    blocked = await _get_blocked_tags(user_id)
+    if blocked and result.get("galleries"):
+        result["galleries"] = _filter_blocked(result["galleries"], blocked)
+
     return result
+
+
+# ── Popular ──────────────────────────────────────────────────────────
+
+
+@router.get("/popular")
+async def get_popular(
+    auth: dict = Depends(require_auth),
+):
+    """Get EH popular galleries (scrape /popular, cached 5min)."""
+    cache_key = "eh:popular"
+    cached = await cache.get_json(cache_key)
+    if cached:
+        user_id = auth["user_id"]
+        blocked = await _get_blocked_tags(user_id)
+        if blocked and cached.get("galleries"):
+            cached["galleries"] = _filter_blocked(cached["galleries"], blocked)
+        return cached
+
+    client = await _make_client()
+    async with client:
+        try:
+            result = await client.get_popular()
+        except PermissionError as e:
+            detail = str(e)
+            if "Sad Panda" in detail or "509" in detail:
+                await push_system_alert(detail)
+                raise HTTPException(status_code=403, detail=detail)
+            await push_system_alert("E-Hentai cookie invalid or expired")
+            raise HTTPException(status_code=401, detail="EH cookie invalid")
+        except ValueError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+
+    await cache.set_json(cache_key, result, 300)  # 5min
+
+    user_id = auth["user_id"]
+    blocked = await _get_blocked_tags(user_id)
+    if blocked and result.get("galleries"):
+        result["galleries"] = _filter_blocked(result["galleries"], blocked)
+
+    return result
+
+
+# ── Top Lists ─────────────────────────────────────────────────────────
+
+
+_VALID_TL = {11, 12, 13, 14, 15}
+
+
+@router.get("/toplists")
+async def get_toplist(
+    tl: int = Query(default=11, description="11=All-Time, 12=Past Year, 13=Past Month, 14=Yesterday, 15=Past Hour"),
+    page: int = Query(default=0, ge=0),
+    auth: dict = Depends(require_auth),
+):
+    """Get EH top list galleries (scrape /toplist.php, cached 10min)."""
+    if tl not in _VALID_TL:
+        raise HTTPException(status_code=400, detail=f"Invalid tl value. Must be one of {sorted(_VALID_TL)}")
+
+    cache_key = f"eh:toplist:{tl}:{page}"
+    cached = await cache.get_json(cache_key)
+    if cached:
+        user_id = auth["user_id"]
+        blocked = await _get_blocked_tags(user_id)
+        if blocked and cached.get("galleries"):
+            cached["galleries"] = _filter_blocked(cached["galleries"], blocked)
+        return cached
+
+    client = await _make_client()
+    async with client:
+        try:
+            result = await client.get_toplist(tl=tl, page=page)
+        except PermissionError as e:
+            detail = str(e)
+            if "Sad Panda" in detail or "509" in detail:
+                await push_system_alert(detail)
+                raise HTTPException(status_code=403, detail=detail)
+            await push_system_alert("E-Hentai cookie invalid or expired")
+            raise HTTPException(status_code=401, detail="EH cookie invalid")
+        except ValueError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+
+    await cache.set_json(cache_key, result, 600)  # 10min
+
+    user_id = auth["user_id"]
+    blocked = await _get_blocked_tags(user_id)
+    if blocked and result.get("galleries"):
+        result["galleries"] = _filter_blocked(result["galleries"], blocked)
+
+    return result
+
+
+# ── Gallery Comments ──────────────────────────────────────────────────
+
+
+@router.get("/gallery/{gid}/{token}/comments")
+async def get_gallery_comments(
+    gid: int,
+    token: str,
+    _: dict = Depends(require_auth),
+):
+    """Scrape gallery comments (read-only, cached 10min)."""
+    cache_key = f"eh:comments:{gid}"
+    cached = await cache.get_json(cache_key)
+    if cached is not None:
+        return {"gid": gid, "comments": cached}
+
+    client = await _make_client()
+    async with client:
+        try:
+            comments = await client.get_comments(gid, token)
+        except PermissionError as e:
+            detail = str(e)
+            await push_system_alert(detail)
+            status_code = 403 if "Sad Panda" in detail or "509" in detail else 401
+            raise HTTPException(status_code=status_code, detail=detail)
+        except ValueError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+
+    await cache.set_json(cache_key, comments, 600)  # 10min
+    return {"gid": gid, "comments": comments}
 
 
 # ── Gallery metadata ─────────────────────────────────────────────────
@@ -371,7 +536,8 @@ async def remove_favorite(
 
 # ── Thumbnail proxy ───────────────────────────────────────────────────
 
-_ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "ul.ehgt.org"}
+_thumb_semaphore = asyncio.Semaphore(4)
+_ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "ul.ehgt.org", "hath.network"}
 
 
 @router.get("/thumb-proxy")
@@ -400,14 +566,15 @@ async def thumb_proxy(
     cred_json = await get_credential("ehentai")
     cookies = json.loads(cred_json) if cred_json else {}
 
-    try:
-        async with httpx.AsyncClient(cookies=cookies, timeout=15) as client:
-            resp = await client.get(url, headers={"Referer": "https://e-hentai.org/"})
-            resp.raise_for_status()
-            content = resp.content
-            media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Thumbnail fetch failed: {exc}")
+    async with _thumb_semaphore:
+        try:
+            async with httpx.AsyncClient(cookies=cookies, timeout=15) as client:
+                resp = await client.get(url, headers={"Referer": "https://e-hentai.org/"})
+                resp.raise_for_status()
+                content = resp.content
+                media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Thumbnail fetch failed: {exc}")
 
     await get_redis().setex(cache_key, 86400, content)  # 24h
     return Response(

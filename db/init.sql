@@ -156,3 +156,52 @@ CREATE INDEX IF NOT EXISTS idx_tags_count ON tags (count DESC);
 CREATE INDEX IF NOT EXISTS idx_gallery_tags_tag ON gallery_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs (status);
+
+-- ── Browse History ────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS browse_history (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source      TEXT NOT NULL,
+    source_id   TEXT NOT NULL,
+    title       TEXT,
+    thumb       TEXT,
+    gid         BIGINT,
+    token       TEXT,
+    viewed_at   TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (user_id, source, source_id)
+);
+CREATE INDEX IF NOT EXISTS idx_browse_history_user ON browse_history (user_id, viewed_at DESC);
+
+-- ── Saved Searches ────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS saved_searches (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name        TEXT NOT NULL,
+    query       TEXT DEFAULT '',
+    params      JSONB DEFAULT '{}',
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_saved_searches_user ON saved_searches (user_id, created_at DESC);
+
+-- ── Tag Translations ──────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS tag_translations (
+    namespace   TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    language    TEXT NOT NULL DEFAULT 'zh',
+    translation TEXT NOT NULL,
+    PRIMARY KEY (namespace, name, language)
+);
+
+-- ── Blocked Tags ──────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS blocked_tags (
+    id          BIGSERIAL PRIMARY KEY,
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    namespace   TEXT NOT NULL,
+    name        TEXT NOT NULL,
+    UNIQUE (user_id, namespace, name)
+);
+CREATE INDEX IF NOT EXISTS idx_blocked_tags_user ON blocked_tags (user_id);
