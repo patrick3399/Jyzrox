@@ -42,13 +42,13 @@ export default function Dashboard() {
   const { data: jobsData } = useSWR(
     'dashboard/jobs',
     () => api.download.getJobs({ limit: 5 }),
-    { refreshInterval: 5000 }
+    { refreshInterval: 5000, dedupingInterval: 3000, focusThrottleInterval: 10000 }
   )
 
   const { data: healthData } = useSWR(
     'dashboard/health',
     () => api.system.health().catch(() => null),
-    { refreshInterval: 30000 }
+    { refreshInterval: 30000, dedupingInterval: 15000, focusThrottleInterval: 30000 }
   )
 
   const activeJobs = (jobsData?.jobs ?? []).filter(

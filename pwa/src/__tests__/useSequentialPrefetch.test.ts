@@ -76,6 +76,7 @@ function makeImages(count: number, startPage = 1): ReaderImage[] {
     pageNum: startPage + i,
     url: `http://proxy/page/${startPage + i}`,
     isLocal: false,
+    mediaType: 'image' as const,
   }))
 }
 

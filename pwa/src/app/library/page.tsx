@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { BookOpen, Plus, Minus } from 'lucide-react'
 import { useLibraryGalleries } from '@/hooks/useGalleries'
@@ -38,6 +38,12 @@ export default function LibraryPage() {
   const [sort, setSort] = useState<'added_at' | 'rating' | 'pages'>('added_at')
   const [page, setPage] = useState(0)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [])
 
   const { data, isLoading, error } = useLibraryGalleries({
     q: searchQuery || undefined,

@@ -101,6 +101,13 @@ const auth = {
       body: form,
     })
     if (!res.ok) {
+      if (res.status === 401 && typeof window !== 'undefined') {
+        const p = window.location.pathname
+        if (p !== '/login' && p !== '/setup') {
+          window.location.href = '/login'
+          return new Promise(() => {}) as never
+        }
+      }
       const body = await res.json().catch(() => ({}))
       throw new Error(body?.detail || `HTTP ${res.status}`)
     }

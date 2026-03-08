@@ -78,6 +78,9 @@ export function useSequentialPrefetch(
   const [prefetched, setPrefetched] = useState<Set<number>>(new Set())
   const inflightRef = useRef(false)
   const prefetchedRef = useRef<Set<number>>(new Set())
+  // Track active Image elements for cleanup on unmount / page change
+  const activeImagesRef = useRef<Set<HTMLImageElement>>(new Set())
+  const unmountedRef = useRef(false)
 
   // prefetchPage needs a stable reference so we use useRef to break the
   // circular dependency with the chain callback.
@@ -88,6 +91,32 @@ export function useSequentialPrefetch(
   // current epoch by the time it fires, it was started for a stale page
   // position and must not continue the chain.
   const epochRef = useRef(0)
+
+  // Cleanup helper: detach handlers and stop loading
+  const cleanupImage = useCallback((el: HTMLImageElement) => {
+    el.onload = null
+    el.onerror = null
+    el.src = ''
+    activeImagesRef.current.delete(el)
+  }, [])
+
+  // Cleanup all active images (used on unmount and epoch change)
+  const cleanupAllImages = useCallback(() => {
+    activeImagesRef.current.forEach((el) => {
+      el.onload = null
+      el.onerror = null
+      el.src = ''
+    })
+    activeImagesRef.current.clear()
+  }, [])
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      unmountedRef.current = true
+      cleanupAllImages()
+    }
+  }, [cleanupAllImages])
 
   const prefetchPage = useCallback(
     (pageNum: number) => {
@@ -102,11 +131,13 @@ export function useSequentialPrefetch(
         const capturedEpoch = epochRef.current   // snapshot epoch for this request
 
         const el = new window.Image()
+        activeImagesRef.current.add(el)
         el.onload = el.onerror = () => {
-          // If the user has moved to a different page since this request was
-          // started, abandon the chain without touching inflightRef so the
-          // new chain (already running) is not disrupted.
-          if (capturedEpoch !== epochRef.current) return
+          cleanupImage(el)
+
+          // If unmounted or the user has moved to a different page since this
+          // request was started, abandon the chain.
+          if (unmountedRef.current || capturedEpoch !== epochRef.current) return
 
           prefetchedRef.current = new Set([...prefetchedRef.current, pageNum])
           setPrefetched(new Set(prefetchedRef.current))
@@ -118,14 +149,18 @@ export function useSequentialPrefetch(
       } else {
         // Local mode: fire-and-forget (concurrent, up to 3 ahead from caller)
         const el = new window.Image()
+        activeImagesRef.current.add(el)
         el.onload = el.onerror = () => {
+          cleanupImage(el)
+          if (unmountedRef.current) return
+
           prefetchedRef.current = new Set([...prefetchedRef.current, pageNum])
           setPrefetched(new Set(prefetchedRef.current))
         }
         el.src = img.url
       }
     },
-    [images, isProxyMode]
+    [images, isProxyMode, cleanupImage]
   )
 
   // Keep the ref in sync with the latest callback
@@ -140,6 +175,8 @@ export function useSequentialPrefetch(
     // Reset inflight flag so the new chain can start immediately even if the
     // old request hasn't fired its callback yet.
     inflightRef.current = false
+    // Clean up any in-flight Image objects from the previous page
+    cleanupAllImages()
 
     if (isProxyMode) {
       // Start sequential chain from current+1
@@ -150,7 +187,7 @@ export function useSequentialPrefetch(
         prefetchPage(currentPage + i)
       }
     }
-  }, [currentPage, prefetchPage, isProxyMode])
+  }, [currentPage, prefetchPage, isProxyMode, cleanupAllImages])
 
   return prefetched
 }

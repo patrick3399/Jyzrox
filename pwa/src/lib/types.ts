@@ -91,7 +91,7 @@ export interface DownloadJob {
   url: string
   source: string
   status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
-  progress: Record<string, unknown>
+  progress: { percent?: number; downloaded?: number; total?: number; [key: string]: unknown }
   error: string | null
   created_at: string
   finished_at: string | null

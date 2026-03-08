@@ -22,7 +22,8 @@ async def _validate_ws_session(ws: WebSocket) -> bool:
         user_id_str, token = vault_session.split(":", 1)
         session_data = await get_redis().get(f"session:{user_id_str}:{token}")
         return session_data is not None
-    except (ValueError, Exception):
+    except (ValueError, ConnectionError, OSError) as exc:
+        logger.warning("WS session validation failed: %s", exc)
         return False
 
 
@@ -56,5 +57,5 @@ async def websocket_endpoint(ws: WebSocket):
 
     except WebSocketDisconnect:
         logger.info("WebSocket client disconnected: %s", ws.client)
-    except Exception as exc:
+    except (ConnectionError, RuntimeError) as exc:
         logger.error("WebSocket error: %s", exc)

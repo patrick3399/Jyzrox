@@ -291,12 +291,10 @@ async def get_profile(auth: dict = Depends(require_auth)):
 @router.patch("/profile")
 async def update_profile(req: UpdateProfileRequest, auth: dict = Depends(require_auth)):
     """Update current user's profile (email, avatar_style)."""
-    updates = []
-    params: dict = {"uid": auth["user_id"]}
+    update_values: dict = {}
 
     if req.email is not None:
         email = req.email.strip() or None
-        params["email"] = email
         if email:
             async with async_session() as session:
                 existing = await session.execute(
@@ -305,21 +303,23 @@ async def update_profile(req: UpdateProfileRequest, auth: dict = Depends(require
                 )
                 if existing.fetchone():
                     raise HTTPException(status_code=409, detail="Email already in use")
-        updates.append("email = :email")
+        update_values["email"] = email
 
     if req.avatar_style is not None:
         if req.avatar_style not in ("gravatar", "manual"):
             raise HTTPException(status_code=400, detail="avatar_style must be 'gravatar' or 'manual'")
-        params["avatar_style"] = req.avatar_style
-        updates.append("avatar_style = :avatar_style")
+        update_values["avatar_style"] = req.avatar_style
 
-    if not updates:
+    if not update_values:
         return {"status": "ok"}
 
+    # Build parameterized SET clause from known column names
+    set_parts = [f"{col} = :{col}" for col in update_values]
+    update_values["uid"] = auth["user_id"]
     async with async_session() as session:
         await session.execute(
-            text(f"UPDATE users SET {', '.join(updates)} WHERE id = :uid"),
-            params,
+            text(f"UPDATE users SET {', '.join(set_parts)} WHERE id = :uid"),
+            update_values,
         )
         await session.commit()
     return {"status": "ok"}
@@ -345,13 +345,16 @@ async def upload_avatar(
         img = Image.open(io.BytesIO(data))
         img = ImageOps.fit(img, (160, 160))
         img = img.convert("RGB")
-    except Exception:
+    except (OSError, ValueError) as exc:
+        logger.warning("Avatar upload failed: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid image file")
 
     avatars_dir = Path(settings.data_avatars_path)
     avatars_dir.mkdir(parents=True, exist_ok=True)
     out_path = avatars_dir / f"{auth['user_id']}.webp"
-    img.save(str(out_path), "WEBP", quality=85)
+    tmp_path = out_path.with_suffix(".webp.tmp")
+    img.save(str(tmp_path), "WEBP", quality=85)
+    tmp_path.replace(out_path)
 
     async with async_session() as session:
         await session.execute(

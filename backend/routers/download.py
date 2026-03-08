@@ -42,22 +42,26 @@ async def enqueue_download(
     job_id = uuid.uuid4()
     source = _detect_source(req.url)
 
-    # DB record
+    # DB record + ARQ enqueue in one logical unit
     job = DownloadJob(id=job_id, url=req.url, source=source, status="queued")
     db.add(job)
-    await db.commit()
+    await db.flush()
 
-    # Enqueue via shared ARQ pool (created at app startup)
     arq = request.app.state.arq
-    await arq.enqueue_job(
-        "download_job",
-        req.url,
-        source,
-        req.options,
-        str(job_id),       # db_job_id parameter
-        _job_id=str(job_id),
-    )
+    try:
+        await arq.enqueue_job(
+            "download_job",
+            req.url,
+            source,
+            req.options,
+            str(job_id),
+            _job_id=str(job_id),
+        )
+    except Exception:
+        await db.rollback()
+        raise HTTPException(status_code=503, detail="Failed to enqueue download job")
 
+    await db.commit()
     return {"job_id": str(job_id), "status": "queued"}
 
 

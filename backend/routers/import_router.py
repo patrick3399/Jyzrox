@@ -33,7 +33,8 @@ async def process_import_task(req: ImportRequest, gallery_id: int):
     if not src_path.exists() or not src_path.is_dir():
         return
     
-    files = sorted([f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in ('.jpg', '.png', '.mp4', '.gif', '.webm')])
+    _SUPPORTED_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.heic', '.mp4', '.webm'}
+    files = sorted([f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS])
     
     async with async_session() as session:
         for idx, f in enumerate(files):
@@ -55,7 +56,8 @@ async def process_import_task(req: ImportRequest, gallery_id: int):
                 dest_path = str(dest_dir / f.name)
                 shutil.copy2(f, dest_path)
             
-            media_type = "video" if f.suffix.lower() in ('.mp4', '.webm') else "gif" if f.suffix.lower() == '.gif' else "image"
+            ext = f.suffix.lower()
+            media_type = "video" if ext in ('.mp4', '.webm') else "gif" if ext == '.gif' else "image"
             
             await session.execute(
                 text("""
@@ -82,6 +84,11 @@ async def start_import(
 ):
     if req.mode not in ("link", "copy"):
         raise HTTPException(status_code=400, detail="Invalid import mode")
+
+    resolved = Path(req.source_dir).resolve()
+    allowed = Path(settings.data_gallery_path).resolve()
+    if not resolved.is_relative_to(allowed):
+        raise HTTPException(status_code=400, detail="source_dir must be within the gallery path")
     
     # Create DB entry
     async with async_session() as session:

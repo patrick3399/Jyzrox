@@ -390,6 +390,7 @@ export default function SettingsPage() {
   }, [])
 
   const handleRevokeSession = useCallback(async (tokenPrefix: string) => {
+    if (!window.confirm('Are you sure you want to revoke this session?')) return
     setRevokingToken(tokenPrefix)
     try {
       await api.auth.revokeSession(tokenPrefix)
@@ -437,6 +438,7 @@ export default function SettingsPage() {
 
   // API Tokens: Delete
   const handleDeleteToken = useCallback(async (tokenId: string) => {
+    if (!window.confirm('Are you sure you want to delete this API token?')) return
     setDeletingTokenId(tokenId)
     try {
       await api.tokens.delete(tokenId)

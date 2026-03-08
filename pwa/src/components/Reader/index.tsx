@@ -162,6 +162,12 @@ function WebtoonView({ images, onPageChange, onToggleOverlay }: WebtoonViewProps
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return
 
+    // Clean stale refs for pages no longer in the image list
+    const validPages = new Set(images.map((img) => img.pageNum))
+    elRefs.current.forEach((_, key) => {
+      if (!validPages.has(key)) elRefs.current.delete(key)
+    })
+
     const observer = new IntersectionObserver(
       (entries) => {
         let topmost: IntersectionObserverEntry | null = null
@@ -212,10 +218,12 @@ function WebtoonView({ images, onPageChange, onToggleOverlay }: WebtoonViewProps
         </div>
       )}
       {/* Tap zone for overlay toggle in webtoon mode */}
-      <div
-        className="fixed top-1/3 left-1/4 w-1/2 h-1/3 z-10 cursor-pointer"
+      <button
+        type="button"
+        className="fixed top-1/3 left-1/4 w-1/2 h-1/3 z-10 cursor-pointer bg-transparent border-none p-0"
         onClick={onToggleOverlay}
         aria-label="Toggle controls"
+        tabIndex={0}
       />
     </div>
   )

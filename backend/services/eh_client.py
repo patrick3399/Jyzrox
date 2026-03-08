@@ -518,7 +518,8 @@ class EhClient:
         try:
             resp = await self._http.get(f"{self.base_url}/home.php")
             return "Credits" in resp.text or "Hath" in resp.text
-        except Exception:
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            logger.warning("check_cookies request failed: %s", exc)
             return False
 
     async def get_account_info(self) -> dict:
@@ -533,5 +534,6 @@ class EhClient:
             if m:
                 info["hath_perks"] = int(m.group(1))
             return info
-        except Exception as exc:
+        except (httpx.HTTPError, httpx.TimeoutException, AttributeError, ValueError) as exc:
+            logger.error("get_account_info failed: %s", exc)
             return {"error": str(exc)}

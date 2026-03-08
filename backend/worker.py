@@ -10,6 +10,7 @@ Workers:
   D  thumbnail_job  — multi-size WebP thumbnail generation
 """
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -18,6 +19,8 @@ import subprocess
 import uuid
 from datetime import datetime, timezone
 from pathlib import Path
+
+import sqlalchemy.exc
 
 from arq.connections import RedisSettings
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -34,7 +37,7 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
-_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif"}
+_IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
 
 
 # ── Lifecycle ────────────────────────────────────────────────────────
@@ -148,7 +151,7 @@ async def _set_job_status(
                 if status in ("done", "failed", "cancelled"):
                     job.finished_at = datetime.now(timezone.utc)
                 await session.commit()
-    except Exception as exc:
+    except (sqlalchemy.exc.SQLAlchemyError, ValueError, OSError) as exc:
         logger.error("[download] failed to update job status: %s", exc)
 
 
@@ -182,7 +185,8 @@ async def import_job(
         try:
             metadata = json.loads(meta_file.read_text(encoding="utf-8"))
             break
-        except Exception:
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            logger.warning("[import] failed to read metadata %s: %s", meta_file, exc)
             continue
 
     tags = _extract_tags(gallery_path, metadata)
@@ -215,7 +219,7 @@ async def import_job(
 
         # Upsert images
         for page_num, img_file in enumerate(image_files, start=1):
-            file_hash = _sha256(img_file)
+            file_hash = await asyncio.to_thread(_sha256, img_file)
             img_stmt = (
                 pg_insert(Image)
                 .values(
@@ -275,8 +279,8 @@ def _build_gallery(
                 posted_at = datetime.fromtimestamp(raw_date, tz=timezone.utc)
             else:
                 posted_at = datetime.fromisoformat(str(raw_date))
-        except Exception:
-            pass
+        except (ValueError, TypeError, OverflowError) as exc:
+            logger.warning("[import] failed to parse date %r: %s", raw_date, exc)
 
     return {
         "source":          source,
@@ -360,7 +364,7 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
 
             # Ensure hash
             if not img.file_hash:
-                img.file_hash = _sha256(src)
+                img.file_hash = await asyncio.to_thread(_sha256, src)
             h = img.file_hash
 
             thumb_dir = thumbs_root / h[:2] / h
@@ -381,7 +385,7 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
 
                 img.thumb_path = str(thumb_dir / "thumb_160.webp")
                 processed += 1
-            except Exception as exc:
+            except (OSError, ValueError) as exc:
                 logger.error("[thumbnail] %s: %s", src, exc)
 
         await session.commit()

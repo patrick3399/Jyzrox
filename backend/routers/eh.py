@@ -322,7 +322,8 @@ async def add_favorite(
             await client.add_favorite(gid, token, favcat=favcat, note=note)
         except PermissionError as e:
             raise HTTPException(status_code=401, detail=str(e))
-        except Exception as e:
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            logger.error("Failed to add favorite %s/%s: %s", gid, token, e)
             raise HTTPException(status_code=502, detail=str(e))
 
     return {"status": "ok"}
@@ -345,7 +346,8 @@ async def remove_favorite(
             await client.remove_favorite(gid, token)
         except PermissionError as e:
             raise HTTPException(status_code=401, detail=str(e))
-        except Exception as e:
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            logger.error("Failed to remove favorite %s/%s: %s", gid, token, e)
             raise HTTPException(status_code=502, detail=str(e))
 
     return {"status": "ok"}

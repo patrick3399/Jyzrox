@@ -38,13 +38,23 @@ async def export_kohya(gallery_id: int, _: dict = Depends(require_auth)):
     if not images:
         raise HTTPException(status_code=404, detail="No images found in gallery")
 
+    # Check total size before creating ZIP (limit: 2 GB)
+    _MAX_ZIP_SIZE = 2 * 1024 * 1024 * 1024
+    total_size = sum(
+        os.path.getsize(img.file_path)
+        for img in images
+        if img.file_path and os.path.exists(img.file_path)
+    )
+    if total_size > _MAX_ZIP_SIZE:
+        raise HTTPException(status_code=413, detail="Gallery too large to export (max 2 GB)")
+
     # Create Zip in memory
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for img in images:
             if not img.file_path or not os.path.exists(img.file_path):
                 continue
-                
+
             # Add image file to zip
             zip_file.write(img.file_path, arcname=img.filename)
             

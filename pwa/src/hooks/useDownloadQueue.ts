@@ -7,7 +7,7 @@ export function useDownloadJobs(params: JobListParams = {}) {
   return useSWR(
     ['download/jobs', params],
     () => api.download.getJobs(params),
-    { refreshInterval: 3000 }   // Poll every 3s for live updates
+    { refreshInterval: 3000, dedupingInterval: 2000, focusThrottleInterval: 5000 }
   )
 }
 

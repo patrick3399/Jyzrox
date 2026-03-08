@@ -1,6 +1,6 @@
 # Jyzrox — CLAUDE.md
 
-個人圖庫管理平台，rev 2.0。Docker Compose 自架服務。
+個人圖庫管理平台。Docker Compose 自架服務。
 
 ---
 
@@ -228,3 +228,64 @@ from core.auth import require_auth
 async def endpoint(_: dict = Depends(require_auth)):
     ...
 ```
+
+---
+
+## Multi-Agent 開發架構
+
+使用 Claude Code 的 Agent 工具進行並行開發，適用於大規模健檢、重構、功能開發等任務。
+核心原則：**每個 Agent 負責不重疊的檔案範圍**，避免寫入衝突。
+
+### Agent 角色定義
+
+| Agent | 職責 | 對應檔案範圍 |
+|-------|------|-------------|
+| Backend Architect | 後端架構審查、安全性、效能 | `backend/` 全部 |
+| Frontend Architect | 前端架構、UX、PWA | `pwa/src/` 全部 |
+| QA Tester | 測試覆蓋分析、測試計畫、撰寫測試 | `backend/tests/`, `pwa/src/__tests__/` |
+| DevOps Engineer | Docker/Nginx/部署/備份 | `docker-compose.yml`, `nginx/`, `scripts/`, `db/` |
+| Documentation Writer | 文檔審查與撰寫 | `*.md`, `docs/` |
+
+### 並行開發原則
+
+- 每個 Agent 負責不重疊的檔案範圍，避免寫入衝突
+- 先啟動審查/研究 Agent（`subagent_type=Explore`），收集結構化報告
+- 再啟動實施 Agent（`mode=auto`），根據報告修改代碼
+- **審查與實施分兩輪，不在同一輪混用**
+
+### 使用流程
+
+```
+Phase 1: 審查（5 Explore Agents 並行）
+  → 各 Agent 輸出結構化報告（問題清單 + 改善建議）
+  → 彙整為統一的健檢報告
+
+Phase 2: 規劃
+  → 從報告中提取 Critical/High 問題
+  → 按檔案範圍分組，確保 Agent 間不衝突
+
+Phase 3: 實施（N 個 Auto Agents 並行）
+  → 每個 Agent 只修改分配到的檔案
+  → 完成後逐一驗證（build + test）
+
+Phase 4: 驗證
+  → Backend: pytest
+  → Frontend: vitest + next build
+  → 全面通過後才算完成
+```
+
+### 測試基礎設施
+
+| 層級 | 框架 | 執行命令 |
+|------|------|---------|
+| Backend | pytest + httpx AsyncClient + SQLite (shared cache) | `cd backend && python -m pytest` |
+| Frontend | vitest + @testing-library/react | `cd pwa && npx vitest run` |
+
+- Backend 測試設定：`backend/pytest.ini`
+- Frontend 測試設定：`pwa/vitest.config.ts`（如有）
+
+### 備份與 Migration
+
+- **Alembic migration**：`backend/alembic.ini` + `backend/migrations/`
+- **備份腳本**：`scripts/backup.sh`（PostgreSQL dump + gallery 檔案）
+- **還原腳本**：`scripts/restore.sh`

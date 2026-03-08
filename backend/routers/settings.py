@@ -109,8 +109,8 @@ async def eh_login_with_password(
                         if m:
                             igneous = m.group(1)
                             break
-    except Exception:
-        pass  # ExH access failed, continue without igneous
+    except (httpx.HTTPError, httpx.TimeoutException, OSError) as exc:
+        logger.warning("ExHentai igneous cookie fetch failed: %s", exc)
 
     if igneous:
         cookies["igneous"] = igneous
@@ -160,7 +160,8 @@ async def set_pixiv_credentials(
         api.auth(refresh_token=req.refresh_token)
         detail = api.user_detail(api.user_id)
         username = detail.user.name
-    except Exception as exc:
+    except (ImportError, AttributeError, ValueError, OSError) as exc:
+        logger.error("Pixiv auth failed: %s", exc)
         raise HTTPException(status_code=400, detail=f"Pixiv auth failed: {exc}")
 
     await set_credential("pixiv", req.refresh_token, "oauth_token")
@@ -185,7 +186,8 @@ async def eh_cookies_check(_: dict = Depends(require_auth)):
         try:
             async with EhClient(cookies=cookies, use_ex=True) as client:
                 ex_ok = await client.check_cookies()
-        except Exception:
+        except (httpx.HTTPError, httpx.TimeoutException, OSError) as exc:
+            logger.warning("ExH cookie check failed: %s", exc)
             ex_ok = False
 
     # Test EH access
@@ -193,7 +195,8 @@ async def eh_cookies_check(_: dict = Depends(require_auth)):
     try:
         async with EhClient(cookies=cookies, use_ex=False) as client:
             eh_ok = await client.check_cookies()
-    except Exception:
+    except (httpx.HTTPError, httpx.TimeoutException, OSError) as exc:
+        logger.warning("EH cookie check failed: %s", exc)
         eh_ok = False
 
     return {
@@ -267,7 +270,7 @@ async def list_tokens(auth: dict = Depends(require_auth)):
     async with async_session() as session:
         rows = await session.execute(
             text("""
-                SELECT id, name, token_plain, created_at, last_used_at, expires_at
+                SELECT id, name, token_hash, created_at, last_used_at, expires_at
                 FROM api_tokens
                 WHERE user_id = :uid
                 ORDER BY created_at DESC
@@ -279,7 +282,7 @@ async def list_tokens(auth: dict = Depends(require_auth)):
         tokens.append({
             "id": str(r.id),
             "name": r.name,
-            "token": r.token_plain or "",
+            "token_prefix": r.token_hash[:8],
             "created_at": r.created_at.isoformat() if r.created_at else None,
             "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
             "expires_at": r.expires_at.isoformat() if r.expires_at else None,
@@ -305,14 +308,13 @@ async def create_token(
         result = await session.execute(
             text("""
                 INSERT INTO api_tokens (user_id, name, token_hash, token_plain, expires_at)
-                VALUES (:uid, :name, :hash, :plain, :exp)
+                VALUES (:uid, :name, :hash, NULL, :exp)
                 RETURNING id, created_at
             """),
             {
                 "uid": auth["user_id"],
                 "name": req.name.strip(),
                 "hash": token_hash,
-                "plain": raw_token,
                 "exp": expires_at,
             },
         )

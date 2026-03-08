@@ -4,7 +4,8 @@ from typing import List, Optional
 from fastapi import APIRouter, Depends, Query
 from core.database import async_session
 from core.auth import require_auth
-from sqlalchemy import text
+from sqlalchemy import select, func, desc, asc, cast, ARRAY, Text
+from db.models import Gallery
 
 router = APIRouter(tags=["search"])
 
@@ -56,65 +57,53 @@ async def search_galleries(
             include_tags.append(t)
 
     offset = (page - 1) * limit
-    conditions: list[str] = []
-    params: dict = {"limit": limit, "offset": offset}
+
+    # Build filters
+    filters = []
 
     if include_tags:
-        conditions.append("tags_array @> :inc_tags")
-        params["inc_tags"] = include_tags
+        filters.append(Gallery.tags_array.contains(cast(include_tags, ARRAY(Text))))
 
     if exclude_tags:
-        conditions.append("NOT (tags_array && :exc_tags)")
-        params["exc_tags"] = exclude_tags
+        filters.append(~Gallery.tags_array.overlap(cast(exclude_tags, ARRAY(Text))))
 
     if text_queries:
-        conditions.append("(title ILIKE :tq OR title_jpn ILIKE :tq)")
-        params["tq"] = f"%{text_queries[0]}%"
+        tq = f"%{text_queries[0]}%"
+        filters.append(
+            (Gallery.title.ilike(tq)) | (Gallery.title_jpn.ilike(tq))
+        )
 
     if source_filter:
-        conditions.append("source = :source")
-        params["source"] = source_filter
+        filters.append(Gallery.source == source_filter)
 
     if rating_filter is not None:
-        conditions.append("rating >= :min_rating")
-        params["min_rating"] = rating_filter
+        filters.append(Gallery.rating >= rating_filter)
 
     if favorited_filter is not None:
-        conditions.append("favorited = :fav")
-        params["fav"] = favorited_filter
-
-    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+        filters.append(Gallery.favorited == favorited_filter)
 
     # Sort
     sort_map = {
-        "added_at": "added_at DESC",
-        "rating": "rating DESC",
-        "pages": "pages DESC",
-        "posted_at": "posted_at DESC",
-        "title": "title ASC",
+        "added_at": desc(Gallery.added_at),
+        "rating": desc(Gallery.rating),
+        "pages": desc(Gallery.pages),
+        "posted_at": desc(Gallery.posted_at),
+        "title": asc(Gallery.title),
     }
-    order = sort_map.get(sort, "added_at DESC")
+    order = sort_map.get(sort, desc(Gallery.added_at))
 
-    # Count
     async with async_session() as session:
-        count_result = await session.execute(
-            text(f"SELECT COUNT(*) FROM galleries {where}"),
-            {k: v for k, v in params.items() if k not in ("limit", "offset")},
-        )
-        total = count_result.scalar()
+        count_query = select(func.count()).select_from(Gallery).where(*filters)
+        total = (await session.execute(count_query)).scalar()
 
-        result = await session.execute(
-            text(f"""
-                SELECT id, title, title_jpn, source, source_id, category, language,
-                       pages, rating, favorited, uploader, download_status,
-                       added_at, posted_at, tags_array
-                FROM galleries {where}
-                ORDER BY {order}
-                LIMIT :limit OFFSET :offset
-            """),
-            params,
+        data_query = (
+            select(Gallery)
+            .where(*filters)
+            .order_by(order)
+            .limit(limit)
+            .offset(offset)
         )
-        rows = result.fetchall()
+        rows = (await session.execute(data_query)).scalars().all()
 
     return {
         "total": total,

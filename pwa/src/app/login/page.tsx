@@ -1,23 +1,10 @@
 'use client'
 
-import { useState, FormEvent, useEffect } from 'react'
+import { useState, FormEvent, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+/* eslint-disable @next/next/no-img-element */
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
-
-function Logo() {
-  return (
-    <svg width="80" height="80" viewBox="0 0 100 100" fill="none" xmlns="http://www.w3.org/2000/svg">
-      <path d="M50 50 C50 30, 65 15, 50 5 C35 15, 50 30, 50 50Z" fill="#F44336" />
-      <path d="M50 50 C65 40, 85 40, 90 25 C75 25, 65 35, 50 50Z" fill="#FF9800" />
-      <path d="M50 50 C65 55, 80 65, 90 55 C80 45, 65 45, 50 50Z" fill="#4CAF50" />
-      <path d="M50 50 C55 65, 60 85, 50 95 C40 85, 45 65, 50 50Z" fill="#2196F3" />
-      <path d="M50 50 C35 60, 20 65, 10 55 C20 45, 35 45, 50 50Z" fill="#E91E63" />
-      <path d="M50 50 C35 40, 20 30, 10 40 C20 50, 35 50, 50 50Z" fill="#9C27B0" />
-      <circle cx="50" cy="50" r="6" fill="currentColor" className="text-vault-bg" />
-    </svg>
-  )
-}
 
 export default function LoginPage() {
   const router = useRouter()
@@ -25,19 +12,25 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
+  const mountedRef = useRef(true)
+
+  useEffect(() => {
+    return () => { mountedRef.current = false }
+  }, [])
 
   useEffect(() => {
     // If we already have a valid session, go straight to dashboard
     api.auth.check()
-      .then(() => { window.location.href = '/' })
+      .then(() => { router.replace('/') })
       .catch(() => {
         // Session invalid or missing — check if first-run setup needed
         api.auth.needsSetup()
           .then((data) => {
+            if (!mountedRef.current) return
             if (data.needs_setup) router.replace('/setup')
             else setLoading(false)
           })
-          .catch(() => setLoading(false))
+          .catch(() => { if (mountedRef.current) setLoading(false) })
       })
   }, [router])
 
@@ -68,7 +61,7 @@ export default function LoginPage() {
       <div className="w-full max-w-sm">
         <div className="bg-vault-card border border-vault-border rounded-3xl px-8 py-10 shadow-2xl">
           <div className="flex flex-col items-center mb-8">
-            <Logo />
+            <img src="/icon-192x192.png" alt="Jyzrox" width={80} height={80} />
             <h1 className="mt-4 text-2xl font-semibold text-vault-accent">{t('login.title')}</h1>
           </div>
 
