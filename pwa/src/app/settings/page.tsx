@@ -172,9 +172,13 @@ export default function SettingsPage() {
   const [ehAccountLoading, setEhAccountLoading] = useState(false)
 
   // Pixiv Token form
+  const [pixivLoginMode, setPixivLoginMode] = useState<'oauth' | 'token'>('oauth')
   const [pixivToken, setPixivToken] = useState('')
   const [pixivSaving, setPixivSaving] = useState(false)
   const [pixivUsername, setPixivUsername] = useState<string | null>(null)
+  const [pixivOauthUrl, setPixivOauthUrl] = useState('')
+  const [pixivCodeVerifier, setPixivCodeVerifier] = useState('')
+  const [pixivCallbackUrl, setPixivCallbackUrl] = useState('')
 
   // System info
   const [health, setHealth] = useState<SystemHealth | null>(null)
@@ -296,6 +300,37 @@ export default function SettingsPage() {
       setPixivSaving(false)
     }
   }, [pixivToken])
+
+  // Pixiv: Get OAuth URL
+  const handlePixivGetOauth = useCallback(async () => {
+    try {
+      const res = await api.settings.getPixivOAuthUrl()
+      setPixivOauthUrl(res.url)
+      setPixivCodeVerifier(res.code_verifier)
+      window.open(res.url, '_blank')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
+    }
+  }, [])
+
+  // Pixiv: Exchange OAuth Callback
+  const handlePixivExchange = useCallback(async () => {
+    if (!pixivCallbackUrl.trim() || !pixivCodeVerifier) return
+    setPixivSaving(true)
+    try {
+      const res = await api.settings.pixivOAuthCallback(pixivCallbackUrl.trim(), pixivCodeVerifier)
+      toast.success(`${t('settings.pixivSaved')}: ${res.username}`)
+      setPixivUsername(res.username)
+      setCredentials((prev) => (prev ? { ...prev, pixiv: { configured: true } } : prev))
+      setPixivCallbackUrl('')
+      setPixivOauthUrl('')
+      setPixivCodeVerifier('')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('settings.pixivFailed'))
+    } finally {
+      setPixivSaving(false)
+    }
+  }, [pixivCallbackUrl, pixivCodeVerifier])
 
   // System: Load health + info
   const handleLoadSystem = useCallback(async () => {
@@ -748,32 +783,93 @@ export default function SettingsPage() {
 
             {activeSection === 'pixiv' && (
               <div className="px-5 pb-5 border-t border-vault-border">
-                <div className="mt-4">
-                  <label className="block text-xs text-vault-text-muted mb-1">
-                    {t('settings.pixivRefreshToken')}
-                  </label>
-                  <input
-                    type="password"
-                    value={pixivToken}
-                    onChange={(e) => setPixivToken(e.target.value)}
-                    placeholder="Enter Pixiv refresh token"
-                    className={inputClass}
-                  />
-                  <p className="text-xs text-vault-text-muted mt-1">{t('settings.pixivHint')}</p>
+                {/* Mode toggle */}
+                <div className="flex mt-4 bg-vault-input border border-vault-border rounded overflow-hidden">
+                  <button
+                    onClick={() => setPixivLoginMode('oauth')}
+                    className={`flex-1 px-3 py-2 text-sm transition-colors ${pixivLoginMode === 'oauth' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
+                  >
+                    Web Login (Recommended)
+                  </button>
+                  <button
+                    onClick={() => setPixivLoginMode('token')}
+                    className={`flex-1 px-3 py-2 text-sm transition-colors ${pixivLoginMode === 'token' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
+                  >
+                    Refresh Token (Advanced)
+                  </button>
                 </div>
 
+                {pixivLoginMode === 'oauth' && (
+                  <div className="mt-4 space-y-3">
+                    <div>
+                      <p className="text-xs text-vault-text-muted mb-2">
+                        1. Click the button below to open the Pixiv login page. After logging in,
+                        the page will redirect to a blank page or prompt an error with a URL
+                        starting with <code>pixiv://</code> or{' '}
+                        <code>https://app-api.pixiv.net</code>.
+                      </p>
+                      <button
+                        onClick={handlePixivGetOauth}
+                        className={btnSecondary + ' w-full mb-4'}
+                      >
+                        Open Pixiv Login Page
+                      </button>
+                    </div>
+                    {pixivCodeVerifier && (
+                      <div>
+                        <p className="text-xs text-vault-text-muted mb-1">
+                          2. Paste the full redirected URL or the <code>code=</code> part here.
+                        </p>
+                        <input
+                          type="text"
+                          value={pixivCallbackUrl}
+                          onChange={(e) => setPixivCallbackUrl(e.target.value)}
+                          placeholder="pixiv://.../?code=..."
+                          className={inputClass}
+                        />
+                        <button
+                          onClick={handlePixivExchange}
+                          disabled={pixivSaving || !pixivCallbackUrl.trim()}
+                          className={btnPrimary + ' mt-3'}
+                        >
+                          {pixivSaving ? t('settings.saving') : 'Verify & Save Token'}
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                )}
+
+                {pixivLoginMode === 'token' && (
+                  <div className="mt-4">
+                    <label className="block text-xs text-vault-text-muted mb-1">
+                      {t('settings.pixivRefreshToken')}
+                    </label>
+                    <input
+                      type="password"
+                      value={pixivToken}
+                      onChange={(e) => setPixivToken(e.target.value)}
+                      placeholder="Enter Pixiv refresh token"
+                      className={inputClass}
+                    />
+                    <p className="text-xs text-vault-text-muted mt-1">{t('settings.pixivHint')}</p>
+                    <div className="mt-4">
+                      <button
+                        onClick={handlePixivSave}
+                        disabled={pixivSaving}
+                        className={btnPrimary}
+                      >
+                        {pixivSaving ? t('settings.saving') : t('settings.saveToken')}
+                      </button>
+                    </div>
+                  </div>
+                )}
+
                 {pixivUsername && (
-                  <div className="mt-3 flex items-center gap-2 text-sm">
+                  <div className="mt-4 flex items-center gap-2 text-sm p-3 bg-vault-input border border-vault-border rounded-lg">
                     <span className="text-vault-text-muted">{t('settings.pixivAccount')}:</span>
                     <span className="text-vault-text-secondary">{pixivUsername}</span>
                   </div>
                 )}
-
-                <div className="mt-4">
-                  <button onClick={handlePixivSave} disabled={pixivSaving} className={btnPrimary}>
-                    {pixivSaving ? t('settings.saving') : t('settings.saveToken')}
-                  </button>
-                </div>
               </div>
             )}
           </div>

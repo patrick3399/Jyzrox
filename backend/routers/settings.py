@@ -1,5 +1,6 @@
 """Credential management and system settings."""
 
+import base64
 import hashlib
 import json
 import logging
@@ -39,6 +40,11 @@ class EhLoginRequest(BaseModel):
 
 class PixivTokenRequest(BaseModel):
     refresh_token: str
+
+
+class PixivOAuthCallbackRequest(BaseModel):
+    code: str
+    code_verifier: str
 
 
 class RateLimitPatch(BaseModel):
@@ -167,6 +173,74 @@ async def set_pixiv_credentials(
         raise HTTPException(status_code=400, detail=f"Pixiv auth failed: {exc}")
 
     await set_credential("pixiv", req.refresh_token, "oauth_token")
+    return {"status": "ok", "username": username}
+
+
+@router.get("/credentials/pixiv/oauth-url")
+async def get_pixiv_oauth_url(_: dict = Depends(require_auth)):
+    """Generate PKCE verifier and authorization URL for Pixiv."""
+    code_verifier = secrets.token_urlsafe(32)
+    code_challenge_bytes = hashlib.sha256(code_verifier.encode("utf-8")).digest()
+    code_challenge = base64.urlsafe_b64encode(code_challenge_bytes).decode("utf-8").rstrip("=")
+
+    client_id = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
+    auth_url = (
+        f"https://app-api.pixiv.net/web/v1/login"
+        f"?code_challenge={code_challenge}"
+        f"&code_challenge_method=S256"
+        f"&client={client_id}"
+    )
+    return {"url": auth_url, "code_verifier": code_verifier}
+
+
+@router.post("/credentials/pixiv/oauth-callback")
+async def pixiv_oauth_callback(
+    req: PixivOAuthCallbackRequest,
+    _: dict = Depends(require_auth),
+):
+    """Exchange authorization code for refresh token."""
+    client_id = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
+    client_secret = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
+
+    # Extract code from URL if user pasted the full URL
+    code = req.code
+    if "code=" in code:
+        import urllib.parse
+
+        parsed = urllib.parse.urlparse(code)
+        qs = urllib.parse.parse_qs(parsed.query)
+        if "code" in qs:
+            code = qs["code"][0]
+
+    try:
+        data = {
+            "client_id": client_id,
+            "client_secret": client_secret,
+            "code": code,
+            "code_verifier": req.code_verifier,
+            "grant_type": "authorization_code",
+            "redirect_uri": "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback",
+            "include_policy": "true",
+        }
+        headers = {
+            "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
+            "App-OS-Version": "11",
+            "App-OS": "android",
+        }
+        async with httpx.AsyncClient() as client:
+            resp = await client.post("https://oauth.secure.pixiv.net/auth/token", data=data, headers=headers)
+            resp.raise_for_status()
+            token_data = resp.json()
+            refresh_token = token_data.get("refresh_token")
+            username = token_data.get("user", {}).get("name", "Unknown")
+
+            if not refresh_token:
+                raise ValueError("No refresh token in response")
+
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Pixiv OAuth failed: {exc}")
+
+    await set_credential("pixiv", refresh_token, "oauth_token")
     return {"status": "ok", "username": username}
 
 
