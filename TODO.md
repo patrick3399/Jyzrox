@@ -18,7 +18,7 @@
 - [x] 考慮將 import 流程統一改為 ARQ job（與 download pipeline 一致）
 
 ### Saved Searches（桌面版已完成）
-- [ ] 手機版 Saved Searches UI（目前書籤按鈕 `hidden sm:block`，手機版不可見）
+- [x] 手機版 Saved Searches UI（目前書籤按鈕 `hidden sm:block`，手機版不可見）
 
 ### 搜尋增強
 - [ ] 感知雜湊（perceptual hash）去重（目前僅 SHA256 完全相同）

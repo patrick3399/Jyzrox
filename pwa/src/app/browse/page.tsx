@@ -486,6 +486,7 @@ function BrowsePage() {
   // Mobile search expand
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
   const mobileInputRef = useRef<HTMLInputElement>(null)
+  const mobileSavedSearchesRef = useRef<HTMLDivElement>(null)
 
   // EH credentials (for favorites tab)
   const [ehConfigured, setEhConfigured] = useState(false)
@@ -511,7 +512,10 @@ function BrowsePage() {
   // Close saved searches dropdown on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
-      if (savedSearchesRef.current && !savedSearchesRef.current.contains(e.target as Node)) {
+      const target = e.target as Node
+      const inDesktop = savedSearchesRef.current?.contains(target)
+      const inMobile = mobileSavedSearchesRef.current?.contains(target)
+      if (!inDesktop && !inMobile) {
         setShowSavedSearches(false)
         setShowSaveInput(false)
       }
@@ -964,6 +968,91 @@ function BrowsePage() {
           >
             <SearchIcon size={18} />
           </button>
+
+          {/* Mobile saved searches button */}
+          <div ref={mobileSavedSearchesRef} className="relative sm:hidden shrink-0">
+            <button
+              onClick={() => {
+                setShowSavedSearches((v) => !v)
+                setShowSaveInput(false)
+              }}
+              title={t('browse.savedSearches')}
+              className="p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-text transition-colors"
+            >
+              {savedSearches.length > 0 ? <BookmarkCheck size={18} /> : <Bookmark size={18} />}
+            </button>
+
+            {/* Mobile saved searches dropdown */}
+            {showSavedSearches && (
+              <div className="absolute left-0 top-full mt-1 z-40 w-72 max-w-[calc(100vw-2rem)] bg-vault-card border border-vault-border rounded-lg shadow-xl overflow-hidden">
+                <div className="flex items-center justify-between px-3 py-2 border-b border-vault-border">
+                  <span className="text-xs font-medium text-vault-text">
+                    {t('browse.savedSearches')}
+                  </span>
+                  {searchQuery && (
+                    <button
+                      onClick={() => setShowSaveInput((v) => !v)}
+                      className="text-xs text-vault-accent hover:text-vault-accent/80 transition-colors"
+                    >
+                      {t('browse.saveSearch')}
+                    </button>
+                  )}
+                </div>
+
+                {/* Save current search input */}
+                {showSaveInput && searchQuery && (
+                  <div className="px-3 py-2 border-b border-vault-border flex gap-2">
+                    <input
+                      type="text"
+                      value={saveSearchName}
+                      onChange={(e) => setSaveSearchName(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSaveSearch()}
+                      placeholder={t('browse.saveSearchName')}
+                      autoFocus
+                      className="flex-1 min-w-0 bg-vault-input border border-vault-border rounded px-2 py-1 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
+                    />
+                    <button
+                      onClick={handleSaveSearch}
+                      className="px-2 py-1 bg-vault-accent hover:bg-vault-accent/80 rounded text-white text-xs font-medium transition-colors shrink-0"
+                    >
+                      {t('browse.saveSearch')}
+                    </button>
+                  </div>
+                )}
+
+                {/* List of saved searches */}
+                <div className="max-h-60 overflow-y-auto">
+                  {savedSearches.length === 0 ? (
+                    <p className="px-3 py-4 text-xs text-vault-text-muted text-center">
+                      {t('browse.noSavedSearches')}
+                    </p>
+                  ) : (
+                    savedSearches.map((s) => (
+                      <button
+                        key={s.id}
+                        onClick={() => handleLoadSavedSearch(s)}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-vault-text hover:bg-vault-card-hover transition-colors group"
+                      >
+                        <span className="flex-1 truncate text-xs">{s.name}</span>
+                        {s.query && (
+                          <span className="text-[10px] text-vault-text-muted truncate max-w-[80px]">
+                            {s.query}
+                          </span>
+                        )}
+                        <span
+                          onClick={(e) => handleDeleteSavedSearch(s.id, e)}
+                          className="text-vault-text-muted hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity px-1 shrink-0"
+                          title="Delete"
+                        >
+                          ✕
+                        </span>
+                      </button>
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
 
           {/* Desktop search input */}
           <div
