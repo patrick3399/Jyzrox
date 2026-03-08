@@ -537,7 +537,7 @@ async def remove_favorite(
 # ── Thumbnail proxy ───────────────────────────────────────────────────
 
 _thumb_semaphore = asyncio.Semaphore(4)
-_ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "ul.ehgt.org"}
+_ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "ul.ehgt.org", "hath.network"}
 
 
 @router.get("/thumb-proxy")

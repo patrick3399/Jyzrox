@@ -8,6 +8,7 @@ References:
 
 import logging
 import re
+from collections import defaultdict
 from typing import Any
 from urllib.parse import urlencode
 
@@ -57,6 +58,15 @@ _NORMAL_PREVIEW_RE = re.compile(
     r'url\(([^)]+)\)\s*(-?\d+)px[^"]*'
     r'width:\s*(\d+)px;\s*height:\s*(\d+)px[^"]*"[^>]*>'
     r".*?/s/[0-9a-f]+/\d+-(\d+)",
+    re.DOTALL,
+)
+# New format (2024+): <a href="/s/PTOKEN/GID-PAGE"><div style="width:Wpx;height:Hpx;background:transparent url(THUMB) OFFSETpx 0 no-repeat"></div></a>
+# Order in style: width → height → background (with url + offset)
+_NEW_PREVIEW_RE = re.compile(
+    r'<a[^>]+href="[^"]+/s/[0-9a-f]{10}/\d+-(\d+)"[^>]*>'
+    r'<div[^>]+style="[^"]*'
+    r'width:\s*(\d+)px[^"]*height:\s*(\d+)px[^"]*'
+    r'url\(([^)]+)\)\s*(-?\d+)px',
     re.DOTALL,
 )
 
@@ -283,23 +293,56 @@ class EhClient:
             page_num = int(match.group(3))
             token_map[page_num] = ptoken
 
-        # Extract preview thumbnails — try large previews first
-        large_matches = list(_LARGE_PREVIEW_RE.finditer(html))
-        if large_matches:
-            for match in large_matches:
+        # Extract preview thumbnails — try new format first (2024+), then legacy formats
+        new_matches = list(_NEW_PREVIEW_RE.finditer(html))
+        if new_matches:
+            # New format: background url() with optional sprite offset
+            # Groups: (page_num, width, height, thumb_url, offset_x)
+            for match in new_matches:
                 page_num = int(match.group(1))
-                thumb_url = match.group(2)
-                preview_map[page_num] = thumb_url
+                width = int(match.group(2))
+                height = int(match.group(3))
+                thumb_url = match.group(4)
+                offset_x = int(match.group(5))
+                # Always store as sprite format — even offset 0 is part of the sprite sheet
+                preview_map[page_num] = f"{thumb_url}|{offset_x}|{width}|{height}"
+
+            # Normalize cell heights per sprite URL — the sprite image has a single
+            # height, but CSS may declare different heights for individual cells
+            # (e.g., cover page 150px vs normal 278px). Use max height per sprite.
+            sprite_heights: dict[str, int] = defaultdict(int)
+            for page_num, val in preview_map.items():
+                parts = val.split('|')
+                if len(parts) == 4:
+                    sprite_url = parts[0]
+                    h = int(parts[3])
+                    if h > sprite_heights[sprite_url]:
+                        sprite_heights[sprite_url] = h
+            for page_num in list(preview_map.keys()):
+                parts = preview_map[page_num].split('|')
+                if len(parts) == 4:
+                    sprite_url = parts[0]
+                    max_h = sprite_heights[sprite_url]
+                    if int(parts[3]) != max_h:
+                        preview_map[page_num] = f"{parts[0]}|{parts[1]}|{parts[2]}|{max_h}"
         else:
-            # Normal previews (CSS sprite sheets)
-            # Store as "url|offsetX|width|height" for frontend to render
-            for match in _NORMAL_PREVIEW_RE.finditer(html):
-                sprite_url = match.group(1)
-                offset_x = int(match.group(2))
-                width = int(match.group(3))
-                height = int(match.group(4))
-                page_num = int(match.group(5))
-                preview_map[page_num] = f"{sprite_url}|{offset_x}|{width}|{height}"
+            # Legacy large previews: <div class="gdtl"><img alt="N" src="URL">
+            large_matches = list(_LARGE_PREVIEW_RE.finditer(html))
+            if large_matches:
+                for match in large_matches:
+                    page_num = int(match.group(1))
+                    thumb_url = match.group(2)
+                    preview_map[page_num] = thumb_url
+            else:
+                # Legacy normal previews (CSS sprite sheets with gdtm class)
+                # Store as "url|offsetX|width|height" for frontend to render
+                for match in _NORMAL_PREVIEW_RE.finditer(html):
+                    sprite_url = match.group(1)
+                    offset_x = int(match.group(2))
+                    width = int(match.group(3))
+                    height = int(match.group(4))
+                    page_num = int(match.group(5))
+                    preview_map[page_num] = f"{sprite_url}|{offset_x}|{width}|{height}"
 
         return token_map, preview_map
 

@@ -676,11 +676,18 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
 
         if (previewRaw) {
           if (previewRaw.includes('|')) {
-            const [spriteUrl, ox] = previewRaw.split('|')
+            const parts = previewRaw.split('|')
+            const spriteUrl = parts[0]
+            const ox = Number(parts[1])
+            const cellW = Number(parts[2]) || 200
+            const cellH = Number(parts[3]) || 300
+            // Scale based on width only — backend normalizes sprite heights.
+            const scale = 48 / cellW
+            const scaledOx = ox * scale
             spriteStyle = {
               backgroundImage: `url(/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)})`,
-              backgroundPosition: `${ox}px 0`,
-              backgroundSize: 'auto 100%',
+              backgroundPosition: `${scaledOx}px center`,
+              backgroundSize: `auto ${cellH * scale}px`,
               backgroundRepeat: 'no-repeat',
               width: '100%',
               height: '100%',
@@ -710,7 +717,6 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
                 src={thumbSrc}
                 alt={`Thumb ${img.pageNum}`}
                 className="h-full w-full object-cover"
-                loading="lazy"
               />
             ) : (
               <div className="h-full w-full bg-neutral-800 flex items-center justify-center">

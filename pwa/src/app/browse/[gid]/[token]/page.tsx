@@ -11,6 +11,73 @@ import { t } from '@/lib/i18n'
 import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react'
 import type { EhComment } from '@/lib/types'
 
+// ── Preview grid with scaled sprite offsets ─────────────────────────────
+
+function PreviewGrid({
+  thumbs,
+  onRead,
+}: {
+  thumbs: { page: number; url: string; isSprite: boolean; offsetX?: number; width?: number; height?: number }[]
+  onRead: (page: number) => void
+}) {
+  const gridRef = useRef<HTMLDivElement>(null)
+  const [cellSize, setCellSize] = useState({ w: 0, h: 0 })
+
+  useEffect(() => {
+    const grid = gridRef.current
+    if (!grid) return
+    const measure = () => {
+      const first = grid.firstElementChild as HTMLElement | null
+      if (first) setCellSize({ w: first.offsetWidth, h: first.offsetHeight })
+    }
+    measure()
+    const obs = new ResizeObserver(measure)
+    obs.observe(grid)
+    return () => obs.disconnect()
+  }, [thumbs.length])
+
+  return (
+    <div ref={gridRef} className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+      {thumbs.map((thumb) => {
+        // Scale based on width only — backend normalizes sprite heights.
+        const tw = thumb.width ?? 200
+        const th = thumb.height ?? 300
+        const scale = cellSize.w ? cellSize.w / tw : 1
+        const scaledH = th * scale
+        return (
+          <button
+            key={thumb.page}
+            onClick={() => onRead(thumb.page)}
+            className="relative aspect-[3/4] bg-vault-bg rounded-lg overflow-hidden border border-vault-border
+                       hover:border-blue-500 hover:brightness-110 transition-all cursor-pointer"
+          >
+            {thumb.isSprite ? (
+              <div
+                className="w-full h-full"
+                style={{
+                  backgroundImage: `url(${thumb.url})`,
+                  backgroundPosition: `${(thumb.offsetX ?? 0) * scale}px center`,
+                  backgroundSize: `auto ${scaledH}px`,
+                  backgroundRepeat: 'no-repeat',
+                }}
+              />
+            ) : (
+              <img
+                src={thumb.url}
+                alt={`Page ${thumb.page}`}
+                className="w-full h-full object-cover"
+              />
+            )}
+            <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-center text-[10px] text-white py-0.5">
+              {thumb.page}
+            </span>
+          </button>
+        )
+      })}
+    </div>
+  )
+}
+
 // Favorite category colors (from EhViewer)
 const FAV_COLORS = [
   '#000',
@@ -417,38 +484,7 @@ export default function EhGalleryDetailPage() {
             <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
               {t('browse.preview')} ({gallery.pages} pages)
             </h2>
-            <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
-              {previewThumbs.map((thumb) => (
-                <button
-                  key={thumb.page}
-                  onClick={() => handleRead(thumb.page)}
-                  className="relative aspect-[3/4] bg-vault-bg rounded-lg overflow-hidden border border-vault-border
-                             hover:border-blue-500 hover:brightness-110 transition-all cursor-pointer"
-                >
-                  {thumb.isSprite ? (
-                    <div
-                      className="w-full h-full"
-                      style={{
-                        backgroundImage: `url(${thumb.url})`,
-                        backgroundPosition: `${thumb.offsetX}px 0`,
-                        backgroundSize: 'auto 100%',
-                        backgroundRepeat: 'no-repeat',
-                      }}
-                    />
-                  ) : (
-                    <img
-                      src={thumb.url}
-                      alt={`Page ${thumb.page}`}
-                      className="w-full h-full object-cover"
-                      loading="lazy"
-                    />
-                  )}
-                  <span className="absolute bottom-0 left-0 right-0 bg-black/70 text-center text-[10px] text-white py-0.5">
-                    {thumb.page}
-                  </span>
-                </button>
-              ))}
-            </div>
+            <PreviewGrid thumbs={previewThumbs} onRead={handleRead} />
           </div>
         )}
       </div>

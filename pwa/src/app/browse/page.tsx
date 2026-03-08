@@ -15,31 +15,18 @@ import type { EhGallery, Credentials } from '@/lib/types'
 // ── IntersectionObserver-based lazy image ──────────────────────────────
 
 function LazyImage({ src, alt, className }: { src: string; alt: string; className: string }) {
-  const imgRef = useRef<HTMLImageElement>(null)
-  const [loaded, setLoaded] = useState(false)
+  const [error, setError] = useState(false)
 
-  useEffect(() => {
-    const el = imgRef.current
-    if (!el) return
-    const observer = new IntersectionObserver(
-      ([entry]) => {
-        if (entry.isIntersecting) {
-          setLoaded(true)
-          observer.disconnect()
-        }
-      },
-      { rootMargin: '200px' },
-    )
-    observer.observe(el)
-    return () => observer.disconnect()
-  }, [])
+  if (error) {
+    return <div className={`${className} bg-vault-input`} />
+  }
 
   return (
     <img
-      ref={imgRef}
-      src={loaded ? src : undefined}
+      src={src}
       alt={alt}
       className={className}
+      onError={() => setError(true)}
     />
   )
 }
@@ -502,14 +489,16 @@ function BrowsePage() {
   }, [])
 
   // Sync URL ?q= changes (e.g. from tag clicks in detail page)
+  // Only react to the q param itself, not to other searchParams changes (page, tab, etc.)
+  // to avoid a feedback loop where the URL sync effect resets page to 0.
+  const urlQ = searchParams.get('q') || ''
   useEffect(() => {
-    const q = searchParams.get('q') || ''
-    if (q !== searchQuery) {
-      setInputValue(q)
-      setSearchQuery(q)
+    if (urlQ !== searchQuery) {
+      setInputValue(urlQ)
+      setSearchQuery(urlQ)
       setPage(0)
     }
-  }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [urlQ]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Persist browse state in URL so back-navigation restores it
   const isFirstRender = useRef(true)
