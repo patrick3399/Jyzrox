@@ -13,9 +13,9 @@
 - [x] 批次重新標記已有圖庫
 
 ### Import 強化
-- [ ] Import 任務加入進度追蹤（目前 download 有進度但 import 沒有）
-- [ ] Import 完成後自動觸發 `thumbnail_job`（目前 import_router 的 BackgroundTask 不走 ARQ pipeline）
-- [ ] 考慮將 import 流程統一改為 ARQ job（與 download pipeline 一致）
+- [x] Import 任務加入進度追蹤（目前 download 有進度但 import 沒有）
+- [x] Import 完成後自動觸發 `thumbnail_job`（目前 import_router 的 BackgroundTask 不走 ARQ pipeline）
+- [x] 考慮將 import 流程統一改為 ARQ job（與 download pipeline 一致）
 
 ### Saved Searches（桌面版已完成）
 - [ ] 手機版 Saved Searches UI（目前書籤按鈕 `hidden sm:block`，手機版不可見）

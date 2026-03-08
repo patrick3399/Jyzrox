@@ -1,17 +1,14 @@
 """Gallery import handling (Link and Copy modes)."""
 
-import hashlib
+import json
 import os
-import shutil
-from pathlib import Path
 
-from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import text
 
 from core.auth import require_auth
 from core.config import settings
-from core.database import async_session
+from core.redis_client import get_redis
 
 router = APIRouter(tags=["import"])
 
@@ -22,68 +19,10 @@ class ImportRequest(BaseModel):
     metadata: dict | None = None
 
 
-def hash_file(filepath: str) -> str:
-    h = hashlib.sha256()
-    with open(filepath, "rb") as f:
-        while chunk := f.read(8192):
-            h.update(chunk)
-    return h.hexdigest()
-
-
-async def process_import_task(req: ImportRequest, gallery_id: int):
-    # This is a simplified version of the background worker logic for Phase 4
-    src_path = Path(req.source_dir)
-    if not src_path.exists() or not src_path.is_dir():
-        return
-
-    _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
-    files = sorted([f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS])
-
-    async with async_session() as session:
-        for idx, f in enumerate(files):
-            file_hash = hash_file(str(f))
-
-            # check for duplicate
-            dup_check = await session.execute(
-                text("SELECT id FROM images WHERE file_hash = :fh LIMIT 1"),
-                {"fh": file_hash},
-            )
-            dup_row = dup_check.fetchone()
-            duplicate_of = dup_row.id if dup_row else None
-
-            dest_path = str(f)
-            if req.mode == "copy" and not duplicate_of:
-                # copy to storage
-                dest_dir = Path(settings.data_gallery_path) / "local" / str(gallery_id)
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                dest_path = str(dest_dir / f.name)
-                shutil.copy2(f, dest_path)
-
-            ext = f.suffix.lower()
-            media_type = "video" if ext in (".mp4", ".webm") else "gif" if ext == ".gif" else "image"
-
-            await session.execute(
-                text("""
-                    INSERT INTO images (gallery_id, page_num, filename, file_path, file_hash, media_type, duplicate_of)
-                    VALUES (:gid, :pnum, :fname, :fpath, :fhash, :mtype, :dup)
-                """),
-                {
-                    "gid": gallery_id,
-                    "pnum": idx + 1,
-                    "fname": f.name,
-                    "fpath": dest_path,
-                    "fhash": file_hash,
-                    "mtype": media_type,
-                    "dup": duplicate_of,
-                },
-            )
-        await session.commit()
-
-
 @router.post("/")
 async def start_import(
     req: ImportRequest,
-    background_tasks: BackgroundTasks,
+    request: Request,
     _: dict = Depends(require_auth),
 ):
     if req.mode not in ("link", "copy"):
@@ -98,6 +37,9 @@ async def start_import(
         raise HTTPException(status_code=400, detail="source_dir must be within the gallery path")
 
     # Create DB entry
+    from core.database import async_session
+    from sqlalchemy import text
+
     async with async_session() as session:
         result = await session.execute(
             text("""
@@ -113,5 +55,19 @@ async def start_import(
         gallery_id = result.scalar()
         await session.commit()
 
-    background_tasks.add_task(process_import_task, req, gallery_id)
+    arq = request.app.state.arq
+    await arq.enqueue_job("local_import_job", req.source_dir, req.mode, gallery_id)
     return {"status": "enqueued", "gallery_id": gallery_id}
+
+
+@router.get("/progress/{gallery_id}")
+async def get_import_progress(
+    gallery_id: int,
+    _: dict = Depends(require_auth),
+):
+    """Poll import progress for a gallery."""
+    r = get_redis()
+    data = await r.get(f"import:progress:{gallery_id}")
+    if not data:
+        return {"gallery_id": gallery_id, "status": "unknown"}
+    return {"gallery_id": gallery_id, **json.loads(data)}

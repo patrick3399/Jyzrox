@@ -659,6 +659,96 @@ async def _upsert_tags(session, gallery_id: int, tags: list[str]) -> None:
         await session.execute(gt_stmt)
 
 
+# ── WORKER B2: Local Import ──────────────────────────────────────────
+
+
+async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: int) -> dict:
+    """Import a local directory into the database with progress tracking."""
+    import json as _json
+    import shutil
+
+    logger.info("[local_import] gallery_id=%d source=%s mode=%s", gallery_id, source_dir, mode)
+
+    src_path = Path(source_dir)
+    if not src_path.is_dir():
+        return {"status": "failed", "error": f"not a directory: {source_dir}"}
+
+    _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
+    files = sorted([f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS])
+
+    if not files:
+        return {"status": "failed", "error": "no supported files found"}
+
+    total = len(files)
+    processed = 0
+    r = ctx["redis"]
+
+    async with AsyncSessionLocal() as session:
+        for idx, f in enumerate(files):
+            file_hash = await asyncio.to_thread(_sha256, f)
+
+            # Check duplicate
+            dup_result = await session.execute(
+                select(Image.id).where(Image.file_hash == file_hash).limit(1)
+            )
+            dup_row = dup_result.scalar_one_or_none()
+            duplicate_of = dup_row if dup_row else None
+
+            dest_path = str(f)
+            if mode == "copy" and not duplicate_of:
+                dest_dir = Path(settings.data_gallery_path) / "local" / str(gallery_id)
+                dest_dir.mkdir(parents=True, exist_ok=True)
+                dest_path = str(dest_dir / f.name)
+                await asyncio.to_thread(shutil.copy2, str(f), dest_path)
+
+            ext = f.suffix.lower()
+            media_type = "video" if ext in (".mp4", ".webm") else "gif" if ext == ".gif" else "image"
+
+            stmt = pg_insert(Image).values(
+                gallery_id=gallery_id,
+                page_num=idx + 1,
+                filename=f.name,
+                file_path=dest_path,
+                file_hash=file_hash,
+                media_type=media_type,
+                duplicate_of=duplicate_of,
+            ).on_conflict_do_nothing()
+            await session.execute(stmt)
+
+            processed += 1
+
+            # Update progress every 5 files or proportionally for small batches
+            update_every = max(1, min(5, total // 10))
+            if processed % update_every == 0 or processed == total:
+                await r.setex(
+                    f"import:progress:{gallery_id}",
+                    3600,
+                    _json.dumps({"processed": processed, "total": total, "status": "running"}),
+                )
+
+        # Update gallery page count and status
+        gallery = await session.get(Gallery, gallery_id)
+        if gallery:
+            gallery.pages = processed
+            gallery.download_status = "complete"
+
+        await session.commit()
+
+    # Clear progress key
+    await r.delete(f"import:progress:{gallery_id}")
+
+    logger.info("[local_import] gallery_id=%d: %d files imported", gallery_id, processed)
+
+    # Trigger thumbnail generation
+    await ctx["redis"].enqueue_job("thumbnail_job", gallery_id)
+
+    # Trigger AI tagging if enabled
+    if settings.tag_model_enabled:
+        await ctx["redis"].enqueue_job("tag_job", gallery_id)
+
+    return {"status": "done", "processed": processed}
+
+
 # ── WORKER C: Tag ────────────────────────────────────────────────────
 
 
@@ -826,7 +916,7 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions = [download_job, import_job, tag_job, thumbnail_job]
+    functions = [download_job, import_job, local_import_job, tag_job, thumbnail_job]
     on_startup = startup
     on_shutdown = shutdown
     max_jobs = 8
