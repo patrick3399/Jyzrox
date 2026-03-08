@@ -82,25 +82,7 @@ async def download_job(
     await _set_job_status(db_job_id, "running")
     started_at = datetime.now(UTC)
 
-    # Validate URL domain
-    allowed_domains = {
-        "e-hentai.org", "exhentai.org",
-        "www.pixiv.net", "pixiv.net",
-        "danbooru.donmai.us",
-        "twitter.com", "x.com",
-    }
-    try:
-        parsed = urlparse(url)
-        domain = parsed.hostname or ""
-        if not any(domain == d or domain.endswith("." + d) for d in allowed_domains):
-            err = f"Unsupported domain: {domain}"
-            logger.warning("[download] %s", err)
-            await _set_job_status(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
-    except Exception:
-        err = "Invalid URL format"
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
+    # Removed domain whitelist to allow any gallery-dl supported site
 
     # Pre-flight: check credentials for the source
     cred_error = await _check_credentials(url)
@@ -118,6 +100,10 @@ async def download_job(
     await _set_job_progress(db_job_id, {**_base_progress, "status_text": "Waiting for download slot..."})
     async with sem.acquire():
         await _build_gallery_dl_config(url)
+        
+        # Isolate this job's downloads into a specific UUID directory
+        target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
+        
         cmd = [
             "gallery-dl",
             "--config-ignore",
@@ -125,6 +111,8 @@ async def download_job(
             settings.gallery_dl_config,
             "--write-metadata",
             "--write-tags",
+            "--directory",
+            str(target_dir),
             url,
         ]
 
@@ -223,10 +211,9 @@ async def download_job(
             "status_text": "Complete",
         })
 
-        # Trigger import for detected gallery directory
-        gallery_dir = _resolve_gallery_dir(url)
-        if gallery_dir:
-            await ctx["redis"].enqueue_job("import_job", str(gallery_dir), db_job_id)
+        # Trigger import for the target directory
+        if target_dir.exists():
+            await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id)
 
         await _set_job_status(db_job_id, "done")
         return {"status": "done", "downloaded": downloaded}
@@ -278,8 +265,12 @@ def _detect_source(url: str) -> str:
     """Detect download source from URL for semaphore selection."""
     if "e-hentai.org" in url or "exhentai.org" in url:
         return "ehentai"
-    if "pixiv.net" in url:
-        return "pixiv"
+    try:
+        parsed = urlparse(url)
+        if parsed.hostname:
+            return parsed.hostname
+    except Exception:
+        pass
     return "other"
 
 
@@ -459,15 +450,6 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
     if not gallery_path.is_dir():
         return {"status": "failed", "error": f"not a directory: {path}"}
 
-    # Detect source from path
-    parts = gallery_path.parts
-    if "ehentai" in parts:
-        source, source_id = "ehentai", gallery_path.name
-    elif "pixiv" in parts:
-        source, source_id = "pixiv", gallery_path.name
-    else:
-        source, source_id = "import", gallery_path.name
-
     # Read gallery-dl metadata (any .json file, they all have gallery info)
     metadata: dict = {}
     for meta_file in sorted(gallery_path.glob("*.json")):
@@ -477,6 +459,48 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
         except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
             logger.warning("[import] failed to read metadata %s: %s", meta_file, exc)
             continue
+
+    # Determine final source and source_id, and move the directory
+    import shutil
+    
+    # Extract source from Category (gallery-dl uses this for the extractor name)
+    source = metadata.get("category")
+    if not source:
+        # Fallback heuristic
+        parts = gallery_path.parts
+        if "ehentai" in parts:
+            source = "ehentai"
+        elif "pixiv" in parts:
+            source = "pixiv"
+        else:
+            source = "gallery_dl"
+            
+    # Extract source ID
+    source_id = str(metadata.get("gallery_id") or metadata.get("tweet_id") or metadata.get("id") or gallery_path.name)
+    
+    # Move the directory to its final resting place if it's currently a UUID
+    final_path = Path(settings.data_gallery_path) / source / source_id
+    if gallery_path != final_path:
+        try:
+            # If the destination already exists (e.g. updating a gallery), we can merge them by moving contents
+            if final_path.exists():
+                for item in gallery_path.iterdir():
+                    dest_item = final_path / item.name
+                    if dest_item.exists():
+                        if dest_item.is_file():
+                            dest_item.unlink()
+                        else:
+                            shutil.rmtree(dest_item)
+                    shutil.move(str(item), str(final_path))
+                gallery_path.rmdir() # Clean up empty UUID dir
+            else:
+                final_path.parent.mkdir(parents=True, exist_ok=True)
+                shutil.move(str(gallery_path), str(final_path))
+            gallery_path = final_path
+            logger.info("[import] moved to final path: %s", gallery_path)
+        except OSError as exc:
+            logger.error("[import] failed to move %s to %s: %s", gallery_path, final_path, exc)
+            return {"status": "failed", "error": f"move failed: {exc}"}
 
     tags = _extract_tags(gallery_path, metadata)
     image_files = sorted(
