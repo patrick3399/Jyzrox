@@ -1,6 +1,14 @@
 'use client'
 import { useCallback, useEffect, useReducer, useRef, useState } from 'react'
-import type { ReaderState, ReaderAction, ReaderImage, ViewMode, ScaleMode, ReadingDirection, ReaderSettings } from './types'
+import type {
+  ReaderState,
+  ReaderAction,
+  ReaderImage,
+  ViewMode,
+  ScaleMode,
+  ReadingDirection,
+  ReaderSettings,
+} from './types'
 import { DEFAULT_READER_SETTINGS } from './types'
 import { api } from '@/lib/api'
 
@@ -86,7 +94,10 @@ export function useReaderState(initialPage: number, totalPages: number, galleryI
 
   const toggleOverlay = useCallback(() => dispatch({ type: 'TOGGLE_OVERLAY' }), [])
 
-  const setScaleMode = useCallback((mode: ScaleMode) => dispatch({ type: 'SET_SCALE_MODE', mode }), [])
+  const setScaleMode = useCallback(
+    (mode: ScaleMode) => dispatch({ type: 'SET_SCALE_MODE', mode }),
+    [],
+  )
 
   const setReadingDirection = useCallback(
     (direction: ReadingDirection) => {

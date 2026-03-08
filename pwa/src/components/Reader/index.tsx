@@ -177,7 +177,11 @@ function SinglePageView({
   return (
     <div ref={containerRef} className={`${getScaleContainerClass(scaleMode)} h-full w-full`}>
       <div
-        style={{ transform, transformOrigin: 'center center', transition: 'transform 0.05s linear' }}
+        style={{
+          transform,
+          transformOrigin: 'center center',
+          transition: 'transform 0.05s linear',
+        }}
         className="w-full h-full flex items-center justify-center"
       >
         <MediaElement
@@ -377,9 +381,16 @@ function DoublePageView({
   const imgClass = getScaleImageClass(scaleMode === 'fit-both' ? 'fit-both' : scaleMode)
 
   return (
-    <div ref={containerRef} className="relative flex h-full w-full items-center justify-center overflow-hidden">
+    <div
+      ref={containerRef}
+      className="relative flex h-full w-full items-center justify-center overflow-hidden"
+    >
       <div
-        style={{ transform, transformOrigin: 'center center', transition: 'transform 0.05s linear' }}
+        style={{
+          transform,
+          transformOrigin: 'center center',
+          transition: 'transform 0.05s linear',
+        }}
         className="flex h-full w-full flex-row"
       >
         <div className="flex h-full w-1/2 items-center justify-center overflow-hidden">
@@ -615,7 +626,9 @@ function ReaderOverlay({
               onChange={(e) => onAutoAdvanceIntervalChange(Number(e.target.value))}
               className="w-24 accent-white"
             />
-            <span className="text-[11px] tabular-nums whitespace-nowrap">{autoAdvanceSeconds}s</span>
+            <span className="text-[11px] tabular-nums whitespace-nowrap">
+              {autoAdvanceSeconds}s
+            </span>
           </div>
         )}
       </div>
@@ -638,13 +651,16 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
   const stripRef = useRef<HTMLDivElement | null>(null)
   const userScrollingRef = useRef(false)
   // Cache natural sprite dimensions per URL for pixel-perfect background-size.
-  const [spriteNaturalSizes, setSpriteNaturalSizes] = useState<Record<string, { w: number; h: number }>>({})
+  const [spriteNaturalSizes, setSpriteNaturalSizes] = useState<
+    Record<string, { w: number; h: number }>
+  >({})
 
   const spriteUrls = useMemo(() => {
     if (!previews) return []
     const urls = new Set<string>()
     for (const raw of Object.values(previews)) {
-      if (raw.includes('|')) urls.add(`/api/eh/thumb-proxy?url=${encodeURIComponent(raw.split('|')[0])}`)
+      if (raw.includes('|'))
+        urls.add(`/api/eh/thumb-proxy?url=${encodeURIComponent(raw.split('|')[0])}`)
     }
     return [...urls]
   }, [previews])
@@ -696,73 +712,73 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
         ref={stripRef}
         className="reader-thumb-strip absolute bottom-0 left-0 right-0 z-20 flex gap-1 bg-black/70 px-2 py-2 backdrop-blur-sm"
       >
-      {images.map((img) => {
-        const isActive = img.pageNum === currentPage
-        const previewRaw = previews?.[String(img.pageNum)]
+        {images.map((img) => {
+          const isActive = img.pageNum === currentPage
+          const previewRaw = previews?.[String(img.pageNum)]
 
-        let thumbSrc: string | null = null
-        let spriteStyle: React.CSSProperties | null = null
+          let thumbSrc: string | null = null
+          let spriteStyle: React.CSSProperties | null = null
 
-        if (previewRaw) {
-          if (previewRaw.includes('|')) {
-            const parts = previewRaw.split('|')
-            const spriteUrl = parts[0]
-            const ox = Number(parts[1])
-            const cellW = Number(parts[2]) || 200
-            const cellH = Number(parts[3]) || 300
-            // Scale based on width only — backend normalizes sprite heights.
-            const scale = 48 / cellW
-            const scaledOx = ox * scale
-            const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
-            const naturalSize = spriteNaturalSizes[proxyUrl]
-            const bgSize = naturalSize
-              ? `${naturalSize.w * scale}px ${naturalSize.h * scale}px`
-              : `auto ${cellH * scale}px`
-            spriteStyle = {
-              backgroundImage: `url(${proxyUrl})`,
-              backgroundPosition: `${scaledOx}px center`,
-              backgroundSize: bgSize,
-              backgroundRepeat: 'no-repeat',
-              width: '100%',
-              height: '100%',
+          if (previewRaw) {
+            if (previewRaw.includes('|')) {
+              const parts = previewRaw.split('|')
+              const spriteUrl = parts[0]
+              const ox = Number(parts[1])
+              const cellW = Number(parts[2]) || 200
+              const cellH = Number(parts[3]) || 300
+              // Scale based on width only — backend normalizes sprite heights.
+              const scale = 48 / cellW
+              const scaledOx = ox * scale
+              const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
+              const naturalSize = spriteNaturalSizes[proxyUrl]
+              const bgSize = naturalSize
+                ? `${naturalSize.w * scale}px ${naturalSize.h * scale}px`
+                : `auto ${cellH * scale}px`
+              spriteStyle = {
+                backgroundImage: `url(${proxyUrl})`,
+                backgroundPosition: `${scaledOx}px center`,
+                backgroundSize: bgSize,
+                backgroundRepeat: 'no-repeat',
+                width: '100%',
+                height: '100%',
+              }
+            } else {
+              thumbSrc = `/api/eh/thumb-proxy?url=${encodeURIComponent(previewRaw)}`
             }
-          } else {
-            thumbSrc = `/api/eh/thumb-proxy?url=${encodeURIComponent(previewRaw)}`
+          } else if (img.isLocal) {
+            thumbSrc = img.url
           }
-        } else if (img.isLocal) {
-          thumbSrc = img.url
-        }
 
-        return (
-          <button
-            key={img.pageNum}
-            ref={isActive ? activeRef : null}
-            onClick={() => onPageSelect(img.pageNum)}
-            className={`relative flex-shrink-0 overflow-hidden rounded transition-all ${
-              isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
-            }`}
-            style={{ width: 48, height: 64 }}
-            title={`Page ${img.pageNum}`}
-          >
-            {spriteStyle ? (
-              <div style={spriteStyle} />
-            ) : thumbSrc ? (
-              <img
-                src={thumbSrc}
-                alt={`Thumb ${img.pageNum}`}
-                className="h-full w-full object-cover"
-              />
-            ) : (
-              <div className="h-full w-full bg-neutral-800 flex items-center justify-center">
-                <span className="text-[11px] text-gray-500">{img.pageNum}</span>
-              </div>
-            )}
-            <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-center text-[10px] text-white leading-tight py-px">
-              {img.pageNum}
-            </span>
-          </button>
-        )
-      })}
+          return (
+            <button
+              key={img.pageNum}
+              ref={isActive ? activeRef : null}
+              onClick={() => onPageSelect(img.pageNum)}
+              className={`relative flex-shrink-0 overflow-hidden rounded transition-all ${
+                isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
+              }`}
+              style={{ width: 48, height: 64 }}
+              title={`Page ${img.pageNum}`}
+            >
+              {spriteStyle ? (
+                <div style={spriteStyle} />
+              ) : thumbSrc ? (
+                <img
+                  src={thumbSrc}
+                  alt={`Thumb ${img.pageNum}`}
+                  className="h-full w-full object-cover"
+                />
+              ) : (
+                <div className="h-full w-full bg-neutral-800 flex items-center justify-center">
+                  <span className="text-[11px] text-gray-500">{img.pageNum}</span>
+                </div>
+              )}
+              <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-center text-[10px] text-white leading-tight py-px">
+                {img.pageNum}
+              </span>
+            </button>
+          )
+        })}
       </div>
     </>
   )
@@ -778,7 +794,13 @@ interface StatusBarProps {
   autoAdvanceEnabled: boolean
 }
 
-function StatusBar({ currentPage, totalPages, settings, countdown, autoAdvanceEnabled }: StatusBarProps) {
+function StatusBar({
+  currentPage,
+  totalPages,
+  settings,
+  countdown,
+  autoAdvanceEnabled,
+}: StatusBarProps) {
   const clock = useStatusBarClock(settings.statusBarEnabled && settings.statusBarShowClock)
 
   if (!settings.statusBarEnabled) return null
@@ -840,10 +862,7 @@ function HelpOverlay({ readingDirection, onDismiss }: HelpOverlayProps) {
   }, [onDismiss])
 
   return (
-    <div
-      className="absolute inset-0 z-50 flex flex-col"
-      onClick={onDismiss}
-    >
+    <div className="absolute inset-0 z-50 flex flex-col" onClick={onDismiss}>
       {isVertical ? (
         /* Vertical mode: top/middle/bottom zones */
         <div className="flex flex-col flex-1">
@@ -1147,10 +1166,7 @@ export default function Reader({
 
       {/* Status bar (always visible unless disabled, offset when overlay+strip shown) */}
       {!state.showOverlay && (
-        <div
-          className="absolute left-0 right-0 z-10"
-          style={{ bottom: statusBarBottomOffset }}
-        >
+        <div className="absolute left-0 right-0 z-10" style={{ bottom: statusBarBottomOffset }}>
           <StatusBar
             currentPage={state.currentPage}
             totalPages={totalPages}
@@ -1163,10 +1179,7 @@ export default function Reader({
 
       {/* Help overlay */}
       {showHelp && (
-        <HelpOverlay
-          readingDirection={state.readingDirection}
-          onDismiss={handleDismissHelp}
-        />
+        <HelpOverlay readingDirection={state.readingDirection} onDismiss={handleDismissHelp} />
       )}
     </div>
   )

@@ -21,14 +21,7 @@ function LazyImage({ src, alt, className }: { src: string; alt: string; classNam
     return <div className={`${className} bg-vault-input`} />
   }
 
-  return (
-    <img
-      src={src}
-      alt={alt}
-      className={className}
-      onError={() => setError(true)}
-    />
-  )
+  return <img src={src} alt={alt} className={className} onError={() => setError(true)} />
 }
 
 // ── Search history (localStorage) ─────────────────────────────────────
@@ -188,7 +181,11 @@ function GridCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
     >
       {/* Thumbnail */}
       {thumbSrc ? (
-        <LazyImage src={thumbSrc} alt={gallery.title} className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300" />
+        <LazyImage
+          src={thumbSrc}
+          alt={gallery.title}
+          className="w-full h-full object-cover group-hover:scale-[1.03] transition-transform duration-300"
+        />
       ) : (
         <div
           className="w-full h-full flex items-center justify-center"

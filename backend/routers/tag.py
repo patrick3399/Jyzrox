@@ -5,7 +5,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy import desc, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth
@@ -397,10 +397,8 @@ async def get_translations(
 
     async with async_session() as session:
         # Fetch all matching translations in one query
-        from sqlalchemy import and_, tuple_
+        from sqlalchemy import tuple_
 
-        namespaces = [p[0] for p in tag_pairs]
-        names = [p[1] for p in tag_pairs]
         rows = (
             await session.execute(
                 select(TagTranslation).where(

@@ -340,7 +340,10 @@ export default function LibraryPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               {data.galleries.map((gallery) => (
                 <Link key={gallery.id} href={`/library/${gallery.id}`}>
-                  <LibraryGalleryCard gallery={gallery} thumbUrl={gallery.cover_thumb ?? undefined} />
+                  <LibraryGalleryCard
+                    gallery={gallery}
+                    thumbUrl={gallery.cover_thumb ?? undefined}
+                  />
                 </Link>
               ))}
             </div>

@@ -355,12 +355,12 @@ const history = {
     thumb?: string
     gid?: number
     token?: string
-  }) => apiFetch<{ status: string }>('/api/history/', { method: 'POST', body: JSON.stringify(data) }),
+  }) =>
+    apiFetch<{ status: string }>('/api/history/', { method: 'POST', body: JSON.stringify(data) }),
 
   clear: () => apiFetch<{ status: string }>('/api/history/', { method: 'DELETE' }),
 
-  delete: (id: number) =>
-    apiFetch<{ status: string }>(`/api/history/${id}`, { method: 'DELETE' }),
+  delete: (id: number) => apiFetch<{ status: string }>(`/api/history/${id}`, { method: 'DELETE' }),
 }
 
 // ── Saved Searches ────────────────────────────────────────────────────

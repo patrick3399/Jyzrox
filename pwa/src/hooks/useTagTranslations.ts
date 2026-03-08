@@ -9,13 +9,9 @@ import { api } from '@/lib/api'
  */
 export function useTagTranslations(tags: string[]) {
   const key = tags.length > 0 ? ['tags/translations', tags.slice().sort().join(',')] : null
-  return useSWR(
-    key,
-    () => api.tags.getTranslations(tags),
-    {
-      revalidateOnFocus: false,
-      revalidateOnReconnect: false,
-      dedupingInterval: 86400_000, // 24h
-    },
-  )
+  return useSWR(key, () => api.tags.getTranslations(tags), {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    dedupingInterval: 86400_000, // 24h
+  })
 }

@@ -1052,14 +1052,22 @@ export default function SettingsPage() {
                       <p className="font-semibold">操作步驟：</p>
                       <p>1. 點擊下方按鈕，會開啟 Pixiv 登入頁面</p>
                       <p>2. 正常登入你的 Pixiv 帳號</p>
-                      <p>3. 登入成功後，頁面會跳轉。<strong>在跳轉的瞬間，快速複製網址列中的 URL</strong></p>
-                      <p className="text-yellow-400/70">提示：URL 格式為 <code className="bg-black/30 px-1 rounded">https://app-api.pixiv.net/...?code=xxx</code></p>
-                      <p className="text-yellow-400/70">如果來不及複製，可以按 F12 開啟開發者工具 → Network 分頁，找到 callback 請求複製 URL</p>
+                      <p>
+                        3. 登入成功後，頁面會跳轉。
+                        <strong>在跳轉的瞬間，快速複製網址列中的 URL</strong>
+                      </p>
+                      <p className="text-yellow-400/70">
+                        提示：URL 格式為{' '}
+                        <code className="bg-black/30 px-1 rounded">
+                          https://app-api.pixiv.net/...?code=xxx
+                        </code>
+                      </p>
+                      <p className="text-yellow-400/70">
+                        如果來不及複製，可以按 F12 開啟開發者工具 → Network 分頁，找到 callback
+                        請求複製 URL
+                      </p>
                     </div>
-                    <button
-                      onClick={handlePixivGetOauth}
-                      className={btnSecondary + ' w-full'}
-                    >
+                    <button onClick={handlePixivGetOauth} className={btnSecondary + ' w-full'}>
                       Open Pixiv Login Page
                     </button>
                     {pixivCodeVerifier && (
@@ -1090,11 +1098,16 @@ export default function SettingsPage() {
                   <div className="mt-4 space-y-3">
                     <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg p-3 text-xs text-blue-300/90 space-y-1.5">
                       <p className="font-semibold">使用 Session Cookie 自動獲取：</p>
-                      <p>Web Login 若跳轉太快無法複製 URL，可使用此方法。系統會自動幫您完成交換。</p>
+                      <p>
+                        Web Login 若跳轉太快無法複製 URL，可使用此方法。系統會自動幫您完成交換。
+                      </p>
                       <ul className="list-disc list-inside mt-1 ml-1">
                         <li>在瀏覽器開啟並登入 Pixiv (https://www.pixiv.net)</li>
                         <li>按 F12 開啟開發者工具 → Application (或 Storage)</li>
-                        <li>在 Cookies 中找到 <code className="bg-black/30 px-1 rounded">PHPSESSID</code></li>
+                        <li>
+                          在 Cookies 中找到{' '}
+                          <code className="bg-black/30 px-1 rounded">PHPSESSID</code>
+                        </li>
                         <li>複製該值，貼到底下欄位即可</li>
                       </ul>
                     </div>

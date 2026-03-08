@@ -259,7 +259,6 @@ async def delete_gallery(
 ):
     """Delete a gallery and its associated files (images + thumbnails)."""
     import asyncio
-    import shutil
     from pathlib import Path
 
     from core.config import settings as app_settings

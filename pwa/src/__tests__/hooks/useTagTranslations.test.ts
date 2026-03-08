@@ -163,7 +163,11 @@ describe('useTagTranslations — return value', () => {
   it('should pass through resolved translation data from SWR', () => {
     const translations = { 'artist:bob': 'Bob', 'parody:foo': 'Foo' }
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
-    mockUseSWR.mockReturnValueOnce({ data: translations, isLoading: false, error: undefined } as any)
+    mockUseSWR.mockReturnValueOnce({
+      data: translations,
+      isLoading: false,
+      error: undefined,
+    } as any)
 
     const result = useTagTranslations(['artist:bob', 'parody:foo'])
     expect(result.data).toEqual(translations)

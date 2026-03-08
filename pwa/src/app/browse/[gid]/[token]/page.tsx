@@ -17,13 +17,22 @@ function PreviewGrid({
   thumbs,
   onRead,
 }: {
-  thumbs: { page: number; url: string; isSprite: boolean; offsetX?: number; width?: number; height?: number }[]
+  thumbs: {
+    page: number
+    url: string
+    isSprite: boolean
+    offsetX?: number
+    width?: number
+    height?: number
+  }[]
   onRead: (page: number) => void
 }) {
   const gridRef = useRef<HTMLDivElement>(null)
   const [cellW, setCellW] = useState(0)
   // Cache natural sprite dimensions per URL to compute pixel-perfect background-size.
-  const [spriteNaturalSizes, setSpriteNaturalSizes] = useState<Record<string, { w: number; h: number }>>({})
+  const [spriteNaturalSizes, setSpriteNaturalSizes] = useState<
+    Record<string, { w: number; h: number }>
+  >({})
 
   useEffect(() => {
     const grid = gridRef.current

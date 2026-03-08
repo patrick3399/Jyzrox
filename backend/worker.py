@@ -170,7 +170,7 @@ async def download_job(
                 asyncio.gather(_read_stdout(), proc.wait()),
                 timeout=3600,
             )
-        except asyncio.TimeoutError:
+        except TimeoutError:
             try:
                 proc.kill()
             except ProcessLookupError:

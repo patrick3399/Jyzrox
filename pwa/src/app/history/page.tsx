@@ -129,19 +129,16 @@ export default function HistoryPage() {
     loadPage(0, true)
   }, [loadPage])
 
-  const handleDelete = useCallback(
-    async (id: number) => {
-      try {
-        await api.history.delete(id)
-        toast.success(t('history.deleted'))
-        setItems((prev) => prev.filter((i) => i.id !== id))
-        setTotal((t) => t - 1)
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : t('history.deleteFailed'))
-      }
-    },
-    [],
-  )
+  const handleDelete = useCallback(async (id: number) => {
+    try {
+      await api.history.delete(id)
+      toast.success(t('history.deleted'))
+      setItems((prev) => prev.filter((i) => i.id !== id))
+      setTotal((t) => t - 1)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('history.deleteFailed'))
+    }
+  }, [])
 
   const handleClearAll = useCallback(async () => {
     if (!window.confirm(t('history.clearConfirm'))) return

@@ -3,7 +3,13 @@
 import { useState, useCallback } from 'react'
 import { Download, ChevronUp, ChevronDown, X, Plus, Trash2, Pause, Play } from 'lucide-react'
 import { toast } from 'sonner'
-import { useDownloadJobs, useEnqueueDownload, useCancelJob, useClearFinishedJobs, usePauseJob } from '@/hooks/useDownloadQueue'
+import {
+  useDownloadJobs,
+  useEnqueueDownload,
+  useCancelJob,
+  useClearFinishedJobs,
+  usePauseJob,
+} from '@/hooks/useDownloadQueue'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { t } from '@/lib/i18n'
@@ -89,7 +95,9 @@ function JobRow({
                     {job.progress.total ? (
                       <div
                         className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                        style={{ width: `${Math.min(100, (job.progress.downloaded / job.progress.total) * 100)}%` }}
+                        style={{
+                          width: `${Math.min(100, (job.progress.downloaded / job.progress.total) * 100)}%`,
+                        }}
                       />
                     ) : (
                       <div className="h-full bg-blue-500/30 rounded-full overflow-hidden relative">
@@ -98,7 +106,8 @@ function JobRow({
                     )}
                   </div>
                   <span className="text-xs text-vault-text-muted whitespace-nowrap">
-                    {job.progress.downloaded}{job.progress.total ? ` / ${job.progress.total}` : ''} {t('queue.files')}
+                    {job.progress.downloaded}
+                    {job.progress.total ? ` / ${job.progress.total}` : ''} {t('queue.files')}
                   </span>
                 </div>
               )}
@@ -110,14 +119,28 @@ function JobRow({
                 )}
                 {job.progress.started_at && job.progress.last_update_at && (
                   <span className="text-xs text-vault-text-muted">
-                    {t('queue.elapsed', { time: formatDuration((new Date(job.progress.last_update_at).getTime() - new Date(job.progress.started_at).getTime()) / 1000) })}
+                    {t('queue.elapsed', {
+                      time: formatDuration(
+                        (new Date(job.progress.last_update_at).getTime() -
+                          new Date(job.progress.started_at).getTime()) /
+                          1000,
+                      ),
+                    })}
                   </span>
                 )}
-                {job.progress.total && typeof job.progress.speed === 'number' && job.progress.speed > 0 && typeof job.progress.downloaded === 'number' && job.progress.downloaded < job.progress.total && (
-                  <span className="text-xs text-vault-text-muted">
-                    {t('queue.remaining', { time: formatDuration((job.progress.total - job.progress.downloaded) / job.progress.speed) })}
-                  </span>
-                )}
+                {job.progress.total &&
+                  typeof job.progress.speed === 'number' &&
+                  job.progress.speed > 0 &&
+                  typeof job.progress.downloaded === 'number' &&
+                  job.progress.downloaded < job.progress.total && (
+                    <span className="text-xs text-vault-text-muted">
+                      {t('queue.remaining', {
+                        time: formatDuration(
+                          (job.progress.total - job.progress.downloaded) / job.progress.speed,
+                        ),
+                      })}
+                    </span>
+                  )}
                 {job.progress.status_text && (
                   <span className="text-xs text-vault-text-muted">{job.progress.status_text}</span>
                 )}
@@ -220,7 +243,9 @@ export default function QueuePage() {
   }, [clearJobs, mutate])
 
   const allJobs = data?.jobs ?? []
-  const activeJobs = allJobs.filter((j) => j.status === 'queued' || j.status === 'running' || j.status === 'paused')
+  const activeJobs = allJobs.filter(
+    (j) => j.status === 'queued' || j.status === 'running' || j.status === 'paused',
+  )
   const completedJobs = allJobs.filter(
     (j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled',
   )
@@ -292,7 +317,13 @@ export default function QueuePage() {
             ) : (
               <div className="space-y-2">
                 {sortedActive.map((job) => (
-                  <JobRow key={job.id} job={job} onCancel={handleCancel} onPause={handlePause} isCancelling={false} />
+                  <JobRow
+                    key={job.id}
+                    job={job}
+                    onCancel={handleCancel}
+                    onPause={handlePause}
+                    isCancelling={false}
+                  />
                 ))}
               </div>
             )}
@@ -329,7 +360,13 @@ export default function QueuePage() {
             {completedOpen && (
               <div className="space-y-2">
                 {sortedCompleted.map((job) => (
-                  <JobRow key={job.id} job={job} onCancel={handleCancel} onPause={handlePause} isCancelling={false} />
+                  <JobRow
+                    key={job.id}
+                    job={job}
+                    onCancel={handleCancel}
+                    onPause={handlePause}
+                    isCancelling={false}
+                  />
                 ))}
               </div>
             )}

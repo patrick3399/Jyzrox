@@ -311,7 +311,7 @@ class EhClient:
             # height, but CSS may declare different heights for individual cells
             # (e.g., cover page 150px vs normal 278px). Use max height per sprite.
             sprite_heights: dict[str, int] = defaultdict(int)
-            for page_num, val in preview_map.items():
+            for _page_num, val in preview_map.items():
                 parts = val.split('|')
                 if len(parts) == 4:
                     sprite_url = parts[0]

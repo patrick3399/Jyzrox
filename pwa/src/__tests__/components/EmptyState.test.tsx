@@ -33,24 +33,14 @@ describe('EmptyState', () => {
   // ── Action prop ───────────────────────────────────────────────────
 
   it('test_emptystate_renders_action_link_with_correct_href', () => {
-    render(
-      <EmptyState
-        title="Empty"
-        action={{ label: 'Go to library', href: '/library' }}
-      />,
-    )
+    render(<EmptyState title="Empty" action={{ label: 'Go to library', href: '/library' }} />)
     const link = screen.getByRole('link', { name: 'Go to library' })
     expect(link).toBeInTheDocument()
     expect(link).toHaveAttribute('href', '/library')
   })
 
   it('test_emptystate_renders_action_link_with_correct_label', () => {
-    render(
-      <EmptyState
-        title="Empty"
-        action={{ label: 'Browse now', href: '/browse' }}
-      />,
-    )
+    render(<EmptyState title="Empty" action={{ label: 'Browse now', href: '/browse' }} />)
     expect(screen.getByText('Browse now')).toBeInTheDocument()
   })
 
@@ -63,9 +53,11 @@ describe('EmptyState', () => {
 
   it('test_emptystate_renders_icon_container_when_icon_provided', () => {
     // Minimal LucideIcon-compatible stub
-    const FakeIcon: LucideIcon = vi.fn().mockImplementation(({ size }: { size: number }) => (
-      <svg data-testid="fake-icon" width={size} height={size} />
-    )) as unknown as LucideIcon
+    const FakeIcon: LucideIcon = vi
+      .fn()
+      .mockImplementation(({ size }: { size: number }) => (
+        <svg data-testid="fake-icon" width={size} height={size} />
+      )) as unknown as LucideIcon
 
     render(<EmptyState title="Empty" icon={FakeIcon} />)
     expect(screen.getByTestId('fake-icon')).toBeInTheDocument()
@@ -80,9 +72,9 @@ describe('EmptyState', () => {
   // ── Full props render ─────────────────────────────────────────────
 
   it('test_emptystate_renders_all_props_together_without_crashing', () => {
-    const FakeIcon: LucideIcon = vi.fn().mockImplementation(() => (
-      <svg data-testid="icon" />
-    )) as unknown as LucideIcon
+    const FakeIcon: LucideIcon = vi
+      .fn()
+      .mockImplementation(() => <svg data-testid="icon" />) as unknown as LucideIcon
 
     render(
       <EmptyState
