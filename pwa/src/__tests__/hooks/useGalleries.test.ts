@@ -247,14 +247,14 @@ describe('useGalleryProgress', () => {
 
 describe('useEhSearch', () => {
   it('test_useEhSearch_keyFirstElementIsEhSearch', () => {
-    useEhSearch({ f_search: 'touhou' })
+    useEhSearch({ q: 'touhou' })
     const { key } = lastSwrCall()
     expect(Array.isArray(key)).toBe(true)
     expect((key as unknown[])[0]).toBe('eh/search')
   })
 
   it('test_useEhSearch_keySecondElementIsTheParamsObject', () => {
-    const params = { f_search: 'touhou' }
+    const params = { q: 'touhou' }
     useEhSearch(params)
     const { key } = lastSwrCall()
     expect((key as unknown[])[1]).toEqual(params)
@@ -266,7 +266,7 @@ describe('useEhSearch', () => {
   })
 
   it('test_useEhSearch_fetcher_callsApiEhSearchWithParams', async () => {
-    const params = { f_search: 'reimu' }
+    const params = { q: 'reimu' }
     useEhSearch(params)
     await lastSwrCall().fetcher!()
     expect(mockEhSearch).toHaveBeenCalledWith(params)
