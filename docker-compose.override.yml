@@ -1,6 +1,11 @@
-# Dev override: run api/worker as current host user to avoid UID 1042 permission issues
+# Dev override: run api/worker as current host user (UID 1000) to avoid permission issues.
+# entrypoint.sh reads PUID/PGID and calls gosu to drop to the correct user.
 services:
   api:
-    user: "1000:1000"
+    environment:
+      - PUID=1000
+      - PGID=1000
   worker:
-    user: "1000:1000"
+    environment:
+      - PUID=1000
+      - PGID=1000

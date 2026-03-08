@@ -59,8 +59,8 @@
 ## DevOps 改善
 
 ### 高優先
-- [ ] `data/avatars` 目錄權限修正 — 確保 appuser (1042) 可寫入（目前 root 擁有）
-- [ ] Nginx healthcheck — 目前 nginx 無 healthcheck，若 crash 無自動偵測
+- [x] `data/avatars` 目錄權限修正 — gosu entrypoint 自動建立+chown 所有 data 目錄
+- [x] Nginx healthcheck — `/nginx-health` location + docker healthcheck (wget)
 
 ### 中優先
 - [ ] Backend Dockerfile 改為 multi-stage build（減少 image 大小）
