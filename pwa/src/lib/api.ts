@@ -243,6 +243,15 @@ const settings = {
       { method: 'POST', body: JSON.stringify({ refresh_token }) }
     ),
 
+  getPixivOAuthUrl: () =>
+    apiFetch<{ url: string; code_verifier: string }>('/api/settings/credentials/pixiv/oauth-url'),
+
+  pixivOAuthCallback: (code: string, code_verifier: string) =>
+    apiFetch<{ status: string; username: string }>(
+      '/api/settings/credentials/pixiv/oauth-callback',
+      { method: 'POST', body: JSON.stringify({ code, code_verifier }) }
+    ),
+
   getEhAccount: () =>
     apiFetch<EhAccount>('/api/settings/eh/account'),
 
