@@ -43,7 +43,9 @@ export function RatingStars({ rating, readonly = false, onChange }: RatingStarsP
             onMouseEnter={() => setHovered(starIndex)}
             onMouseLeave={() => setHovered(null)}
             className={`text-base leading-none transition-colors duration-100 cursor-pointer ${
-              isFilled ? 'text-yellow-400 hover:text-yellow-300' : 'text-vault-text-muted/40 hover:text-yellow-500'
+              isFilled
+                ? 'text-yellow-400 hover:text-yellow-300'
+                : 'text-vault-text-muted/40 hover:text-yellow-500'
             }`}
             aria-label={`Rate ${starIndex} out of 5`}
           >

@@ -10,23 +10,45 @@ import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 
 // Favorite category colors (from EhViewer)
-const FAV_COLORS = ['#000', '#F44336', '#FF9800', '#FBC02D', '#4CAF50', '#8BC34A', '#03A9F4', '#3F51B5', '#9C27B0', '#E91E63']
-const FAV_NAMES = ['Favorites 0', 'Favorites 1', 'Favorites 2', 'Favorites 3', 'Favorites 4', 'Favorites 5', 'Favorites 6', 'Favorites 7', 'Favorites 8', 'Favorites 9']
+const FAV_COLORS = [
+  '#000',
+  '#F44336',
+  '#FF9800',
+  '#FBC02D',
+  '#4CAF50',
+  '#8BC34A',
+  '#03A9F4',
+  '#3F51B5',
+  '#9C27B0',
+  '#E91E63',
+]
+const FAV_NAMES = [
+  'Favorites 0',
+  'Favorites 1',
+  'Favorites 2',
+  'Favorites 3',
+  'Favorites 4',
+  'Favorites 5',
+  'Favorites 6',
+  'Favorites 7',
+  'Favorites 8',
+  'Favorites 9',
+]
 
 // ── Namespace colours (EhViewer style) ─────────────────────────────────
 
 const NS_COLORS: Record<string, { bg: string; text: string; border: string }> = {
-  female:    { bg: 'bg-pink-900/30',    text: 'text-pink-300',    border: 'border-pink-700' },
-  male:      { bg: 'bg-blue-900/30',    text: 'text-blue-300',    border: 'border-blue-700' },
-  artist:    { bg: 'bg-orange-900/30',   text: 'text-orange-300',  border: 'border-orange-700' },
-  group:     { bg: 'bg-amber-900/30',    text: 'text-amber-300',   border: 'border-amber-700' },
-  parody:    { bg: 'bg-green-900/30',    text: 'text-green-300',   border: 'border-green-700' },
-  character: { bg: 'bg-purple-900/30',   text: 'text-purple-300',  border: 'border-purple-700' },
-  language:  { bg: 'bg-cyan-900/30',     text: 'text-cyan-300',    border: 'border-cyan-700' },
-  cosplayer: { bg: 'bg-rose-900/30',     text: 'text-rose-300',    border: 'border-rose-700' },
-  mixed:     { bg: 'bg-teal-900/30',     text: 'text-teal-300',    border: 'border-teal-700' },
-  other:     { bg: 'bg-gray-800',        text: 'text-gray-300',    border: 'border-gray-600' },
-  reclass:   { bg: 'bg-red-900/30',      text: 'text-red-300',     border: 'border-red-700' },
+  female: { bg: 'bg-pink-900/30', text: 'text-pink-300', border: 'border-pink-700' },
+  male: { bg: 'bg-blue-900/30', text: 'text-blue-300', border: 'border-blue-700' },
+  artist: { bg: 'bg-orange-900/30', text: 'text-orange-300', border: 'border-orange-700' },
+  group: { bg: 'bg-amber-900/30', text: 'text-amber-300', border: 'border-amber-700' },
+  parody: { bg: 'bg-green-900/30', text: 'text-green-300', border: 'border-green-700' },
+  character: { bg: 'bg-purple-900/30', text: 'text-purple-300', border: 'border-purple-700' },
+  language: { bg: 'bg-cyan-900/30', text: 'text-cyan-300', border: 'border-cyan-700' },
+  cosplayer: { bg: 'bg-rose-900/30', text: 'text-rose-300', border: 'border-rose-700' },
+  mixed: { bg: 'bg-teal-900/30', text: 'text-teal-300', border: 'border-teal-700' },
+  other: { bg: 'bg-gray-800', text: 'text-gray-300', border: 'border-gray-600' },
+  reclass: { bg: 'bg-red-900/30', text: 'text-red-300', border: 'border-red-700' },
 }
 
 function nsStyle(ns: string) {
@@ -36,9 +58,16 @@ function nsStyle(ns: string) {
 // ── Category colours ───────────────────────────────────────────────────
 
 const CATEGORY_COLOR: Record<string, string> = {
-  doujinshi: '#F44336', manga: '#FF9800', artist_cg: '#FBC02D', game_cg: '#4CAF50',
-  western: '#8BC34A', 'non-h': '#2196F3', image_set: '#3F51B5', cosplay: '#9C27B0',
-  asian_porn: '#E91E63', misc: '#9E9E9E',
+  doujinshi: '#F44336',
+  manga: '#FF9800',
+  artist_cg: '#FBC02D',
+  game_cg: '#4CAF50',
+  western: '#8BC34A',
+  'non-h': '#2196F3',
+  image_set: '#3F51B5',
+  cosplay: '#9C27B0',
+  asian_porn: '#E91E63',
+  misc: '#9E9E9E',
 }
 
 function getCatColor(cat: string) {
@@ -47,7 +76,11 @@ function getCatColor(cat: string) {
 
 function formatDate(unix: number) {
   return new Date(unix * 1000).toLocaleDateString(undefined, {
-    year: 'numeric', month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit',
+    year: 'numeric',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
   })
 }
 
@@ -76,20 +109,23 @@ export default function EhGalleryDetailPage() {
     return () => document.removeEventListener('mousedown', handler)
   }, [])
 
-  const handleAddFavorite = useCallback(async (favcat: number) => {
-    if (!gallery) return
-    setFavSaving(true)
-    try {
-      await api.eh.addFavorite(gallery.gid, gallery.token, favcat)
-      toast.success(`Added to Favorites ${favcat}`)
-      setIsFavorited(true)
-      setShowFavPicker(false)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to add favorite')
-    } finally {
-      setFavSaving(false)
-    }
-  }, [gallery])
+  const handleAddFavorite = useCallback(
+    async (favcat: number) => {
+      if (!gallery) return
+      setFavSaving(true)
+      try {
+        await api.eh.addFavorite(gallery.gid, gallery.token, favcat)
+        toast.success(`Added to Favorites ${favcat}`)
+        setIsFavorited(true)
+        setShowFavPicker(false)
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : 'Failed to add favorite')
+      } finally {
+        setFavSaving(false)
+      }
+    },
+    [gallery],
+  )
 
   const handleRemoveFavorite = useCallback(async () => {
     if (!gallery) return
@@ -133,7 +169,14 @@ export default function EhGalleryDetailPage() {
   const previewThumbs = useMemo(() => {
     if (!previewData?.previews || !gallery) return []
     const count = Math.min(6, gallery.pages)
-    const thumbs: { page: number; url: string; isSprite: boolean; offsetX?: number; width?: number; height?: number }[] = []
+    const thumbs: {
+      page: number
+      url: string
+      isSprite: boolean
+      offsetX?: number
+      width?: number
+      height?: number
+    }[] = []
     for (let i = 1; i <= count; i++) {
       const raw = previewData.previews[String(i)]
       if (!raw) continue
@@ -154,10 +197,13 @@ export default function EhGalleryDetailPage() {
     return thumbs
   }, [previewData, gallery])
 
-  const handleTagClick = useCallback((ns: string, name: string) => {
-    const query = `${ns}:${name.replace(/ /g, '+')}`
-    router.push(`/browse?q=${encodeURIComponent(query)}`)
-  }, [router])
+  const handleTagClick = useCallback(
+    (ns: string, name: string) => {
+      const query = name.includes(' ') ? `${ns}:"${name}"` : `${ns}:${name}`
+      router.push(`/browse?q=${encodeURIComponent(query)}`)
+    },
+    [router],
+  )
 
   const handleDownload = useCallback(async () => {
     if (!gallery) return
@@ -170,9 +216,12 @@ export default function EhGalleryDetailPage() {
     }
   }, [gallery])
 
-  const handleRead = useCallback((startPage = 1) => {
-    router.push(`/browse/read/${gid}/${token}?page=${startPage}`)
-  }, [router, gid, token])
+  const handleRead = useCallback(
+    (startPage = 1) => {
+      router.push(`/browse/read/${gid}/${token}?page=${startPage}`)
+    },
+    [router, gid, token],
+  )
 
   // ── Error / Loading ──
 
@@ -182,7 +231,10 @@ export default function EhGalleryDetailPage() {
         <div className="text-center">
           <p className="text-red-400 text-lg font-semibold">Failed to load gallery</p>
           <p className="text-sm text-vault-text-muted mt-1">{galleryError.message}</p>
-          <button onClick={() => router.back()} className="mt-4 px-4 py-2 bg-vault-card rounded text-sm hover:bg-vault-card-hover">
+          <button
+            onClick={() => router.back()}
+            className="mt-4 px-4 py-2 bg-vault-card rounded text-sm hover:bg-vault-card-hover"
+          >
             Go back
           </button>
         </div>
@@ -206,7 +258,6 @@ export default function EhGalleryDetailPage() {
   return (
     <div className="min-h-screen bg-vault-bg text-vault-text">
       <div className="max-w-5xl mx-auto px-4 py-5 space-y-6">
-
         {/* Back button */}
         <button
           onClick={() => router.back()}
@@ -333,14 +384,18 @@ export default function EhGalleryDetailPage() {
 
         {/* ── Tags section (grouped by namespace) ── */}
         <div className="space-y-3">
-          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">{t('common.tags')}</h2>
+          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
+            {t('common.tags')}
+          </h2>
           <div className="space-y-2">
             {tagGroups.map(([ns, names]) => {
               const style = nsStyle(ns)
               return (
                 <div key={ns} className="flex flex-wrap items-start gap-1.5">
                   {/* Namespace label */}
-                  <span className={`text-[11px] font-bold px-2 py-1 rounded ${style.bg} ${style.text} ${style.border} border uppercase tracking-wide min-w-[70px] text-center flex-shrink-0`}>
+                  <span
+                    className={`text-[11px] font-bold px-2 py-1 rounded ${style.bg} ${style.text} ${style.border} border uppercase tracking-wide min-w-[70px] text-center flex-shrink-0`}
+                  >
                     {ns}
                   </span>
                   {/* Tag buttons */}

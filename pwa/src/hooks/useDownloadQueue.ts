@@ -4,25 +4,40 @@ import { api } from '@/lib/api'
 import type { JobListParams } from '@/lib/types'
 
 export function useDownloadJobs(params: JobListParams = {}) {
-  return useSWR(
-    ['download/jobs', params],
-    () => api.download.getJobs(params),
-    { refreshInterval: 3000 }   // Poll every 3s for live updates
-  )
+  return useSWR(['download/jobs', params], () => api.download.getJobs(params), {
+    refreshInterval: 3000,
+    dedupingInterval: 2000,
+    focusThrottleInterval: 5000,
+  })
 }
 
 export function useEnqueueDownload() {
-  return useSWRMutation(
-    'download/enqueue',
-    (_key: unknown, { arg }: { arg: { url: string } }) =>
-      api.download.enqueue(arg.url)
+  return useSWRMutation('download/enqueue', (_key: unknown, { arg }: { arg: { url: string } }) =>
+    api.download.enqueue(arg.url),
   )
 }
 
 export function useCancelJob() {
+  return useSWRMutation('download/cancel', (_key: unknown, { arg }: { arg: string }) =>
+    api.download.cancelJob(arg),
+  )
+}
+
+export function useClearFinishedJobs() {
+  return useSWRMutation('download/clear', () => api.download.clearFinishedJobs())
+}
+
+export function useDownloadStats() {
+  return useSWR('download/stats', () => api.download.getStats(), {
+    refreshInterval: 5000,
+    dedupingInterval: 3000,
+  })
+}
+
+export function usePauseJob() {
   return useSWRMutation(
-    'download/cancel',
-    (_key: unknown, { arg }: { arg: string }) =>
-      api.download.cancelJob(arg)
+    'download/pause',
+    (_key: unknown, { arg }: { arg: { id: string; action: 'pause' | 'resume' } }) =>
+      arg.action === 'pause' ? api.download.pauseJob(arg.id) : api.download.resumeJob(arg.id),
   )
 }

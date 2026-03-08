@@ -1,18 +1,18 @@
 export type ViewMode = 'single' | 'webtoon' | 'double'
 
 export interface ReaderImage {
-  pageNum: number      // 1-indexed
-  url: string          // resolved URL (local path or proxy API)
-  isLocal: boolean     // true = served from /media/gallery/
+  pageNum: number // 1-indexed
+  url: string // resolved URL (local path or proxy API)
+  isLocal: boolean // true = served from /media/gallery/
   width?: number
   height?: number
   mediaType: 'image' | 'video' | 'gif'
 }
 
 export interface ReaderState {
-  currentPage: number   // 1-indexed
+  currentPage: number // 1-indexed
   viewMode: ViewMode
-  showOverlay: boolean  // show top/bottom controls
+  showOverlay: boolean // show top/bottom controls
 }
 
 export type ReaderAction =

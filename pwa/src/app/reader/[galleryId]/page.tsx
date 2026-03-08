@@ -81,9 +81,8 @@ export default function ReaderPage() {
   // source_id is the numeric EH gid stored as a string in Gallery
   const sourceId = gallery.source_id
 
-  const initialPage = progress?.last_page && progress.last_page > 0
-    ? Math.min(progress.last_page, gallery.pages)
-    : 1
+  const initialPage =
+    progress?.last_page && progress.last_page > 0 ? Math.min(progress.last_page, gallery.pages) : 1
 
   return (
     <Reader
@@ -96,4 +95,3 @@ export default function ReaderPage() {
     />
   )
 }
-

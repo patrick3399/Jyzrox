@@ -31,7 +31,11 @@ function Spinner({ className = '' }: { className?: string }) {
       viewBox="0 0 24 24"
     >
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
     </svg>
   )
 }
@@ -114,7 +118,14 @@ interface SinglePageViewProps {
   onImageLoaded: () => void
 }
 
-function SinglePageView({ image, isLoading, onNext, onPrev, onToggleOverlay, onImageLoaded }: SinglePageViewProps) {
+function SinglePageView({
+  image,
+  isLoading,
+  onNext,
+  onPrev,
+  onToggleOverlay,
+  onImageLoaded,
+}: SinglePageViewProps) {
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
       <MediaElement
@@ -162,6 +173,12 @@ function WebtoonView({ images, onPageChange, onToggleOverlay }: WebtoonViewProps
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return
 
+    // Clean stale refs for pages no longer in the image list
+    const validPages = new Set(images.map((img) => img.pageNum))
+    elRefs.current.forEach((_, key) => {
+      if (!validPages.has(key)) elRefs.current.delete(key)
+    })
+
     const observer = new IntersectionObserver(
       (entries) => {
         let topmost: IntersectionObserverEntry | null = null
@@ -177,7 +194,7 @@ function WebtoonView({ images, onPageChange, onToggleOverlay }: WebtoonViewProps
           if (!isNaN(pageNum)) onPageChange(pageNum)
         }
       },
-      { threshold: 0.5 }
+      { threshold: 0.5 },
     )
 
     elRefs.current.forEach((el) => observer.observe(el))
@@ -212,10 +229,12 @@ function WebtoonView({ images, onPageChange, onToggleOverlay }: WebtoonViewProps
         </div>
       )}
       {/* Tap zone for overlay toggle in webtoon mode */}
-      <div
-        className="fixed top-1/3 left-1/4 w-1/2 h-1/3 z-10 cursor-pointer"
+      <button
+        type="button"
+        className="fixed top-1/3 left-1/4 w-1/2 h-1/3 z-10 cursor-pointer bg-transparent border-none p-0"
         onClick={onToggleOverlay}
         aria-label="Toggle controls"
+        tabIndex={0}
       />
     </div>
   )
@@ -322,9 +341,7 @@ function ReaderOverlay({
             key={m}
             onClick={() => onViewModeChange(m)}
             className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-              viewMode === m
-                ? 'bg-white text-black'
-                : 'bg-white/10 hover:bg-white/20 text-white'
+              viewMode === m ? 'bg-white text-black' : 'bg-white/10 hover:bg-white/20 text-white'
             }`}
           >
             {m}
@@ -417,9 +434,7 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
             ref={isActive ? activeRef : null}
             onClick={() => onPageSelect(img.pageNum)}
             className={`relative flex-shrink-0 overflow-hidden rounded transition-all ${
-              isActive
-                ? 'ring-2 ring-white opacity-100'
-                : 'opacity-50 hover:opacity-80'
+              isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
             }`}
             style={{ width: 48, height: 64 }}
             title={`Page ${img.pageNum}`}
@@ -471,14 +486,10 @@ export default function Reader({
     mediaType: img.media_type,
   }))
 
-  const {
-    state,
-    setPage,
-    nextPage,
-    prevPage,
-    setViewMode,
-    toggleOverlay,
-  } = useReaderState(initialPage, totalPages)
+  const { state, setPage, nextPage, prevPage, setViewMode, toggleOverlay } = useReaderState(
+    initialPage,
+    totalPages,
+  )
 
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -501,11 +512,7 @@ export default function Reader({
   useSequentialPrefetch(images, state.currentPage, isProxyMode)
   useProgressSave(galleryId, state.currentPage)
 
-  useTouchGesture(
-    containerRef as React.RefObject<HTMLElement | null>,
-    nextPage,
-    prevPage
-  )
+  useTouchGesture(containerRef as React.RefObject<HTMLElement | null>, nextPage, prevPage)
 
   useKeyboardNav(nextPage, prevPage)
 
@@ -525,10 +532,7 @@ export default function Reader({
   const nextImage = images.find((i) => i.pageNum === state.currentPage + 1) ?? null
 
   return (
-    <div
-      ref={containerRef}
-      className="reader-container flex flex-col bg-black"
-    >
+    <div ref={containerRef} className="reader-container flex flex-col bg-black">
       {/* Top overlay */}
       {state.showOverlay && (
         <ReaderOverlay

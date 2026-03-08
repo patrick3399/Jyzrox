@@ -14,6 +14,11 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 COPY . .
 RUN chown -R appuser:appgroup /app
 
+# Create gallery-dl config directory under /app (accessible by any user)
+RUN mkdir -p /app/config && \
+    echo '{}' > /app/config/gallery-dl.json && \
+    chmod 777 /app/config /app/config/gallery-dl.json
+
 USER appuser
 
 CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]

@@ -5,17 +5,18 @@ import hashlib
 import json
 import logging
 import secrets
-from datetime import datetime, timezone
-from typing import Optional
+import urllib.parse
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from core.auth import require_auth
 from core.config import settings as app_settings
 from core.database import async_session
+from db.models import Credential
 from services.cache import get_system_alerts, push_system_alert
 from services.credential import get_credential, set_credential
 from services.eh_client import EhClient
@@ -25,6 +26,7 @@ router = APIRouter(tags=["settings"])
 
 
 # ── Models ───────────────────────────────────────────────────────────
+
 
 class EhCookieRequest(BaseModel):
     ipb_member_id: str
@@ -48,19 +50,17 @@ class PixivOAuthCallbackRequest(BaseModel):
 
 
 class RateLimitPatch(BaseModel):
-    enabled: Optional[bool] = None
+    enabled: bool | None = None
 
 
 # ── Credentials ──────────────────────────────────────────────────────
+
 
 @router.get("/credentials")
 async def list_credentials(_: dict = Depends(require_auth)):
     """Which credential sources are configured (values never exposed)."""
     sources = ["ehentai", "pixiv"]
-    return {
-        src: {"configured": (await get_credential(src)) is not None}
-        for src in sources
-    }
+    return {src: {"configured": (await get_credential(src)) is not None} for src in sources}
 
 
 @router.post("/credentials/ehentai/login")
@@ -102,7 +102,9 @@ async def eh_login_with_password(
     igneous = None
     try:
         async with httpx.AsyncClient(
-            cookies=cookies, follow_redirects=True, timeout=15,
+            cookies=cookies,
+            follow_redirects=True,
+            timeout=15,
         ) as ex_client:
             ex_resp = await ex_client.get("https://exhentai.org/")
             igneous = ex_resp.cookies.get("igneous")
@@ -111,12 +113,13 @@ async def eh_login_with_password(
                 for h_name, h_val in ex_resp.headers.multi_items():
                     if h_name.lower() == "set-cookie" and "igneous" in h_val:
                         import re as _re
+
                         m = _re.search(r"igneous=([^;]+)", h_val)
                         if m:
                             igneous = m.group(1)
                             break
-    except Exception:
-        pass  # ExH access failed, continue without igneous
+    except (httpx.HTTPError, httpx.TimeoutException, OSError) as exc:
+        logger.warning("ExHentai igneous cookie fetch failed: %s", exc)
 
     if igneous:
         cookies["igneous"] = igneous
@@ -140,7 +143,7 @@ async def set_eh_credentials(
     cookies = {
         "ipb_member_id": req.ipb_member_id,
         "ipb_pass_hash": req.ipb_pass_hash,
-        "sk":            req.sk,
+        "sk": req.sk,
     }
     if req.igneous:
         cookies["igneous"] = req.igneous
@@ -162,11 +165,13 @@ async def set_pixiv_credentials(
     """Save Pixiv refresh_token after verifying it via pixivpy3."""
     try:
         import pixivpy3
+
         api = pixivpy3.AppPixivAPI()
         api.auth(refresh_token=req.refresh_token)
         detail = api.user_detail(api.user_id)
         username = detail.user.name
-    except Exception as exc:
+    except (ImportError, AttributeError, ValueError, OSError) as exc:
+        logger.error("Pixiv auth failed: %s", exc)
         raise HTTPException(status_code=400, detail=f"Pixiv auth failed: {exc}")
 
     await set_credential("pixiv", req.refresh_token, "oauth_token")
@@ -180,12 +185,15 @@ async def get_pixiv_oauth_url(_: dict = Depends(require_auth)):
     code_challenge_bytes = hashlib.sha256(code_verifier.encode("utf-8")).digest()
     code_challenge = base64.urlsafe_b64encode(code_challenge_bytes).decode("utf-8").rstrip("=")
 
-    client_id = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
+    client_id = app_settings.pixiv_client_id
+    redirect_uri = "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback"
     auth_url = (
-        f"https://app-api.pixiv.net/web/v1/login"
-        f"?code_challenge={code_challenge}"
+        f"https://accounts.pixiv.net/login"
+        f"?client_id={client_id}"
+        f"&redirect_uri={urllib.parse.quote(redirect_uri, safe='')}"
+        f"&response_type=code"
+        f"&code_challenge={code_challenge}"
         f"&code_challenge_method=S256"
-        f"&client={client_id}"
     )
     return {"url": auth_url, "code_verifier": code_verifier}
 
@@ -196,13 +204,14 @@ async def pixiv_oauth_callback(
     _: dict = Depends(require_auth),
 ):
     """Exchange authorization code for refresh token."""
-    client_id = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
-    client_secret = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
+    client_id = app_settings.pixiv_client_id
+    client_secret = app_settings.pixiv_client_secret
 
     # Extract code from URL if user pasted the full URL
     code = req.code
     if "code=" in code:
         import urllib.parse
+
         parsed = urllib.parse.urlparse(code)
         qs = urllib.parse.parse_qs(parsed.query)
         if "code" in qs:
@@ -216,12 +225,12 @@ async def pixiv_oauth_callback(
             "code_verifier": req.code_verifier,
             "grant_type": "authorization_code",
             "redirect_uri": "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback",
-            "include_policy": "true"
+            "include_policy": "true",
         }
         headers = {
             "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
             "App-OS-Version": "11",
-            "App-OS": "android"
+            "App-OS": "android",
         }
         async with httpx.AsyncClient() as client:
             resp = await client.post("https://oauth.secure.pixiv.net/auth/token", data=data, headers=headers)
@@ -240,7 +249,28 @@ async def pixiv_oauth_callback(
     return {"status": "ok", "username": username}
 
 
+@router.delete("/credentials/{source}")
+async def delete_credential_endpoint(
+    source: str,
+    _: dict = Depends(require_auth),
+):
+    """Delete stored credential for a source (ehentai, pixiv)."""
+    if source not in ("ehentai", "pixiv"):
+        raise HTTPException(status_code=400, detail="Invalid source")
+    async with async_session() as session:
+        result = await session.execute(
+            select(Credential).where(Credential.source == source)
+        )
+        cred = result.scalar_one_or_none()
+        if not cred:
+            raise HTTPException(status_code=404, detail="No credential found")
+        await session.delete(cred)
+        await session.commit()
+    return {"status": "ok"}
+
+
 # ── ExHentai cookie check ─────────────────────────────────────────────
+
 
 @router.post("/credentials/ehentai/cookies-check")
 async def eh_cookies_check(_: dict = Depends(require_auth)):
@@ -258,7 +288,8 @@ async def eh_cookies_check(_: dict = Depends(require_auth)):
         try:
             async with EhClient(cookies=cookies, use_ex=True) as client:
                 ex_ok = await client.check_cookies()
-        except Exception:
+        except (httpx.HTTPError, httpx.TimeoutException, OSError) as exc:
+            logger.warning("ExH cookie check failed: %s", exc)
             ex_ok = False
 
     # Test EH access
@@ -266,7 +297,8 @@ async def eh_cookies_check(_: dict = Depends(require_auth)):
     try:
         async with EhClient(cookies=cookies, use_ex=False) as client:
             eh_ok = await client.check_cookies()
-    except Exception:
+    except (httpx.HTTPError, httpx.TimeoutException, OSError) as exc:
+        logger.warning("EH cookie check failed: %s", exc)
         eh_ok = False
 
     return {
@@ -277,6 +309,7 @@ async def eh_cookies_check(_: dict = Depends(require_auth)):
 
 
 # ── Account info ─────────────────────────────────────────────────────
+
 
 @router.get("/eh/account")
 async def eh_account_info(_: dict = Depends(require_auth)):
@@ -295,6 +328,7 @@ async def eh_account_info(_: dict = Depends(require_auth)):
 
 
 # ── Rate Limiting ────────────────────────────────────────────────
+
 
 @router.get("/rate-limit")
 async def get_rate_limit_settings(_: dict = Depends(require_auth)):
@@ -321,6 +355,7 @@ async def patch_rate_limit_settings(
 
 # ── Alerts ───────────────────────────────────────────────────────────
 
+
 @router.get("/alerts")
 async def get_alerts(_: dict = Depends(require_auth)):
     """Return queued system alerts (cookie expiry, etc.)."""
@@ -328,6 +363,7 @@ async def get_alerts(_: dict = Depends(require_auth)):
 
 
 # ── API Tokens ────────────────────────────────────────────────────────
+
 
 class CreateTokenRequest(BaseModel):
     name: str
@@ -340,7 +376,7 @@ async def list_tokens(auth: dict = Depends(require_auth)):
     async with async_session() as session:
         rows = await session.execute(
             text("""
-                SELECT id, name, token_plain, created_at, last_used_at, expires_at
+                SELECT id, name, token_hash, created_at, last_used_at, expires_at
                 FROM api_tokens
                 WHERE user_id = :uid
                 ORDER BY created_at DESC
@@ -349,14 +385,16 @@ async def list_tokens(auth: dict = Depends(require_auth)):
         )
     tokens = []
     for r in rows:
-        tokens.append({
-            "id": str(r.id),
-            "name": r.name,
-            "token": r.token_plain or "",
-            "created_at": r.created_at.isoformat() if r.created_at else None,
-            "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
-            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
-        })
+        tokens.append(
+            {
+                "id": str(r.id),
+                "name": r.name,
+                "token_prefix": r.token_hash[:8],
+                "created_at": r.created_at.isoformat() if r.created_at else None,
+                "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
+                "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+            }
+        )
     return {"tokens": tokens}
 
 
@@ -372,20 +410,20 @@ async def create_token(
     expires_at = None
     if req.expires_days and req.expires_days > 0:
         from datetime import timedelta
-        expires_at = datetime.now(timezone.utc) + timedelta(days=req.expires_days)
+
+        expires_at = datetime.now(UTC) + timedelta(days=req.expires_days)
 
     async with async_session() as session:
         result = await session.execute(
             text("""
                 INSERT INTO api_tokens (user_id, name, token_hash, token_plain, expires_at)
-                VALUES (:uid, :name, :hash, :plain, :exp)
+                VALUES (:uid, :name, :hash, NULL, :exp)
                 RETURNING id, created_at
             """),
             {
                 "uid": auth["user_id"],
                 "name": req.name.strip(),
                 "hash": token_hash,
-                "plain": raw_token,
                 "exp": expires_at,
             },
         )

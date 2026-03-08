@@ -24,7 +24,9 @@ export function useWebSocket() {
         if (msg.type === 'alert' && msg.message) {
           setAlerts((prev) => [...prev.slice(-49), msg.message!])
         }
-      } catch { /* ignore malformed */ }
+      } catch {
+        /* ignore malformed */
+      }
     }
 
     ws.onclose = () => {
@@ -33,7 +35,12 @@ export function useWebSocket() {
       reconnectTimer.current = setTimeout(connect, 3000)
     }
 
-    ws.onerror = () => ws.close()
+    ws.onerror = (ev) => {
+      if (process.env.NODE_ENV === 'development') {
+        console.warn('[WebSocket] connection error', ev)
+      }
+      ws.close()
+    }
   }, [])
 
   useEffect(() => {

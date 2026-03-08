@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useRef, useEffect } from 'react'
 import Link from 'next/link'
 import { BookOpen, Plus, Minus } from 'lucide-react'
 import { useLibraryGalleries } from '@/hooks/useGalleries'
@@ -37,7 +37,25 @@ export default function LibraryPage() {
   const [source, setSource] = useState('')
   const [sort, setSort] = useState<'added_at' | 'rating' | 'pages'>('added_at')
   const [page, setPage] = useState(0)
+  // cursor-based pagination state
+  const [cursor, setCursor] = useState<string | undefined>(undefined)
+  // stack of cursors for navigating backwards; each entry is the cursor that
+  // was active when we moved forward (undefined = first page)
+  const [cursorHistory, setCursorHistory] = useState<(string | undefined)[]>([])
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  useEffect(() => {
+    return () => {
+      if (debounceRef.current) clearTimeout(debounceRef.current)
+    }
+  }, [])
+
+  // Reset all pagination state whenever filters change
+  const resetPagination = useCallback(() => {
+    setPage(0)
+    setCursor(undefined)
+    setCursorHistory([])
+  }, [])
 
   const { data, isLoading, error } = useLibraryGalleries({
     q: searchQuery || undefined,
@@ -47,56 +65,90 @@ export default function LibraryPage() {
     favorited: onlyFavorited || undefined,
     source: source || undefined,
     sort,
-    page,
+    // When a cursor is active, send it instead of the page number so the
+    // backend uses keyset pagination. Otherwise fall back to page-based.
+    ...(cursor ? { cursor } : { page }),
     limit: PAGE_SIZE,
   })
 
-  const handleSearchChange = useCallback((value: string) => {
-    setSearchInput(value)
-    if (debounceRef.current) clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(() => {
-      setSearchQuery(value)
-      setPage(0)
-    }, 400)
-  }, [])
+  // Derived: are we in cursor mode (backend returned next_cursor)?
+  const isCursorMode = data !== undefined && data.next_cursor !== undefined
+  const hasNext = isCursorMode ? (data?.has_next ?? false) : false
+  const hasPrev = cursorHistory.length > 0
 
-  const handleSearchKeyDown = useCallback((e: React.KeyboardEvent) => {
-    if (e.key === 'Enter') {
+  const handleSearchChange = useCallback(
+    (value: string) => {
+      setSearchInput(value)
       if (debounceRef.current) clearTimeout(debounceRef.current)
-      setSearchQuery(searchInput)
-      setPage(0)
-    }
-  }, [searchInput])
+      debounceRef.current = setTimeout(() => {
+        setSearchQuery(value)
+        resetPagination()
+      }, 400)
+    },
+    [resetPagination],
+  )
+
+  const handleSearchKeyDown = useCallback(
+    (e: React.KeyboardEvent) => {
+      if (e.key === 'Enter') {
+        if (debounceRef.current) clearTimeout(debounceRef.current)
+        setSearchQuery(searchInput)
+        resetPagination()
+      }
+    },
+    [searchInput, resetPagination],
+  )
 
   const addIncludeTag = useCallback(() => {
     const tag = includeInput.trim()
     if (tag && !includeTags.includes(tag)) {
       setIncludeTags((prev) => [...prev, tag])
-      setPage(0)
+      resetPagination()
     }
     setIncludeInput('')
-  }, [includeInput, includeTags])
+  }, [includeInput, includeTags, resetPagination])
 
   const addExcludeTag = useCallback(() => {
     const tag = excludeInput.trim()
     if (tag && !excludeTags.includes(tag)) {
       setExcludeTags((prev) => [...prev, tag])
-      setPage(0)
+      resetPagination()
     }
     setExcludeInput('')
-  }, [excludeInput, excludeTags])
+  }, [excludeInput, excludeTags, resetPagination])
 
-  const removeIncludeTag = useCallback((tag: string) => {
-    setIncludeTags((prev) => prev.filter((t) => t !== tag))
-    setPage(0)
-  }, [])
+  const removeIncludeTag = useCallback(
+    (tag: string) => {
+      setIncludeTags((prev) => prev.filter((t) => t !== tag))
+      resetPagination()
+    },
+    [resetPagination],
+  )
 
-  const removeExcludeTag = useCallback((tag: string) => {
-    setExcludeTags((prev) => prev.filter((t) => t !== tag))
-    setPage(0)
-  }, [])
+  const removeExcludeTag = useCallback(
+    (tag: string) => {
+      setExcludeTags((prev) => prev.filter((t) => t !== tag))
+      resetPagination()
+    },
+    [resetPagination],
+  )
 
-  const totalPages = data ? Math.ceil(data.total / PAGE_SIZE) : 0
+  // Page-based: total is known → show numbered pagination
+  const totalPages = data?.total !== undefined ? Math.ceil(data.total / PAGE_SIZE) : 0
+
+  const handleNextCursor = useCallback(() => {
+    if (!data?.next_cursor) return
+    setCursorHistory((prev) => [...prev, cursor])
+    setCursor(data.next_cursor ?? undefined)
+  }, [data, cursor])
+
+  const handlePrevCursor = useCallback(() => {
+    if (cursorHistory.length === 0) return
+    const prev = [...cursorHistory]
+    const restored = prev.pop()
+    setCursorHistory(prev)
+    setCursor(restored)
+  }, [cursorHistory])
 
   return (
     <div className="min-h-screen">
@@ -129,7 +181,10 @@ export default function LibraryPage() {
                   placeholder="character:rem"
                   className="flex-1 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
                 />
-                <button onClick={addIncludeTag} className="p-1.5 bg-green-600 hover:bg-green-700 rounded text-white transition-colors">
+                <button
+                  onClick={addIncludeTag}
+                  className="p-1.5 bg-green-600 hover:bg-green-700 rounded text-white transition-colors"
+                >
                   <Plus size={14} />
                 </button>
               </div>
@@ -159,7 +214,10 @@ export default function LibraryPage() {
                   placeholder="tag:value"
                   className="flex-1 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
                 />
-                <button onClick={addExcludeTag} className="p-1.5 bg-red-600 hover:bg-red-700 rounded text-white transition-colors">
+                <button
+                  onClick={addExcludeTag}
+                  className="p-1.5 bg-red-600 hover:bg-red-700 rounded text-white transition-colors"
+                >
                   <Minus size={14} />
                 </button>
               </div>
@@ -180,36 +238,63 @@ export default function LibraryPage() {
           {/* Additional Filters */}
           <div className="flex flex-wrap gap-4 items-center">
             <div className="flex items-center gap-2">
-              <label className="text-xs text-vault-text-muted uppercase tracking-wide">{t('library.minRating')}</label>
+              <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                {t('library.minRating')}
+              </label>
               <select
                 value={minRating ?? ''}
-                onChange={(e) => { setMinRating(e.target.value ? Number(e.target.value) : undefined); setPage(0) }}
+                onChange={(e) => {
+                  setMinRating(e.target.value ? Number(e.target.value) : undefined)
+                  resetPagination()
+                }}
                 className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
               >
                 <option value="">{t('library.any')}</option>
-                {[1, 2, 3, 4, 5].map((n) => (<option key={n} value={n}>{n}+</option>))}
+                {[1, 2, 3, 4, 5].map((n) => (
+                  <option key={n} value={n}>
+                    {n}+
+                  </option>
+                ))}
               </select>
             </div>
 
             <div className="flex items-center gap-2">
-              <label className="text-xs text-vault-text-muted uppercase tracking-wide">{t('library.source')}</label>
+              <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                {t('library.source')}
+              </label>
               <select
                 value={source}
-                onChange={(e) => { setSource(e.target.value); setPage(0) }}
+                onChange={(e) => {
+                  setSource(e.target.value)
+                  resetPagination()
+                }}
                 className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
               >
-                {SOURCE_OPTIONS.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label()}</option>))}
+                {SOURCE_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label()}
+                  </option>
+                ))}
               </select>
             </div>
 
             <div className="flex items-center gap-2">
-              <label className="text-xs text-vault-text-muted uppercase tracking-wide">{t('library.sort')}</label>
+              <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                {t('library.sort')}
+              </label>
               <select
                 value={sort}
-                onChange={(e) => { setSort(e.target.value as typeof sort); setPage(0) }}
+                onChange={(e) => {
+                  setSort(e.target.value as typeof sort)
+                  resetPagination()
+                }}
                 className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
               >
-                {SORT_OPTIONS.map((opt) => (<option key={opt.value} value={opt.value}>{opt.label()}</option>))}
+                {SORT_OPTIONS.map((opt) => (
+                  <option key={opt.value} value={opt.value}>
+                    {opt.label()}
+                  </option>
+                ))}
               </select>
             </div>
 
@@ -217,22 +302,31 @@ export default function LibraryPage() {
               <input
                 type="checkbox"
                 checked={onlyFavorited}
-                onChange={(e) => { setOnlyFavorited(e.target.checked); setPage(0) }}
+                onChange={(e) => {
+                  setOnlyFavorited(e.target.checked)
+                  resetPagination()
+                }}
                 className="w-4 h-4 accent-yellow-500"
               />
-              <span className="text-sm text-vault-text-secondary">{t('library.favoritesOnly')}</span>
+              <span className="text-sm text-vault-text-secondary">
+                {t('library.favoritesOnly')}
+              </span>
             </label>
           </div>
         </div>
 
         {data && (
           <div className="text-sm text-vault-text-muted mb-4">
-            {data.total.toLocaleString()} {t('library.galleries')}
+            {data.total !== undefined
+              ? `${data.total.toLocaleString()} ${t('library.galleries')}`
+              : `${data.galleries.length} ${t('library.galleries')}`}
           </div>
         )}
 
         {isLoading && (
-          <div className="flex justify-center py-20"><LoadingSpinner /></div>
+          <div className="flex justify-center py-20">
+            <LoadingSpinner />
+          </div>
         )}
 
         {error && (
@@ -246,11 +340,39 @@ export default function LibraryPage() {
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
               {data.galleries.map((gallery) => (
                 <Link key={gallery.id} href={`/library/${gallery.id}`}>
-                  <LibraryGalleryCard gallery={gallery} />
+                  <LibraryGalleryCard gallery={gallery} thumbUrl={gallery.cover_thumb ?? undefined} />
                 </Link>
               ))}
             </div>
-            {totalPages > 1 && <Pagination page={page} total={data.total} onChange={setPage} />}
+
+            {/* Cursor-based pagination: shown when backend returns next_cursor */}
+            {isCursorMode && (hasPrev || hasNext) && (
+              <div className="flex items-center justify-center gap-3 py-4">
+                <button
+                  type="button"
+                  onClick={handlePrevCursor}
+                  disabled={!hasPrev}
+                  className="flex items-center gap-1 px-4 py-2 rounded-lg bg-vault-card border border-vault-border hover:border-vault-accent hover:text-vault-text text-vault-text-secondary text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="Previous page"
+                >
+                  ← {t('tags.prev')}
+                </button>
+                <button
+                  type="button"
+                  onClick={handleNextCursor}
+                  disabled={!hasNext}
+                  className="flex items-center gap-1 px-4 py-2 rounded-lg bg-vault-card border border-vault-border hover:border-vault-accent hover:text-vault-text text-vault-text-secondary text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                  aria-label="Next page"
+                >
+                  {t('tags.next')} →
+                </button>
+              </div>
+            )}
+
+            {/* Page-based pagination: shown when backend returns total */}
+            {!isCursorMode && totalPages > 1 && data.total !== undefined && (
+              <Pagination page={page} total={data.total} pageSize={PAGE_SIZE} onChange={setPage} />
+            )}
           </>
         )}
 

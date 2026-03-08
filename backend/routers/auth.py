@@ -3,22 +3,22 @@
 import hashlib
 import io
 import json
-import bcrypt
 import logging
 import secrets
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
+import bcrypt
 from fastapi import APIRouter, Cookie, Depends, File, HTTPException, Request, Response, UploadFile
 from PIL import Image, ImageOps
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from core.auth import require_auth
 from core.config import settings
 from core.database import async_session
 from core.rate_limit import check_rate_limit, get_client_ip
 from core.redis_client import get_redis
-from sqlalchemy import text
 
 router = APIRouter(tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -73,14 +73,9 @@ async def setup(req: LoginRequest, request: Request):
         if result.scalar() > 0:
             raise HTTPException(status_code=403, detail="Setup already completed")
 
-        password_hash = bcrypt.hashpw(
-            req.password.encode("utf-8"), bcrypt.gensalt(rounds=12)
-        ).decode("utf-8")
+        password_hash = bcrypt.hashpw(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
         await session.execute(
-            text(
-                "INSERT INTO users (username, password_hash, role) "
-                "VALUES (:uname, :phash, 'admin')"
-            ),
+            text("INSERT INTO users (username, password_hash, role) VALUES (:uname, :phash, 'admin')"),
             {"uname": req.username, "phash": password_hash},
         )
         await session.commit()
@@ -105,20 +100,20 @@ async def login(req: LoginRequest, request: Request, response: Response):
         )
         user = result.fetchone()
 
-    if not user or not bcrypt.checkpw(
-        req.password.encode("utf-8"), user.password_hash.encode("utf-8")
-    ):
+    if not user or not bcrypt.checkpw(req.password.encode("utf-8"), user.password_hash.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Invalid credentials")
 
     token = secrets.token_urlsafe(32)
     ua = request.headers.get("user-agent", "")
-    session_meta = json.dumps({
-        "user_id": user.id,
-        "role": user.role,
-        "ip": client_ip,
-        "user_agent": ua[:256],
-        "created_at": datetime.now(timezone.utc).isoformat(),
-    })
+    session_meta = json.dumps(
+        {
+            "user_id": user.id,
+            "role": user.role,
+            "ip": client_ip,
+            "user_agent": ua[:256],
+            "created_at": datetime.now(UTC).isoformat(),
+        }
+    )
     await get_redis().setex(f"session:{user.id}:{token}", _SESSION_TTL, session_meta)
 
     response.set_cookie(
@@ -132,9 +127,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
     )
 
     async with async_session() as session:
-        await session.execute(
-            text("UPDATE users SET last_login_at = now() WHERE id = :uid"), {"uid": user.id}
-        )
+        await session.execute(text("UPDATE users SET last_login_at = now() WHERE id = :uid"), {"uid": user.id})
         await session.commit()
 
     return {"status": "ok", "role": user.role}
@@ -179,7 +172,7 @@ async def list_sessions(
         cursor, keys = await redis.scan(cursor, match=f"{prefix}*", count=100)
         for key in keys:
             key_str = key if isinstance(key, str) else key.decode()
-            token = key_str[len(prefix):]
+            token = key_str[len(prefix) :]
             raw = await redis.get(key_str)
             if not raw:
                 continue
@@ -191,14 +184,16 @@ async def list_sessions(
             except (json.JSONDecodeError, UnicodeDecodeError):
                 meta = {}
 
-            sessions.append({
-                "token_prefix": token[:8],
-                "ip": meta.get("ip", "unknown"),
-                "user_agent": meta.get("user_agent", "unknown"),
-                "created_at": meta.get("created_at"),
-                "ttl": ttl,
-                "is_current": token == current_token,
-            })
+            sessions.append(
+                {
+                    "token_prefix": token[:8],
+                    "ip": meta.get("ip", "unknown"),
+                    "user_agent": meta.get("user_agent", "unknown"),
+                    "created_at": meta.get("created_at"),
+                    "ttl": ttl,
+                    "is_current": token == current_token,
+                }
+            )
         if cursor == 0:
             break
 
@@ -233,7 +228,7 @@ async def revoke_session(
         cursor, keys = await redis.scan(cursor, match=f"{prefix}*", count=100)
         for key in keys:
             key_str = key if isinstance(key, str) else key.decode()
-            token = key_str[len(prefix):]
+            token = key_str[len(prefix) :]
             if token[:8] == token_prefix:
                 if token == current_token:
                     raise HTTPException(status_code=400, detail="Cannot revoke current session. Use logout instead.")
@@ -291,12 +286,10 @@ async def get_profile(auth: dict = Depends(require_auth)):
 @router.patch("/profile")
 async def update_profile(req: UpdateProfileRequest, auth: dict = Depends(require_auth)):
     """Update current user's profile (email, avatar_style)."""
-    updates = []
-    params: dict = {"uid": auth["user_id"]}
+    update_values: dict = {}
 
     if req.email is not None:
         email = req.email.strip() or None
-        params["email"] = email
         if email:
             async with async_session() as session:
                 existing = await session.execute(
@@ -305,21 +298,23 @@ async def update_profile(req: UpdateProfileRequest, auth: dict = Depends(require
                 )
                 if existing.fetchone():
                     raise HTTPException(status_code=409, detail="Email already in use")
-        updates.append("email = :email")
+        update_values["email"] = email
 
     if req.avatar_style is not None:
         if req.avatar_style not in ("gravatar", "manual"):
             raise HTTPException(status_code=400, detail="avatar_style must be 'gravatar' or 'manual'")
-        params["avatar_style"] = req.avatar_style
-        updates.append("avatar_style = :avatar_style")
+        update_values["avatar_style"] = req.avatar_style
 
-    if not updates:
+    if not update_values:
         return {"status": "ok"}
 
+    # Build parameterized SET clause from known column names
+    set_parts = [f"{col} = :{col}" for col in update_values]
+    update_values["uid"] = auth["user_id"]
     async with async_session() as session:
         await session.execute(
-            text(f"UPDATE users SET {', '.join(updates)} WHERE id = :uid"),
-            params,
+            text(f"UPDATE users SET {', '.join(set_parts)} WHERE id = :uid"),
+            update_values,
         )
         await session.commit()
     return {"status": "ok"}
@@ -345,13 +340,16 @@ async def upload_avatar(
         img = Image.open(io.BytesIO(data))
         img = ImageOps.fit(img, (160, 160))
         img = img.convert("RGB")
-    except Exception:
+    except (OSError, ValueError) as exc:
+        logger.warning("Avatar upload failed: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid image file")
 
     avatars_dir = Path(settings.data_avatars_path)
     avatars_dir.mkdir(parents=True, exist_ok=True)
     out_path = avatars_dir / f"{auth['user_id']}.webp"
-    img.save(str(out_path), "WEBP", quality=85)
+    tmp_path = out_path.with_suffix(".webp.tmp")
+    img.save(str(tmp_path), "WEBP", quality=85)
+    tmp_path.replace(out_path)
 
     async with async_session() as session:
         await session.execute(
@@ -403,14 +401,10 @@ async def change_password(req: ChangePasswordRequest, auth: dict = Depends(requi
         )
         user = result.fetchone()
 
-    if not user or not bcrypt.checkpw(
-        req.current_password.encode("utf-8"), user.password_hash.encode("utf-8")
-    ):
+    if not user or not bcrypt.checkpw(req.current_password.encode("utf-8"), user.password_hash.encode("utf-8")):
         raise HTTPException(status_code=401, detail="Current password is incorrect")
 
-    new_hash = bcrypt.hashpw(
-        req.new_password.encode("utf-8"), bcrypt.gensalt(rounds=12)
-    ).decode("utf-8")
+    new_hash = bcrypt.hashpw(req.new_password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
 
     async with async_session() as session:
         await session.execute(

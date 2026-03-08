@@ -1,51 +1,109 @@
 """Tag, Alias, and Implication management endpoints."""
 
-from typing import Optional
+import base64
+import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import desc, func, or_, select
 
 from core.auth import require_auth
 from core.database import async_session
-from sqlalchemy import text
+from db.models import Tag, TagAlias, TagImplication
 
 router = APIRouter(tags=["tags"])
 
 
+# ── Cursor helpers ────────────────────────────────────────────────────
+
+
+def _encode_tag_cursor(tag: Tag) -> str:
+    payload = {"id": tag.id, "count": tag.count}
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+
+
+def _decode_tag_cursor(cursor: str) -> dict:
+    try:
+        return json.loads(base64.urlsafe_b64decode(cursor + "=="))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+
+
 # ── List tags ────────────────────────────────────────────────────────
+
 
 @router.get("/")
 async def list_tags(
-    prefix: Optional[str] = None,
-    namespace: Optional[str] = None,
-    limit: int = 50,
-    offset: int = 0,
+    prefix: str | None = None,
+    namespace: str | None = None,
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    cursor: str | None = Query(default=None),
     _: dict = Depends(require_auth),
 ):
+    """
+    List tags sorted by count DESC.
+
+    Supports cursor-based pagination (cursor=) for O(1) seek without COUNT(*)/OFFSET.
+    Falls back to offset-based pagination when cursor is absent (max offset 10 000).
+    """
+    filters = []
+    if prefix:
+        filters.append(Tag.name.like(f"{prefix}%"))
+    if namespace:
+        filters.append(Tag.namespace == namespace)
+
     async with async_session() as session:
-        conditions = []
-        params: dict = {"limit": limit, "offset": offset}
-        if prefix:
-            conditions.append("name LIKE :prefix")
-            params["prefix"] = f"{prefix}%"
-        if namespace:
-            conditions.append("namespace = :namespace")
-            params["namespace"] = namespace
-        where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-        result = await session.execute(
-            text(f"SELECT id, namespace, name, count FROM tags {where} ORDER BY count DESC LIMIT :limit OFFSET :offset"),
-            params,
-        )
-        rows = result.fetchall()
-        count_result = await session.execute(
-            text(f"SELECT COUNT(*) FROM tags {where}"),
-            {k: v for k, v in params.items() if k not in ("limit", "offset")},
-        )
-        total = count_result.scalar()
-    return {"total": total, "tags": [{"id": r.id, "namespace": r.namespace, "name": r.name, "count": r.count} for r in rows]}
+        if cursor is not None:
+            # Keyset pagination on (count DESC, id DESC)
+            c = _decode_tag_cursor(cursor)
+            cursor_count = c["count"]
+            cursor_id = c["id"]
+
+            data_query = (
+                select(Tag)
+                .where(*filters)
+                .where(
+                    or_(
+                        Tag.count < cursor_count,
+                        (Tag.count == cursor_count) & (Tag.id < cursor_id),
+                    )
+                )
+                .order_by(desc(Tag.count), desc(Tag.id))
+                .limit(limit + 1)
+            )
+            rows = (await session.execute(data_query)).scalars().all()
+
+            has_next = len(rows) > limit
+            if has_next:
+                rows = rows[:limit]
+
+            next_cursor = _encode_tag_cursor(rows[-1]) if has_next and rows else None
+            return {
+                "tags": [{"id": r.id, "namespace": r.namespace, "name": r.name, "count": r.count} for r in rows],
+                "next_cursor": next_cursor,
+                "has_next": has_next,
+            }
+
+        else:
+            # Legacy offset-based pagination — keep COUNT(*) for backward compat
+            if offset > 10_000:
+                raise HTTPException(status_code=400, detail="Offset too large. Use cursor= for deep pagination.")
+
+            data_query = select(Tag).where(*filters).order_by(desc(Tag.count), desc(Tag.id)).limit(limit).offset(offset)
+            rows = (await session.execute(data_query)).scalars().all()
+
+            count_query = select(func.count()).select_from(Tag).where(*filters)
+            total = (await session.execute(count_query)).scalar()
+
+    return {
+        "total": total,
+        "tags": [{"id": r.id, "namespace": r.namespace, "name": r.name, "count": r.count} for r in rows],
+    }
 
 
 # ── Aliases ──────────────────────────────────────────────────────────
+
 
 class AliasRequest(BaseModel):
     alias_namespace: str
@@ -55,33 +113,28 @@ class AliasRequest(BaseModel):
 
 @router.get("/aliases")
 async def list_aliases(
-    tag_id: Optional[int] = None,
+    tag_id: int | None = None,
     limit: int = 50,
     _: dict = Depends(require_auth),
 ):
     async with async_session() as session:
+        query = (
+            select(
+                TagAlias.alias_namespace,
+                TagAlias.alias_name,
+                TagAlias.canonical_id,
+                Tag.namespace.label("canonical_namespace"),
+                Tag.name.label("canonical_name"),
+            )
+            .join(Tag, TagAlias.canonical_id == Tag.id)
+            .order_by(TagAlias.alias_name)
+            .limit(limit)
+        )
         if tag_id:
-            result = await session.execute(
-                text("""
-                    SELECT a.alias_namespace, a.alias_name, a.canonical_id,
-                           t.namespace AS canonical_namespace, t.name AS canonical_name
-                    FROM tag_aliases a JOIN tags t ON a.canonical_id = t.id
-                    WHERE a.canonical_id = :tid
-                    ORDER BY a.alias_name LIMIT :limit
-                """),
-                {"tid": tag_id, "limit": limit},
-            )
-        else:
-            result = await session.execute(
-                text("""
-                    SELECT a.alias_namespace, a.alias_name, a.canonical_id,
-                           t.namespace AS canonical_namespace, t.name AS canonical_name
-                    FROM tag_aliases a JOIN tags t ON a.canonical_id = t.id
-                    ORDER BY a.alias_name LIMIT :limit
-                """),
-                {"limit": limit},
-            )
-        rows = result.fetchall()
+            query = query.where(TagAlias.canonical_id == tag_id)
+
+        rows = (await session.execute(query)).all()
+
     return [
         {
             "alias_namespace": r.alias_namespace,
@@ -97,19 +150,30 @@ async def list_aliases(
 @router.post("/aliases")
 async def create_alias(req: AliasRequest, _: dict = Depends(require_auth)):
     async with async_session() as session:
-        tag = await session.execute(
-            text("SELECT id FROM tags WHERE id = :id"), {"id": req.canonical_id}
-        )
-        if not tag.fetchone():
+        tag = (await session.execute(select(Tag.id).where(Tag.id == req.canonical_id))).fetchone()
+        if not tag:
             raise HTTPException(status_code=404, detail="Canonical tag not found")
-        await session.execute(
-            text("""
-                INSERT INTO tag_aliases (alias_namespace, alias_name, canonical_id)
-                VALUES (:ns, :name, :cid)
-                ON CONFLICT (alias_namespace, alias_name) DO UPDATE SET canonical_id = :cid
-            """),
-            {"ns": req.alias_namespace, "name": req.alias_name, "cid": req.canonical_id},
-        )
+
+        # Upsert alias
+        existing = (
+            await session.execute(
+                select(TagAlias).where(
+                    TagAlias.alias_namespace == req.alias_namespace,
+                    TagAlias.alias_name == req.alias_name,
+                )
+            )
+        ).scalar_one_or_none()
+
+        if existing:
+            existing.canonical_id = req.canonical_id
+        else:
+            session.add(
+                TagAlias(
+                    alias_namespace=req.alias_namespace,
+                    alias_name=req.alias_name,
+                    canonical_id=req.canonical_id,
+                )
+            )
         await session.commit()
     return {"status": "ok"}
 
@@ -121,15 +185,22 @@ async def delete_alias(
     _: dict = Depends(require_auth),
 ):
     async with async_session() as session:
-        await session.execute(
-            text("DELETE FROM tag_aliases WHERE alias_namespace = :ns AND alias_name = :name"),
-            {"ns": alias_namespace, "name": alias_name},
-        )
-        await session.commit()
+        alias = (
+            await session.execute(
+                select(TagAlias).where(
+                    TagAlias.alias_namespace == alias_namespace,
+                    TagAlias.alias_name == alias_name,
+                )
+            )
+        ).scalar_one_or_none()
+        if alias:
+            session.delete(alias)
+            await session.commit()
     return {"status": "ok"}
 
 
 # ── Implications ─────────────────────────────────────────────────────
+
 
 class ImplicationRequest(BaseModel):
     antecedent_id: int
@@ -138,39 +209,38 @@ class ImplicationRequest(BaseModel):
 
 @router.get("/implications")
 async def list_implications(
-    tag_id: Optional[int] = None,
+    tag_id: int | None = None,
     limit: int = 50,
     _: dict = Depends(require_auth),
 ):
+    ant = Tag.__table__.alias("ant")
+    con = Tag.__table__.alias("con")
+
     async with async_session() as session:
+        query = (
+            select(
+                TagImplication.antecedent_id,
+                TagImplication.consequent_id,
+                ant.c.namespace.label("ant_ns"),
+                ant.c.name.label("ant_name"),
+                con.c.namespace.label("con_ns"),
+                con.c.name.label("con_name"),
+            )
+            .join(ant, TagImplication.antecedent_id == ant.c.id)
+            .join(con, TagImplication.consequent_id == con.c.id)
+            .order_by(ant.c.name)
+            .limit(limit)
+        )
         if tag_id:
-            result = await session.execute(
-                text("""
-                    SELECT i.antecedent_id, i.consequent_id,
-                           a.namespace AS ant_ns, a.name AS ant_name,
-                           c.namespace AS con_ns, c.name AS con_name
-                    FROM tag_implications i
-                    JOIN tags a ON i.antecedent_id = a.id
-                    JOIN tags c ON i.consequent_id = c.id
-                    WHERE i.antecedent_id = :tid OR i.consequent_id = :tid
-                    ORDER BY a.name LIMIT :limit
-                """),
-                {"tid": tag_id, "limit": limit},
+            query = query.where(
+                or_(
+                    TagImplication.antecedent_id == tag_id,
+                    TagImplication.consequent_id == tag_id,
+                )
             )
-        else:
-            result = await session.execute(
-                text("""
-                    SELECT i.antecedent_id, i.consequent_id,
-                           a.namespace AS ant_ns, a.name AS ant_name,
-                           c.namespace AS con_ns, c.name AS con_name
-                    FROM tag_implications i
-                    JOIN tags a ON i.antecedent_id = a.id
-                    JOIN tags c ON i.consequent_id = c.id
-                    ORDER BY a.name LIMIT :limit
-                """),
-                {"limit": limit},
-            )
-        rows = result.fetchall()
+
+        rows = (await session.execute(query)).all()
+
     return [
         {
             "antecedent_id": r.antecedent_id,
@@ -188,21 +258,34 @@ async def create_implication(req: ImplicationRequest, _: dict = Depends(require_
         raise HTTPException(status_code=400, detail="Cannot imply self")
     async with async_session() as session:
         # Check for circular implication (simple 1-hop check)
-        result = await session.execute(
-            text("SELECT 1 FROM tag_implications WHERE antecedent_id = :con AND consequent_id = :ant"),
-            {"con": req.consequent_id, "ant": req.antecedent_id},
-        )
-        if result.fetchone():
+        result = (
+            await session.execute(
+                select(TagImplication).where(
+                    TagImplication.antecedent_id == req.consequent_id,
+                    TagImplication.consequent_id == req.antecedent_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if result:
             raise HTTPException(status_code=400, detail="Circular implication detected")
-        await session.execute(
-            text("""
-                INSERT INTO tag_implications (antecedent_id, consequent_id)
-                VALUES (:ant, :con)
-                ON CONFLICT DO NOTHING
-            """),
-            {"ant": req.antecedent_id, "con": req.consequent_id},
-        )
-        await session.commit()
+
+        # Check if already exists
+        existing = (
+            await session.execute(
+                select(TagImplication).where(
+                    TagImplication.antecedent_id == req.antecedent_id,
+                    TagImplication.consequent_id == req.consequent_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not existing:
+            session.add(
+                TagImplication(
+                    antecedent_id=req.antecedent_id,
+                    consequent_id=req.consequent_id,
+                )
+            )
+            await session.commit()
     return {"status": "ok"}
 
 
@@ -213,9 +296,15 @@ async def delete_implication(
     _: dict = Depends(require_auth),
 ):
     async with async_session() as session:
-        await session.execute(
-            text("DELETE FROM tag_implications WHERE antecedent_id = :ant AND consequent_id = :con"),
-            {"ant": antecedent_id, "con": consequent_id},
-        )
-        await session.commit()
+        impl = (
+            await session.execute(
+                select(TagImplication).where(
+                    TagImplication.antecedent_id == antecedent_id,
+                    TagImplication.consequent_id == consequent_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if impl:
+            session.delete(impl)
+            await session.commit()
     return {"status": "ok"}

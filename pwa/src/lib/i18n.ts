@@ -21,7 +21,7 @@ const dict: Record<string, Record<string, string>> = {
 
     // ── Dashboard ──
     'dashboard.title': 'Dashboard',
-    'dashboard.subtitle': 'Jyzrox rev 2.0',
+    'dashboard.subtitle': '',
     'dashboard.systemOnline': 'System online',
     'dashboard.activeDownloads': 'Active Downloads',
     'dashboard.viewAll': 'View all',
@@ -66,7 +66,8 @@ const dict: Record<string, Record<string, string>> = {
     'browse.recentHistory': 'Recent',
     'browse.clearAll': 'Clear all',
     'browse.addedToQueue': 'Added to queue',
-    'browse.credentialsNotSet': 'E-Hentai credentials not configured. Go to Settings to add cookies.',
+    'browse.credentialsNotSet':
+      'E-Hentai credentials not configured. Go to Settings to add cookies.',
     'browse.favorited': 'favorited',
     'browse.backToBrowse': '← Back to browse',
     'browse.read': 'Read',
@@ -112,6 +113,10 @@ const dict: Record<string, Record<string, string>> = {
     'queue.created': 'Created',
     'queue.finished': 'Finished',
     'queue.queuedSuccess': 'Queued successfully',
+    'queue.clear': 'Clear',
+    'queue.clearing': 'Clearing...',
+    'queue.cleared': '{count} jobs cleared',
+    'queue.clearError': 'Failed to clear jobs',
 
     // ── Tags ──
     'tags.title': 'Tag Management',
@@ -251,7 +256,8 @@ const dict: Record<string, Record<string, string>> = {
 
     // ── Export ──
     'export.title': 'Training Data Export',
-    'export.subtitle': 'Export gallery images + tags in Kohya format (ZIP with images and .txt caption files).',
+    'export.subtitle':
+      'Export gallery images + tags in Kohya format (ZIP with images and .txt caption files).',
     'export.searchPlaceholder': 'Search galleries by title...',
     'export.downloading': 'Downloading...',
     'export.kohyaZip': 'Kohya ZIP',
@@ -270,6 +276,15 @@ const dict: Record<string, Record<string, string>> = {
 
     // ── Queue ──  (extra)
     'queue.cancelError': 'Failed to cancel job',
+    'queue.pause': 'Pause',
+    'queue.resume': 'Resume',
+    'queue.paused': 'Paused',
+    'queue.pauseError': 'Failed to pause/resume job',
+    'queue.files': 'files',
+    'queue.filesPerMin': '{count} files/min',
+    'queue.elapsed': 'Elapsed: {time}',
+    'queue.remaining': '~{time} remaining',
+    'queue.waitingSlot': 'Waiting for download slot...',
 
     // ── Tags ── (extra)
     'tags.selectTag': 'Select a tag to view details',

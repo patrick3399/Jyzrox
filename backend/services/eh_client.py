@@ -23,16 +23,16 @@ EH_BASE_URL = "https://e-hentai.org"
 EX_BASE_URL = "https://exhentai.org"
 
 CATEGORY_MASK: dict[str, int] = {
-    "misc":        1,
-    "doujinshi":   2,
-    "manga":       4,
-    "artist_cg":   8,
-    "game_cg":     16,
-    "image_set":   32,
-    "cosplay":     64,
-    "asian_porn":  128,
-    "non_h":       256,
-    "western":     512,
+    "misc": 1,
+    "doujinshi": 2,
+    "manga": 4,
+    "artist_cg": 8,
+    "game_cg": 16,
+    "image_set": 32,
+    "cosplay": 64,
+    "asian_porn": 128,
+    "non_h": 256,
+    "western": 512,
 }
 ALL_CATS = sum(CATEGORY_MASK.values())  # 1023
 
@@ -42,6 +42,8 @@ _TOTAL_COUNT_RE = re.compile(r"Showing .+? of ([\d,]+)")
 _PTOKEN_RE = re.compile(r"/s/([0-9a-f]{10})/(\d+)-(\d+)")
 # Matches showkey in page HTML: var showkey="...";
 _SHOWKEY_RE = re.compile(r'var\s+showkey\s*=\s*"([0-9a-z]+)"')
+# Matches nl() call in image page HTML: return nl('PARAM')
+_NL_RE = re.compile(r"return nl\('([^']+)'\)")
 # Large preview: <div class="gdtl"...><a href="..."><img alt="N" src="THUMB_URL"...>
 _LARGE_PREVIEW_RE = re.compile(
     r'<div class="gdtl"[^>]*>.*?<a[^>]*href="[^"]*"[^>]*>'
@@ -54,7 +56,7 @@ _NORMAL_PREVIEW_RE = re.compile(
     r'<div[^>]*class="gdtm"[^>]*style="[^"]*'
     r'url\(([^)]+)\)\s*(-?\d+)px[^"]*'
     r'width:\s*(\d+)px;\s*height:\s*(\d+)px[^"]*"[^>]*>'
-    r'.*?/s/[0-9a-f]+/\d+-(\d+)',
+    r".*?/s/[0-9a-f]+/\d+-(\d+)",
     re.DOTALL,
 )
 
@@ -67,18 +69,18 @@ def _chunks(lst: list, n: int):
 def _parse_gmetadata(g: dict) -> dict:
     """Normalise a single gdata API entry to our internal dict."""
     return {
-        "gid":       int(g["gid"]),
-        "token":     g["token"],
-        "title":     g.get("title", ""),
+        "gid": int(g["gid"]),
+        "token": g["token"],
+        "title": g.get("title", ""),
         "title_jpn": g.get("title_jpn", ""),
-        "category":  g.get("category", ""),
-        "thumb":     g.get("thumb", ""),
-        "uploader":  g.get("uploader", ""),
+        "category": g.get("category", ""),
+        "thumb": g.get("thumb", ""),
+        "uploader": g.get("uploader", ""),
         "posted_at": int(g.get("posted", 0)),
-        "pages":     int(g.get("filecount", 0)),
-        "rating":    float(g.get("rating", 0)),
-        "tags":      g.get("tags", []),
-        "expunged":  bool(g.get("expunged", False)),
+        "pages": int(g.get("filecount", 0)),
+        "rating": float(g.get("rating", 0)),
+        "tags": g.get("tags", []),
+        "expunged": bool(g.get("expunged", False)),
     }
 
 
@@ -106,6 +108,7 @@ class EhClient:
         self.cookies = cookies
         self.base_url = EX_BASE_URL if use_ex else EH_BASE_URL
         self._http: httpx.AsyncClient | None = None
+        self._img_http: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "EhClient":
         # Inject nw=1 cookie to skip Content Warning page
@@ -124,9 +127,24 @@ class EhClient:
             timeout=settings.eh_request_timeout,
             follow_redirects=True,
         )
+        self._img_http = httpx.AsyncClient(
+            cookies=cookies,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+            },
+            timeout=20,
+            follow_redirects=True,
+        )
         return self
 
     async def __aexit__(self, *_) -> None:
+        if self._img_http:
+            await self._img_http.aclose()
         if self._http:
             await self._http.aclose()
 
@@ -185,17 +203,28 @@ class EhClient:
         # Advanced search flags (EHViewer ListUrlBuilder style)
         if advance:
             params["advsearch"] = "1"
-            if adv_search & 0x1:   params["f_sname"] = "on"
-            if adv_search & 0x2:   params["f_stags"] = "on"
-            if adv_search & 0x4:   params["f_sdesc"] = "on"
-            if adv_search & 0x8:   params["f_storr"] = "on"
-            if adv_search & 0x10:  params["f_sto"]   = "on"
-            if adv_search & 0x20:  params["f_sdt1"]  = "on"
-            if adv_search & 0x40:  params["f_sdt2"]  = "on"
-            if adv_search & 0x80:  params["f_sh"]    = "on"
-            if adv_search & 0x100: params["f_sfl"]   = "on"
-            if adv_search & 0x200: params["f_sfu"]   = "on"
-            if adv_search & 0x400: params["f_sft"]   = "on"
+            if adv_search & 0x1:
+                params["f_sname"] = "on"
+            if adv_search & 0x2:
+                params["f_stags"] = "on"
+            if adv_search & 0x4:
+                params["f_sdesc"] = "on"
+            if adv_search & 0x8:
+                params["f_storr"] = "on"
+            if adv_search & 0x10:
+                params["f_sto"] = "on"
+            if adv_search & 0x20:
+                params["f_sdt1"] = "on"
+            if adv_search & 0x40:
+                params["f_sdt2"] = "on"
+            if adv_search & 0x80:
+                params["f_sh"] = "on"
+            if adv_search & 0x100:
+                params["f_sfl"] = "on"
+            if adv_search & 0x200:
+                params["f_sfu"] = "on"
+            if adv_search & 0x400:
+                params["f_sft"] = "on"
         if min_rating:
             params["f_sr"] = "on"
             params["f_srdd"] = min_rating
@@ -231,9 +260,7 @@ class EhClient:
         """Batch-fetch gallery metadata via gdata API (max 25 per call)."""
         results: list[dict] = []
         for chunk in _chunks(gid_list, 25):
-            resp = await self._api(
-                {"method": "gdata", "gidlist": chunk, "namespace": 1}
-            )
+            resp = await self._api({"method": "gdata", "gidlist": chunk, "namespace": 1})
             for g in resp.get("gmetadata", []):
                 if not g.get("error"):
                     results.append(_parse_gmetadata(g))
@@ -245,9 +272,7 @@ class EhClient:
             raise ValueError(f"Gallery {gid}/{token} not found or expunged")
         return results[0]
 
-    def _parse_detail_html(
-        self, html: str
-    ) -> tuple[dict[int, str], dict[int, str]]:
+    def _parse_detail_html(self, html: str) -> tuple[dict[int, str], dict[int, str]]:
         """Parse a single gallery detail page HTML for pTokens + preview thumbnails."""
         token_map: dict[int, str] = {}
         preview_map: dict[int, str] = {}
@@ -274,15 +299,11 @@ class EhClient:
                 width = int(match.group(3))
                 height = int(match.group(4))
                 page_num = int(match.group(5))
-                preview_map[page_num] = (
-                    f"{sprite_url}|{offset_x}|{width}|{height}"
-                )
+                preview_map[page_num] = f"{sprite_url}|{offset_x}|{width}|{height}"
 
         return token_map, preview_map
 
-    async def get_previews(
-        self, gid: int, token: str
-    ) -> dict[int, str]:
+    async def get_previews(self, gid: int, token: str) -> dict[int, str]:
         """
         Fetch ONLY the first gallery detail page (p=0) to extract
         ~20 preview thumbnail URLs.  Very fast — single HTTP request.
@@ -296,9 +317,7 @@ class EhClient:
         _, preview_map = self._parse_detail_html(resp.text)
         return preview_map
 
-    async def get_image_tokens(
-        self, gid: int, token: str, total_pages: int
-    ) -> tuple[dict[int, str], dict[int, str]]:
+    async def get_image_tokens(self, gid: int, token: str, total_pages: int) -> tuple[dict[int, str], dict[int, str]]:
         """
         Get image page tokens (pTokens) and preview thumbnail URLs by
         scraping gallery detail pages.  Matches EhViewer's approach.
@@ -329,9 +348,7 @@ class EhClient:
 
         return token_map, preview_map
 
-    async def get_image_url(
-        self, image_page_token: str, gid: int, page: int
-    ) -> str:
+    async def get_image_url(self, image_page_token: str, gid: int, page: int) -> str:
         """
         Fetch the image page HTML and extract the actual image URL.
         Page URL: /s/{image_page_token}/{gid}-{page}
@@ -345,6 +362,102 @@ class EhClient:
         if not img_tag or not img_tag.get("src"):
             raise ValueError(f"Image src not found for {gid}-{page}")
         return img_tag["src"]
+
+    async def get_showkey(self, gid: int, page: int, image_page_token: str) -> tuple[str, str | None]:
+        """Fetch image page HTML, extract showkey + nl param.
+        GET /s/{image_page_token}/{gid}-{page}
+        Returns (showkey, nl_param_or_None)
+        """
+        url = f"{self.base_url}/s/{image_page_token}/{gid}-{page}"
+        resp = await self._http.get(url)
+        resp.raise_for_status()
+        self._check_auth(resp.text, resp)
+
+        m = _SHOWKEY_RE.search(resp.text)
+        if not m:
+            raise ValueError(f"showkey not found for {gid}-{page}")
+        showkey = m.group(1)
+
+        nl_m = _NL_RE.search(resp.text)
+        nl_param = nl_m.group(1) if nl_m else None
+
+        return showkey, nl_param
+
+    async def get_image_url_via_api(self, showkey: str, gid: int, page: int, imgkey: str, nl: str = "") -> tuple[str, str | None]:
+        """Use showpage JSON API for fast image URL resolution.
+        POST to api.php with method=showpage.
+        Response JSON has:
+          - i3: HTML containing <img id="img" src="IMAGE_URL">
+          - i6: HTML containing onclick="return nl('NL_PARAM')"
+        Returns (image_url, nl_param)
+        """
+        payload: dict = {
+            "method": "showpage",
+            "gid": gid,
+            "page": page,
+            "imgkey": imgkey,
+            "showkey": showkey,
+        }
+        if nl:
+            payload["nl"] = nl
+
+        api_url = f"{self.base_url}/api.php" if self.base_url == EX_BASE_URL else EH_API_URL
+        resp = await self._http.post(api_url, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("error"):
+            raise ValueError(f"showpage API error: {data['error']}")
+
+        # Parse image URL from i3 field (HTML string containing img tag)
+        i3 = data.get("i3", "")
+        img_match = re.search(r'<img[^>]+src="([^"]+)"', i3)
+        if not img_match:
+            raise ValueError(f"Image URL not found in showpage response for {gid}-{page}")
+        image_url = img_match.group(1)
+
+        # Parse nl param from i6 field
+        i6 = data.get("i6", "")
+        nl_match = _NL_RE.search(i6)
+        nl_param = nl_match.group(1) if nl_match else None
+
+        return image_url, nl_param
+
+    async def download_image_with_retry(self, showkey: str, gid: int, page: int, imgkey: str, max_retries: int = 3) -> tuple[bytes, str, str]:
+        """Resolve URL via showpage API + download with nl retry on stall/error.
+        Returns (image_bytes, media_type, filename_ext)
+        """
+        nl = ""
+        nl_param: str | None = None
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                image_url, nl_param = await self.get_image_url_via_api(showkey, gid, page, imgkey, nl=nl)
+
+                # Download the image (use _img_http with follow_redirects=True for H@H)
+                resp = await self._img_http.get(image_url)
+                resp.raise_for_status()
+                image_data = resp.content
+
+                if len(image_data) < 100:
+                    # Suspiciously small — might be an error page
+                    raise ValueError(f"Image too small ({len(image_data)} bytes), possible error")
+
+                media_type = _detect_media_type(image_data)
+                ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp"}
+                ext = ext_map.get(media_type, "jpg")
+
+                return image_data, media_type, ext
+
+            except (httpx.TimeoutException, httpx.HTTPStatusError, ValueError) as exc:
+                last_error = exc
+                logger.warning("[eh_download] page %d attempt %d failed: %s", page, attempt + 1, exc)
+                # Use nl param to try a different H@H server
+                if nl_param:
+                    nl = nl_param
+
+        raise RuntimeError(f"Failed to download page {page} after {max_retries} attempts: {last_error}")
 
     async def fetch_image_bytes(self, image_url: str) -> tuple[bytes, str]:
         """Fetch image bytes. Returns (bytes, media_type)."""
@@ -379,16 +492,12 @@ class EhClient:
         elif prev_cursor:
             params["prev"] = prev_cursor
 
-        resp = await self._http.get(
-            f"{self.base_url}/favorites.php?{urlencode(params)}"
-        )
+        resp = await self._http.get(f"{self.base_url}/favorites.php?{urlencode(params)}")
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
         # Parse gallery links
-        matches = list(
-            {(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)}
-        )
+        matches = list({(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)})
 
         soup = BeautifulSoup(resp.text, "lxml")
 
@@ -457,9 +566,16 @@ class EhClient:
         # Fallback: if parsing found nothing, provide default 0-9 categories
         if not categories:
             _DEFAULT_FAV_NAMES = [
-                "Favorites 0", "Favorites 1", "Favorites 2", "Favorites 3",
-                "Favorites 4", "Favorites 5", "Favorites 6", "Favorites 7",
-                "Favorites 8", "Favorites 9",
+                "Favorites 0",
+                "Favorites 1",
+                "Favorites 2",
+                "Favorites 3",
+                "Favorites 4",
+                "Favorites 5",
+                "Favorites 6",
+                "Favorites 7",
+                "Favorites 8",
+                "Favorites 9",
             ]
             for i in range(10):
                 categories.append({"index": i, "name": _DEFAULT_FAV_NAMES[i], "count": 0})
@@ -479,9 +595,7 @@ class EhClient:
             "categories": categories,
         }
 
-    async def add_favorite(
-        self, gid: int, token: str, favcat: int = 0, note: str = ""
-    ) -> bool:
+    async def add_favorite(self, gid: int, token: str, favcat: int = 0, note: str = "") -> bool:
         """Add gallery to cloud favorites. favcat: 0-9, note: max 250 chars."""
         url = f"{self.base_url}/gallerypopups.php?gid={gid}&t={token}&act=addfav"
         data = {
@@ -490,10 +604,14 @@ class EhClient:
             "submit": "Apply Changes",
             "update": "1",
         }
-        resp = await self._http.post(url, data=data, headers={
-            "Referer": url,
-            "Origin": self.base_url,
-        })
+        resp = await self._http.post(
+            url,
+            data=data,
+            headers={
+                "Referer": url,
+                "Origin": self.base_url,
+            },
+        )
         resp.raise_for_status()
         return True
 
@@ -506,10 +624,14 @@ class EhClient:
             "submit": "Apply Changes",
             "update": "1",
         }
-        resp = await self._http.post(url, data=data, headers={
-            "Referer": url,
-            "Origin": self.base_url,
-        })
+        resp = await self._http.post(
+            url,
+            data=data,
+            headers={
+                "Referer": url,
+                "Origin": self.base_url,
+            },
+        )
         resp.raise_for_status()
         return True
 
@@ -518,7 +640,8 @@ class EhClient:
         try:
             resp = await self._http.get(f"{self.base_url}/home.php")
             return "Credits" in resp.text or "Hath" in resp.text
-        except Exception:
+        except (httpx.HTTPError, httpx.TimeoutException) as exc:
+            logger.warning("check_cookies request failed: %s", exc)
             return False
 
     async def get_account_info(self) -> dict:
@@ -533,5 +656,6 @@ class EhClient:
             if m:
                 info["hath_perks"] = int(m.group(1))
             return info
-        except Exception as exc:
+        except (httpx.HTTPError, httpx.TimeoutException, AttributeError, ValueError) as exc:
+            logger.error("get_account_info failed: %s", exc)
             return {"error": str(exc)}

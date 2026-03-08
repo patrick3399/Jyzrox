@@ -61,10 +61,46 @@ class EhSemaphore:
             # Slot not available — give it back and wait
             await r.decr(self._COUNTER_KEY)
             if loop.time() >= deadline:
-                raise TimeoutError(
-                    f"EH semaphore: could not acquire slot within {self.acquire_timeout}s"
-                )
+                raise TimeoutError(f"EH semaphore: could not acquire slot within {self.acquire_timeout}s")
             await asyncio.sleep(0.3)
 
 
 eh_semaphore = EhSemaphore()
+
+
+class DownloadSemaphore:
+    """
+    Redis-based per-source download concurrency limiter.
+    Uses INCR/DECR + polling, same pattern as EhSemaphore.
+    """
+
+    _LIMITS: dict[str, int] = {
+        "ehentai": 2,
+        "pixiv": 2,
+        "other": 2,
+    }
+
+    def __init__(self, source: str, acquire_timeout: int = 300) -> None:
+        self._key = f"download:sem:{source}"
+        self.max_count = self._LIMITS.get(source, 2)
+        self.acquire_timeout = acquire_timeout
+
+    @asynccontextmanager
+    async def acquire(self):
+        r = get_redis()
+        loop = asyncio.get_event_loop()
+        deadline = loop.time() + self.acquire_timeout
+
+        while True:
+            count = await r.incr(self._key)
+            if count <= self.max_count:
+                try:
+                    yield
+                finally:
+                    await r.decr(self._key)
+                return
+
+            await r.decr(self._key)
+            if loop.time() >= deadline:
+                raise TimeoutError(f"Download semaphore [{self._key}]: could not acquire slot within {self.acquire_timeout}s")
+            await asyncio.sleep(0.5)

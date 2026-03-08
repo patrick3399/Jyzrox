@@ -1,9 +1,9 @@
 'use client'
 
 import { useState, useCallback } from 'react'
-import { Download, ChevronUp, ChevronDown, X, Plus } from 'lucide-react'
+import { Download, ChevronUp, ChevronDown, X, Plus, Trash2, Pause, Play } from 'lucide-react'
 import { toast } from 'sonner'
-import { useDownloadJobs, useEnqueueDownload, useCancelJob } from '@/hooks/useDownloadQueue'
+import { useDownloadJobs, useEnqueueDownload, useCancelJob, useClearFinishedJobs, usePauseJob } from '@/hooks/useDownloadQueue'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { t } from '@/lib/i18n'
@@ -15,11 +15,14 @@ const STATUS_STYLES: Record<string, string> = {
   done: 'bg-green-500/10 border-green-500/30 text-green-400',
   failed: 'bg-red-500/10 border-red-500/30 text-red-400',
   cancelled: 'bg-vault-card border-vault-border text-vault-text-muted',
+  paused: 'bg-orange-500/10 border-orange-500/30 text-orange-400',
 }
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs font-medium ${STATUS_STYLES[status] ?? STATUS_STYLES.cancelled}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs font-medium ${STATUS_STYLES[status] ?? STATUS_STYLES.cancelled}`}
+    >
       {status === 'running' && (
         <span className="flex gap-0.5">
           <span className="w-1 h-1 rounded-full bg-blue-400 animate-bounce [animation-delay:0ms]" />
@@ -32,16 +35,26 @@ function StatusBadge({ status }: { status: string }) {
   )
 }
 
+function formatDuration(seconds: number): string {
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  if (seconds < 3600) return `${Math.floor(seconds / 60)}m ${Math.round(seconds % 60)}s`
+  const h = Math.floor(seconds / 3600)
+  const m = Math.floor((seconds % 3600) / 60)
+  return `${h}h ${m}m`
+}
+
 function JobRow({
   job,
   onCancel,
+  onPause,
   isCancelling,
 }: {
   job: DownloadJob
   onCancel: (id: string) => void
+  onPause: (id: string, action: 'pause' | 'resume') => void
   isCancelling: boolean
 }) {
-  const canCancel = job.status === 'queued' || job.status === 'running'
+  const canCancel = job.status === 'queued' || job.status === 'running' || job.status === 'paused'
   const createdAt = new Date(job.created_at).toLocaleString()
   const finishedAt = job.finished_at ? new Date(job.finished_at).toLocaleString() : null
 
@@ -53,17 +66,86 @@ function JobRow({
             {job.url}
           </p>
           <div className="flex flex-wrap items-center gap-3 text-xs text-vault-text-muted">
-            <span>{t('queue.source')}: <span className="text-vault-text-secondary">{job.source || t('common.auto')}</span></span>
-            <span>{t('queue.created')}: <span className="text-vault-text-secondary">{createdAt}</span></span>
-            {finishedAt && <span>{t('queue.finished')}: <span className="text-vault-text-secondary">{finishedAt}</span></span>}
+            <span>
+              {t('queue.source')}:{' '}
+              <span className="text-vault-text-secondary">{job.source || t('common.auto')}</span>
+            </span>
+            <span>
+              {t('queue.created')}: <span className="text-vault-text-secondary">{createdAt}</span>
+            </span>
+            {finishedAt && (
+              <span>
+                {t('queue.finished')}:{' '}
+                <span className="text-vault-text-secondary">{finishedAt}</span>
+              </span>
+            )}
           </div>
-          {job.error && (
-            <p className="mt-1 text-xs text-red-400 break-words">{job.error}</p>
+          {job.error && <p className="mt-1 text-xs text-red-400 break-words">{job.error}</p>}
+          {job.status === 'running' && job.progress && (
+            <div className="mt-2">
+              {typeof job.progress.downloaded === 'number' && (
+                <div className="flex items-center gap-2">
+                  <div className="flex-1 h-1.5 bg-vault-border rounded-full overflow-hidden">
+                    {job.progress.total ? (
+                      <div
+                        className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                        style={{ width: `${Math.min(100, (job.progress.downloaded / job.progress.total) * 100)}%` }}
+                      />
+                    ) : (
+                      <div className="h-full bg-blue-500/30 rounded-full overflow-hidden relative">
+                        <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/60 to-transparent animate-[shimmer_1.5s_infinite]" />
+                      </div>
+                    )}
+                  </div>
+                  <span className="text-xs text-vault-text-muted whitespace-nowrap">
+                    {job.progress.downloaded}{job.progress.total ? ` / ${job.progress.total}` : ''} {t('queue.files')}
+                  </span>
+                </div>
+              )}
+              <div className="flex flex-wrap items-center gap-3 mt-1">
+                {typeof job.progress.speed === 'number' && job.progress.speed > 0 && (
+                  <span className="text-xs text-vault-text-muted">
+                    {t('queue.filesPerMin', { count: (job.progress.speed * 60).toFixed(1) })}
+                  </span>
+                )}
+                {job.progress.started_at && job.progress.last_update_at && (
+                  <span className="text-xs text-vault-text-muted">
+                    {t('queue.elapsed', { time: formatDuration((new Date(job.progress.last_update_at).getTime() - new Date(job.progress.started_at).getTime()) / 1000) })}
+                  </span>
+                )}
+                {job.progress.total && typeof job.progress.speed === 'number' && job.progress.speed > 0 && typeof job.progress.downloaded === 'number' && job.progress.downloaded < job.progress.total && (
+                  <span className="text-xs text-vault-text-muted">
+                    {t('queue.remaining', { time: formatDuration((job.progress.total - job.progress.downloaded) / job.progress.speed) })}
+                  </span>
+                )}
+                {job.progress.status_text && (
+                  <span className="text-xs text-vault-text-muted">{job.progress.status_text}</span>
+                )}
+              </div>
+            </div>
           )}
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
           <StatusBadge status={job.status} />
+          {job.status === 'running' && (
+            <button
+              onClick={() => onPause(job.id, 'pause')}
+              className="p-1.5 rounded-lg bg-orange-500/10 border border-orange-500/30 hover:bg-orange-500/20 text-orange-400 transition-colors"
+              title={t('queue.pause')}
+            >
+              <Pause size={14} />
+            </button>
+          )}
+          {job.status === 'paused' && (
+            <button
+              onClick={() => onPause(job.id, 'resume')}
+              className="p-1.5 rounded-lg bg-green-500/10 border border-green-500/30 hover:bg-green-500/20 text-green-400 transition-colors"
+              title={t('queue.resume')}
+            >
+              <Play size={14} />
+            </button>
+          )}
           {canCancel && (
             <button
               onClick={() => onCancel(job.id)}
@@ -87,6 +169,8 @@ export default function QueuePage() {
   const { data, isLoading, error, mutate } = useDownloadJobs({})
   const { trigger: enqueue, isMutating: isEnqueuing } = useEnqueueDownload()
   const { trigger: cancelJob } = useCancelJob()
+  const { trigger: clearJobs, isMutating: isClearing } = useClearFinishedJobs()
+  const { trigger: pauseJob } = usePauseJob()
 
   const handleEnqueue = useCallback(async () => {
     const url = urlInput.trim()
@@ -101,26 +185,54 @@ export default function QueuePage() {
     }
   }, [urlInput, enqueue, mutate])
 
-  const handleCancel = useCallback(async (id: string) => {
+  const handleCancel = useCallback(
+    async (id: string) => {
+      try {
+        await cancelJob(id)
+        mutate()
+      } catch {
+        toast.error(t('queue.cancelError'))
+      }
+    },
+    [cancelJob, mutate],
+  )
+
+  const handlePause = useCallback(
+    async (id: string, action: 'pause' | 'resume') => {
+      try {
+        await pauseJob({ id, action })
+        mutate()
+      } catch {
+        toast.error(t('queue.pauseError'))
+      }
+    },
+    [pauseJob, mutate],
+  )
+
+  const handleClear = useCallback(async () => {
     try {
-      await cancelJob(id)
+      const result = await clearJobs()
+      toast.success(t('queue.cleared', { count: String(result.deleted) }))
       mutate()
     } catch {
-      toast.error(t('queue.cancelError'))
+      toast.error(t('queue.clearError'))
     }
-  }, [cancelJob, mutate])
+  }, [clearJobs, mutate])
 
   const allJobs = data?.jobs ?? []
-  const activeJobs = allJobs.filter((j) => j.status === 'queued' || j.status === 'running')
-  const completedJobs = allJobs.filter((j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled')
+  const activeJobs = allJobs.filter((j) => j.status === 'queued' || j.status === 'running' || j.status === 'paused')
+  const completedJobs = allJobs.filter(
+    (j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled',
+  )
 
+  const statusOrder: Record<string, number> = { running: 0, paused: 1, queued: 2 }
   const sortedActive = [...activeJobs].sort((a, b) => {
-    if (a.status === 'running' && b.status !== 'running') return -1
-    if (b.status === 'running' && a.status !== 'running') return 1
+    const orderDiff = (statusOrder[a.status] ?? 3) - (statusOrder[b.status] ?? 3)
+    if (orderDiff !== 0) return orderDiff
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   })
   const sortedCompleted = [...completedJobs].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   )
 
   return (
@@ -180,7 +292,7 @@ export default function QueuePage() {
             ) : (
               <div className="space-y-2">
                 {sortedActive.map((job) => (
-                  <JobRow key={job.id} job={job} onCancel={handleCancel} isCancelling={false} />
+                  <JobRow key={job.id} job={job} onCancel={handleCancel} onPause={handlePause} isCancelling={false} />
                 ))}
               </div>
             )}
@@ -190,20 +302,34 @@ export default function QueuePage() {
         {/* Completed Jobs */}
         {!isLoading && sortedCompleted.length > 0 && (
           <div>
-            <button
-              onClick={() => setCompletedOpen((o) => !o)}
-              className="flex items-center justify-between w-full text-left mb-3"
-            >
-              <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
-                {t('queue.completedFailed')} ({sortedCompleted.length})
-              </h2>
-              {completedOpen ? <ChevronUp size={16} className="text-vault-text-muted" /> : <ChevronDown size={16} className="text-vault-text-muted" />}
-            </button>
+            <div className="flex items-center justify-between mb-3">
+              <button
+                onClick={() => setCompletedOpen((o) => !o)}
+                className="flex items-center gap-2 text-left"
+              >
+                <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
+                  {t('queue.completedFailed')} ({sortedCompleted.length})
+                </h2>
+                {completedOpen ? (
+                  <ChevronUp size={16} className="text-vault-text-muted" />
+                ) : (
+                  <ChevronDown size={16} className="text-vault-text-muted" />
+                )}
+              </button>
+              <button
+                onClick={handleClear}
+                disabled={isClearing || sortedCompleted.length === 0}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-vault-card border border-vault-border hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 text-vault-text-muted transition-colors disabled:opacity-40"
+              >
+                <Trash2 size={13} />
+                {isClearing ? t('queue.clearing') : t('queue.clear')}
+              </button>
+            </div>
 
             {completedOpen && (
               <div className="space-y-2">
                 {sortedCompleted.map((job) => (
-                  <JobRow key={job.id} job={job} onCancel={handleCancel} isCancelling={false} />
+                  <JobRow key={job.id} job={job} onCancel={handleCancel} onPause={handlePause} isCancelling={false} />
                 ))}
               </div>
             )}

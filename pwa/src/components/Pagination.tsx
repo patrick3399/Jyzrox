@@ -2,7 +2,7 @@ import { ChevronLeft, ChevronRight } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
 interface PaginationProps {
-  page: number       // 0-indexed
+  page: number // 0-indexed
   total: number
   pageSize?: number
   onChange: (page: number) => void
@@ -46,22 +46,30 @@ export function Pagination({ page, total, pageSize = 20, onChange }: PaginationP
   return (
     <div className="flex flex-col items-center gap-3 py-4">
       <p className="text-xs text-vault-text-muted">
-        {t('common.showing')}{' '}
-        <span className="text-vault-text-secondary">{start}</span>
+        {t('common.showing')} <span className="text-vault-text-secondary">{start}</span>
         {' – '}
-        <span className="text-vault-text-secondary">{end}</span>
-        {' '}{t('common.of')}{' '}
+        <span className="text-vault-text-secondary">{end}</span> {t('common.of')}{' '}
         <span className="text-vault-text-secondary">{total}</span>
       </p>
 
       <div className="flex items-center gap-1">
-        <button type="button" className={btnNav} onClick={() => onChange(page - 1)} disabled={page === 0} aria-label="Previous page">
+        <button
+          type="button"
+          className={btnNav}
+          onClick={() => onChange(page - 1)}
+          disabled={page === 0}
+          aria-label="Previous page"
+        >
           <ChevronLeft size={16} />
         </button>
 
         {pageNumbers.map((item, idx) => {
           if (item === 'ellipsis-start' || item === 'ellipsis-end') {
-            return <span key={item} className="px-1 text-vault-text-muted select-none">…</span>
+            return (
+              <span key={item} className="px-1 text-vault-text-muted select-none">
+                …
+              </span>
+            )
           }
           return (
             <button
@@ -77,7 +85,13 @@ export function Pagination({ page, total, pageSize = 20, onChange }: PaginationP
           )
         })}
 
-        <button type="button" className={btnNav} onClick={() => onChange(page + 1)} disabled={page >= totalPages - 1} aria-label="Next page">
+        <button
+          type="button"
+          className={btnNav}
+          onClick={() => onChange(page + 1)}
+          disabled={page >= totalPages - 1}
+          aria-label="Next page"
+        >
           <ChevronRight size={16} />
         </button>
       </div>

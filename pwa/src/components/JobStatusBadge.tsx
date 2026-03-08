@@ -4,10 +4,7 @@ interface JobStatusBadgeProps {
   status: DownloadJob['status']
 }
 
-const statusConfig: Record<
-  DownloadJob['status'],
-  { label: string; className: string }
-> = {
+const statusConfig: Record<DownloadJob['status'], { label: string; className: string }> = {
   queued: {
     label: 'Queued',
     className: 'bg-yellow-900/50 text-yellow-300 border-yellow-800',
@@ -27,6 +24,10 @@ const statusConfig: Record<
   cancelled: {
     label: 'Cancelled',
     className: 'bg-gray-800/80 text-gray-400 border-gray-700',
+  },
+  paused: {
+    label: 'Paused',
+    className: 'bg-orange-900/50 text-orange-300 border-orange-800',
   },
 }
 

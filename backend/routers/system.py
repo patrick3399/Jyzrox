@@ -1,8 +1,9 @@
 import logging
 
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy import text
 
+from core.auth import require_auth
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.redis_client import get_redis
@@ -40,10 +41,10 @@ async def system_health():
 
 
 @router.get("/info")
-async def system_info():
+async def system_info(_: dict = Depends(require_auth)):
     """Return non-sensitive runtime configuration."""
     return {
-        "version": "2.0.0",
+        "version": "0.1",
         "eh_max_concurrency": settings.eh_max_concurrency,
         "tag_model_enabled": settings.tag_model_enabled,
     }

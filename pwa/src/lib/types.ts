@@ -11,12 +11,13 @@ export interface Gallery {
   pages: number
   posted_at: string | null
   added_at: string
-  rating: number           // 0–5
+  rating: number // 0–5
   favorited: boolean
   uploader: string
   download_status: 'proxy_only' | 'partial' | 'complete'
   import_mode: string | null
   tags_array: string[]
+  cover_thumb?: string | null
 }
 
 export interface GalleryImage {
@@ -49,7 +50,7 @@ export interface EhGallery {
   category: string
   thumb: string
   uploader: string
-  posted_at: number      // Unix timestamp
+  posted_at: number // Unix timestamp
   pages: number
   rating: number
   tags: string[]
@@ -80,7 +81,7 @@ export interface EhFavoritesResult {
 
 export interface EhImageMap {
   gid: number
-  images: Record<string, string>   // { "1": "image_page_token", ... }
+  images: Record<string, string> // { "1": "image_page_token", ... }
   previews: Record<string, string> // { "1": "thumb_url" or "sprite_url|offsetX|w|h", ... }
 }
 
@@ -90,8 +91,8 @@ export interface DownloadJob {
   id: string
   url: string
   source: string
-  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
-  progress: Record<string, unknown>
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused'
+  progress: { percent?: number; downloaded?: number; total?: number; status_text?: string; speed?: number; started_at?: string; last_update_at?: string; [key: string]: unknown }
   error: string | null
   created_at: string
   finished_at: string | null
@@ -117,8 +118,8 @@ export interface TagAlias {
 export interface TagImplication {
   antecedent_id: number
   consequent_id: number
-  antecedent: string     // "namespace:name"
-  consequent: string     // "namespace:name"
+  antecedent: string // "namespace:name"
+  consequent: string // "namespace:name"
 }
 
 // ── Settings ──────────────────────────────────────────────────────────
@@ -145,7 +146,7 @@ export interface EhAccount {
 export interface ApiTokenInfo {
   id: string
   name: string | null
-  token: string            // raw token, always visible
+  token: string // raw token, always visible
   created_at: string | null
   last_used_at: string | null
   expires_at: string | null
@@ -183,6 +184,27 @@ export interface WsMessage {
   ts?: string
 }
 
+// ── Pagination responses ──────────────────────────────────────────────
+
+/** Page-based response (total always present) */
+export interface GalleryListResponse {
+  galleries: Gallery[]
+  /** Present in page-based responses */
+  total?: number
+  /** Present in cursor-based responses */
+  next_cursor?: string | null
+  /** Present in cursor-based responses */
+  has_next?: boolean
+}
+
+/** Page-based tag list response */
+export interface TagListResponse {
+  tags: TagItem[]
+  total?: number
+  next_cursor?: string | null
+  has_next?: boolean
+}
+
 // ── API Params ────────────────────────────────────────────────────────
 
 export interface GallerySearchParams {
@@ -193,6 +215,7 @@ export interface GallerySearchParams {
   min_rating?: number
   source?: string
   page?: number
+  cursor?: string
   limit?: number
   sort?: 'added_at' | 'rating' | 'pages'
 }

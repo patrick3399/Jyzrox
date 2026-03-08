@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
+import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
 
 const navLinks = [
@@ -46,6 +47,7 @@ export function MobileNav() {
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()
   const { data: profile } = useProfile()
+  const { data: stats } = useDownloadStats()
   const [open, setOpen] = useState(false)
 
   // Close drawer on route change
@@ -57,12 +59,14 @@ export function MobileNav() {
   useEffect(() => {
     if (open) {
       document.body.style.overflow = 'hidden'
-      return () => { document.body.style.overflow = '' }
+      return () => {
+        document.body.style.overflow = ''
+      }
     }
   }, [open])
 
   const cycleTheme = useCallback(() => {
-    const idx = themeCycle.indexOf(theme as typeof themeCycle[number])
+    const idx = themeCycle.indexOf(theme as (typeof themeCycle)[number])
     setTheme(themeCycle[(idx + 1) % themeCycle.length])
   }, [theme, setTheme])
 
@@ -72,7 +76,10 @@ export function MobileNav() {
   return (
     <>
       {/* Top bar — pt accounts for iOS safe area (notch / Dynamic Island) */}
-      <nav className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-vault-card border-b border-vault-border h-14 flex items-center px-3 gap-2" style={{ paddingTop: 'var(--sat)', height: 'calc(3.5rem + var(--sat))' }}>
+      <nav
+        className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-vault-card border-b border-vault-border h-14 flex items-center px-3 gap-2"
+        style={{ paddingTop: 'var(--sat)', height: 'calc(3.5rem + var(--sat))' }}
+      >
         <button
           onClick={() => setOpen(true)}
           className="p-2 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
@@ -81,9 +88,7 @@ export function MobileNav() {
           <Menu size={20} />
         </button>
 
-        <span className="text-vault-accent font-bold text-lg tracking-wide flex-1">
-          Jyzrox
-        </span>
+        <span className="text-vault-accent font-bold text-lg tracking-wide flex-1">Jyzrox</span>
 
         <button
           onClick={cycleTheme}
@@ -116,11 +121,17 @@ export function MobileNav() {
         }`}
       >
         {/* Drawer header — pt for iOS safe area */}
-        <div className="flex items-center justify-between px-4 shrink-0 border-b border-vault-border" style={{ paddingTop: 'var(--sat)', minHeight: 'calc(3.5rem + var(--sat))' }}>
+        <div
+          className="flex items-center justify-between px-4 shrink-0 border-b border-vault-border"
+          style={{ paddingTop: 'var(--sat)', minHeight: 'calc(3.5rem + var(--sat))' }}
+        >
           <div className="flex items-center gap-2">
             {profile && (
-              /* eslint-disable-next-line @next/next/no-img-element */
-              <img src={profile.avatar_url} alt="" className="w-7 h-7 rounded-full object-cover bg-vault-input shrink-0" />
+              <img
+                src={profile.avatar_url}
+                alt=""
+                className="w-7 h-7 rounded-full object-cover bg-vault-input shrink-0"
+              />
             )}
             <span className="text-vault-accent font-bold text-lg tracking-wide">Jyzrox</span>
           </div>
@@ -137,7 +148,8 @@ export function MobileNav() {
         <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
           {navLinks.map((link) => {
             const Icon = link.icon
-            const isActive = pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
+            const isActive =
+              pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
             return (
               <Link
                 key={link.href}
@@ -150,6 +162,20 @@ export function MobileNav() {
               >
                 <Icon size={18} />
                 <span>{link.label()}</span>
+                {link.href === '/queue' && stats && (
+                  <span className="ml-auto flex items-center gap-1">
+                    {stats.running > 0 && (
+                      <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1">
+                        {stats.running}
+                      </span>
+                    )}
+                    {stats.finished > 0 && (
+                      <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold px-1">
+                        {stats.finished}
+                      </span>
+                    )}
+                  </span>
+                )}
               </Link>
             )
           })}

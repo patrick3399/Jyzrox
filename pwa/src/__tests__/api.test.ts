@@ -30,22 +30,18 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 function makeResponse(options: {
   status?: number
   ok?: boolean
-  body?: string        // raw text returned by res.text()
-  jsonBody?: unknown   // if set, body is JSON.stringify(jsonBody)
+  body?: string // raw text returned by res.text()
+  jsonBody?: unknown // if set, body is JSON.stringify(jsonBody)
 }): Response {
   const status = options.status ?? 200
   const ok = options.ok ?? (status >= 200 && status < 300)
   const bodyText =
-    options.jsonBody !== undefined
-      ? JSON.stringify(options.jsonBody)
-      : (options.body ?? '')
+    options.jsonBody !== undefined ? JSON.stringify(options.jsonBody) : (options.body ?? '')
 
   return {
     ok,
     status,
-    json: vi.fn().mockResolvedValue(
-      options.jsonBody !== undefined ? options.jsonBody : {}
-    ),
+    json: vi.fn().mockResolvedValue(options.jsonBody !== undefined ? options.jsonBody : {}),
     text: vi.fn().mockResolvedValue(bodyText),
   } as unknown as Response
 }
@@ -71,9 +67,7 @@ describe('apiFetch', () => {
   it('should always include credentials: "include" in the fetch call', async () => {
     const { api } = await import('../lib/api')
 
-    vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: { status: 'ok' } })
-    )
+    vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ jsonBody: { status: 'ok' } }))
 
     await api.auth.logout()
 
@@ -85,9 +79,7 @@ describe('apiFetch', () => {
   it('should send Content-Type: application/json header by default', async () => {
     const { api } = await import('../lib/api')
 
-    vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: { status: 'ok' } })
-    )
+    vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ jsonBody: { status: 'ok' } }))
 
     await api.auth.logout()
 
@@ -104,10 +96,10 @@ describe('apiFetch', () => {
         status: 403,
         ok: false,
         jsonBody: { detail: 'Access denied' },
-      })
+      }),
     )
 
-    await expect(api.auth.login('wrong')).rejects.toThrow('Access denied')
+    await expect(api.auth.login('wrong', 'pass')).rejects.toThrow('Access denied')
   })
 
   it('should throw "HTTP <status>" when the error body has no detail field', async () => {
@@ -118,7 +110,7 @@ describe('apiFetch', () => {
         status: 500,
         ok: false,
         jsonBody: { error: 'internal' }, // no `detail` key
-      })
+      }),
     )
 
     await expect(api.system.health()).rejects.toThrow('HTTP 500')
@@ -144,9 +136,7 @@ describe('apiFetch', () => {
     const { api } = await import('../lib/api')
 
     const payload = { total: 2, page: 1, galleries: [] }
-    vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: payload })
-    )
+    vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ jsonBody: payload }))
 
     const result = await api.library.getGalleries()
     expect(result).toEqual(payload)
@@ -173,9 +163,7 @@ describe('apiFetch', () => {
   it('should call the correct endpoint URL', async () => {
     const { api } = await import('../lib/api')
 
-    vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: {} })
-    )
+    vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ jsonBody: {} }))
 
     await api.library.getGallery(42)
 
@@ -191,7 +179,7 @@ describe('qs() query-string builder', () => {
     const { api } = await import('../lib/api')
 
     vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } })
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
     )
 
     await api.library.getGalleries({ tags: ['action', 'romance'] } as never)
@@ -207,7 +195,7 @@ describe('qs() query-string builder', () => {
     const { api } = await import('../lib/api')
 
     vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } })
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
     )
 
     await api.library.getGalleries({ query: 'naruto' } as never)
@@ -222,7 +210,7 @@ describe('qs() query-string builder', () => {
     const { api } = await import('../lib/api')
 
     vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } })
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
     )
 
     await api.library.getGalleries({ page: 3 } as never)
@@ -237,7 +225,7 @@ describe('qs() query-string builder', () => {
     const { api } = await import('../lib/api')
 
     vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } })
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
     )
 
     await api.library.getGalleries({ query: undefined } as never)
@@ -251,7 +239,7 @@ describe('qs() query-string builder', () => {
     const { api } = await import('../lib/api')
 
     vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } })
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
     )
 
     await api.library.getGalleries({ query: null } as never)
@@ -264,7 +252,7 @@ describe('qs() query-string builder', () => {
     const { api } = await import('../lib/api')
 
     vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } })
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
     )
 
     await api.library.getGalleries({})
@@ -277,7 +265,7 @@ describe('qs() query-string builder', () => {
     const { api } = await import('../lib/api')
 
     vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } })
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
     )
 
     // An empty array: forEach does nothing, so the key should not appear.
@@ -291,7 +279,7 @@ describe('qs() query-string builder', () => {
     const { api } = await import('../lib/api')
 
     vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } })
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
     )
 
     await api.library.getGalleries({ page: 2, tags: ['action', 'romance'] } as never)

@@ -58,9 +58,7 @@ export function TagBadge({ tag, onClick, onRemove, variant = 'default' }: TagBad
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
     >
-      {colonIndex !== -1 && (
-        <span className="opacity-60">{namespace}:</span>
-      )}
+      {colonIndex !== -1 && <span className="opacity-60">{namespace}:</span>}
       <span className={isExclude ? 'line-through' : ''}>{name}</span>
       {onRemove && (
         <button

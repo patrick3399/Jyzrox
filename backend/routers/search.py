@@ -1,20 +1,50 @@
 """Unified search endpoint for galleries."""
 
-from typing import List, Optional
-from fastapi import APIRouter, Depends, Query
-from core.database import async_session
+import base64
+import json
+
+from fastapi import APIRouter, Depends, HTTPException, Query
+from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, func, or_, select
+
 from core.auth import require_auth
-from sqlalchemy import text
+from core.database import async_session
+from db.models import Gallery
 
 router = APIRouter(tags=["search"])
 
 
+# ── Cursor helpers ────────────────────────────────────────────────────
+
+
+def _encode_cursor(row: Gallery, sort: str) -> str:
+    sort_val = {
+        "added_at": row.added_at.isoformat() if row.added_at else "",
+        "rating": row.rating,
+        "pages": row.pages if row.pages is not None else 0,
+        "posted_at": row.posted_at.isoformat() if row.posted_at else "",
+        "title": row.title or "",
+    }[sort]
+    payload = {"id": row.id, "v": str(sort_val), "s": sort}
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+
+
+def _decode_cursor(cursor: str) -> dict:
+    try:
+        return json.loads(base64.urlsafe_b64decode(cursor + "=="))
+    except Exception:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+
+
 @router.get("/")
 async def search_galleries(
-    q: str = Query("", description="Search query: tags (character:rem), exclude (-general:sketch), title (title:\"re zero\"), source (source:ehentai), rating (rating:>=4), favorited (favorited:true), sort (sort:rating)"),
+    q: str = Query(
+        "",
+        description='Search query: tags (character:rem), exclude (-general:sketch), title (title:"re zero"), source (source:ehentai), rating (rating:>=4), favorited (favorited:true), sort (sort:rating)',
+    ),
     sort: str = "added_at",
     page: int = 1,
     limit: int = 24,
+    cursor: str | None = Query(default=None),
     _: dict = Depends(require_auth),
 ):
     """
@@ -26,6 +56,9 @@ async def search_galleries(
       rating:>=4                        → minimum rating
       favorited:true                    → favorited only
       sort:rating                       → override sort order
+
+    Supports cursor-based pagination (cursor=) for deep pages without COUNT(*)/OFFSET cost.
+    When cursor is absent, falls back to OFFSET-based pagination (page-based, max page 500).
     """
     tokens = q.split()
     include_tags: list[str] = []
@@ -55,89 +88,165 @@ async def search_galleries(
         else:
             include_tags.append(t)
 
-    offset = (page - 1) * limit
-    conditions: list[str] = []
-    params: dict = {"limit": limit, "offset": offset}
+    # Build filters
+    filters = []
 
     if include_tags:
-        conditions.append("tags_array @> :inc_tags")
-        params["inc_tags"] = include_tags
+        filters.append(Gallery.tags_array.contains(cast(include_tags, ARRAY(Text))))
 
     if exclude_tags:
-        conditions.append("NOT (tags_array && :exc_tags)")
-        params["exc_tags"] = exclude_tags
+        filters.append(~Gallery.tags_array.overlap(cast(exclude_tags, ARRAY(Text))))
 
     if text_queries:
-        conditions.append("(title ILIKE :tq OR title_jpn ILIKE :tq)")
-        params["tq"] = f"%{text_queries[0]}%"
+        tq = f"%{text_queries[0]}%"
+        filters.append((Gallery.title.ilike(tq)) | (Gallery.title_jpn.ilike(tq)))
 
     if source_filter:
-        conditions.append("source = :source")
-        params["source"] = source_filter
+        filters.append(Gallery.source == source_filter)
 
     if rating_filter is not None:
-        conditions.append("rating >= :min_rating")
-        params["min_rating"] = rating_filter
+        filters.append(Gallery.rating >= rating_filter)
 
     if favorited_filter is not None:
-        conditions.append("favorited = :fav")
-        params["fav"] = favorited_filter
+        filters.append(Gallery.favorited == favorited_filter)
 
-    where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
-
-    # Sort
+    # Sort — DESC for numeric/date columns, ASC for title
+    _desc_sorts = {"added_at", "rating", "pages", "posted_at"}
     sort_map = {
-        "added_at": "added_at DESC",
-        "rating": "rating DESC",
-        "pages": "pages DESC",
-        "posted_at": "posted_at DESC",
-        "title": "title ASC",
+        "added_at": desc(Gallery.added_at),
+        "rating": desc(Gallery.rating),
+        "pages": desc(Gallery.pages),
+        "posted_at": desc(Gallery.posted_at),
+        "title": asc(Gallery.title),
     }
-    order = sort_map.get(sort, "added_at DESC")
+    order = sort_map.get(sort, desc(Gallery.added_at))
+    effective_sort = sort if sort in sort_map else "added_at"
 
-    # Count
+    def _row_to_item(r: Gallery) -> dict:
+        return {
+            "id": r.id,
+            "title": r.title,
+            "title_jpn": r.title_jpn,
+            "source": r.source,
+            "source_id": r.source_id,
+            "category": r.category,
+            "language": r.language,
+            "pages": r.pages,
+            "rating": r.rating,
+            "favorited": r.favorited,
+            "uploader": r.uploader,
+            "download_status": r.download_status,
+            "added_at": r.added_at.isoformat() if r.added_at else None,
+            "posted_at": r.posted_at.isoformat() if r.posted_at else None,
+            "tags": r.tags_array or [],
+        }
+
     async with async_session() as session:
-        count_result = await session.execute(
-            text(f"SELECT COUNT(*) FROM galleries {where}"),
-            {k: v for k, v in params.items() if k not in ("limit", "offset")},
-        )
-        total = count_result.scalar()
+        if cursor is not None:
+            # Keyset pagination — no COUNT(*), no OFFSET
+            c = _decode_cursor(cursor)
+            if c.get("s") != effective_sort:
+                raise HTTPException(status_code=400, detail="Cursor sort key does not match current sort parameter")
 
-        result = await session.execute(
-            text(f"""
-                SELECT id, title, title_jpn, source, source_id, category, language,
-                       pages, rating, favorited, uploader, download_status,
-                       added_at, posted_at, tags_array
-                FROM galleries {where}
-                ORDER BY {order}
-                LIMIT :limit OFFSET :offset
-            """),
-            params,
-        )
-        rows = result.fetchall()
+            cursor_id = c["id"]
+            cursor_val = c["v"]
+
+            base_stmt = select(Gallery).where(*filters)
+
+            if effective_sort == "added_at":
+                from datetime import datetime as _dt
+
+                try:
+                    parsed = _dt.fromisoformat(cursor_val)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid cursor value")
+                base_stmt = base_stmt.where(
+                    or_(
+                        Gallery.added_at < parsed,
+                        and_(Gallery.added_at == parsed, Gallery.id < cursor_id),
+                    )
+                )
+            elif effective_sort == "posted_at":
+                from datetime import datetime as _dt
+
+                try:
+                    parsed = _dt.fromisoformat(cursor_val)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid cursor value")
+                base_stmt = base_stmt.where(
+                    or_(
+                        Gallery.posted_at < parsed,
+                        and_(Gallery.posted_at == parsed, Gallery.id < cursor_id),
+                    )
+                )
+            elif effective_sort == "rating":
+                try:
+                    cv = int(cursor_val)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid cursor value")
+                base_stmt = base_stmt.where(
+                    or_(
+                        Gallery.rating < cv,
+                        and_(Gallery.rating == cv, Gallery.id < cursor_id),
+                    )
+                )
+            elif effective_sort == "pages":
+                try:
+                    cv = int(cursor_val)
+                except ValueError:
+                    raise HTTPException(status_code=400, detail="Invalid cursor value")
+                base_stmt = base_stmt.where(
+                    or_(
+                        Gallery.pages < cv,
+                        and_(Gallery.pages == cv, Gallery.id < cursor_id),
+                    )
+                )
+            else:
+                # title: ASC sort — next page means title > cursor_val, tie-break id ASC
+                base_stmt = base_stmt.where(
+                    or_(
+                        Gallery.title > cursor_val,
+                        and_(Gallery.title == cursor_val, Gallery.id > cursor_id),
+                    )
+                )
+
+            # For DESC sorts tie-break on id DESC; ASC (title) tie-break on id ASC
+            if effective_sort == "title":
+                data_query = base_stmt.order_by(asc(Gallery.title), asc(Gallery.id)).limit(limit + 1)
+            else:
+                data_query = base_stmt.order_by(order, desc(Gallery.id)).limit(limit + 1)
+
+            rows = (await session.execute(data_query)).scalars().all()
+            has_next = len(rows) > limit
+            if has_next:
+                rows = rows[:limit]
+
+            next_cursor = _encode_cursor(rows[-1], effective_sort) if has_next and rows else None
+            return {
+                "query": q,
+                "items": [_row_to_item(r) for r in rows],
+                "next_cursor": next_cursor,
+                "has_next": has_next,
+            }
+
+        else:
+            # Legacy page-based pagination
+            if page > 500:
+                raise HTTPException(
+                    status_code=400, detail="Page depth exceeds limit. Use cursor= for deep pagination."
+                )
+
+            offset = (page - 1) * limit
+
+            count_query = select(func.count()).select_from(Gallery).where(*filters)
+            total = (await session.execute(count_query)).scalar()
+
+            data_query = select(Gallery).where(*filters).order_by(order).limit(limit).offset(offset)
+            rows = (await session.execute(data_query)).scalars().all()
 
     return {
         "total": total,
         "page": page,
         "query": q,
-        "items": [
-            {
-                "id": r.id,
-                "title": r.title,
-                "title_jpn": r.title_jpn,
-                "source": r.source,
-                "source_id": r.source_id,
-                "category": r.category,
-                "language": r.language,
-                "pages": r.pages,
-                "rating": r.rating,
-                "favorited": r.favorited,
-                "uploader": r.uploader,
-                "download_status": r.download_status,
-                "added_at": r.added_at.isoformat() if r.added_at else None,
-                "posted_at": r.posted_at.isoformat() if r.posted_at else None,
-                "tags": r.tags_array or [],
-            }
-            for r in rows
-        ],
+        "items": [_row_to_item(r) for r in rows],
     }

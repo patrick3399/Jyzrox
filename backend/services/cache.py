@@ -11,15 +11,16 @@ logger = logging.getLogger(__name__)
 # TTLs (seconds)
 # EhViewer caches gallery detail in LruCache (no TTL, 25 entries) and
 # pTokens persistently on disk.  We use generous Redis TTLs to match.
-_TTL_GALLERY = 86400      # 24h — gallery metadata (rarely changes)
-_TTL_IMAGELIST = 604800   # 7d  — image token list (pTokens are stable)
+_TTL_GALLERY = 86400  # 24h — gallery metadata (rarely changes)
+_TTL_IMAGELIST = 604800  # 7d  — image token list (pTokens are stable)
 _TTL_PROXY_IMAGE = 86400  # 24h — proxied image bytes
-_TTL_SEARCH = 300         # 5m  — search results
+_TTL_SEARCH = 300  # 5m  — search results
 
 MAX_IMAGE_CACHE_BYTES = 5 * 1024 * 1024  # Skip caching images > 5 MB
 
 
 # ── Generic helpers ──────────────────────────────────────────────────
+
 
 async def get_json(key: str) -> Any | None:
     raw = await get_redis().get(key)
@@ -42,6 +43,7 @@ async def set_bytes(key: str, value: bytes, ttl: int) -> None:
 
 
 # ── Named cache operations ───────────────────────────────────────────
+
 
 async def get_gallery_cache(gid: int) -> dict | None:
     return await get_json(f"eh:gallery:{gid}")

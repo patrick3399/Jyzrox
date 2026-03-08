@@ -18,6 +18,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
+import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
 
 const navLinks = [
@@ -32,16 +33,21 @@ const navLinks = [
 
 const themeCycle = ['light', 'dark', 'system'] as const
 const themeIcon = { light: Sun, dark: Moon, system: Monitor }
-const themeLabel = { light: () => t('common.light'), dark: () => t('common.dark'), system: () => t('common.system') }
+const themeLabel = {
+  light: () => t('common.light'),
+  dark: () => t('common.dark'),
+  system: () => t('common.system'),
+}
 
 export function Sidebar() {
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()
   const { data: profile } = useProfile()
+  const { data: stats } = useDownloadStats()
 
   const cycleTheme = () => {
-    const idx = themeCycle.indexOf(theme as typeof themeCycle[number])
+    const idx = themeCycle.indexOf(theme as (typeof themeCycle)[number])
     setTheme(themeCycle[(idx + 1) % themeCycle.length])
   }
 
@@ -49,16 +55,15 @@ export function Sidebar() {
     <aside className="hidden lg:flex fixed inset-y-0 left-0 z-40 w-56 flex-col bg-vault-card border-r border-vault-border">
       {/* Logo */}
       <div className="flex items-center gap-2 px-5 h-16 shrink-0">
-        <span className="text-vault-accent font-bold text-lg tracking-wide">
-          Jyzrox
-        </span>
+        <span className="text-vault-accent font-bold text-lg tracking-wide">Jyzrox</span>
       </div>
 
       {/* Nav links */}
       <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
         {navLinks.map((link) => {
           const Icon = link.icon
-          const isActive = pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
+          const isActive =
+            pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
           return (
             <Link
               key={link.href}
@@ -71,6 +76,20 @@ export function Sidebar() {
             >
               <Icon size={18} />
               <span>{link.label()}</span>
+              {link.href === '/queue' && stats && (
+                <span className="ml-auto flex items-center gap-1">
+                  {stats.running > 0 && (
+                    <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1">
+                      {stats.running}
+                    </span>
+                  )}
+                  {stats.finished > 0 && (
+                    <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold px-1">
+                      {stats.finished}
+                    </span>
+                  )}
+                </span>
+              )}
             </Link>
           )
         })}
@@ -81,8 +100,12 @@ export function Sidebar() {
         {/* User avatar + name */}
         {profile && (
           <div className="flex items-center gap-3 px-3 py-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={profile.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover bg-vault-input shrink-0" />
+            {}
+            <img
+              src={profile.avatar_url}
+              alt=""
+              className="w-8 h-8 rounded-full object-cover bg-vault-input shrink-0"
+            />
             <span className="text-sm text-vault-text truncate">{profile.username}</span>
           </div>
         )}

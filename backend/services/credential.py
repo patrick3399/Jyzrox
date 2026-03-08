@@ -44,9 +44,7 @@ def decrypt(data: bytes) -> str:
 async def get_credential(source: str) -> str | None:
     """Load and decrypt a credential by source name. Returns None if not set."""
     async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Credential).where(Credential.source == source)
-        )
+        result = await session.execute(select(Credential).where(Credential.source == source))
         cred = result.scalar_one_or_none()
         if cred is None or cred.value_encrypted is None:
             return None
