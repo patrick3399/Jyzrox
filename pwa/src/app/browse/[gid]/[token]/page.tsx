@@ -17,7 +17,7 @@ function PreviewGrid({
   thumbs,
   onRead,
 }: {
-  thumbs: { page: number; url: string; isSprite: boolean; offsetX?: number; width?: number; height?: number }[]
+  thumbs: { page: number; url: string; isSprite: boolean; offsetX?: number; offsetY?: number; width?: number; height?: number }[]
   onRead: (page: number) => void
 }) {
   const gridRef = useRef<HTMLDivElement>(null)
@@ -44,6 +44,14 @@ function PreviewGrid({
         const th = thumb.height ?? 300
         const scale = cellSize.w ? cellSize.w / tw : 1
         const scaledH = th * scale
+        const normalizedOffsetX = (() => {
+          const raw = thumb.offsetX ?? 0
+          return raw > 0 ? -raw : raw
+        })()
+        const normalizedOffsetY = (() => {
+          const raw = thumb.offsetY ?? 0
+          return raw > 0 ? -raw : raw
+        })()
         return (
           <button
             key={thumb.page}
@@ -56,7 +64,7 @@ function PreviewGrid({
                 className="w-full h-full"
                 style={{
                   backgroundImage: `url(${thumb.url})`,
-                  backgroundPosition: `${(thumb.offsetX ?? 0) * scale}px center`,
+                  backgroundPosition: `${normalizedOffsetX * scale}px ${normalizedOffsetY * scale}px`,
                   backgroundSize: `auto ${scaledH}px`,
                   backgroundRepeat: 'no-repeat',
                 }}
@@ -243,6 +251,7 @@ export default function EhGalleryDetailPage() {
       url: string
       isSprite: boolean
       offsetX?: number
+      offsetY?: number
       width?: number
       height?: number
     }[] = []
@@ -250,12 +259,17 @@ export default function EhGalleryDetailPage() {
       const raw = previewData.previews[String(i)]
       if (!raw) continue
       if (raw.includes('|')) {
-        const [spriteUrl, ox, w, h] = raw.split('|')
+        const parts = raw.split('|')
+        const [spriteUrl, ox, oy, w, h] =
+          parts.length >= 5
+            ? parts
+            : [parts[0], parts[1], '0', parts[2], parts[3]]
         thumbs.push({
           page: i,
           url: api.eh.thumbProxyUrl(spriteUrl),
           isSprite: true,
           offsetX: parseInt(ox),
+          offsetY: parseInt(oy),
           width: parseInt(w),
           height: parseInt(h),
         })

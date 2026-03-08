@@ -64,11 +64,11 @@ async def set_imagelist_cache(gid: int, data: dict) -> None:
 
 async def get_preview_cache(gid: int) -> dict | None:
     """Returns {str(page_num): preview_url_or_sprite_info} or None."""
-    return await get_json(f"eh:previews:{gid}")
+    return await get_json(f"eh:previews:v2:{gid}")
 
 
 async def set_preview_cache(gid: int, data: dict) -> None:
-    await set_json(f"eh:previews:{gid}", data, _TTL_IMAGELIST)
+    await set_json(f"eh:previews:v2:{gid}", data, _TTL_IMAGELIST)
 
 
 async def get_proxied_image(gid: int, page: int) -> bytes | None:

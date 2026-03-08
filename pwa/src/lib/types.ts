@@ -82,7 +82,7 @@ export interface EhFavoritesResult {
 export interface EhImageMap {
   gid: number
   images: Record<string, string> // { "1": "image_page_token", ... }
-  previews: Record<string, string> // { "1": "thumb_url" or "sprite_url|offsetX|w|h", ... }
+  previews: Record<string, string> // { "1": "thumb_url" or "sprite_url|offsetX|offsetY|w|h" (legacy: offsetY omitted), ... }
 }
 
 // ── Download ──────────────────────────────────────────────────────────

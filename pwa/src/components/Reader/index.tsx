@@ -141,7 +141,7 @@ interface ReaderProps {
   images: GalleryImage[]
   totalPages: number
   initialPage?: number
-  /** EH preview thumbnail map: { "1": "url" or "url|ox|w|h" } */
+  /** EH preview thumbnail map: { "1": "url" or "url|ox|oy|w|h" (legacy: oy omitted) } */
   previews?: Record<string, string>
 }
 
@@ -629,7 +629,7 @@ interface ThumbnailStripProps {
   images: ReaderImage[]
   currentPage: number
   onPageSelect: (page: number) => void
-  /** Preview thumbs from EH CDN: { "1": "url" or "url|ox|w|h" } */
+  /** Preview thumbs from EH CDN: { "1": "url" or "url|ox|oy|w|h" (legacy: oy omitted) } */
   previews?: Record<string, string>
 }
 
@@ -679,14 +679,19 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
             const parts = previewRaw.split('|')
             const spriteUrl = parts[0]
             const ox = Number(parts[1])
-            const cellW = Number(parts[2]) || 200
-            const cellH = Number(parts[3]) || 300
+            const hasOffsetY = parts.length >= 5
+            const oy = Number(hasOffsetY ? parts[2] : 0)
+            const cellW = Number(parts[hasOffsetY ? 3 : 2]) || 200
+            const cellH = Number(parts[hasOffsetY ? 4 : 3]) || 300
+            const normalizedOffsetX = ox > 0 ? -ox : ox
+            const normalizedOffsetY = oy > 0 ? -oy : oy
             // Scale based on width only — backend normalizes sprite heights.
             const scale = 48 / cellW
-            const scaledOx = ox * scale
+            const scaledOx = normalizedOffsetX * scale
+            const scaledOy = normalizedOffsetY * scale
             spriteStyle = {
               backgroundImage: `url(/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)})`,
-              backgroundPosition: `${scaledOx}px center`,
+              backgroundPosition: `${scaledOx}px ${scaledOy}px`,
               backgroundSize: `auto ${cellH * scale}px`,
               backgroundRepeat: 'no-repeat',
               width: '100%',
