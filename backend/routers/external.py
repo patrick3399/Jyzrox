@@ -2,6 +2,7 @@
 
 import hashlib
 import shutil
+import time
 import uuid as _uuid
 
 import psutil
@@ -10,6 +11,7 @@ from sqlalchemy import func, select, update
 
 from core.config import settings
 from core.database import async_session
+from core.redis_client import get_redis
 from db.models import ApiToken, DownloadJob, Gallery, Image, Tag
 
 router = APIRouter(tags=["external"])
@@ -38,6 +40,27 @@ async def verify_api_token(x_api_token: str = Header(...)):
         await session.commit()
 
     return {"user_id": token.user_id, "token_id": token.id}
+
+
+# ── Rate limiter ──────────────────────────────────────────────────────
+
+_RATE_LIMIT_REQUESTS = 10   # max requests per window
+_RATE_LIMIT_WINDOW = 60     # window size in seconds
+
+
+async def _check_rate_limit(token_id: int) -> None:
+    """Redis-based sliding-window rate limiter scoped to a token per minute."""
+    minute = int(time.time()) // _RATE_LIMIT_WINDOW
+    key = f"ratelimit:ext:{token_id}:{minute}"
+    r = get_redis()
+    count = await r.incr(key)
+    if count == 1:
+        await r.expire(key, _RATE_LIMIT_WINDOW)
+    if count > _RATE_LIMIT_REQUESTS:
+        raise HTTPException(
+            status_code=429,
+            detail=f"Rate limit exceeded: max {_RATE_LIMIT_REQUESTS} requests per minute",
+        )
 
 
 # ── Status ────────────────────────────────────────────────────────────
@@ -240,6 +263,7 @@ async def enqueue_download(
     token_data: dict = Depends(verify_api_token),
 ):
     """Enqueue a download job via external API."""
+    await _check_rate_limit(token_data["token_id"])
     job_id = _uuid.uuid4()
 
     async with async_session() as session:

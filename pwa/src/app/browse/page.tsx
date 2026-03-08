@@ -19,6 +19,7 @@ const HISTORY_ENABLED_KEY = 'eh_search_history_enabled'
 const MAX_HISTORY = 10
 
 function getSearchHistory(): string[] {
+  if (typeof window === 'undefined') return []
   try {
     return JSON.parse(localStorage.getItem(HISTORY_KEY) || '[]')
   } catch {
@@ -27,6 +28,7 @@ function getSearchHistory(): string[] {
 }
 
 function addSearchHistory(query: string) {
+  if (typeof window === 'undefined') return
   if (!query.trim()) return
   if (localStorage.getItem(HISTORY_ENABLED_KEY) === 'false') return
   const history = getSearchHistory().filter((h) => h !== query)
@@ -35,15 +37,18 @@ function addSearchHistory(query: string) {
 }
 
 function removeSearchHistoryItem(query: string) {
+  if (typeof window === 'undefined') return
   const history = getSearchHistory().filter((h) => h !== query)
   localStorage.setItem(HISTORY_KEY, JSON.stringify(history))
 }
 
 function clearSearchHistory() {
+  if (typeof window === 'undefined') return
   localStorage.removeItem(HISTORY_KEY)
 }
 
 function isSearchHistoryEnabled(): boolean {
+  if (typeof window === 'undefined') return true
   return localStorage.getItem(HISTORY_ENABLED_KEY) !== 'false'
 }
 

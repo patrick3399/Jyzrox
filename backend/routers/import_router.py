@@ -89,9 +89,12 @@ async def start_import(
     if req.mode not in ("link", "copy"):
         raise HTTPException(status_code=400, detail="Invalid import mode")
 
-    resolved = Path(req.source_dir).resolve()
-    allowed = Path(settings.data_gallery_path).resolve()
-    if not resolved.is_relative_to(allowed):
+    # Use os.path.realpath to resolve symlinks before validating containment.
+    # Path.resolve() follows symlinks too, but os.path.realpath is explicit
+    # and consistent across Python versions.
+    real_source = os.path.realpath(req.source_dir)
+    real_allowed = os.path.realpath(settings.data_gallery_path)
+    if not real_source.startswith(real_allowed + os.sep) and real_source != real_allowed:
         raise HTTPException(status_code=400, detail="source_dir must be within the gallery path")
 
     # Create DB entry

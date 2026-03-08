@@ -242,6 +242,12 @@ async def delete_gallery(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a gallery and its associated files (images + thumbnails)."""
+    import asyncio
+    import shutil
+    from pathlib import Path
+
+    from core.config import settings as app_settings
+
     g = await _get_or_404(db, gallery_id)
 
     # Collect file paths before deleting DB records
@@ -252,38 +258,55 @@ async def delete_gallery(
     await db.delete(g)
     await db.commit()
 
-    # Best-effort file cleanup
-    import shutil
-    from pathlib import Path
-    deleted_files = 0
-    for row in image_rows:
-        for path_str in (row.file_path, row.thumb_path):
-            if path_str:
-                p = Path(path_str)
+    allowed_gallery = Path(app_settings.data_gallery_path).resolve()
+    allowed_thumbs = Path(app_settings.data_thumbs_path).resolve()
+
+    def _is_safe_path(p: Path) -> bool:
+        """Return True only if path is within an allowed base directory."""
+        try:
+            resolved = p.resolve()
+            return resolved.is_relative_to(allowed_gallery) or resolved.is_relative_to(allowed_thumbs)
+        except (OSError, ValueError):
+            return False
+
+    def _delete_files() -> int:
+        deleted = 0
+        for row in image_rows:
+            for path_str in (row.file_path, row.thumb_path):
+                if path_str:
+                    p = Path(path_str)
+                    if not _is_safe_path(p):
+                        logger.warning("[delete_gallery] skipping unsafe path: %s", path_str)
+                        continue
+                    try:
+                        if p.is_file():
+                            p.unlink()
+                            deleted += 1
+                    except OSError:
+                        pass
+            # Clean up thumb directory (hash-based dir like /data/thumbs/ab/abcdef.../)
+            if row.thumb_path:
+                thumb_dir = Path(row.thumb_path).parent
+                if _is_safe_path(thumb_dir):
+                    try:
+                        if thumb_dir.is_dir() and not any(thumb_dir.iterdir()):
+                            thumb_dir.rmdir()
+                    except OSError:
+                        pass
+
+        # Try to remove gallery directory if empty
+        if image_rows and image_rows[0].file_path:
+            gallery_dir = Path(image_rows[0].file_path).parent
+            if _is_safe_path(gallery_dir):
                 try:
-                    if p.is_file():
-                        p.unlink()
-                        deleted_files += 1
+                    if gallery_dir.is_dir() and not any(gallery_dir.iterdir()):
+                        gallery_dir.rmdir()
                 except OSError:
                     pass
-        # Clean up thumb directory (hash-based dir like /data/thumbs/ab/abcdef.../)
-        if row.thumb_path:
-            thumb_dir = Path(row.thumb_path).parent
-            try:
-                if thumb_dir.is_dir() and not any(thumb_dir.iterdir()):
-                    thumb_dir.rmdir()
-            except OSError:
-                pass
 
-    # Try to remove gallery directory if empty
-    if image_rows and image_rows[0].file_path:
-        gallery_dir = Path(image_rows[0].file_path).parent
-        try:
-            if gallery_dir.is_dir() and not any(gallery_dir.iterdir()):
-                gallery_dir.rmdir()
-        except OSError:
-            pass
+        return deleted
 
+    deleted_files = await asyncio.to_thread(_delete_files)
     return {"status": "ok", "deleted_files": deleted_files}
 
 

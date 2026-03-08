@@ -271,7 +271,10 @@ async def _build_gallery_dl_config(url: str) -> None:
         if token:
             config["extractor"]["pixiv"] = {"refresh-token": token}
 
-    Path(settings.gallery_dl_config).write_text(json.dumps(config, indent=2))
+    config_path = Path(settings.gallery_dl_config)
+    tmp_path = config_path.with_suffix(".tmp")
+    tmp_path.write_text(json.dumps(config, indent=2))
+    os.rename(tmp_path, config_path)
 
 
 def _detect_source(url: str) -> str:
@@ -680,7 +683,9 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
                             continue
                         thumb = rgb.copy()
                         thumb.thumbnail((size, size * 2), PILImage.LANCZOS)
-                        thumb.save(str(dest), "WEBP", quality=85)
+                        tmp = dest.with_suffix(".tmp")
+                        thumb.save(str(tmp), "WEBP", quality=85)
+                        os.rename(tmp, dest)
 
                 img.thumb_path = str(thumb_dir / "thumb_160.webp")
                 processed += 1

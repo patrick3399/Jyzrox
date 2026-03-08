@@ -14,10 +14,12 @@ RUN pip install --no-cache-dir -r requirements.txt && \
 COPY . .
 RUN chown -R appuser:appgroup /app
 
-# Create gallery-dl config directory under /app (accessible by any user)
+# Create gallery-dl config directory under /app (owner: appuser, no world access)
 RUN mkdir -p /app/config && \
     echo '{}' > /app/config/gallery-dl.json && \
-    chmod 777 /app/config /app/config/gallery-dl.json
+    chown -R appuser:appgroup /app/config && \
+    chmod 750 /app/config && \
+    chmod 640 /app/config/gallery-dl.json
 
 USER appuser
 

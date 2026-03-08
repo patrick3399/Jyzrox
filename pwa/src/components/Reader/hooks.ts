@@ -247,6 +247,7 @@ export function useKeyboardNav(onNext: () => void, onPrev: () => void) {
 
 export function useProgressSave(galleryId: number, currentPage: number) {
   const timerRef = useRef<ReturnType<typeof setTimeout>>()
+  const retryRef = useRef<ReturnType<typeof setTimeout>>()
 
   useEffect(() => {
     // Skip progress save for proxy-only browsing (galleryId === 0)
@@ -254,11 +255,20 @@ export function useProgressSave(galleryId: number, currentPage: number) {
 
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
-      api.library.saveProgress(galleryId, currentPage).catch(() => {
-        /* silent */
+      api.library.saveProgress(galleryId, currentPage).catch((err) => {
+        console.warn('[Reader] Failed to save progress, retrying in 5s:', err)
+        clearTimeout(retryRef.current)
+        retryRef.current = setTimeout(() => {
+          api.library.saveProgress(galleryId, currentPage).catch((retryErr) => {
+            console.warn('[Reader] Progress save retry also failed:', retryErr)
+          })
+        }, 5000)
       })
     }, 2000) // debounce 2 s
 
-    return () => clearTimeout(timerRef.current)
+    return () => {
+      clearTimeout(timerRef.current)
+      clearTimeout(retryRef.current)
+    }
   }, [galleryId, currentPage])
 }

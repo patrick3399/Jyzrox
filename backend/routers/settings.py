@@ -416,8 +416,8 @@ async def create_token(
     async with async_session() as session:
         result = await session.execute(
             text("""
-                INSERT INTO api_tokens (user_id, name, token_hash, token_plain, expires_at)
-                VALUES (:uid, :name, :hash, NULL, :exp)
+                INSERT INTO api_tokens (user_id, name, token_hash, expires_at)
+                VALUES (:uid, :name, :hash, :exp)
                 RETURNING id, created_at
             """),
             {

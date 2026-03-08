@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, FormEvent, useEffect, useRef } from 'react'
+import { useState, FormEvent, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 
 import { api } from '@/lib/api'
@@ -12,34 +12,35 @@ export default function LoginPage() {
   const [password, setPassword] = useState('')
   const [error, setError] = useState('')
   const [loading, setLoading] = useState(true)
-  const mountedRef = useRef(true)
-
   useEffect(() => {
-    return () => {
-      mountedRef.current = false
-    }
-  }, [])
+    const controller = new AbortController()
 
-  useEffect(() => {
-    // If we already have a valid session, go straight to dashboard
-    api.auth
-      .check()
-      .then(() => {
+    async function checkSession() {
+      try {
+        // If we already have a valid session, go straight to dashboard
+        await api.auth.check()
+        if (controller.signal.aborted) return
         router.replace('/')
-      })
-      .catch(() => {
+      } catch {
+        if (controller.signal.aborted) return
         // Session invalid or missing — check if first-run setup needed
-        api.auth
-          .needsSetup()
-          .then((data) => {
-            if (!mountedRef.current) return
-            if (data.needs_setup) router.replace('/setup')
-            else setLoading(false)
-          })
-          .catch(() => {
-            if (mountedRef.current) setLoading(false)
-          })
-      })
+        try {
+          const data = await api.auth.needsSetup()
+          if (controller.signal.aborted) return
+          if (data.needs_setup) router.replace('/setup')
+          else setLoading(false)
+        } catch {
+          if (controller.signal.aborted) return
+          setLoading(false)
+        }
+      }
+    }
+
+    checkSession()
+
+    return () => {
+      controller.abort()
+    }
   }, [router])
 
   async function handleSubmit(e: FormEvent<HTMLFormElement>) {

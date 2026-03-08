@@ -252,21 +252,36 @@ async def list_implications(
     ]
 
 
+async def _has_cycle(session, from_id: int, target_id: int) -> bool:
+    """
+    BFS from `from_id` along existing implications.
+    Returns True if `target_id` is reachable (i.e. adding target→from would create a cycle).
+    """
+    visited: set[int] = set()
+    queue: list[int] = [from_id]
+    while queue:
+        current = queue.pop(0)
+        if current in visited:
+            continue
+        visited.add(current)
+        if current == target_id:
+            return True
+        rows = (
+            await session.execute(
+                select(TagImplication.consequent_id).where(TagImplication.antecedent_id == current)
+            )
+        ).scalars().all()
+        queue.extend(r for r in rows if r not in visited)
+    return False
+
+
 @router.post("/implications")
 async def create_implication(req: ImplicationRequest, _: dict = Depends(require_auth)):
     if req.antecedent_id == req.consequent_id:
         raise HTTPException(status_code=400, detail="Cannot imply self")
     async with async_session() as session:
-        # Check for circular implication (simple 1-hop check)
-        result = (
-            await session.execute(
-                select(TagImplication).where(
-                    TagImplication.antecedent_id == req.consequent_id,
-                    TagImplication.consequent_id == req.antecedent_id,
-                )
-            )
-        ).scalar_one_or_none()
-        if result:
+        # Check for circular implication via BFS (detects chains of any length)
+        if await _has_cycle(session, req.consequent_id, req.antecedent_id):
             raise HTTPException(status_code=400, detail="Circular implication detected")
 
         # Check if already exists

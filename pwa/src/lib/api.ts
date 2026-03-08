@@ -24,6 +24,8 @@ import type {
 
 // ── Base fetch ───────────────────────────────────────────────────────
 
+let isRedirecting = false
+
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
     credentials: 'include', // always send vault_token cookie
@@ -35,10 +37,11 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     // Stale session → redirect to login (skip if already on /login or /setup)
     if (res.status === 401 && typeof window !== 'undefined') {
       const p = window.location.pathname
-      if (p !== '/login' && p !== '/setup') {
+      if (p !== '/login' && p !== '/setup' && !isRedirecting) {
+        isRedirecting = true
         window.location.href = '/login'
-        return new Promise(() => {}) as T // never resolves; page is navigating
       }
+      throw new Error('Unauthorized')
     }
     const body = await res.json().catch(() => ({}))
     const msg = body?.detail || `HTTP ${res.status}`
@@ -118,10 +121,11 @@ const auth = {
     if (!res.ok) {
       if (res.status === 401 && typeof window !== 'undefined') {
         const p = window.location.pathname
-        if (p !== '/login' && p !== '/setup') {
+        if (p !== '/login' && p !== '/setup' && !isRedirecting) {
+          isRedirecting = true
           window.location.href = '/login'
-          return new Promise(() => {}) as never
         }
+        throw new Error('Unauthorized')
       }
       const body = await res.json().catch(() => ({}))
       throw new Error(body?.detail || `HTTP ${res.status}`)

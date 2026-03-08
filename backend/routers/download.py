@@ -46,16 +46,17 @@ async def enqueue_download(
     _: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """Create a DB download record and enqueue an ARQ job."""
+    """Create a DB download record and enqueue an ARQ job.
+
+    Order: ARQ enqueue first, then DB commit. If ARQ fails we never create the
+    DB record. If DB insert fails after a successful ARQ enqueue we log a
+    warning — the ARQ job will time out naturally without a matching DB record.
+    """
     job_id = uuid.uuid4()
     source = _detect_source(req.url)
-
-    # DB record + ARQ enqueue in one logical unit
     initial_progress = {"total": req.total} if req.total is not None else None
-    job = DownloadJob(id=job_id, url=req.url, source=source, status="queued", progress=initial_progress)
-    db.add(job)
-    await db.flush()
 
+    # 1. Enqueue ARQ job first — if this fails, no DB record is created.
     arq = request.app.state.arq
     try:
         await arq.enqueue_job(
@@ -67,11 +68,24 @@ async def enqueue_download(
             req.total,
             _job_id=str(job_id),
         )
-    except Exception:
-        await db.rollback()
+    except Exception as exc:
+        logger.error("[enqueue] ARQ enqueue failed: %s", exc)
         raise HTTPException(status_code=503, detail="Failed to enqueue download job")
 
-    await db.commit()
+    # 2. Persist DB record. If this fails, log a warning; the ARQ job will
+    #    eventually time out without a matching DB row.
+    try:
+        job = DownloadJob(id=job_id, url=req.url, source=source, status="queued", progress=initial_progress)
+        db.add(job)
+        await db.commit()
+    except Exception as exc:
+        logger.warning(
+            "[enqueue] ARQ job %s enqueued but DB insert failed: %s — job will time out naturally",
+            job_id,
+            exc,
+        )
+        raise HTTPException(status_code=500, detail="Job enqueued but failed to persist to database")
+
     return {"job_id": str(job_id), "status": "queued"}
 
 
@@ -164,6 +178,18 @@ async def pause_resume_job(
     except (ValueError, TypeError):
         raise HTTPException(status_code=500, detail="Corrupted PID value in Redis")
 
+    # Validate that the PID actually belongs to a gallery-dl process before signalling.
+    try:
+        with open(f"/proc/{pid}/cmdline", "rb") as fh:
+            cmdline = fh.read()
+        if b"gallery-dl" not in cmdline:
+            logger.warning("[pause_resume] pid %d cmdline does not contain gallery-dl; clearing stale PID", pid)
+            await redis.delete(f"download:pid:{job_id}")
+            raise HTTPException(status_code=400, detail="Process is no longer a gallery-dl process")
+    except FileNotFoundError:
+        await redis.delete(f"download:pid:{job_id}")
+        raise HTTPException(status_code=400, detail="Process no longer exists")
+
     try:
         if body.action == "pause":
             if job.status != "running":
@@ -176,6 +202,7 @@ async def pause_resume_job(
             os.kill(pid, signal.SIGCONT)
             job.status = "running"
     except ProcessLookupError:
+        await redis.delete(f"download:pid:{job_id}")
         raise HTTPException(status_code=400, detail="Process no longer exists")
     except PermissionError:
         raise HTTPException(status_code=500, detail="Insufficient permission to signal process")
@@ -202,8 +229,17 @@ async def cancel_job(
     if pid_bytes:
         try:
             pid = int(pid_bytes)
-            os.kill(pid, signal.SIGTERM)
-        except (ProcessLookupError, ValueError, PermissionError) as exc:
+            # Verify PID belongs to gallery-dl before sending signal
+            try:
+                with open(f"/proc/{pid}/cmdline", "rb") as fh:
+                    cmdline = fh.read()
+                if b"gallery-dl" not in cmdline:
+                    logger.warning("[cancel] pid %d is not gallery-dl; skipping signal", pid)
+                else:
+                    os.kill(pid, signal.SIGTERM)
+            except FileNotFoundError:
+                pass  # Process already gone
+        except (ValueError, PermissionError) as exc:
             logger.warning("[cancel] failed to kill pid %s: %s", pid_bytes, exc)
         await redis.delete(f"download:pid:{job_id}")
 

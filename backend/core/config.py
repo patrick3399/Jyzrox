@@ -41,9 +41,10 @@ class Settings(BaseSettings):
     # gallery-dl config (bind-mounted)
     gallery_dl_config: str = "/app/config/gallery-dl.json"
 
-    # Pixiv OAuth
+    # Pixiv OAuth (public Android app credentials; override via env if needed)
     pixiv_client_id: str = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
     pixiv_client_secret: str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
+    # To override: set PIXIV_CLIENT_ID and PIXIV_CLIENT_SECRET in .env
 
     model_config = {"env_file": ".env", "case_sensitive": False}
 

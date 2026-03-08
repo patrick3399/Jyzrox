@@ -179,7 +179,7 @@ export default function QueuePage() {
       const result = await enqueue({ url })
       toast.success(`${t('queue.queuedSuccess')} (job: ${result.job_id})`)
       setUrlInput('')
-      mutate()
+      await mutate()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to enqueue download')
     }
@@ -189,7 +189,7 @@ export default function QueuePage() {
     async (id: string) => {
       try {
         await cancelJob(id)
-        mutate()
+        await mutate()
       } catch {
         toast.error(t('queue.cancelError'))
       }
@@ -201,7 +201,7 @@ export default function QueuePage() {
     async (id: string, action: 'pause' | 'resume') => {
       try {
         await pauseJob({ id, action })
-        mutate()
+        await mutate()
       } catch {
         toast.error(t('queue.pauseError'))
       }
@@ -213,7 +213,7 @@ export default function QueuePage() {
     try {
       const result = await clearJobs()
       toast.success(t('queue.cleared', { count: String(result.deleted) }))
-      mutate()
+      await mutate()
     } catch {
       toast.error(t('queue.clearError'))
     }

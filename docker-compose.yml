@@ -36,6 +36,7 @@ services:
       - ./data/thumbs:/data/thumbs
       - ./data/training:/data/training
       - ./data/avatars:/data/avatars
+      # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
     depends_on:
       postgres:
@@ -74,6 +75,7 @@ services:
       - ./data/gallery:/data/gallery
       - ./data/thumbs:/data/thumbs
       - ./data/training:/data/training
+      # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
     depends_on:
       postgres:
