@@ -196,7 +196,7 @@ async def delete_alias(
             )
         ).scalar_one_or_none()
         if alias:
-            session.delete(alias)
+            await session.delete(alias)
             await session.commit()
     return {"status": "ok"}
 
@@ -322,7 +322,7 @@ async def delete_implication(
             )
         ).scalar_one_or_none()
         if impl:
-            session.delete(impl)
+            await session.delete(impl)
             await session.commit()
     return {"status": "ok"}
 

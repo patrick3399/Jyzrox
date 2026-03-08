@@ -1522,7 +1522,7 @@ function BrowsePage() {
                       <ListCard
                         key={`${g.gid}-${g.token}`}
                         gallery={g}
-                        onClick={() => navigateToGallery(g)}
+                        onClick={() => setSelectedGallery(g)}
                       />
                     ))}
                   </div>
@@ -1532,7 +1532,7 @@ function BrowsePage() {
                       <GridCard
                         key={`${g.gid}-${g.token}`}
                         gallery={g}
-                        onClick={() => navigateToGallery(g)}
+                        onClick={() => setSelectedGallery(g)}
                       />
                     ))}
                   </div>
@@ -1909,7 +1909,17 @@ function BrowsePage() {
         </div>
       </div>
 
-      {/* Gallery modal kept for quick-action fallback (e.g. long-press in future) */}
+      {/* Gallery detail modal */}
+      {selectedGallery && (
+        <GalleryModal
+          gallery={selectedGallery}
+          onClose={() => setSelectedGallery(null)}
+          onDownload={(g) => {
+            setSelectedGallery(null)
+            handleDownload(g)
+          }}
+        />
+      )}
     </div>
   )
 }

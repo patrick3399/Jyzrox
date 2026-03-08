@@ -159,6 +159,7 @@ _SQLITE_SCHEMA = [
         thumb_path TEXT,
         file_size INTEGER,
         file_hash TEXT,
+        phash TEXT,
         media_type TEXT DEFAULT 'image',
         duration REAL,
         duplicate_of INTEGER REFERENCES images(id),
@@ -191,6 +192,101 @@ _SQLITE_SCHEMA = [
         namespace TEXT NOT NULL,
         name TEXT NOT NULL,
         UNIQUE (user_id, namespace, name)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        namespace TEXT NOT NULL,
+        name TEXT NOT NULL,
+        count INTEGER DEFAULT 0,
+        UNIQUE (namespace, name)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS tag_aliases (
+        alias_namespace TEXT NOT NULL,
+        alias_name TEXT NOT NULL,
+        canonical_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        PRIMARY KEY (alias_namespace, alias_name)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS tag_implications (
+        antecedent_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        consequent_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        PRIMARY KEY (antecedent_id, consequent_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS gallery_tags (
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        confidence REAL DEFAULT 1.0,
+        source TEXT DEFAULT 'metadata',
+        PRIMARY KEY (gallery_id, tag_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS image_tags (
+        image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+        tag_id INTEGER NOT NULL REFERENCES tags(id) ON DELETE CASCADE,
+        confidence REAL,
+        PRIMARY KEY (image_id, tag_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS credentials (
+        source TEXT PRIMARY KEY,
+        credential_type TEXT NOT NULL,
+        value_encrypted BLOB,
+        expires_at TIMESTAMP,
+        last_verified TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS api_tokens (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT,
+        token_hash TEXT UNIQUE NOT NULL,
+        token_plain TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        last_used_at TIMESTAMP,
+        expires_at TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS browse_history (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        source TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        title TEXT,
+        thumb TEXT,
+        gid INTEGER,
+        token TEXT,
+        viewed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, source, source_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS saved_searches (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        query TEXT DEFAULT '',
+        params TEXT DEFAULT '{}',
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS tag_translations (
+        namespace TEXT NOT NULL,
+        name TEXT NOT NULL,
+        language TEXT NOT NULL DEFAULT 'zh',
+        translation TEXT NOT NULL,
+        PRIMARY KEY (namespace, name, language)
     )
     """,
 ]
@@ -289,6 +385,10 @@ async def client(db_session, db_session_factory, mock_redis):
     _app.dependency_overrides[_fake_get_db] = _override_get_db
     _app.dependency_overrides[require_auth] = _override_require_auth
 
+    # Set app.state.arq since ASGITransport doesn't trigger lifespan
+    _app.state.arq = AsyncMock()
+    _app.state.arq.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job"))
+
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
@@ -296,6 +396,9 @@ async def client(db_session, db_session_factory, mock_redis):
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.async_session", db_session_factory),
+        patch("routers.search.async_session", db_session_factory),
+        patch("routers.tag.async_session", db_session_factory),
+        patch("routers.eh.async_session", db_session_factory),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:
@@ -326,6 +429,75 @@ async def unauthed_client(db_session, db_session_factory, mock_redis):
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.async_session", db_session_factory),
+    ):
+        transport = ASGITransport(app=_app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+    _app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def ext_client(db_session, db_session_factory, mock_redis):
+    """
+    httpx.AsyncClient for external API tests.
+
+    No require_auth override — the external router uses verify_api_token
+    (backed by async_session). We patch routers.external.async_session so
+    all DB calls go through the SQLite test engine.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    async def _override_get_db():
+        yield db_session
+
+    _app.dependency_overrides[_fake_get_db] = _override_get_db
+
+    with (
+        patch("core.redis_client.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.get_redis", return_value=mock_redis),
+        patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.async_session", db_session_factory),
+        patch("routers.external.async_session", db_session_factory),
+    ):
+        transport = ASGITransport(app=_app, raise_app_exceptions=False)
+        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+            yield ac
+
+    _app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def hist_client(db_session, db_session_factory, mock_redis):
+    """
+    Authenticated httpx.AsyncClient for history router tests.
+
+    Patches routers.history.async_session to use the SQLite test engine
+    so that history CRUD operations are fully testable in isolation.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from core.auth import require_auth
+
+    async def _override_get_db():
+        yield db_session
+
+    async def _override_require_auth():
+        return {"user_id": 1}
+
+    _app.dependency_overrides[_fake_get_db] = _override_get_db
+    _app.dependency_overrides[require_auth] = _override_require_auth
+
+    with (
+        patch("core.redis_client.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.get_redis", return_value=mock_redis),
+        patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.async_session", db_session_factory),
+        patch("routers.history.async_session", db_session_factory),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
         async with AsyncClient(transport=transport, base_url="http://test") as ac:

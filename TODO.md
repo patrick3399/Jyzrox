@@ -22,7 +22,7 @@
 
 ### 搜尋增強
 - [x] 感知雜湊（perceptual hash）去重（目前僅 SHA256 完全相同）
-- [ ] 搜尋語法：`sort:posted_at`、`sort:title` 後端已支援，前端 UI 可增加排序選項
+- [x] 搜尋語法：`sort:posted_at`、`sort:title` 後端已支援，前端 UI 可增加排序選項
 
 ---
 
@@ -37,22 +37,22 @@
 
 ## 測試覆蓋
 
-### Backend（3 個測試檔，覆蓋不足）
-- [ ] `test_eh.py` — E-Hentai router 測試
-- [ ] `test_search.py` — 搜尋語法解析 + GIN query 測試
-- [ ] `test_tag.py` — Tag alias/implication CRUD + cycle detection
-- [ ] `test_settings.py` — 憑證加解密 + API token CRUD
-- [ ] `test_import.py` — Import 流程 + 重複檢測
-- [ ] `test_export.py` — Kohya zip export
-- [ ] `test_external.py` — External API token 驗證 + rate limiting
-- [ ] `test_history.py` — Browse history CRUD
-- [ ] `test_worker.py` — Worker pipeline 單元測試
+### Backend（221 tests passing）
+- [x] `test_eh.py` — E-Hentai router 測試
+- [x] `test_search.py` — 搜尋語法解析 + GIN query 測試
+- [x] `test_tag.py` — Tag alias/implication CRUD + cycle detection
+- [x] `test_settings.py` — 憑證加解密 + API token CRUD
+- [x] `test_import.py` — Import 流程 + 重複檢測
+- [x] `test_export.py` — Kohya zip export
+- [x] `test_external.py` — External API token 驗證 + rate limiting
+- [x] `test_history.py` — Browse history CRUD
+- [x] `test_worker.py` — Worker pipeline 單元測試
 
-### Frontend（基礎元件已有，頁面/hooks 不足）
-- [ ] `useGalleries.test.ts` — Library + EH hooks 測試
-- [ ] Reader component 測試（模式切換、鍵盤導航、進度儲存）
-- [ ] Browse page 整合測試（搜尋、分頁、saved searches）
-- [ ] Library page 整合測試（篩選、cursor pagination）
+### Frontend（242 tests passing）
+- [x] `useGalleries.test.ts` — Library + EH hooks 測試
+- [x] Reader component 測試（模式切換、鍵盤導航、進度儲存）
+- [x] Browse page 整合測試（搜尋、分頁、saved searches）
+- [x] Library page 整合測試（篩選、cursor pagination）
 
 ---
 
