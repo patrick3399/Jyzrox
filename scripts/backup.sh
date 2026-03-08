@@ -9,8 +9,17 @@ set -euo pipefail
 
 BACKUP_DIR="${1:-./backups}"
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-DB_USER="vault"
-DB_NAME="vault"
+
+# Read DB credentials from .env at project root (same directory as docker-compose.yml)
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_DIR="$(dirname "$SCRIPT_DIR")"
+ENV_FILE="$PROJECT_DIR/.env"
+if [ -f "$ENV_FILE" ]; then
+  DB_USER="$(grep -E '^POSTGRES_USER=' "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]')"
+  DB_NAME="$(grep -E '^POSTGRES_DB=' "$ENV_FILE" | cut -d= -f2- | tr -d '[:space:]')"
+fi
+DB_USER="${DB_USER:-vault}"
+DB_NAME="${DB_NAME:-vault}"
 
 mkdir -p "$BACKUP_DIR"
 

@@ -63,11 +63,11 @@
 - [x] Nginx healthcheck — `/nginx-health` location + docker healthcheck (wget)
 
 ### 中優先
-- [ ] Backend Dockerfile 改為 multi-stage build（減少 image 大小）
-- [ ] API healthcheck 改用 `curl` 或 `wget`（目前用 `python -c urllib` 開銷較大）
-- [ ] `backup.sh` 讀取 `.env` 取得 DB 憑證（目前硬編碼 `DB_USER="vault"`）
-- [ ] `restore.sh` 停止服務時加入 nginx（目前只停 api/worker/pwa）
-- [ ] 自動備份排程（systemd timer 或 cron）
+- [x] Backend Dockerfile 改為 multi-stage build（builder + runtime stages）
+- [x] API healthcheck 改用 `wget`（替代 `python -c urllib`，減少開銷）
+- [x] `backup.sh` 讀取 `.env` 取得 DB 憑證（不再硬編碼）
+- [x] `restore.sh` 停止服務時加入 nginx（已確認原本就有）
+- [x] 自動備份排程 — `scripts/backup-cron.sh` wrapper + crontab/systemd 範例
 
 ### 低優先
 - [ ] Docker network 分段（DB/Redis 獨立子網，僅 api/worker 可存取）
