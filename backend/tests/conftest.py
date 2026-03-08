@@ -62,9 +62,7 @@ class _PlaceholderBase(DeclarativeBase):
 
 
 _placeholder_engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
-_placeholder_factory = async_sessionmaker(
-    _placeholder_engine, class_=AsyncSession, expire_on_commit=False
-)
+_placeholder_factory = async_sessionmaker(_placeholder_engine, class_=AsyncSession, expire_on_commit=False)
 
 
 async def _fake_get_db():

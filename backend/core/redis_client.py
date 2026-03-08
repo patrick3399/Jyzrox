@@ -61,9 +61,7 @@ class EhSemaphore:
             # Slot not available — give it back and wait
             await r.decr(self._COUNTER_KEY)
             if loop.time() >= deadline:
-                raise TimeoutError(
-                    f"EH semaphore: could not acquire slot within {self.acquire_timeout}s"
-                )
+                raise TimeoutError(f"EH semaphore: could not acquire slot within {self.acquire_timeout}s")
             await asyncio.sleep(0.3)
 
 

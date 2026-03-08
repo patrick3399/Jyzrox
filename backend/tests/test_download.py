@@ -7,13 +7,12 @@ app.state.arq. Download jobs are stored in SQLite test DB.
 
 import uuid
 
-import pytest
 from sqlalchemy import text
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _insert_job(db_session, url="https://e-hentai.org/g/123/abc/", status="queued", source="ehentai"):
     """Insert a download job directly via raw SQL (SQLite-compatible)."""
@@ -32,6 +31,7 @@ async def _insert_job(db_session, url="https://e-hentai.org/g/123/abc/", status=
 # ---------------------------------------------------------------------------
 # Source auto-detection (unit tests — no HTTP needed)
 # ---------------------------------------------------------------------------
+
 
 class TestDetectSource:
     """Unit tests for _detect_source helper."""
@@ -67,6 +67,7 @@ class TestDetectSource:
 # Enqueue download
 # ---------------------------------------------------------------------------
 
+
 class TestEnqueueDownload:
     """POST /api/download/ — create a download job.
 
@@ -85,6 +86,7 @@ class TestEnqueueDownload:
 # ---------------------------------------------------------------------------
 # List jobs
 # ---------------------------------------------------------------------------
+
 
 class TestListJobs:
     """GET /api/download/jobs — paginated job listing."""
@@ -136,6 +138,7 @@ class TestListJobs:
 # uses UUID type matching which doesn't work on SQLite. These tests are
 # marked as expected to require PostgreSQL for full integration.
 # ---------------------------------------------------------------------------
+
 
 class TestGetJob:
     """GET /api/download/jobs/{job_id}"""

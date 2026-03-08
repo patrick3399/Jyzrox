@@ -19,7 +19,9 @@ const STATUS_STYLES: Record<string, string> = {
 
 function StatusBadge({ status }: { status: string }) {
   return (
-    <span className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs font-medium ${STATUS_STYLES[status] ?? STATUS_STYLES.cancelled}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 px-2 py-0.5 rounded border text-xs font-medium ${STATUS_STYLES[status] ?? STATUS_STYLES.cancelled}`}
+    >
       {status === 'running' && (
         <span className="flex gap-0.5">
           <span className="w-1 h-1 rounded-full bg-blue-400 animate-bounce [animation-delay:0ms]" />
@@ -53,13 +55,21 @@ function JobRow({
             {job.url}
           </p>
           <div className="flex flex-wrap items-center gap-3 text-xs text-vault-text-muted">
-            <span>{t('queue.source')}: <span className="text-vault-text-secondary">{job.source || t('common.auto')}</span></span>
-            <span>{t('queue.created')}: <span className="text-vault-text-secondary">{createdAt}</span></span>
-            {finishedAt && <span>{t('queue.finished')}: <span className="text-vault-text-secondary">{finishedAt}</span></span>}
+            <span>
+              {t('queue.source')}:{' '}
+              <span className="text-vault-text-secondary">{job.source || t('common.auto')}</span>
+            </span>
+            <span>
+              {t('queue.created')}: <span className="text-vault-text-secondary">{createdAt}</span>
+            </span>
+            {finishedAt && (
+              <span>
+                {t('queue.finished')}:{' '}
+                <span className="text-vault-text-secondary">{finishedAt}</span>
+              </span>
+            )}
           </div>
-          {job.error && (
-            <p className="mt-1 text-xs text-red-400 break-words">{job.error}</p>
-          )}
+          {job.error && <p className="mt-1 text-xs text-red-400 break-words">{job.error}</p>}
         </div>
 
         <div className="flex items-center gap-2 flex-shrink-0">
@@ -101,18 +111,23 @@ export default function QueuePage() {
     }
   }, [urlInput, enqueue, mutate])
 
-  const handleCancel = useCallback(async (id: string) => {
-    try {
-      await cancelJob(id)
-      mutate()
-    } catch {
-      toast.error(t('queue.cancelError'))
-    }
-  }, [cancelJob, mutate])
+  const handleCancel = useCallback(
+    async (id: string) => {
+      try {
+        await cancelJob(id)
+        mutate()
+      } catch {
+        toast.error(t('queue.cancelError'))
+      }
+    },
+    [cancelJob, mutate],
+  )
 
   const allJobs = data?.jobs ?? []
   const activeJobs = allJobs.filter((j) => j.status === 'queued' || j.status === 'running')
-  const completedJobs = allJobs.filter((j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled')
+  const completedJobs = allJobs.filter(
+    (j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled',
+  )
 
   const sortedActive = [...activeJobs].sort((a, b) => {
     if (a.status === 'running' && b.status !== 'running') return -1
@@ -120,7 +135,7 @@ export default function QueuePage() {
     return new Date(a.created_at).getTime() - new Date(b.created_at).getTime()
   })
   const sortedCompleted = [...completedJobs].sort(
-    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    (a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime(),
   )
 
   return (
@@ -197,7 +212,11 @@ export default function QueuePage() {
               <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
                 {t('queue.completedFailed')} ({sortedCompleted.length})
               </h2>
-              {completedOpen ? <ChevronUp size={16} className="text-vault-text-muted" /> : <ChevronDown size={16} className="text-vault-text-muted" />}
+              {completedOpen ? (
+                <ChevronUp size={16} className="text-vault-text-muted" />
+              ) : (
+                <ChevronDown size={16} className="text-vault-text-muted" />
+              )}
             </button>
 
             {completedOpen && (

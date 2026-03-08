@@ -1,22 +1,32 @@
 import type {
-  Gallery, GalleryImage, GallerySearchParams,
-  EhGallery, EhSearchResult, EhFavoritesResult, EhImageMap, EhSearchParams,
-  DownloadJob, JobListParams,
-  Credentials, EhAccount, SessionInfo,
+  Gallery,
+  GalleryImage,
+  GalleryListResponse,
+  GallerySearchParams,
+  TagListResponse,
+  EhGallery,
+  EhSearchResult,
+  EhFavoritesResult,
+  EhImageMap,
+  EhSearchParams,
+  DownloadJob,
+  JobListParams,
+  Credentials,
+  EhAccount,
+  SessionInfo,
   ApiTokenInfo,
   ReadProgress,
-  SystemHealth, SystemInfo,
-  TagItem, TagAlias, TagImplication,
+  SystemHealth,
+  SystemInfo,
+  TagAlias,
+  TagImplication,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
 
-async function apiFetch<T>(
-  path: string,
-  options: RequestInit = {}
-): Promise<T> {
+async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const res = await fetch(path, {
-    credentials: 'include',   // always send vault_token cookie
+    credentials: 'include', // always send vault_token cookie
     headers: { 'Content-Type': 'application/json', ...options.headers },
     ...options,
   })
@@ -60,11 +70,9 @@ const auth = {
       body: JSON.stringify({ username, password }),
     }),
 
-  logout: () =>
-    apiFetch<{ status: string }>('/api/auth/logout', { method: 'POST' }),
+  logout: () => apiFetch<{ status: string }>('/api/auth/logout', { method: 'POST' }),
 
-  needsSetup: () =>
-    apiFetch<{ needs_setup: boolean }>('/api/auth/needs-setup'),
+  needsSetup: () => apiFetch<{ needs_setup: boolean }>('/api/auth/needs-setup'),
 
   setup: (username: string, password: string) =>
     apiFetch<{ status: string }>('/api/auth/setup', {
@@ -72,19 +80,24 @@ const auth = {
       body: JSON.stringify({ username, password }),
     }),
 
-  getSessions: () =>
-    apiFetch<{ sessions: SessionInfo[] }>('/api/auth/sessions'),
+  getSessions: () => apiFetch<{ sessions: SessionInfo[] }>('/api/auth/sessions'),
 
   revokeSession: (tokenPrefix: string) =>
     apiFetch<{ status: string }>(`/api/auth/sessions/${tokenPrefix}`, {
       method: 'DELETE',
     }),
 
-  check: () =>
-    apiFetch<{ status: string }>('/api/auth/check'),
+  check: () => apiFetch<{ status: string }>('/api/auth/check'),
 
   getProfile: () =>
-    apiFetch<{ username: string; email: string | null; role: string; created_at: string | null; avatar_url: string; avatar_style: string }>('/api/auth/profile'),
+    apiFetch<{
+      username: string
+      email: string | null
+      role: string
+      created_at: string | null
+      avatar_url: string
+      avatar_style: string
+    }>('/api/auth/profile'),
 
   updateProfile: (data: { email?: string | null; avatar_style?: string }) =>
     apiFetch<{ status: string }>('/api/auth/profile', {
@@ -92,7 +105,9 @@ const auth = {
       body: JSON.stringify(data),
     }),
 
-  uploadAvatar: async (file: File): Promise<{ status: string; avatar_url: string; avatar_style: string }> => {
+  uploadAvatar: async (
+    file: File,
+  ): Promise<{ status: string; avatar_url: string; avatar_style: string }> => {
     const form = new FormData()
     form.append('file', file)
     const res = await fetch('/api/auth/avatar', {
@@ -141,16 +156,14 @@ const eh = {
   /** Lightweight: only scrapes page 0 for ~20 preview thumbnails */
   getPreviews: (gid: number, token: string) =>
     apiFetch<{ gid: number; previews: Record<string, string> }>(
-      `/api/eh/gallery/${gid}/${token}/previews`
+      `/api/eh/gallery/${gid}/${token}/previews`,
     ),
 
   /** Returns the URL string — caller uses it as <img src> */
-  imageProxyUrl: (gid: number, page: number): string =>
-    `/api/eh/image-proxy/${gid}/${page}`,
+  imageProxyUrl: (gid: number, page: number): string => `/api/eh/image-proxy/${gid}/${page}`,
 
   /** Proxy an EH CDN thumbnail through our server */
-  thumbProxyUrl: (url: string): string =>
-    `/api/eh/thumb-proxy?url=${encodeURIComponent(url)}`,
+  thumbProxyUrl: (url: string): string => `/api/eh/thumb-proxy?url=${encodeURIComponent(url)}`,
 
   getFavorites: (params: { favcat?: string; q?: string; next?: string; prev?: string } = {}) =>
     apiFetch<EhFavoritesResult>(`/api/eh/favorites${qs(params as Record<string, unknown>)}`),
@@ -170,17 +183,12 @@ const eh = {
 
 const library = {
   getGalleries: (params: GallerySearchParams = {}) =>
-    apiFetch<{ total: number; page: number; galleries: Gallery[] }>(
-      `/api/library/galleries${qs(params as Record<string, unknown>)}`
-    ),
+    apiFetch<GalleryListResponse>(`/api/library/galleries${qs(params as Record<string, unknown>)}`),
 
-  getGallery: (id: number) =>
-    apiFetch<Gallery>(`/api/library/galleries/${id}`),
+  getGallery: (id: number) => apiFetch<Gallery>(`/api/library/galleries/${id}`),
 
   getImages: (id: number) =>
-    apiFetch<{ gallery_id: number; images: GalleryImage[] }>(
-      `/api/library/galleries/${id}/images`
-    ),
+    apiFetch<{ gallery_id: number; images: GalleryImage[] }>(`/api/library/galleries/${id}/images`),
 
   updateGallery: (id: number, patch: { favorited?: boolean; rating?: number }) =>
     apiFetch<Gallery>(`/api/library/galleries/${id}`, {
@@ -188,8 +196,7 @@ const library = {
       body: JSON.stringify(patch),
     }),
 
-  getProgress: (id: number) =>
-    apiFetch<ReadProgress>(`/api/library/galleries/${id}/progress`),
+  getProgress: (id: number) => apiFetch<ReadProgress>(`/api/library/galleries/${id}/progress`),
 
   saveProgress: (id: number, last_page: number) =>
     apiFetch<{ status: string }>(`/api/library/galleries/${id}/progress`, {
@@ -204,16 +211,19 @@ const download = {
   enqueue: (url: string, source?: string, options: Record<string, unknown> = {}) =>
     apiFetch<{ job_id: string; status: string }>('/api/download/', {
       method: 'POST',
-      body: JSON.stringify({ url, ...(source && { source }), ...((Object.keys(options).length > 0) && { options }) }),
+      body: JSON.stringify({
+        url,
+        ...(source && { source }),
+        ...(Object.keys(options).length > 0 && { options }),
+      }),
     }),
 
   getJobs: (params: JobListParams = {}) =>
     apiFetch<{ total: number; jobs: DownloadJob[] }>(
-      `/api/download/jobs${qs(params as Record<string, unknown>)}`
+      `/api/download/jobs${qs(params as Record<string, unknown>)}`,
     ),
 
-  getJob: (id: string) =>
-    apiFetch<DownloadJob>(`/api/download/jobs/${id}`),
+  getJob: (id: string) => apiFetch<DownloadJob>(`/api/download/jobs/${id}`),
 
   cancelJob: (id: string) =>
     apiFetch<{ status: string }>(`/api/download/jobs/${id}`, {
@@ -224,14 +234,13 @@ const download = {
 // ── Settings ──────────────────────────────────────────────────────────
 
 const settings = {
-  getCredentials: () =>
-    apiFetch<Credentials>('/api/settings/credentials'),
+  getCredentials: () => apiFetch<Credentials>('/api/settings/credentials'),
 
   ehLogin: (username: string, password: string) =>
-    apiFetch<{ status: string; account: EhAccount }>(
-      '/api/settings/credentials/ehentai/login',
-      { method: 'POST', body: JSON.stringify({ username, password }) }
-    ),
+    apiFetch<{ status: string; account: EhAccount }>('/api/settings/credentials/ehentai/login', {
+      method: 'POST',
+      body: JSON.stringify({ username, password }),
+    }),
 
   setEhCookies: (data: {
     ipb_member_id: string
@@ -239,28 +248,26 @@ const settings = {
     sk: string
     igneous?: string
   }) =>
-    apiFetch<{ status: string; account: EhAccount }>(
-      '/api/settings/credentials/ehentai',
-      { method: 'POST', body: JSON.stringify(data) }
-    ),
+    apiFetch<{ status: string; account: EhAccount }>('/api/settings/credentials/ehentai', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
 
   setPixivToken: (refresh_token: string) =>
-    apiFetch<{ status: string; username: string }>(
-      '/api/settings/credentials/pixiv',
-      { method: 'POST', body: JSON.stringify({ refresh_token }) }
-    ),
+    apiFetch<{ status: string; username: string }>('/api/settings/credentials/pixiv', {
+      method: 'POST',
+      body: JSON.stringify({ refresh_token }),
+    }),
 
-  getEhAccount: () =>
-    apiFetch<EhAccount>('/api/settings/eh/account'),
+  getEhAccount: () => apiFetch<EhAccount>('/api/settings/eh/account'),
 
   checkEhCookies: () =>
     apiFetch<{ eh_valid: boolean; ex_valid: boolean; has_igneous: boolean }>(
       '/api/settings/credentials/ehentai/cookies-check',
-      { method: 'POST' }
+      { method: 'POST' },
     ),
 
-  getAlerts: () =>
-    apiFetch<{ alerts: string[] }>('/api/settings/alerts'),
+  getAlerts: () => apiFetch<{ alerts: string[] }>('/api/settings/alerts'),
 
   getRateLimit: () =>
     apiFetch<{ enabled: boolean; login_max: number; window: number }>('/api/settings/rate-limit'),
@@ -282,10 +289,15 @@ const system = {
 // ── Tags ─────────────────────────────────────────────────────────────
 
 const tags = {
-  list: (params: { prefix?: string; namespace?: string; limit?: number; offset?: number } = {}) =>
-    apiFetch<{ total: number; tags: TagItem[] }>(
-      `/api/tags/${qs(params as Record<string, unknown>)}`
-    ),
+  list: (
+    params: {
+      prefix?: string
+      namespace?: string
+      limit?: number
+      offset?: number
+      cursor?: string
+    } = {},
+  ) => apiFetch<TagListResponse>(`/api/tags/${qs(params as Record<string, unknown>)}`),
 
   listAliases: (params: { tag_id?: number; limit?: number } = {}) =>
     apiFetch<TagAlias[]>(`/api/tags/aliases${qs(params as Record<string, unknown>)}`),
@@ -297,10 +309,9 @@ const tags = {
     }),
 
   deleteAlias: (alias_namespace: string, alias_name: string) =>
-    apiFetch<{ status: string }>(
-      `/api/tags/aliases${qs({ alias_namespace, alias_name })}`,
-      { method: 'DELETE' }
-    ),
+    apiFetch<{ status: string }>(`/api/tags/aliases${qs({ alias_namespace, alias_name })}`, {
+      method: 'DELETE',
+    }),
 
   listImplications: (params: { tag_id?: number; limit?: number } = {}) =>
     apiFetch<TagImplication[]>(`/api/tags/implications${qs(params as Record<string, unknown>)}`),
@@ -312,17 +323,15 @@ const tags = {
     }),
 
   deleteImplication: (antecedent_id: number, consequent_id: number) =>
-    apiFetch<{ status: string }>(
-      `/api/tags/implications${qs({ antecedent_id, consequent_id })}`,
-      { method: 'DELETE' }
-    ),
+    apiFetch<{ status: string }>(`/api/tags/implications${qs({ antecedent_id, consequent_id })}`, {
+      method: 'DELETE',
+    }),
 }
 
 // ── API Tokens ───────────────────────────────────────────────────────
 
 const tokens = {
-  list: () =>
-    apiFetch<{ tokens: ApiTokenInfo[] }>('/api/settings/tokens'),
+  list: () => apiFetch<{ tokens: ApiTokenInfo[] }>('/api/settings/tokens'),
 
   create: (name: string, expires_days?: number) =>
     apiFetch<ApiTokenInfo>('/api/settings/tokens', {
@@ -349,4 +358,14 @@ const exportApi = {
 
 // ── Exported API ──────────────────────────────────────────────────────
 
-export const api = { auth, eh, library, download, settings, system, tags, tokens, export: exportApi }
+export const api = {
+  auth,
+  eh,
+  library,
+  download,
+  settings,
+  system,
+  tags,
+  tokens,
+  export: exportApi,
+}

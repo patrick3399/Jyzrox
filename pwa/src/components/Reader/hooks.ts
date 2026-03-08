@@ -34,28 +34,16 @@ export function useReaderState(initialPage: number, totalPages: number) {
       const clamped = Math.max(1, Math.min(totalPages, page))
       dispatch({ type: 'SET_PAGE', page: clamped })
     },
-    [totalPages]
+    [totalPages],
   )
 
-  const nextPage = useCallback(
-    () => setPage(state.currentPage + 1),
-    [state.currentPage, setPage]
-  )
+  const nextPage = useCallback(() => setPage(state.currentPage + 1), [state.currentPage, setPage])
 
-  const prevPage = useCallback(
-    () => setPage(state.currentPage - 1),
-    [state.currentPage, setPage]
-  )
+  const prevPage = useCallback(() => setPage(state.currentPage - 1), [state.currentPage, setPage])
 
-  const setViewMode = useCallback(
-    (mode: ViewMode) => dispatch({ type: 'SET_VIEW_MODE', mode }),
-    []
-  )
+  const setViewMode = useCallback((mode: ViewMode) => dispatch({ type: 'SET_VIEW_MODE', mode }), [])
 
-  const toggleOverlay = useCallback(
-    () => dispatch({ type: 'TOGGLE_OVERLAY' }),
-    []
-  )
+  const toggleOverlay = useCallback(() => dispatch({ type: 'TOGGLE_OVERLAY' }), [])
 
   return {
     state,
@@ -73,7 +61,7 @@ export function useReaderState(initialPage: number, totalPages: number) {
 export function useSequentialPrefetch(
   images: ReaderImage[],
   currentPage: number,
-  isProxyMode: boolean
+  isProxyMode: boolean,
 ): Set<number> {
   const [prefetched, setPrefetched] = useState<Set<number>>(new Set())
   const inflightRef = useRef(false)
@@ -128,7 +116,7 @@ export function useSequentialPrefetch(
         if (inflightRef.current) return
         inflightRef.current = true
 
-        const capturedEpoch = epochRef.current   // snapshot epoch for this request
+        const capturedEpoch = epochRef.current // snapshot epoch for this request
 
         const el = new window.Image()
         activeImagesRef.current.add(el)
@@ -160,7 +148,7 @@ export function useSequentialPrefetch(
         el.src = img.url
       }
     },
-    [images, isProxyMode, cleanupImage]
+    [images, isProxyMode, cleanupImage],
   )
 
   // Keep the ref in sync with the latest callback
@@ -198,7 +186,7 @@ export function useTouchGesture(
   elementRef: React.RefObject<HTMLElement | null>,
   onSwipeLeft: () => void,
   onSwipeRight: () => void,
-  threshold = 50
+  threshold = 50,
 ) {
   const startX = useRef(0)
   const startY = useRef(0)
@@ -233,10 +221,7 @@ export function useTouchGesture(
 
 // ── useKeyboardNav ────────────────────────────────────────────────────
 
-export function useKeyboardNav(
-  onNext: () => void,
-  onPrev: () => void,
-) {
+export function useKeyboardNav(onNext: () => void, onPrev: () => void) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return
@@ -277,4 +262,3 @@ export function useProgressSave(galleryId: number, currentPage: number) {
     return () => clearTimeout(timerRef.current)
   }, [galleryId, currentPage])
 }
-

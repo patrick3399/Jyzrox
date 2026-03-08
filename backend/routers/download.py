@@ -19,7 +19,7 @@ router = APIRouter(tags=["download"])
 class DownloadRequest(BaseModel):
     url: str
     source: str = ""  # ignored; kept for backward compat
-    options: dict = {}
+    options: dict | None = None  # ignored; kept for backward compat
 
 
 def _detect_source(url: str) -> str:
@@ -114,12 +114,12 @@ async def cancel_job(
 
 def _j(j: DownloadJob) -> dict:
     return {
-        "id":          str(j.id),
-        "url":         j.url,
-        "source":      j.source,
-        "status":      j.status,
-        "progress":    j.progress,
-        "error":       j.error,
-        "created_at":  j.created_at.isoformat() if j.created_at else None,
+        "id": str(j.id),
+        "url": j.url,
+        "source": j.source,
+        "status": j.status,
+        "progress": j.progress,
+        "error": j.error,
+        "created_at": j.created_at.isoformat() if j.created_at else None,
         "finished_at": j.finished_at.isoformat() if j.finished_at else None,
     }

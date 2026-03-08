@@ -27,9 +27,7 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(Text, unique=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, default="admin")
-    created_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     avatar_style: Mapped[str] = mapped_column(Text, default="gravatar")
 
@@ -46,37 +44,25 @@ class Gallery(Base):
     language: Mapped[str | None] = mapped_column(Text)
     pages: Mapped[int | None] = mapped_column(Integer)
     posted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
-    added_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     rating: Mapped[int] = mapped_column(SmallInteger, default=0)
     favorited: Mapped[bool] = mapped_column(Boolean, default=False)
     uploader: Mapped[str | None] = mapped_column(Text)
-    parent_id: Mapped[int | None] = mapped_column(
-        BigInteger, ForeignKey("galleries.id")
-    )
+    parent_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("galleries.id"))
     download_status: Mapped[str] = mapped_column(Text, default="proxy_only")
     import_mode: Mapped[str | None] = mapped_column(Text)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
 
-    images: Mapped[list["Image"]] = relationship(
-        back_populates="gallery", cascade="all, delete-orphan"
-    )
-    gallery_tags: Mapped[list["GalleryTag"]] = relationship(
-        back_populates="gallery", cascade="all, delete-orphan"
-    )
-    read_progress: Mapped["ReadProgress | None"] = relationship(
-        back_populates="gallery", cascade="all, delete-orphan"
-    )
+    images: Mapped[list["Image"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
+    gallery_tags: Mapped[list["GalleryTag"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
+    read_progress: Mapped["ReadProgress | None"] = relationship(back_populates="gallery", cascade="all, delete-orphan")
 
 
 class Image(Base):
     __tablename__ = "images"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
-    gallery_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False
-    )
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False)
     page_num: Mapped[int] = mapped_column(Integer, nullable=False)
     filename: Mapped[str | None] = mapped_column(Text)
     width: Mapped[int | None] = mapped_column(Integer)
@@ -91,9 +77,7 @@ class Image(Base):
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
 
     gallery: Mapped["Gallery"] = relationship(back_populates="images")
-    image_tags: Mapped[list["ImageTag"]] = relationship(
-        back_populates="image", cascade="all, delete-orphan"
-    )
+    image_tags: Mapped[list["ImageTag"]] = relationship(back_populates="image", cascade="all, delete-orphan")
 
 
 class Tag(Base):
@@ -110,9 +94,7 @@ class TagAlias(Base):
 
     alias_namespace: Mapped[str] = mapped_column(Text, primary_key=True)
     alias_name: Mapped[str] = mapped_column(Text, primary_key=True)
-    canonical_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False
-    )
+    canonical_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False)
 
     canonical: Mapped["Tag"] = relationship()
 
@@ -120,12 +102,8 @@ class TagAlias(Base):
 class TagImplication(Base):
     __tablename__ = "tag_implications"
 
-    antecedent_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
-    )
-    consequent_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True
-    )
+    antecedent_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True)
+    consequent_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True)
 
     antecedent: Mapped["Tag"] = relationship(foreign_keys=[antecedent_id])
     consequent: Mapped["Tag"] = relationship(foreign_keys=[consequent_id])
@@ -137,9 +115,7 @@ class GalleryTag(Base):
     gallery_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
     )
-    tag_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tags.id"), primary_key=True
-    )
+    tag_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tags.id"), primary_key=True)
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     source: Mapped[str] = mapped_column(Text, default="metadata")
 
@@ -150,12 +126,8 @@ class GalleryTag(Base):
 class ImageTag(Base):
     __tablename__ = "image_tags"
 
-    image_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True
-    )
-    tag_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("tags.id"), primary_key=True
-    )
+    image_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True)
+    tag_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tags.id"), primary_key=True)
     confidence: Mapped[float | None] = mapped_column(Float)
 
     image: Mapped["Image"] = relationship(back_populates="image_tags")
@@ -165,30 +137,22 @@ class ImageTag(Base):
 class DownloadJob(Base):
     __tablename__ = "download_jobs"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     url: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, default="queued")
     progress: Mapped[dict] = mapped_column(JSONB, default=dict)
     error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ReadProgress(Base):
     __tablename__ = "read_progress"
 
-    gallery_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("galleries.id"), primary_key=True
-    )
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id"), primary_key=True)
     last_page: Mapped[int] = mapped_column(Integer, default=0)
-    last_read_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    last_read_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     gallery: Mapped["Gallery"] = relationship(back_populates="read_progress")
 
@@ -206,15 +170,11 @@ class Credential(Base):
 class ApiToken(Base):
     __tablename__ = "api_tokens"
 
-    id: Mapped[uuid.UUID] = mapped_column(
-        UUID(as_uuid=True), primary_key=True, default=uuid.uuid4
-    )
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str | None] = mapped_column(Text)
     token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
     token_plain: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[DateTime] = mapped_column(
-        DateTime(timezone=True), server_default=func.now()
-    )
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_used_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))

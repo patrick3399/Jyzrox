@@ -61,12 +61,7 @@ function TagField({ label, tags, variant, placeholder, onAdd, onRemove }: TagFie
       {tags.length > 0 && (
         <div className="flex flex-wrap gap-1.5">
           {tags.map((tag) => (
-            <TagBadge
-              key={tag}
-              tag={tag}
-              variant={variant}
-              onRemove={() => onRemove(tag)}
-            />
+            <TagBadge key={tag} tag={tag} variant={variant} onRemove={() => onRemove(tag)} />
           ))}
         </div>
       )}

@@ -24,7 +24,9 @@ export function useWebSocket() {
         if (msg.type === 'alert' && msg.message) {
           setAlerts((prev) => [...prev.slice(-49), msg.message!])
         }
-      } catch { /* ignore malformed */ }
+      } catch {
+        /* ignore malformed */
+      }
     }
 
     ws.onclose = () => {

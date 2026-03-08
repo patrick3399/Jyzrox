@@ -66,7 +66,8 @@ const dict: Record<string, Record<string, string>> = {
     'browse.recentHistory': 'Recent',
     'browse.clearAll': 'Clear all',
     'browse.addedToQueue': 'Added to queue',
-    'browse.credentialsNotSet': 'E-Hentai credentials not configured. Go to Settings to add cookies.',
+    'browse.credentialsNotSet':
+      'E-Hentai credentials not configured. Go to Settings to add cookies.',
     'browse.favorited': 'favorited',
     'browse.backToBrowse': '← Back to browse',
     'browse.read': 'Read',
@@ -251,7 +252,8 @@ const dict: Record<string, Record<string, string>> = {
 
     // ── Export ──
     'export.title': 'Training Data Export',
-    'export.subtitle': 'Export gallery images + tags in Kohya format (ZIP with images and .txt caption files).',
+    'export.subtitle':
+      'Export gallery images + tags in Kohya format (ZIP with images and .txt caption files).',
     'export.searchPlaceholder': 'Search galleries by title...',
     'export.downloading': 'Downloading...',
     'export.kohyaZip': 'Kohya ZIP',

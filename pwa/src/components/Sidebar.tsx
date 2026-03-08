@@ -32,7 +32,11 @@ const navLinks = [
 
 const themeCycle = ['light', 'dark', 'system'] as const
 const themeIcon = { light: Sun, dark: Moon, system: Monitor }
-const themeLabel = { light: () => t('common.light'), dark: () => t('common.dark'), system: () => t('common.system') }
+const themeLabel = {
+  light: () => t('common.light'),
+  dark: () => t('common.dark'),
+  system: () => t('common.system'),
+}
 
 export function Sidebar() {
   const pathname = usePathname()
@@ -41,7 +45,7 @@ export function Sidebar() {
   const { data: profile } = useProfile()
 
   const cycleTheme = () => {
-    const idx = themeCycle.indexOf(theme as typeof themeCycle[number])
+    const idx = themeCycle.indexOf(theme as (typeof themeCycle)[number])
     setTheme(themeCycle[(idx + 1) % themeCycle.length])
   }
 
@@ -49,16 +53,15 @@ export function Sidebar() {
     <aside className="hidden lg:flex fixed inset-y-0 left-0 z-40 w-56 flex-col bg-vault-card border-r border-vault-border">
       {/* Logo */}
       <div className="flex items-center gap-2 px-5 h-16 shrink-0">
-        <span className="text-vault-accent font-bold text-lg tracking-wide">
-          Jyzrox
-        </span>
+        <span className="text-vault-accent font-bold text-lg tracking-wide">Jyzrox</span>
       </div>
 
       {/* Nav links */}
       <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
         {navLinks.map((link) => {
           const Icon = link.icon
-          const isActive = pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
+          const isActive =
+            pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
           return (
             <Link
               key={link.href}
@@ -81,8 +84,12 @@ export function Sidebar() {
         {/* User avatar + name */}
         {profile && (
           <div className="flex items-center gap-3 px-3 py-2">
-            {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={profile.avatar_url} alt="" className="w-8 h-8 rounded-full object-cover bg-vault-input shrink-0" />
+            {}
+            <img
+              src={profile.avatar_url}
+              alt=""
+              className="w-8 h-8 rounded-full object-cover bg-vault-input shrink-0"
+            />
             <span className="text-sm text-vault-text truncate">{profile.username}</span>
           </div>
         )}

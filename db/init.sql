@@ -145,3 +145,10 @@ CREATE INDEX IF NOT EXISTS idx_galleries_favorited ON galleries (favorited) WHER
 CREATE INDEX IF NOT EXISTS idx_images_gallery      ON images (gallery_id, page_num);
 CREATE INDEX IF NOT EXISTS idx_images_hash         ON images (file_hash);
 CREATE INDEX IF NOT EXISTS idx_images_duplicate    ON images (duplicate_of) WHERE duplicate_of IS NOT NULL;
+
+-- #4: galleries.source (single-column) — used in WHERE source = 'pixiv' filters
+-- Note: idx_galleries_source above covers (source, source_id); this covers source-only lookups.
+CREATE INDEX IF NOT EXISTS idx_galleries_source_only ON galleries (source);
+
+-- #5: tags.count DESC — used in ORDER BY count DESC for tag listing
+CREATE INDEX IF NOT EXISTS idx_tags_count ON tags (count DESC);

@@ -8,13 +8,12 @@ test login/setup flows. Redis is mocked, and SQLite is used for the user table.
 import json
 
 import bcrypt
-import pytest
 from sqlalchemy import text
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _create_user(db_session, username="admin", password="testpass123", role="admin"):
     """Insert a user directly into the test DB and return the user id."""
@@ -32,15 +31,19 @@ async def _create_user(db_session, username="admin", password="testpass123", rol
 # Setup flow
 # ---------------------------------------------------------------------------
 
+
 class TestSetup:
     """POST /api/auth/setup — first-run admin creation."""
 
     async def test_setup_creates_first_user(self, unauthed_client, db_session):
         """Setup should succeed when no users exist."""
-        resp = await unauthed_client.post("/api/auth/setup", json={
-            "username": "admin",
-            "password": "securepass123",
-        })
+        resp = await unauthed_client.post(
+            "/api/auth/setup",
+            json={
+                "username": "admin",
+                "password": "securepass123",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
@@ -56,10 +59,13 @@ class TestSetup:
         """Setup should return 403 if a user already exists."""
         await _create_user(db_session)
 
-        resp = await unauthed_client.post("/api/auth/setup", json={
-            "username": "another",
-            "password": "password123",
-        })
+        resp = await unauthed_client.post(
+            "/api/auth/setup",
+            json={
+                "username": "another",
+                "password": "password123",
+            },
+        )
         assert resp.status_code == 403
         assert "already completed" in resp.json()["detail"].lower()
 
@@ -68,6 +74,7 @@ class TestSetup:
 # Login
 # ---------------------------------------------------------------------------
 
+
 class TestLogin:
     """POST /api/auth/login — session-based login."""
 
@@ -75,10 +82,13 @@ class TestLogin:
         """Valid credentials should return 200 and set session cookie."""
         await _create_user(db_session, "admin", "correctpass")
 
-        resp = await unauthed_client.post("/api/auth/login", json={
-            "username": "admin",
-            "password": "correctpass",
-        })
+        resp = await unauthed_client.post(
+            "/api/auth/login",
+            json={
+                "username": "admin",
+                "password": "correctpass",
+            },
+        )
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
@@ -94,19 +104,25 @@ class TestLogin:
         """Wrong password should return 401."""
         await _create_user(db_session, "admin", "correctpass")
 
-        resp = await unauthed_client.post("/api/auth/login", json={
-            "username": "admin",
-            "password": "wrongpass",
-        })
+        resp = await unauthed_client.post(
+            "/api/auth/login",
+            json={
+                "username": "admin",
+                "password": "wrongpass",
+            },
+        )
         assert resp.status_code == 401
         assert "invalid" in resp.json()["detail"].lower()
 
     async def test_login_nonexistent_user(self, unauthed_client, db_session):
         """Login with a username that doesn't exist should return 401."""
-        resp = await unauthed_client.post("/api/auth/login", json={
-            "username": "nobody",
-            "password": "whatever",
-        })
+        resp = await unauthed_client.post(
+            "/api/auth/login",
+            json={
+                "username": "nobody",
+                "password": "whatever",
+            },
+        )
         assert resp.status_code == 401
 
     async def test_login_missing_fields(self, unauthed_client):
@@ -118,6 +134,7 @@ class TestLogin:
 # ---------------------------------------------------------------------------
 # Session check
 # ---------------------------------------------------------------------------
+
 
 class TestCheckAuth:
     """GET /api/auth/check — lightweight session validation."""
@@ -154,6 +171,7 @@ class TestCheckAuth:
 # Logout
 # ---------------------------------------------------------------------------
 
+
 class TestLogout:
     """POST /api/auth/logout — clear session."""
 
@@ -178,6 +196,7 @@ class TestLogout:
 # ---------------------------------------------------------------------------
 # Profile
 # ---------------------------------------------------------------------------
+
 
 class TestProfile:
     """GET /api/auth/profile — requires auth."""
@@ -213,8 +232,10 @@ class TestProfile:
 # Helper: AsyncMock that returns a specific value
 # ---------------------------------------------------------------------------
 
+
 def AsyncMock_returning(value):
     """Create an AsyncMock that returns a fixed value."""
     from unittest.mock import AsyncMock
+
     mock = AsyncMock(return_value=value)
     return mock

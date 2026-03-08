@@ -9,7 +9,19 @@ from fastapi.middleware.cors import CORSMiddleware
 from core.config import settings
 from core.database import engine
 from core.redis_client import close_redis, init_redis
-from routers import auth, download, eh, export, library, system, ws, search, tag, import_router, external
+from routers import (
+    auth,
+    download,
+    eh,
+    export,
+    external,
+    import_router,
+    library,
+    search,
+    system,
+    tag,
+    ws,
+)
 from routers import settings as settings_router
 
 logging.basicConfig(
@@ -52,20 +64,21 @@ app.add_middleware(
     allow_headers=["Content-Type"],
 )
 
-app.include_router(auth.router,            prefix="/api/auth")
-app.include_router(system.router,          prefix="/api/system")
-app.include_router(eh.router,              prefix="/api/eh")
-app.include_router(library.router,         prefix="/api/library")
-app.include_router(download.router,        prefix="/api/download")
+app.include_router(auth.router, prefix="/api/auth")
+app.include_router(system.router, prefix="/api/system")
+app.include_router(eh.router, prefix="/api/eh")
+app.include_router(library.router, prefix="/api/library")
+app.include_router(download.router, prefix="/api/download")
 app.include_router(settings_router.router, prefix="/api/settings")
-app.include_router(ws.router,              prefix="/api/ws")
+app.include_router(ws.router, prefix="/api/ws")
 
 # rev 2.0 new routers
-app.include_router(search.router,          prefix="/api/search")
-app.include_router(tag.router,             prefix="/api/tags")
-app.include_router(import_router.router,   prefix="/api/import")
-app.include_router(export.router,          prefix="/api/export")
-app.include_router(external.router,        prefix="/api/external/v1")
+app.include_router(search.router, prefix="/api/search")
+app.include_router(tag.router, prefix="/api/tags")
+app.include_router(import_router.router, prefix="/api/import")
+app.include_router(export.router, prefix="/api/export")
+app.include_router(external.router, prefix="/api/external/v1")
+
 
 @app.get("/api/health")
 async def health():

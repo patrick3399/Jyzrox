@@ -5,16 +5,24 @@ import { DownloadStatusBadge } from './DownloadStatusBadge'
 // ── Category colours ──────────────────────────────────────────────────
 
 const CATEGORY_COLORS: Record<string, { bg: string; text: string; badge: string }> = {
-  Doujinshi:    { bg: 'from-pink-950 to-pink-900',    text: 'text-pink-300',    badge: 'bg-pink-700' },
-  Manga:        { bg: 'from-orange-950 to-orange-900', text: 'text-orange-300',  badge: 'bg-orange-700' },
-  'Artist CG':  { bg: 'from-yellow-950 to-yellow-900', text: 'text-yellow-300',  badge: 'bg-yellow-700' },
-  'Game CG':    { bg: 'from-green-950 to-green-900',   text: 'text-green-300',   badge: 'bg-green-700' },
-  Western:      { bg: 'from-sky-950 to-sky-900',       text: 'text-sky-300',     badge: 'bg-sky-700' },
-  'Non-H':      { bg: 'from-blue-950 to-blue-900',     text: 'text-blue-300',    badge: 'bg-blue-700' },
-  'Image Set':  { bg: 'from-purple-950 to-purple-900', text: 'text-purple-300',  badge: 'bg-purple-700' },
-  Cosplay:      { bg: 'from-red-950 to-red-900',       text: 'text-red-300',     badge: 'bg-red-700' },
-  'Asian Porn': { bg: 'from-rose-950 to-rose-900',     text: 'text-rose-300',    badge: 'bg-rose-700' },
-  Misc:         { bg: 'from-gray-900 to-gray-800',     text: 'text-gray-300',    badge: 'bg-gray-600' },
+  Doujinshi: { bg: 'from-pink-950 to-pink-900', text: 'text-pink-300', badge: 'bg-pink-700' },
+  Manga: { bg: 'from-orange-950 to-orange-900', text: 'text-orange-300', badge: 'bg-orange-700' },
+  'Artist CG': {
+    bg: 'from-yellow-950 to-yellow-900',
+    text: 'text-yellow-300',
+    badge: 'bg-yellow-700',
+  },
+  'Game CG': { bg: 'from-green-950 to-green-900', text: 'text-green-300', badge: 'bg-green-700' },
+  Western: { bg: 'from-sky-950 to-sky-900', text: 'text-sky-300', badge: 'bg-sky-700' },
+  'Non-H': { bg: 'from-blue-950 to-blue-900', text: 'text-blue-300', badge: 'bg-blue-700' },
+  'Image Set': {
+    bg: 'from-purple-950 to-purple-900',
+    text: 'text-purple-300',
+    badge: 'bg-purple-700',
+  },
+  Cosplay: { bg: 'from-red-950 to-red-900', text: 'text-red-300', badge: 'bg-red-700' },
+  'Asian Porn': { bg: 'from-rose-950 to-rose-900', text: 'text-rose-300', badge: 'bg-rose-700' },
+  Misc: { bg: 'from-gray-900 to-gray-800', text: 'text-gray-300', badge: 'bg-gray-600' },
 }
 
 function getCategoryColors(category: string) {

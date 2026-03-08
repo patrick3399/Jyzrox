@@ -1,53 +1,56 @@
 """Gallery import handling (Link and Copy modes)."""
 
+import hashlib
 import os
 import shutil
-import hashlib
 from pathlib import Path
-from fastapi import APIRouter, Depends, HTTPException, BackgroundTasks
-from pydantic import BaseModel
-from typing import List, Optional
 
-from core.database import async_session
-from core.auth import require_auth
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException
+from pydantic import BaseModel
 from sqlalchemy import text
+
+from core.auth import require_auth
 from core.config import settings
+from core.database import async_session
 
 router = APIRouter(tags=["import"])
 
+
 class ImportRequest(BaseModel):
     source_dir: str
-    mode: str = "link" # "link" or "copy"
-    metadata: Optional[dict] = None
+    mode: str = "link"  # "link" or "copy"
+    metadata: dict | None = None
+
 
 def hash_file(filepath: str) -> str:
     h = hashlib.sha256()
-    with open(filepath, 'rb') as f:
+    with open(filepath, "rb") as f:
         while chunk := f.read(8192):
             h.update(chunk)
     return h.hexdigest()
+
 
 async def process_import_task(req: ImportRequest, gallery_id: int):
     # This is a simplified version of the background worker logic for Phase 4
     src_path = Path(req.source_dir)
     if not src_path.exists() or not src_path.is_dir():
         return
-    
-    _SUPPORTED_EXTS = {'.jpg', '.jpeg', '.png', '.gif', '.webp', '.avif', '.heic', '.mp4', '.webm'}
+
+    _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
     files = sorted([f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS])
-    
+
     async with async_session() as session:
         for idx, f in enumerate(files):
             file_hash = hash_file(str(f))
-            
+
             # check for duplicate
             dup_check = await session.execute(
                 text("SELECT id FROM images WHERE file_hash = :fh LIMIT 1"),
-                {"fh": file_hash}
+                {"fh": file_hash},
             )
             dup_row = dup_check.fetchone()
             duplicate_of = dup_row.id if dup_row else None
-            
+
             dest_path = str(f)
             if req.mode == "copy" and not duplicate_of:
                 # copy to storage
@@ -55,10 +58,10 @@ async def process_import_task(req: ImportRequest, gallery_id: int):
                 dest_dir.mkdir(parents=True, exist_ok=True)
                 dest_path = str(dest_dir / f.name)
                 shutil.copy2(f, dest_path)
-            
+
             ext = f.suffix.lower()
-            media_type = "video" if ext in ('.mp4', '.webm') else "gif" if ext == '.gif' else "image"
-            
+            media_type = "video" if ext in (".mp4", ".webm") else "gif" if ext == ".gif" else "image"
+
             await session.execute(
                 text("""
                     INSERT INTO images (gallery_id, page_num, filename, file_path, file_hash, media_type, duplicate_of)
@@ -71,10 +74,11 @@ async def process_import_task(req: ImportRequest, gallery_id: int):
                     "fpath": dest_path,
                     "fhash": file_hash,
                     "mtype": media_type,
-                    "dup": duplicate_of
-                }
+                    "dup": duplicate_of,
+                },
             )
         await session.commit()
+
 
 @router.post("/")
 async def start_import(
@@ -89,22 +93,22 @@ async def start_import(
     allowed = Path(settings.data_gallery_path).resolve()
     if not resolved.is_relative_to(allowed):
         raise HTTPException(status_code=400, detail="source_dir must be within the gallery path")
-    
+
     # Create DB entry
     async with async_session() as session:
         result = await session.execute(
             text("""
-                INSERT INTO galleries (source, source_id, title, import_mode) 
+                INSERT INTO galleries (source, source_id, title, import_mode)
                 VALUES ('local', :sid, :title, :mode) RETURNING id
             """),
             {
                 "sid": os.path.basename(req.source_dir),
                 "title": req.metadata.get("title", "Imported") if req.metadata else "Imported",
-                "mode": req.mode
-            }
+                "mode": req.mode,
+            },
         )
         gallery_id = result.scalar()
         await session.commit()
-    
+
     background_tasks.add_task(process_import_task, req, gallery_id)
     return {"status": "enqueued", "gallery_id": gallery_id}

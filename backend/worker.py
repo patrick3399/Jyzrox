@@ -14,14 +14,14 @@ import asyncio
 import hashlib
 import json
 import logging
+import os
 import re
 import subprocess
 import uuid
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 import sqlalchemy.exc
-
 from arq.connections import RedisSettings
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
@@ -42,6 +42,7 @@ _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
 
 # ── Lifecycle ────────────────────────────────────────────────────────
 
+
 async def startup(ctx: dict) -> None:
     logger.info("ARQ Worker started — Jyzrox")
 
@@ -51,6 +52,7 @@ async def shutdown(ctx: dict) -> None:
 
 
 # ── WORKER A: Download ───────────────────────────────────────────────
+
 
 async def download_job(
     ctx: dict,
@@ -73,7 +75,8 @@ async def download_job(
 
     cmd = [
         "gallery-dl",
-        "--config", settings.gallery_dl_config,
+        "--config",
+        settings.gallery_dl_config,
         "--write-metadata",
         "--write-tags",
         url,
@@ -128,17 +131,25 @@ def _resolve_gallery_dir(url: str) -> Path | None:
 
     m = re.search(r"pixiv\.net/.*?artworks?/(\d+)", url)
     if m:
-        # Pixiv galleries are nested under artist dirs; scan for a matching subdir
-        for artist_dir in Path(settings.data_gallery_path).glob("pixiv/*/"):
-            candidate = artist_dir / m.group(1)
-            if candidate.exists():
-                return candidate
+        artwork_id = m.group(1)
+        # Use os.scandir instead of glob — avoids building a full generator
+        # of all artist subdirectories; scandir yields DirEntry objects with
+        # cached stat data, making is_dir() free on Linux (d_type from readdir).
+        pixiv_root = Path(settings.data_gallery_path) / "pixiv"
+        if pixiv_root.is_dir():
+            try:
+                with os.scandir(pixiv_root) as it:
+                    for entry in it:
+                        if entry.is_dir():
+                            candidate = Path(entry.path) / artwork_id
+                            if candidate.exists():
+                                return candidate
+            except OSError as exc:
+                logger.warning("[download] scandir pixiv root failed: %s", exc)
     return None
 
 
-async def _set_job_status(
-    job_id: str | None, status: str, error: str | None = None
-) -> None:
+async def _set_job_status(job_id: str | None, status: str, error: str | None = None) -> None:
     if not job_id:
         return
     try:
@@ -149,7 +160,7 @@ async def _set_job_status(
                 if error:
                     job.error = error
                 if status in ("done", "failed", "cancelled"):
-                    job.finished_at = datetime.now(timezone.utc)
+                    job.finished_at = datetime.now(UTC)
                 await session.commit()
     except (sqlalchemy.exc.SQLAlchemyError, ValueError, OSError) as exc:
         logger.error("[download] failed to update job status: %s", exc)
@@ -157,9 +168,8 @@ async def _set_job_status(
 
 # ── WORKER B: Import ─────────────────────────────────────────────────
 
-async def import_job(
-    ctx: dict, path: str, db_job_id: str | None = None
-) -> dict:
+
+async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict:
     """
     Ingest a downloaded gallery directory into the database.
     Handles gallery-dl E-Hentai and Pixiv output formats.
@@ -207,31 +217,31 @@ async def import_job(
             .on_conflict_do_update(
                 index_elements=["source", "source_id"],
                 set_={
-                    "title":           pg_insert(Gallery).excluded.title,
-                    "tags_array":      pg_insert(Gallery).excluded.tags_array,
+                    "title": pg_insert(Gallery).excluded.title,
+                    "tags_array": pg_insert(Gallery).excluded.tags_array,
                     "download_status": "complete",
-                    "pages":           pg_insert(Gallery).excluded.pages,
+                    "pages": pg_insert(Gallery).excluded.pages,
                 },
             )
             .returning(Gallery.id)
         )
         gallery_id = (await session.execute(stmt)).scalar_one()
 
-        # Upsert images
-        for page_num, img_file in enumerate(image_files, start=1):
-            file_hash = await asyncio.to_thread(_sha256, img_file)
-            img_stmt = (
-                pg_insert(Image)
-                .values(
-                    gallery_id=gallery_id,
-                    page_num=page_num,
-                    filename=img_file.name,
-                    file_path=str(img_file),
-                    file_size=img_file.stat().st_size,
-                    file_hash=file_hash,
-                )
-                .on_conflict_do_nothing()
-            )
+        # Compute hashes concurrently, then bulk-insert all images in one statement
+        hashes = await asyncio.gather(*[asyncio.to_thread(_sha256, f) for f in image_files])
+        image_values = [
+            {
+                "gallery_id": gallery_id,
+                "page_num": page_num,
+                "filename": img_file.name,
+                "file_path": str(img_file),
+                "file_size": img_file.stat().st_size,
+                "file_hash": file_hash,
+            }
+            for page_num, (img_file, file_hash) in enumerate(zip(image_files, hashes, strict=False), start=1)
+        ]
+        if image_values:
+            img_stmt = pg_insert(Image).values(image_values).on_conflict_do_nothing()
             await session.execute(img_stmt)
 
         # Upsert tags + gallery_tags
@@ -275,25 +285,25 @@ def _build_gallery(
     raw_date = meta.get("date") or meta.get("posted")
     if raw_date:
         try:
-            if isinstance(raw_date, (int, float)):
-                posted_at = datetime.fromtimestamp(raw_date, tz=timezone.utc)
+            if isinstance(raw_date, int | float):
+                posted_at = datetime.fromtimestamp(raw_date, tz=UTC)
             else:
                 posted_at = datetime.fromisoformat(str(raw_date))
         except (ValueError, TypeError, OverflowError) as exc:
             logger.warning("[import] failed to parse date %r: %s", raw_date, exc)
 
     return {
-        "source":          source,
-        "source_id":       source_id,
-        "title":           meta.get("title") or meta.get("title_en", ""),
-        "title_jpn":       meta.get("title_jpn") or meta.get("title_original") or "",
-        "category":        meta.get("category") or meta.get("type", ""),
-        "language":        meta.get("lang") or meta.get("language", ""),
-        "pages":           page_count,
-        "posted_at":       posted_at,
-        "uploader":        meta.get("uploader", ""),
+        "source": source,
+        "source_id": source_id,
+        "title": meta.get("title") or meta.get("title_en", ""),
+        "title_jpn": meta.get("title_jpn") or meta.get("title_original") or "",
+        "category": meta.get("category") or meta.get("type", ""),
+        "language": meta.get("lang") or meta.get("language", ""),
+        "pages": page_count,
+        "posted_at": posted_at,
+        "uploader": meta.get("uploader", ""),
         "download_status": "complete",
-        "tags_array":      tags,
+        "tags_array": tags,
     }
 
 
@@ -306,32 +316,43 @@ def _sha256(path: Path) -> str:
 
 
 async def _upsert_tags(session, gallery_id: int, tags: list[str]) -> None:
+    if not tags:
+        return
+
+    # Step 1: deduplicate so we don't send duplicate rows to the DB
+    seen: set[tuple[str, str]] = set()
+    tag_values: list[dict] = []
     for tag_str in tags:
         if ":" in tag_str:
             ns, name = tag_str.split(":", 1)
         else:
             ns, name = "general", tag_str
+        key = (ns, name)
+        if key not in seen:
+            seen.add(key)
+            tag_values.append({"namespace": ns, "name": name, "count": 1})
 
-        tag_stmt = (
-            pg_insert(Tag)
-            .values(namespace=ns, name=name, count=1)
-            .on_conflict_do_update(
-                index_elements=["namespace", "name"],
-                set_={"count": Tag.count + 1},
-            )
-            .returning(Tag.id)
+    # Step 2: batch upsert all tags, retrieve their IDs in a single round-trip
+    tag_stmt = (
+        pg_insert(Tag)
+        .values(tag_values)
+        .on_conflict_do_update(
+            index_elements=["namespace", "name"],
+            set_={"count": Tag.count + 1},
         )
-        tag_id = (await session.execute(tag_stmt)).scalar_one()
+        .returning(Tag.id)
+    )
+    tag_ids = (await session.execute(tag_stmt)).scalars().all()
 
-        gt_stmt = (
-            pg_insert(GalleryTag)
-            .values(gallery_id=gallery_id, tag_id=tag_id, confidence=1.0, source="metadata")
-            .on_conflict_do_nothing()
-        )
+    # Step 3: batch insert gallery_tag junction rows in a single round-trip
+    gt_values = [{"gallery_id": gallery_id, "tag_id": tid, "confidence": 1.0, "source": "metadata"} for tid in tag_ids]
+    if gt_values:
+        gt_stmt = pg_insert(GalleryTag).values(gt_values).on_conflict_do_nothing()
         await session.execute(gt_stmt)
 
 
 # ── WORKER C: Tag (stub) ─────────────────────────────────────────────
+
 
 async def tag_job(ctx: dict, image_id: int, image_path: str) -> dict:
     """AI tagging via WD14 — disabled until Phase 6 (TAG_MODEL_ENABLED=true)."""
@@ -340,6 +361,7 @@ async def tag_job(ctx: dict, image_id: int, image_path: str) -> dict:
 
 
 # ── WORKER D: Thumbnail ──────────────────────────────────────────────
+
 
 async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
     """Generate 160/360/720px WebP thumbnails for all images in a gallery."""
@@ -351,9 +373,7 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
     processed = 0
 
     async with AsyncSessionLocal() as session:
-        images = (
-            await session.execute(select(Image).where(Image.gallery_id == gallery_id))
-        ).scalars().all()
+        images = (await session.execute(select(Image).where(Image.gallery_id == gallery_id))).scalars().all()
 
         for img in images:
             if not img.file_path:
@@ -395,6 +415,7 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
 
 
 # ── ARQ Worker Settings ──────────────────────────────────────────────
+
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)

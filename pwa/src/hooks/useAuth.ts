@@ -8,11 +8,14 @@ import { api } from '@/lib/api'
 export function useAuth() {
   const router = useRouter()
 
-  const login = useCallback(async (username: string, password: string) => {
-    await api.auth.login(username, password)
-    router.push('/')
-    router.refresh()
-  }, [router])
+  const login = useCallback(
+    async (username: string, password: string) => {
+      await api.auth.login(username, password)
+      router.push('/')
+      router.refresh()
+    },
+    [router],
+  )
 
   const logout = useCallback(async () => {
     try {

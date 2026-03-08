@@ -23,16 +23,16 @@ EH_BASE_URL = "https://e-hentai.org"
 EX_BASE_URL = "https://exhentai.org"
 
 CATEGORY_MASK: dict[str, int] = {
-    "misc":        1,
-    "doujinshi":   2,
-    "manga":       4,
-    "artist_cg":   8,
-    "game_cg":     16,
-    "image_set":   32,
-    "cosplay":     64,
-    "asian_porn":  128,
-    "non_h":       256,
-    "western":     512,
+    "misc": 1,
+    "doujinshi": 2,
+    "manga": 4,
+    "artist_cg": 8,
+    "game_cg": 16,
+    "image_set": 32,
+    "cosplay": 64,
+    "asian_porn": 128,
+    "non_h": 256,
+    "western": 512,
 }
 ALL_CATS = sum(CATEGORY_MASK.values())  # 1023
 
@@ -54,7 +54,7 @@ _NORMAL_PREVIEW_RE = re.compile(
     r'<div[^>]*class="gdtm"[^>]*style="[^"]*'
     r'url\(([^)]+)\)\s*(-?\d+)px[^"]*'
     r'width:\s*(\d+)px;\s*height:\s*(\d+)px[^"]*"[^>]*>'
-    r'.*?/s/[0-9a-f]+/\d+-(\d+)',
+    r".*?/s/[0-9a-f]+/\d+-(\d+)",
     re.DOTALL,
 )
 
@@ -67,18 +67,18 @@ def _chunks(lst: list, n: int):
 def _parse_gmetadata(g: dict) -> dict:
     """Normalise a single gdata API entry to our internal dict."""
     return {
-        "gid":       int(g["gid"]),
-        "token":     g["token"],
-        "title":     g.get("title", ""),
+        "gid": int(g["gid"]),
+        "token": g["token"],
+        "title": g.get("title", ""),
         "title_jpn": g.get("title_jpn", ""),
-        "category":  g.get("category", ""),
-        "thumb":     g.get("thumb", ""),
-        "uploader":  g.get("uploader", ""),
+        "category": g.get("category", ""),
+        "thumb": g.get("thumb", ""),
+        "uploader": g.get("uploader", ""),
         "posted_at": int(g.get("posted", 0)),
-        "pages":     int(g.get("filecount", 0)),
-        "rating":    float(g.get("rating", 0)),
-        "tags":      g.get("tags", []),
-        "expunged":  bool(g.get("expunged", False)),
+        "pages": int(g.get("filecount", 0)),
+        "rating": float(g.get("rating", 0)),
+        "tags": g.get("tags", []),
+        "expunged": bool(g.get("expunged", False)),
     }
 
 
@@ -185,17 +185,28 @@ class EhClient:
         # Advanced search flags (EHViewer ListUrlBuilder style)
         if advance:
             params["advsearch"] = "1"
-            if adv_search & 0x1:   params["f_sname"] = "on"
-            if adv_search & 0x2:   params["f_stags"] = "on"
-            if adv_search & 0x4:   params["f_sdesc"] = "on"
-            if adv_search & 0x8:   params["f_storr"] = "on"
-            if adv_search & 0x10:  params["f_sto"]   = "on"
-            if adv_search & 0x20:  params["f_sdt1"]  = "on"
-            if adv_search & 0x40:  params["f_sdt2"]  = "on"
-            if adv_search & 0x80:  params["f_sh"]    = "on"
-            if adv_search & 0x100: params["f_sfl"]   = "on"
-            if adv_search & 0x200: params["f_sfu"]   = "on"
-            if adv_search & 0x400: params["f_sft"]   = "on"
+            if adv_search & 0x1:
+                params["f_sname"] = "on"
+            if adv_search & 0x2:
+                params["f_stags"] = "on"
+            if adv_search & 0x4:
+                params["f_sdesc"] = "on"
+            if adv_search & 0x8:
+                params["f_storr"] = "on"
+            if adv_search & 0x10:
+                params["f_sto"] = "on"
+            if adv_search & 0x20:
+                params["f_sdt1"] = "on"
+            if adv_search & 0x40:
+                params["f_sdt2"] = "on"
+            if adv_search & 0x80:
+                params["f_sh"] = "on"
+            if adv_search & 0x100:
+                params["f_sfl"] = "on"
+            if adv_search & 0x200:
+                params["f_sfu"] = "on"
+            if adv_search & 0x400:
+                params["f_sft"] = "on"
         if min_rating:
             params["f_sr"] = "on"
             params["f_srdd"] = min_rating
@@ -231,9 +242,7 @@ class EhClient:
         """Batch-fetch gallery metadata via gdata API (max 25 per call)."""
         results: list[dict] = []
         for chunk in _chunks(gid_list, 25):
-            resp = await self._api(
-                {"method": "gdata", "gidlist": chunk, "namespace": 1}
-            )
+            resp = await self._api({"method": "gdata", "gidlist": chunk, "namespace": 1})
             for g in resp.get("gmetadata", []):
                 if not g.get("error"):
                     results.append(_parse_gmetadata(g))
@@ -245,9 +254,7 @@ class EhClient:
             raise ValueError(f"Gallery {gid}/{token} not found or expunged")
         return results[0]
 
-    def _parse_detail_html(
-        self, html: str
-    ) -> tuple[dict[int, str], dict[int, str]]:
+    def _parse_detail_html(self, html: str) -> tuple[dict[int, str], dict[int, str]]:
         """Parse a single gallery detail page HTML for pTokens + preview thumbnails."""
         token_map: dict[int, str] = {}
         preview_map: dict[int, str] = {}
@@ -274,15 +281,11 @@ class EhClient:
                 width = int(match.group(3))
                 height = int(match.group(4))
                 page_num = int(match.group(5))
-                preview_map[page_num] = (
-                    f"{sprite_url}|{offset_x}|{width}|{height}"
-                )
+                preview_map[page_num] = f"{sprite_url}|{offset_x}|{width}|{height}"
 
         return token_map, preview_map
 
-    async def get_previews(
-        self, gid: int, token: str
-    ) -> dict[int, str]:
+    async def get_previews(self, gid: int, token: str) -> dict[int, str]:
         """
         Fetch ONLY the first gallery detail page (p=0) to extract
         ~20 preview thumbnail URLs.  Very fast — single HTTP request.
@@ -296,9 +299,7 @@ class EhClient:
         _, preview_map = self._parse_detail_html(resp.text)
         return preview_map
 
-    async def get_image_tokens(
-        self, gid: int, token: str, total_pages: int
-    ) -> tuple[dict[int, str], dict[int, str]]:
+    async def get_image_tokens(self, gid: int, token: str, total_pages: int) -> tuple[dict[int, str], dict[int, str]]:
         """
         Get image page tokens (pTokens) and preview thumbnail URLs by
         scraping gallery detail pages.  Matches EhViewer's approach.
@@ -329,9 +330,7 @@ class EhClient:
 
         return token_map, preview_map
 
-    async def get_image_url(
-        self, image_page_token: str, gid: int, page: int
-    ) -> str:
+    async def get_image_url(self, image_page_token: str, gid: int, page: int) -> str:
         """
         Fetch the image page HTML and extract the actual image URL.
         Page URL: /s/{image_page_token}/{gid}-{page}
@@ -379,16 +378,12 @@ class EhClient:
         elif prev_cursor:
             params["prev"] = prev_cursor
 
-        resp = await self._http.get(
-            f"{self.base_url}/favorites.php?{urlencode(params)}"
-        )
+        resp = await self._http.get(f"{self.base_url}/favorites.php?{urlencode(params)}")
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
         # Parse gallery links
-        matches = list(
-            {(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)}
-        )
+        matches = list({(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)})
 
         soup = BeautifulSoup(resp.text, "lxml")
 
@@ -457,9 +452,16 @@ class EhClient:
         # Fallback: if parsing found nothing, provide default 0-9 categories
         if not categories:
             _DEFAULT_FAV_NAMES = [
-                "Favorites 0", "Favorites 1", "Favorites 2", "Favorites 3",
-                "Favorites 4", "Favorites 5", "Favorites 6", "Favorites 7",
-                "Favorites 8", "Favorites 9",
+                "Favorites 0",
+                "Favorites 1",
+                "Favorites 2",
+                "Favorites 3",
+                "Favorites 4",
+                "Favorites 5",
+                "Favorites 6",
+                "Favorites 7",
+                "Favorites 8",
+                "Favorites 9",
             ]
             for i in range(10):
                 categories.append({"index": i, "name": _DEFAULT_FAV_NAMES[i], "count": 0})
@@ -479,9 +481,7 @@ class EhClient:
             "categories": categories,
         }
 
-    async def add_favorite(
-        self, gid: int, token: str, favcat: int = 0, note: str = ""
-    ) -> bool:
+    async def add_favorite(self, gid: int, token: str, favcat: int = 0, note: str = "") -> bool:
         """Add gallery to cloud favorites. favcat: 0-9, note: max 250 chars."""
         url = f"{self.base_url}/gallerypopups.php?gid={gid}&t={token}&act=addfav"
         data = {
@@ -490,10 +490,14 @@ class EhClient:
             "submit": "Apply Changes",
             "update": "1",
         }
-        resp = await self._http.post(url, data=data, headers={
-            "Referer": url,
-            "Origin": self.base_url,
-        })
+        resp = await self._http.post(
+            url,
+            data=data,
+            headers={
+                "Referer": url,
+                "Origin": self.base_url,
+            },
+        )
         resp.raise_for_status()
         return True
 
@@ -506,10 +510,14 @@ class EhClient:
             "submit": "Apply Changes",
             "update": "1",
         }
-        resp = await self._http.post(url, data=data, headers={
-            "Referer": url,
-            "Origin": self.base_url,
-        })
+        resp = await self._http.post(
+            url,
+            data=data,
+            headers={
+                "Referer": url,
+                "Origin": self.base_url,
+            },
+        )
         resp.raise_for_status()
         return True
 

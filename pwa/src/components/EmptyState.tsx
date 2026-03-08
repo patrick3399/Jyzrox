@@ -17,9 +17,7 @@ export function EmptyState({ icon: Icon, title, description, action }: EmptyStat
         </div>
       )}
       <p className="text-sm text-vault-text-secondary font-medium">{title}</p>
-      {description && (
-        <p className="text-xs text-vault-text-muted mt-1 max-w-xs">{description}</p>
-      )}
+      {description && <p className="text-xs text-vault-text-muted mt-1 max-w-xs">{description}</p>}
       {action && (
         <Link
           href={action.href}

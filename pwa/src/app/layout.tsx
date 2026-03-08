@@ -23,11 +23,7 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 }
 
-export default function RootLayout({
-  children,
-}: {
-  children: React.ReactNode
-}) {
+export default function RootLayout({ children }: { children: React.ReactNode }) {
   return (
     <html lang="en" suppressHydrationWarning>
       <head>
@@ -56,7 +52,9 @@ export default function RootLayout({
           }}
         />
         <ThemeProvider>
-          <LayoutShell><ErrorBoundary>{children}</ErrorBoundary></LayoutShell>
+          <LayoutShell>
+            <ErrorBoundary>{children}</ErrorBoundary>
+          </LayoutShell>
         </ThemeProvider>
       </body>
     </html>

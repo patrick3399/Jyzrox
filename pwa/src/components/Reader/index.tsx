@@ -31,7 +31,11 @@ function Spinner({ className = '' }: { className?: string }) {
       viewBox="0 0 24 24"
     >
       <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
-      <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
+      <path
+        className="opacity-75"
+        fill="currentColor"
+        d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z"
+      />
     </svg>
   )
 }
@@ -114,7 +118,14 @@ interface SinglePageViewProps {
   onImageLoaded: () => void
 }
 
-function SinglePageView({ image, isLoading, onNext, onPrev, onToggleOverlay, onImageLoaded }: SinglePageViewProps) {
+function SinglePageView({
+  image,
+  isLoading,
+  onNext,
+  onPrev,
+  onToggleOverlay,
+  onImageLoaded,
+}: SinglePageViewProps) {
   return (
     <div className="relative flex h-full w-full items-center justify-center overflow-hidden">
       <MediaElement
@@ -183,7 +194,7 @@ function WebtoonView({ images, onPageChange, onToggleOverlay }: WebtoonViewProps
           if (!isNaN(pageNum)) onPageChange(pageNum)
         }
       },
-      { threshold: 0.5 }
+      { threshold: 0.5 },
     )
 
     elRefs.current.forEach((el) => observer.observe(el))
@@ -330,9 +341,7 @@ function ReaderOverlay({
             key={m}
             onClick={() => onViewModeChange(m)}
             className={`rounded px-2 py-1 text-xs font-medium transition-colors ${
-              viewMode === m
-                ? 'bg-white text-black'
-                : 'bg-white/10 hover:bg-white/20 text-white'
+              viewMode === m ? 'bg-white text-black' : 'bg-white/10 hover:bg-white/20 text-white'
             }`}
           >
             {m}
@@ -425,9 +434,7 @@ function ThumbnailStrip({ images, currentPage, onPageSelect, previews }: Thumbna
             ref={isActive ? activeRef : null}
             onClick={() => onPageSelect(img.pageNum)}
             className={`relative flex-shrink-0 overflow-hidden rounded transition-all ${
-              isActive
-                ? 'ring-2 ring-white opacity-100'
-                : 'opacity-50 hover:opacity-80'
+              isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
             }`}
             style={{ width: 48, height: 64 }}
             title={`Page ${img.pageNum}`}
@@ -479,14 +486,10 @@ export default function Reader({
     mediaType: img.media_type,
   }))
 
-  const {
-    state,
-    setPage,
-    nextPage,
-    prevPage,
-    setViewMode,
-    toggleOverlay,
-  } = useReaderState(initialPage, totalPages)
+  const { state, setPage, nextPage, prevPage, setViewMode, toggleOverlay } = useReaderState(
+    initialPage,
+    totalPages,
+  )
 
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -509,11 +512,7 @@ export default function Reader({
   useSequentialPrefetch(images, state.currentPage, isProxyMode)
   useProgressSave(galleryId, state.currentPage)
 
-  useTouchGesture(
-    containerRef as React.RefObject<HTMLElement | null>,
-    nextPage,
-    prevPage
-  )
+  useTouchGesture(containerRef as React.RefObject<HTMLElement | null>, nextPage, prevPage)
 
   useKeyboardNav(nextPage, prevPage)
 
@@ -533,10 +532,7 @@ export default function Reader({
   const nextImage = images.find((i) => i.pageNum === state.currentPage + 1) ?? null
 
   return (
-    <div
-      ref={containerRef}
-      className="reader-container flex flex-col bg-black"
-    >
+    <div ref={containerRef} className="reader-container flex flex-col bg-black">
       {/* Top overlay */}
       {state.showOverlay && (
         <ReaderOverlay

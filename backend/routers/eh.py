@@ -10,11 +10,11 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import JSONResponse
 
 from core.auth import require_auth
+from core.config import settings as app_settings
 from core.redis_client import eh_semaphore, get_redis
 from services import cache
 from services.cache import push_system_alert
 from services.credential import get_credential
-from core.config import settings as app_settings
 from services.eh_client import EhClient
 
 logger = logging.getLogger(__name__)
@@ -31,6 +31,7 @@ async def _make_client() -> EhClient:
 
 
 # ── Search ───────────────────────────────────────────────────────────
+
 
 @router.get("/search")
 async def search(
@@ -55,9 +56,15 @@ async def search(
     async with client:
         try:
             result = await client.search(
-                query=q, page=page, category=category,
-                f_cats=f_cats, advance=advance, adv_search=adv_search,
-                min_rating=min_rating, page_from=page_from, page_to=page_to,
+                query=q,
+                page=page,
+                category=category,
+                f_cats=f_cats,
+                advance=advance,
+                adv_search=adv_search,
+                min_rating=min_rating,
+                page_from=page_from,
+                page_to=page_to,
             )
         except PermissionError as e:
             detail = str(e)
@@ -74,6 +81,7 @@ async def search(
 
 
 # ── Gallery metadata ─────────────────────────────────────────────────
+
 
 @router.get("/gallery/{gid}/{token}")
 async def get_gallery(
@@ -109,6 +117,7 @@ async def get_gallery(
 
 
 # ── Preview thumbnails (lightweight — single page scrape) ────────────
+
 
 @router.get("/gallery/{gid}/{token}/previews")
 async def get_gallery_previews(
@@ -149,6 +158,7 @@ async def get_gallery_previews(
 
 
 # ── Image token list ─────────────────────────────────────────────────
+
 
 @router.get("/gallery/{gid}/{token}/images")
 async def get_gallery_images(
@@ -202,6 +212,7 @@ async def get_gallery_images(
 
 # ── Image proxy ──────────────────────────────────────────────────────
 
+
 @router.get("/image-proxy/{gid}/{page}")
 async def image_proxy(
     gid: int,
@@ -222,6 +233,7 @@ async def image_proxy(
     cached_bytes = await cache.get_proxied_image(gid, page)
     if cached_bytes:
         from services.eh_client import _detect_media_type
+
         return Response(
             content=cached_bytes,
             media_type=_detect_media_type(cached_bytes),
@@ -264,6 +276,7 @@ async def image_proxy(
 
 # ── Favorites ─────────────────────────────────────────────────────────
 
+
 @router.get("/favorites")
 async def get_favorites(
     favcat: str = Query(default="all"),
@@ -286,8 +299,10 @@ async def get_favorites(
     async with client:
         try:
             result = await client.get_favorites(
-                favcat=favcat, search=q,
-                next_cursor=next, prev_cursor=prev,
+                favcat=favcat,
+                search=q,
+                next_cursor=next,
+                prev_cursor=prev,
             )
         except PermissionError as e:
             detail = str(e)
@@ -302,6 +317,7 @@ async def get_favorites(
 
 
 # ── Favorite management ──────────────────────────────────────────────
+
 
 @router.post("/favorites/{gid}/{token}")
 async def add_favorite(

@@ -23,7 +23,11 @@ function EhProxyReaderPage() {
   const startPage = Number(searchParams.get('page') || '1')
 
   const { data: gallery, error: galleryError, isLoading: galleryLoading } = useEhGallery(gid, token)
-  const { data: imageMap, error: imagesError, isLoading: imagesLoading } = useEhGalleryImages(gid, token)
+  const {
+    data: imageMap,
+    error: imagesError,
+    isLoading: imagesLoading,
+  } = useEhGalleryImages(gid, token)
 
   // Track loading time
   const [loadingTooLong, setLoadingTooLong] = useState(false)
@@ -78,9 +82,7 @@ function EhProxyReaderPage() {
           <p className="mt-3 text-sm opacity-50">
             {!gallery && galleryLoading ? 'Loading metadata...' : 'Loading image tokens...'}
           </p>
-          {gallery && (
-            <p className="mt-1 text-xs opacity-30">{gallery.pages} pages</p>
-          )}
+          {gallery && <p className="mt-1 text-xs opacity-30">{gallery.pages} pages</p>}
           {loadingTooLong && (
             <div className="mt-4 space-y-2">
               <p className="text-xs text-yellow-500">Loading is taking longer than expected...</p>

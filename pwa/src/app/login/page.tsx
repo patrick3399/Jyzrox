@@ -2,7 +2,7 @@
 
 import { useState, FormEvent, useEffect, useRef } from 'react'
 import { useRouter } from 'next/navigation'
-/* eslint-disable @next/next/no-img-element */
+
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 
@@ -15,22 +15,30 @@ export default function LoginPage() {
   const mountedRef = useRef(true)
 
   useEffect(() => {
-    return () => { mountedRef.current = false }
+    return () => {
+      mountedRef.current = false
+    }
   }, [])
 
   useEffect(() => {
     // If we already have a valid session, go straight to dashboard
-    api.auth.check()
-      .then(() => { router.replace('/') })
+    api.auth
+      .check()
+      .then(() => {
+        router.replace('/')
+      })
       .catch(() => {
         // Session invalid or missing — check if first-run setup needed
-        api.auth.needsSetup()
+        api.auth
+          .needsSetup()
           .then((data) => {
             if (!mountedRef.current) return
             if (data.needs_setup) router.replace('/setup')
             else setLoading(false)
           })
-          .catch(() => { if (mountedRef.current) setLoading(false) })
+          .catch(() => {
+            if (mountedRef.current) setLoading(false)
+          })
       })
   }, [router])
 
@@ -67,20 +75,46 @@ export default function LoginPage() {
 
           <form onSubmit={handleSubmit} className="flex flex-col gap-5">
             <div className="flex flex-col gap-2">
-              <label htmlFor="username" className="text-sm text-vault-text-secondary">{t('login.accountOrEmail')}</label>
-              <input id="username" type="text" value={username} onChange={(e) => setUsername(e.target.value)} autoComplete="username" autoFocus required disabled={loading}
-                className="w-full bg-vault-input border border-vault-border rounded-xl px-4 py-3 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors disabled:opacity-50" />
+              <label htmlFor="username" className="text-sm text-vault-text-secondary">
+                {t('login.accountOrEmail')}
+              </label>
+              <input
+                id="username"
+                type="text"
+                value={username}
+                onChange={(e) => setUsername(e.target.value)}
+                autoComplete="username"
+                autoFocus
+                required
+                disabled={loading}
+                className="w-full bg-vault-input border border-vault-border rounded-xl px-4 py-3 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors disabled:opacity-50"
+              />
             </div>
             <div className="flex flex-col gap-2">
-              <label htmlFor="password" className="text-sm text-vault-text-secondary">{t('login.password')}</label>
-              <input id="password" type="password" value={password} onChange={(e) => setPassword(e.target.value)} autoComplete="current-password" required disabled={loading}
-                className="w-full bg-vault-input border border-vault-border rounded-xl px-4 py-3 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors disabled:opacity-50" />
+              <label htmlFor="password" className="text-sm text-vault-text-secondary">
+                {t('login.password')}
+              </label>
+              <input
+                id="password"
+                type="password"
+                value={password}
+                onChange={(e) => setPassword(e.target.value)}
+                autoComplete="current-password"
+                required
+                disabled={loading}
+                className="w-full bg-vault-input border border-vault-border rounded-xl px-4 py-3 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors disabled:opacity-50"
+              />
             </div>
             {error && (
-              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">{error}</p>
+              <p className="text-xs text-red-400 bg-red-500/10 border border-red-500/20 rounded-xl px-4 py-2.5">
+                {error}
+              </p>
             )}
-            <button type="submit" disabled={loading || !username || !password}
-              className="mt-2 w-full bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-full py-3.5 text-sm transition-colors">
+            <button
+              type="submit"
+              disabled={loading || !username || !password}
+              className="mt-2 w-full bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold rounded-full py-3.5 text-sm transition-colors"
+            >
               {loading ? t('login.submitting') : t('login.submit')}
             </button>
           </form>

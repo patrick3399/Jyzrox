@@ -38,9 +38,18 @@ function groupTagsByNamespace(tags: string[]): Record<string, string[]> {
 }
 
 const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: string }> = {
-  complete: { labelKey: 'library.statusComplete', className: 'bg-green-900/40 border-green-700/50 text-green-400' },
-  partial: { labelKey: 'library.statusPartial', className: 'bg-yellow-900/40 border-yellow-700/50 text-yellow-400' },
-  proxy_only: { labelKey: 'library.statusProxyOnly', className: 'bg-gray-800 border-gray-600 text-gray-400' },
+  complete: {
+    labelKey: 'library.statusComplete',
+    className: 'bg-green-900/40 border-green-700/50 text-green-400',
+  },
+  partial: {
+    labelKey: 'library.statusPartial',
+    className: 'bg-yellow-900/40 border-yellow-700/50 text-yellow-400',
+  },
+  proxy_only: {
+    labelKey: 'library.statusProxyOnly',
+    className: 'bg-gray-800 border-gray-600 text-gray-400',
+  },
 }
 
 export default function GalleryDetailPage() {
@@ -48,7 +57,12 @@ export default function GalleryDetailPage() {
   const router = useRouter()
   const id = params?.id ? Number(params.id) : null
 
-  const { data: gallery, isLoading: galleryLoading, error: galleryError, mutate: mutateGallery } = useLibraryGallery(id)
+  const {
+    data: gallery,
+    isLoading: galleryLoading,
+    error: galleryError,
+    mutate: mutateGallery,
+  } = useLibraryGallery(id)
   const { data: imagesData, isLoading: imagesLoading } = useGalleryImages(id)
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(id ?? 0)
 
@@ -101,7 +115,8 @@ export default function GalleryDetailPage() {
 
   const tagGroups = groupTagsByNamespace(gallery.tags_array)
   const images = imagesData?.images ?? []
-  const statusInfo = DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
+  const statusInfo =
+    DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
 
   return (
     <div className="min-h-screen bg-vault-bg text-vault-text">
@@ -136,7 +151,9 @@ export default function GalleryDetailPage() {
             <div className="flex-1 min-w-0">
               <div className="flex items-start justify-between gap-2 mb-1">
                 <h1 className="text-xl font-bold text-vault-text leading-tight">{gallery.title}</h1>
-                <span className={`flex-shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}>
+                <span
+                  className={`flex-shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
+                >
                   {t(statusInfo.labelKey)}
                 </span>
               </div>
@@ -175,7 +192,9 @@ export default function GalleryDetailPage() {
                   readonly={false}
                   onChange={handleRatingChange}
                 />
-                <span className="text-sm text-vault-text-secondary">{gallery.rating.toFixed(1)}</span>
+                <span className="text-sm text-vault-text-secondary">
+                  {gallery.rating.toFixed(1)}
+                </span>
               </div>
 
               {/* Action Buttons */}
@@ -204,7 +223,9 @@ export default function GalleryDetailPage() {
 
         {/* Tags */}
         <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
-          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide mb-3">{t('common.tags')}</h2>
+          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide mb-3">
+            {t('common.tags')}
+          </h2>
           {Object.keys(tagGroups).length === 0 ? (
             <p className="text-sm text-vault-text-muted">{t('library.noTags')}</p>
           ) : (

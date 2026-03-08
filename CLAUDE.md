@@ -236,18 +236,37 @@ async def endpoint(_: dict = Depends(require_auth)):
 使用 Claude Code 的 Agent 工具進行並行開發，適用於大規模健檢、重構、功能開發等任務。
 核心原則：**每個 Agent 負責不重疊的檔案範圍**，避免寫入衝突。
 
+### Main Orchestrator（Opus）角色
+
+> ⚠️ **除非使用者特別指定，否則 Main Orchestrator 不直接寫代碼。** 所有代碼修改預設委派給對應的 Agent 執行。
+
+Main Orchestrator 的職責：
+1. **接收需求** — 理解用戶意圖，拆解任務
+2. **啟動審查 Agent** — 並行派發 Explore Agent 收集報告
+3. **規劃與分配** — 從報告提取問題，按檔案範圍分組，制定修改計畫
+4. **啟動實施 Agent** — 將具體修改指令派發給對應 Agent（`mode=auto`）
+5. **驗證結果** — 執行 build/test 確認改動正確
+6. **彙報用戶** — 總結改動內容
+
+Main Orchestrator **預設不做**（除非使用者明確要求）：
+- ❌ 直接使用 Edit/Write 修改 `backend/`、`pwa/src/`、`db/`、`nginx/` 等代碼檔案
+- ❌ 跳過 Agent 直接修 bug（即使是「小修改」也要委派）
+- ✅ 可以修改 `CLAUDE.md`、memory 檔案等非代碼配置
+- ✅ 使用者明確指示「你直接改」「不用開 agent」時，可直接寫代碼
+
 ### Agent 角色定義
 
-| Agent | 職責 | 對應檔案範圍 |
-|-------|------|-------------|
-| Backend Architect | 後端架構審查、安全性、效能 | `backend/` 全部 |
-| Frontend Architect | 前端架構、UX、PWA | `pwa/src/` 全部 |
-| QA Tester | 測試覆蓋分析、測試計畫、撰寫測試 | `backend/tests/`, `pwa/src/__tests__/` |
-| DevOps Engineer | Docker/Nginx/部署/備份 | `docker-compose.yml`, `nginx/`, `scripts/`, `db/` |
-| Documentation Writer | 文檔審查與撰寫 | `*.md`, `docs/` |
+| Agent | subagent_type | 職責 | 對應檔案範圍 |
+|-------|---------------|------|-------------|
+| Backend Architect | `backend-architect` | 後端架構審查、安全性、效能、代碼修改 | `backend/` 全部 |
+| Frontend Architect | `frontend-architect` | 前端架構、UX、PWA、代碼修改 | `pwa/src/` 全部 |
+| QA Tester | `qa-tester` | 測試覆蓋分析、測試計畫、撰寫測試 | `backend/tests/`, `pwa/src/__tests__/` |
+| DevOps Engineer | `devops-engineer` | Docker/Nginx/部署/備份、配置修改 | `docker-compose.yml`, `nginx/`, `scripts/`, `db/` |
+| Documentation Writer | `doc-writer` | 文檔審查與撰寫 | `*.md`, `docs/` |
 
 ### 並行開發原則
 
+- **除非使用者特別指定，Main Orchestrator 只做規劃與協調，不直接寫代碼**
 - 每個 Agent 負責不重疊的檔案範圍，避免寫入衝突
 - 先啟動審查/研究 Agent（`subagent_type=Explore`），收集結構化報告
 - 再啟動實施 Agent（`mode=auto`），根據報告修改代碼
@@ -258,20 +277,23 @@ async def endpoint(_: dict = Depends(require_auth)):
 ```
 Phase 1: 審查（5 Explore Agents 並行）
   → 各 Agent 輸出結構化報告（問題清單 + 改善建議）
-  → 彙整為統一的健檢報告
+  → Main Orchestrator 彙整為統一的健檢報告
 
-Phase 2: 規劃
+Phase 2: 規劃（Main Orchestrator）
   → 從報告中提取 Critical/High 問題
   → 按檔案範圍分組，確保 Agent 間不衝突
+  → 為每個 Agent 撰寫具體修改指令
 
-Phase 3: 實施（N 個 Auto Agents 並行）
+Phase 3: 實施（N 個 Typed Agents 並行）
+  → 使用對應的 subagent_type 啟動 Agent（mode=auto）
   → 每個 Agent 只修改分配到的檔案
-  → 完成後逐一驗證（build + test）
+  → Agent 完成後回報改動摘要
 
-Phase 4: 驗證
+Phase 4: 驗證（Main Orchestrator）
   → Backend: pytest
   → Frontend: vitest + next build
-  → 全面通過後才算完成
+  → Docker: docker compose build
+  → 全面通過後才算完成，失敗則派發修復 Agent
 ```
 
 ### 測試基礎設施

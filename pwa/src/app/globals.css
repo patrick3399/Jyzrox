@@ -29,7 +29,8 @@
   }
 }
 
-html, body {
+html,
+body {
   min-height: 100vh;
   min-height: 100dvh;
 }
@@ -66,10 +67,10 @@ html {
 .reader-container {
   position: fixed;
   inset: 0;
-  z-index: 100;                 /* above NavBar (z-50) */
+  z-index: 100; /* above NavBar (z-50) */
   overflow: hidden;
   overscroll-behavior: none;
-  -webkit-touch-callout: none;  /* prevent iOS long-press popup on images */
+  -webkit-touch-callout: none; /* prevent iOS long-press popup on images */
   -webkit-user-select: none;
   user-select: none;
 }
@@ -85,11 +86,11 @@ html {
   overflow-x: hidden;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y;         /* allow vertical scroll only */
-  scrollbar-width: none;       /* Firefox */
+  touch-action: pan-y; /* allow vertical scroll only */
+  scrollbar-width: none; /* Firefox */
 }
 .reader-webtoon-scroll::-webkit-scrollbar {
-  display: none;               /* Chrome / Safari */
+  display: none; /* Chrome / Safari */
 }
 
 /* Thumbnail strip — horizontal scroll, hide scrollbar */

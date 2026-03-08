@@ -10,11 +10,36 @@ import { EmptyState } from '@/components/EmptyState'
 import type { Gallery, DownloadJob } from '@/lib/types'
 
 const QUICK_LINKS = [
-  { href: '/browse', label: () => t('dashboard.quickLinks.browse'), desc: () => t('dashboard.quickLinks.browseDesc'), icon: Search },
-  { href: '/library', label: () => t('dashboard.quickLinks.library'), desc: () => t('dashboard.quickLinks.libraryDesc'), icon: BookOpen },
-  { href: '/queue', label: () => t('dashboard.quickLinks.queue'), desc: () => t('dashboard.quickLinks.queueDesc'), icon: Download },
-  { href: '/tags', label: () => t('dashboard.quickLinks.tags'), desc: () => t('dashboard.quickLinks.tagsDesc'), icon: Tags },
-  { href: '/settings', label: () => t('dashboard.quickLinks.settings'), desc: () => t('dashboard.quickLinks.settingsDesc'), icon: Settings },
+  {
+    href: '/browse',
+    label: () => t('dashboard.quickLinks.browse'),
+    desc: () => t('dashboard.quickLinks.browseDesc'),
+    icon: Search,
+  },
+  {
+    href: '/library',
+    label: () => t('dashboard.quickLinks.library'),
+    desc: () => t('dashboard.quickLinks.libraryDesc'),
+    icon: BookOpen,
+  },
+  {
+    href: '/queue',
+    label: () => t('dashboard.quickLinks.queue'),
+    desc: () => t('dashboard.quickLinks.queueDesc'),
+    icon: Download,
+  },
+  {
+    href: '/tags',
+    label: () => t('dashboard.quickLinks.tags'),
+    desc: () => t('dashboard.quickLinks.tagsDesc'),
+    icon: Tags,
+  },
+  {
+    href: '/settings',
+    label: () => t('dashboard.quickLinks.settings'),
+    desc: () => t('dashboard.quickLinks.settingsDesc'),
+    icon: Settings,
+  },
 ]
 
 function GalleryThumb({ gallery }: { gallery: Gallery }) {
@@ -34,25 +59,24 @@ function GalleryThumb({ gallery }: { gallery: Gallery }) {
 }
 
 export default function Dashboard() {
-  const { data: libraryData, isLoading: libraryLoading } = useSWR(
-    'dashboard/recent',
-    () => api.library.getGalleries({ limit: 12, sort: 'added_at' })
+  const { data: libraryData, isLoading: libraryLoading } = useSWR('dashboard/recent', () =>
+    api.library.getGalleries({ limit: 12, sort: 'added_at' }),
   )
 
-  const { data: jobsData } = useSWR(
-    'dashboard/jobs',
-    () => api.download.getJobs({ limit: 5 }),
-    { refreshInterval: 5000, dedupingInterval: 3000, focusThrottleInterval: 10000 }
-  )
+  const { data: jobsData } = useSWR('dashboard/jobs', () => api.download.getJobs({ limit: 5 }), {
+    refreshInterval: 5000,
+    dedupingInterval: 3000,
+    focusThrottleInterval: 10000,
+  })
 
   const { data: healthData } = useSWR(
     'dashboard/health',
     () => api.system.health().catch(() => null),
-    { refreshInterval: 30000, dedupingInterval: 15000, focusThrottleInterval: 30000 }
+    { refreshInterval: 30000, dedupingInterval: 15000, focusThrottleInterval: 30000 },
   )
 
   const activeJobs = (jobsData?.jobs ?? []).filter(
-    (j: DownloadJob) => j.status === 'queued' || j.status === 'running'
+    (j: DownloadJob) => j.status === 'queued' || j.status === 'running',
   )
 
   return (
@@ -83,7 +107,10 @@ export default function Dashboard() {
                 className="bg-vault-card border border-vault-border rounded-lg p-4 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group"
               >
                 <div className="flex items-center gap-2 mb-1">
-                  <Icon size={16} className="text-vault-text-muted group-hover:text-vault-accent transition-colors" />
+                  <Icon
+                    size={16}
+                    className="text-vault-text-muted group-hover:text-vault-accent transition-colors"
+                  />
                   <p className="font-medium text-sm">{link.label()}</p>
                 </div>
                 <p className="text-xs text-vault-text-muted">{link.desc()}</p>
@@ -99,19 +126,27 @@ export default function Dashboard() {
               <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
                 {t('dashboard.activeDownloads')} ({activeJobs.length})
               </h2>
-              <Link href="/queue" className="flex items-center gap-1 text-xs text-vault-accent hover:text-vault-accent/80 transition-colors">
+              <Link
+                href="/queue"
+                className="flex items-center gap-1 text-xs text-vault-accent hover:text-vault-accent/80 transition-colors"
+              >
                 {t('dashboard.viewAll')} <ArrowRight size={12} />
               </Link>
             </div>
             <div className="space-y-2">
               {activeJobs.map((job: DownloadJob) => (
-                <div key={job.id} className="bg-vault-card border border-vault-border rounded-lg px-4 py-3 flex items-center justify-between gap-3">
+                <div
+                  key={job.id}
+                  className="bg-vault-card border border-vault-border rounded-lg px-4 py-3 flex items-center justify-between gap-3"
+                >
                   <p className="text-sm text-vault-text-secondary truncate">{job.url}</p>
-                  <span className={`flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded border ${
-                    job.status === 'running'
-                      ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
-                      : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
-                  }`}>
+                  <span
+                    className={`flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded border ${
+                      job.status === 'running'
+                        ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+                        : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+                    }`}
+                  >
                     {job.status}
                   </span>
                 </div>
@@ -127,11 +162,14 @@ export default function Dashboard() {
               {t('dashboard.recentlyAdded')}
               {libraryData && (
                 <span className="ml-2 text-vault-text-muted/60 normal-case font-normal">
-                  ({libraryData.total.toLocaleString()} {t('dashboard.total')})
+                  ({(libraryData.total ?? 0).toLocaleString()} {t('dashboard.total')})
                 </span>
               )}
             </h2>
-            <Link href="/library" className="flex items-center gap-1 text-xs text-vault-accent hover:text-vault-accent/80 transition-colors">
+            <Link
+              href="/library"
+              className="flex items-center gap-1 text-xs text-vault-accent hover:text-vault-accent/80 transition-colors"
+            >
               {t('dashboard.viewLibrary')} <ArrowRight size={12} />
             </Link>
           </div>

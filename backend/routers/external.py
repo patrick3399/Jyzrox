@@ -5,12 +5,12 @@ import shutil
 import uuid as _uuid
 
 import psutil
-from fastapi import APIRouter, Depends, HTTPException, Header, Query
-from sqlalchemy import select, func, update
+from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from sqlalchemy import func, select, update
 
 from core.config import settings
 from core.database import async_session
-from db.models import Gallery, Image, Tag, DownloadJob, ApiToken
+from db.models import ApiToken, DownloadJob, Gallery, Image, Tag
 
 router = APIRouter(tags=["external"])
 
@@ -34,15 +34,14 @@ async def verify_api_token(x_api_token: str = Header(...)):
 
     # Update last_used_at
     async with async_session() as session:
-        await session.execute(
-            update(ApiToken).where(ApiToken.id == token.id).values(last_used_at=func.now())
-        )
+        await session.execute(update(ApiToken).where(ApiToken.id == token.id).values(last_used_at=func.now()))
         await session.commit()
 
     return {"user_id": token.user_id, "token_id": token.id}
 
 
 # ── Status ────────────────────────────────────────────────────────────
+
 
 @router.get("/status")
 async def system_status(token_data: dict = Depends(verify_api_token)):
@@ -52,11 +51,11 @@ async def system_status(token_data: dict = Depends(verify_api_token)):
         gallery_count = (await session.execute(select(func.count()).select_from(Gallery))).scalar()
         image_count = (await session.execute(select(func.count()).select_from(Image))).scalar()
         tag_count = (await session.execute(select(func.count()).select_from(Tag))).scalar()
-        active_downloads = (await session.execute(
-            select(func.count()).select_from(DownloadJob).where(
-                DownloadJob.status.in_(["queued", "running"])
+        active_downloads = (
+            await session.execute(
+                select(func.count()).select_from(DownloadJob).where(DownloadJob.status.in_(["queued", "running"]))
             )
-        )).scalar()
+        ).scalar()
 
     try:
         usage = shutil.disk_usage(settings.data_gallery_path)
@@ -86,6 +85,7 @@ async def system_status(token_data: dict = Depends(verify_api_token)):
 
 # ── Galleries ─────────────────────────────────────────────────────────
 
+
 @router.get("/galleries")
 async def list_galleries(
     page: int = Query(default=0, ge=0),
@@ -99,39 +99,33 @@ async def list_galleries(
         filters.append(Gallery.source == source)
 
     async with async_session() as session:
-        count_result = await session.execute(
-            select(func.count()).select_from(Gallery).where(*filters)
-        )
+        count_result = await session.execute(select(func.count()).select_from(Gallery).where(*filters))
         total = count_result.scalar() or 0
 
-        data_query = (
-            select(Gallery)
-            .where(*filters)
-            .order_by(Gallery.added_at.desc())
-            .limit(limit)
-            .offset(page * limit)
-        )
+        data_query = select(Gallery).where(*filters).order_by(Gallery.added_at.desc()).limit(limit).offset(page * limit)
         rows = (await session.execute(data_query)).scalars().all()
 
     galleries = []
     for r in rows:
-        galleries.append({
-            "id": r.id,
-            "source": r.source,
-            "source_id": r.source_id,
-            "title": r.title,
-            "title_jpn": r.title_jpn,
-            "category": r.category,
-            "language": r.language,
-            "pages": r.pages,
-            "posted_at": r.posted_at.isoformat() if r.posted_at else None,
-            "added_at": r.added_at.isoformat() if r.added_at else None,
-            "rating": r.rating,
-            "favorited": r.favorited,
-            "uploader": r.uploader,
-            "download_status": r.download_status,
-            "tags": r.tags_array or [],
-        })
+        galleries.append(
+            {
+                "id": r.id,
+                "source": r.source,
+                "source_id": r.source_id,
+                "title": r.title,
+                "title_jpn": r.title_jpn,
+                "category": r.category,
+                "language": r.language,
+                "pages": r.pages,
+                "posted_at": r.posted_at.isoformat() if r.posted_at else None,
+                "added_at": r.added_at.isoformat() if r.added_at else None,
+                "rating": r.rating,
+                "favorited": r.favorited,
+                "uploader": r.uploader,
+                "download_status": r.download_status,
+                "tags": r.tags_array or [],
+            }
+        )
 
     return {"total": total, "page": page, "galleries": galleries}
 
@@ -143,9 +137,7 @@ async def get_gallery(
 ):
     """Get a single gallery by ID."""
     async with async_session() as session:
-        r = (await session.execute(
-            select(Gallery).where(Gallery.id == gallery_id)
-        )).scalar_one_or_none()
+        r = (await session.execute(select(Gallery).where(Gallery.id == gallery_id))).scalar_one_or_none()
 
     if not r:
         raise HTTPException(status_code=404, detail="Gallery not found")
@@ -171,6 +163,7 @@ async def get_gallery(
 
 # ── Gallery images ────────────────────────────────────────────────────
 
+
 @router.get("/galleries/{gallery_id}/images")
 async def get_gallery_images(
     gallery_id: int,
@@ -179,34 +172,35 @@ async def get_gallery_images(
     """List images for a gallery."""
     async with async_session() as session:
         # Verify gallery exists
-        gallery = (await session.execute(
-            select(Gallery.id).where(Gallery.id == gallery_id)
-        )).fetchone()
+        gallery = (await session.execute(select(Gallery.id).where(Gallery.id == gallery_id))).fetchone()
         if not gallery:
             raise HTTPException(status_code=404, detail="Gallery not found")
 
-        rows = (await session.execute(
-            select(Image)
-            .where(Image.gallery_id == gallery_id)
-            .order_by(Image.page_num)
-        )).scalars().all()
+        rows = (
+            (await session.execute(select(Image).where(Image.gallery_id == gallery_id).order_by(Image.page_num)))
+            .scalars()
+            .all()
+        )
 
     images = []
     for r in rows:
-        images.append({
-            "id": r.id,
-            "page_num": r.page_num,
-            "filename": r.filename,
-            "width": r.width,
-            "height": r.height,
-            "file_size": r.file_size,
-            "media_type": r.media_type,
-        })
+        images.append(
+            {
+                "id": r.id,
+                "page_num": r.page_num,
+                "filename": r.filename,
+                "width": r.width,
+                "height": r.height,
+                "file_size": r.file_size,
+                "media_type": r.media_type,
+            }
+        )
 
     return {"gallery_id": gallery_id, "images": images}
 
 
 # ── Tags ──────────────────────────────────────────────────────────────
+
 
 @router.get("/tags")
 async def list_tags(
@@ -224,24 +218,21 @@ async def list_tags(
         filters.append(Tag.namespace == namespace)
 
     async with async_session() as session:
-        count_result = await session.execute(
-            select(func.count()).select_from(Tag).where(*filters)
-        )
+        count_result = await session.execute(select(func.count()).select_from(Tag).where(*filters))
         total = count_result.scalar() or 0
 
-        rows = (await session.execute(
-            select(Tag)
-            .where(*filters)
-            .order_by(Tag.count.desc())
-            .limit(limit)
-            .offset(offset)
-        )).scalars().all()
+        rows = (
+            (await session.execute(select(Tag).where(*filters).order_by(Tag.count.desc()).limit(limit).offset(offset)))
+            .scalars()
+            .all()
+        )
 
     tags = [{"id": r.id, "namespace": r.namespace, "name": r.name, "count": r.count} for r in rows]
     return {"total": total, "tags": tags}
 
 
 # ── Download trigger ──────────────────────────────────────────────────
+
 
 @router.post("/download")
 async def enqueue_download(

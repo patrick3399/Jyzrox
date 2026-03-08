@@ -8,7 +8,14 @@ import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
 import { Copy, Key } from 'lucide-react'
-import type { SystemHealth, SystemInfo, EhAccount, Credentials, SessionInfo, ApiTokenInfo } from '@/lib/types'
+import type {
+  SystemHealth,
+  SystemInfo,
+  EhAccount,
+  Credentials,
+  SessionInfo,
+  ApiTokenInfo,
+} from '@/lib/types'
 
 type SectionKey = 'ehentai' | 'pixiv' | 'system' | 'account' | 'browse' | 'apiTokens'
 
@@ -30,15 +37,23 @@ function SectionHeader({
       className="w-full flex items-center justify-between px-5 py-4 text-left hover:bg-vault-card-hover transition-colors"
     >
       <span className="font-medium text-vault-text text-sm">{title}</span>
-      {isOpen ? <ChevronUp size={16} className="text-vault-text-muted" /> : <ChevronDown size={16} className="text-vault-text-muted" />}
+      {isOpen ? (
+        <ChevronUp size={16} className="text-vault-text-muted" />
+      ) : (
+        <ChevronDown size={16} className="text-vault-text-muted" />
+      )}
     </button>
   )
 }
 
 function StatusIndicator({ configured }: { configured: boolean }) {
   return (
-    <span className={`inline-flex items-center gap-1 text-xs ${configured ? 'text-green-500' : 'text-vault-text-muted'}`}>
-      <span className={`w-1.5 h-1.5 rounded-full ${configured ? 'bg-green-500' : 'bg-vault-text-muted'}`} />
+    <span
+      className={`inline-flex items-center gap-1 text-xs ${configured ? 'text-green-500' : 'text-vault-text-muted'}`}
+    >
+      <span
+        className={`w-1.5 h-1.5 rounded-full ${configured ? 'bg-green-500' : 'bg-vault-text-muted'}`}
+      />
       {configured ? t('settings.configured') : t('settings.notConfigured')}
     </span>
   )
@@ -47,9 +62,14 @@ function StatusIndicator({ configured }: { configured: boolean }) {
 // ── Browse Settings sub-component ────────────────────────────────────
 
 function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
-  const historyEnabled = typeof window !== 'undefined' && localStorage.getItem('eh_search_history_enabled') !== 'false'
-  const loadMode = typeof window !== 'undefined' ? (localStorage.getItem('browse_load_mode') || 'pagination') : 'pagination'
-  const perPage = typeof window !== 'undefined' ? (localStorage.getItem('browse_per_page') || '25') : '25'
+  const historyEnabled =
+    typeof window !== 'undefined' && localStorage.getItem('eh_search_history_enabled') !== 'false'
+  const loadMode =
+    typeof window !== 'undefined'
+      ? localStorage.getItem('browse_load_mode') || 'pagination'
+      : 'pagination'
+  const perPage =
+    typeof window !== 'undefined' ? localStorage.getItem('browse_per_page') || '25' : '25'
 
   return (
     <div className="px-5 pb-5 border-t border-vault-border">
@@ -68,7 +88,9 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
           }}
           className={`relative w-11 h-6 rounded-full transition-colors ${historyEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
         >
-          <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${historyEnabled ? 'translate-x-5' : ''}`} />
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${historyEnabled ? 'translate-x-5' : ''}`}
+          />
         </button>
       </div>
 
@@ -80,13 +102,19 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
         </div>
         <div className="flex bg-vault-input border border-vault-border rounded overflow-hidden">
           <button
-            onClick={() => { localStorage.setItem('browse_load_mode', 'pagination'); onForceRerender() }}
+            onClick={() => {
+              localStorage.setItem('browse_load_mode', 'pagination')
+              onForceRerender()
+            }}
             className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'pagination' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
           >
             {t('settings.pagination')}
           </button>
           <button
-            onClick={() => { localStorage.setItem('browse_load_mode', 'scroll'); onForceRerender() }}
+            onClick={() => {
+              localStorage.setItem('browse_load_mode', 'scroll')
+              onForceRerender()
+            }}
             className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'scroll' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
           >
             {t('settings.infiniteScroll')}
@@ -102,7 +130,10 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
         </div>
         <select
           value={perPage}
-          onChange={(e) => { localStorage.setItem('browse_per_page', e.target.value); onForceRerender() }}
+          onChange={(e) => {
+            localStorage.setItem('browse_per_page', e.target.value)
+            onForceRerender()
+          }}
           className="bg-vault-input border border-vault-border rounded px-3 py-1.5 text-sm text-vault-text focus:outline-none"
         >
           <option value="25">25</option>
@@ -188,7 +219,8 @@ export default function SettingsPage() {
 
   // Load credentials on mount
   useEffect(() => {
-    api.settings.getCredentials()
+    api.settings
+      .getCredentials()
       .then(setCredentials)
       .catch((err) => toast.error(err instanceof Error ? err.message : t('common.failedToLoad')))
       .finally(() => setCredLoading(false))
@@ -206,7 +238,7 @@ export default function SettingsPage() {
       const result = await api.settings.ehLogin(ehUsername.trim(), ehPassword.trim())
       toast.success(t('settings.ehLoginSuccess'))
       setEhAccount(result.account)
-      setCredentials((prev) => prev ? { ...prev, ehentai: { configured: true } } : prev)
+      setCredentials((prev) => (prev ? { ...prev, ehentai: { configured: true } } : prev))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.ehLoginFailed'))
     } finally {
@@ -228,7 +260,7 @@ export default function SettingsPage() {
       const result = await api.settings.setEhCookies(data)
       toast.success(t('settings.ehCookiesSaved'))
       setEhAccount(result.account)
-      setCredentials((prev) => prev ? { ...prev, ehentai: { configured: true } } : prev)
+      setCredentials((prev) => (prev ? { ...prev, ehentai: { configured: true } } : prev))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.ehCookiesFailed'))
     } finally {
@@ -257,7 +289,7 @@ export default function SettingsPage() {
       const result = await api.settings.setPixivToken(pixivToken.trim())
       toast.success(`${t('settings.pixivSaved')}: ${result.username}`)
       setPixivUsername(result.username)
-      setCredentials((prev) => prev ? { ...prev, pixiv: { configured: true } } : prev)
+      setCredentials((prev) => (prev ? { ...prev, pixiv: { configured: true } } : prev))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.pixivFailed'))
     } finally {
@@ -269,7 +301,11 @@ export default function SettingsPage() {
   const handleLoadSystem = useCallback(async () => {
     setSystemLoading(true)
     try {
-      const [h, i, rl] = await Promise.all([api.system.health(), api.system.info(), api.settings.getRateLimit()])
+      const [h, i, rl] = await Promise.all([
+        api.system.health(),
+        api.system.info(),
+        api.settings.getRateLimit(),
+      ])
       setHealth(h)
       setSystemInfo(i)
       setRateLimitEnabled(rl.enabled)
@@ -345,14 +381,17 @@ export default function SettingsPage() {
     }
   }, [])
 
-  const handleAvatarStyleChange = useCallback(async (style: 'gravatar' | 'manual') => {
-    if (style === avatarStyle) return
-    if (style === 'gravatar') {
-      await handleAvatarRemove()
-    } else {
-      setAvatarStyle('manual')
-    }
-  }, [avatarStyle, handleAvatarRemove])
+  const handleAvatarStyleChange = useCallback(
+    async (style: 'gravatar' | 'manual') => {
+      if (style === avatarStyle) return
+      if (style === 'gravatar') {
+        await handleAvatarRemove()
+      } else {
+        setAvatarStyle('manual')
+      }
+    },
+    [avatarStyle, handleAvatarRemove],
+  )
 
   const handleChangePassword = useCallback(async () => {
     if (newPw !== confirmPw) {
@@ -462,16 +501,30 @@ export default function SettingsPage() {
     if (activeSection === 'apiTokens' && !apiTokensLoaded && !apiTokensLoading) {
       handleLoadApiTokens()
     }
-  }, [activeSection, health, systemLoading, handleLoadSystem, profileLoaded, handleLoadProfile, sessions.length, sessionsLoading, handleLoadSessions, apiTokensLoaded, apiTokensLoading, handleLoadApiTokens])
+  }, [
+    activeSection,
+    health,
+    systemLoading,
+    handleLoadSystem,
+    profileLoaded,
+    handleLoadProfile,
+    sessions.length,
+    sessionsLoading,
+    handleLoadSessions,
+    apiTokensLoaded,
+    apiTokensLoading,
+    handleLoadApiTokens,
+  ])
 
   const serviceStatusClass = (status: string) =>
-    status === 'ok' || status === 'healthy'
-      ? 'text-green-400'
-      : 'text-red-400'
+    status === 'ok' || status === 'healthy' ? 'text-green-400' : 'text-red-400'
 
-  const inputClass = 'w-full bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent text-sm'
-  const btnPrimary = 'px-4 py-2 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-sm font-medium transition-colors'
-  const btnSecondary = 'px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors'
+  const inputClass =
+    'w-full bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent text-sm'
+  const btnPrimary =
+    'px-4 py-2 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-sm font-medium transition-colors'
+  const btnSecondary =
+    'px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors'
 
   return (
     <div className="min-h-screen bg-vault-bg text-vault-text">
@@ -519,7 +572,9 @@ export default function SettingsPage() {
                 {ehLoginMode === 'password' && (
                   <div className="mt-4 space-y-3">
                     <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">{t('settings.username')}</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        {t('settings.username')}
+                      </label>
                       <input
                         type="text"
                         value={ehUsername}
@@ -530,7 +585,9 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">{t('settings.password')}</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        {t('settings.password')}
+                      </label>
                       <input
                         type="password"
                         value={ehPassword}
@@ -542,10 +599,18 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div className="flex gap-2">
-                      <button onClick={handleEhLogin} disabled={ehLoginSaving} className={btnPrimary}>
+                      <button
+                        onClick={handleEhLogin}
+                        disabled={ehLoginSaving}
+                        className={btnPrimary}
+                      >
                         {ehLoginSaving ? t('settings.loggingIn') : t('settings.logIn')}
                       </button>
-                      <button onClick={handleEhRefresh} disabled={ehAccountLoading} className={btnSecondary}>
+                      <button
+                        onClick={handleEhRefresh}
+                        disabled={ehAccountLoading}
+                        className={btnSecondary}
+                      >
                         {ehAccountLoading ? t('settings.refreshing') : t('settings.refreshAccount')}
                       </button>
                     </div>
@@ -556,7 +621,9 @@ export default function SettingsPage() {
                 {ehLoginMode === 'cookie' && (
                   <div className="mt-4 space-y-3">
                     <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">ipb_member_id</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        ipb_member_id
+                      </label>
                       <input
                         type="text"
                         value={ehMemberId}
@@ -566,7 +633,9 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">ipb_pass_hash</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        ipb_pass_hash
+                      </label>
                       <div className="relative">
                         <input
                           type={showPassHash ? 'text' : 'password'}
@@ -595,7 +664,10 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">igneous <span className="text-vault-text-muted">(optional, for ExHentai)</span></label>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        igneous{' '}
+                        <span className="text-vault-text-muted">(optional, for ExHentai)</span>
+                      </label>
                       <input
                         type="text"
                         value={ehIgneous}
@@ -608,7 +680,11 @@ export default function SettingsPage() {
                       <button onClick={handleEhSave} disabled={ehSaving} className={btnPrimary}>
                         {ehSaving ? t('settings.saving') : t('settings.saveCookies')}
                       </button>
-                      <button onClick={handleEhRefresh} disabled={ehAccountLoading} className={btnSecondary}>
+                      <button
+                        onClick={handleEhRefresh}
+                        disabled={ehAccountLoading}
+                        className={btnSecondary}
+                      >
                         {ehAccountLoading ? t('settings.refreshing') : t('settings.refreshAccount')}
                       </button>
                     </div>
@@ -618,7 +694,9 @@ export default function SettingsPage() {
                 {/* Account Info */}
                 {ehAccount && (
                   <div className="mt-4 bg-vault-input border border-vault-border rounded-lg p-3">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('settings.accountStatus')}</p>
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                      {t('settings.accountStatus')}
+                    </p>
                     <div className="space-y-1">
                       <div className="flex justify-between text-sm">
                         <span className="text-vault-text-muted">{t('settings.valid')}</span>
@@ -629,7 +707,9 @@ export default function SettingsPage() {
                       {ehAccount.credits !== undefined && (
                         <div className="flex justify-between text-sm">
                           <span className="text-vault-text-muted">{t('settings.credits')}</span>
-                          <span className="text-vault-text-secondary">{ehAccount.credits.toLocaleString()}</span>
+                          <span className="text-vault-text-secondary">
+                            {ehAccount.credits.toLocaleString()}
+                          </span>
                         </div>
                       )}
                       {ehAccount.hath_perks !== undefined && (
@@ -669,7 +749,9 @@ export default function SettingsPage() {
             {activeSection === 'pixiv' && (
               <div className="px-5 pb-5 border-t border-vault-border">
                 <div className="mt-4">
-                  <label className="block text-xs text-vault-text-muted mb-1">{t('settings.pixivRefreshToken')}</label>
+                  <label className="block text-xs text-vault-text-muted mb-1">
+                    {t('settings.pixivRefreshToken')}
+                  </label>
                   <input
                     type="password"
                     value={pixivToken}
@@ -677,9 +759,7 @@ export default function SettingsPage() {
                     placeholder="Enter Pixiv refresh token"
                     className={inputClass}
                   />
-                  <p className="text-xs text-vault-text-muted mt-1">
-                    {t('settings.pixivHint')}
-                  </p>
+                  <p className="text-xs text-vault-text-muted mt-1">{t('settings.pixivHint')}</p>
                 </div>
 
                 {pixivUsername && (
@@ -718,7 +798,9 @@ export default function SettingsPage() {
                   <div className="mt-4 space-y-4">
                     {/* Health */}
                     <div>
-                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('settings.serviceHealth')}</p>
+                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                        {t('settings.serviceHealth')}
+                      </p>
                       <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
                         {[
                           { label: t('settings.overall'), value: health.status },
@@ -737,20 +819,33 @@ export default function SettingsPage() {
 
                     {/* Info */}
                     <div>
-                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('settings.configuration')}</p>
+                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                        {t('settings.configuration')}
+                      </p>
                       <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
                         {[
                           { label: t('settings.version'), value: systemInfo.version },
-                          { label: t('settings.ehMaxConcurrency'), value: String(systemInfo.eh_max_concurrency) },
+                          {
+                            label: t('settings.ehMaxConcurrency'),
+                            value: String(systemInfo.eh_max_concurrency),
+                          },
                           {
                             label: t('settings.aiTagging'),
-                            value: systemInfo.tag_model_enabled ? t('settings.enabled') : t('settings.disabled'),
-                            valueClass: systemInfo.tag_model_enabled ? 'text-green-400' : 'text-vault-text-muted',
+                            value: systemInfo.tag_model_enabled
+                              ? t('settings.enabled')
+                              : t('settings.disabled'),
+                            valueClass: systemInfo.tag_model_enabled
+                              ? 'text-green-400'
+                              : 'text-vault-text-muted',
                           },
                         ].map(({ label, value, valueClass }) => (
                           <div key={label} className="flex justify-between items-center px-3 py-2">
                             <span className="text-sm text-vault-text-muted">{label}</span>
-                            <span className={`text-sm font-medium ${valueClass ?? 'text-vault-text-secondary'}`}>{value}</span>
+                            <span
+                              className={`text-sm font-medium ${valueClass ?? 'text-vault-text-secondary'}`}
+                            >
+                              {value}
+                            </span>
                           </div>
                         ))}
                       </div>
@@ -758,19 +853,25 @@ export default function SettingsPage() {
 
                     {/* Rate Limiting */}
                     <div>
-                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('settings.security')}</p>
+                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                        {t('settings.security')}
+                      </p>
                       <div className="bg-vault-input border border-vault-border rounded-lg px-3 py-2">
                         <div className="flex items-center justify-between">
                           <div>
                             <p className="text-sm text-vault-text">{t('settings.rateLimiting')}</p>
-                            <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.rateLimitDesc')}</p>
+                            <p className="text-xs text-vault-text-muted mt-0.5">
+                              {t('settings.rateLimitDesc')}
+                            </p>
                           </div>
                           <button
                             onClick={handleToggleRateLimit}
                             disabled={rateLimitToggling || rateLimitEnabled === null}
                             className={`relative w-11 h-6 rounded-full transition-colors ${rateLimitEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
                           >
-                            <span className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${rateLimitEnabled ? 'translate-x-5' : ''}`} />
+                            <span
+                              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${rateLimitEnabled ? 'translate-x-5' : ''}`}
+                            />
                           </button>
                         </div>
                       </div>
@@ -797,10 +898,12 @@ export default function SettingsPage() {
               onToggle={toggleSection}
             />
             {activeSection === 'browse' && (
-              <BrowseSettings onForceRerender={() => {
-                setActiveSection(null)
-                setTimeout(() => setActiveSection('browse'), 0)
-              }} />
+              <BrowseSettings
+                onForceRerender={() => {
+                  setActiveSection(null)
+                  setTimeout(() => setActiveSection('browse'), 0)
+                }}
+              />
             )}
           </div>
 
@@ -818,7 +921,9 @@ export default function SettingsPage() {
               <div className="pr-5">
                 <span className="inline-flex items-center gap-1 text-xs text-vault-text-muted">
                   <Key size={12} />
-                  {apiTokens.length > 0 ? `${apiTokens.length} token${apiTokens.length > 1 ? 's' : ''}` : ''}
+                  {apiTokens.length > 0
+                    ? `${apiTokens.length} token${apiTokens.length > 1 ? 's' : ''}`
+                    : ''}
                 </span>
               </div>
             </div>
@@ -827,7 +932,9 @@ export default function SettingsPage() {
               <div className="px-5 pb-5 border-t border-vault-border">
                 {/* Create new token */}
                 <div className="mt-4">
-                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">Create new token</p>
+                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                    Create new token
+                  </p>
                   <div className="space-y-3">
                     <div>
                       <label className="block text-xs text-vault-text-muted mb-1">Name</label>
@@ -841,7 +948,9 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">Expires in (days)</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        Expires in (days)
+                      </label>
                       <select
                         value={newTokenExpiry}
                         onChange={(e) => setNewTokenExpiry(e.target.value)}
@@ -867,7 +976,9 @@ export default function SettingsPage() {
                 {/* Token list */}
                 <div className="mt-5 pt-4 border-t border-vault-border">
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide">Active tokens</p>
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide">
+                      Active tokens
+                    </p>
                     <button
                       onClick={handleLoadApiTokens}
                       disabled={apiTokensLoading}
@@ -897,7 +1008,9 @@ export default function SettingsPage() {
                             <div className="flex items-start justify-between gap-2">
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
-                                  <span className="text-sm text-vault-text font-medium">{tk.name || 'Unnamed'}</span>
+                                  <span className="text-sm text-vault-text font-medium">
+                                    {tk.name || 'Unnamed'}
+                                  </span>
                                   {isExpired && (
                                     <span className="text-[10px] bg-red-900/40 text-red-400 px-1.5 py-0.5 rounded">
                                       Expired
@@ -924,10 +1037,14 @@ export default function SettingsPage() {
                                 )}
                                 <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-vault-text-muted">
                                   {tk.created_at && (
-                                    <span>Created {new Date(tk.created_at).toLocaleDateString()}</span>
+                                    <span>
+                                      Created {new Date(tk.created_at).toLocaleDateString()}
+                                    </span>
                                   )}
                                   {tk.last_used_at ? (
-                                    <span>Last used {new Date(tk.last_used_at).toLocaleDateString()}</span>
+                                    <span>
+                                      Last used {new Date(tk.last_used_at).toLocaleDateString()}
+                                    </span>
                                   ) : (
                                     <span>Never used</span>
                                   )}
@@ -957,19 +1074,39 @@ export default function SettingsPage() {
 
                 {/* API usage info */}
                 <div className="mt-5 pt-4 border-t border-vault-border">
-                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">Usage</p>
+                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                    Usage
+                  </p>
                   <div className="bg-vault-input border border-vault-border rounded-lg p-3">
                     <p className="text-xs text-vault-text-secondary mb-2">
-                      Use the <code className="bg-black/30 px-1 py-0.5 rounded text-vault-text-muted">X-API-Token</code> header to authenticate external API requests.
+                      Use the{' '}
+                      <code className="bg-black/30 px-1 py-0.5 rounded text-vault-text-muted">
+                        X-API-Token
+                      </code>{' '}
+                      header to authenticate external API requests.
                     </p>
                     <p className="text-xs text-vault-text-muted mb-1">Available endpoints:</p>
                     <div className="space-y-0.5 font-mono text-[11px] text-vault-text-muted">
-                      <p><span className="text-green-400">GET</span> /api/external/v1/status</p>
-                      <p><span className="text-green-400">GET</span> /api/external/v1/galleries</p>
-                      <p><span className="text-green-400">GET</span> /api/external/v1/galleries/:id</p>
-                      <p><span className="text-green-400">GET</span> /api/external/v1/galleries/:id/images</p>
-                      <p><span className="text-green-400">GET</span> /api/external/v1/tags</p>
-                      <p><span className="text-blue-400">POST</span> /api/external/v1/download?url=...</p>
+                      <p>
+                        <span className="text-green-400">GET</span> /api/external/v1/status
+                      </p>
+                      <p>
+                        <span className="text-green-400">GET</span> /api/external/v1/galleries
+                      </p>
+                      <p>
+                        <span className="text-green-400">GET</span> /api/external/v1/galleries/:id
+                      </p>
+                      <p>
+                        <span className="text-green-400">GET</span>{' '}
+                        /api/external/v1/galleries/:id/images
+                      </p>
+                      <p>
+                        <span className="text-green-400">GET</span> /api/external/v1/tags
+                      </p>
+                      <p>
+                        <span className="text-blue-400">POST</span>{' '}
+                        /api/external/v1/download?url=...
+                      </p>
                     </div>
                   </div>
                 </div>
@@ -990,9 +1127,11 @@ export default function SettingsPage() {
                 {/* Avatar */}
                 {profileLoaded && (
                   <div className="mt-4">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-3">{t('settings.avatar')}</p>
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-3">
+                      {t('settings.avatar')}
+                    </p>
                     <div className="flex items-start gap-4">
-                      {/* eslint-disable-next-line @next/next/no-img-element */}
+                      {}
                       <img
                         src={avatarUrl}
                         alt=""
@@ -1016,12 +1155,18 @@ export default function SettingsPage() {
                         </div>
 
                         {avatarStyle === 'gravatar' ? (
-                          <p className="text-xs text-vault-text-muted">{t('settings.avatarGravatarDesc')}</p>
+                          <p className="text-xs text-vault-text-muted">
+                            {t('settings.avatarGravatarDesc')}
+                          </p>
                         ) : (
                           <div className="space-y-2">
                             <div className="flex gap-2">
-                              <label className={`${btnSecondary} cursor-pointer inline-flex items-center`}>
-                                {avatarUploading ? t('settings.avatarUploading') : t('settings.avatarUpload')}
+                              <label
+                                className={`${btnSecondary} cursor-pointer inline-flex items-center`}
+                              >
+                                {avatarUploading
+                                  ? t('settings.avatarUploading')
+                                  : t('settings.avatarUpload')}
                                 <input
                                   type="file"
                                   accept="image/*"
@@ -1038,7 +1183,9 @@ export default function SettingsPage() {
                                 {t('settings.avatarRemove')}
                               </button>
                             </div>
-                            <p className="text-xs text-vault-text-muted">{t('settings.avatarMaxSize')}</p>
+                            <p className="text-xs text-vault-text-muted">
+                              {t('settings.avatarMaxSize')}
+                            </p>
                           </div>
                         )}
                       </div>
@@ -1049,10 +1196,14 @@ export default function SettingsPage() {
                 {/* Profile */}
                 {profileLoaded && (
                   <div className="mt-4">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('settings.profile')}</p>
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                      {t('settings.profile')}
+                    </p>
                     <div className="space-y-3">
                       <div>
-                        <label className="block text-xs text-vault-text-muted mb-1">{t('settings.username')}</label>
+                        <label className="block text-xs text-vault-text-muted mb-1">
+                          {t('settings.username')}
+                        </label>
                         <input
                           type="text"
                           value={profileUsername}
@@ -1061,7 +1212,9 @@ export default function SettingsPage() {
                         />
                       </div>
                       <div>
-                        <label className="block text-xs text-vault-text-muted mb-1">{t('settings.email')}</label>
+                        <label className="block text-xs text-vault-text-muted mb-1">
+                          {t('settings.email')}
+                        </label>
                         <div className="flex gap-2">
                           <input
                             type="email"
@@ -1085,10 +1238,14 @@ export default function SettingsPage() {
 
                 {/* Change Password */}
                 <div className="mt-5 pt-4 border-t border-vault-border">
-                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">{t('settings.changePassword')}</p>
+                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                    {t('settings.changePassword')}
+                  </p>
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">{t('settings.currentPassword')}</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        {t('settings.currentPassword')}
+                      </label>
                       <input
                         type="password"
                         value={currentPw}
@@ -1098,7 +1255,9 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">{t('settings.newPassword')}</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        {t('settings.newPassword')}
+                      </label>
                       <input
                         type="password"
                         value={newPw}
@@ -1108,7 +1267,9 @@ export default function SettingsPage() {
                       />
                     </div>
                     <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">{t('settings.confirmNewPassword')}</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        {t('settings.confirmNewPassword')}
+                      </label>
                       <input
                         type="password"
                         value={confirmPw}
@@ -1131,7 +1292,9 @@ export default function SettingsPage() {
                 {/* Active Sessions */}
                 <div className="mt-5 pt-4 border-t border-vault-border">
                   <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide">{t('settings.activeSessions')}</p>
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide">
+                      {t('settings.activeSessions')}
+                    </p>
                     <button
                       onClick={handleLoadSessions}
                       disabled={sessionsLoading}
@@ -1157,14 +1320,19 @@ export default function SettingsPage() {
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
-                                <span className="text-sm text-vault-text font-mono">{s.token_prefix}...</span>
+                                <span className="text-sm text-vault-text font-mono">
+                                  {s.token_prefix}...
+                                </span>
                                 {s.is_current && (
                                   <span className="text-[10px] bg-vault-accent/30 text-vault-accent px-1.5 py-0.5 rounded">
                                     {t('settings.current')}
                                   </span>
                                 )}
                               </div>
-                              <p className="text-xs text-vault-text-muted mt-1 truncate" title={s.user_agent}>
+                              <p
+                                className="text-xs text-vault-text-muted mt-1 truncate"
+                                title={s.user_agent}
+                              >
                                 {s.user_agent || t('settings.unknownDevice')}
                               </p>
                               <div className="flex items-center gap-3 mt-1">
@@ -1175,7 +1343,8 @@ export default function SettingsPage() {
                                   </span>
                                 )}
                                 <span className="text-xs text-vault-text-muted">
-                                  {t('settings.expiresIn')} {Math.ceil(s.ttl / 86400)}{t('settings.days')}
+                                  {t('settings.expiresIn')} {Math.ceil(s.ttl / 86400)}
+                                  {t('settings.days')}
                                 </span>
                               </div>
                             </div>
@@ -1192,7 +1361,9 @@ export default function SettingsPage() {
                         </div>
                       ))}
                       {sessions.length === 0 && !sessionsLoading && (
-                        <p className="text-xs text-vault-text-muted py-2">{t('settings.noSessions')}</p>
+                        <p className="text-xs text-vault-text-muted py-2">
+                          {t('settings.noSessions')}
+                        </p>
                       )}
                     </div>
                   )}

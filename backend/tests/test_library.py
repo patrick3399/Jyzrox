@@ -9,13 +9,12 @@ are not available in SQLite. Tests that would exercise those features are struct
 to work with the basic query paths or are noted as SQLite-limited.
 """
 
-import pytest
 from sqlalchemy import text
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 async def _insert_gallery(db_session, **overrides):
     """Insert a gallery into the test DB and return its id."""
@@ -50,10 +49,7 @@ async def _insert_gallery(db_session, **overrides):
 async def _insert_image(db_session, gallery_id, page_num=1, filename="001.jpg"):
     """Insert an image record for a gallery."""
     await db_session.execute(
-        text(
-            "INSERT INTO images (gallery_id, page_num, filename, width, height) "
-            "VALUES (:gid, :pn, :fn, 1280, 1800)"
-        ),
+        text("INSERT INTO images (gallery_id, page_num, filename, width, height) VALUES (:gid, :pn, :fn, 1280, 1800)"),
         {"gid": gallery_id, "pn": page_num, "fn": filename},
     )
     await db_session.commit()
@@ -62,6 +58,7 @@ async def _insert_image(db_session, gallery_id, page_num=1, filename="001.jpg"):
 # ---------------------------------------------------------------------------
 # Gallery list
 # ---------------------------------------------------------------------------
+
 
 class TestListGalleries:
     """GET /api/library/galleries — paginated gallery listing."""
@@ -134,6 +131,7 @@ class TestListGalleries:
 # Single gallery
 # ---------------------------------------------------------------------------
 
+
 class TestGetGallery:
     """GET /api/library/galleries/{id}"""
 
@@ -159,6 +157,7 @@ class TestGetGallery:
 # ---------------------------------------------------------------------------
 # Gallery images
 # ---------------------------------------------------------------------------
+
 
 class TestGetGalleryImages:
     """GET /api/library/galleries/{id}/images"""
@@ -186,6 +185,7 @@ class TestGetGalleryImages:
 # ---------------------------------------------------------------------------
 # Gallery update (PATCH)
 # ---------------------------------------------------------------------------
+
 
 class TestUpdateGallery:
     """PATCH /api/library/galleries/{id}"""
@@ -224,6 +224,7 @@ class TestUpdateGallery:
 # ---------------------------------------------------------------------------
 # Read progress
 # ---------------------------------------------------------------------------
+
 
 class TestReadProgress:
     """GET/POST /api/library/galleries/{id}/progress"""
