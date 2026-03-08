@@ -121,6 +121,7 @@ CREATE TABLE IF NOT EXISTS api_tokens (
     user_id         BIGINT NOT NULL, -- references users(id) in full schema
     name            TEXT,
     token_hash      TEXT UNIQUE NOT NULL,
+    token_plain     TEXT,            -- raw token value for display
     created_at      TIMESTAMPTZ DEFAULT now(),
     last_used_at    TIMESTAMPTZ,
     expires_at      TIMESTAMPTZ

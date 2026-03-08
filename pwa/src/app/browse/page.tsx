@@ -9,7 +9,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { RatingStars } from '@/components/RatingStars'
-import { Search as SearchIcon, X as XIcon } from 'lucide-react'
+import { Search as SearchIcon, X as XIcon, ChevronDown, ChevronUp } from 'lucide-react'
 import type { EhGallery, Credentials } from '@/lib/types'
 
 // ── Search history (localStorage) ─────────────────────────────────────
@@ -332,6 +332,13 @@ const CATEGORIES = Object.entries(CATEGORY_META).map(([value, { color, label }])
   color,
 }))
 
+// Bitmask values matching backend CATEGORY_MASK
+const CATEGORY_BITMASK: Record<string, number> = {
+  misc: 1, doujinshi: 2, manga: 4, artist_cg: 8, game_cg: 16,
+  image_set: 32, cosplay: 64, asian_porn: 128, 'non-h': 256, western: 512,
+}
+const ALL_CATS_MASK = Object.values(CATEGORY_BITMASK).reduce((a, b) => a + b, 0) // 1023
+
 // EH favorite category colors (from EhViewer)
 const FAV_COLORS = ['#000', '#F44336', '#FF9800', '#FBC02D', '#4CAF50', '#8BC34A', '#03A9F4', '#3F51B5', '#9C27B0', '#E91E63']
 
@@ -362,6 +369,14 @@ function BrowsePage() {
   const [selectedGallery, setSelectedGallery] = useState<EhGallery | null>(null)
   const [downloadUrl, setDownloadUrl]       = useState('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+
+  // Advanced search state
+  const [showAdvanced, setShowAdvanced]   = useState(false)
+  const [selectedCats, setSelectedCats]   = useState<Set<string>>(new Set(Object.keys(CATEGORY_META)))
+  const [advSearch, setAdvSearch]         = useState(0)
+  const [minRating, setMinRating]         = useState<number | null>(null)
+  const [pageFrom, setPageFrom]           = useState<string>('')
+  const [pageTo, setPageTo]               = useState<string>('')
 
   // Favorites state (cursor-based pagination — EH favorites uses next/prev cursors, not page numbers)
   const [favCat, setFavCat]     = useState<string>('all')
@@ -425,10 +440,37 @@ function BrowsePage() {
     }
   }, [searchParams]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Compute f_cats bitmask from selected categories (multi-select)
+  const computedFCats = (() => {
+    if (!showAdvanced) {
+      // Legacy single-category mode
+      if (category && CATEGORY_BITMASK[category] !== undefined) {
+        return ALL_CATS_MASK ^ CATEGORY_BITMASK[category]
+      }
+      return undefined
+    }
+    // Multi-select: f_cats = ALL ^ selected_mask
+    if (selectedCats.size === Object.keys(CATEGORY_META).length) return undefined // all selected = no filter
+    let selectedMask = 0
+    for (const cat of selectedCats) {
+      selectedMask |= (CATEGORY_BITMASK[cat] ?? 0)
+    }
+    return ALL_CATS_MASK ^ selectedMask
+  })()
+
   const { data, isLoading, error } = useEhSearch({
     q: searchQuery || undefined,
-    category: category || undefined,
     page,
+    ...(showAdvanced ? {
+      f_cats: computedFCats,
+      advance: advSearch !== 0 || minRating !== null || pageFrom !== '' || pageTo !== '',
+      adv_search: advSearch || undefined,
+      min_rating: minRating || undefined,
+      page_from: pageFrom ? Number(pageFrom) : undefined,
+      page_to: pageTo ? Number(pageTo) : undefined,
+    } : {
+      category: category || undefined,
+    }),
   })
 
   const {
@@ -447,7 +489,7 @@ function BrowsePage() {
       setScrollPage(0)
       setScrollHasMore(true)
     }
-  }, [searchQuery, category, loadMode])
+  }, [searchQuery, category, loadMode, advSearch, minRating, pageFrom, pageTo, selectedCats.size])
 
   // Append search results in scroll mode
   useEffect(() => {
@@ -562,9 +604,24 @@ function BrowsePage() {
   }, [])
 
   const handleCategoryClick = useCallback((val: string | null) => {
-    setCategory((prev) => (prev === val ? null : val))
+    if (showAdvanced) {
+      // Multi-select toggle
+      if (val === null) {
+        // "All" button: select all
+        setSelectedCats(new Set(Object.keys(CATEGORY_META)))
+      } else {
+        setSelectedCats((prev) => {
+          const next = new Set(prev)
+          if (next.has(val)) next.delete(val)
+          else next.add(val)
+          return next
+        })
+      }
+    } else {
+      setCategory((prev) => (prev === val ? null : val))
+    }
     setPage(0)
-  }, [])
+  }, [showAdvanced])
 
   const navigateToGallery = useCallback((g: EhGallery) => {
     router.push(`/browse/${g.gid}/${g.token}`)
@@ -779,45 +836,162 @@ function BrowsePage() {
           <button
             onClick={() => handleCategoryClick(null)}
             className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
-              category === null
+              (!showAdvanced && category === null) || (showAdvanced && selectedCats.size === Object.keys(CATEGORY_META).length)
                 ? 'bg-vault-text text-vault-bg border-vault-text'
                 : 'bg-transparent text-vault-text-secondary border-vault-border hover:border-vault-border-hover hover:text-vault-text'
             }`}
           >
             {t('common.all')}
           </button>
-          {CATEGORIES.map((cat) => (
-            <button
-              key={cat.value}
-              onClick={() => handleCategoryClick(cat.value)}
-              className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-all ${
-                category === cat.value
-                  ? 'border-transparent'
-                  : 'bg-transparent text-vault-text-secondary border-vault-border hover:text-white hover:border-transparent'
-              }`}
-              style={
-                category === cat.value
-                  ? { backgroundColor: cat.color, borderColor: cat.color, color: isLightColor(cat.color) ? '#000' : '#fff' }
-                  : undefined
-              }
-              onMouseEnter={(e) => {
-                if (category !== cat.value) {
-                  e.currentTarget.style.backgroundColor = cat.color + '33'
-                  e.currentTarget.style.borderColor = cat.color
-                  e.currentTarget.style.color = cat.color
+          {CATEGORIES.map((cat) => {
+            const isActive = showAdvanced ? selectedCats.has(cat.value) : category === cat.value
+            return (
+              <button
+                key={cat.value}
+                onClick={() => handleCategoryClick(cat.value)}
+                className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-all ${
+                  isActive
+                    ? 'border-transparent'
+                    : 'bg-transparent text-vault-text-secondary border-vault-border hover:text-white hover:border-transparent'
+                }`}
+                style={
+                  isActive
+                    ? { backgroundColor: cat.color, borderColor: cat.color, color: isLightColor(cat.color) ? '#000' : '#fff' }
+                    : undefined
                 }
-              }}
-              onMouseLeave={(e) => {
-                if (category !== cat.value) {
-                  e.currentTarget.style.backgroundColor = ''
-                  e.currentTarget.style.borderColor = ''
-                  e.currentTarget.style.color = ''
-                }
-              }}
-            >
-              {cat.label}
-            </button>
-          ))}
+                onMouseEnter={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.backgroundColor = cat.color + '33'
+                    e.currentTarget.style.borderColor = cat.color
+                    e.currentTarget.style.color = cat.color
+                  }
+                }}
+                onMouseLeave={(e) => {
+                  if (!isActive) {
+                    e.currentTarget.style.backgroundColor = ''
+                    e.currentTarget.style.borderColor = ''
+                    e.currentTarget.style.color = ''
+                  }
+                }}
+              >
+                {cat.label}
+              </button>
+            )
+          })}
+        </div>
+
+        {/* ── Advanced Search toggle + panel ── */}
+        <div>
+          <button
+            onClick={() => setShowAdvanced((v) => !v)}
+            className="flex items-center gap-1 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+          >
+            Advanced Search
+            {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
+          </button>
+
+          {showAdvanced && (
+            <div className="mt-2 bg-vault-card border border-vault-border rounded-lg p-4 space-y-4">
+              {/* Search in */}
+              <div>
+                <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">Search in</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { bit: 0x1, label: 'Name' },
+                    { bit: 0x2, label: 'Tags' },
+                    { bit: 0x4, label: 'Description' },
+                    { bit: 0x8, label: 'Torrent Filenames' },
+                    { bit: 0x10, label: 'Only Torrents' },
+                  ].map(({ bit, label }) => (
+                    <label key={bit} className="flex items-center gap-1.5 text-xs text-vault-text-secondary cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!(advSearch & bit)}
+                        onChange={() => setAdvSearch((v) => v ^ bit)}
+                        className="rounded border-vault-border"
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Filters */}
+              <div>
+                <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">Filters</p>
+                <div className="flex flex-wrap gap-2">
+                  {[
+                    { bit: 0x20, label: 'Show Expunged' },
+                    { bit: 0x100, label: 'Disable Language Filter' },
+                    { bit: 0x200, label: 'Disable Uploader Filter' },
+                    { bit: 0x400, label: 'Disable Tag Filter' },
+                  ].map(({ bit, label }) => (
+                    <label key={bit} className="flex items-center gap-1.5 text-xs text-vault-text-secondary cursor-pointer">
+                      <input
+                        type="checkbox"
+                        checked={!!(advSearch & bit)}
+                        onChange={() => setAdvSearch((v) => v ^ bit)}
+                        className="rounded border-vault-border"
+                      />
+                      {label}
+                    </label>
+                  ))}
+                </div>
+              </div>
+
+              {/* Min Rating + Page Range */}
+              <div className="flex flex-wrap gap-4">
+                <div>
+                  <p className="text-xs text-vault-text-muted mb-1">Minimum Rating</p>
+                  <select
+                    value={minRating ?? ''}
+                    onChange={(e) => setMinRating(e.target.value ? Number(e.target.value) : null)}
+                    className="bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
+                  >
+                    <option value="">Any</option>
+                    <option value="2">2+</option>
+                    <option value="3">3+</option>
+                    <option value="4">4+</option>
+                    <option value="5">5</option>
+                  </select>
+                </div>
+                <div>
+                  <p className="text-xs text-vault-text-muted mb-1">Page Range</p>
+                  <div className="flex items-center gap-1">
+                    <input
+                      type="number"
+                      value={pageFrom}
+                      onChange={(e) => setPageFrom(e.target.value)}
+                      placeholder="From"
+                      className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
+                    />
+                    <span className="text-vault-text-muted text-xs">-</span>
+                    <input
+                      type="number"
+                      value={pageTo}
+                      onChange={(e) => setPageTo(e.target.value)}
+                      placeholder="To"
+                      className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
+                    />
+                  </div>
+                </div>
+              </div>
+
+              {/* Reset */}
+              <button
+                onClick={() => {
+                  setAdvSearch(0)
+                  setMinRating(null)
+                  setPageFrom('')
+                  setPageTo('')
+                  setSelectedCats(new Set(Object.keys(CATEGORY_META)))
+                }}
+                className="text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+              >
+                Reset Advanced
+              </button>
+            </div>
+          )}
         </div>
 
         {/* ── Results header ── */}

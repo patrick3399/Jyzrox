@@ -137,6 +137,18 @@ export interface EhAccount {
   credits?: number
   hath_perks?: number
   error?: string
+  use_ex?: boolean
+}
+
+// ── API Tokens ──────────────────────────────────────────────────────
+
+export interface ApiTokenInfo {
+  id: string
+  name: string | null
+  token: string            // raw token, always visible
+  created_at: string | null
+  last_used_at: string | null
+  expires_at: string | null
 }
 
 // ── Sessions ─────────────────────────────────────────────────────
@@ -189,6 +201,12 @@ export interface EhSearchParams {
   q?: string
   page?: number
   category?: string
+  f_cats?: number
+  advance?: boolean
+  adv_search?: number
+  min_rating?: number
+  page_from?: number
+  page_to?: number
 }
 
 export interface JobListParams {

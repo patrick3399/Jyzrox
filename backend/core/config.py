@@ -25,6 +25,7 @@ class Settings(BaseSettings):
     eh_max_concurrency: int = 2
     eh_request_timeout: int = 30
     eh_acquire_timeout: int = 60
+    eh_use_ex: bool = False  # Use ExHentai instead of E-Hentai (EH_USE_EX env var)
 
     # AI Tagging
     tag_model_enabled: bool = False

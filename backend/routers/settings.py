@@ -1,15 +1,20 @@
 """Credential management and system settings."""
 
+import hashlib
 import json
 import logging
+import secrets
+from datetime import datetime, timezone
 from typing import Optional
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from core.auth import require_auth
 from core.config import settings as app_settings
+from core.database import async_session
 from services.cache import get_system_alerts, push_system_alert
 from services.credential import get_credential, set_credential
 from services.eh_client import EhClient
@@ -24,6 +29,7 @@ class EhCookieRequest(BaseModel):
     ipb_member_id: str
     ipb_pass_hash: str
     sk: str
+    igneous: str | None = None
 
 
 class EhLoginRequest(BaseModel):
@@ -85,13 +91,38 @@ async def eh_login_with_password(
     sk = resp2.cookies.get("sk", "")
 
     cookies = {"ipb_member_id": ipb_member_id, "ipb_pass_hash": ipb_pass_hash, "sk": sk}
-    async with EhClient(cookies=cookies) as client:
+
+    # Try to obtain igneous cookie for ExHentai access
+    igneous = None
+    try:
+        async with httpx.AsyncClient(
+            cookies=cookies, follow_redirects=True, timeout=15,
+        ) as ex_client:
+            ex_resp = await ex_client.get("https://exhentai.org/")
+            igneous = ex_resp.cookies.get("igneous")
+            if not igneous:
+                # Check if it was set on the initial response
+                for h_name, h_val in ex_resp.headers.multi_items():
+                    if h_name.lower() == "set-cookie" and "igneous" in h_val:
+                        import re as _re
+                        m = _re.search(r"igneous=([^;]+)", h_val)
+                        if m:
+                            igneous = m.group(1)
+                            break
+    except Exception:
+        pass  # ExH access failed, continue without igneous
+
+    if igneous:
+        cookies["igneous"] = igneous
+
+    use_ex = bool(igneous)
+    async with EhClient(cookies=cookies, use_ex=use_ex) as client:
         if not await client.check_cookies():
             raise HTTPException(status_code=400, detail="Login succeeded but cookies are invalid")
         account = await client.get_account_info()
 
     await set_credential("ehentai", json.dumps(cookies), "cookie")
-    return {"status": "ok", "account": account}
+    return {"status": "ok", "account": account, "use_ex": use_ex}
 
 
 @router.post("/credentials/ehentai")
@@ -105,7 +136,10 @@ async def set_eh_credentials(
         "ipb_pass_hash": req.ipb_pass_hash,
         "sk":            req.sk,
     }
-    async with EhClient(cookies=cookies) as client:
+    if req.igneous:
+        cookies["igneous"] = req.igneous
+    use_ex = bool(req.igneous)
+    async with EhClient(cookies=cookies, use_ex=use_ex) as client:
         if not await client.check_cookies():
             raise HTTPException(status_code=400, detail="EH cookies are invalid")
         account = await client.get_account_info()
@@ -131,6 +165,42 @@ async def set_pixiv_credentials(
 
     await set_credential("pixiv", req.refresh_token, "oauth_token")
     return {"status": "ok", "username": username}
+
+
+# ── ExHentai cookie check ─────────────────────────────────────────────
+
+@router.post("/credentials/ehentai/cookies-check")
+async def eh_cookies_check(_: dict = Depends(require_auth)):
+    """Verify whether stored cookies can access ExHentai."""
+    cred_json = await get_credential("ehentai")
+    if not cred_json:
+        raise HTTPException(status_code=404, detail="EH credentials not configured")
+
+    cookies = json.loads(cred_json)
+    has_igneous = bool(cookies.get("igneous"))
+
+    # Test ExH access
+    ex_ok = False
+    if has_igneous:
+        try:
+            async with EhClient(cookies=cookies, use_ex=True) as client:
+                ex_ok = await client.check_cookies()
+        except Exception:
+            ex_ok = False
+
+    # Test EH access
+    eh_ok = False
+    try:
+        async with EhClient(cookies=cookies, use_ex=False) as client:
+            eh_ok = await client.check_cookies()
+    except Exception:
+        eh_ok = False
+
+    return {
+        "eh_valid": eh_ok,
+        "ex_valid": ex_ok,
+        "has_igneous": has_igneous,
+    }
 
 
 # ── Account info ─────────────────────────────────────────────────────
@@ -182,3 +252,119 @@ async def patch_rate_limit_settings(
 async def get_alerts(_: dict = Depends(require_auth)):
     """Return queued system alerts (cookie expiry, etc.)."""
     return {"alerts": await get_system_alerts()}
+
+
+# ── API Tokens ────────────────────────────────────────────────────────
+
+class CreateTokenRequest(BaseModel):
+    name: str
+    expires_days: int | None = None  # None = never expires
+
+
+@router.get("/tokens")
+async def list_tokens(auth: dict = Depends(require_auth)):
+    """List all API tokens for the current user."""
+    async with async_session() as session:
+        rows = await session.execute(
+            text("""
+                SELECT id, name, token_plain, created_at, last_used_at, expires_at
+                FROM api_tokens
+                WHERE user_id = :uid
+                ORDER BY created_at DESC
+            """),
+            {"uid": auth["user_id"]},
+        )
+    tokens = []
+    for r in rows:
+        tokens.append({
+            "id": str(r.id),
+            "name": r.name,
+            "token": r.token_plain or "",
+            "created_at": r.created_at.isoformat() if r.created_at else None,
+            "last_used_at": r.last_used_at.isoformat() if r.last_used_at else None,
+            "expires_at": r.expires_at.isoformat() if r.expires_at else None,
+        })
+    return {"tokens": tokens}
+
+
+@router.post("/tokens")
+async def create_token(
+    req: CreateTokenRequest,
+    auth: dict = Depends(require_auth),
+):
+    """Create a new API token."""
+    raw_token = secrets.token_urlsafe(32)
+    token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
+
+    expires_at = None
+    if req.expires_days and req.expires_days > 0:
+        from datetime import timedelta
+        expires_at = datetime.now(timezone.utc) + timedelta(days=req.expires_days)
+
+    async with async_session() as session:
+        result = await session.execute(
+            text("""
+                INSERT INTO api_tokens (user_id, name, token_hash, token_plain, expires_at)
+                VALUES (:uid, :name, :hash, :plain, :exp)
+                RETURNING id, created_at
+            """),
+            {
+                "uid": auth["user_id"],
+                "name": req.name.strip(),
+                "hash": token_hash,
+                "plain": raw_token,
+                "exp": expires_at,
+            },
+        )
+        row = result.fetchone()
+        await session.commit()
+
+    return {
+        "id": str(row.id),
+        "name": req.name.strip(),
+        "token": raw_token,
+        "created_at": row.created_at.isoformat() if row.created_at else None,
+        "expires_at": expires_at.isoformat() if expires_at else None,
+    }
+
+
+@router.delete("/tokens/{token_id}")
+async def delete_token(
+    token_id: str,
+    auth: dict = Depends(require_auth),
+):
+    """Revoke/delete an API token."""
+    async with async_session() as session:
+        result = await session.execute(
+            text("DELETE FROM api_tokens WHERE id = :id AND user_id = :uid RETURNING id"),
+            {"id": token_id, "uid": auth["user_id"]},
+        )
+        deleted = result.fetchone()
+        await session.commit()
+
+    if not deleted:
+        raise HTTPException(status_code=404, detail="Token not found")
+    return {"status": "ok"}
+
+
+@router.patch("/tokens/{token_id}")
+async def update_token(
+    token_id: str,
+    name: str = Query(default=None),
+    auth: dict = Depends(require_auth),
+):
+    """Update token name."""
+    if not name or not name.strip():
+        raise HTTPException(status_code=400, detail="Name is required")
+
+    async with async_session() as session:
+        result = await session.execute(
+            text("UPDATE api_tokens SET name = :name WHERE id = :id AND user_id = :uid RETURNING id"),
+            {"name": name.strip(), "id": token_id, "uid": auth["user_id"]},
+        )
+        updated = result.fetchone()
+        await session.commit()
+
+    if not updated:
+        raise HTTPException(status_code=404, detail="Token not found")
+    return {"status": "ok"}

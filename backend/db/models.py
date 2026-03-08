@@ -212,6 +212,7 @@ class ApiToken(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, nullable=False)
     name: Mapped[str | None] = mapped_column(Text)
     token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    token_plain: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[DateTime] = mapped_column(
         DateTime(timezone=True), server_default=func.now()
     )

@@ -3,6 +3,7 @@ import type {
   EhGallery, EhSearchResult, EhFavoritesResult, EhImageMap, EhSearchParams,
   DownloadJob, JobListParams,
   Credentials, EhAccount, SessionInfo,
+  ApiTokenInfo,
   ReadProgress,
   SystemHealth, SystemInfo,
   TagItem, TagAlias, TagImplication,
@@ -146,6 +147,16 @@ const eh = {
 
   getFavorites: (params: { favcat?: string; q?: string; next?: string; prev?: string } = {}) =>
     apiFetch<EhFavoritesResult>(`/api/eh/favorites${qs(params as Record<string, unknown>)}`),
+
+  addFavorite: (gid: number, token: string, favcat?: number, note?: string) =>
+    apiFetch<{ status: string }>(`/api/eh/favorites/${gid}/${token}${qs({ favcat, note })}`, {
+      method: 'POST',
+    }),
+
+  removeFavorite: (gid: number, token: string) =>
+    apiFetch<{ status: string }>(`/api/eh/favorites/${gid}/${token}`, {
+      method: 'DELETE',
+    }),
 }
 
 // ── Library ───────────────────────────────────────────────────────────
@@ -219,6 +230,7 @@ const settings = {
     ipb_member_id: string
     ipb_pass_hash: string
     sk: string
+    igneous?: string
   }) =>
     apiFetch<{ status: string; account: EhAccount }>(
       '/api/settings/credentials/ehentai',
@@ -233,6 +245,12 @@ const settings = {
 
   getEhAccount: () =>
     apiFetch<EhAccount>('/api/settings/eh/account'),
+
+  checkEhCookies: () =>
+    apiFetch<{ eh_valid: boolean; ex_valid: boolean; has_igneous: boolean }>(
+      '/api/settings/credentials/ehentai/cookies-check',
+      { method: 'POST' }
+    ),
 
   getAlerts: () =>
     apiFetch<{ alerts: string[] }>('/api/settings/alerts'),
@@ -293,6 +311,29 @@ const tags = {
     ),
 }
 
+// ── API Tokens ───────────────────────────────────────────────────────
+
+const tokens = {
+  list: () =>
+    apiFetch<{ tokens: ApiTokenInfo[] }>('/api/settings/tokens'),
+
+  create: (name: string, expires_days?: number) =>
+    apiFetch<ApiTokenInfo>('/api/settings/tokens', {
+      method: 'POST',
+      body: JSON.stringify({ name, expires_days: expires_days || null }),
+    }),
+
+  delete: (tokenId: string) =>
+    apiFetch<{ status: string }>(`/api/settings/tokens/${tokenId}`, {
+      method: 'DELETE',
+    }),
+
+  update: (tokenId: string, name: string) =>
+    apiFetch<{ status: string }>(`/api/settings/tokens/${tokenId}${qs({ name })}`, {
+      method: 'PATCH',
+    }),
+}
+
 // ── Export ────────────────────────────────────────────────────────────
 
 const exportApi = {
@@ -301,4 +342,4 @@ const exportApi = {
 
 // ── Exported API ──────────────────────────────────────────────────────
 
-export const api = { auth, eh, library, download, settings, system, tags, export: exportApi }
+export const api = { auth, eh, library, download, settings, system, tags, tokens, export: exportApi }

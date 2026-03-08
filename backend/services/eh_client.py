@@ -108,8 +108,10 @@ class EhClient:
         self._http: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "EhClient":
+        # Inject nw=1 cookie to skip Content Warning page
+        cookies = {**self.cookies, "nw": "1"}
         self._http = httpx.AsyncClient(
-            cookies=self.cookies,
+            cookies=cookies,
             headers={
                 "User-Agent": (
                     "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
@@ -131,14 +133,24 @@ class EhClient:
     # ── Internal ─────────────────────────────────────────────────────
 
     async def _api(self, payload: dict) -> dict:
-        resp = await self._http.post(EH_API_URL, json=payload)
+        api_url = f"{self.base_url}/api.php" if self.base_url == EX_BASE_URL else EH_API_URL
+        resp = await self._http.post(api_url, json=payload)
         resp.raise_for_status()
         data = resp.json()
         if data.get("error"):
             raise ValueError(f"E-H API error: {data['error']}")
         return data
 
-    def _check_auth(self, html: str) -> None:
+    def _check_auth(self, html: str, resp: httpx.Response | None = None) -> None:
+        # Sad Panda detection (ExHentai returns a tiny image instead of HTML)
+        if resp is not None and len(html) < 100 and "<html" not in html.lower():
+            raise PermissionError("ExHentai access denied (Sad Panda)")
+        cd = resp.headers.get("content-disposition", "") if resp else ""
+        if "sadpanda" in cd.lower():
+            raise PermissionError("ExHentai access denied (Sad Panda)")
+        # 509 bandwidth exceeded detection
+        if "/509.gif" in html or "/509s.gif" in html:
+            raise PermissionError("E-Hentai bandwidth limit exceeded (509)")
         if "You do not have access" in html:
             raise PermissionError("EH cookie invalid or expired")
 
@@ -149,6 +161,12 @@ class EhClient:
         query: str = "",
         page: int = 0,
         category: str | None = None,
+        f_cats: int | None = None,
+        advance: bool = False,
+        adv_search: int = 0,
+        min_rating: int | None = None,
+        page_from: int | None = None,
+        page_to: int | None = None,
     ) -> dict:
         """
         Scrape E-H search results.
@@ -157,12 +175,40 @@ class EhClient:
         params: dict[str, Any] = {"page": page}
         if query:
             params["f_search"] = query
-        if category and category in CATEGORY_MASK:
+
+        # Category bitmask: f_cats = direct bitmask, category = single category
+        if f_cats is not None:
+            params["f_cats"] = f_cats
+        elif category and category in CATEGORY_MASK:
             params["f_cats"] = ALL_CATS ^ CATEGORY_MASK[category]
+
+        # Advanced search flags (EHViewer ListUrlBuilder style)
+        if advance:
+            params["advsearch"] = "1"
+            if adv_search & 0x1:   params["f_sname"] = "on"
+            if adv_search & 0x2:   params["f_stags"] = "on"
+            if adv_search & 0x4:   params["f_sdesc"] = "on"
+            if adv_search & 0x8:   params["f_storr"] = "on"
+            if adv_search & 0x10:  params["f_sto"]   = "on"
+            if adv_search & 0x20:  params["f_sdt1"]  = "on"
+            if adv_search & 0x40:  params["f_sdt2"]  = "on"
+            if adv_search & 0x80:  params["f_sh"]    = "on"
+            if adv_search & 0x100: params["f_sfl"]   = "on"
+            if adv_search & 0x200: params["f_sfu"]   = "on"
+            if adv_search & 0x400: params["f_sft"]   = "on"
+        if min_rating:
+            params["f_sr"] = "on"
+            params["f_srdd"] = min_rating
+        if page_from is not None:
+            params["f_sp"] = "on"
+            params["f_spf"] = page_from
+        if page_to is not None:
+            params["f_sp"] = "on"
+            params["f_spt"] = page_to
 
         resp = await self._http.get(f"{self.base_url}/?{urlencode(params)}")
         resp.raise_for_status()
-        self._check_auth(resp.text)
+        self._check_auth(resp.text, resp)
 
         matches = list({(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)})
         total_match = _TOTAL_COUNT_RE.search(resp.text)
@@ -245,7 +291,7 @@ class EhClient:
         url = f"{self.base_url}/g/{gid}/{token}/?p=0"
         resp = await self._http.get(url)
         resp.raise_for_status()
-        self._check_auth(resp.text)
+        self._check_auth(resp.text, resp)
 
         _, preview_map = self._parse_detail_html(resp.text)
         return preview_map
@@ -275,7 +321,7 @@ class EhClient:
             url = f"{self.base_url}/g/{gid}/{token}/?p={dp}"
             resp = await self._http.get(url)
             resp.raise_for_status()
-            self._check_auth(resp.text)
+            self._check_auth(resp.text, resp)
 
             page_tokens, page_previews = self._parse_detail_html(resp.text)
             token_map.update(page_tokens)
@@ -337,7 +383,7 @@ class EhClient:
             f"{self.base_url}/favorites.php?{urlencode(params)}"
         )
         resp.raise_for_status()
-        self._check_auth(resp.text)
+        self._check_auth(resp.text, resp)
 
         # Parse gallery links
         matches = list(
@@ -432,6 +478,40 @@ class EhClient:
             "prev_cursor": out_prev_cursor,
             "categories": categories,
         }
+
+    async def add_favorite(
+        self, gid: int, token: str, favcat: int = 0, note: str = ""
+    ) -> bool:
+        """Add gallery to cloud favorites. favcat: 0-9, note: max 250 chars."""
+        url = f"{self.base_url}/gallerypopups.php?gid={gid}&t={token}&act=addfav"
+        data = {
+            "favcat": str(favcat),
+            "favnote": note[:250],
+            "submit": "Apply Changes",
+            "update": "1",
+        }
+        resp = await self._http.post(url, data=data, headers={
+            "Referer": url,
+            "Origin": self.base_url,
+        })
+        resp.raise_for_status()
+        return True
+
+    async def remove_favorite(self, gid: int, token: str) -> bool:
+        """Remove gallery from cloud favorites."""
+        url = f"{self.base_url}/gallerypopups.php?gid={gid}&t={token}&act=addfav"
+        data = {
+            "favcat": "favdel",
+            "favnote": "",
+            "submit": "Apply Changes",
+            "update": "1",
+        }
+        resp = await self._http.post(url, data=data, headers={
+            "Referer": url,
+            "Origin": self.base_url,
+        })
+        resp.raise_for_status()
+        return True
 
     async def check_cookies(self) -> bool:
         """Verify that the current cookies give authenticated access."""

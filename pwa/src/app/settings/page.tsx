@@ -7,9 +7,10 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
-import type { SystemHealth, SystemInfo, EhAccount, Credentials, SessionInfo } from '@/lib/types'
+import { Copy, Key } from 'lucide-react'
+import type { SystemHealth, SystemInfo, EhAccount, Credentials, SessionInfo, ApiTokenInfo } from '@/lib/types'
 
-type SectionKey = 'ehentai' | 'pixiv' | 'system' | 'account' | 'browse'
+type SectionKey = 'ehentai' | 'pixiv' | 'system' | 'account' | 'browse' | 'apiTokens'
 
 function SectionHeader({
   title,
@@ -133,6 +134,7 @@ export default function SettingsPage() {
   const [ehMemberId, setEhMemberId] = useState('')
   const [ehPassHash, setEhPassHash] = useState('')
   const [ehSk, setEhSk] = useState('')
+  const [ehIgneous, setEhIgneous] = useState('')
   const [ehSaving, setEhSaving] = useState(false)
   const [showPassHash, setShowPassHash] = useState(false)
   const [ehAccount, setEhAccount] = useState<EhAccount | null>(null)
@@ -175,6 +177,15 @@ export default function SettingsPage() {
   const [sessionsLoading, setSessionsLoading] = useState(false)
   const [revokingToken, setRevokingToken] = useState<string | null>(null)
 
+  // API Tokens
+  const [apiTokens, setApiTokens] = useState<ApiTokenInfo[]>([])
+  const [apiTokensLoaded, setApiTokensLoaded] = useState(false)
+  const [apiTokensLoading, setApiTokensLoading] = useState(false)
+  const [newTokenName, setNewTokenName] = useState('')
+  const [newTokenExpiry, setNewTokenExpiry] = useState<string>('')
+  const [tokenCreating, setTokenCreating] = useState(false)
+  const [deletingTokenId, setDeletingTokenId] = useState<string | null>(null)
+
   // Load credentials on mount
   useEffect(() => {
     api.settings.getCredentials()
@@ -208,11 +219,13 @@ export default function SettingsPage() {
     if (!ehMemberId.trim() || !ehPassHash.trim() || !ehSk.trim()) return
     setEhSaving(true)
     try {
-      const result = await api.settings.setEhCookies({
+      const data: { ipb_member_id: string; ipb_pass_hash: string; sk: string; igneous?: string } = {
         ipb_member_id: ehMemberId.trim(),
         ipb_pass_hash: ehPassHash.trim(),
         sk: ehSk.trim(),
-      })
+      }
+      if (ehIgneous.trim()) data.igneous = ehIgneous.trim()
+      const result = await api.settings.setEhCookies(data)
       toast.success(t('settings.ehCookiesSaved'))
       setEhAccount(result.account)
       setCredentials((prev) => prev ? { ...prev, ehentai: { configured: true } } : prev)
@@ -221,7 +234,7 @@ export default function SettingsPage() {
     } finally {
       setEhSaving(false)
     }
-  }, [ehMemberId, ehPassHash, ehSk])
+  }, [ehMemberId, ehPassHash, ehSk, ehIgneous])
 
   // EH: Refresh account info
   const handleEhRefresh = useCallback(async () => {
@@ -389,6 +402,53 @@ export default function SettingsPage() {
     }
   }, [])
 
+  // API Tokens: Load
+  const handleLoadApiTokens = useCallback(async () => {
+    setApiTokensLoading(true)
+    try {
+      const result = await api.tokens.list()
+      setApiTokens(result.tokens)
+      setApiTokensLoaded(true)
+    } catch {
+      toast.error(t('common.failedToLoad'))
+      setApiTokensLoaded(true) // prevent retry loop on error
+    } finally {
+      setApiTokensLoading(false)
+    }
+  }, [])
+
+  // API Tokens: Create
+  const handleCreateToken = useCallback(async () => {
+    if (!newTokenName.trim()) return
+    setTokenCreating(true)
+    try {
+      const expDays = newTokenExpiry ? Number(newTokenExpiry) : undefined
+      await api.tokens.create(newTokenName.trim(), expDays)
+      toast.success('Token created')
+      setNewTokenName('')
+      setNewTokenExpiry('')
+      handleLoadApiTokens()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to create token')
+    } finally {
+      setTokenCreating(false)
+    }
+  }, [newTokenName, newTokenExpiry, handleLoadApiTokens])
+
+  // API Tokens: Delete
+  const handleDeleteToken = useCallback(async (tokenId: string) => {
+    setDeletingTokenId(tokenId)
+    try {
+      await api.tokens.delete(tokenId)
+      setApiTokens((prev) => prev.filter((t) => t.id !== tokenId))
+      toast.success('Token revoked')
+    } catch {
+      toast.error('Failed to revoke token')
+    } finally {
+      setDeletingTokenId(null)
+    }
+  }, [])
+
   useEffect(() => {
     if (activeSection === 'system' && !health && !systemLoading) {
       handleLoadSystem()
@@ -397,7 +457,10 @@ export default function SettingsPage() {
       if (!profileLoaded) handleLoadProfile()
       if (sessions.length === 0 && !sessionsLoading) handleLoadSessions()
     }
-  }, [activeSection, health, systemLoading, handleLoadSystem, profileLoaded, handleLoadProfile, sessions.length, sessionsLoading, handleLoadSessions])
+    if (activeSection === 'apiTokens' && !apiTokensLoaded && !apiTokensLoading) {
+      handleLoadApiTokens()
+    }
+  }, [activeSection, health, systemLoading, handleLoadSystem, profileLoaded, handleLoadProfile, sessions.length, sessionsLoading, handleLoadSessions, apiTokensLoaded, apiTokensLoading, handleLoadApiTokens])
 
   const serviceStatusClass = (status: string) =>
     status === 'ok' || status === 'healthy'
@@ -526,6 +589,16 @@ export default function SettingsPage() {
                         value={ehSk}
                         onChange={(e) => setEhSk(e.target.value)}
                         placeholder="Enter sk"
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-vault-text-muted mb-1">igneous <span className="text-vault-text-muted">(optional, for ExHentai)</span></label>
+                      <input
+                        type="text"
+                        value={ehIgneous}
+                        onChange={(e) => setEhIgneous(e.target.value)}
+                        placeholder="Enter igneous (enables ExHentai)"
                         className={inputClass}
                       />
                     </div>
@@ -726,6 +799,179 @@ export default function SettingsPage() {
                 setActiveSection(null)
                 setTimeout(() => setActiveSection('browse'), 0)
               }} />
+            )}
+          </div>
+
+          {/* ── API Tokens ── */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <SectionHeader
+                  title="API Tokens"
+                  sectionKey="apiTokens"
+                  activeSection={activeSection}
+                  onToggle={toggleSection}
+                />
+              </div>
+              <div className="pr-5">
+                <span className="inline-flex items-center gap-1 text-xs text-vault-text-muted">
+                  <Key size={12} />
+                  {apiTokens.length > 0 ? `${apiTokens.length} token${apiTokens.length > 1 ? 's' : ''}` : ''}
+                </span>
+              </div>
+            </div>
+
+            {activeSection === 'apiTokens' && (
+              <div className="px-5 pb-5 border-t border-vault-border">
+                {/* Create new token */}
+                <div className="mt-4">
+                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">Create new token</p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs text-vault-text-muted mb-1">Name</label>
+                      <input
+                        type="text"
+                        value={newTokenName}
+                        onChange={(e) => setNewTokenName(e.target.value)}
+                        placeholder="e.g. Homepage widget, CI/CD"
+                        onKeyDown={(e) => e.key === 'Enter' && handleCreateToken()}
+                        className={inputClass}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-vault-text-muted mb-1">Expires in (days)</label>
+                      <select
+                        value={newTokenExpiry}
+                        onChange={(e) => setNewTokenExpiry(e.target.value)}
+                        className={inputClass}
+                      >
+                        <option value="">Never</option>
+                        <option value="7">7 days</option>
+                        <option value="30">30 days</option>
+                        <option value="90">90 days</option>
+                        <option value="365">1 year</option>
+                      </select>
+                    </div>
+                    <button
+                      onClick={handleCreateToken}
+                      disabled={tokenCreating || !newTokenName.trim()}
+                      className={btnPrimary}
+                    >
+                      {tokenCreating ? 'Creating...' : 'Create Token'}
+                    </button>
+                  </div>
+                </div>
+
+                {/* Token list */}
+                <div className="mt-5 pt-4 border-t border-vault-border">
+                  <div className="flex items-center justify-between mb-2">
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide">Active tokens</p>
+                    <button
+                      onClick={handleLoadApiTokens}
+                      disabled={apiTokensLoading}
+                      className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+                    >
+                      {apiTokensLoading ? t('settings.loading') : t('settings.refresh')}
+                    </button>
+                  </div>
+
+                  {apiTokensLoading && apiTokens.length === 0 ? (
+                    <div className="flex justify-center py-4">
+                      <LoadingSpinner />
+                    </div>
+                  ) : apiTokens.length === 0 ? (
+                    <p className="text-xs text-vault-text-muted py-3">No API tokens created yet.</p>
+                  ) : (
+                    <div className="space-y-2">
+                      {apiTokens.map((tk) => {
+                        const isExpired = tk.expires_at && new Date(tk.expires_at) < new Date()
+                        return (
+                          <div
+                            key={tk.id}
+                            className={`bg-vault-input border rounded-lg px-3 py-2.5 ${
+                              isExpired ? 'border-red-700/50 opacity-60' : 'border-vault-border'
+                            }`}
+                          >
+                            <div className="flex items-start justify-between gap-2">
+                              <div className="min-w-0 flex-1">
+                                <div className="flex items-center gap-2">
+                                  <span className="text-sm text-vault-text font-medium">{tk.name || 'Unnamed'}</span>
+                                  {isExpired && (
+                                    <span className="text-[10px] bg-red-900/40 text-red-400 px-1.5 py-0.5 rounded">
+                                      Expired
+                                    </span>
+                                  )}
+                                </div>
+                                {/* Token value — always visible */}
+                                {tk.token && (
+                                  <div className="flex items-center gap-1.5 mt-1.5">
+                                    <code className="flex-1 text-xs text-vault-text-secondary bg-black/20 rounded px-2 py-1 font-mono break-all select-all">
+                                      {tk.token}
+                                    </code>
+                                    <button
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(tk.token)
+                                        toast.success('Copied')
+                                      }}
+                                      className="px-1.5 py-1 text-vault-text-muted hover:text-vault-text transition-colors shrink-0"
+                                      title="Copy"
+                                    >
+                                      <Copy size={12} />
+                                    </button>
+                                  </div>
+                                )}
+                                <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-vault-text-muted">
+                                  {tk.created_at && (
+                                    <span>Created {new Date(tk.created_at).toLocaleDateString()}</span>
+                                  )}
+                                  {tk.last_used_at ? (
+                                    <span>Last used {new Date(tk.last_used_at).toLocaleDateString()}</span>
+                                  ) : (
+                                    <span>Never used</span>
+                                  )}
+                                  {tk.expires_at && (
+                                    <span>
+                                      {isExpired ? 'Expired' : 'Expires'}{' '}
+                                      {new Date(tk.expires_at).toLocaleDateString()}
+                                    </span>
+                                  )}
+                                  {!tk.expires_at && <span>No expiration</span>}
+                                </div>
+                              </div>
+                              <button
+                                onClick={() => handleDeleteToken(tk.id)}
+                                disabled={deletingTokenId === tk.id}
+                                className="text-xs text-red-400/70 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
+                              >
+                                {deletingTokenId === tk.id ? '...' : 'Revoke'}
+                              </button>
+                            </div>
+                          </div>
+                        )
+                      })}
+                    </div>
+                  )}
+                </div>
+
+                {/* API usage info */}
+                <div className="mt-5 pt-4 border-t border-vault-border">
+                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">Usage</p>
+                  <div className="bg-vault-input border border-vault-border rounded-lg p-3">
+                    <p className="text-xs text-vault-text-secondary mb-2">
+                      Use the <code className="bg-black/30 px-1 py-0.5 rounded text-vault-text-muted">X-API-Token</code> header to authenticate external API requests.
+                    </p>
+                    <p className="text-xs text-vault-text-muted mb-1">Available endpoints:</p>
+                    <div className="space-y-0.5 font-mono text-[11px] text-vault-text-muted">
+                      <p><span className="text-green-400">GET</span> /api/external/v1/status</p>
+                      <p><span className="text-green-400">GET</span> /api/external/v1/galleries</p>
+                      <p><span className="text-green-400">GET</span> /api/external/v1/galleries/:id</p>
+                      <p><span className="text-green-400">GET</span> /api/external/v1/galleries/:id/images</p>
+                      <p><span className="text-green-400">GET</span> /api/external/v1/tags</p>
+                      <p><span className="text-blue-400">POST</span> /api/external/v1/download?url=...</p>
+                    </div>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
 

@@ -1,6 +1,6 @@
 'use client'
 
-import { useMemo, useCallback } from 'react'
+import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import { useEhGallery, useEhGalleryPreviews } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
@@ -8,6 +8,10 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
+
+// Favorite category colors (from EhViewer)
+const FAV_COLORS = ['#000', '#F44336', '#FF9800', '#FBC02D', '#4CAF50', '#8BC34A', '#03A9F4', '#3F51B5', '#9C27B0', '#E91E63']
+const FAV_NAMES = ['Favorites 0', 'Favorites 1', 'Favorites 2', 'Favorites 3', 'Favorites 4', 'Favorites 5', 'Favorites 6', 'Favorites 7', 'Favorites 8', 'Favorites 9']
 
 // ── Namespace colours (EhViewer style) ─────────────────────────────────
 
@@ -56,6 +60,51 @@ export default function EhGalleryDetailPage() {
 
   const { data: gallery, error: galleryError } = useEhGallery(gid, token)
   const { data: previewData } = useEhGalleryPreviews(gid, token)
+
+  // Favorite state
+  const [showFavPicker, setShowFavPicker] = useState(false)
+  const [favSaving, setFavSaving] = useState(false)
+  const [isFavorited, setIsFavorited] = useState(false)
+  const favRef = useRef<HTMLDivElement>(null)
+
+  // Close fav picker on outside click
+  useEffect(() => {
+    const handler = (e: MouseEvent) => {
+      if (favRef.current && !favRef.current.contains(e.target as Node)) setShowFavPicker(false)
+    }
+    document.addEventListener('mousedown', handler)
+    return () => document.removeEventListener('mousedown', handler)
+  }, [])
+
+  const handleAddFavorite = useCallback(async (favcat: number) => {
+    if (!gallery) return
+    setFavSaving(true)
+    try {
+      await api.eh.addFavorite(gallery.gid, gallery.token, favcat)
+      toast.success(`Added to Favorites ${favcat}`)
+      setIsFavorited(true)
+      setShowFavPicker(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to add favorite')
+    } finally {
+      setFavSaving(false)
+    }
+  }, [gallery])
+
+  const handleRemoveFavorite = useCallback(async () => {
+    if (!gallery) return
+    setFavSaving(true)
+    try {
+      await api.eh.removeFavorite(gallery.gid, gallery.token)
+      toast.success('Removed from favorites')
+      setIsFavorited(false)
+      setShowFavPicker(false)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'Failed to remove favorite')
+    } finally {
+      setFavSaving(false)
+    }
+  }, [gallery])
 
   // Group tags by namespace
   const tagGroups = useMemo(() => {
@@ -233,6 +282,51 @@ export default function EhGalleryDetailPage() {
               >
                 {t('browse.download')}
               </button>
+              {/* Favorite button with picker */}
+              <div className="relative" ref={favRef}>
+                <button
+                  onClick={() => setShowFavPicker((v) => !v)}
+                  disabled={favSaving}
+                  className={`px-4 py-2.5 rounded-lg text-sm font-medium transition-colors ${
+                    isFavorited
+                      ? 'bg-pink-700 hover:bg-pink-600 text-white'
+                      : 'bg-vault-card border border-vault-border hover:border-vault-border-hover text-vault-text-secondary'
+                  }`}
+                  title="Favorite"
+                >
+                  {isFavorited ? '♥' : '♡'}
+                </button>
+                {showFavPicker && (
+                  <div className="absolute top-full left-0 mt-1 z-50 bg-vault-card border border-vault-border rounded-lg shadow-xl overflow-hidden min-w-[180px]">
+                    {FAV_NAMES.map((name, i) => (
+                      <button
+                        key={i}
+                        onClick={() => handleAddFavorite(i)}
+                        disabled={favSaving}
+                        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-vault-text hover:bg-vault-card-hover transition-colors"
+                      >
+                        <span
+                          className="w-3 h-3 rounded-full flex-shrink-0"
+                          style={{ backgroundColor: FAV_COLORS[i] }}
+                        />
+                        {name}
+                      </button>
+                    ))}
+                    {isFavorited && (
+                      <>
+                        <div className="border-t border-vault-border" />
+                        <button
+                          onClick={handleRemoveFavorite}
+                          disabled={favSaving}
+                          className="w-full px-3 py-2 text-left text-sm text-red-400 hover:bg-vault-card-hover transition-colors"
+                        >
+                          Remove from favorites
+                        </button>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
             </div>
           </div>
         </div>

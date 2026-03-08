@@ -14,6 +14,7 @@ from core.redis_client import eh_semaphore, get_redis
 from services import cache
 from services.cache import push_system_alert
 from services.credential import get_credential
+from core.config import settings as app_settings
 from services.eh_client import EhClient
 
 logger = logging.getLogger(__name__)
@@ -24,7 +25,9 @@ async def _make_client() -> EhClient:
     """Load EH cookies from DB and return a configured client (guest if no creds)."""
     cred_json = await get_credential("ehentai")
     cookies = json.loads(cred_json) if cred_json else {}
-    return EhClient(cookies=cookies)
+    # Use ExHentai if configured or if igneous cookie is present
+    use_ex = app_settings.eh_use_ex or bool(cookies.get("igneous"))
+    return EhClient(cookies=cookies, use_ex=use_ex)
 
 
 # ── Search ───────────────────────────────────────────────────────────
@@ -34,10 +37,16 @@ async def search(
     q: str = Query(default=""),
     page: int = Query(default=0, ge=0),
     category: str | None = Query(default=None),
+    f_cats: int | None = Query(default=None),
+    advance: bool = Query(default=False),
+    adv_search: int = Query(default=0),
+    min_rating: int | None = Query(default=None, ge=2, le=5),
+    page_from: int | None = Query(default=None),
+    page_to: int | None = Query(default=None),
     _: dict = Depends(require_auth),
 ):
     """Search E-Hentai galleries (scrape + gdata batch)."""
-    cache_key = f"eh:search:{q}:{page}:{category}"
+    cache_key = f"eh:search:{q}:{page}:{category}:{f_cats}:{advance}:{adv_search}:{min_rating}:{page_from}:{page_to}"
     cached = await cache.get_json(cache_key)
     if cached:
         return cached
@@ -45,8 +54,16 @@ async def search(
     client = await _make_client()
     async with client:
         try:
-            result = await client.search(query=q, page=page, category=category)
-        except PermissionError:
+            result = await client.search(
+                query=q, page=page, category=category,
+                f_cats=f_cats, advance=advance, adv_search=adv_search,
+                min_rating=min_rating, page_from=page_from, page_to=page_to,
+            )
+        except PermissionError as e:
+            detail = str(e)
+            if "Sad Panda" in detail or "509" in detail:
+                await push_system_alert(detail)
+                raise HTTPException(status_code=403, detail=detail)
             await push_system_alert("E-Hentai cookie invalid or expired")
             raise HTTPException(status_code=401, detail="EH cookie invalid")
         except ValueError as e:
@@ -76,9 +93,11 @@ async def get_gallery(
     async with client:
         try:
             metadata = await client.get_gallery_metadata(gid, token)
-        except PermissionError:
-            await push_system_alert("E-Hentai cookie invalid or expired")
-            raise HTTPException(status_code=401, detail="EH cookie invalid")
+        except PermissionError as e:
+            detail = str(e)
+            await push_system_alert(detail)
+            status = 403 if "Sad Panda" in detail or "509" in detail else 401
+            raise HTTPException(status_code=status, detail=detail)
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
@@ -113,9 +132,11 @@ async def get_gallery_previews(
     async with client:
         try:
             preview_map = await client.get_previews(gid, token)
-        except PermissionError:
-            await push_system_alert("E-Hentai cookie invalid or expired")
-            raise HTTPException(status_code=401, detail="EH cookie invalid")
+        except PermissionError as e:
+            detail = str(e)
+            await push_system_alert(detail)
+            status = 403 if "Sad Panda" in detail or "509" in detail else 401
+            raise HTTPException(status_code=status, detail=detail)
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
@@ -227,9 +248,11 @@ async def image_proxy(
                 image_bytes, media_type = await client.fetch_image_bytes(image_url)
         except TimeoutError:
             raise HTTPException(status_code=503, detail="EH semaphore timeout")
-        except PermissionError:
-            await push_system_alert("E-Hentai cookie invalid or expired")
-            raise HTTPException(status_code=401, detail="EH cookie invalid")
+        except PermissionError as e:
+            detail = str(e)
+            await push_system_alert(detail)
+            status = 403 if "Sad Panda" in detail or "509" in detail else 401
+            raise HTTPException(status_code=status, detail=detail)
 
     await cache.set_proxied_image(gid, page, image_bytes)
     return Response(
@@ -266,14 +289,66 @@ async def get_favorites(
                 favcat=favcat, search=q,
                 next_cursor=next, prev_cursor=prev,
             )
-        except PermissionError:
-            await push_system_alert("E-Hentai cookie invalid or expired")
-            raise HTTPException(status_code=401, detail="EH cookie invalid")
+        except PermissionError as e:
+            detail = str(e)
+            await push_system_alert(detail)
+            status = 403 if "Sad Panda" in detail or "509" in detail else 401
+            raise HTTPException(status_code=status, detail=detail)
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
     await cache.set_json(cache_key, result, 120)  # 2min cache — favorites change often
     return result
+
+
+# ── Favorite management ──────────────────────────────────────────────
+
+@router.post("/favorites/{gid}/{token}")
+async def add_favorite(
+    gid: int,
+    token: str,
+    favcat: int = Query(default=0, ge=0, le=9),
+    note: str = Query(default=""),
+    _: dict = Depends(require_auth),
+):
+    """Add/move gallery to a cloud favorites category."""
+    cred_json = await get_credential("ehentai")
+    if not cred_json:
+        raise HTTPException(status_code=400, detail="EH credentials not configured")
+
+    client = await _make_client()
+    async with client:
+        try:
+            await client.add_favorite(gid, token, favcat=favcat, note=note)
+        except PermissionError as e:
+            raise HTTPException(status_code=401, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=str(e))
+
+    return {"status": "ok"}
+
+
+@router.delete("/favorites/{gid}/{token}")
+async def remove_favorite(
+    gid: int,
+    token: str,
+    _: dict = Depends(require_auth),
+):
+    """Remove gallery from cloud favorites."""
+    cred_json = await get_credential("ehentai")
+    if not cred_json:
+        raise HTTPException(status_code=400, detail="EH credentials not configured")
+
+    client = await _make_client()
+    async with client:
+        try:
+            await client.remove_favorite(gid, token)
+        except PermissionError as e:
+            raise HTTPException(status_code=401, detail=str(e))
+        except Exception as e:
+            raise HTTPException(status_code=502, detail=str(e))
+
+    return {"status": "ok"}
 
 
 # ── Thumbnail proxy ───────────────────────────────────────────────────
