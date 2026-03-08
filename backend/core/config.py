@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     # AI Tagging
     tag_model_enabled: bool = False
+    tag_model_name: str = "SmilingWolf/wd-swinv2-tagger-v3"
+    tag_general_threshold: float = 0.35
+    tag_character_threshold: float = 0.85
 
     # Storage paths (inside container)
     data_gallery_path: str = "/data/gallery"

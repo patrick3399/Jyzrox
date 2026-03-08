@@ -68,6 +68,7 @@ export default function GalleryDetailPage() {
   const { data: imagesData, isLoading: imagesLoading } = useGalleryImages(id)
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(id ?? 0)
   const [isDeleting, setIsDeleting] = useState(false)
+  const [isRetagging, setIsRetagging] = useState(false)
 
   // Record browse history once when gallery data is loaded
   const historyRecordedRef = useRef(false)
@@ -103,6 +104,20 @@ export default function GalleryDetailPage() {
       toast.error(msg)
     } finally {
       setIsDeleting(false)
+    }
+  }
+
+  const handleRetag = async () => {
+    if (!id) return
+    setIsRetagging(true)
+    try {
+      await api.tags.retag(id)
+      toast.success('已排入 AI 標記任務')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : 'AI 標記失敗'
+      toast.error(msg)
+    } finally {
+      setIsRetagging(false)
     }
   }
 
@@ -262,6 +277,13 @@ export default function GalleryDetailPage() {
                   className="px-4 py-2 rounded text-sm font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
                 >
                   {isDeleting ? '刪除中...' : '刪除圖庫'}
+                </button>
+                <button
+                  onClick={handleRetag}
+                  disabled={isRetagging}
+                  className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-purple-600 hover:text-purple-400 transition-colors disabled:opacity-50"
+                >
+                  {isRetagging ? 'AI 標記中...' : 'AI 標籤'}
                 </button>
               </div>
             </div>

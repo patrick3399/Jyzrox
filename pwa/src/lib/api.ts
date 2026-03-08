@@ -463,6 +463,14 @@ const tags = {
 
   removeBlocked: (id: number) =>
     apiFetch<{ status: string }>(`/api/tags/blocked/${id}`, { method: 'DELETE' }),
+
+  retag: (galleryId: number) =>
+    apiFetch<{ status: string; gallery_id: number }>(`/api/tags/retag/${galleryId}`, {
+      method: 'POST',
+    }),
+
+  retagAll: () =>
+    apiFetch<{ status: string; total: number }>('/api/tags/retag-all', { method: 'POST' }),
 }
 
 // ── API Tokens ───────────────────────────────────────────────────────

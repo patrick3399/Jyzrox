@@ -30,6 +30,7 @@ type SectionKey =
   | 'apiTokens'
   | 'reader'
   | 'blockedTags'
+  | 'aiTagging'
 
 function SectionHeader({
   title,
@@ -68,6 +69,40 @@ function StatusIndicator({ configured }: { configured: boolean }) {
       />
       {configured ? t('settings.configured') : t('settings.notConfigured')}
     </span>
+  )
+}
+
+// ── AI Tagging sub-component ──────────────────────────────────────────
+
+function AiTaggingSection() {
+  const [isRetagging, setIsRetagging] = useState(false)
+
+  const handleRetagAll = async () => {
+    if (!window.confirm('確定要為所有圖庫重新執行 AI 標記？這可能需要一段時間。')) return
+    setIsRetagging(true)
+    try {
+      const result = await api.tags.retagAll()
+      toast.success(`已排入 ${result.total} 個標記任務`)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : 'AI 標記失敗')
+    } finally {
+      setIsRetagging(false)
+    }
+  }
+
+  return (
+    <div className="px-5 pb-5 border-t border-vault-border">
+      <p className="text-xs text-vault-text-muted mt-4 mb-4">
+        使用 WD14 模型為所有圖庫自動標記
+      </p>
+      <button
+        onClick={handleRetagAll}
+        disabled={isRetagging}
+        className="px-4 py-2 bg-purple-900/30 border border-purple-700/50 text-purple-400 hover:bg-purple-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isRetagging ? '排入中...' : '重新標記全部'}
+      </button>
+    </div>
   )
 }
 
@@ -1656,6 +1691,19 @@ export default function SettingsPage() {
                   )}
                 </div>
               </div>
+            )}
+          </div>
+
+          {/* ── AI Tagging ── */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            <SectionHeader
+              title="AI 標籤"
+              sectionKey="aiTagging"
+              activeSection={activeSection}
+              onToggle={toggleSection}
+            />
+            {activeSection === 'aiTagging' && (
+              <AiTaggingSection />
             )}
           </div>
 

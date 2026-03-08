@@ -3,14 +3,15 @@
 import base64
 import json
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import desc, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth
-from core.database import async_session
-from db.models import BlockedTag, Tag, TagAlias, TagImplication, TagTranslation
+from core.database import async_session, get_db
+from db.models import BlockedTag, Gallery, Tag, TagAlias, TagImplication, TagTranslation
 
 router = APIRouter(tags=["tags"])
 
@@ -532,3 +533,52 @@ async def remove_blocked_tag(
         await session.delete(row)
         await session.commit()
     return {"status": "ok"}
+
+
+# ── AI Re-tag ─────────────────────────────────────────────────────────
+
+
+@router.post("/retag/{gallery_id}")
+async def retag_gallery(
+    gallery_id: int,
+    request: Request,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enqueue AI tagging job for all images in a gallery."""
+    from core.config import settings as app_settings
+
+    if not app_settings.tag_model_enabled:
+        raise HTTPException(status_code=400, detail="AI tagging is not enabled (TAG_MODEL_ENABLED=false)")
+
+    # Verify gallery exists
+    gallery = await db.get(Gallery, gallery_id)
+    if not gallery:
+        raise HTTPException(status_code=404, detail="Gallery not found")
+
+    arq = request.app.state.arq
+    await arq.enqueue_job("tag_job", gallery_id)
+    return {"status": "enqueued", "gallery_id": gallery_id}
+
+
+@router.post("/retag-all")
+async def retag_all_galleries(
+    request: Request,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Enqueue AI tagging jobs for ALL galleries (batch re-tag)."""
+    from core.config import settings as app_settings
+
+    if not app_settings.tag_model_enabled:
+        raise HTTPException(status_code=400, detail="AI tagging is not enabled (TAG_MODEL_ENABLED=false)")
+
+    gallery_ids = (await db.execute(select(Gallery.id))).scalars().all()
+    arq = request.app.state.arq
+
+    enqueued = 0
+    for gid in gallery_ids:
+        await arq.enqueue_job("tag_job", gid)
+        enqueued += 1
+
+    return {"status": "enqueued", "total": enqueued}
