@@ -1,9 +1,11 @@
 'use client'
 
+import { useState } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { useLibraryGallery, useGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
+import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { TagBadge } from '@/components/TagBadge'
 import { RatingStars } from '@/components/RatingStars'
@@ -65,6 +67,23 @@ export default function GalleryDetailPage() {
   } = useLibraryGallery(id)
   const { data: imagesData, isLoading: imagesLoading } = useGalleryImages(id)
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(id ?? 0)
+  const [isDeleting, setIsDeleting] = useState(false)
+
+  const handleDelete = async () => {
+    if (!gallery || !id) return
+    if (!confirm(`確定要刪除「${gallery.title}」？此操作無法復原。`)) return
+    setIsDeleting(true)
+    try {
+      await api.library.deleteGallery(id)
+      toast.success('圖庫已刪除')
+      router.push('/library')
+    } catch (e: unknown) {
+      const msg = e instanceof Error ? e.message : '刪除失敗'
+      toast.error(msg)
+    } finally {
+      setIsDeleting(false)
+    }
+  }
 
   const handleFavoriteToggle = async () => {
     if (!gallery) return
@@ -215,6 +234,13 @@ export default function GalleryDetailPage() {
                   }`}
                 >
                   {gallery.favorited ? '★ Favorited' : '☆ Favorite'}
+                </button>
+                <button
+                  onClick={handleDelete}
+                  disabled={isDeleting}
+                  className="px-4 py-2 rounded text-sm font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                >
+                  {isDeleting ? '刪除中...' : '刪除圖庫'}
                 </button>
               </div>
             </div>

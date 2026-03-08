@@ -42,6 +42,8 @@ _TOTAL_COUNT_RE = re.compile(r"Showing .+? of ([\d,]+)")
 _PTOKEN_RE = re.compile(r"/s/([0-9a-f]{10})/(\d+)-(\d+)")
 # Matches showkey in page HTML: var showkey="...";
 _SHOWKEY_RE = re.compile(r'var\s+showkey\s*=\s*"([0-9a-z]+)"')
+# Matches nl() call in image page HTML: return nl('PARAM')
+_NL_RE = re.compile(r"return nl\('([^']+)'\)")
 # Large preview: <div class="gdtl"...><a href="..."><img alt="N" src="THUMB_URL"...>
 _LARGE_PREVIEW_RE = re.compile(
     r'<div class="gdtl"[^>]*>.*?<a[^>]*href="[^"]*"[^>]*>'
@@ -106,6 +108,7 @@ class EhClient:
         self.cookies = cookies
         self.base_url = EX_BASE_URL if use_ex else EH_BASE_URL
         self._http: httpx.AsyncClient | None = None
+        self._img_http: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> "EhClient":
         # Inject nw=1 cookie to skip Content Warning page
@@ -124,9 +127,24 @@ class EhClient:
             timeout=settings.eh_request_timeout,
             follow_redirects=True,
         )
+        self._img_http = httpx.AsyncClient(
+            cookies=cookies,
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+            },
+            timeout=20,
+            follow_redirects=True,
+        )
         return self
 
     async def __aexit__(self, *_) -> None:
+        if self._img_http:
+            await self._img_http.aclose()
         if self._http:
             await self._http.aclose()
 
@@ -344,6 +362,102 @@ class EhClient:
         if not img_tag or not img_tag.get("src"):
             raise ValueError(f"Image src not found for {gid}-{page}")
         return img_tag["src"]
+
+    async def get_showkey(self, gid: int, page: int, image_page_token: str) -> tuple[str, str | None]:
+        """Fetch image page HTML, extract showkey + nl param.
+        GET /s/{image_page_token}/{gid}-{page}
+        Returns (showkey, nl_param_or_None)
+        """
+        url = f"{self.base_url}/s/{image_page_token}/{gid}-{page}"
+        resp = await self._http.get(url)
+        resp.raise_for_status()
+        self._check_auth(resp.text, resp)
+
+        m = _SHOWKEY_RE.search(resp.text)
+        if not m:
+            raise ValueError(f"showkey not found for {gid}-{page}")
+        showkey = m.group(1)
+
+        nl_m = _NL_RE.search(resp.text)
+        nl_param = nl_m.group(1) if nl_m else None
+
+        return showkey, nl_param
+
+    async def get_image_url_via_api(self, showkey: str, gid: int, page: int, imgkey: str, nl: str = "") -> tuple[str, str | None]:
+        """Use showpage JSON API for fast image URL resolution.
+        POST to api.php with method=showpage.
+        Response JSON has:
+          - i3: HTML containing <img id="img" src="IMAGE_URL">
+          - i6: HTML containing onclick="return nl('NL_PARAM')"
+        Returns (image_url, nl_param)
+        """
+        payload: dict = {
+            "method": "showpage",
+            "gid": gid,
+            "page": page,
+            "imgkey": imgkey,
+            "showkey": showkey,
+        }
+        if nl:
+            payload["nl"] = nl
+
+        api_url = f"{self.base_url}/api.php" if self.base_url == EX_BASE_URL else EH_API_URL
+        resp = await self._http.post(api_url, json=payload)
+        resp.raise_for_status()
+        data = resp.json()
+
+        if data.get("error"):
+            raise ValueError(f"showpage API error: {data['error']}")
+
+        # Parse image URL from i3 field (HTML string containing img tag)
+        i3 = data.get("i3", "")
+        img_match = re.search(r'<img[^>]+src="([^"]+)"', i3)
+        if not img_match:
+            raise ValueError(f"Image URL not found in showpage response for {gid}-{page}")
+        image_url = img_match.group(1)
+
+        # Parse nl param from i6 field
+        i6 = data.get("i6", "")
+        nl_match = _NL_RE.search(i6)
+        nl_param = nl_match.group(1) if nl_match else None
+
+        return image_url, nl_param
+
+    async def download_image_with_retry(self, showkey: str, gid: int, page: int, imgkey: str, max_retries: int = 3) -> tuple[bytes, str, str]:
+        """Resolve URL via showpage API + download with nl retry on stall/error.
+        Returns (image_bytes, media_type, filename_ext)
+        """
+        nl = ""
+        nl_param: str | None = None
+        last_error: Exception | None = None
+
+        for attempt in range(max_retries):
+            try:
+                image_url, nl_param = await self.get_image_url_via_api(showkey, gid, page, imgkey, nl=nl)
+
+                # Download the image (use _img_http with follow_redirects=True for H@H)
+                resp = await self._img_http.get(image_url)
+                resp.raise_for_status()
+                image_data = resp.content
+
+                if len(image_data) < 100:
+                    # Suspiciously small — might be an error page
+                    raise ValueError(f"Image too small ({len(image_data)} bytes), possible error")
+
+                media_type = _detect_media_type(image_data)
+                ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp"}
+                ext = ext_map.get(media_type, "jpg")
+
+                return image_data, media_type, ext
+
+            except (httpx.TimeoutException, httpx.HTTPStatusError, ValueError) as exc:
+                last_error = exc
+                logger.warning("[eh_download] page %d attempt %d failed: %s", page, attempt + 1, exc)
+                # Use nl param to try a different H@H server
+                if nl_param:
+                    nl = nl_param
+
+        raise RuntimeError(f"Failed to download page {page} after {max_retries} attempts: {last_error}")
 
     async def fetch_image_bytes(self, image_url: str) -> tuple[bytes, str]:
         """Fetch image bytes. Returns (bytes, media_type)."""

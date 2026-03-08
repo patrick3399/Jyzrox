@@ -44,7 +44,7 @@ async def system_health():
 async def system_info(_: dict = Depends(require_auth)):
     """Return non-sensitive runtime configuration."""
     return {
-        "version": "2.0.0",
+        "version": "0.1",
         "eh_max_concurrency": settings.eh_max_concurrency,
         "tag_model_enabled": settings.tag_model_enabled,
     }

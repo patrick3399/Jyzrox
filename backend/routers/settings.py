@@ -5,16 +5,18 @@ import hashlib
 import json
 import logging
 import secrets
+import urllib.parse
 from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from core.auth import require_auth
 from core.config import settings as app_settings
 from core.database import async_session
+from db.models import Credential
 from services.cache import get_system_alerts, push_system_alert
 from services.credential import get_credential, set_credential
 from services.eh_client import EhClient
@@ -183,12 +185,15 @@ async def get_pixiv_oauth_url(_: dict = Depends(require_auth)):
     code_challenge_bytes = hashlib.sha256(code_verifier.encode("utf-8")).digest()
     code_challenge = base64.urlsafe_b64encode(code_challenge_bytes).decode("utf-8").rstrip("=")
 
-    client_id = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
+    client_id = app_settings.pixiv_client_id
+    redirect_uri = "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback"
     auth_url = (
-        f"https://app-api.pixiv.net/web/v1/login"
-        f"?code_challenge={code_challenge}"
+        f"https://accounts.pixiv.net/login"
+        f"?client_id={client_id}"
+        f"&redirect_uri={urllib.parse.quote(redirect_uri, safe='')}"
+        f"&response_type=code"
+        f"&code_challenge={code_challenge}"
         f"&code_challenge_method=S256"
-        f"&client={client_id}"
     )
     return {"url": auth_url, "code_verifier": code_verifier}
 
@@ -199,8 +204,8 @@ async def pixiv_oauth_callback(
     _: dict = Depends(require_auth),
 ):
     """Exchange authorization code for refresh token."""
-    client_id = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
-    client_secret = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
+    client_id = app_settings.pixiv_client_id
+    client_secret = app_settings.pixiv_client_secret
 
     # Extract code from URL if user pasted the full URL
     code = req.code
@@ -242,6 +247,26 @@ async def pixiv_oauth_callback(
 
     await set_credential("pixiv", refresh_token, "oauth_token")
     return {"status": "ok", "username": username}
+
+
+@router.delete("/credentials/{source}")
+async def delete_credential_endpoint(
+    source: str,
+    _: dict = Depends(require_auth),
+):
+    """Delete stored credential for a source (ehentai, pixiv)."""
+    if source not in ("ehentai", "pixiv"):
+        raise HTTPException(status_code=400, detail="Invalid source")
+    async with async_session() as session:
+        result = await session.execute(
+            select(Credential).where(Credential.source == source)
+        )
+        cred = result.scalar_one_or_none()
+        if not cred:
+            raise HTTPException(status_code=404, detail="No credential found")
+        await session.delete(cred)
+        await session.commit()
+    return {"status": "ok"}
 
 
 # ── ExHentai cookie check ─────────────────────────────────────────────

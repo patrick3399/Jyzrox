@@ -148,6 +148,166 @@ download_job → import_job → thumbnail_job
 
 ---
 
+## Tag 系統
+
+Tag 格式：`{namespace}:{name}`
+
+命名空間（固定）：`artist` / `character` / `copyright` / `general` / `meta` / `language`
+
+### Tag Alias（別名合併）
+
+`tag_aliases` 表：將多個名稱指向同一個 canonical tag。
+
+| 欄位 | 說明 |
+|------|------|
+| `alias_namespace` | 別名的 namespace |
+| `alias_name` | 別名（如 `blue hair`、`藍髮`） |
+| `canonical_id` | 指向 `tags.id`（canonical tag） |
+
+行為：導入/搜尋時 alias 自動解析為 canonical；`/tags` 頁面可管理。
+
+### Tag Implication（含義推導）
+
+`tag_implications` 表：定義 A → B 的推導關係。
+
+| 欄位 | 說明 |
+|------|------|
+| `antecedent_id` | 前提 tag（如 `character:rem`） |
+| `consequent_id` | 推導 tag（如 `copyright:re_zero`） |
+
+行為：遞迴展開（A→B→C），展開在寫入 DB 時發生（`tags_array` 包含完整展開列表）。
+
+### Tag 同步流程
+
+```
+解析 metadata.json / tags.txt
+→ 每個 tag 查 alias → 替換為 canonical
+→ 每個 canonical tag 展開 implication
+→ 去重後寫入 gallery_tags + 更新 tags_array
+→ 更新 tags.count 統計
+```
+
+---
+
+## 搜尋系統
+
+統一端點：`GET /api/search?q=...&sort=...&page=...`
+
+### 搜尋語法
+
+| 語法 | 說明 |
+|------|------|
+| `character:rem` | Tag 精確搜尋（GIN 索引） |
+| `-general:sketch` | 排除 tag |
+| `character:rem general:blue_hair` | AND（空格分隔） |
+| `title:"re zero"` | 標題模糊搜尋（pg_trgm） |
+| `source:ehentai` | 來源篩選（ehentai / pixiv / import） |
+| `rating:>=4` | 評分篩選 |
+| `pages:>=20` | 頁數篩選 |
+| `favorited:true` | 已收藏 |
+| `language:japanese` | 語言篩選 |
+
+### 排序選項
+
+`sort:added_at`（預設）、`sort:rating`、`sort:posted_at`、`sort:pages`、`sort:title`
+
+### 實作細節
+
+- Tag 搜尋：`tags_array @> ARRAY[...]`（GIN 索引），排除用 `&&`
+- 標題模糊搜尋：`pg_trgm` 擴充 + GIN index（`gin_trgm_ops`）
+- Tag Autocomplete：`tags` 表前綴匹配 + alias 查找，依 `count DESC` 排序
+
+---
+
+## SHA256 去重機制
+
+去重時機：`import_job` 導入每個檔案時。
+
+| 情境 | 行為 |
+|------|------|
+| 同 gallery 內重複 | 跳過，記 log |
+| 跨 gallery 重複 | 仍匯入，`images.duplicate_of` 設為原始 image.id |
+| 不存在 | 正常匯入 |
+
+- 僅用 SHA256（完全相同），**不做感知雜湊**（perceptual hash）
+- Copy Mode 跨 gallery 重複時建立硬連結節省空間
+
+---
+
+## 影片 / GIF 支援
+
+`images.media_type` 欄位：`'image'` / `'video'` / `'gif'`
+
+| 類型 | Reader 行為 | 縮圖 |
+|------|------------|------|
+| `image` | `<img>` | Pillow WebP |
+| `video` | `<video controls autoplay loop>` | ffmpeg 擷取首幀 |
+| `gif` | `<img>` | 取第一幀靜態縮圖 |
+
+支援格式：`.mp4`、`.webm`、`.gif`（不做伺服器端轉碼）
+Nginx 對影片檔提供 HTTP Range Request 支援（可拖曳時間軸）。
+
+---
+
+## 匯入模式
+
+兩種模式均執行 SHA256 去重 + Tag 同步流程。
+
+| 模式 | 端點 | 行為 |
+|------|------|------|
+| Link Mode | `POST /api/import/link { path, recursive }` | 唯讀；`file_path` 指向外部絕對路徑；不複製檔案；縮圖仍寫入 `/data/thumbs/` |
+| Copy Mode | `POST /api/import/copy { path }` | 檔案從 `/data/imports/` 複製至 `/data/gallery/imports/{id}/`；原始檔移至 `/data/imports/_done/` |
+
+---
+
+## Redis Key 模式
+
+```
+session:{user_id}:{token}      → session 資料（TTL 30 天）
+job:{job_id}                   → 下載任務狀態
+eh:gallery:{gid}               → EH gallery 快取（TTL 1h）
+eh:imagelist:{gid}             → 圖片列表快取（TTL 1h）
+thumb:proxied:{gid}:{page}     → 代理圖片快取（TTL 24h）
+eh:semaphore                   → 全域併發計數
+system:alerts                  → 系統警告列表
+```
+
+---
+
+## 檔案系統佈局
+
+```
+/data/
+├── gallery/
+│   ├── ehentai/{gid}/          # 下載的 EH 圖庫
+│   ├── pixiv/{artist_id}/{work_id}/
+│   └── imports/{id}/           # Copy Mode 匯入
+├── imports/                    # Copy Mode 來源（使用者放入）
+│   └── _done/                  # 已處理的原始檔
+├── thumbs/
+│   └── {hash[:2]}/{hash}/      # 160/360/720px WebP
+└── training/
+    └── {dataset_name}/         # Kohya 格式匯出
+```
+
+Link Mode 的檔案不在 `/data/` 下，`file_path` 指向外部絕對路徑。
+
+---
+
+## EH 並發限制器
+
+Redis-based Global Semaphore：
+
+| 設定 | 值 |
+|------|-----|
+| `EH_MAX_CONCURRENCY` | 2 |
+| `EH_REQUEST_TIMEOUT` | 30 秒 |
+| `EH_ACQUIRE_TIMEOUT` | 60 秒 |
+
+流程：先查 Redis 快取（不佔 semaphore），快取未命中才 acquire semaphore 發外部請求。
+
+---
+
 ## 測試基礎設施
 
 | 層級 | 框架 | 執行命令 |

@@ -26,6 +26,8 @@ class Settings(BaseSettings):
     eh_request_timeout: int = 30
     eh_acquire_timeout: int = 60
     eh_use_ex: bool = False  # Use ExHentai instead of E-Hentai (EH_USE_EX env var)
+    eh_download_concurrency: int = 3    # parallel images per gallery
+    eh_download_max_retries: int = 3    # nl retries per image
 
     # AI Tagging
     tag_model_enabled: bool = False
@@ -37,7 +39,11 @@ class Settings(BaseSettings):
     data_avatars_path: str = "/data/avatars"
 
     # gallery-dl config (bind-mounted)
-    gallery_dl_config: str = "/home/appuser/.config/gallery-dl/config.json"
+    gallery_dl_config: str = "/app/config/gallery-dl.json"
+
+    # Pixiv OAuth
+    pixiv_client_id: str = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
+    pixiv_client_secret: str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
 
     model_config = {"env_file": ".env", "case_sensitive": False}
 

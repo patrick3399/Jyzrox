@@ -332,6 +332,32 @@ export default function SettingsPage() {
     }
   }, [pixivCallbackUrl, pixivCodeVerifier])
 
+  // EH: Clear credential
+  const handleClearEh = async () => {
+    if (!confirm('確定要清除 E-Hentai Cookie？')) return
+    try {
+      await api.settings.deleteCredential('ehentai')
+      toast.success('E-Hentai Cookie 已清除')
+      setCredentials((prev) => (prev ? { ...prev, ehentai: { configured: false } } : prev))
+      setEhAccount(null)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '清除失敗')
+    }
+  }
+
+  // Pixiv: Clear credential
+  const handleClearPixiv = async () => {
+    if (!confirm('確定要清除 Pixiv Token？')) return
+    try {
+      await api.settings.deleteCredential('pixiv')
+      toast.success('Pixiv Token 已清除')
+      setCredentials((prev) => (prev ? { ...prev, pixiv: { configured: false } } : prev))
+      setPixivUsername(null)
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : '清除失敗')
+    }
+  }
+
   // System: Load health + info
   const handleLoadSystem = useCallback(async () => {
     setSystemLoading(true)
@@ -759,6 +785,15 @@ export default function SettingsPage() {
                     </div>
                   </div>
                 )}
+
+                {credentials?.ehentai?.configured && (
+                  <button
+                    onClick={handleClearEh}
+                    className="mt-3 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors"
+                  >
+                    清除 Cookie
+                  </button>
+                )}
               </div>
             )}
           </div>
@@ -801,30 +836,30 @@ export default function SettingsPage() {
 
                 {pixivLoginMode === 'oauth' && (
                   <div className="mt-4 space-y-3">
-                    <div>
-                      <p className="text-xs text-vault-text-muted mb-2">
-                        1. Click the button below to open the Pixiv login page. After logging in,
-                        the page will redirect to a blank page or prompt an error with a URL
-                        starting with <code>pixiv://</code> or{' '}
-                        <code>https://app-api.pixiv.net</code>.
-                      </p>
-                      <button
-                        onClick={handlePixivGetOauth}
-                        className={btnSecondary + ' w-full mb-4'}
-                      >
-                        Open Pixiv Login Page
-                      </button>
+                    <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3 text-xs text-yellow-300/90 space-y-1.5">
+                      <p className="font-semibold">操作步驟：</p>
+                      <p>1. 點擊下方按鈕，會開啟 Pixiv 登入頁面</p>
+                      <p>2. 正常登入你的 Pixiv 帳號</p>
+                      <p>3. 登入成功後，頁面會跳轉。<strong>在跳轉的瞬間，快速複製網址列中的 URL</strong></p>
+                      <p className="text-yellow-400/70">提示：URL 格式為 <code className="bg-black/30 px-1 rounded">https://app-api.pixiv.net/...?code=xxx</code></p>
+                      <p className="text-yellow-400/70">如果來不及複製，可以按 F12 開啟開發者工具 → Network 分頁，找到 callback 請求複製 URL</p>
                     </div>
+                    <button
+                      onClick={handlePixivGetOauth}
+                      className={btnSecondary + ' w-full'}
+                    >
+                      Open Pixiv Login Page
+                    </button>
                     {pixivCodeVerifier && (
                       <div>
                         <p className="text-xs text-vault-text-muted mb-1">
-                          2. Paste the full redirected URL or the <code>code=</code> part here.
+                          4. 將複製的 URL 或 <code>code=</code> 後面的值貼到這裡：
                         </p>
                         <input
                           type="text"
                           value={pixivCallbackUrl}
                           onChange={(e) => setPixivCallbackUrl(e.target.value)}
-                          placeholder="pixiv://.../?code=..."
+                          placeholder="https://app-api.pixiv.net/...?code=... 或直接貼 code 值"
                           className={inputClass}
                         />
                         <button
@@ -869,6 +904,15 @@ export default function SettingsPage() {
                     <span className="text-vault-text-muted">{t('settings.pixivAccount')}:</span>
                     <span className="text-vault-text-secondary">{pixivUsername}</span>
                   </div>
+                )}
+
+                {credentials?.pixiv?.configured && (
+                  <button
+                    onClick={handleClearPixiv}
+                    className="mt-3 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors"
+                  >
+                    清除 Token
+                  </button>
                 )}
               </div>
             )}

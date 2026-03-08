@@ -143,8 +143,19 @@ async def list_galleries(
             rows = rows[:limit]
 
         next_cursor = _encode_cursor(rows[-1], sort) if has_next and rows else None
+
+        gallery_ids = [g.id for g in rows]
+        if gallery_ids:
+            cover_stmt = select(Image.gallery_id, Image.thumb_path).where(
+                Image.gallery_id.in_(gallery_ids), Image.page_num == 1
+            )
+            cover_rows = (await db.execute(cover_stmt)).all()
+            cover_map = {r.gallery_id: _to_url(r.thumb_path, "/data/thumbs/", "/media/thumbs/") for r in cover_rows}
+        else:
+            cover_map = {}
+
         return {
-            "galleries": [_g(g) for g in rows],
+            "galleries": [_g(g, cover_thumb=cover_map.get(g.id)) for g in rows],
             "next_cursor": next_cursor,
             "has_next": has_next,
         }
@@ -158,7 +169,18 @@ async def list_galleries(
 
         stmt = stmt.order_by(desc(sort_col), desc(Gallery.id)).offset(page * limit).limit(limit)
         galleries = (await db.execute(stmt)).scalars().all()
-        return {"total": total, "page": page, "galleries": [_g(g) for g in galleries]}
+
+        gallery_ids = [g.id for g in galleries]
+        if gallery_ids:
+            cover_stmt = select(Image.gallery_id, Image.thumb_path).where(
+                Image.gallery_id.in_(gallery_ids), Image.page_num == 1
+            )
+            cover_rows = (await db.execute(cover_stmt)).all()
+            cover_map = {r.gallery_id: _to_url(r.thumb_path, "/data/thumbs/", "/media/thumbs/") for r in cover_rows}
+        else:
+            cover_map = {}
+
+        return {"total": total, "page": page, "galleries": [_g(g, cover_thumb=cover_map.get(g.id)) for g in galleries]}
 
 
 @router.get("/galleries/{gallery_id}")
@@ -168,7 +190,13 @@ async def get_gallery(
     db: AsyncSession = Depends(get_db),
 ):
     g = await _get_or_404(db, gallery_id)
-    return _g(g)
+    cover_row = (
+        await db.execute(
+            select(Image.thumb_path).where(Image.gallery_id == gallery_id, Image.page_num == 1)
+        )
+    ).scalar_one_or_none()
+    cover_thumb = _to_url(cover_row, "/data/thumbs/", "/media/thumbs/")
+    return _g(g, cover_thumb=cover_thumb)
 
 
 @router.get("/galleries/{gallery_id}/images")
@@ -205,6 +233,58 @@ async def update_gallery(
         g.rating = patch.rating
     await db.commit()
     return _g(g)
+
+
+@router.delete("/galleries/{gallery_id}")
+async def delete_gallery(
+    gallery_id: int,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a gallery and its associated files (images + thumbnails)."""
+    g = await _get_or_404(db, gallery_id)
+
+    # Collect file paths before deleting DB records
+    stmt = select(Image.file_path, Image.thumb_path).where(Image.gallery_id == gallery_id)
+    image_rows = (await db.execute(stmt)).all()
+
+    # Delete from DB (cascades to images, gallery_tags, read_progress)
+    await db.delete(g)
+    await db.commit()
+
+    # Best-effort file cleanup
+    import shutil
+    from pathlib import Path
+    deleted_files = 0
+    for row in image_rows:
+        for path_str in (row.file_path, row.thumb_path):
+            if path_str:
+                p = Path(path_str)
+                try:
+                    if p.is_file():
+                        p.unlink()
+                        deleted_files += 1
+                except OSError:
+                    pass
+        # Clean up thumb directory (hash-based dir like /data/thumbs/ab/abcdef.../)
+        if row.thumb_path:
+            thumb_dir = Path(row.thumb_path).parent
+            try:
+                if thumb_dir.is_dir() and not any(thumb_dir.iterdir()):
+                    thumb_dir.rmdir()
+            except OSError:
+                pass
+
+    # Try to remove gallery directory if empty
+    if image_rows and image_rows[0].file_path:
+        gallery_dir = Path(image_rows[0].file_path).parent
+        try:
+            if gallery_dir.is_dir() and not any(gallery_dir.iterdir()):
+                gallery_dir.rmdir()
+        except OSError:
+            pass
+
+    return {"status": "ok", "deleted_files": deleted_files}
 
 
 # ── Read progress ────────────────────────────────────────────────────
@@ -254,6 +334,12 @@ async def save_progress(
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
+def _to_url(path: str | None, fs_prefix: str, url_prefix: str) -> str | None:
+    if not path:
+        return None
+    return path.replace(fs_prefix, url_prefix, 1)
+
+
 async def _get_or_404(db: AsyncSession, gallery_id: int) -> Gallery:
     g = await db.get(Gallery, gallery_id)
     if not g:
@@ -261,7 +347,7 @@ async def _get_or_404(db: AsyncSession, gallery_id: int) -> Gallery:
     return g
 
 
-def _g(g: Gallery) -> dict:
+def _g(g: Gallery, cover_thumb: str | None = None) -> dict:
     return {
         "id": g.id,
         "source": g.source,
@@ -278,6 +364,7 @@ def _g(g: Gallery) -> dict:
         "uploader": g.uploader,
         "download_status": g.download_status,
         "tags_array": g.tags_array or [],
+        "cover_thumb": cover_thumb,
     }
 
 
@@ -289,8 +376,8 @@ def _i(img: Image) -> dict:
         "filename": img.filename,
         "width": img.width,
         "height": img.height,
-        "file_path": img.file_path,
-        "thumb_path": img.thumb_path,
+        "file_path": _to_url(img.file_path, "/data/gallery/", "/media/gallery/"),
+        "thumb_path": _to_url(img.thumb_path, "/data/thumbs/", "/media/thumbs/"),
         "file_size": img.file_size,
         "file_hash": img.file_hash,
     }

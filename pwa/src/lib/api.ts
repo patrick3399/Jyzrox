@@ -196,6 +196,11 @@ const library = {
       body: JSON.stringify(patch),
     }),
 
+  deleteGallery: (id: number) =>
+    apiFetch<{ status: string; deleted_files: number }>(`/api/library/galleries/${id}`, {
+      method: 'DELETE',
+    }),
+
   getProgress: (id: number) => apiFetch<ReadProgress>(`/api/library/galleries/${id}/progress`),
 
   saveProgress: (id: number, last_page: number) =>
@@ -208,12 +213,13 @@ const library = {
 // ── Download ──────────────────────────────────────────────────────────
 
 const download = {
-  enqueue: (url: string, source?: string, options: Record<string, unknown> = {}) =>
+  enqueue: (url: string, source?: string, options: Record<string, unknown> = {}, total?: number) =>
     apiFetch<{ job_id: string; status: string }>('/api/download/', {
       method: 'POST',
       body: JSON.stringify({
         url,
         ...(source && { source }),
+        ...(total !== undefined && { total }),
         ...(Object.keys(options).length > 0 && { options }),
       }),
     }),
@@ -228,6 +234,25 @@ const download = {
   cancelJob: (id: string) =>
     apiFetch<{ status: string }>(`/api/download/jobs/${id}`, {
       method: 'DELETE',
+    }),
+
+  clearFinishedJobs: () =>
+    apiFetch<{ deleted: number }>('/api/download/jobs', {
+      method: 'DELETE',
+    }),
+
+  getStats: () => apiFetch<{ running: number; finished: number }>('/api/download/stats'),
+
+  pauseJob: (id: string) =>
+    apiFetch<{ status: string }>(`/api/download/jobs/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'pause' }),
+    }),
+
+  resumeJob: (id: string) =>
+    apiFetch<{ status: string }>(`/api/download/jobs/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ action: 'resume' }),
     }),
 }
 
@@ -275,6 +300,9 @@ const settings = {
       '/api/settings/credentials/ehentai/cookies-check',
       { method: 'POST' },
     ),
+
+  deleteCredential: (source: 'ehentai' | 'pixiv') =>
+    apiFetch<{ status: string }>(`/api/settings/credentials/${source}`, { method: 'DELETE' }),
 
   getAlerts: () => apiFetch<{ alerts: string[] }>('/api/settings/alerts'),
 

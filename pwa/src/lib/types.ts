@@ -17,6 +17,7 @@ export interface Gallery {
   download_status: 'proxy_only' | 'partial' | 'complete'
   import_mode: string | null
   tags_array: string[]
+  cover_thumb?: string | null
 }
 
 export interface GalleryImage {
@@ -90,8 +91,8 @@ export interface DownloadJob {
   id: string
   url: string
   source: string
-  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled'
-  progress: { percent?: number; downloaded?: number; total?: number; [key: string]: unknown }
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused'
+  progress: { percent?: number; downloaded?: number; total?: number; status_text?: string; speed?: number; started_at?: string; last_update_at?: string; [key: string]: unknown }
   error: string | null
   created_at: string
   finished_at: string | null

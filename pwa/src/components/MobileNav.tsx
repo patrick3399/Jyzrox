@@ -21,6 +21,7 @@ import {
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
+import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
 
 const navLinks = [
@@ -46,6 +47,7 @@ export function MobileNav() {
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()
   const { data: profile } = useProfile()
+  const { data: stats } = useDownloadStats()
   const [open, setOpen] = useState(false)
 
   // Close drawer on route change
@@ -160,6 +162,20 @@ export function MobileNav() {
               >
                 <Icon size={18} />
                 <span>{link.label()}</span>
+                {link.href === '/queue' && stats && (
+                  <span className="ml-auto flex items-center gap-1">
+                    {stats.running > 0 && (
+                      <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1">
+                        {stats.running}
+                      </span>
+                    )}
+                    {stats.finished > 0 && (
+                      <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold px-1">
+                        {stats.finished}
+                      </span>
+                    )}
+                  </span>
+                )}
               </Link>
             )
           })}

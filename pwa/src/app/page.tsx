@@ -46,9 +46,18 @@ function GalleryThumb({ gallery }: { gallery: Gallery }) {
   return (
     <Link href={`/library/${gallery.id}`} className="group block">
       <div className="aspect-[2/3] bg-vault-card rounded-lg overflow-hidden border border-vault-border group-hover:border-vault-border-hover transition-colors relative">
-        <div className="absolute inset-0 flex items-center justify-center text-vault-text-muted text-xs">
-          {gallery.pages}p
-        </div>
+        {gallery.cover_thumb ? (
+          <img
+            src={gallery.cover_thumb}
+            alt={gallery.title || 'Untitled'}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+        ) : (
+          <div className="absolute inset-0 flex items-center justify-center text-vault-text-muted text-xs">
+            {gallery.pages}p
+          </div>
+        )}
       </div>
       <p className="mt-1.5 text-xs text-vault-text-secondary line-clamp-2 leading-snug group-hover:text-vault-text transition-colors">
         {gallery.title || 'Untitled'}
@@ -69,12 +78,6 @@ export default function Dashboard() {
     focusThrottleInterval: 10000,
   })
 
-  const { data: healthData } = useSWR(
-    'dashboard/health',
-    () => api.system.health().catch(() => null),
-    { refreshInterval: 30000, dedupingInterval: 15000, focusThrottleInterval: 30000 },
-  )
-
   const activeJobs = (jobsData?.jobs ?? []).filter(
     (j: DownloadJob) => j.status === 'queued' || j.status === 'running',
   )
@@ -86,14 +89,7 @@ export default function Dashboard() {
         <div className="flex items-center justify-between">
           <div>
             <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
-            <p className="text-sm text-vault-text-muted mt-0.5">{t('dashboard.subtitle')}</p>
           </div>
-          {healthData && (
-            <div className="flex items-center gap-1.5 text-xs text-green-500">
-              <span className="w-1.5 h-1.5 rounded-full bg-green-500" />
-              {t('dashboard.systemOnline')}
-            </div>
-          )}
         </div>
 
         {/* Quick Links */}

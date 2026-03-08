@@ -21,7 +21,7 @@ const dict: Record<string, Record<string, string>> = {
 
     // ── Dashboard ──
     'dashboard.title': 'Dashboard',
-    'dashboard.subtitle': 'Jyzrox rev 2.0',
+    'dashboard.subtitle': '',
     'dashboard.systemOnline': 'System online',
     'dashboard.activeDownloads': 'Active Downloads',
     'dashboard.viewAll': 'View all',
@@ -113,6 +113,10 @@ const dict: Record<string, Record<string, string>> = {
     'queue.created': 'Created',
     'queue.finished': 'Finished',
     'queue.queuedSuccess': 'Queued successfully',
+    'queue.clear': 'Clear',
+    'queue.clearing': 'Clearing...',
+    'queue.cleared': '{count} jobs cleared',
+    'queue.clearError': 'Failed to clear jobs',
 
     // ── Tags ──
     'tags.title': 'Tag Management',
@@ -272,6 +276,15 @@ const dict: Record<string, Record<string, string>> = {
 
     // ── Queue ──  (extra)
     'queue.cancelError': 'Failed to cancel job',
+    'queue.pause': 'Pause',
+    'queue.resume': 'Resume',
+    'queue.paused': 'Paused',
+    'queue.pauseError': 'Failed to pause/resume job',
+    'queue.files': 'files',
+    'queue.filesPerMin': '{count} files/min',
+    'queue.elapsed': 'Elapsed: {time}',
+    'queue.remaining': '~{time} remaining',
+    'queue.waitingSlot': 'Waiting for download slot...',
 
     // ── Tags ── (extra)
     'tags.selectTag': 'Select a tag to view details',

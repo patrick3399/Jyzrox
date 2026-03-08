@@ -3,6 +3,7 @@
 # Usage: ./scripts/restore.sh <backup_file.sql.gz>
 
 set -euo pipefail
+trap 'echo "[restore] Error occurred, restarting services..."; docker compose up -d api worker pwa nginx; exit 1' ERR
 
 if [ $# -lt 1 ]; then
   echo "Usage: $0 <backup_file.sql.gz>"
@@ -30,10 +31,13 @@ fi
 echo "[restore] Stopping all services (except postgres)..."
 docker compose stop api worker pwa nginx
 
-echo "[restore] Restoring from: $BACKUP_FILE"
+echo "[restore] Dropping and recreating schema..."
+docker compose exec -T postgres \
+  psql -U "$DB_USER" -d "$DB_NAME" \
+  -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
+
+echo "[restore] Loading backup data..."
 gunzip -c "$BACKUP_FILE" | docker compose exec -T postgres \
-  psql -U "$DB_USER" -d "$DB_NAME" -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;" \
-  && gunzip -c "$BACKUP_FILE" | docker compose exec -T postgres \
   psql -U "$DB_USER" -d "$DB_NAME"
 
 echo "[restore] Restarting all services..."

@@ -67,7 +67,7 @@ async def system_status(token_data: dict = Depends(verify_api_token)):
 
     return {
         "status": "online",
-        "version": "2.0.0",
+        "version": "0.1",
         "stats": {
             "galleries": gallery_count,
             "images": image_count,

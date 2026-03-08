@@ -692,7 +692,7 @@ function BrowsePage() {
   const handleDownload = useCallback(async (gallery: EhGallery) => {
     const url = `https://e-hentai.org/g/${gallery.gid}/${gallery.token}/`
     try {
-      const res = await api.download.enqueue(url, 'ehentai')
+      const res = await api.download.enqueue(url, 'ehentai', {}, gallery.pages)
       toast.success(`已加入佇列 (job: ${res.job_id})`)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed')

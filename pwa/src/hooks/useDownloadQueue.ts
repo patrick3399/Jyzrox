@@ -22,3 +22,22 @@ export function useCancelJob() {
     api.download.cancelJob(arg),
   )
 }
+
+export function useClearFinishedJobs() {
+  return useSWRMutation('download/clear', () => api.download.clearFinishedJobs())
+}
+
+export function useDownloadStats() {
+  return useSWR('download/stats', () => api.download.getStats(), {
+    refreshInterval: 5000,
+    dedupingInterval: 3000,
+  })
+}
+
+export function usePauseJob() {
+  return useSWRMutation(
+    'download/pause',
+    (_key: unknown, { arg }: { arg: { id: string; action: 'pause' | 'resume' } }) =>
+      arg.action === 'pause' ? api.download.pauseJob(arg.id) : api.download.resumeJob(arg.id),
+  )
+}
