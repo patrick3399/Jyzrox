@@ -73,3 +73,13 @@ export function useEhGalleryPreviews(gid: number | null, token: string | null) {
     { revalidateOnFocus: false },
   )
 }
+
+export function useEhPopular() {
+  return useSWR('eh/popular', () => api.eh.getPopular(), { revalidateOnFocus: false })
+}
+
+export function useEhToplist(tl: number, page = 0) {
+  return useSWR(['eh/toplist', tl, page], () => api.eh.getToplist({ tl, page }), {
+    revalidateOnFocus: false,
+  })
+}

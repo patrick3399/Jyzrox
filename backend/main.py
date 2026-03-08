@@ -15,6 +15,7 @@ from routers import (
     eh,
     export,
     external,
+    history,
     import_router,
     library,
     search,
@@ -78,6 +79,7 @@ app.include_router(tag.router, prefix="/api/tags")
 app.include_router(import_router.router, prefix="/api/import")
 app.include_router(export.router, prefix="/api/export")
 app.include_router(external.router, prefix="/api/external/v1")
+app.include_router(history.router, prefix="/api/history")
 
 
 @app.get("/api/health")

@@ -20,6 +20,12 @@ import type {
   SystemInfo,
   TagAlias,
   TagImplication,
+  TagItem,
+  EhComment,
+  BrowseHistoryItem,
+  SavedSearch,
+  BlockedTag,
+  CacheStats,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -181,6 +187,14 @@ const eh = {
     apiFetch<{ status: string }>(`/api/eh/favorites/${gid}/${token}`, {
       method: 'DELETE',
     }),
+
+  getPopular: () => apiFetch<EhSearchResult>('/api/eh/popular'),
+
+  getToplist: (params: { tl?: number; page?: number } = {}) =>
+    apiFetch<EhSearchResult>(`/api/eh/toplists${qs(params as Record<string, unknown>)}`),
+
+  getComments: (gid: number, token: string) =>
+    apiFetch<{ comments: EhComment[] }>(`/api/eh/gallery/${gid}/${token}/comments`),
 }
 
 // ── Library ───────────────────────────────────────────────────────────
@@ -320,11 +334,56 @@ const settings = {
     }),
 }
 
+// ── History ───────────────────────────────────────────────────────────
+
+const history = {
+  list: (params: { limit?: number; offset?: number } = {}) =>
+    apiFetch<{ items: BrowseHistoryItem[]; total: number }>(
+      `/api/history/${qs(params as Record<string, unknown>)}`,
+    ),
+
+  record: (data: {
+    source: string
+    source_id: string
+    title: string
+    thumb?: string
+    gid?: number
+    token?: string
+  }) => apiFetch<{ status: string }>('/api/history/', { method: 'POST', body: JSON.stringify(data) }),
+
+  clear: () => apiFetch<{ status: string }>('/api/history/', { method: 'DELETE' }),
+
+  delete: (id: number) =>
+    apiFetch<{ status: string }>(`/api/history/${id}`, { method: 'DELETE' }),
+}
+
+// ── Saved Searches ────────────────────────────────────────────────────
+
+const savedSearches = {
+  list: () => apiFetch<{ searches: SavedSearch[] }>('/api/search/saved'),
+
+  create: (data: { name: string; query: string; params: Record<string, unknown> }) =>
+    apiFetch<SavedSearch>('/api/search/saved', { method: 'POST', body: JSON.stringify(data) }),
+
+  delete: (id: number) =>
+    apiFetch<{ status: string }>(`/api/search/saved/${id}`, { method: 'DELETE' }),
+
+  rename: (id: number, name: string) =>
+    apiFetch<{ status: string }>(`/api/search/saved/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ name }),
+    }),
+}
+
 // ── System ────────────────────────────────────────────────────────────
 
 const system = {
   health: () => apiFetch<SystemHealth>('/api/system/health'),
   info: () => apiFetch<SystemInfo>('/api/system/info'),
+  getCache: () => apiFetch<CacheStats>('/api/system/cache'),
+  clearCache: () => apiFetch<{ deleted_keys: number }>('/api/system/cache', { method: 'DELETE' }),
+  clearCacheCategory: (category: string) =>
+    apiFetch<{ deleted_keys: number }>(`/api/system/cache/${category}`, { method: 'DELETE' }),
 }
 
 // ── Tags ─────────────────────────────────────────────────────────────
@@ -367,6 +426,23 @@ const tags = {
     apiFetch<{ status: string }>(`/api/tags/implications${qs({ antecedent_id, consequent_id })}`, {
       method: 'DELETE',
     }),
+
+  autocomplete: (q: string, limit = 10) =>
+    apiFetch<TagItem[]>(`/api/tags/autocomplete${qs({ q, limit })}`),
+
+  getTranslations: (tags: string[]) =>
+    apiFetch<Record<string, string>>(`/api/tags/translations${qs({ tags: tags.join(',') })}`),
+
+  listBlocked: () => apiFetch<BlockedTag[]>('/api/tags/blocked'),
+
+  addBlocked: (namespace: string, name: string) =>
+    apiFetch<{ status: string }>('/api/tags/blocked', {
+      method: 'POST',
+      body: JSON.stringify({ namespace, name }),
+    }),
+
+  removeBlocked: (id: number) =>
+    apiFetch<{ status: string }>(`/api/tags/blocked/${id}`, { method: 'DELETE' }),
 }
 
 // ── API Tokens ───────────────────────────────────────────────────────
@@ -409,4 +485,6 @@ export const api = {
   tags,
   tokens,
   export: exportApi,
+  history,
+  savedSearches,
 }

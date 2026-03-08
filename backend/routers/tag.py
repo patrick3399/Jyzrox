@@ -5,11 +5,12 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth
 from core.database import async_session
-from db.models import Tag, TagAlias, TagImplication
+from db.models import BlockedTag, Tag, TagAlias, TagImplication, TagTranslation
 
 router = APIRouter(tags=["tags"])
 
@@ -322,4 +323,214 @@ async def delete_implication(
         if impl:
             session.delete(impl)
             await session.commit()
+    return {"status": "ok"}
+
+
+# ── Tag Autocomplete ──────────────────────────────────────────────────
+
+
+@router.get("/autocomplete")
+async def autocomplete_tags(
+    q: str = Query(default="", description="Tag name prefix or 'namespace:name' prefix"),
+    limit: int = Query(default=10, ge=1, le=30),
+    _: dict = Depends(require_auth),
+):
+    """Return tags matching the given prefix, ordered by count DESC."""
+    if not q:
+        return []
+
+    async with async_session() as session:
+        # Support 'namespace:name' prefix format
+        if ":" in q:
+            ns, name_prefix = q.split(":", 1)
+            query = (
+                select(Tag)
+                .where(Tag.namespace.ilike(f"{ns}%"), Tag.name.ilike(f"{name_prefix}%"))
+                .order_by(desc(Tag.count), desc(Tag.id))
+                .limit(limit)
+            )
+        else:
+            query = (
+                select(Tag)
+                .where(Tag.name.ilike(f"{q}%"))
+                .order_by(desc(Tag.count), desc(Tag.id))
+                .limit(limit)
+            )
+        rows = (await session.execute(query)).scalars().all()
+
+    return [{"id": r.id, "namespace": r.namespace, "name": r.name, "count": r.count} for r in rows]
+
+
+# ── Tag Translations ──────────────────────────────────────────────────
+
+
+class TranslationUpsert(BaseModel):
+    namespace: str
+    name: str
+    language: str = "zh"
+    translation: str
+
+
+class TranslationBatchImport(BaseModel):
+    translations: list[TranslationUpsert]
+
+
+@router.get("/translations")
+async def get_translations(
+    tags: str = Query(default="", description="Comma-separated 'namespace:name' list"),
+    language: str = Query(default="zh"),
+    _: dict = Depends(require_auth),
+):
+    """Batch look up translations for a list of tags."""
+    if not tags:
+        return {}
+
+    tag_pairs = []
+    for item in tags.split(","):
+        item = item.strip()
+        if ":" in item:
+            ns, name = item.split(":", 1)
+            tag_pairs.append((ns.strip(), name.strip()))
+
+    if not tag_pairs:
+        return {}
+
+    async with async_session() as session:
+        # Fetch all matching translations in one query
+        from sqlalchemy import and_, tuple_
+
+        namespaces = [p[0] for p in tag_pairs]
+        names = [p[1] for p in tag_pairs]
+        rows = (
+            await session.execute(
+                select(TagTranslation).where(
+                    TagTranslation.language == language,
+                    tuple_(TagTranslation.namespace, TagTranslation.name).in_(tag_pairs),
+                )
+            )
+        ).scalars().all()
+
+    result = {}
+    for r in rows:
+        result[f"{r.namespace}:{r.name}"] = r.translation
+    return result
+
+
+@router.post("/translations")
+async def upsert_translation(
+    body: TranslationUpsert,
+    _: dict = Depends(require_auth),
+):
+    """Upsert a single tag translation."""
+    async with async_session() as session:
+        stmt = (
+            pg_insert(TagTranslation)
+            .values(
+                namespace=body.namespace,
+                name=body.name,
+                language=body.language,
+                translation=body.translation,
+            )
+            .on_conflict_do_update(
+                index_elements=["namespace", "name", "language"],
+                set_={"translation": body.translation},
+            )
+        )
+        await session.execute(stmt)
+        await session.commit()
+    return {"status": "ok"}
+
+
+@router.post("/translations/batch")
+async def batch_import_translations(
+    body: TranslationBatchImport,
+    _: dict = Depends(require_auth),
+):
+    """Bulk upsert tag translations."""
+    if not body.translations:
+        return {"status": "ok", "count": 0}
+
+    async with async_session() as session:
+        for item in body.translations:
+            stmt = (
+                pg_insert(TagTranslation)
+                .values(
+                    namespace=item.namespace,
+                    name=item.name,
+                    language=item.language,
+                    translation=item.translation,
+                )
+                .on_conflict_do_update(
+                    index_elements=["namespace", "name", "language"],
+                    set_={"translation": item.translation},
+                )
+            )
+            await session.execute(stmt)
+        await session.commit()
+    return {"status": "ok", "count": len(body.translations)}
+
+
+# ── Blocked Tags ──────────────────────────────────────────────────────
+
+
+class BlockedTagCreate(BaseModel):
+    namespace: str
+    name: str
+
+
+@router.get("/blocked")
+async def list_blocked_tags(
+    auth: dict = Depends(require_auth),
+):
+    """List blocked tags for the current user."""
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                select(BlockedTag).where(BlockedTag.user_id == user_id)
+            )
+        ).scalars().all()
+    return [{"id": r.id, "namespace": r.namespace, "name": r.name} for r in rows]
+
+
+@router.post("/blocked", status_code=201)
+async def add_blocked_tag(
+    body: BlockedTagCreate,
+    auth: dict = Depends(require_auth),
+):
+    """Add a blocked tag for the current user."""
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        # Use upsert to handle duplicate gracefully
+        stmt = (
+            pg_insert(BlockedTag)
+            .values(user_id=user_id, namespace=body.namespace, name=body.name)
+            .on_conflict_do_nothing(index_elements=["user_id", "namespace", "name"])
+            .returning(BlockedTag.id)
+        )
+        result = (await session.execute(stmt)).scalar_one_or_none()
+        await session.commit()
+    return {"status": "ok", "id": result}
+
+
+@router.delete("/blocked/{blocked_id}")
+async def remove_blocked_tag(
+    blocked_id: int,
+    auth: dict = Depends(require_auth),
+):
+    """Remove a blocked tag."""
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                select(BlockedTag).where(
+                    BlockedTag.id == blocked_id,
+                    BlockedTag.user_id == user_id,
+                )
+            )
+        ).scalar_one_or_none()
+        if not row:
+            raise HTTPException(status_code=404, detail="Blocked tag not found")
+        await session.delete(row)
+        await session.commit()
     return {"status": "ok"}

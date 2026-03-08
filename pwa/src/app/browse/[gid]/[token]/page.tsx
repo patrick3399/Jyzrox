@@ -8,6 +8,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
+import { ChevronDown, ChevronUp } from 'lucide-react'
+import type { EhComment } from '@/lib/types'
 
 // Favorite category colors (from EhViewer)
 const FAV_COLORS = [

@@ -635,6 +635,91 @@ class EhClient:
         resp.raise_for_status()
         return True
 
+    async def get_popular(self) -> dict:
+        """
+        Scrape E-H popular page and return galleries.
+        GET {base_url}/popular
+        """
+        resp = await self._http.get(f"{self.base_url}/popular")
+        resp.raise_for_status()
+        self._check_auth(resp.text, resp)
+
+        matches = list({(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)})
+        if not matches:
+            return {"galleries": []}
+
+        gid_list = [[gid, tok] for gid, tok in matches]
+        galleries = await self._gdata(gid_list)
+        return {"galleries": galleries}
+
+    async def get_toplist(self, tl: int, page: int = 0) -> dict:
+        """
+        Scrape E-H top list page.
+        GET {base_url}/toplist.php?tl={tl}&p={page}
+        tl: 11=All-Time, 12=Past Year, 13=Past Month, 14=Yesterday, 15=Past Hour
+        """
+        resp = await self._http.get(f"{self.base_url}/toplist.php?tl={tl}&p={page}")
+        resp.raise_for_status()
+        self._check_auth(resp.text, resp)
+
+        matches = list({(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)})
+        total_match = _TOTAL_COUNT_RE.search(resp.text)
+        total = int(total_match.group(1).replace(",", "")) if total_match else len(matches)
+
+        if not matches:
+            return {"galleries": [], "total": total, "page": page}
+
+        gid_list = [[gid, tok] for gid, tok in matches]
+        galleries = await self._gdata(gid_list)
+        return {"galleries": galleries, "total": total, "page": page}
+
+    async def get_comments(self, gid: int, token: str) -> list[dict]:
+        """
+        Scrape gallery comments from gallery detail page.
+        Returns list of {poster, posted_at, text, score}.
+        """
+        url = f"{self.base_url}/g/{gid}/{token}/?p=0"
+        resp = await self._http.get(url)
+        resp.raise_for_status()
+        self._check_auth(resp.text, resp)
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        comments: list[dict] = []
+
+        for c1 in soup.select("div.c1"):
+            c3 = c1.find("div", class_="c3")
+            c6 = c1.find("div", class_="c6")
+            c5 = c1.find("div", class_="c5")
+
+            poster = ""
+            posted_at = ""
+            if c3:
+                c3_text = c3.get_text(" ", strip=True)
+                # "Posted on {date} UTC by: {poster}"
+                by_match = re.search(r"by:\s*(.+)$", c3_text)
+                if by_match:
+                    poster = by_match.group(1).strip()
+                date_match = re.search(r"Posted on\s+(.+?)\s+UTC", c3_text)
+                if date_match:
+                    posted_at = date_match.group(1).strip()
+
+            text = c6.decode_contents().strip() if c6 else ""
+            score_text = c5.get_text(strip=True) if c5 else ""
+            score: int | None = None
+            if score_text:
+                score_match = re.search(r"([+-]?\d+)", score_text)
+                if score_match:
+                    score = int(score_match.group(1))
+
+            comments.append({
+                "poster": poster,
+                "posted_at": posted_at,
+                "text": text,
+                "score": score,
+            })
+
+        return comments
+
     async def check_cookies(self) -> bool:
         """Verify that the current cookies give authenticated access."""
         try:

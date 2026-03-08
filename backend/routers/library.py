@@ -8,13 +8,13 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, desc, func, not_, or_, select
+from sqlalchemy import ARRAY, Text, and_, cast, desc, func, not_, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth
-from core.database import get_db
-from db.models import Gallery, Image, ReadProgress
+from core.database import async_session, get_db
+from db.models import BlockedTag, Gallery, Image, ReadProgress
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["library"])
@@ -44,6 +44,17 @@ def _decode_cursor(cursor: str) -> dict:
 # ── Gallery list ─────────────────────────────────────────────────────
 
 
+async def _get_blocked_tag_strings(user_id: int) -> list[str]:
+    """Return list of 'namespace:name' blocked tag strings for the user."""
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == user_id)
+            )
+        ).all()
+    return [f"{r.namespace}:{r.name}" for r in rows]
+
+
 @router.get("/galleries")
 async def list_galleries(
     q: str = Query(default=""),
@@ -56,7 +67,7 @@ async def list_galleries(
     limit: int = Query(default=20, ge=1, le=100),
     sort: Literal["added_at", "rating", "pages"] = Query(default="added_at"),
     cursor: str | None = Query(default=None),
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """
@@ -85,6 +96,12 @@ async def list_galleries(
         stmt = stmt.where(Gallery.source == source)
     if q:
         stmt = stmt.where(Gallery.title.ilike(f"%{q}%"))
+
+    # Filter out galleries containing blocked tags
+    user_id = auth["user_id"]
+    blocked_tags = await _get_blocked_tag_strings(user_id)
+    if blocked_tags:
+        stmt = stmt.where(not_(Gallery.tags_array.overlap(cast(blocked_tags, ARRAY(Text)))))
 
     sort_col = {"added_at": Gallery.added_at, "rating": Gallery.rating, "pages": Gallery.pages}[sort]
 
