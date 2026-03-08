@@ -280,7 +280,7 @@ async def list_saved_searches(
                 .order_by(desc(SavedSearch.created_at))
             )
         ).scalars().all()
-    return {"items": [_ss(r) for r in rows]}
+    return {"searches": [_ss(r) for r in rows]}
 
 
 @router.post("/saved", status_code=201)

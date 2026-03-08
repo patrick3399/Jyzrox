@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import delete, desc, select
+from sqlalchemy import delete, desc, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth
@@ -34,6 +34,13 @@ async def list_history(
     """List browse history for the current user, newest first."""
     user_id = auth["user_id"]
     async with async_session() as session:
+        total = (
+            await session.execute(
+                select(func.count()).select_from(
+                    select(BrowseHistory).where(BrowseHistory.user_id == user_id).subquery()
+                )
+            )
+        ).scalar_one()
         rows = (
             await session.execute(
                 select(BrowseHistory)
@@ -45,6 +52,7 @@ async def list_history(
         ).scalars().all()
     return {
         "items": [_h(r) for r in rows],
+        "total": total,
         "limit": limit,
         "offset": offset,
     }
