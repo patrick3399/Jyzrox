@@ -309,7 +309,7 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
             >
               <option value="ltr">{t('reader.dirLtr')}</option>
               <option value="rtl">{t('reader.dirRtl')}</option>
-              <option value="ttb">{t('reader.dirTtb')}</option>
+              <option value="vertical">{t('reader.dirVertical')}</option>
             </select>
           </ReaderSettingRow>
           <ReaderSettingRow label={t('reader.defaultScaleMode')}>

@@ -8,7 +8,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
-import { ChevronDown, ChevronUp } from 'lucide-react'
+import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react'
 import type { EhComment } from '@/lib/types'
 
 // Favorite category colors (from EhViewer)
@@ -260,14 +260,6 @@ export default function EhGalleryDetailPage() {
   return (
     <div className="min-h-screen bg-vault-bg text-vault-text">
       <div className="max-w-5xl mx-auto px-4 py-5 space-y-6">
-        {/* Back button */}
-        <button
-          onClick={() => router.back()}
-          className="text-sm text-vault-text-muted hover:text-vault-text-secondary transition-colors"
-        >
-          {t('browse.backToBrowse')}
-        </button>
-
         {/* ── Header section ── */}
         <div className="flex gap-5 flex-col sm:flex-row">
           {/* Cover */}
@@ -460,6 +452,17 @@ export default function EhGalleryDetailPage() {
           </div>
         )}
       </div>
+
+      {/* Floating back button — bottom-right for easy thumb reach on mobile */}
+      <button
+        onClick={() => router.back()}
+        className="fixed bottom-6 right-6 z-40 w-12 h-12 rounded-full bg-vault-card border border-vault-border
+                   shadow-lg flex items-center justify-center text-vault-text-secondary hover:text-vault-text
+                   hover:bg-vault-card-hover hover:border-vault-border-hover transition-colors active:scale-95"
+        aria-label={t('browse.backToBrowse')}
+      >
+        <ArrowLeft size={20} />
+      </button>
     </div>
   )
 }

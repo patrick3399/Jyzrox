@@ -297,7 +297,7 @@ const dict: Record<string, Record<string, string>> = {
     'reader.scaleOriginal': 'Original',
     'reader.dirLtr': 'LTR',
     'reader.dirRtl': 'RTL',
-    'reader.dirTtb': 'TTB',
+    'reader.dirVertical': 'Vertical',
     'reader.autoAdvance': 'Auto Advance',
     'reader.autoAdvanceDesc': 'Automatically advance to the next page',
     'reader.autoAdvanceInterval': 'Interval (seconds)',

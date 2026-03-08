@@ -26,7 +26,7 @@ export function saveReaderSettings(settings: Partial<ReaderSettings>) {
 function loadDirection(galleryId: number): ReadingDirection | null {
   if (typeof window === 'undefined') return null
   const val = localStorage.getItem(`reader_direction_${galleryId}`)
-  if (val === 'ltr' || val === 'rtl' || val === 'ttb') return val
+  if (val === 'ltr' || val === 'rtl' || val === 'vertical') return val
   return null
 }
 

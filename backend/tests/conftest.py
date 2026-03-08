@@ -184,6 +184,15 @@ _SQLITE_SCHEMA = [
         last_read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS blocked_tags (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id),
+        namespace TEXT NOT NULL,
+        name TEXT NOT NULL,
+        UNIQUE (user_id, namespace, name)
+    )
+    """,
 ]
 
 # ---------------------------------------------------------------------------

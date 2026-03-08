@@ -1,5 +1,6 @@
 """E-Hentai / ExHentai API proxy endpoints."""
 
+import asyncio
 import hashlib
 import json
 import logging
@@ -535,6 +536,7 @@ async def remove_favorite(
 
 # ── Thumbnail proxy ───────────────────────────────────────────────────
 
+_thumb_semaphore = asyncio.Semaphore(4)
 _ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "ul.ehgt.org"}
 
 
@@ -564,14 +566,15 @@ async def thumb_proxy(
     cred_json = await get_credential("ehentai")
     cookies = json.loads(cred_json) if cred_json else {}
 
-    try:
-        async with httpx.AsyncClient(cookies=cookies, timeout=15) as client:
-            resp = await client.get(url, headers={"Referer": "https://e-hentai.org/"})
-            resp.raise_for_status()
-            content = resp.content
-            media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
-    except httpx.HTTPError as exc:
-        raise HTTPException(status_code=502, detail=f"Thumbnail fetch failed: {exc}")
+    async with _thumb_semaphore:
+        try:
+            async with httpx.AsyncClient(cookies=cookies, timeout=15) as client:
+                resp = await client.get(url, headers={"Referer": "https://e-hentai.org/"})
+                resp.raise_for_status()
+                content = resp.content
+                media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]
+        except httpx.HTTPError as exc:
+            raise HTTPException(status_code=502, detail=f"Thumbnail fetch failed: {exc}")
 
     await get_redis().setex(cache_key, 86400, content)  # 24h
     return Response(

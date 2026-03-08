@@ -2,7 +2,7 @@ export type ViewMode = 'single' | 'webtoon' | 'double'
 
 export type ScaleMode = 'fit-both' | 'fit-width' | 'fit-height' | 'original'
 
-export type ReadingDirection = 'ltr' | 'rtl' | 'ttb'
+export type ReadingDirection = 'ltr' | 'rtl' | 'vertical'
 
 export interface ReaderImage {
   pageNum: number // 1-indexed

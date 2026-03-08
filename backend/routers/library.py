@@ -13,7 +13,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth
-from core.database import async_session, get_db
+from core.database import get_db
 from db.models import BlockedTag, Gallery, Image, ReadProgress
 
 logger = logging.getLogger(__name__)
@@ -44,14 +44,13 @@ def _decode_cursor(cursor: str) -> dict:
 # ── Gallery list ─────────────────────────────────────────────────────
 
 
-async def _get_blocked_tag_strings(user_id: int) -> list[str]:
+async def _get_blocked_tag_strings(db: AsyncSession, user_id: int) -> list[str]:
     """Return list of 'namespace:name' blocked tag strings for the user."""
-    async with async_session() as session:
-        rows = (
-            await session.execute(
-                select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == user_id)
-            )
-        ).all()
+    rows = (
+        await db.execute(
+            select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == user_id)
+        )
+    ).all()
     return [f"{r.namespace}:{r.name}" for r in rows]
 
 
@@ -99,7 +98,7 @@ async def list_galleries(
 
     # Filter out galleries containing blocked tags
     user_id = auth["user_id"]
-    blocked_tags = await _get_blocked_tag_strings(user_id)
+    blocked_tags = await _get_blocked_tag_strings(db, user_id)
     if blocked_tags:
         stmt = stmt.where(not_(Gallery.tags_array.overlap(cast(blocked_tags, ARRAY(Text)))))
 
