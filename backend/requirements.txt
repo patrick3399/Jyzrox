@@ -15,5 +15,5 @@ websockets==16.0
 aiofiles==24.1.0
 beautifulsoup4==4.12.3
 lxml==5.3.0
-bcrypt==4.2.1
+bcrypt==5.0.0
 psutil==6.1.1
