@@ -93,14 +93,14 @@ export default function GalleryDetailPage() {
 
   const handleDelete = async () => {
     if (!gallery || !id) return
-    if (!confirm(`確定要刪除「${gallery.title}」？此操作無法復原。`)) return
+    if (!confirm(t('library.deleteConfirm').replace('{title}', gallery.title))) return
     setIsDeleting(true)
     try {
       await api.library.deleteGallery(id)
-      toast.success('圖庫已刪除')
+      toast.success(t('library.deleted'))
       router.push('/library')
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : '刪除失敗'
+      const msg = e instanceof Error ? e.message : t('library.deleteFailed')
       toast.error(msg)
     } finally {
       setIsDeleting(false)
@@ -112,9 +112,9 @@ export default function GalleryDetailPage() {
     setIsRetagging(true)
     try {
       await api.tags.retag(id)
-      toast.success('已排入 AI 標記任務')
+      toast.success(t('library.retagQueued'))
     } catch (e: unknown) {
-      const msg = e instanceof Error ? e.message : 'AI 標記失敗'
+      const msg = e instanceof Error ? e.message : t('library.retagFailed')
       toast.error(msg)
     } finally {
       setIsRetagging(false)
@@ -269,21 +269,21 @@ export default function GalleryDetailPage() {
                       : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
                   }`}
                 >
-                  {gallery.favorited ? '★ Favorited' : '☆ Favorite'}
+                  {gallery.favorited ? t('library.favorited') : t('library.unfavorited')}
                 </button>
                 <button
                   onClick={handleDelete}
                   disabled={isDeleting}
                   className="px-4 py-2 rounded text-sm font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
                 >
-                  {isDeleting ? '刪除中...' : '刪除圖庫'}
+                  {isDeleting ? t('library.deleting') : t('library.delete')}
                 </button>
                 <button
                   onClick={handleRetag}
                   disabled={isRetagging}
                   className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-purple-600 hover:text-purple-400 transition-colors disabled:opacity-50"
                 >
-                  {isRetagging ? 'AI 標記中...' : 'AI 標籤'}
+                  {isRetagging ? t('library.retagging') : t('library.retag')}
                 </button>
               </div>
             </div>

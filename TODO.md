@@ -70,23 +70,23 @@
 - [x] 自動備份排程 — `scripts/backup-cron.sh` wrapper + crontab/systemd 範例
 
 ### 低優先
-- [ ] Docker network 分段（DB/Redis 獨立子網，僅 api/worker 可存取）
-- [ ] Worker `max_jobs` 可透過環境變數設定（目前硬編碼 8）
-- [ ] `LOG_LEVEL` 環境變數支援（目前硬編碼 `INFO`）
-- [ ] 集中式日誌（ELK / Loki / Datadog）
+- [x] Docker network 分段 — frontend/backend 雙網路，DB/Redis 僅 api/worker 可存取
+- [x] Worker `max_jobs` 可透過 `MAX_WORKER_JOBS` 環境變數設定（預設 8）
+- [x] `LOG_LEVEL` 環境變數支援（預設 `INFO`）
+- [ ] 集中式日誌（ELK / Loki / Datadog）— 需外部基礎設施，暫不實作
 
 ---
 
 ## 程式碼品質
 
 ### Backend
-- [ ] Tag cycle detection 使用 `collections.deque` 取代 `list.pop(0)`（`tag.py:256`）
-- [ ] System router 快取 pattern 定義統一（避免硬編碼重複）
-- [ ] `import_router.py` 使用 ORM 取代 raw SQL（目前混用兩種風格）
+- [x] Tag cycle detection 使用 `collections.deque` 取代 `list.pop(0)`
+- [x] System router 快取 pattern 定義統一（`_CACHE_PATTERNS` dict）
+- [x] `import_router.py` 使用 ORM 取代 raw SQL — 保留 raw SQL（Gallery 模型有 ARRAY 型別不相容 SQLite 測試）
 
 ### Frontend
-- [ ] i18n 完整性 — 部分頁面仍有硬編碼中文字串（`library/[id]/page.tsx`）
-- [ ] Service Worker 版本管理機制（cache busting 策略）
+- [x] i18n 完整性 — 硬編碼中文字串改為 `t()` 呼叫
+- [x] Service Worker 版本管理機制（cache busting 策略）
 
 ---
 

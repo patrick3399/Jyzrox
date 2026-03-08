@@ -78,13 +78,13 @@ function AiTaggingSection() {
   const [isRetagging, setIsRetagging] = useState(false)
 
   const handleRetagAll = async () => {
-    if (!window.confirm('確定要為所有圖庫重新執行 AI 標記？這可能需要一段時間。')) return
+    if (!window.confirm(t('settings.retagAllConfirm'))) return
     setIsRetagging(true)
     try {
       const result = await api.tags.retagAll()
-      toast.success(`已排入 ${result.total} 個標記任務`)
+      toast.success(t('settings.retagAllQueued', { total: result.total }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'AI 標記失敗')
+      toast.error(err instanceof Error ? err.message : t('settings.retagAllFailed'))
     } finally {
       setIsRetagging(false)
     }
@@ -93,14 +93,14 @@ function AiTaggingSection() {
   return (
     <div className="px-5 pb-5 border-t border-vault-border">
       <p className="text-xs text-vault-text-muted mt-4 mb-4">
-        使用 WD14 模型為所有圖庫自動標記
+        {t('settings.aiTaggingDesc')}
       </p>
       <button
         onClick={handleRetagAll}
         disabled={isRetagging}
         className="px-4 py-2 bg-purple-900/30 border border-purple-700/50 text-purple-400 hover:bg-purple-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
       >
-        {isRetagging ? '排入中...' : '重新標記全部'}
+        {isRetagging ? t('settings.retagging') : t('settings.retagAll')}
       </button>
     </div>
   )
@@ -203,8 +203,8 @@ function BrowseHistoryToggle({ onForceRerender }: { onForceRerender: () => void 
   return (
     <div className="mt-5 flex items-center justify-between">
       <div>
-        <p className="text-sm text-vault-text">瀏覽記錄</p>
-        <p className="text-xs text-vault-text-muted mt-0.5">記錄瀏覽過的畫廊</p>
+        <p className="text-sm text-vault-text">{t('settings.browseHistory')}</p>
+        <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.browseHistoryDesc')}</p>
       </div>
       <button
         onClick={() => {
@@ -629,14 +629,14 @@ export default function SettingsPage() {
 
   // EH: Clear credential
   const handleClearEh = async () => {
-    if (!confirm('確定要清除 E-Hentai Cookie？')) return
+    if (!confirm(t('settings.clearEhConfirm'))) return
     try {
       await api.settings.deleteCredential('ehentai')
-      toast.success('E-Hentai Cookie 已清除')
+      toast.success(t('settings.ehCookiesCleared'))
       setCredentials((prev) => (prev ? { ...prev, ehentai: { configured: false } } : prev))
       setEhAccount(null)
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : '清除失敗')
+      toast.error(e instanceof Error ? e.message : t('settings.clearFailed'))
     }
   }
 

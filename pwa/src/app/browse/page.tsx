@@ -816,7 +816,7 @@ function BrowsePage() {
     const url = `https://e-hentai.org/g/${gallery.gid}/${gallery.token}/`
     try {
       const res = await api.download.enqueue(url, 'ehentai', {}, gallery.pages)
-      toast.success(`已加入佇列 (job: ${res.job_id})`)
+      toast.success(t('browse.addedToQueueJob', { jobId: res.job_id }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed')
     }
@@ -826,7 +826,7 @@ function BrowsePage() {
     if (!downloadUrl.trim()) return
     try {
       const res = await api.download.enqueue(downloadUrl.trim())
-      toast.success(`已加入佇列 (job: ${res.job_id})`)
+      toast.success(t('browse.addedToQueueJob', { jobId: res.job_id }))
       setDownloadUrl('')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed')
@@ -1501,11 +1501,7 @@ function BrowsePage() {
                 {error.message?.includes('credentials not configured') ||
                 error.message?.includes('503') ? (
                   <p className="text-yellow-400">
-                    E-Hentai 憑證尚未設定。請前往{' '}
-                    <a href="/settings" className="underline text-yellow-300 hover:text-white">
-                      Settings
-                    </a>{' '}
-                    輸入 EH Cookie（ipb_member_id、ipb_pass_hash、sk）。
+                    {t('browse.credentialsMissingDetail')}
                   </p>
                 ) : (
                   <p className="text-red-400">{error.message || 'Failed to load results'}</p>

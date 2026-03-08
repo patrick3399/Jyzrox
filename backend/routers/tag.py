@@ -2,6 +2,7 @@
 
 import base64
 import json
+from collections import deque
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -260,9 +261,9 @@ async def _has_cycle(session, from_id: int, target_id: int) -> bool:
     Returns True if `target_id` is reachable (i.e. adding target→from would create a cycle).
     """
     visited: set[int] = set()
-    queue: list[int] = [from_id]
+    queue: deque[int] = deque([from_id])
     while queue:
-        current = queue.pop(0)
+        current = queue.popleft()
         if current in visited:
             continue
         visited.add(current)

@@ -35,7 +35,7 @@ from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
 from services.eh_downloader import download_eh_gallery
 
 logging.basicConfig(
-    level=logging.INFO,
+    level=os.environ.get("LOG_LEVEL", "INFO").upper(),
     format="%(asctime)s [%(levelname)s] %(name)s: %(message)s",
 )
 logger = logging.getLogger(__name__)
@@ -921,5 +921,5 @@ class WorkerSettings:
     functions = [download_job, import_job, local_import_job, tag_job, thumbnail_job]
     on_startup = startup
     on_shutdown = shutdown
-    max_jobs = 8
+    max_jobs = int(os.environ.get("MAX_WORKER_JOBS", "8"))
     job_timeout = 3600

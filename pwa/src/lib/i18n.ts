@@ -274,6 +274,17 @@ const dict: Record<string, Record<string, string>> = {
     'library.statusProxyOnly': 'Proxy Only',
     'library.favoriteError': 'Failed to update favorite',
     'library.ratingError': 'Failed to update rating',
+    'library.deleteConfirm': 'Delete "{title}"? This action cannot be undone.',
+    'library.deleted': 'Gallery deleted',
+    'library.deleteFailed': 'Delete failed',
+    'library.deleting': 'Deleting...',
+    'library.delete': 'Delete Gallery',
+    'library.retagQueued': 'AI tagging job queued',
+    'library.retagFailed': 'AI tagging failed',
+    'library.retagging': 'AI Tagging...',
+    'library.retag': 'AI Tags',
+    'library.favorited': '★ Favorited',
+    'library.unfavorited': '☆ Favorite',
 
     // ── Queue ──  (extra)
     'queue.cancelError': 'Failed to cancel job',
@@ -291,6 +302,16 @@ const dict: Record<string, Record<string, string>> = {
     'tags.selectTag': 'Select a tag to view details',
 
     // ── Reader ──
+    'reader.viewModeSingleShort': 'Single',
+    'reader.viewModeWebtoonShort': 'Webtoon',
+    'reader.viewModeDoubleShort': 'Double',
+    'reader.scaleFitBothShort': 'Fit',
+    'reader.scaleFitWidthShort': 'Width',
+    'reader.scaleFitHeightShort': 'Height',
+    'reader.scaleOriginalShort': 'Original',
+    'reader.dirLtrShort': 'L→R',
+    'reader.dirRtlShort': 'R→L',
+    'reader.dirVerticalShort': 'Vertical',
     'reader.scaleFitBoth': 'Fit',
     'reader.scaleFitWidth': 'Width',
     'reader.scaleFitHeight': 'Height',
@@ -324,6 +345,9 @@ const dict: Record<string, Record<string, string>> = {
     'settings.reader': '\u95b1\u8b80\u5668 / Reader',
 
     // ── Browse (extra) ──
+    'browse.addedToQueueJob': 'Added to queue (job: {jobId})',
+    'browse.credentialsMissingDetail':
+      'E-Hentai credentials not configured. Go to Settings to enter EH cookies (ipb_member_id, ipb_pass_hash, sk).',
     'browse.popularTab': 'Popular',
     'browse.toplistTab': 'Top Lists',
     'browse.allTime': 'All-Time',
@@ -367,6 +391,28 @@ const dict: Record<string, Record<string, string>> = {
 
     // ── Tag Translations ──
     'tags.translations': 'Tag Translations',
+
+    // ── Settings extra ──
+    'settings.aiTaggingDesc': 'Auto-tag all galleries using the WD14 model',
+    'settings.retagAll': 'Retag All',
+    'settings.retagging': 'Queuing...',
+    'settings.retagAllConfirm': 'Retag all galleries with AI? This may take a while.',
+    'settings.retagAllQueued': '{total} tagging jobs queued',
+    'settings.retagAllFailed': 'AI tagging failed',
+    'settings.browseHistory': 'Browse History',
+    'settings.browseHistoryDesc': 'Record visited galleries',
+    'settings.clearEhConfirm': 'Clear E-Hentai cookies?',
+    'settings.ehCookiesCleared': 'E-Hentai cookies cleared',
+    'settings.clearPixivConfirm': 'Clear Pixiv token?',
+    'settings.pixivTokenCleared': 'Pixiv token cleared',
+    'settings.clearFailed': 'Clear failed',
+    'settings.clearCategoryConfirm': 'Clear {category} cache?',
+    'settings.clearEhCookies': 'Clear Cookies',
+    'settings.clearPixivToken': 'Clear Token',
+    'settings.cacheCategory.eh_search': 'EH Search Cache',
+    'settings.cacheCategory.eh_gallery': 'EH Gallery Cache',
+    'settings.cacheCategory.eh_image': 'EH Image Cache',
+    'settings.cacheCategory.thumbs': 'Thumbnail Cache',
 
     // ── Tag Blocking ──
     'settings.tagBlocking': 'Tag Blocking',
