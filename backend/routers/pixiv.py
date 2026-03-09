@@ -5,10 +5,11 @@ import logging
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 
 from core.auth import require_auth
+from core.errors import api_error, parse_accept_language
 from services import cache
 from services.credential import get_credential
 from services.pixiv_client import PixivClient
@@ -19,17 +20,18 @@ router = APIRouter(tags=["pixiv"])
 _ALLOWED_PXIMG_HOSTS = {"i.pximg.net", "i-f.pximg.net", "s.pximg.net"}
 
 
+def _locale(request: Request) -> str:
+    return parse_accept_language(request.headers.get("accept-language"))
+
+
 # ── Client factory ────────────────────────────────────────────────────
 
 
-async def _make_client() -> PixivClient:
+async def _make_client(locale: str = "en") -> PixivClient:
     """Load Pixiv refresh_token from DB credentials and return a client."""
     refresh_token = await get_credential("pixiv")
     if not refresh_token:
-        raise HTTPException(
-            status_code=400,
-            detail="Pixiv refresh token not configured. Add it via Settings.",
-        )
+        raise api_error(400, "pixiv_not_configured", locale)
     return PixivClient(refresh_token=refresh_token)
 
 
@@ -38,6 +40,7 @@ async def _make_client() -> PixivClient:
 
 @router.get("/search")
 async def search_illust(
+    request: Request,
     word: str = Query(..., min_length=1),
     sort: str = Query(default="date_desc"),
     search_target: str = Query(default="partial_match_for_tags"),
@@ -51,7 +54,7 @@ async def search_illust(
     if cached is not None:
         return cached
 
-    client = await _make_client()
+    client = await _make_client(_locale(request))
     async with client:
         try:
             result = await client.search_illust(
@@ -61,8 +64,8 @@ async def search_illust(
                 duration=duration,
                 offset=offset,
             )
-        except PermissionError as e:
-            raise HTTPException(status_code=401, detail=str(e))
+        except PermissionError:
+            raise api_error(401, "pixiv_token_invalid", _locale(request))
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=f"Pixiv request failed: {e}")
 
@@ -75,6 +78,7 @@ async def search_illust(
 
 @router.get("/illust/{illust_id}")
 async def get_illust(
+    request: Request,
     illust_id: int,
     _: dict = Depends(require_auth),
 ):
@@ -86,12 +90,12 @@ async def get_illust(
             headers={"Cache-Control": "private, max-age=3600"},
         )
 
-    client = await _make_client()
+    client = await _make_client(_locale(request))
     async with client:
         try:
             result = await client.illust_detail(illust_id)
-        except PermissionError as e:
-            raise HTTPException(status_code=401, detail=str(e))
+        except PermissionError:
+            raise api_error(401, "pixiv_token_invalid", _locale(request))
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except httpx.HTTPError as e:
@@ -109,6 +113,7 @@ async def get_illust(
 
 @router.get("/user/{user_id}")
 async def get_user(
+    request: Request,
     user_id: int,
     _: dict = Depends(require_auth),
 ):
@@ -117,13 +122,13 @@ async def get_user(
     if cached is not None:
         return cached
 
-    client = await _make_client()
+    client = await _make_client(_locale(request))
     async with client:
         try:
             user_info = await client.user_detail(user_id)
             recent = await client.user_illusts(user_id, offset=0)
-        except PermissionError as e:
-            raise HTTPException(status_code=401, detail=str(e))
+        except PermissionError:
+            raise api_error(401, "pixiv_token_invalid", _locale(request))
         except ValueError as e:
             raise HTTPException(status_code=404, detail=str(e))
         except httpx.HTTPError as e:
@@ -142,6 +147,7 @@ async def get_user(
 
 @router.get("/user/{user_id}/illusts")
 async def get_user_illusts(
+    request: Request,
     user_id: int,
     offset: int = Query(default=0, ge=0),
     _: dict = Depends(require_auth),
@@ -152,12 +158,12 @@ async def get_user_illusts(
     if cached is not None:
         return cached
 
-    client = await _make_client()
+    client = await _make_client(_locale(request))
     async with client:
         try:
             result = await client.user_illusts(user_id, offset=offset)
-        except PermissionError as e:
-            raise HTTPException(status_code=401, detail=str(e))
+        except PermissionError:
+            raise api_error(401, "pixiv_token_invalid", _locale(request))
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=f"Pixiv request failed: {e}")
 

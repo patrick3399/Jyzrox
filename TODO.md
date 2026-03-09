@@ -57,9 +57,9 @@
 - [x] 統一 Settings → Security / Features 分區，集中管理所有開關
 
 ### 後端 i18n
-- [ ] API 錯誤訊息 i18n（目前硬編碼中/英文）
-- [ ] 根據 `Accept-Language` header 回傳對應語言
-- [ ] 確認前端有顯示翻譯後的 tag 名稱
+- [x] API 錯誤訊息 i18n（目前硬編碼中/英文）
+- [x] 根據 `Accept-Language` header 回傳對應語言
+- [x] 確認前端有顯示翻譯後的 tag 名稱
 
 ---
 

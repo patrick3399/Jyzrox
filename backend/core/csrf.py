@@ -6,6 +6,8 @@ from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
 
+from core.errors import get_error_message, parse_accept_language
+
 _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 _EXEMPT_PATHS = {
@@ -52,9 +54,10 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         header_token = request.headers.get("x-csrf-token")
 
         if not cookie_token or not header_token or not hmac.compare_digest(cookie_token, header_token):
+            locale = parse_accept_language(request.headers.get("accept-language"))
             return JSONResponse(
                 status_code=403,
-                content={"detail": "CSRF token missing or invalid"},
+                content={"detail": {"code": "csrf_invalid", "message": get_error_message("csrf_invalid", locale)}},
             )
 
         return await call_next(request)

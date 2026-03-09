@@ -17,6 +17,7 @@ from sqlalchemy import text
 from core.auth import require_auth
 from core.config import settings
 from core.database import async_session
+from core.errors import api_error, parse_accept_language
 from core.rate_limit import check_rate_limit, get_client_ip
 from core.redis_client import get_redis
 
@@ -72,7 +73,8 @@ async def setup(req: LoginRequest, request: Request):
     async with async_session() as session:
         result = await session.execute(text("SELECT COUNT(*) FROM users"))
         if result.scalar() > 0:
-            raise HTTPException(status_code=403, detail="Setup already completed")
+            locale = parse_accept_language(request.headers.get("accept-language"))
+            raise api_error(403, "setup_completed", locale)
 
         password_hash = bcrypt.hashpw(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
         await session.execute(
@@ -102,7 +104,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
         user = result.fetchone()
 
     if not user or not bcrypt.checkpw(req.password.encode("utf-8"), user.password_hash.encode("utf-8")):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise api_error(401, "invalid_credentials", parse_accept_language(request.headers.get("accept-language")))
 
     token = secrets.token_urlsafe(32)
     ua = request.headers.get("user-agent", "")

@@ -1,3 +1,5 @@
+import { t } from '@/lib/i18n'
+
 import type {
   Gallery,
   GalleryImage,
@@ -68,7 +70,16 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     }
     const body = await res.json().catch(() => ({}))
     const raw = body?.detail
-    const msg = typeof raw === 'string' ? raw : raw ? JSON.stringify(raw) : `HTTP ${res.status}`
+    let msg: string
+    if (typeof raw === 'object' && raw !== null && raw.code) {
+      const i18nKey = `error.${raw.code}`
+      const translated = t(i18nKey)
+      msg = translated !== i18nKey ? translated : (raw.message || `HTTP ${res.status}`)
+    } else if (typeof raw === 'string') {
+      msg = raw
+    } else {
+      msg = raw ? JSON.stringify(raw) : `HTTP ${res.status}`
+    }
     throw new Error(msg)
   }
 

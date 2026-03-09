@@ -7,12 +7,13 @@ import logging
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from core.auth import require_auth
 from core.config import settings as app_settings
+from core.errors import api_error, parse_accept_language
 from core.database import async_session
 from core.redis_client import eh_semaphore, get_redis
 from db.models import BlockedTag
@@ -23,6 +24,10 @@ from services.eh_client import EhClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["e-hentai"])
+
+
+def _locale(request: Request) -> str:
+    return parse_accept_language(request.headers.get("accept-language"))
 
 
 # ── Blocked tag helpers ───────────────────────────────────────────────
@@ -50,8 +55,13 @@ async def _make_client() -> EhClient:
     """Load EH cookies from DB and return a configured client (guest if no creds)."""
     cred_json = await get_credential("ehentai")
     cookies = json.loads(cred_json) if cred_json else {}
-    # Use ExHentai if configured or if igneous cookie is present
-    use_ex = app_settings.eh_use_ex or bool(cookies.get("igneous"))
+    # Check user preference in Redis, fall back to config/igneous
+    redis = get_redis()
+    pref = await redis.get("setting:eh_use_ex")
+    if pref is not None:
+        use_ex = pref == b"1"
+    else:
+        use_ex = app_settings.eh_use_ex or bool(cookies.get("igneous"))
     return EhClient(cookies=cookies, use_ex=use_ex)
 
 
@@ -60,6 +70,7 @@ async def _make_client() -> EhClient:
 
 @router.get("/search")
 async def search(
+    request: Request,
     q: str = Query(default=""),
     page: int = Query(default=0, ge=0),
     category: str | None = Query(default=None),
@@ -109,7 +120,7 @@ async def search(
                 await push_system_alert(detail)
                 raise HTTPException(status_code=403, detail=detail)
             await push_system_alert("E-Hentai cookie invalid or expired")
-            raise HTTPException(status_code=401, detail="EH cookie invalid")
+            raise api_error(401, "eh_cookie_invalid", _locale(request))
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
@@ -129,6 +140,7 @@ async def search(
 
 @router.get("/popular")
 async def get_popular(
+    request: Request,
     auth: dict = Depends(require_auth),
 ):
     """Get EH popular galleries (scrape /popular, cached 5min)."""
@@ -151,7 +163,7 @@ async def get_popular(
                 await push_system_alert(detail)
                 raise HTTPException(status_code=403, detail=detail)
             await push_system_alert("E-Hentai cookie invalid or expired")
-            raise HTTPException(status_code=401, detail="EH cookie invalid")
+            raise api_error(401, "eh_cookie_invalid", _locale(request))
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
@@ -173,6 +185,7 @@ _VALID_TL = {11, 12, 13, 15}
 
 @router.get("/toplists")
 async def get_toplist(
+    request: Request,
     tl: int = Query(default=11, description="11=All-Time, 12=Past Year, 13=Past Month, 15=Yesterday"),
     page: int = Query(default=0, ge=0),
     auth: dict = Depends(require_auth),
@@ -200,7 +213,7 @@ async def get_toplist(
                 await push_system_alert(detail)
                 raise HTTPException(status_code=403, detail=detail)
             await push_system_alert("E-Hentai cookie invalid or expired")
-            raise HTTPException(status_code=401, detail="EH cookie invalid")
+            raise api_error(401, "eh_cookie_invalid", _locale(request))
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
@@ -589,6 +602,7 @@ async def image_proxy(
 
 @router.get("/favorites")
 async def get_favorites(
+    request: Request,
     favcat: str = Query(default="all"),
     q: str = Query(default=""),
     next: str = Query(default="", alias="next"),
@@ -598,7 +612,7 @@ async def get_favorites(
     """Browse EH cloud favorites with cursor-based pagination."""
     cred_json = await get_credential("ehentai")
     if not cred_json:
-        raise HTTPException(status_code=400, detail="EH credentials not configured")
+        raise api_error(400, "eh_not_configured", _locale(request))
 
     cache_key = f"eh:favorites:{favcat}:{next}:{prev}:{q}"
     cached = await cache.get_json(cache_key)
@@ -617,8 +631,9 @@ async def get_favorites(
         except PermissionError as e:
             detail = str(e)
             await push_system_alert(detail)
-            status = 403 if "Sad Panda" in detail or "509" in detail else 401
-            raise HTTPException(status_code=status, detail=detail)
+            if "Sad Panda" in detail or "509" in detail:
+                raise HTTPException(status_code=403, detail=detail)
+            raise api_error(401, "eh_cookie_invalid", _locale(request))
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
@@ -631,6 +646,7 @@ async def get_favorites(
 
 @router.post("/favorites/{gid}/{token}")
 async def add_favorite(
+    request: Request,
     gid: int,
     token: str,
     favcat: int = Query(default=0, ge=0, le=9),
@@ -640,14 +656,14 @@ async def add_favorite(
     """Add/move gallery to a cloud favorites category."""
     cred_json = await get_credential("ehentai")
     if not cred_json:
-        raise HTTPException(status_code=400, detail="EH credentials not configured")
+        raise api_error(400, "eh_not_configured", _locale(request))
 
     client = await _make_client()
     async with client:
         try:
             await client.add_favorite(gid, token, favcat=favcat, note=note)
-        except PermissionError as e:
-            raise HTTPException(status_code=401, detail=str(e))
+        except PermissionError:
+            raise api_error(401, "eh_cookie_invalid", _locale(request))
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             logger.error("Failed to add favorite %s/%s: %s", gid, token, e)
             raise HTTPException(status_code=502, detail=str(e))
@@ -657,6 +673,7 @@ async def add_favorite(
 
 @router.delete("/favorites/{gid}/{token}")
 async def remove_favorite(
+    request: Request,
     gid: int,
     token: str,
     _: dict = Depends(require_auth),
@@ -664,14 +681,14 @@ async def remove_favorite(
     """Remove gallery from cloud favorites."""
     cred_json = await get_credential("ehentai")
     if not cred_json:
-        raise HTTPException(status_code=400, detail="EH credentials not configured")
+        raise api_error(400, "eh_not_configured", _locale(request))
 
     client = await _make_client()
     async with client:
         try:
             await client.remove_favorite(gid, token)
-        except PermissionError as e:
-            raise HTTPException(status_code=401, detail=str(e))
+        except PermissionError:
+            raise api_error(401, "eh_cookie_invalid", _locale(request))
         except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
             logger.error("Failed to remove favorite %s/%s: %s", gid, token, e)
             raise HTTPException(status_code=502, detail=str(e))
