@@ -198,6 +198,12 @@ async def download_job(
         await _set_job_status(db_job_id, "failed", err)
         return {"status": "failed", "error": err}
 
+    if source_id == "pixiv" and not credentials:
+        err = "Pixiv credentials not configured. Go to Credentials to add a refresh token."
+        logger.error("[download] %s", err)
+        await _set_job_status(db_job_id, "failed", err)
+        return {"status": "failed", "error": err}
+
     # Determine output directory
     if source_id == "ehentai":
         m = EH_GALLERY_URL_RE.search(url)
@@ -205,6 +211,19 @@ async def download_job(
             target_dir = Path(settings.data_gallery_path) / "ehentai" / m.group(1)
         else:
             target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
+    elif source_id == "pixiv":
+        # Route single artworks to pixiv/{illust_id}/ so import_job detects
+        # "pixiv" in path parts and sets source correctly.
+        # User-profile downloads go to pixiv/{db_job_id}/ and each illust
+        # creates its own subdirectory inside.
+        art_m = re.search(r"pixiv\.net/(?:en/)?(?:artworks|i)/(\d+)", url)
+        user_m = re.search(r"pixiv\.net/(?:en/)?users/(\d+)", url)
+        if art_m:
+            target_dir = Path(settings.data_gallery_path) / "pixiv" / art_m.group(1)
+        elif user_m:
+            target_dir = Path(settings.data_gallery_path) / "pixiv" / (db_job_id or f"user_{user_m.group(1)}")
+        else:
+            target_dir = Path(settings.data_gallery_path) / "pixiv" / (db_job_id or "local_test")
     else:
         target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
 

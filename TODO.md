@@ -87,11 +87,11 @@
   - 請求間隔 ≥ 2s（Pixiv 限速較嚴）
 
 ### Pixiv Phase 3: 原生下載器（依賴 Phase 1）
-- [ ] 新建 `services/pixiv_downloader.py`（仿 eh_downloader.py）
+- [x] 新建 `services/pixiv_downloader.py`（仿 eh_downloader.py）
   - `download_pixiv_illust()` — 下載單一插畫（含多頁漫畫）
   - `download_pixiv_user_works()` — 下載作者全部作品
   - 輸出 `metadata.json` 相容現有 `import_job`
-- [ ] `worker.py` download_job 新增 Pixiv 分支（URL 偵測 → 原生下載器，取代 gallery-dl subprocess）
+- [x] `worker.py` download_job 新增 Pixiv 分支（URL 偵測 → 原生下載器，取代 gallery-dl subprocess）
 
 ### Pixiv Phase 4: 前端頁面（依賴 Phase 1-3）
 
