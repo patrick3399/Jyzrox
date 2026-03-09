@@ -32,7 +32,8 @@ from core.config import get_all_library_paths, settings
 from core.database import AsyncSessionLocal
 from core.redis_client import DownloadSemaphore, close_redis, init_redis
 from core.watcher import LibraryWatcher
-from db.models import DownloadJob, Gallery, GalleryTag, Image, Tag
+from db.models import Blob, DownloadJob, Gallery, GalleryTag, Image, Tag
+from services.cas import cas_path, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, store_blob, thumb_dir
 from services.credential import get_credential
 from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
 from services.eh_downloader import download_eh_gallery
@@ -501,9 +502,6 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
             logger.warning("[import] failed to read metadata %s: %s", meta_file, exc)
             continue
 
-    # Determine final source and source_id, and move the directory
-    import shutil
-    
     # Extract source from Category (gallery-dl uses this for the extractor name)
     source = metadata.get("category")
     if not source:
@@ -515,33 +513,9 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
             source = "pixiv"
         else:
             source = "gallery_dl"
-            
+
     # Extract source ID
     source_id = str(metadata.get("gallery_id") or metadata.get("tweet_id") or metadata.get("id") or gallery_path.name)
-    
-    # Move the directory to its final resting place if it's currently a UUID
-    final_path = Path(settings.data_gallery_path) / source / source_id
-    if gallery_path != final_path:
-        try:
-            # If the destination already exists (e.g. updating a gallery), we can merge them by moving contents
-            if final_path.exists():
-                for item in gallery_path.iterdir():
-                    dest_item = final_path / item.name
-                    if dest_item.exists():
-                        if dest_item.is_file():
-                            dest_item.unlink()
-                        else:
-                            shutil.rmtree(dest_item)
-                    shutil.move(str(item), str(final_path))
-                gallery_path.rmdir() # Clean up empty UUID dir
-            else:
-                final_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(gallery_path), str(final_path))
-            gallery_path = final_path
-            logger.info("[import] moved to final path: %s", gallery_path)
-        except OSError as exc:
-            logger.error("[import] failed to move %s to %s: %s", gallery_path, final_path, exc)
-            return {"status": "failed", "error": f"move failed: {exc}"}
 
     tags = _extract_tags(gallery_path, metadata)
     image_files = sorted(
@@ -551,6 +525,8 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
 
     if not image_files:
         return {"status": "failed", "error": "no images found"}
+
+    import shutil as _shutil
 
     async with AsyncSessionLocal() as session:
         # Upsert gallery
@@ -571,18 +547,26 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
         )
         gallery_id = (await session.execute(stmt)).scalar_one()
 
-        # Compute hashes concurrently, then bulk-insert all images in one statement
+        # Compute hashes sequentially (avoid memory spikes for large galleries)
         hashes = await asyncio.gather(*[asyncio.to_thread(_sha256, f) for f in image_files])
+
+        # Store each file in CAS and create library symlink
+        for img_file, sha256 in zip(image_files, hashes, strict=False):
+            blob = await store_blob(img_file, sha256, session)
+            await asyncio.to_thread(create_library_symlink, gallery_id, img_file.name, blob)
+
+        # Flush blob upserts before inserting images (FK: blob_sha256 → blobs.sha256)
+        await session.flush()
+
+        # Bulk-insert images
         image_values = [
             {
                 "gallery_id": gallery_id,
                 "page_num": page_num,
                 "filename": img_file.name,
-                "file_path": str(img_file),
-                "file_size": img_file.stat().st_size,
-                "file_hash": file_hash,
+                "blob_sha256": sha256,
             }
-            for page_num, (img_file, file_hash) in enumerate(zip(image_files, hashes, strict=False), start=1)
+            for page_num, (img_file, sha256) in enumerate(zip(image_files, hashes, strict=False), start=1)
         ]
         if image_values:
             img_stmt = pg_insert(Image).values(image_values).on_conflict_do_nothing()
@@ -591,6 +575,12 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
         # Upsert tags + gallery_tags
         await _upsert_tags(session, gallery_id, tags)
         await session.commit()
+
+    # Delete the temporary download directory
+    try:
+        _shutil.rmtree(str(gallery_path), ignore_errors=True)
+    except Exception as exc:
+        logger.warning("[import] failed to remove temp dir %s: %s", gallery_path, exc)
 
     logger.info("[import] gallery_id=%d source=%s/%s", gallery_id, source, source_id)
 
@@ -703,7 +693,6 @@ async def _upsert_tags(session, gallery_id: int, tags: list[str]) -> None:
 async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: int) -> dict:
     """Import a local directory into the database with progress tracking."""
     import json as _json
-    import shutil
 
     logger.info("[local_import] gallery_id=%d source=%s mode=%s", gallery_id, source_dir, mode)
 
@@ -723,33 +712,25 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
 
     async with AsyncSessionLocal() as session:
         for idx, f in enumerate(files):
-            file_hash = await asyncio.to_thread(_sha256, f)
+            sha256 = await asyncio.to_thread(_sha256, f)
 
-            # Check duplicate
-            dup_result = await session.execute(
-                select(Image.id).where(Image.file_hash == file_hash).limit(1)
-            )
-            dup_row = dup_result.scalar_one_or_none()
-            duplicate_of = dup_row if dup_row else None
+            if mode == "copy":
+                # Hardlink/copy into CAS; create library symlink
+                blob = await store_blob(f, sha256, session)
+            else:
+                # Link mode: record external path, do not copy file
+                blob = await store_blob(f, sha256, session, storage="external", external_path=str(f))
 
-            dest_path = str(f)
-            if mode == "copy" and not duplicate_of:
-                dest_dir = Path(settings.data_gallery_path) / "local" / str(gallery_id)
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                dest_path = str(dest_dir / f.name)
-                await asyncio.to_thread(shutil.copy2, str(f), dest_path)
+            await asyncio.to_thread(create_library_symlink, gallery_id, f.name, blob)
 
-            ext = f.suffix.lower()
-            media_type = "video" if ext in (".mp4", ".webm") else "gif" if ext == ".gif" else "image"
+            # Flush blob upsert before inserting image (FK constraint)
+            await session.flush()
 
             stmt = pg_insert(Image).values(
                 gallery_id=gallery_id,
                 page_num=idx + 1,
                 filename=f.name,
-                file_path=dest_path,
-                file_hash=file_hash,
-                media_type=media_type,
-                duplicate_of=duplicate_of,
+                blob_sha256=sha256,
             ).on_conflict_do_nothing()
             await session.execute(stmt)
 
@@ -1200,38 +1181,40 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
     """Generate 160/360/720px WebP thumbnails for all images in a gallery."""
     import imagehash
     from PIL import Image as PILImage
+    from sqlalchemy.orm import selectinload
 
     logger.info("[thumbnail] gallery_id=%d", gallery_id)
-    thumbs_root = Path(settings.data_thumbs_path)
     sizes = [160, 360, 720]
     processed = 0
 
     async with AsyncSessionLocal() as session:
-        images = (await session.execute(select(Image).where(Image.gallery_id == gallery_id))).scalars().all()
+        images = (
+            await session.execute(
+                select(Image)
+                .where(Image.gallery_id == gallery_id)
+                .options(selectinload(Image.blob))
+            )
+        ).scalars().all()
 
         for img in images:
-            if not img.file_path:
+            blob = img.blob
+            if not blob:
                 continue
-            src = Path(img.file_path)
+            src = resolve_blob_path(blob)
             if not src.exists():
                 continue
 
-            # Ensure hash
-            if not img.file_hash:
-                img.file_hash = await asyncio.to_thread(_sha256, src)
-            h = img.file_hash
-
-            thumb_dir = thumbs_root / h[:2] / h
-            thumb_dir.mkdir(parents=True, exist_ok=True)
+            td = thumb_dir(blob.sha256)
+            td.mkdir(parents=True, exist_ok=True)
 
             try:
                 with PILImage.open(src) as pil:
-                    # Store actual dimensions
-                    img.width, img.height = pil.size
-                    img.phash = str(imagehash.phash(pil))
+                    # Store actual dimensions and phash on the blob
+                    blob.width, blob.height = pil.size
+                    blob.phash = str(imagehash.phash(pil))
                     rgb = pil.convert("RGB")
                     for size in sizes:
-                        dest = thumb_dir / f"thumb_{size}.webp"
+                        dest = td / f"thumb_{size}.webp"
                         if dest.exists():
                             continue
                         thumb = rgb.copy()
@@ -1240,7 +1223,6 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
                         thumb.save(str(tmp), "WEBP", quality=85)
                         os.rename(tmp, dest)
 
-                img.thumb_path = str(thumb_dir / "thumb_160.webp")
                 processed += 1
             except (OSError, ValueError) as exc:
                 logger.error("[thumbnail] %s: %s", src, exc)
@@ -1249,6 +1231,169 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
 
     logger.info("[thumbnail] gallery_id=%d: %d done", gallery_id, processed)
     return {"status": "done", "processed": processed}
+
+
+# ── WORKER I: Reconciliation + Blob GC ───────────────────────────────
+
+
+async def reconciliation_job(ctx: dict) -> dict:
+    """
+    Reconcile /data/library/ symlink tree with database records.
+
+    Users can delete symlinks directly from filesystem. This job syncs
+    those changes back to the database.
+
+    Also runs blob GC: removes unreferenced blobs and their CAS files.
+    """
+    import shutil
+    from sqlalchemy.orm import selectinload
+
+    logger.info("[reconcile] Starting reconciliation")
+    r = ctx["redis"]
+
+    # Check 14-day interval via Redis
+    last_run_key = "reconcile:last_run"
+    last_run = await r.get(last_run_key)
+    if last_run:
+        last_dt = datetime.fromisoformat(last_run.decode())
+        if (datetime.now(UTC) - last_dt).days < 14:
+            logger.info("[reconcile] Skipping — last run was %s (< 14 days ago)", last_run.decode())
+            return {"status": "skipped", "reason": "interval_not_reached"}
+
+    stats = {"removed_images": 0, "removed_galleries": 0, "orphan_blobs_cleaned": 0}
+
+    lib_base = Path(settings.data_library_path)
+    if not lib_base.exists():
+        logger.info("[reconcile] library path does not exist, nothing to do")
+        await r.set(last_run_key, datetime.now(UTC).isoformat())
+        return {"status": "done", **stats}
+
+    async with AsyncSessionLocal() as session:
+        # Phase 1: Scan library directories and compare with DB
+        for gallery_dir in sorted(lib_base.iterdir()):
+            if not gallery_dir.is_dir():
+                continue
+            try:
+                gallery_id = int(gallery_dir.name)
+            except ValueError:
+                logger.warning("[reconcile] skipping non-numeric dir: %s", gallery_dir.name)
+                continue
+
+            # Get DB images for this gallery
+            db_images = (await session.execute(
+                select(Image)
+                .where(Image.gallery_id == gallery_id)
+                .options(selectinload(Image.blob))
+            )).scalars().all()
+
+            db_filenames = {img.filename: img for img in db_images}
+
+            # Check which symlinks exist on disk
+            disk_files: set[str] = set()
+            for entry in gallery_dir.iterdir():
+                disk_files.add(entry.name)
+                # Check for broken symlinks
+                if entry.is_symlink() and not entry.exists():
+                    # Broken symlink — remove it
+                    entry.unlink()
+                    if entry.name in db_filenames:
+                        img = db_filenames[entry.name]
+                        await decrement_ref_count(img.blob_sha256, session)
+                        await session.delete(img)
+                        stats["removed_images"] += 1
+
+            # Check for DB records whose symlinks are missing
+            for filename, img in db_filenames.items():
+                if filename not in disk_files:
+                    await decrement_ref_count(img.blob_sha256, session)
+                    await session.delete(img)
+                    stats["removed_images"] += 1
+
+            # If gallery directory is now empty, remove gallery
+            remaining = list(gallery_dir.iterdir())
+            if not remaining:
+                gallery = await session.get(Gallery, gallery_id)
+                if gallery:
+                    await session.delete(gallery)
+                    stats["removed_galleries"] += 1
+                try:
+                    gallery_dir.rmdir()
+                except OSError:
+                    pass
+
+        # Phase 2: Check for galleries in DB whose library directory doesn't exist
+        # (Only check downloaded/imported galleries, not proxy_only)
+        all_galleries = (await session.execute(
+            select(Gallery).where(Gallery.download_status != "proxy_only")
+        )).scalars().all()
+
+        for g in all_galleries:
+            gdir = lib_base / str(g.id)
+            if not gdir.exists():
+                # Library directory missing — get images and decrement ref counts
+                images = (await session.execute(
+                    select(Image).where(Image.gallery_id == g.id)
+                )).scalars().all()
+                for img in images:
+                    await decrement_ref_count(img.blob_sha256, session)
+                    stats["removed_images"] += 1
+                await session.delete(g)
+                stats["removed_galleries"] += 1
+
+        await session.commit()
+
+    # Phase 3: Blob GC — clean up unreferenced blobs
+    async with AsyncSessionLocal() as session:
+        from sqlalchemy import func as sqlfunc
+
+        orphan_blobs = (await session.execute(
+            select(Blob).where(Blob.ref_count <= 0)
+        )).scalars().all()
+
+        for blob in orphan_blobs:
+            # Safety check: verify no images actually reference this blob
+            actual_refs = (await session.execute(
+                select(Image.id).where(Image.blob_sha256 == blob.sha256).limit(1)
+            )).scalar_one_or_none()
+
+            if actual_refs is not None:
+                # ref_count drifted — fix it
+                count_result = (await session.execute(
+                    select(sqlfunc.count()).select_from(Image).where(Image.blob_sha256 == blob.sha256)
+                )).scalar_one()
+                blob.ref_count = count_result
+                logger.warning("[reconcile] ref_count drift for %s: corrected to %d", blob.sha256[:12], count_result)
+                continue
+
+            # No references — safe to delete CAS file and thumbnail
+            cas_file = cas_path(blob.sha256, blob.extension)
+            if cas_file.exists():
+                try:
+                    cas_file.unlink()
+                except OSError as exc:
+                    logger.warning("[reconcile] failed to delete CAS file %s: %s", cas_file, exc)
+
+            # Delete thumbnail directory
+            td = thumb_dir(blob.sha256)
+            if td.exists():
+                shutil.rmtree(str(td), ignore_errors=True)
+
+            await session.delete(blob)
+            stats["orphan_blobs_cleaned"] += 1
+
+        await session.commit()
+
+    # Record last run time
+    await r.set(last_run_key, datetime.now(UTC).isoformat())
+
+    # Store result in Redis for API query (30-day TTL)
+    await r.setex("reconcile:last_result", 86400 * 30, json.dumps({
+        "completed_at": datetime.now(UTC).isoformat(),
+        **stats,
+    }))
+
+    logger.info("[reconcile] done: %s", stats)
+    return {"status": "done", **stats}
 
 
 # ── WORKER E: Auto-Discovery ──────────────────────────────────────────
@@ -1503,6 +1648,7 @@ class WorkerSettings:
         auto_discover_job,
         tag_job,
         thumbnail_job,
+        reconciliation_job,
         scheduled_scan_job,
         toggle_watcher_job,
     ]
@@ -1514,6 +1660,14 @@ class WorkerSettings:
             run_at_startup=False,
             unique=True,
             timeout=7200,
+        ),
+        cron(
+            reconciliation_job,
+            weekday=0,   # Monday
+            hour=3,
+            minute=0,
+            unique=True,
+            timeout=3600,
         ),
     ]
     on_startup = startup

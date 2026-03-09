@@ -1,6 +1,7 @@
+import json
 import logging
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import text
 
 from core.auth import require_auth
@@ -140,3 +141,27 @@ async def clear_cache_category(
         )
     deleted = await _delete_keys(_CACHE_PATTERNS[category])
     return {"status": "ok", "category": category, "deleted_keys": deleted}
+
+
+# ── Reconciliation ────────────────────────────────────────────────────
+
+
+@router.post("/reconcile")
+async def trigger_reconcile(
+    request: Request,
+    _: dict = Depends(require_auth),
+):
+    """Manually trigger the reconciliation job via ARQ."""
+    arq = request.app.state.arq
+    await arq.enqueue_job("reconciliation_job")
+    return {"status": "enqueued"}
+
+
+@router.get("/reconcile")
+async def get_reconcile_status(_: dict = Depends(require_auth)):
+    """Get the result of the last reconciliation run."""
+    r = get_redis()
+    result = await r.get("reconcile:last_result")
+    if not result:
+        return {"status": "never_run"}
+    return json.loads(result)

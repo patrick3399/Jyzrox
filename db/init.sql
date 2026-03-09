@@ -37,21 +37,27 @@ CREATE TABLE IF NOT EXISTS galleries (
     UNIQUE (source, source_id)
 );
 
+CREATE TABLE IF NOT EXISTS blobs (
+    sha256        TEXT PRIMARY KEY,
+    file_size     BIGINT NOT NULL,
+    media_type    TEXT NOT NULL DEFAULT 'image',
+    width         INT,
+    height        INT,
+    phash         TEXT,
+    extension     TEXT NOT NULL,
+    storage       TEXT NOT NULL DEFAULT 'cas',
+    external_path TEXT,
+    ref_count     INT NOT NULL DEFAULT 0,
+    created_at    TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_blobs_phash ON blobs (phash) WHERE phash IS NOT NULL;
+
 CREATE TABLE IF NOT EXISTS images (
     id              BIGSERIAL PRIMARY KEY,
     gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
     page_num        INT NOT NULL,
     filename        TEXT,
-    width           INT,
-    height          INT,
-    file_path       TEXT,
-    thumb_path      TEXT,
-    file_size       BIGINT,
-    file_hash       TEXT,
-    phash           TEXT,
-    media_type      TEXT DEFAULT 'image',
-    duration        REAL,
-    duplicate_of    BIGINT REFERENCES images(id),
+    blob_sha256     TEXT NOT NULL REFERENCES blobs(sha256),
     tags_array      TEXT[] DEFAULT '{}',
     UNIQUE (gallery_id, page_num)
 );
@@ -144,9 +150,7 @@ CREATE INDEX IF NOT EXISTS idx_galleries_added_at  ON galleries (added_at DESC);
 CREATE INDEX IF NOT EXISTS idx_galleries_rating    ON galleries (rating);
 CREATE INDEX IF NOT EXISTS idx_galleries_favorited ON galleries (favorited) WHERE favorited = true;
 CREATE INDEX IF NOT EXISTS idx_images_gallery      ON images (gallery_id, page_num);
-CREATE INDEX IF NOT EXISTS idx_images_hash         ON images (file_hash);
-CREATE INDEX IF NOT EXISTS idx_images_duplicate    ON images (duplicate_of) WHERE duplicate_of IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_images_phash        ON images (phash) WHERE phash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_images_blob         ON images (blob_sha256);
 
 -- #4: galleries.source (single-column) — used in WHERE source = 'pixiv' filters
 -- Note: idx_galleries_source above covers (source, source_id); this covers source-only lookups.

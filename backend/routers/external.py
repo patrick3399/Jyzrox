@@ -13,7 +13,8 @@ from sqlalchemy import func, select, update
 from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
-from db.models import ApiToken, DownloadJob, Gallery, Image, Tag
+from db.models import ApiToken, Blob, DownloadJob, Gallery, Image, Tag
+from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["external"])
@@ -202,22 +203,30 @@ async def get_gallery_images(
             raise HTTPException(status_code=404, detail="Gallery not found")
 
         rows = (
-            (await session.execute(select(Image).where(Image.gallery_id == gallery_id).order_by(Image.page_num)))
+            (
+                await session.execute(
+                    select(Image)
+                    .where(Image.gallery_id == gallery_id)
+                    .order_by(Image.page_num)
+                    .options(selectinload(Image.blob))
+                )
+            )
             .scalars()
             .all()
         )
 
     images = []
     for r in rows:
+        blob = r.blob
         images.append(
             {
                 "id": r.id,
                 "page_num": r.page_num,
                 "filename": r.filename,
-                "width": r.width,
-                "height": r.height,
-                "file_size": r.file_size,
-                "media_type": r.media_type,
+                "width": blob.width if blob else None,
+                "height": blob.height if blob else None,
+                "file_size": blob.file_size if blob else None,
+                "media_type": blob.media_type if blob else None,
             }
         )
 
