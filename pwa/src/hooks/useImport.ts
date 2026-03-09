@@ -109,7 +109,7 @@ export function useMountPoints() {
 
 export function useToggleMonitor() {
   const { mutate } = useSWRConfig()
-  return useSWRMutation('/api/import/monitor/status', async (_key: unknown, { arg }: { arg: boolean }) => {
+  return useSWRMutation('import/monitor/toggle', async (_key: unknown, { arg }: { arg: boolean }) => {
     const res = await api.import_.toggleMonitor(arg)
     mutate('import/monitor/status')
     return res

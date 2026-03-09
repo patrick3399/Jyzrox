@@ -15,12 +15,12 @@ const PAGE_SIZE = 24
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60_000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
+  if (mins < 1) return t('history.justNow')
+  if (mins < 60) return t('history.minutesAgo', { n: String(mins) })
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return t('history.hoursAgo', { n: String(hours) })
   const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}d ago`
+  if (days < 30) return t('history.daysAgo', { n: String(days) })
   return new Date(iso).toLocaleDateString()
 }
 
@@ -91,7 +91,7 @@ function HistoryCard({
         className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/60 text-white/70
                    hover:text-white hover:bg-black/80 opacity-0 group-hover:opacity-100
                    transition-opacity"
-        title="Remove"
+        title={t('history.remove')}
       >
         <X size={12} />
       </button>
@@ -135,7 +135,7 @@ export default function HistoryPage() {
       await api.history.delete(id)
       toast.success(t('history.deleted'))
       setItems((prev) => prev.filter((i) => i.id !== id))
-      setTotal((t) => t - 1)
+      setTotal((prev) => prev - 1)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('history.deleteFailed'))
     }

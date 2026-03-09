@@ -197,6 +197,13 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "ja": "タグが見つかりません",
         "ko": "태그를 찾을 수 없습니다",
     },
+    "not_found": {
+        "en": "Not found",
+        "zh-TW": "找不到",
+        "zh-CN": "找不到",
+        "ja": "見つかりません",
+        "ko": "찾을 수 없습니다",
+    },
     "unknown_feature": {
         "en": "Unknown feature",
         "zh-TW": "未知的功能",

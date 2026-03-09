@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jyzrox-static-v1';
+const CACHE_NAME = 'jyzrox-static-76600696';
 const OFFLINE_URL = '/offline.html';
 
 // ── Offline Share Queue ──
@@ -73,9 +73,14 @@ self.addEventListener('activate', (event) => {
     }).then(() => {
       // Try to replay any queued share requests that were stored while offline
       return replayShareQueue();
+    }).then(() => {
+      return self.clients.claim();
+    }).then(() => {
+      return self.clients.matchAll({ type: 'window' });
+    }).then((clients) => {
+      clients.forEach((client) => client.postMessage({ type: 'SW_UPDATED' }));
     })
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {

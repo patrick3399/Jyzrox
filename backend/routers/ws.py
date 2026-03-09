@@ -52,7 +52,7 @@ async def websocket_endpoint(ws: WebSocket):
                     await ws.send_json({"type": "alert", "message": msg})
                 await clear_system_alerts()
 
-            await ws.send_json({"type": "ping", "ts": datetime.datetime.utcnow().isoformat()})
+            await ws.send_json({"type": "ping", "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()})
             await asyncio.sleep(2)
 
     except WebSocketDisconnect:

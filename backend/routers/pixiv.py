@@ -271,7 +271,10 @@ async def image_proxy(
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=f"Pixiv request failed: {e}")
 
-    await cache.set_pixiv_image_cache(url_hash, image_bytes)
+    if len(image_bytes) <= 5 * 1024 * 1024:
+        await cache.set_pixiv_image_cache(url_hash, image_bytes)
+    else:
+        logger.debug("[pixiv_proxy] skipping Redis cache for large image (%d bytes): %s", len(image_bytes), url)
     return Response(
         content=image_bytes,
         media_type=media_type,

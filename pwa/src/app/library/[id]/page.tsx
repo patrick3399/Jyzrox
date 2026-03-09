@@ -106,7 +106,7 @@ export default function GalleryDetailPage() {
 
   const handleDelete = async () => {
     if (!gallery || !id) return
-    const confirmMsg = t(getDeleteConfirmKey()).replace('{title}', gallery.title)
+    const confirmMsg = t(getDeleteConfirmKey(), { title: gallery.title })
     if (!confirm(confirmMsg)) return
     setIsDeleting(true)
     try {
@@ -183,7 +183,7 @@ export default function GalleryDetailPage() {
   if (!gallery) return null
 
   const tagGroups = groupTagsByNamespace(gallery.tags_array)
-  const aiTags = tagData.filter((t) => t.source === 'ai' && t.confidence >= confidenceThreshold)
+  const aiTags = tagData.filter((tag) => tag.source === 'ai' && tag.confidence >= confidenceThreshold)
   const images = imagesData?.images ?? []
   const statusInfo =
     DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
@@ -234,21 +234,21 @@ export default function GalleryDetailPage() {
               {/* Meta grid */}
               <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm mb-4">
                 {[
-                  { label: 'Source', value: gallery.source },
-                  { label: 'Category', value: gallery.category },
-                  { label: 'Language', value: gallery.language || 'N/A' },
-                  { label: 'Uploader', value: gallery.uploader || 'N/A' },
-                  { label: 'Pages', value: String(gallery.pages) },
+                  { labelKey: 'library.metaSource', value: gallery.source },
+                  { labelKey: 'library.metaCategory', value: gallery.category },
+                  { labelKey: 'library.metaLanguage', value: gallery.language || 'N/A' },
+                  { labelKey: 'library.metaUploader', value: gallery.uploader || 'N/A' },
+                  { labelKey: 'library.metaPages', value: String(gallery.pages) },
                   {
-                    label: 'Added',
+                    labelKey: 'library.metaAdded',
                     value: formatDate(gallery.added_at),
                   },
                   ...(gallery.posted_at
-                    ? [{ label: 'Posted', value: formatDate(gallery.posted_at) }]
+                    ? [{ labelKey: 'library.metaPosted', value: formatDate(gallery.posted_at) }]
                     : []),
-                ].map(({ label, value }) => (
-                  <div key={label}>
-                    <span className="text-vault-text-muted">{label}: </span>
+                ].map(({ labelKey, value }) => (
+                  <div key={labelKey}>
+                    <span className="text-vault-text-muted">{t(labelKey)}: </span>
                     <span className="text-vault-text">{value}</span>
                   </div>
                 ))}
@@ -256,7 +256,7 @@ export default function GalleryDetailPage() {
 
               {/* Rating */}
               <div className="flex items-center gap-3 mb-4">
-                <span className="text-sm text-vault-text-muted">Rating:</span>
+                <span className="text-sm text-vault-text-muted">{t('library.metaRating')}</span>
                 <RatingStars
                   rating={gallery.rating}
                   readonly={false}
@@ -390,7 +390,7 @@ export default function GalleryDetailPage() {
         {/* Image Thumbnails */}
         <div className="bg-vault-card border border-vault-border rounded-xl p-5">
           <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide mb-3">
-            {t('library.images')} ({gallery.pages} pages)
+            {t('library.images')} ({gallery.pages} {t('library.metaPages')})
           </h2>
 
           {imagesLoading && (

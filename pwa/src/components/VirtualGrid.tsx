@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useEffect, useState, useMemo } from 'react'
+import { useRef, useEffect, useLayoutEffect, useState, useMemo } from 'react'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 
@@ -49,10 +49,18 @@ export function VirtualGrid<T>({
   className,
 }: VirtualGridProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const [scrollMargin, setScrollMargin] = useState(0)
   const [colCount, setColCount] = useState<number>(() => {
     if (typeof window === 'undefined') return columns.base
     return getColumnCount(window.innerWidth, columns)
   })
+
+  // Capture offsetTop after mount so the virtualizer has a stable scrollMargin
+  useLayoutEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    setScrollMargin(el.offsetTop)
+  }, [])
 
   // ResizeObserver on the container to detect width changes
   useEffect(() => {
@@ -87,23 +95,26 @@ export function VirtualGrid<T>({
     count: rowCount,
     estimateSize: () => estimateHeight + gap,
     overscan,
-    scrollMargin: containerRef.current?.offsetTop ?? 0,
+    scrollMargin,
   })
 
   const virtualItems = virtualizer.getVirtualItems()
 
+  // Keep a ref to onLoadMore so the effect never needs it as a dependency
+  const onLoadMoreRef = useRef(onLoadMore)
+  useEffect(() => {
+    onLoadMoreRef.current = onLoadMore
+  }, [onLoadMore])
+
   // Trigger onLoadMore when the last virtual row enters the visible area
   const lastVirtualItem = virtualItems[virtualItems.length - 1]
-  const onLoadMoreRef = useRef(onLoadMore)
-  onLoadMoreRef.current = onLoadMore
-
   useEffect(() => {
     if (!lastVirtualItem) return
     if (!hasMore || isLoading) return
     if (lastVirtualItem.index >= rowCount - 1) {
       onLoadMoreRef.current?.()
     }
-  }, [lastVirtualItem?.index, hasMore, isLoading, rowCount])
+  }, [lastVirtualItem, hasMore, isLoading, rowCount])
 
   if (items.length === 0) return null
 

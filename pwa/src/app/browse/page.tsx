@@ -333,13 +333,13 @@ function GalleryModal({
                 onClick={() => onDownload(gallery)}
                 className="px-4 py-2 bg-green-700 hover:bg-green-600 rounded text-white text-sm font-medium transition-colors"
               >
-                Download
+                {t('browse.download')}
               </button>
               <button
                 onClick={onClose}
                 className="px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors"
               >
-                Close
+                {t('browse.close')}
               </button>
             </div>
           </div>

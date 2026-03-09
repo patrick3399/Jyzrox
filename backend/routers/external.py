@@ -115,12 +115,15 @@ async def system_status(token_data: dict = Depends(verify_api_token)):
         disk_free = 0
 
     try:
+        import asyncio as _asyncio
         import subprocess
-        result = subprocess.run(
-            ["df", "-i", "--output=itotal,iused,iavail,ipcent", settings.data_cas_path],
-            capture_output=True, text=True, timeout=5,
+        proc = await _asyncio.create_subprocess_exec(
+            "df", "-i", "--output=itotal,iused,iavail,ipcent", settings.data_cas_path,
+            stdout=_asyncio.subprocess.PIPE,
+            stderr=_asyncio.subprocess.PIPE,
         )
-        lines = result.stdout.strip().split("\n")
+        stdout, _ = await _asyncio.wait_for(proc.communicate(), timeout=5)
+        lines = stdout.decode().strip().split("\n")
         if len(lines) >= 2:
             parts = lines[1].split()
             inode_total = int(parts[0])

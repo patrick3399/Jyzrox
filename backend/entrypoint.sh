@@ -13,7 +13,7 @@ if [ "$(id -u appuser)" != "$PUID" ] || [ "$(id -g appgroup)" != "$PGID" ]; then
 fi
 
 # Create and fix ownership of bind-mounted data directories.
-for dir in /data/gallery /data/thumbs /data/training /data/avatars; do
+for dir in /data/gallery /data/thumbs /data/training /data/avatars /data/cas /data/library /app/config; do
     mkdir -p "$dir"
     chown "$PUID:$PGID" "$dir"
 done

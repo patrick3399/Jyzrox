@@ -1,5 +1,6 @@
 """Authentication endpoints (session-based, rev 2.0)."""
 
+import asyncio
 import hashlib
 import io
 import json
@@ -392,8 +393,8 @@ async def upload_avatar(
     avatars_dir.mkdir(parents=True, exist_ok=True)
     out_path = avatars_dir / f"{auth['user_id']}.webp"
     tmp_path = out_path.with_suffix(".webp.tmp")
-    img.save(str(tmp_path), "WEBP", quality=85)
-    tmp_path.replace(out_path)
+    await asyncio.to_thread(img.save, str(tmp_path), "WEBP", quality=85)
+    await asyncio.to_thread(tmp_path.replace, out_path)
 
     async with async_session() as session:
         await session.execute(

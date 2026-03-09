@@ -60,13 +60,16 @@ async def export_kohya(gallery_id: int, _: dict = Depends(require_auth)):
     # Create Zip in memory
     zip_buffer = BytesIO()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for img in images:
+        for i, img in enumerate(images):
             file_path = _file_path(img)
             if not file_path:
                 continue
 
+            # Use img.filename if available, otherwise fall back to a page-based name
+            arcname = img.filename if img.filename else f"image_{i}"
+
             # Add image file to zip
-            zip_file.write(str(file_path), arcname=img.filename)
+            zip_file.write(str(file_path), arcname=arcname)
 
             # Combine gallery tags and specific image tags
             all_tags = set(gallery_tags)
@@ -74,7 +77,8 @@ async def export_kohya(gallery_id: int, _: dict = Depends(require_auth)):
                 all_tags.update(img.tags_array)
 
             # Create tag text file
-            txt_filename = os.path.splitext(img.filename)[0] + ".txt"
+            base, _ = os.path.splitext(arcname)
+            txt_filename = base + ".txt"
             tag_string = ", ".join(all_tags)
 
             zip_file.writestr(txt_filename, tag_string)

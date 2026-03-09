@@ -51,7 +51,7 @@ _IMAGE_MAGIC = {
     b'\x89PNG\r\n\x1a\n': {'.png'},               # PNG
     b'GIF87a': {'.gif'},                           # GIF87a
     b'GIF89a': {'.gif'},                           # GIF89a
-    b'\x00\x00\x00': {'.avif', '.heic'},           # AVIF/HEIC (ftyp box, starts with size bytes)
+    # AVIF/HEIC: ftyp box at bytes 4-7, handled by the special-case check below
 }
 
 
@@ -442,7 +442,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
     source_id = str(metadata.get("gallery_id") or metadata.get("tweet_id") or metadata.get("id") or gallery_path.name)
 
     tags = _extract_tags(gallery_path, metadata)
-    image_files_raw = [f for f in gallery_path.iterdir() if f.suffix.lower() in _IMAGE_EXTS]
+    image_files_raw = [f for f in gallery_path.rglob('*') if f.is_file() and f.suffix.lower() in _IMAGE_EXTS]
     # Validate actual file content matches extension (MIME check)
     image_files = sorted(
         [f for f in image_files_raw if _validate_image_magic(f)],
@@ -476,13 +476,19 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
         )
         gallery_id = (await session.execute(stmt)).scalar_one()
 
-        # Compute hashes sequentially (avoid memory spikes for large galleries)
-        hashes = await asyncio.gather(*[asyncio.to_thread(_sha256, f) for f in image_files])
+        # Compute hashes with bounded concurrency to avoid thread pool exhaustion
+        _hash_sem = asyncio.Semaphore(10)
+
+        async def _sha256_limited(f):
+            async with _hash_sem:
+                return await asyncio.to_thread(_sha256, f)
+
+        hashes = await asyncio.gather(*[_sha256_limited(f) for f in image_files])
 
         # Store each file in CAS and create library symlink
         for img_file, sha256 in zip(image_files, hashes, strict=False):
             blob = await store_blob(img_file, sha256, session)
-            await asyncio.to_thread(create_library_symlink, gallery_id, img_file.name, blob)
+            await create_library_symlink(gallery_id, img_file.name, blob)
 
         # Flush blob upserts before inserting images (FK: blob_sha256 → blobs.sha256)
         await session.flush()
@@ -670,7 +676,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                 # Link mode: record external path, do not copy file
                 blob = await store_blob(f, sha256, session, storage="external", external_path=str(f))
 
-            await asyncio.to_thread(create_library_symlink, gallery_id, f.name, blob)
+            await create_library_symlink(gallery_id, f.name, blob)
 
             # Flush blob upsert before inserting image (FK constraint)
             await session.flush()
@@ -1055,12 +1061,10 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         gallery.pages = len(final_images)
 
         if gallery.pages == 0 and gallery.import_mode == "link":
-            # All source files are gone — clean up remaining thumbnail dirs and remove gallery
-            remaining_imgs = (await session.execute(
-                select(Image).where(Image.gallery_id == gallery_id)
-                .options(selectinload(Image.blob))
-            )).scalars().all()
-            for rim in remaining_imgs:
+            # All source files are gone — clean up blob ref-counts and thumbnail dirs
+            # Use final_images (already queried above) — re-querying returns empty because
+            # images were deleted in Step 1 and flushed, causing the blob leak.
+            for rim in final_images:
                 if rim.blob:
                     td = thumb_dir(rim.blob.sha256)
                     if td.exists():
@@ -1682,7 +1686,10 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
             result = await session.execute(
                 select(Image.gallery_id)
                 .join(Blob, Image.blob_sha256 == Blob.sha256)
-                .where(Blob.external_path.like(f"{dir_path}%"))
+                .where(Blob.external_path.like(
+                    dir_path.replace('%', '\\%').replace('_', '\\_') + '%',
+                    escape='\\',
+                ))
                 .limit(1)
             )
             gallery_id = result.scalar_one_or_none()
@@ -1912,10 +1919,24 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
                             for ill in illusts[:new_count]:
                                 illust_url = f"https://www.pixiv.net/artworks/{ill['id']}"
                                 try:
+                                    job_id = uuid.uuid4()
+                                    async with AsyncSessionLocal() as db_session:
+                                        db_session.add(DownloadJob(
+                                            id=job_id,
+                                            url=illust_url,
+                                            source="pixiv",
+                                            status="queued",
+                                            progress={},
+                                        ))
+                                        await db_session.commit()
                                     await pool.enqueue_job(
                                         "download_job",
                                         illust_url,
                                         "pixiv",
+                                        None,
+                                        str(job_id),
+                                        None,
+                                        _job_id=str(job_id),
                                     )
                                 except Exception as enq_exc:
                                     logger.warning(

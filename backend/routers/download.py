@@ -86,7 +86,7 @@ async def _enqueue(
     """
     job_id = uuid.uuid4()
     source = _detect_source(url)
-    initial_progress = {"total": total} if total is not None else None
+    initial_progress = {"total": total} if total is not None else {}
 
     await _check_source_enabled(source)
 
@@ -108,7 +108,7 @@ async def _enqueue(
     # 2. Persist DB record. If this fails, log a warning; the ARQ job will
     #    eventually time out without a matching DB row.
     try:
-        job = DownloadJob(id=job_id, url=url, source=source, status="queued", progress=initial_progress)
+        job = DownloadJob(id=job_id, url=url, source=source, status="queued", progress=initial_progress or {})
         db.add(job)
         await db.commit()
     except Exception as exc:

@@ -98,6 +98,8 @@ async def list_galleries(
         stmt = stmt.where(Gallery.rating >= min_rating)
     if source:
         stmt = stmt.where(Gallery.source == source)
+    if import_mode:
+        stmt = stmt.where(Gallery.import_mode == import_mode)
     if q:
         stmt = stmt.where(Gallery.title.ilike(f"%{q}%"))
 

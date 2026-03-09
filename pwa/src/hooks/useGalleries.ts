@@ -38,7 +38,7 @@ export function useInfiniteLibraryGalleries(
 
   const galleries = data ? data.flatMap((page) => page.galleries) : []
   const total = data?.[0]?.total
-  const isLoadingMore = isValidating && data !== undefined && data.length === size
+  const isLoadingMore = isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
   const isEmpty = data?.[0]?.galleries.length === 0
   const lastPage = data?.[data.length - 1]
   const isReachingEnd =

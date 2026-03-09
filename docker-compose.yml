@@ -7,7 +7,10 @@ services:
       - app_data:/data:ro
       - ./mnt:/mnt:ro
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+      pwa:
+        condition: service_healthy
     networks:
       - frontend
     restart: unless-stopped
@@ -91,7 +94,6 @@ services:
       redis:
         condition: service_healthy
     networks:
-      - frontend
       - backend
     restart: unless-stopped
     healthcheck:

@@ -72,13 +72,18 @@ const LOCALE_TO_INTL: Record<string, string> = {
 
 /** Format a date string or Date object according to the current locale */
 export function formatDate(date: string | Date, options?: Intl.DateTimeFormatOptions): string {
-  const d = typeof date === 'string' ? new Date(date) : date
-  const intlLocale = LOCALE_TO_INTL[currentLocale] || 'en-US'
-  return new Intl.DateTimeFormat(intlLocale, options ?? {
-    year: 'numeric',
-    month: 'short',
-    day: 'numeric',
-  }).format(d)
+  try {
+    const d = typeof date === 'string' ? new Date(date) : date
+    if (isNaN(d.getTime())) return ''
+    const intlLocale = LOCALE_TO_INTL[currentLocale] || 'en-US'
+    return new Intl.DateTimeFormat(intlLocale, options ?? {
+      year: 'numeric',
+      month: 'short',
+      day: 'numeric',
+    }).format(d)
+  } catch {
+    return ''
+  }
 }
 
 /** Format a number according to the current locale */

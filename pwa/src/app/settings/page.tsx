@@ -321,14 +321,19 @@ function ScanScheduleSection() {
 // ── Browse Settings sub-component ────────────────────────────────────
 
 function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
-  const historyEnabled =
-    typeof window !== 'undefined' && localStorage.getItem('eh_search_history_enabled') !== 'false'
-  const loadMode =
-    typeof window !== 'undefined'
-      ? localStorage.getItem('browse_load_mode') || 'pagination'
-      : 'pagination'
-  const perPage =
-    typeof window !== 'undefined' ? localStorage.getItem('browse_per_page') || '25' : '25'
+  const [historyEnabled] = useState(
+    () => typeof window !== 'undefined' && localStorage.getItem('eh_search_history_enabled') !== 'false',
+  )
+  const [loadMode] = useState(
+    () =>
+      typeof window !== 'undefined'
+        ? localStorage.getItem('browse_load_mode') || 'pagination'
+        : 'pagination',
+  )
+  const [perPage] = useState(
+    () =>
+      typeof window !== 'undefined' ? localStorage.getItem('browse_per_page') || '25' : '25',
+  )
 
   return (
     <div className="px-5 pb-5 border-t border-vault-border">

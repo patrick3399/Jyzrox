@@ -298,6 +298,79 @@ export interface PluginInfo {
   enabled: boolean
 }
 
+// ── Pixiv Types ──────────────────────────────────────────────────────
+
+export interface PixivImageUrls {
+  square_medium: string
+  medium: string
+  large: string
+  original?: string
+}
+
+export interface PixivTag {
+  name: string
+  translated_name: string | null
+}
+
+export interface PixivUser {
+  id: number
+  name: string
+  account: string
+  profile_image: string
+}
+
+export interface PixivIllust {
+  id: number
+  title: string
+  type: string
+  image_urls: PixivImageUrls
+  caption: string
+  user: PixivUser
+  tags: PixivTag[]
+  create_date: string
+  page_count: number
+  width: number
+  height: number
+  sanity_level: number
+  total_view: number
+  total_bookmarks: number
+  is_bookmarked: boolean
+}
+
+export interface PixivSearchResult {
+  illusts: PixivIllust[]
+  next_offset: number | null
+}
+
+export interface PixivUserDetail {
+  id: number
+  name: string
+  account: string
+  profile_image: string
+  comment: string
+  total_illusts: number
+  total_manga: number
+  total_novels: number
+}
+
+export interface PixivUserResult {
+  user: PixivUserDetail
+  recent_illusts: PixivIllust[]
+  next_offset: number | null
+}
+
+export interface FollowedArtist {
+  id: number
+  source: string
+  artist_id: string
+  artist_name: string | null
+  artist_avatar: string | null
+  last_checked_at: string | null
+  last_illust_id: string | null
+  auto_download: boolean
+  added_at: string | null
+}
+
 // ── API Params ────────────────────────────────────────────────────────
 
 export interface GallerySearchParams {

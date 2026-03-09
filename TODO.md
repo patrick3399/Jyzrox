@@ -96,18 +96,18 @@
 ### Pixiv Phase 4: 前端頁面（依賴 Phase 1-3）
 
 #### Types / API / i18n
-- [ ] `types.ts` 新增 PixivIllust / PixivUser / PixivSearchResult 型別
-- [ ] `api.ts` 新增 pixiv namespace（search, illust, user, imageProxy, follow）
-- [ ] `i18n/en.ts` 新增 `pixiv.*` keys
+- [x] `types.ts` 新增 PixivIllust / PixivUser / PixivSearchResult 型別
+- [x] `api.ts` 新增 pixiv namespace（search, illust, user, imageProxy, follow）
+- [x] `i18n/en.ts` 新增 `pixiv.*` keys
 
 #### 頁面
-- [ ] `/pixiv` 搜尋頁 — 關鍵字搜尋 + 排序/時間篩選 + 結果 grid（仿 `/browse`）
-- [ ] `/pixiv/illust/[id]` 插畫詳情 — 大圖、tags、stats、下載按鈕
-- [ ] `/pixiv/user/[id]` 作者頁 — 作品 grid、追蹤按鈕
-- [ ] `/pixiv/following` 追蹤管理 — 已追蹤作者列表 + 新作品 feed
+- [x] `/pixiv` 搜尋頁 — 關鍵字搜尋 + 排序/時間篩選 + 結果 grid（仿 `/browse`）
+- [x] `/pixiv/illust/[id]` 插畫詳情 — 大圖、tags、stats、下載按鈕
+- [x] `/pixiv/user/[id]` 作者頁 — 作品 grid、追蹤按鈕
+- [x] `/pixiv/following` 追蹤管理 — 已追蹤作者列表 + 新作品 feed
 
 #### 導航
-- [ ] Sidebar + MobileNav 新增 Pixiv 入口
+- [x] Sidebar + MobileNav 新增 Pixiv 入口
 
 ### 大量下載
 

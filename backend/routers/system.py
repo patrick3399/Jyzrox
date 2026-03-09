@@ -1,3 +1,4 @@
+import asyncio
 import json
 import logging
 import subprocess
@@ -130,11 +131,13 @@ async def system_health():
 
     # Inode check
     try:
-        result = subprocess.run(
-            ["df", "-i", "--output=ipcent", settings.data_cas_path],
-            capture_output=True, text=True, timeout=5,
+        proc = await asyncio.create_subprocess_exec(
+            "df", "-i", "--output=ipcent", settings.data_cas_path,
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
         )
-        lines = result.stdout.strip().split("\n")
+        stdout, _ = await asyncio.wait_for(proc.communicate(), timeout=5)
+        lines = stdout.decode().strip().split("\n")
         if len(lines) >= 2:
             pct = int(lines[1].strip().rstrip("%"))
             if pct > 90:
@@ -146,7 +149,7 @@ async def system_health():
     except Exception:
         results["inodes"] = "unknown"
 
-    if any(v != "ok" for v in results.values()):
+    if any(v.startswith("error") for v in results.values()):
         raise HTTPException(status_code=503, detail=results)
 
     return {"status": "ok", "services": results}
