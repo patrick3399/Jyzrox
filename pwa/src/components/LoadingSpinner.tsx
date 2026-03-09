@@ -1,3 +1,5 @@
+import { t } from '@/lib/i18n'
+
 interface LoadingSpinnerProps {
   size?: 'sm' | 'md' | 'lg'
   className?: string
@@ -20,7 +22,7 @@ export function LoadingSpinner({ size = 'md', className = '' }: LoadingSpinnerPr
         ${className}
       `}
       role="status"
-      aria-label="Loading"
+      aria-label={t('common.loading')}
     />
   )
 }

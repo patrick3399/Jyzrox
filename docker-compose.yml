@@ -4,9 +4,7 @@ services:
     ports:
       - "${HTTP_PORT:-35689}:80"
     volumes:
-      - ./data/thumbs:/data/thumbs:ro
-      - ./data/gallery:/data/gallery:ro
-      - ./data/avatars:/data/avatars:ro
+      - app_data:/data:ro
       - ./mnt:/mnt:ro
     depends_on:
       - api
@@ -14,7 +12,7 @@ services:
       - frontend
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost/nginx-health || exit 1"]
+      test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/nginx-health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -42,11 +40,7 @@ services:
       - PGID=1042
     env_file: .env
     volumes:
-      - ./data/gallery:/data/gallery
-      - ./data/thumbs:/data/thumbs
-      - ./data/training:/data/training
-      - ./data/avatars:/data/avatars
-      # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
+      - app_data:/data
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - ./mnt:/mnt:ro
     depends_on:
@@ -59,7 +53,7 @@ services:
       - backend
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "wget -q --spider http://localhost:8000/api/health || exit 1"]
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8000/api/health || exit 1"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -87,9 +81,7 @@ services:
       - PGID=1042
     env_file: .env
     volumes:
-      - ./data/gallery:/data/gallery
-      - ./data/thumbs:/data/thumbs
-      - ./data/training:/data/training
+      - app_data:/data
       # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - ./mnt:/mnt:ro
@@ -179,7 +171,7 @@ services:
 
   redis:
     image: redis:7-alpine
-    command: redis-server --appendonly yes
+    command: redis-server --appendonly yes --maxmemory 768mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
     healthcheck:
@@ -194,9 +186,9 @@ services:
       resources:
         limits:
           cpus: '1'
-          memory: 512M
+          memory: 1G
         reservations:
-          memory: 128M
+          memory: 256M
     logging:
       driver: "json-file"
       options:
@@ -204,6 +196,7 @@ services:
         max-file: "5"
 
 volumes:
+  app_data:
   postgres_data:
   redis_data:
 

@@ -341,15 +341,12 @@ class TestListCredentials:
     """GET /api/settings/credentials — list configured credential sources."""
 
     async def test_list_credentials_no_creds_configured(self, client):
-        """With no credentials stored, all sources should show configured=false."""
-        with patch("routers.settings.get_credential", new_callable=AsyncMock, return_value=None):
+        """With no credentials stored, the result should be an empty dict."""
+        with patch("routers.settings.list_credentials", new_callable=AsyncMock, return_value=[]):
             resp = await client.get("/api/settings/credentials")
         assert resp.status_code == 200
         data = resp.json()
-        assert "ehentai" in data
-        assert "pixiv" in data
-        assert data["ehentai"]["configured"] is False
-        assert data["pixiv"]["configured"] is False
+        assert data == {}
 
     async def test_list_credentials_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""

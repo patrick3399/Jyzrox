@@ -293,14 +293,14 @@ export default function TagsPage() {
                 <div className="flex gap-2">
                   <input
                     type="text"
-                    placeholder="ns"
+                    placeholder={t('tags.namespacePlaceholder')}
                     className="p-2 w-16 bg-vault-input border border-vault-border rounded text-sm outline-none text-vault-text"
                     value={aliasNs}
                     onChange={(e) => setAliasNs(e.target.value)}
                   />
                   <input
                     type="text"
-                    placeholder="alias name"
+                    placeholder={t('tags.aliasNamePlaceholder')}
                     className="p-2 flex-1 bg-vault-input border border-vault-border rounded text-sm outline-none text-vault-text"
                     value={aliasName}
                     onChange={(e) => setAliasName(e.target.value)}

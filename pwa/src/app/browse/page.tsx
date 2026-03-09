@@ -1343,7 +1343,7 @@ function BrowsePage() {
                 onClick={() => setShowAdvanced((v) => !v)}
                 className="flex items-center gap-1 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
               >
-                Advanced Search
+                {t('browse.advancedSearch')}
                 {showAdvanced ? <ChevronUp size={14} /> : <ChevronDown size={14} />}
               </button>
 
@@ -1352,7 +1352,7 @@ function BrowsePage() {
                   {/* Search in */}
                   <div>
                     <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                      Search in
+                      {t('browse.searchIn')}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {[
@@ -1381,7 +1381,7 @@ function BrowsePage() {
                   {/* Filters */}
                   <div>
                     <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                      Filters
+                      {t('browse.filters')}
                     </p>
                     <div className="flex flex-wrap gap-2">
                       {[
@@ -1409,7 +1409,7 @@ function BrowsePage() {
                   {/* Min Rating + Page Range */}
                   <div className="flex flex-wrap gap-4">
                     <div>
-                      <p className="text-xs text-vault-text-muted mb-1">Minimum Rating</p>
+                      <p className="text-xs text-vault-text-muted mb-1">{t('browse.minRating')}</p>
                       <select
                         value={minRating ?? ''}
                         onChange={(e) =>
@@ -1417,7 +1417,7 @@ function BrowsePage() {
                         }
                         className="bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
                       >
-                        <option value="">Any</option>
+                        <option value="">{t('browse.anyRating')}</option>
                         <option value="2">2+</option>
                         <option value="3">3+</option>
                         <option value="4">4+</option>
@@ -1425,13 +1425,13 @@ function BrowsePage() {
                       </select>
                     </div>
                     <div>
-                      <p className="text-xs text-vault-text-muted mb-1">Page Range</p>
+                      <p className="text-xs text-vault-text-muted mb-1">{t('browse.pageRange')}</p>
                       <div className="flex items-center gap-1">
                         <input
                           type="number"
                           value={pageFrom}
                           onChange={(e) => setPageFrom(e.target.value)}
-                          placeholder="From"
+                          placeholder={t('browse.pageFrom')}
                           className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
                         />
                         <span className="text-vault-text-muted text-xs">-</span>
@@ -1439,7 +1439,7 @@ function BrowsePage() {
                           type="number"
                           value={pageTo}
                           onChange={(e) => setPageTo(e.target.value)}
-                          placeholder="To"
+                          placeholder={t('browse.pageTo')}
                           className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
                         />
                       </div>
@@ -1457,7 +1457,7 @@ function BrowsePage() {
                     }}
                     className="text-xs text-vault-text-muted hover:text-vault-text transition-colors"
                   >
-                    Reset Advanced
+                    {t('browse.resetAdvanced')}
                   </button>
                 </div>
               )}

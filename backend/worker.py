@@ -32,10 +32,10 @@ from core.config import get_all_library_paths, settings
 from core.database import AsyncSessionLocal
 from core.redis_client import DownloadSemaphore, close_redis, init_redis
 from core.watcher import LibraryWatcher
-from db.models import DownloadJob, Gallery, GalleryTag, Image, Tag
+from db.models import Blob, DownloadJob, Gallery, GalleryTag, Image, Tag
+from services.cas import cas_path, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, store_blob, thumb_dir
 from services.credential import get_credential
 from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
-from services.eh_downloader import download_eh_gallery
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -55,6 +55,8 @@ _watcher = LibraryWatcher()
 async def startup(ctx: dict) -> None:
     logger.info("ARQ Worker started — Jyzrox")
     await init_redis()
+    from plugins import init_plugins
+    await init_plugins()
     r = ctx["redis"]
     for key in ("download:sem:ehentai", "download:sem:pixiv", "download:sem:other"):
         await r.delete(key)
@@ -114,192 +116,157 @@ async def download_job(
     db_job_id: str | None = None,
     total: int | None = None,
 ) -> dict:
-    """Download a gallery via gallery-dl with async subprocess and progress tracking."""
+    """Download a gallery via the plugin registry, falling back to gallery-dl."""
     logger.info("[download] url=%s", url)
 
     await _set_job_status(db_job_id, "running")
     started_at = datetime.now(UTC)
 
-    # Removed domain whitelist to allow any gallery-dl supported site
+    from plugins.registry import plugin_registry
+    from services.credential import list_credentials as _list_creds
 
-    # Pre-flight: check credentials for the source
-    cred_error = await _check_credentials(url)
-    if cred_error:
-        logger.error("[download] %s", cred_error)
-        await _set_job_status(db_job_id, "failed", cred_error)
-        return {"status": "failed", "error": cred_error}
+    # Find the plugin that handles this URL
+    plugin = await plugin_registry.get_handler(url)
+    if not plugin:
+        plugin = plugin_registry.get_fallback()
+    if not plugin:
+        err = "No plugin can handle this URL"
+        logger.error("[download] %s", err)
+        await _set_job_status(db_job_id, "failed", err)
+        return {"status": "failed", "error": err}
 
-    # Native EH download path (bypasses gallery-dl)
-    if _detect_source(url) == "ehentai":
-        return await _eh_native_download(ctx, url, db_job_id, total)
+    source_id = plugin.meta.source_id
 
-    sem = DownloadSemaphore(_detect_source(url))
+    # Load credentials
+    if source_id == "gallery_dl":
+        # gallery-dl needs ALL credentials to build its config file
+        all_creds = await _list_creds()
+        credentials: dict | str | None = {}
+        for c in all_creds:
+            val = await get_credential(c["source"])
+            if val:
+                credentials[c["source"]] = val  # type: ignore[index]
+    else:
+        credentials = await get_credential(source_id)
+
+    # Credential gate for sources that require it
+    if source_id == "ehentai" and not credentials:
+        err = "E-Hentai credentials not configured. Go to Credentials to add cookies."
+        logger.error("[download] %s", err)
+        await _set_job_status(db_job_id, "failed", err)
+        return {"status": "failed", "error": err}
+
+    # Determine output directory
+    if source_id == "ehentai":
+        m = EH_GALLERY_URL_RE.search(url)
+        if m:
+            target_dir = Path(settings.data_gallery_path) / "ehentai" / m.group(1)
+        else:
+            target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
+    else:
+        target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
+
+    # Semaphore — use source_id as the semaphore key (maps to existing keys)
+    sem_key = _detect_source(url)
+    sem = DownloadSemaphore(sem_key)
     _base_progress: dict = {} if total is None else {"total": total}
     await _set_job_progress(db_job_id, {**_base_progress, "status_text": "Waiting for download slot..."})
-    async with sem.acquire():
-        await _build_gallery_dl_config(url)
-        
-        # Isolate this job's downloads into a specific UUID directory
-        target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
-        
-        cmd = [
-            "gallery-dl",
-            "--config-ignore",
-            "--config",
-            settings.gallery_dl_config,
-            "--write-metadata",
-            "--write-tags",
-            "--directory",
-            str(target_dir),
-            url,
-        ]
 
-        redis = ctx["redis"]
-        pid_key = f"download:pid:{db_job_id}" if db_job_id else None
+    # Progress callback
+    async def on_progress(downloaded: int, total_pages: int) -> None:
+        elapsed = (datetime.now(UTC) - started_at).total_seconds()
+        speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
+        status_text = (
+            f"Downloading... ({downloaded}/{total_pages})" if total_pages > 0 else "Downloading..."
+        )
+        await _set_job_progress(db_job_id, {
+            **_base_progress,
+            **({"total": total_pages} if total_pages > 0 else {}),
+            "downloaded": downloaded,
+            "started_at": started_at.isoformat(),
+            "last_update_at": datetime.now(UTC).isoformat(),
+            "speed": speed,
+            "status_text": status_text,
+        })
 
+    # Cancel check — reads the Redis cancel key set by the cancel endpoint
+    redis = ctx["redis"]
+    cancel_key = f"download:cancel:{db_job_id}" if db_job_id else None
+
+    async def cancel_check() -> bool:
+        if not cancel_key:
+            return False
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except OSError as exc:
-            err = f"Failed to start gallery-dl: {exc}"
-            logger.error("[download] %s", err)
-            await _set_job_status(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
+            val = await redis.get(cancel_key)
+            return val is not None
+        except Exception:
+            return False
 
-        # Store PID in Redis for pause/resume and cancel
+    # PID callback for gallery-dl pause/resume
+    pid_key = f"download:pid:{db_job_id}" if db_job_id else None
+
+    async def pid_callback(pid: int) -> None:
         if pid_key:
             try:
-                await redis.set(pid_key, proc.pid, ex=3600)
+                await redis.set(pid_key, pid, ex=3600)
             except Exception as exc:
                 logger.warning("[download] failed to store PID in Redis: %s", exc)
 
-        # Stream stdout line by line to track progress
-        downloaded = 0
-        last_progress_update = asyncio.get_event_loop().time()
-
-        async def _read_stdout() -> None:
-            nonlocal downloaded, last_progress_update
-            assert proc.stdout is not None
-            async for raw_line in proc.stdout:
-                line = raw_line.decode("utf-8", errors="replace").rstrip()
-                if _FILE_PATH_RE.search(line) or _IMAGE_EXT_RE.search(line):
-                    downloaded += 1
-                    now = asyncio.get_event_loop().time()
-                    if downloaded % _PROGRESS_EVERY_N == 0 or (now - last_progress_update) >= _PROGRESS_EVERY_S:
-                        last_progress_update = now
-                        elapsed = (datetime.now(UTC) - started_at).total_seconds()
-                        speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
-                        await _set_job_progress(db_job_id, {
-                            **_base_progress,
-                            "downloaded": downloaded,
-                            "started_at": started_at.isoformat(),
-                            "last_update_at": datetime.now(UTC).isoformat(),
-                            "speed": speed,
-                            "status_text": "Downloading...",
-                        })
-
+    async with sem.acquire():
         try:
-            # Read stdout concurrently while waiting for the process; apply a
-            # generous timeout matching the ARQ job_timeout setting.
-            await asyncio.wait_for(
-                asyncio.gather(_read_stdout(), proc.wait()),
-                timeout=3600,
+            result = await plugin.download(
+                url=url,
+                dest_dir=target_dir,
+                credentials=credentials,
+                on_progress=on_progress,
+                cancel_check=cancel_check,
+                pid_callback=pid_callback,
             )
-        except TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            logger.error("[download] timeout: %s", url)
-            # PID key cleanup handled in finally below
-            await _set_job_status(db_job_id, "failed", "download timeout after 3600s")
-            return {"status": "failed", "error": "timeout"}
+        except Exception as exc:
+            err = f"Download failed: {exc}"
+            logger.error("[download] %s", err, exc_info=True)
+            await _set_job_status(db_job_id, "failed", err)
+            return {"status": "failed", "error": err}
         finally:
-            # Always clean up the PID key once the process is done or killed
             if pid_key:
                 try:
                     await redis.delete(pid_key)
                 except Exception:
                     pass
 
-        # Collect stderr for error reporting
-        stderr_bytes = await proc.stderr.read() if proc.stderr else b""
-        stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+    if result.status == "cancelled":
+        await _set_job_status(db_job_id, "cancelled")
+        return {"status": "cancelled"}
 
-        if proc.returncode != 0:
-            err = stderr_text[:500]
-            logger.error("[download] gallery-dl error:\n%s", stderr_text)
-            await _set_job_status(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
+    if result.status == "failed":
+        err = result.error or "Download failed"
+        await _set_job_status(db_job_id, "failed", err)
+        return {"status": "failed", "error": err}
 
-        logger.info("[download] done: %s (files=%d)", url, downloaded)
+    # Final progress update
+    elapsed = (datetime.now(UTC) - started_at).total_seconds()
+    speed = round(result.downloaded / elapsed, 3) if elapsed > 0 else 0
+    await _set_job_progress(db_job_id, {
+        **_base_progress,
+        "total": result.total or result.downloaded,
+        "downloaded": result.downloaded,
+        "started_at": started_at.isoformat(),
+        "last_update_at": datetime.now(UTC).isoformat(),
+        "speed": speed,
+        "status_text": "Complete",
+    })
 
-        # Final progress update with total count
-        elapsed = (datetime.now(UTC) - started_at).total_seconds()
-        speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
-        await _set_job_progress(db_job_id, {
-            **_base_progress,
-            "downloaded": downloaded,
-            "started_at": started_at.isoformat(),
-            "last_update_at": datetime.now(UTC).isoformat(),
-            "speed": speed,
-            "status_text": "Complete",
-        })
+    # Trigger import
+    if target_dir.exists():
+        await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id)
 
-        # Trigger import for the target directory
-        if target_dir.exists():
-            await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id)
+    await _set_job_status(db_job_id, "done")
 
-        await _set_job_status(db_job_id, "done")
-        return {"status": "done", "downloaded": downloaded}
+    if result.failed_pages:
+        logger.warning("[download] %d pages failed: %s", len(result.failed_pages), result.failed_pages)
 
-
-async def _check_credentials(url: str) -> str | None:
-    """Return an error message if required credentials are missing, else None."""
-    is_pixiv = "pixiv.net" in url
-    is_eh = "e-hentai.org" in url or "exhentai.org" in url
-
-    if is_pixiv:
-        cred = await get_credential("pixiv")
-        if not cred:
-            return "Pixiv credentials not configured. Go to Settings to add your refresh token."
-    elif is_eh:
-        cred = await get_credential("ehentai")
-        if not cred:
-            return "E-Hentai credentials not configured. Go to Settings to add cookies."
-    return None
-
-
-async def _build_gallery_dl_config(url: str) -> None:
-    """Write source-specific credentials into the gallery-dl config file."""
-    config: dict = {
-        "extractor": {
-            "base-directory": settings.data_gallery_path,
-        },
-    }
-
-    is_eh = "e-hentai.org" in url or "exhentai.org" in url
-    is_pixiv = "pixiv.net" in url
-
-    if is_eh:
-        cred_json = await get_credential("ehentai")
-        if cred_json:
-            cookies = json.loads(cred_json)
-            # Apply to both e-hentai and exhentai extractors
-            config["extractor"]["exhentai"] = {"cookies": cookies}
-            config["extractor"]["e-hentai"] = {"cookies": cookies}
-    elif is_pixiv:
-        token = await get_credential("pixiv")
-        if token:
-            config["extractor"]["pixiv"] = {"refresh-token": token}
-
-    config_path = Path(settings.gallery_dl_config)
-    tmp_path = config_path.with_suffix(".tmp")
-    tmp_path.write_text(json.dumps(config, indent=2))
-    os.rename(tmp_path, config_path)
+    logger.info("[download] done: %s (downloaded=%d)", url, result.downloaded)
+    return {"status": "done", "downloaded": result.downloaded}
 
 
 def _detect_source(url: str) -> str:
@@ -313,109 +280,6 @@ def _detect_source(url: str) -> str:
     except Exception:
         pass
     return "other"
-
-
-async def _eh_native_download(ctx: dict, url: str, db_job_id: str | None, total: int | None) -> dict:
-    """Native EH download using EhClient instead of gallery-dl."""
-    logger.info("[download] native EH path: %s", url)
-    started_at = datetime.now(UTC)
-
-    # Parse gid and token from URL
-    m = EH_GALLERY_URL_RE.search(url)
-    if not m:
-        err = f"Cannot parse EH gallery URL: {url}"
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
-
-    gid = int(m.group(1))
-    token = m.group(2)
-    use_ex = "exhentai.org" in url
-
-    # Load cookies
-    cred_json = await get_credential("ehentai")
-    if not cred_json:
-        err = "E-Hentai credentials not configured"
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
-    cookies = json.loads(cred_json)
-
-    # Output directory
-    output_dir = Path(settings.data_gallery_path) / "ehentai" / str(gid)
-
-    # Cancel key in Redis
-    cancel_key = f"download:cancel:{db_job_id}" if db_job_id else None
-
-    # Progress callback
-    async def on_progress(downloaded: int, total_pages: int) -> None:
-        elapsed = (datetime.now(UTC) - started_at).total_seconds()
-        speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
-        await _set_job_progress(db_job_id, {
-            "total": total_pages,
-            "downloaded": downloaded,
-            "started_at": started_at.isoformat(),
-            "last_update_at": datetime.now(UTC).isoformat(),
-            "speed": speed,
-            "status_text": f"Downloading... ({downloaded}/{total_pages})",
-        })
-
-    sem = DownloadSemaphore("ehentai")
-    await _set_job_progress(db_job_id, {"status_text": "Waiting for download slot...", **({"total": total} if total else {})})
-
-    async with sem.acquire():
-        try:
-            result = await download_eh_gallery(
-                gid=gid,
-                token=token,
-                cookies=cookies,
-                use_ex=use_ex,
-                output_dir=output_dir,
-                concurrency=settings.eh_download_concurrency,
-                on_progress=on_progress,
-                cancel_key=cancel_key,
-            )
-        except PermissionError as exc:
-            err = str(exc)
-            logger.error("[download] EH permission error: %s", err)
-            await _set_job_status(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
-        except Exception as exc:
-            err = f"Native EH download failed: {exc}"
-            logger.error("[download] %s", err, exc_info=True)
-            await _set_job_status(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
-
-    if result["status"] == "cancelled":
-        await _set_job_status(db_job_id, "cancelled")
-        return {"status": "cancelled"}
-
-    if result["status"] == "failed":
-        err = result.get("error", "Download failed")
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
-
-    # Final progress
-    elapsed = (datetime.now(UTC) - started_at).total_seconds()
-    downloaded_count = result.get("downloaded", 0)
-    speed = round(downloaded_count / elapsed, 3) if elapsed > 0 else 0
-    await _set_job_progress(db_job_id, {
-        "total": result.get("total", downloaded_count),
-        "downloaded": downloaded_count,
-        "started_at": started_at.isoformat(),
-        "last_update_at": datetime.now(UTC).isoformat(),
-        "speed": speed,
-        "status_text": "Complete",
-    })
-
-    # Trigger import
-    if output_dir.exists():
-        await ctx["redis"].enqueue_job("import_job", str(output_dir), db_job_id)
-
-    await _set_job_status(db_job_id, "done")
-
-    if result.get("failed_pages"):
-        logger.warning("[download] %d pages failed: %s", len(result["failed_pages"]), result["failed_pages"])
-
-    return {"status": "done", "downloaded": downloaded_count}
 
 
 def _resolve_gallery_dir(url: str) -> Path | None:
@@ -493,7 +357,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
 
     # Read gallery-dl metadata (any .json file, they all have gallery info)
     metadata: dict = {}
-    for meta_file in sorted(gallery_path.glob("*.json")):
+    for meta_file in sorted(gallery_path.rglob("*.json")):
         try:
             metadata = json.loads(meta_file.read_text(encoding="utf-8"))
             break
@@ -501,9 +365,6 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
             logger.warning("[import] failed to read metadata %s: %s", meta_file, exc)
             continue
 
-    # Determine final source and source_id, and move the directory
-    import shutil
-    
     # Extract source from Category (gallery-dl uses this for the extractor name)
     source = metadata.get("category")
     if not source:
@@ -515,33 +376,9 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
             source = "pixiv"
         else:
             source = "gallery_dl"
-            
+
     # Extract source ID
     source_id = str(metadata.get("gallery_id") or metadata.get("tweet_id") or metadata.get("id") or gallery_path.name)
-    
-    # Move the directory to its final resting place if it's currently a UUID
-    final_path = Path(settings.data_gallery_path) / source / source_id
-    if gallery_path != final_path:
-        try:
-            # If the destination already exists (e.g. updating a gallery), we can merge them by moving contents
-            if final_path.exists():
-                for item in gallery_path.iterdir():
-                    dest_item = final_path / item.name
-                    if dest_item.exists():
-                        if dest_item.is_file():
-                            dest_item.unlink()
-                        else:
-                            shutil.rmtree(dest_item)
-                    shutil.move(str(item), str(final_path))
-                gallery_path.rmdir() # Clean up empty UUID dir
-            else:
-                final_path.parent.mkdir(parents=True, exist_ok=True)
-                shutil.move(str(gallery_path), str(final_path))
-            gallery_path = final_path
-            logger.info("[import] moved to final path: %s", gallery_path)
-        except OSError as exc:
-            logger.error("[import] failed to move %s to %s: %s", gallery_path, final_path, exc)
-            return {"status": "failed", "error": f"move failed: {exc}"}
 
     tags = _extract_tags(gallery_path, metadata)
     image_files = sorted(
@@ -551,6 +388,8 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
 
     if not image_files:
         return {"status": "failed", "error": "no images found"}
+
+    import shutil as _shutil
 
     async with AsyncSessionLocal() as session:
         # Upsert gallery
@@ -571,18 +410,26 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
         )
         gallery_id = (await session.execute(stmt)).scalar_one()
 
-        # Compute hashes concurrently, then bulk-insert all images in one statement
+        # Compute hashes sequentially (avoid memory spikes for large galleries)
         hashes = await asyncio.gather(*[asyncio.to_thread(_sha256, f) for f in image_files])
+
+        # Store each file in CAS and create library symlink
+        for img_file, sha256 in zip(image_files, hashes, strict=False):
+            blob = await store_blob(img_file, sha256, session)
+            await asyncio.to_thread(create_library_symlink, gallery_id, img_file.name, blob)
+
+        # Flush blob upserts before inserting images (FK: blob_sha256 → blobs.sha256)
+        await session.flush()
+
+        # Bulk-insert images
         image_values = [
             {
                 "gallery_id": gallery_id,
                 "page_num": page_num,
                 "filename": img_file.name,
-                "file_path": str(img_file),
-                "file_size": img_file.stat().st_size,
-                "file_hash": file_hash,
+                "blob_sha256": sha256,
             }
-            for page_num, (img_file, file_hash) in enumerate(zip(image_files, hashes, strict=False), start=1)
+            for page_num, (img_file, sha256) in enumerate(zip(image_files, hashes, strict=False), start=1)
         ]
         if image_values:
             img_stmt = pg_insert(Image).values(image_values).on_conflict_do_nothing()
@@ -591,6 +438,12 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
         # Upsert tags + gallery_tags
         await _upsert_tags(session, gallery_id, tags)
         await session.commit()
+
+    # Delete the temporary download directory
+    try:
+        _shutil.rmtree(str(gallery_path), ignore_errors=True)
+    except Exception as exc:
+        logger.warning("[import] failed to remove temp dir %s: %s", gallery_path, exc)
 
     logger.info("[import] gallery_id=%d source=%s/%s", gallery_id, source, source_id)
 
@@ -641,7 +494,13 @@ def _build_gallery(
     return {
         "source": source,
         "source_id": source_id,
-        "title": meta.get("title") or meta.get("title_en", ""),
+        "title": (
+            meta.get("title")
+            or meta.get("title_en")
+            or (meta.get("description") or "")[:120]  # Twitter text / Pixiv caption 截斷
+            or (meta.get("content") or "")[:120]
+            or f"{source}_{source_id}"  # 最終 fallback：來源+ID
+        ),
         "title_jpn": meta.get("title_jpn") or meta.get("title_original") or "",
         "category": meta.get("category") or meta.get("type", ""),
         "language": meta.get("lang") or meta.get("language", ""),
@@ -703,7 +562,6 @@ async def _upsert_tags(session, gallery_id: int, tags: list[str]) -> None:
 async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: int) -> dict:
     """Import a local directory into the database with progress tracking."""
     import json as _json
-    import shutil
 
     logger.info("[local_import] gallery_id=%d source=%s mode=%s", gallery_id, source_dir, mode)
 
@@ -723,33 +581,25 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
 
     async with AsyncSessionLocal() as session:
         for idx, f in enumerate(files):
-            file_hash = await asyncio.to_thread(_sha256, f)
+            sha256 = await asyncio.to_thread(_sha256, f)
 
-            # Check duplicate
-            dup_result = await session.execute(
-                select(Image.id).where(Image.file_hash == file_hash).limit(1)
-            )
-            dup_row = dup_result.scalar_one_or_none()
-            duplicate_of = dup_row if dup_row else None
+            if mode == "copy":
+                # Hardlink/copy into CAS; create library symlink
+                blob = await store_blob(f, sha256, session)
+            else:
+                # Link mode: record external path, do not copy file
+                blob = await store_blob(f, sha256, session, storage="external", external_path=str(f))
 
-            dest_path = str(f)
-            if mode == "copy" and not duplicate_of:
-                dest_dir = Path(settings.data_gallery_path) / "local" / str(gallery_id)
-                dest_dir.mkdir(parents=True, exist_ok=True)
-                dest_path = str(dest_dir / f.name)
-                await asyncio.to_thread(shutil.copy2, str(f), dest_path)
+            await asyncio.to_thread(create_library_symlink, gallery_id, f.name, blob)
 
-            ext = f.suffix.lower()
-            media_type = "video" if ext in (".mp4", ".webm") else "gif" if ext == ".gif" else "image"
+            # Flush blob upsert before inserting image (FK constraint)
+            await session.flush()
 
             stmt = pg_insert(Image).values(
                 gallery_id=gallery_id,
                 page_num=idx + 1,
                 filename=f.name,
-                file_path=dest_path,
-                file_hash=file_hash,
-                media_type=media_type,
-                duplicate_of=duplicate_of,
+                blob_sha256=sha256,
             ).on_conflict_do_nothing()
             await session.execute(stmt)
 
@@ -802,8 +652,15 @@ async def rescan_library_job(ctx: dict) -> dict:
     - Enqueue thumbnail_job for galleries with images that have no thumbnail.
     Progress is written to Redis key ``rescan:progress`` during the run and
     deleted on completion so the status endpoint can report accurately.
+
+    Batch processing: galleries are processed in chunks of 500 to avoid the
+    N+1 query problem that arises with per-gallery SELECT FROM images.
     """
     import json as _json
+    import shutil
+    from collections import Counter, defaultdict
+
+    from sqlalchemy.orm import selectinload
 
     logger.info("[rescan_library] starting full library rescan")
     r = ctx["redis"]
@@ -818,104 +675,163 @@ async def rescan_library_job(ctx: dict) -> dict:
     cancelled = False
     try:
         async with AsyncSessionLocal() as session:
-            # Order by last_scanned_at NULLS FIRST so unscanned galleries get priority
-            gallery_rows = (await session.execute(
-                select(Gallery).order_by(Gallery.last_scanned_at.asc().nulls_first())
+            # Fetch only IDs ordered by scan priority (unscanned first)
+            all_gallery_ids = (await session.execute(
+                select(Gallery.id).order_by(Gallery.last_scanned_at.asc().nulls_first())
             )).scalars().all()
-            total = len(gallery_rows)
+            total = len(all_gallery_ids)
             logger.info("[rescan_library] %d galleries to scan", total)
 
-            for idx, gallery in enumerate(gallery_rows):
-                # Check for cancel signal before processing each gallery
+            CHUNK = 500
+            processed = 0
+
+            for chunk_start in range(0, total, CHUNK):
+                # Check for cancel signal once per chunk
                 cancel_flag = await r.get("rescan:cancel")
                 if cancel_flag:
                     await r.delete("rescan:cancel")
                     await r.setex(
                         "rescan:progress",
                         3600,
-                        _json.dumps({"processed": idx, "total": total, "status": "cancelled"}),
+                        _json.dumps({"processed": processed, "total": total, "status": "cancelled"}),
                     )
-                    logger.info("[rescan_library] cancelled at gallery %d/%d", idx, total)
+                    logger.info("[rescan_library] cancelled at %d/%d", processed, total)
                     cancelled = True
                     break
 
+                chunk_ids = all_gallery_ids[chunk_start:chunk_start + CHUNK]
+
+                # Batch load all images + blobs for this chunk in a single query
+                images_result = (await session.execute(
+                    select(Image)
+                    .where(Image.gallery_id.in_(chunk_ids))
+                    .options(selectinload(Image.blob))
+                )).scalars().all()
+
+                # Group images by gallery_id
+                images_by_gallery: dict[int, list] = defaultdict(list)
+                for img in images_result:
+                    images_by_gallery[img.gallery_id].append(img)
+
+                # Batch load Gallery ORM objects for this chunk
+                galleries = (await session.execute(
+                    select(Gallery).where(Gallery.id.in_(chunk_ids))
+                )).scalars().all()
+                gallery_map = {g.id: g for g in galleries}
+
+                # Accumulate batch operations across the chunk
+                shas_to_decrement: list[str] = []
+                images_to_delete: list[int] = []
+                galleries_to_delete: list[int] = []
+                galleries_needing_thumbs: list[int] = []
+
+                for gid in chunk_ids:
+                    gallery = gallery_map.get(gid)
+                    if not gallery:
+                        continue
+
+                    images = images_by_gallery.get(gid, [])
+                    missing_thumb = False
+                    removed = 0
+
+                    for img in images:
+                        blob = img.blob
+                        if not blob:
+                            images_to_delete.append(img.id)
+                            removed += 1
+                            continue
+                        src = resolve_blob_path(blob)
+                        if not src.exists():
+                            logger.warning(
+                                "[rescan_library] gallery_id=%d image_id=%d missing file: %s",
+                                gid,
+                                img.id,
+                                str(src),
+                            )
+                            # Remove thumbnail directory immediately (filesystem op)
+                            td = thumb_dir(blob.sha256)
+                            if td.exists():
+                                shutil.rmtree(str(td), ignore_errors=True)
+                            shas_to_decrement.append(blob.sha256)
+                            images_to_delete.append(img.id)
+                            removed += 1
+                            continue
+                        td = thumb_dir(blob.sha256)
+                        if not (td / "thumb_160.webp").exists():
+                            missing_thumb = True
+
+                    if removed:
+                        gallery.pages = len(images) - removed
+                        if gallery.pages == 0 and gallery.import_mode == "link":
+                            # Mark for bulk delete — gallery row + its images handled via cascade
+                            galleries_to_delete.append(gid)
+                            logger.info(
+                                "[rescan_library] gallery_id=%d marked for removal (link mode, all files gone)",
+                                gid,
+                            )
+                            continue  # skip last_scanned_at update for this gallery
+                        elif gallery.pages == 0:
+                            gallery.download_status = "missing"
+                        logger.info(
+                            "[rescan_library] gallery_id=%d: removed %d missing images, pages=%d",
+                            gid,
+                            removed,
+                            gallery.pages,
+                        )
+
+                    if missing_thumb:
+                        galleries_needing_thumbs.append(gid)
+
+                    gallery.last_scanned_at = datetime.now(timezone.utc)
+
+                # ── Batch DB operations for this chunk ──────────────────────
+
+                # Batch decrement blob ref_counts, accounting for multiple
+                # images referencing the same sha (each missing image = -1).
+                if shas_to_decrement:
+                    sha_counts = Counter(shas_to_decrement)
+                    unique_shas = list(sha_counts.keys())
+                    decrements = [sha_counts[s] for s in unique_shas]
+                    await session.execute(
+                        text("""
+                            UPDATE blobs SET ref_count = ref_count - v.n
+                            FROM (SELECT unnest(:shas::text[]) AS sha,
+                                         unnest(:ns::int[])  AS n) v
+                            WHERE blobs.sha256 = v.sha
+                        """),
+                        {"shas": unique_shas, "ns": decrements},
+                    )
+
+                # Batch delete orphaned/missing images
+                if images_to_delete:
+                    await session.execute(
+                        text("DELETE FROM images WHERE id = ANY(:ids)"),
+                        {"ids": images_to_delete},
+                    )
+
+                # Batch delete zero-page link-mode galleries (cascade removes images)
+                if galleries_to_delete:
+                    await session.execute(
+                        text("DELETE FROM galleries WHERE id = ANY(:ids)"),
+                        {"ids": galleries_to_delete},
+                    )
+
+                await session.commit()
+
+                # Enqueue thumbnail jobs outside the transaction
+                for gid in galleries_needing_thumbs:
+                    await r.enqueue_job("thumbnail_job", gid)
+                    logger.info(
+                        "[rescan_library] gallery_id=%d: enqueued thumbnail_job (missing thumbs)",
+                        gid,
+                    )
+
+                processed += len(chunk_ids)
                 await r.setex(
                     "rescan:progress",
                     3600,
-                    _json.dumps({
-                        "processed": idx,
-                        "total": total,
-                        "status": "running",
-                        "current_gallery": gallery.id,
-                    }),
+                    _json.dumps({"processed": processed, "total": total, "status": "running"}),
                 )
-
-                images = (await session.execute(
-                    select(Image).where(Image.gallery_id == gallery.id)
-                )).scalars().all()
-
-                missing_thumb = False
-                removed = 0
-                for img in images:
-                    if not img.file_path or not Path(img.file_path).exists():
-                        logger.warning(
-                            "[rescan_library] gallery_id=%d image_id=%d missing file: %s",
-                            gallery.id,
-                            img.id,
-                            img.file_path,
-                        )
-                        # Delete thumbnail file from disk before removing the DB record
-                        if img.thumb_path:
-                            tp = Path(img.thumb_path)
-                            if tp.is_file():
-                                tp.unlink(missing_ok=True)
-                        await session.delete(img)
-                        removed += 1
-                        continue
-                    if not img.thumb_path or not Path(img.thumb_path).exists():
-                        missing_thumb = True
-
-                if removed:
-                    await session.flush()
-                    # Recount surviving images
-                    surviving = (await session.execute(
-                        select(Image).where(Image.gallery_id == gallery.id)
-                    )).scalars().all()
-                    gallery.pages = len(surviving)
-                    if gallery.pages == 0 and gallery.import_mode == "link":
-                        # Clean up any remaining thumbnails then delete the gallery entirely
-                        remaining_imgs = (await session.execute(
-                            select(Image.thumb_path).where(Image.gallery_id == gallery.id)
-                        )).scalars().all()
-                        for tp_str in remaining_imgs:
-                            if tp_str and Path(tp_str).is_file():
-                                Path(tp_str).unlink(missing_ok=True)
-                        await session.delete(gallery)
-                        await session.commit()
-                        logger.info(
-                            "[rescan_library] gallery_id=%d removed (link mode, all files gone)",
-                            gallery.id,
-                        )
-                        continue
-                    elif gallery.pages == 0:
-                        gallery.download_status = "missing"
-                    logger.info(
-                        "[rescan_library] gallery_id=%d: removed %d missing images, pages=%d",
-                        gallery.id,
-                        removed,
-                        gallery.pages,
-                    )
-
-                if missing_thumb:
-                    await r.enqueue_job("thumbnail_job", gallery.id)
-                    logger.info(
-                        "[rescan_library] gallery_id=%d: enqueued thumbnail_job (missing thumbs)",
-                        gallery.id,
-                    )
-
-                gallery.last_scanned_at = datetime.now(timezone.utc)
-                # Commit after each gallery so progress is persisted incrementally
-                await session.commit()
 
     finally:
         # Always resume the watcher even if the scan fails or is cancelled
@@ -953,51 +869,63 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             logger.error("[rescan_gallery] gallery_id=%d not found", gallery_id)
             return {"status": "failed", "error": "gallery not found"}
 
+        import shutil
+        from sqlalchemy.orm import selectinload
         images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .options(selectinload(Image.blob))
         )).scalars().all()
 
         # --- Step 1: Verify existing records ---
-        known_paths: set[str] = set()
+        known_sha256s: set[str] = set()
         missing_thumb = False
         removed = 0
         for img in images:
-            if not img.file_path or not Path(img.file_path).exists():
+            blob = img.blob
+            if not blob:
+                await session.delete(img)
+                removed += 1
+                continue
+            src = resolve_blob_path(blob)
+            if not src.exists():
                 logger.warning(
                     "[rescan_gallery] gallery_id=%d image_id=%d missing: %s",
                     gallery_id,
                     img.id,
-                    img.file_path,
+                    str(src),
                 )
-                # Delete thumbnail file from disk before removing the DB record
-                if img.thumb_path:
-                    tp = Path(img.thumb_path)
-                    if tp.is_file():
-                        tp.unlink(missing_ok=True)
+                # Delete thumbnail directory before removing the DB record
+                td = thumb_dir(blob.sha256)
+                if td.exists():
+                    shutil.rmtree(str(td), ignore_errors=True)
+                await decrement_ref_count(blob.sha256, session)
                 await session.delete(img)
                 removed += 1
                 continue
-            known_paths.add(img.file_path)
-            if not img.thumb_path or not Path(img.thumb_path).exists():
+            known_sha256s.add(blob.sha256)
+            td = thumb_dir(blob.sha256)
+            if not (td / "thumb_160.webp").exists():
                 missing_thumb = True
 
         if removed:
             await session.flush()
 
         # --- Step 2: Discover new files in the gallery directory ---
-        # Infer the gallery directory from the first surviving image's path.
+        # With CAS, the gallery directory is the library symlink directory.
         gallery_dir: Path | None = None
         surviving_images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .options(selectinload(Image.blob))
         )).scalars().all()
 
-        if surviving_images:
-            gallery_dir = Path(surviving_images[0].file_path).parent
-        else:
-            # Attempt to derive path from source/source_id convention.
+        gallery_dir = library_dir(gallery_id)
+        if not gallery_dir.exists():
+            # Fallback: try source/source_id convention
             candidate = Path(settings.data_gallery_path) / gallery.source / gallery.source_id
             if candidate.is_dir():
                 gallery_dir = candidate
+            else:
+                gallery_dir = None
 
         new_files_added = 0
         if gallery_dir and gallery_dir.is_dir():
@@ -1015,25 +943,24 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 dir_files = []
 
             for fpath in dir_files:
-                if str(fpath) in known_paths:
+                file_hash = await asyncio.to_thread(_sha256, fpath)
+                if file_hash in known_sha256s:
                     continue
                 # New file found on disk that is not in the DB.
-                file_hash = await asyncio.to_thread(_sha256, fpath)
-                ext = fpath.suffix.lower()
-                media_type = "video" if ext in (".mp4", ".webm") else "gif" if ext == ".gif" else "image"
+                blob = await store_blob(fpath, file_hash, session)
+                await create_library_symlink(gallery_id, fpath.name, blob)
+                await session.flush()
                 max_page += 1
                 stmt = pg_insert_local(Image).values(
                     gallery_id=gallery_id,
                     page_num=max_page,
                     filename=fpath.name,
-                    file_path=str(fpath),
-                    file_hash=file_hash,
-                    file_size=fpath.stat().st_size,
-                    media_type=media_type,
+                    blob_sha256=file_hash,
                 ).on_conflict_do_nothing()
                 await session.execute(stmt)
                 new_files_added += 1
                 missing_thumb = True  # New file needs a thumbnail.
+                known_sha256s.add(file_hash)
                 logger.info(
                     "[rescan_gallery] gallery_id=%d: added new file %s",
                     gallery_id,
@@ -1043,17 +970,22 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         # --- Step 3: Update gallery metadata ---
         final_images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .options(selectinload(Image.blob))
         )).scalars().all()
         gallery.pages = len(final_images)
 
         if gallery.pages == 0 and gallery.import_mode == "link":
-            # All source files are gone — clean up remaining thumbnails and remove gallery
+            # All source files are gone — clean up remaining thumbnail dirs and remove gallery
             remaining_imgs = (await session.execute(
-                select(Image.thumb_path).where(Image.gallery_id == gallery_id)
+                select(Image).where(Image.gallery_id == gallery_id)
+                .options(selectinload(Image.blob))
             )).scalars().all()
-            for tp_str in remaining_imgs:
-                if tp_str and Path(tp_str).is_file():
-                    Path(tp_str).unlink(missing_ok=True)
+            for rim in remaining_imgs:
+                if rim.blob:
+                    td = thumb_dir(rim.blob.sha256)
+                    if td.exists():
+                        shutil.rmtree(str(td), ignore_errors=True)
+                    await decrement_ref_count(rim.blob.sha256, session)
             await session.delete(gallery)
             await session.commit()
             logger.info("[rescan_gallery] gallery_id=%d removed (link mode, all files gone)", gallery_id)
@@ -1098,18 +1030,22 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
 
     logger.info("[tag] gallery_id=%d", gallery_id)
 
+    from sqlalchemy.orm import selectinload
+
     from services.tagger import predict
 
     tagged = 0
     async with AsyncSessionLocal() as session:
         images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .options(selectinload(Image.blob))
         )).scalars().all()
 
         for img in images:
-            if not img.file_path:
+            blob = img.blob
+            if not blob:
                 continue
-            src = Path(img.file_path)
+            src = resolve_blob_path(blob)
             if not src.exists() or src.suffix.lower() not in _IMAGE_EXTS:
                 continue
 
@@ -1200,38 +1136,52 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
     """Generate 160/360/720px WebP thumbnails for all images in a gallery."""
     import imagehash
     from PIL import Image as PILImage
+    from sqlalchemy.orm import selectinload
 
     logger.info("[thumbnail] gallery_id=%d", gallery_id)
-    thumbs_root = Path(settings.data_thumbs_path)
     sizes = [160, 360, 720]
     processed = 0
 
     async with AsyncSessionLocal() as session:
-        images = (await session.execute(select(Image).where(Image.gallery_id == gallery_id))).scalars().all()
+        images = (
+            await session.execute(
+                select(Image)
+                .where(Image.gallery_id == gallery_id)
+                .options(selectinload(Image.blob))
+            )
+        ).scalars().all()
 
         for img in images:
-            if not img.file_path:
+            blob = img.blob
+            if not blob:
                 continue
-            src = Path(img.file_path)
+            src = resolve_blob_path(blob)
             if not src.exists():
                 continue
 
-            # Ensure hash
-            if not img.file_hash:
-                img.file_hash = await asyncio.to_thread(_sha256, src)
-            h = img.file_hash
-
-            thumb_dir = thumbs_root / h[:2] / h
-            thumb_dir.mkdir(parents=True, exist_ok=True)
+            td = thumb_dir(blob.sha256)
+            td.mkdir(parents=True, exist_ok=True)
 
             try:
                 with PILImage.open(src) as pil:
-                    # Store actual dimensions
-                    img.width, img.height = pil.size
-                    img.phash = str(imagehash.phash(pil))
+                    # Store actual dimensions and phash on the blob
+                    blob.width, blob.height = pil.size
+                    blob.phash = str(imagehash.phash(pil))
+                    phash_int_val = int(blob.phash, 16)
+                    # Convert unsigned 64-bit to signed 64-bit for PostgreSQL BIGINT
+                    if phash_int_val >= (1 << 63):
+                        phash_int_val -= (1 << 64)
+                    blob.phash_int = phash_int_val
+                    # Store quarter values as signed 16-bit (PostgreSQL SMALLINT range)
+                    def _to_signed16(v: int) -> int:
+                        return v - 0x10000 if v >= 0x8000 else v
+                    blob.phash_q0 = _to_signed16((phash_int_val >> 48) & 0xFFFF)
+                    blob.phash_q1 = _to_signed16((phash_int_val >> 32) & 0xFFFF)
+                    blob.phash_q2 = _to_signed16((phash_int_val >> 16) & 0xFFFF)
+                    blob.phash_q3 = _to_signed16(phash_int_val & 0xFFFF)
                     rgb = pil.convert("RGB")
                     for size in sizes:
-                        dest = thumb_dir / f"thumb_{size}.webp"
+                        dest = td / f"thumb_{size}.webp"
                         if dest.exists():
                             continue
                         thumb = rgb.copy()
@@ -1240,7 +1190,6 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
                         thumb.save(str(tmp), "WEBP", quality=85)
                         os.rename(tmp, dest)
 
-                img.thumb_path = str(thumb_dir / "thumb_160.webp")
                 processed += 1
             except (OSError, ValueError) as exc:
                 logger.error("[thumbnail] %s: %s", src, exc)
@@ -1249,6 +1198,307 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
 
     logger.info("[thumbnail] gallery_id=%d: %d done", gallery_id, processed)
     return {"status": "done", "processed": processed}
+
+
+# ── WORKER I: Reconciliation + Blob GC ───────────────────────────────
+
+
+async def reconciliation_job(ctx: dict) -> dict:
+    """
+    Reconcile /data/library/ symlink tree with database records.
+
+    Users can delete symlinks directly from filesystem. This job syncs
+    those changes back to the database.
+
+    Also runs blob GC: removes unreferenced blobs and their CAS files.
+
+    Batch-optimised for 10M images / 100K galleries:
+    - Phase 1: single scandir pass + chunked batch queries (chunk=500)
+    - Phase 2: chunked NOT-IN queries for orphan galleries
+    - Phase 3: single JOIN query for orphan blobs, batch update/delete
+    """
+    import shutil
+
+    logger.info("[reconcile] Starting reconciliation")
+    r = ctx["redis"]
+
+    # Check 14-day interval via Redis
+    last_run_key = "reconcile:last_run"
+    last_run = await r.get(last_run_key)
+    if last_run:
+        last_dt = datetime.fromisoformat(last_run.decode())
+        if (datetime.now(UTC) - last_dt).days < 14:
+            logger.info("[reconcile] Skipping — last run was %s (< 14 days ago)", last_run.decode())
+            return {"status": "skipped", "reason": "interval_not_reached"}
+
+    stats = {"removed_images": 0, "removed_galleries": 0, "orphan_blobs_cleaned": 0}
+
+    lib_base = Path(settings.data_library_path)
+    if not lib_base.exists():
+        logger.info("[reconcile] library path does not exist, nothing to do")
+        await r.set(last_run_key, datetime.now(UTC).isoformat())
+        return {"status": "done", **stats}
+
+    # ── Phase 1: Scan filesystem once, batch-query DB, reconcile in chunks ──
+
+    # Single scandir pass: gallery_map[gallery_id] = set of filenames on disk
+    # Broken symlinks are unlinked here; they are excluded from disk_files so
+    # the subsequent DB diff will mark those image records for deletion.
+    gallery_map: dict[int, set[str]] = {}
+    empty_gallery_dirs: set[int] = set()
+
+    logger.info("[reconcile] Phase 1: scanning %s", lib_base)
+    for entry in os.scandir(str(lib_base)):
+        if not entry.is_dir(follow_symlinks=False):
+            continue
+        try:
+            gid = int(entry.name)
+        except ValueError:
+            logger.warning("[reconcile] skipping non-numeric dir: %s", entry.name)
+            continue
+
+        disk_files: set[str] = set()
+        has_valid = False
+        for fe in os.scandir(entry.path):
+            if fe.is_symlink() and not Path(fe.path).exists():
+                # Broken symlink — remove it silently; absence from disk_files
+                # will cause DB record to be deleted in batch step below.
+                try:
+                    os.unlink(fe.path)
+                except OSError:
+                    pass
+            else:
+                disk_files.add(fe.name)
+                has_valid = True
+
+        gallery_map[gid] = disk_files
+        if not has_valid:
+            empty_gallery_dirs.add(gid)
+
+    fs_gallery_ids = set(gallery_map.keys())
+    all_fs_ids_list = sorted(fs_gallery_ids)
+    total_fs = len(all_fs_ids_list)
+    logger.info("[reconcile] Phase 1: %d gallery dirs on disk", total_fs)
+
+    _CHUNK = 500
+
+    async with AsyncSessionLocal() as session:
+        processed_p1 = 0
+        for chunk_start in range(0, total_fs, _CHUNK):
+            chunk_ids = all_fs_ids_list[chunk_start : chunk_start + _CHUNK]
+
+            # Batch query: id, gallery_id, filename, blob_sha256 for this chunk
+            rows = (await session.execute(
+                select(Image.id, Image.gallery_id, Image.filename, Image.blob_sha256)
+                .where(Image.gallery_id.in_(chunk_ids))
+            )).all()
+
+            # Group DB rows by gallery_id
+            db_by_gallery: dict[int, dict[str, tuple[int, str]]] = {}
+            for row in rows:
+                db_by_gallery.setdefault(row.gallery_id, {})[row.filename] = (row.id, row.blob_sha256)
+
+            # Determine which image IDs and blob shas to remove for this chunk
+            dead_image_ids: list[int] = []
+            dead_blob_shas: list[str] = []
+
+            for gid in chunk_ids:
+                disk_files = gallery_map[gid]
+                db_files = db_by_gallery.get(gid, {})
+                for filename, (img_id, sha) in db_files.items():
+                    if filename not in disk_files:
+                        dead_image_ids.append(img_id)
+                        dead_blob_shas.append(sha)
+
+            if dead_image_ids:
+                # Batch decrement ref_counts
+                await session.execute(
+                    text(
+                        "UPDATE blobs SET ref_count = ref_count - 1 "
+                        "WHERE sha256 = ANY(:shas)"
+                    ),
+                    {"shas": dead_blob_shas},
+                )
+                # Batch delete images
+                await session.execute(
+                    text("DELETE FROM images WHERE id = ANY(:ids)"),
+                    {"ids": dead_image_ids},
+                )
+                stats["removed_images"] += len(dead_image_ids)
+
+            # Delete empty gallery dirs and their DB records in this chunk
+            empty_in_chunk = [gid for gid in chunk_ids if gid in empty_gallery_dirs]
+            if empty_in_chunk:
+                await session.execute(
+                    text("DELETE FROM galleries WHERE id = ANY(:ids)"),
+                    {"ids": empty_in_chunk},
+                )
+                stats["removed_galleries"] += len(empty_in_chunk)
+                for gid in empty_in_chunk:
+                    gdir = lib_base / str(gid)
+                    try:
+                        gdir.rmdir()
+                    except OSError:
+                        pass
+
+            await session.commit()
+            processed_p1 += len(chunk_ids)
+            await r.setex(
+                "reconcile:progress",
+                3600,
+                json.dumps({"phase": 1, "processed": processed_p1, "total": total_fs}),
+            )
+
+        logger.info("[reconcile] Phase 1 done: removed %d images, %d galleries",
+                    stats["removed_images"], stats["removed_galleries"])
+
+        # ── Phase 2: Orphan galleries — in DB but missing from filesystem ──
+        # Query gallery IDs that are NOT in fs_gallery_ids, in chunks.
+        # We iterate the DB in chunks using OFFSET/LIMIT on the sorted id list
+        # rather than a NOT IN on a potentially 100K-element set.
+
+        logger.info("[reconcile] Phase 2: checking for orphan DB galleries")
+
+        # Collect all gallery IDs in DB (non-proxy) using a single streaming query
+        db_gallery_ids_result = (await session.execute(
+            select(Gallery.id).where(Gallery.download_status != "proxy_only")
+        )).scalars().all()
+
+        orphan_gallery_ids = [gid for gid in db_gallery_ids_result if gid not in fs_gallery_ids]
+        total_orphans = len(orphan_gallery_ids)
+        logger.info("[reconcile] Phase 2: %d orphan galleries found", total_orphans)
+
+        processed_p2 = 0
+        for chunk_start in range(0, total_orphans, _CHUNK):
+            chunk_ids = orphan_gallery_ids[chunk_start : chunk_start + _CHUNK]
+
+            # Batch-fetch blob shas for images in these galleries
+            orphan_rows = (await session.execute(
+                select(Image.id, Image.blob_sha256)
+                .where(Image.gallery_id.in_(chunk_ids))
+            )).all()
+
+            if orphan_rows:
+                orphan_img_ids = [r.id for r in orphan_rows]
+                orphan_shas = [r.blob_sha256 for r in orphan_rows]
+                await session.execute(
+                    text(
+                        "UPDATE blobs SET ref_count = ref_count - 1 "
+                        "WHERE sha256 = ANY(:shas)"
+                    ),
+                    {"shas": orphan_shas},
+                )
+                await session.execute(
+                    text("DELETE FROM images WHERE id = ANY(:ids)"),
+                    {"ids": orphan_img_ids},
+                )
+                stats["removed_images"] += len(orphan_img_ids)
+
+            await session.execute(
+                text("DELETE FROM galleries WHERE id = ANY(:ids)"),
+                {"ids": chunk_ids},
+            )
+            stats["removed_galleries"] += len(chunk_ids)
+
+            await session.commit()
+            processed_p2 += len(chunk_ids)
+            await r.setex(
+                "reconcile:progress",
+                3600,
+                json.dumps({"phase": 2, "processed": processed_p2, "total": total_orphans}),
+            )
+
+        logger.info("[reconcile] Phase 2 done: removed %d orphan galleries", stats["removed_galleries"])
+
+    # ── Phase 3: Blob GC — single batch query with actual ref counts ──
+
+    logger.info("[reconcile] Phase 3: blob GC")
+
+    _BLOB_CHUNK = 1000
+
+    async with AsyncSessionLocal() as session:
+        # Single query: join blobs with actual image ref count
+        # Fetches only blobs where ref_count <= 0, with real count for safety
+        gc_rows = (await session.execute(
+            text("""
+                SELECT b.sha256, b.extension, b.storage, b.external_path,
+                       COUNT(i.id) AS actual_refs
+                FROM blobs b
+                LEFT JOIN images i ON i.blob_sha256 = b.sha256
+                WHERE b.ref_count <= 0
+                GROUP BY b.sha256, b.extension, b.storage, b.external_path
+            """)
+        )).all()
+
+        total_gc = len(gc_rows)
+        logger.info("[reconcile] Phase 3: %d candidate blobs to GC", total_gc)
+
+        # Separate into: truly orphaned vs ref_count-drifted
+        truly_orphaned = [r for r in gc_rows if r.actual_refs == 0]
+        drifted = [r for r in gc_rows if r.actual_refs > 0]
+
+        # Fix drifted ref_counts in batch (chunk to avoid huge IN lists)
+        for chunk_start in range(0, len(drifted), _BLOB_CHUNK):
+            chunk = drifted[chunk_start : chunk_start + _BLOB_CHUNK]
+            for row in chunk:
+                logger.warning(
+                    "[reconcile] ref_count drift for %s: corrected to %d",
+                    row.sha256[:12], row.actual_refs,
+                )
+                await session.execute(
+                    text("UPDATE blobs SET ref_count = :rc WHERE sha256 = :sha"),
+                    {"rc": row.actual_refs, "sha": row.sha256},
+                )
+            await session.commit()
+
+        # Delete truly orphaned blobs in chunks
+        processed_p3 = 0
+        for chunk_start in range(0, len(truly_orphaned), _BLOB_CHUNK):
+            chunk = truly_orphaned[chunk_start : chunk_start + _BLOB_CHUNK]
+            chunk_shas = [r.sha256 for r in chunk]
+
+            # Delete CAS files and thumb dirs first (filesystem ops)
+            for row in chunk:
+                cas_file = cas_path(row.sha256, row.extension)
+                if cas_file.exists():
+                    try:
+                        cas_file.unlink()
+                    except OSError as exc:
+                        logger.warning("[reconcile] failed to delete CAS file %s: %s", cas_file, exc)
+
+                td = thumb_dir(row.sha256)
+                if td.exists():
+                    shutil.rmtree(str(td), ignore_errors=True)
+
+            # Batch delete blob records
+            await session.execute(
+                text("DELETE FROM blobs WHERE sha256 = ANY(:shas)"),
+                {"shas": chunk_shas},
+            )
+            await session.commit()
+
+            stats["orphan_blobs_cleaned"] += len(chunk)
+            processed_p3 += len(chunk)
+            await r.setex(
+                "reconcile:progress",
+                3600,
+                json.dumps({"phase": 3, "processed": processed_p3, "total": total_gc}),
+            )
+
+        logger.info("[reconcile] Phase 3 done: cleaned %d orphan blobs (%d ref_count corrections)",
+                    stats["orphan_blobs_cleaned"], len(drifted))
+
+    # Record last run time
+    await r.set(last_run_key, datetime.now(UTC).isoformat())
+
+    # Store result in Redis for API query (30-day TTL)
+    await r.setex("reconcile:last_result", 86400 * 30, json.dumps({
+        "completed_at": datetime.now(UTC).isoformat(),
+        **stats,
+    }))
+
+    logger.info("[reconcile] done: %s", stats)
+    return {"status": "done", **stats}
 
 
 # ── WORKER E: Auto-Discovery ──────────────────────────────────────────
@@ -1333,11 +1583,29 @@ async def auto_discover_job(ctx: dict) -> dict:
 
 async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
     """Rescan the gallery whose files reside in dir_path."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Image.gallery_id).where(Image.file_path.like(f"{dir_path}%")).limit(1)
-        )
-        gallery_id = result.scalar_one_or_none()
+    # In CAS mode, /data/library/{gallery_id}/ is the gallery directory.
+    lib_base = Path(settings.data_library_path)
+    dir_p = Path(dir_path)
+
+    gallery_id: int | None = None
+    # Check if this path is a library directory (or inside one)
+    try:
+        rel = dir_p.relative_to(lib_base)
+        # The first component should be the gallery_id
+        gallery_id = int(rel.parts[0])
+    except (ValueError, IndexError):
+        pass
+
+    if not gallery_id:
+        # Try checking if it's a blob external path
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Image.gallery_id)
+                .join(Blob, Image.blob_sha256 == Blob.sha256)
+                .where(Blob.external_path.like(f"{dir_path}%"))
+                .limit(1)
+            )
+            gallery_id = result.scalar_one_or_none()
 
     if gallery_id:
         return await rescan_gallery_job(ctx, gallery_id)
@@ -1372,11 +1640,14 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
             if g.library_path == library_path:
                 relevant.append(g)
             elif g.library_path is None and g.import_mode == "link":
-                # Check if any image file_path starts with this library_path
-                img = (await session.execute(
-                    select(Image.file_path).where(Image.gallery_id == g.id).limit(1)
+                # Check if any blob has external_path under this library_path
+                blob_row = (await session.execute(
+                    select(Blob.external_path)
+                    .join(Image, Image.blob_sha256 == Blob.sha256)
+                    .where(Image.gallery_id == g.id, Blob.storage == "external")
+                    .limit(1)
                 )).scalar_one_or_none()
-                if img and img.startswith(library_path):
+                if blob_row and blob_row.startswith(library_path):
                     relevant.append(g)
 
         total = len(relevant)
@@ -1503,6 +1774,7 @@ class WorkerSettings:
         auto_discover_job,
         tag_job,
         thumbnail_job,
+        reconciliation_job,
         scheduled_scan_job,
         toggle_watcher_job,
     ]
@@ -1514,6 +1786,14 @@ class WorkerSettings:
             run_at_startup=False,
             unique=True,
             timeout=7200,
+        ),
+        cron(
+            reconciliation_job,
+            weekday=0,   # Monday
+            hour=3,
+            minute=0,
+            unique=True,
+            timeout=3600,
         ),
     ]
     on_startup = startup

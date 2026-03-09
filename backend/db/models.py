@@ -61,6 +61,27 @@ class Gallery(Base):
     read_progress: Mapped["ReadProgress | None"] = relationship(back_populates="gallery", cascade="all, delete-orphan")
 
 
+class Blob(Base):
+    __tablename__ = "blobs"
+
+    sha256: Mapped[str] = mapped_column(Text, primary_key=True)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    media_type: Mapped[str] = mapped_column(Text, default="image")
+    width: Mapped[int | None] = mapped_column(Integer)
+    height: Mapped[int | None] = mapped_column(Integer)
+    phash: Mapped[str | None] = mapped_column(Text)
+    phash_int: Mapped[int | None] = mapped_column(BigInteger)
+    phash_q0: Mapped[int | None] = mapped_column(SmallInteger)
+    phash_q1: Mapped[int | None] = mapped_column(SmallInteger)
+    phash_q2: Mapped[int | None] = mapped_column(SmallInteger)
+    phash_q3: Mapped[int | None] = mapped_column(SmallInteger)
+    extension: Mapped[str] = mapped_column(Text, nullable=False)
+    storage: Mapped[str] = mapped_column(Text, default="cas")
+    external_path: Mapped[str | None] = mapped_column(Text)
+    ref_count: Mapped[int] = mapped_column(Integer, default=0)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Image(Base):
     __tablename__ = "images"
 
@@ -68,19 +89,11 @@ class Image(Base):
     gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False)
     page_num: Mapped[int] = mapped_column(Integer, nullable=False)
     filename: Mapped[str | None] = mapped_column(Text)
-    width: Mapped[int | None] = mapped_column(Integer)
-    height: Mapped[int | None] = mapped_column(Integer)
-    file_path: Mapped[str | None] = mapped_column(Text)
-    thumb_path: Mapped[str | None] = mapped_column(Text)
-    file_size: Mapped[int | None] = mapped_column(BigInteger)
-    file_hash: Mapped[str | None] = mapped_column(Text)
-    phash: Mapped[str | None] = mapped_column(Text)
-    media_type: Mapped[str] = mapped_column(Text, default="image")
-    duration: Mapped[float | None] = mapped_column(Float)
-    duplicate_of: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("images.id"))
+    blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=False)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
 
     gallery: Mapped["Gallery"] = relationship(back_populates="images")
+    blob: Mapped["Blob"] = relationship()
     image_tags: Mapped[list["ImageTag"]] = relationship(back_populates="image", cascade="all, delete-orphan")
 
 
@@ -238,3 +251,12 @@ class LibraryPath(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     monitor: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PluginConfig(Base):
+    __tablename__ = "plugin_config"
+
+    source_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    config_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

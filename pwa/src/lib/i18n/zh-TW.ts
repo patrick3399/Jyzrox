@@ -160,6 +160,7 @@ const zhTW: Record<string, string> = {
   'settings.hathPerks': 'H@H Perks',
   'settings.serviceHealth': '服務健康',
   'settings.overall': '整體',
+  'settings.versions': '版本資訊',
   'settings.configuration': '設定',
   'settings.version': '版本',
   'settings.ehMaxConcurrency': 'EH 最大並發數',

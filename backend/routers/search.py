@@ -278,6 +278,7 @@ async def list_saved_searches(
                 select(SavedSearch)
                 .where(SavedSearch.user_id == user_id)
                 .order_by(desc(SavedSearch.created_at))
+                .limit(200)
             )
         ).scalars().all()
     return {"searches": [_ss(r) for r in rows]}

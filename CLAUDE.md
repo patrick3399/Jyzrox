@@ -86,6 +86,34 @@ async def endpoint(_: dict = Depends(require_auth)):
     ...
 ```
 
+### 前端 UI 文字必須使用 i18n 抽象層
+
+所有使用者可見的 UI 文字（按鈕、標籤、placeholder、toast、錯誤訊息、aria-label）都必須透過 `t()` 函數：
+
+```tsx
+import { t } from '@/lib/i18n'
+
+// ✅ 正確
+<button>{t('settings.save')}</button>
+<input placeholder={t('settings.searchPlaceholder')} />
+toast.success(t('common.saved'))
+
+// ❌ 禁止
+<button>Save</button>
+<input placeholder="Search..." />
+toast.success('Saved')
+```
+
+**例外**（不需要 `t()`）：
+- 專有名詞 / 品牌名：`"E-Hentai"`, `"Pixiv"`, `"Next.js"`, `"PostgreSQL"`, `"Jyzrox"`
+- 版本號、數字、技術識別符：`"0.1"`, `"X-API-Token"`, `"/api/external/v1/status"`
+- CSS class、HTML attribute value
+
+**新增 UI 文字時**：
+1. 在 `pwa/src/lib/i18n/en.ts` 加入英文 key（其他語言自動 fallback 到英文）
+2. Key 命名慣例：`{section}.{description}`，如 `browse.failedLoadResults`、`settings.createToken`
+3. 帶參數用 `{param}` 語法：`t('browse.pageN', { page: '5' })`
+
 ---
 
 ## Multi-Agent 開發架構

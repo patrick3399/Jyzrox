@@ -40,6 +40,8 @@ class Settings(BaseSettings):
     data_thumbs_path: str = "/data/thumbs"
     data_training_path: str = "/data/training"
     data_avatars_path: str = "/data/avatars"
+    data_cas_path: str = "/data/cas"
+    data_library_path: str = "/data/library"
 
     # gallery-dl config (bind-mounted)
     gallery_dl_config: str = "/app/config/gallery-dl.json"
@@ -54,6 +56,8 @@ class Settings(BaseSettings):
     library_scan_interval_hours: int = 24
     extra_library_paths: str = ""  # Comma-separated extra paths
     library_base_path: str = "/mnt"  # Default root for user-mounted external media
+    watcher_use_polling: bool = False
+    watcher_polling_interval: int = 60  # seconds
 
     model_config = {"env_file": ".env", "case_sensitive": False}
 

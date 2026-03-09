@@ -17,11 +17,14 @@ import {
   Monitor,
   PackageOpen,
   FolderInput,
+  Key,
+  Puzzle,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
+import { useLocale } from '@/components/LocaleProvider'
 
 const navLinks = [
   { href: '/', label: () => t('nav.dashboard'), icon: LayoutDashboard },
@@ -32,6 +35,8 @@ const navLinks = [
   { href: '/tags', label: () => t('nav.tags'), icon: Tags },
   { href: '/export', label: () => t('nav.export'), icon: PackageOpen },
   { href: '/import', label: () => t('nav.import'), icon: FolderInput },
+  { href: '/credentials', label: () => t('nav.credentials'), icon: Key },
+  { href: '/plugins', label: () => t('nav.plugins'), icon: Puzzle },
   { href: '/settings', label: () => t('nav.settings'), icon: Settings },
 ]
 
@@ -44,6 +49,7 @@ const themeLabel = {
 }
 
 export function Sidebar() {
+  useLocale()
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()

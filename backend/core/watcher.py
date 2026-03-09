@@ -89,18 +89,48 @@ class LibraryWatcher:
     def start(self, paths: list[str], enqueue_fn, debounce_secs: int = 30):
         global watcher_instance
         self.stop()
-        self._observer = Observer()
-        self._handler = _LibraryHandler(enqueue_fn, debounce_secs)
-        for p in paths:
-            if Path(p).is_dir():
-                self._observer.schedule(self._handler, str(p), recursive=True)
-                self._paths.append(str(p))
-                logger.info("[watcher] Monitoring: %s", p)
+
+        from core.config import settings
+        use_polling = settings.watcher_use_polling
+
+        if not use_polling:
+            try:
+                self._observer = Observer()
+                self._handler = _LibraryHandler(enqueue_fn, debounce_secs)
+                for p in paths:
+                    if Path(p).is_dir():
+                        self._observer.schedule(self._handler, str(p), recursive=True)
+                        self._paths.append(str(p))
+                        logger.info("[watcher] Monitoring: %s", p)
+            except OSError:
+                logger.warning(
+                    "[watcher] inotify limit hit, falling back to polling (interval=%ds)",
+                    settings.watcher_polling_interval,
+                )
+                if self._observer.is_alive():
+                    self._observer.stop()
+                use_polling = True
+                self._paths = []
+
+        if use_polling:
+            from watchdog.observers.polling import PollingObserver
+            self._observer = PollingObserver(timeout=settings.watcher_polling_interval)
+            self._handler = _LibraryHandler(enqueue_fn, debounce_secs)
+            for p in paths:
+                if Path(p).is_dir():
+                    self._observer.schedule(self._handler, str(p), recursive=True)
+                    self._paths.append(str(p))
+                    logger.info("[watcher] Monitoring (polling): %s", p)
+
         if self._paths:
             self._observer.daemon = True
             self._observer.start()
             watcher_instance = self
-            logger.info("[watcher] Started monitoring %d paths", len(self._paths))
+            logger.info(
+                "[watcher] Started monitoring %d paths (polling=%s)",
+                len(self._paths),
+                use_polling,
+            )
         else:
             self._observer = None
             self._handler = None
@@ -133,6 +163,11 @@ class LibraryWatcher:
     @property
     def is_running(self) -> bool:
         return self._observer is not None and self._observer.is_alive()
+
+    @property
+    def is_polling(self) -> bool:
+        from watchdog.observers.polling import PollingObserver
+        return isinstance(self._observer, PollingObserver)
 
     @property
     def watched_paths(self) -> list[str]:

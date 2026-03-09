@@ -7,7 +7,7 @@ export type ReadingDirection = 'ltr' | 'rtl' | 'vertical'
 export interface ReaderImage {
   pageNum: number // 1-indexed
   url: string // resolved URL (local path or proxy API)
-  isLocal: boolean // true = served from /media/gallery/
+  isLocal: boolean // true = served from /media/cas/
   width?: number
   height?: number
   mediaType: 'image' | 'video' | 'gif'

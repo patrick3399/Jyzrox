@@ -1,4 +1,4 @@
-"""Add phash column to images table.
+"""Placeholder — phash moved to blobs table in CAS migration.
 
 Revision ID: 0003
 Revises: 0002
@@ -14,15 +14,10 @@ depends_on = None
 
 
 def upgrade() -> None:
-    op.add_column("images", sa.Column("phash", sa.Text(), nullable=True))
-    op.create_index(
-        "idx_images_phash",
-        "images",
-        ["phash"],
-        postgresql_where=sa.text("phash IS NOT NULL"),
-    )
+    # phash is now on the blobs table (created by init.sql or CAS migration).
+    # This migration is intentionally empty.
+    pass
 
 
 def downgrade() -> None:
-    op.drop_index("idx_images_phash", table_name="images")
-    op.drop_column("images", "phash")
+    pass

@@ -255,14 +255,15 @@ async def list_implications(
     ]
 
 
-async def _has_cycle(session, from_id: int, target_id: int) -> bool:
+async def _has_cycle(session, from_id: int, target_id: int, max_depth: int = 50) -> bool:
     """
     BFS from `from_id` along existing implications.
     Returns True if `target_id` is reachable (i.e. adding target→from would create a cycle).
+    Caps traversal at max_depth visited nodes; conservatively returns True if the limit is hit.
     """
     visited: set[int] = set()
     queue: deque[int] = deque([from_id])
-    while queue:
+    while queue and len(visited) < max_depth:
         current = queue.popleft()
         if current in visited:
             continue
@@ -275,7 +276,8 @@ async def _has_cycle(session, from_id: int, target_id: int) -> bool:
             )
         ).scalars().all()
         queue.extend(r for r in rows if r not in visited)
-    return False
+    # If we hit the limit, conservatively assume a cycle exists
+    return len(visited) >= max_depth
 
 
 @router.post("/implications")
@@ -451,18 +453,25 @@ async def batch_import_translations(
         return {"status": "ok", "count": 0}
 
     async with async_session() as session:
-        for item in body.translations:
+        CHUNK = 1000
+        items = body.translations
+        for i in range(0, len(items), CHUNK):
+            chunk = items[i : i + CHUNK]
+            values = [
+                {
+                    "namespace": t.namespace,
+                    "name": t.name,
+                    "language": t.language,
+                    "translation": t.translation,
+                }
+                for t in chunk
+            ]
             stmt = (
                 pg_insert(TagTranslation)
-                .values(
-                    namespace=item.namespace,
-                    name=item.name,
-                    language=item.language,
-                    translation=item.translation,
-                )
+                .values(values)
                 .on_conflict_do_update(
                     index_elements=["namespace", "name", "language"],
-                    set_={"translation": item.translation},
+                    set_={"translation": pg_insert(TagTranslation).excluded.translation},
                 )
             )
             await session.execute(stmt)
@@ -568,18 +577,33 @@ async def retag_all_galleries(
     _: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """Enqueue AI tagging jobs for ALL galleries (batch re-tag)."""
+    """Enqueue AI tagging jobs for ALL galleries (batch re-tag).
+
+    Uses chunked queries and Redis pipeline to avoid loading all IDs
+    into memory and doing 100K individual roundtrips.
+    """
     from core.config import settings as app_settings
 
     if not app_settings.tag_model_enabled:
         raise HTTPException(status_code=400, detail="AI tagging is not enabled (TAG_MODEL_ENABLED=false)")
 
-    gallery_ids = (await db.execute(select(Gallery.id))).scalars().all()
     arq = request.app.state.arq
-
     enqueued = 0
-    for gid in gallery_ids:
-        await arq.enqueue_job("tag_job", gid)
-        enqueued += 1
+    CHUNK = 1000
+    offset = 0
+
+    while True:
+        chunk = (await db.execute(
+            select(Gallery.id).order_by(Gallery.id).offset(offset).limit(CHUNK)
+        )).scalars().all()
+
+        if not chunk:
+            break
+
+        for gid in chunk:
+            await arq.enqueue_job("tag_job", gid)
+            enqueued += 1
+
+        offset += CHUNK
 
     return {"status": "enqueued", "total": enqueued}

@@ -1,6 +1,10 @@
+import json
 import logging
+import subprocess
+import sys
 
-from fastapi import APIRouter, Depends, HTTPException
+import fastapi
+from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import text
 
 from core.auth import require_auth
@@ -10,6 +14,96 @@ from core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
+
+
+# ── Static version detection (executed once at import time) ───────────
+
+def _detect_jyzrox_version() -> str:
+    """Return output of `git describe --tags --always`, fallback 'dev'."""
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--always"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        tag = result.stdout.strip()
+        return tag if tag else "dev"
+    except Exception:
+        return "dev"
+
+
+def _detect_gallery_dl_version() -> str | None:
+    """Return gallery-dl version, or None on failure."""
+    try:
+        import gallery_dl  # type: ignore
+        return gallery_dl.version.__version__
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["gallery-dl", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        ver = result.stdout.strip()
+        return ver if ver else None
+    except Exception:
+        return None
+
+
+def _detect_onnxruntime_version() -> str | None:
+    """Return onnxruntime version, or None if not installed."""
+    try:
+        import onnxruntime  # type: ignore
+        return onnxruntime.__version__
+    except Exception:
+        return None
+
+
+def _detect_python_version() -> str:
+    """Return Python version string (major.minor.micro)."""
+    v = sys.version_info
+    return f"{v.major}.{v.minor}.{v.micro}"
+
+
+_STATIC_VERSIONS: dict[str, str | None] = {
+    "jyzrox": _detect_jyzrox_version(),
+    "python": _detect_python_version(),
+    "fastapi": fastapi.__version__,
+    "gallery_dl": _detect_gallery_dl_version(),
+    "onnxruntime": _detect_onnxruntime_version(),
+}
+
+
+# ── Dynamic version helpers (queried per request) ─────────────────────
+
+async def _get_postgresql_version() -> str | None:
+    """Query PostgreSQL server version via SELECT version()."""
+    try:
+        async with AsyncSessionLocal() as session:
+            row = await session.execute(text("SELECT version()"))
+            raw: str = row.scalar_one()
+            # raw looks like "PostgreSQL 15.3 on x86_64-pc-linux-gnu ..."
+            # Extract the version number token after "PostgreSQL "
+            parts = raw.split()
+            if len(parts) >= 2:
+                return parts[1]
+            return raw
+    except Exception as exc:
+        logger.warning("Failed to detect PostgreSQL version: %s", exc)
+        return None
+
+
+async def _get_redis_version() -> str | None:
+    """Return redis_version from INFO server."""
+    try:
+        info = await get_redis().info("server")
+        return info.get("redis_version") or None
+    except Exception as exc:
+        logger.warning("Failed to detect Redis version: %s", exc)
+        return None
 
 
 @router.get("/health")
@@ -34,6 +128,24 @@ async def system_health():
         logger.error("Redis health check failed: %s", exc)
         results["redis"] = f"error: {exc}"
 
+    # Inode check
+    try:
+        result = subprocess.run(
+            ["df", "-i", "--output=ipcent", settings.data_cas_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        lines = result.stdout.strip().split("\n")
+        if len(lines) >= 2:
+            pct = int(lines[1].strip().rstrip("%"))
+            if pct > 90:
+                results["inodes"] = f"warning: {pct}% used"
+            else:
+                results["inodes"] = "ok"
+        else:
+            results["inodes"] = "unknown"
+    except Exception:
+        results["inodes"] = "unknown"
+
     if any(v != "ok" for v in results.values()):
         raise HTTPException(status_code=503, detail=results)
 
@@ -42,11 +154,23 @@ async def system_health():
 
 @router.get("/info")
 async def system_info(_: dict = Depends(require_auth)):
-    """Return non-sensitive runtime configuration."""
+    """Return non-sensitive runtime configuration including component versions."""
+    pg_ver, redis_ver = await _get_postgresql_version(), await _get_redis_version()
+    jyzrox_ver = _STATIC_VERSIONS["jyzrox"]
     return {
-        "version": "0.1",
+        # Kept for backwards compatibility; identical to versions.jyzrox
+        "version": jyzrox_ver,
         "eh_max_concurrency": settings.eh_max_concurrency,
         "tag_model_enabled": settings.tag_model_enabled,
+        "versions": {
+            "jyzrox": jyzrox_ver,
+            "python": _STATIC_VERSIONS["python"],
+            "fastapi": _STATIC_VERSIONS["fastapi"],
+            "gallery_dl": _STATIC_VERSIONS["gallery_dl"],
+            "postgresql": pg_ver,
+            "redis": redis_ver,
+            "onnxruntime": _STATIC_VERSIONS["onnxruntime"],
+        },
     }
 
 
@@ -66,15 +190,20 @@ _CACHE_PATTERNS: dict[str, str] = {
 }
 
 
-async def _count_keys(pattern: str) -> int:
-    """Count Redis keys matching a glob pattern (uses SCAN to avoid blocking)."""
+async def _count_keys(pattern: str, max_iterations: int = 500) -> int:
+    """Count Redis keys matching a glob pattern (uses SCAN to avoid blocking).
+
+    Caps at max_iterations SCAN rounds (~100K keys) to prevent blocking on large keyspaces.
+    """
     r = get_redis()
     count = 0
     cursor = 0
+    iterations = 0
     while True:
         cursor, keys = await r.scan(cursor, match=pattern, count=200)
         count += len(keys)
-        if cursor == 0:
+        iterations += 1
+        if cursor == 0 or iterations >= max_iterations:
             break
     return count
 
@@ -140,3 +269,27 @@ async def clear_cache_category(
         )
     deleted = await _delete_keys(_CACHE_PATTERNS[category])
     return {"status": "ok", "category": category, "deleted_keys": deleted}
+
+
+# ── Reconciliation ────────────────────────────────────────────────────
+
+
+@router.post("/reconcile")
+async def trigger_reconcile(
+    request: Request,
+    _: dict = Depends(require_auth),
+):
+    """Manually trigger the reconciliation job via ARQ."""
+    arq = request.app.state.arq
+    await arq.enqueue_job("reconciliation_job")
+    return {"status": "enqueued"}
+
+
+@router.get("/reconcile")
+async def get_reconcile_status(_: dict = Depends(require_auth)):
+    """Get the result of the last reconciliation run."""
+    r = get_redis()
+    result = await r.get("reconcile:last_result")
+    if not result:
+        return {"status": "never_run"}
+    return json.loads(result)

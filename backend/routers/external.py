@@ -8,12 +8,13 @@ import uuid as _uuid
 
 import psutil
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
-from sqlalchemy import func, select, update
+from sqlalchemy import func, select, text, update
 
 from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
-from db.models import ApiToken, DownloadJob, Gallery, Image, Tag
+from db.models import ApiToken, Blob, DownloadJob, Gallery, Image, Tag
+from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["external"])
@@ -73,9 +74,17 @@ async def system_status(token_data: dict = Depends(verify_api_token)):
     """Returns basic system status and stats for external dashboards (e.g. Homepage)."""
 
     async with async_session() as session:
-        gallery_count = (await session.execute(select(func.count()).select_from(Gallery))).scalar()
-        image_count = (await session.execute(select(func.count()).select_from(Image))).scalar()
-        tag_count = (await session.execute(select(func.count()).select_from(Tag))).scalar()
+        # Fast estimated counts via pg_stat (< 1ms vs 2-5s for COUNT(*) on large tables)
+        row_estimates = (await session.execute(text(
+            "SELECT relname, n_live_tup::bigint FROM pg_stat_user_tables "
+            "WHERE relname IN ('galleries', 'images', 'tags')"
+        ))).all()
+        counts = {r[0]: r[1] for r in row_estimates}
+        gallery_count = counts.get("galleries", 0)
+        image_count = counts.get("images", 0)
+        tag_count = counts.get("tags", 0)
+
+        # Active downloads: small result set, exact COUNT is fine
         active_downloads = (
             await session.execute(
                 select(func.count()).select_from(DownloadJob).where(DownloadJob.status.in_(["queued", "running"]))
@@ -89,6 +98,26 @@ async def system_status(token_data: dict = Depends(verify_api_token)):
     except OSError:
         disk_total = 0
         disk_free = 0
+
+    try:
+        import subprocess
+        result = subprocess.run(
+            ["df", "-i", "--output=itotal,iused,iavail,ipcent", settings.data_cas_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        lines = result.stdout.strip().split("\n")
+        if len(lines) >= 2:
+            parts = lines[1].split()
+            inode_total = int(parts[0])
+            inode_used = int(parts[1])
+            inode_free = int(parts[2])
+            inode_percent = parts[3]  # e.g. "54%"
+        else:
+            inode_total = inode_used = inode_free = 0
+            inode_percent = "N/A"
+    except Exception:
+        inode_total = inode_used = inode_free = 0
+        inode_percent = "N/A"
 
     return {
         "status": "online",
@@ -104,6 +133,12 @@ async def system_status(token_data: dict = Depends(verify_api_token)):
             "memory_percent": psutil.virtual_memory().percent,
             "disk_free_bytes": disk_free,
             "disk_total_bytes": disk_total,
+        },
+        "inodes": {
+            "total": inode_total,
+            "used": inode_used,
+            "free": inode_free,
+            "percent": inode_percent,
         },
     }
 
@@ -202,22 +237,30 @@ async def get_gallery_images(
             raise HTTPException(status_code=404, detail="Gallery not found")
 
         rows = (
-            (await session.execute(select(Image).where(Image.gallery_id == gallery_id).order_by(Image.page_num)))
+            (
+                await session.execute(
+                    select(Image)
+                    .where(Image.gallery_id == gallery_id)
+                    .order_by(Image.page_num)
+                    .options(selectinload(Image.blob))
+                )
+            )
             .scalars()
             .all()
         )
 
     images = []
     for r in rows:
+        blob = r.blob
         images.append(
             {
                 "id": r.id,
                 "page_num": r.page_num,
                 "filename": r.filename,
-                "width": r.width,
-                "height": r.height,
-                "file_size": r.file_size,
-                "media_type": r.media_type,
+                "width": blob.width if blob else None,
+                "height": blob.height if blob else None,
+                "file_size": blob.file_size if blob else None,
+                "media_type": blob.media_type if blob else None,
             }
         )
 

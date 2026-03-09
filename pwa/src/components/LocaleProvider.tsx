@@ -16,8 +16,7 @@ function detectLocale(): Locale {
   if (typeof window === 'undefined') return 'en'
   const stored = localStorage.getItem(STORAGE_KEY)
   if (stored && SUPPORTED_LOCALES.includes(stored as Locale)) return stored as Locale
-  const lang = navigator.language || ''
-  return lang.startsWith('zh') ? 'zh-TW' : 'en'
+  return 'en'
 }
 
 export function LocaleProvider({ children }: { children: React.ReactNode }) {

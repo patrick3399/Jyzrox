@@ -161,6 +161,7 @@ const ko: Record<string, string> = {
   'settings.hathPerks': 'H@H Perks',
   'settings.serviceHealth': '서비스 상태',
   'settings.overall': '전체',
+  'settings.versions': '버전 정보',
   'settings.configuration': '설정',
   'settings.version': '버전',
   'settings.ehMaxConcurrency': 'EH 최대 동시 접속 수',
