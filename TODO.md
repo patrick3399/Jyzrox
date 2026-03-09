@@ -31,13 +31,13 @@
 - [ ] 實際 OPDS client 測試（Panels iOS / KOReader / Chunky）連線瀏覽 + 圖片載入
 
 ### External API 增強測試（X-API-Token Auth）
-- [ ] `GET /api/external/v1/galleries/{id}/images` — 回傳含 `file_url` 和 `thumb_url` 欄位
-- [ ] `GET /api/external/v1/galleries/{id}/images/{page}/file` — 回傳正確圖片二進位（Content-Type 正確）
-- [ ] 圖片不存在 → 404
-- [ ] `GET /api/external/v1/galleries?q=test` — title 搜尋過濾正確
-- [ ] `GET /api/external/v1/galleries?favorited=true` — 僅回傳收藏 gallery
-- [ ] `GET /api/external/v1/galleries?min_rating=3` — 僅回傳 rating ≥ 3 的 gallery
-- [ ] 多參數組合：`?q=test&favorited=true&min_rating=3&source=ehentai` — 正確 AND 過濾
+- [x] `GET /api/external/v1/galleries/{id}/images` — 回傳含 `file_url` 和 `thumb_url` 欄位
+- [x] `GET /api/external/v1/galleries/{id}/images/{page}/file` — 回傳正確圖片二進位（Content-Type 正確）
+- [x] 圖片不存在 → 404
+- [x] `GET /api/external/v1/galleries?q=test` — title 搜尋過濾正確
+- [x] `GET /api/external/v1/galleries?favorited=true` — 僅回傳收藏 gallery
+- [x] `GET /api/external/v1/galleries?min_rating=3` — 僅回傳 rating ≥ 3 的 gallery
+- [x] 多參數組合：`?q=test&favorited=true&min_rating=3&source=ehentai` — 正確 AND 過濾
 
 ### Mihon Extension 測試
 - [ ] `./gradlew assembleDebug` 編譯通過
