@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { VirtualGrid } from '@/components/VirtualGrid'
 import { toast } from 'sonner'
 import { X, Trash2, Clock } from 'lucide-react'
 import type { BrowseHistoryItem } from '@/lib/types'
@@ -209,33 +210,23 @@ export default function HistoryPage() {
             <p className="text-vault-text-muted text-sm mt-1">{t('history.noHistoryHint')}</p>
           </div>
         ) : (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              {items.map((item) => (
-                <HistoryCard
-                  key={item.id}
-                  item={item}
-                  onDelete={handleDelete}
-                  onClick={() => handleClick(item)}
-                />
-              ))}
-            </div>
-
-            {/* Load More */}
-            {hasMore && (
-              <div className="flex justify-center mt-8">
-                <button
-                  onClick={() => loadPage(items.length, false)}
-                  disabled={loadingMore}
-                  className="px-6 py-2.5 rounded-lg bg-vault-card border border-vault-border
-                             text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text
-                             transition-colors text-sm"
-                >
-                  {loadingMore ? <LoadingSpinner /> : t('history.loadMore')}
-                </button>
-              </div>
+          <VirtualGrid
+            items={items}
+            columns={{ base: 2, sm: 3, md: 4, lg: 6 }}
+            gap={12}
+            estimateHeight={250}
+            renderItem={(item) => (
+              <HistoryCard
+                key={item.id}
+                item={item}
+                onDelete={handleDelete}
+                onClick={() => handleClick(item)}
+              />
             )}
-          </>
+            onLoadMore={() => loadPage(items.length, false)}
+            hasMore={hasMore}
+            isLoading={loadingMore}
+          />
         )}
       </div>
     </div>

@@ -8,6 +8,7 @@ import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
+import { VirtualGrid } from '@/components/VirtualGrid'
 import { t, formatNumber } from '@/lib/i18n'
 
 const SORT_OPTIONS = [
@@ -45,7 +46,6 @@ function LibraryContent() {
     (searchParams.get('sort') as 'added_at' | 'rating' | 'pages') ?? 'added_at',
   )
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
-  const sentinelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     return () => {
@@ -87,21 +87,6 @@ function LibraryContent() {
       sort,
       limit: PAGE_SIZE,
     })
-
-  // Intersection Observer: auto-trigger loadMore when sentinel enters viewport
-  useEffect(() => {
-    if (!sentinelRef.current) return
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && !isLoadingMore && !isReachingEnd) {
-          loadMore()
-        }
-      },
-      { rootMargin: '200px' },
-    )
-    observer.observe(sentinelRef.current)
-    return () => observer.disconnect()
-  }, [isLoadingMore, isReachingEnd, loadMore])
 
   const handleSearchChange = useCallback((value: string) => {
     setSearchInput(value)
@@ -325,34 +310,23 @@ function LibraryContent() {
         )}
 
         {!isLoading && galleries.length > 0 && (
-          <>
-            <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              {galleries.map((gallery) => (
-                <Link key={gallery.id} href={`/library/${gallery.id}`}>
-                  <LibraryGalleryCard
-                    gallery={gallery}
-                    thumbUrl={gallery.cover_thumb ?? undefined}
-                  />
-                </Link>
-              ))}
-            </div>
-
-            {/* Infinite scroll sentinel */}
-            {!isReachingEnd && (
-              <div ref={sentinelRef} className="flex justify-center py-8">
-                {isLoadingMore ? (
-                  <LoadingSpinner />
-                ) : (
-                  <button
-                    onClick={loadMore}
-                    className="px-6 py-2 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary text-sm hover:border-vault-accent transition-colors"
-                  >
-                    {t('common.loadMore')}
-                  </button>
-                )}
-              </div>
+          <VirtualGrid
+            items={galleries}
+            columns={{ base: 2, md: 4 }}
+            gap={16}
+            estimateHeight={300}
+            renderItem={(gallery) => (
+              <Link href={`/library/${gallery.id}`}>
+                <LibraryGalleryCard
+                  gallery={gallery}
+                  thumbUrl={gallery.cover_thumb ?? undefined}
+                />
+              </Link>
             )}
-          </>
+            onLoadMore={loadMore}
+            hasMore={!isReachingEnd}
+            isLoading={isLoadingMore}
+          />
         )}
 
         {!isLoading && galleries.length === 0 && !error && (

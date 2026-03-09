@@ -6,6 +6,7 @@ import { useEhSearch, useEhFavorites, useEhPopular, useEhToplist } from '@/hooks
 import { api } from '@/lib/api'
 import { Pagination } from '@/components/Pagination'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { VirtualGrid } from '@/components/VirtualGrid'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { RatingStars } from '@/components/RatingStars'
@@ -453,13 +454,11 @@ function BrowsePage() {
   const [scrollPage, setScrollPage] = useState(0)
   const [scrollLoading, setScrollLoading] = useState(false)
   const [scrollHasMore, setScrollHasMore] = useState(true)
-  const scrollSentinelRef = useRef<HTMLDivElement>(null)
   // Same for favorites scroll (cursor-based)
   const [favScrollGalleries, setFavScrollGalleries] = useState<EhGallery[]>([])
   const [favScrollNextCursor, setFavScrollNextCursor] = useState<string | undefined>(undefined)
   const [favScrollLoading, setFavScrollLoading] = useState(false)
   const [favScrollHasMore, setFavScrollHasMore] = useState(true)
-  const favScrollSentinelRef = useRef<HTMLDivElement>(null)
 
   // Toplist state — initialised from URL so back-navigation preserves the selection
   const [toplistTl, setToplistTl] = useState(() => {
@@ -690,49 +689,6 @@ function BrowsePage() {
     setFavScrollLoading(false)
   }, [favData]) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Intersection observer for search infinite scroll
-  useEffect(() => {
-    if (loadMode !== 'scroll' || activeTab !== 'search') return
-    const sentinel = scrollSentinelRef.current
-    if (!sentinel) return
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (entries[0].isIntersecting && scrollHasMore && !scrollLoading && !isLoading) {
-          setScrollLoading(true)
-          setScrollPage((p) => p + 1)
-          setPage((p) => p + 1)
-        }
-      },
-      { rootMargin: '400px' },
-    )
-    observer.observe(sentinel)
-    return () => observer.disconnect()
-  }, [loadMode, activeTab, scrollHasMore, scrollLoading, isLoading])
-
-  // Intersection observer for favorites infinite scroll (cursor-based)
-  useEffect(() => {
-    if (loadMode !== 'scroll' || activeTab !== 'favorites') return
-    const sentinel = favScrollSentinelRef.current
-    if (!sentinel) return
-    const observer = new IntersectionObserver(
-      (entries) => {
-        if (
-          entries[0].isIntersecting &&
-          favScrollHasMore &&
-          !favScrollLoading &&
-          !favLoading &&
-          favScrollNextCursor
-        ) {
-          setFavScrollLoading(true)
-          setFavCursor({ next: favScrollNextCursor })
-        }
-      },
-      { rootMargin: '400px' },
-    )
-    observer.observe(sentinel)
-    return () => observer.disconnect()
-  }, [loadMode, activeTab, favScrollHasMore, favScrollLoading, favLoading, favScrollNextCursor])
-
   // ── Handlers ────────────────────────────────────────────
 
   const commitSearch = useCallback((q: string) => {
@@ -812,10 +768,10 @@ function BrowsePage() {
     [router],
   )
 
-  const handleDownload = useCallback(async (gallery: EhGallery) => {
-    const url = `https://e-hentai.org/g/${gallery.gid}/${gallery.token}/`
+  const handleDownload = useCallback(async (g: EhGallery) => {
+    const url = `https://e-hentai.org/g/${g.gid}/${g.token}/`
     try {
-      const res = await api.download.enqueue(url, 'ehentai', {}, gallery.pages)
+      const res = await api.download.enqueue(url)
       toast.success(t('browse.addedToQueueJob', { jobId: res.job_id }))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed')
@@ -1518,20 +1474,37 @@ function BrowsePage() {
                       <ListCard
                         key={`${g.gid}-${g.token}`}
                         gallery={g}
-                        onClick={() => setSelectedGallery(g)}
+                        onClick={() => navigateToGallery(g)}
                       />
                     ))}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                    {displayGalleries.map((g) => (
+                  <VirtualGrid
+                    items={displayGalleries}
+                    columns={{ base: 3, sm: 4, md: 5 }}
+                    gap={8}
+                    estimateHeight={220}
+                    renderItem={(g) => (
                       <GridCard
                         key={`${g.gid}-${g.token}`}
                         gallery={g}
-                        onClick={() => setSelectedGallery(g)}
+                        onClick={() => navigateToGallery(g)}
                       />
-                    ))}
-                  </div>
+                    )}
+                    onLoadMore={
+                      loadMode === 'scroll'
+                        ? () => {
+                            if (scrollHasMore && !scrollLoading && !isLoading) {
+                              setScrollLoading(true)
+                              setScrollPage((p) => p + 1)
+                              setPage((p) => p + 1)
+                            }
+                          }
+                        : undefined
+                    }
+                    hasMore={loadMode === 'scroll' ? scrollHasMore : false}
+                    isLoading={loadMode === 'scroll' ? scrollLoading || isLoading : false}
+                  />
                 )}
 
                 {/* Pagination mode */}
@@ -1549,15 +1522,12 @@ function BrowsePage() {
                   </div>
                 )}
 
-                {/* Infinite scroll sentinel */}
-                {loadMode === 'scroll' && (
-                  <div ref={scrollSentinelRef} className="flex justify-center py-4">
-                    {(scrollLoading || isLoading) && <LoadingSpinner />}
-                    {!scrollHasMore && (
-                      <span className="text-xs text-vault-text-muted">
-                        {t('browse.noMoreResults')}
-                      </span>
-                    )}
+                {/* Scroll mode end indicator */}
+                {loadMode === 'scroll' && !scrollHasMore && (
+                  <div className="flex justify-center py-4">
+                    <span className="text-xs text-vault-text-muted">
+                      {t('browse.noMoreResults')}
+                    </span>
                   </div>
                 )}
               </>
@@ -1671,15 +1641,31 @@ function BrowsePage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                    {favDisplayGalleries.map((g) => (
+                  <VirtualGrid
+                    items={favDisplayGalleries}
+                    columns={{ base: 3, sm: 4, md: 5 }}
+                    gap={8}
+                    estimateHeight={220}
+                    renderItem={(g) => (
                       <GridCard
                         key={`${g.gid}-${g.token}`}
                         gallery={g}
                         onClick={() => navigateToGallery(g)}
                       />
-                    ))}
-                  </div>
+                    )}
+                    onLoadMore={
+                      loadMode === 'scroll'
+                        ? () => {
+                            if (favScrollHasMore && !favScrollLoading && !favLoading && favScrollNextCursor) {
+                              setFavScrollLoading(true)
+                              setFavCursor({ next: favScrollNextCursor })
+                            }
+                          }
+                        : undefined
+                    }
+                    hasMore={loadMode === 'scroll' ? favScrollHasMore : false}
+                    isLoading={loadMode === 'scroll' ? favScrollLoading || favLoading : false}
+                  />
                 )}
 
                 {/* Pagination mode — cursor-based prev/next */}
@@ -1714,15 +1700,12 @@ function BrowsePage() {
                   </div>
                 )}
 
-                {/* Infinite scroll sentinel */}
-                {loadMode === 'scroll' && (
-                  <div ref={favScrollSentinelRef} className="flex justify-center py-4">
-                    {(favScrollLoading || favLoading) && <LoadingSpinner />}
-                    {!favScrollHasMore && (
-                      <span className="text-xs text-vault-text-muted">
-                        {t('browse.noMoreFavorites')}
-                      </span>
-                    )}
+                {/* Scroll mode end indicator */}
+                {loadMode === 'scroll' && !favScrollHasMore && (
+                  <div className="flex justify-center py-4">
+                    <span className="text-xs text-vault-text-muted">
+                      {t('browse.noMoreFavorites')}
+                    </span>
                   </div>
                 )}
               </>
@@ -1769,15 +1752,19 @@ function BrowsePage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                    {popularData.galleries.map((g) => (
+                  <VirtualGrid
+                    items={popularData.galleries}
+                    columns={{ base: 3, sm: 4, md: 5 }}
+                    gap={8}
+                    estimateHeight={220}
+                    renderItem={(g) => (
                       <GridCard
                         key={`${g.gid}-${g.token}`}
                         gallery={g}
                         onClick={() => navigateToGallery(g)}
                       />
-                    ))}
-                  </div>
+                    )}
+                  />
                 )}
               </>
             )}
@@ -1845,15 +1832,19 @@ function BrowsePage() {
                     ))}
                   </div>
                 ) : (
-                  <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 gap-2">
-                    {toplistData.galleries.map((g) => (
+                  <VirtualGrid
+                    items={toplistData.galleries}
+                    columns={{ base: 3, sm: 4, md: 5 }}
+                    gap={8}
+                    estimateHeight={220}
+                    renderItem={(g) => (
                       <GridCard
                         key={`${g.gid}-${g.token}`}
                         gallery={g}
                         onClick={() => navigateToGallery(g)}
                       />
-                    ))}
-                  </div>
+                    )}
+                  />
                 )}
 
                 {/* Toplist pagination */}

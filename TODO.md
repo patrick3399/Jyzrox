@@ -43,9 +43,9 @@
 - [x] `core/config.py` 新增 `pixiv_max_concurrency` / `pixiv_image_concurrency`
 
 ### 效能：Virtual Scrolling
-- [ ] Library 頁面導入虛擬滾動（react-window 或 tanstack-virtual），避免滾動多頁後 DOM 膨脹
-- [ ] Browse 頁面同步導入虛擬滾動
-- [ ] History 頁面改為 infinite scroll + 虛擬滾動（目前為手動按鈕）
+- [x] Library 頁面導入虛擬滾動（react-window 或 tanstack-virtual），避免滾動多頁後 DOM 膨脹
+- [x] Browse 頁面同步導入虛擬滾動
+- [x] History 頁面改為 infinite scroll + 虛擬滾動（目前為手動按鈕）
 
 ### Settings UI 功能開關
 - [ ] CSRF 保護開關（環境變數 `CSRF_ENABLED` + Settings UI toggle）
