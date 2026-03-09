@@ -144,7 +144,9 @@ _SQLITE_SCHEMA = [
         parent_id INTEGER REFERENCES galleries(id),
         download_status TEXT DEFAULT 'proxy_only',
         import_mode TEXT,
-        tags_array TEXT DEFAULT '[]'
+        tags_array TEXT DEFAULT '[]',
+        last_scanned_at TIMESTAMP,
+        library_path TEXT
     )
     """,
     """

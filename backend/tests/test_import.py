@@ -36,13 +36,16 @@ async def _gallery_count(db_session) -> int:
 class TestStartImport:
     """POST /api/import/ — start a local import job."""
 
-    async def test_import_valid_link_mode(self, client, db_session, db_session_factory):
-        """Valid request with mode=link should create a gallery and enqueue a job.
+    async def test_import_valid_copy_mode_explicit(self, client, db_session, db_session_factory):
+        """Valid request with mode=copy should create a gallery and enqueue a job.
 
         The import router imports async_session lazily inside the function body via
         `from core.database import async_session`. Since core.database is a fake
         module injected into sys.modules before any imports, we patch its
         `async_session` attribute directly on that module object.
+
+        Paths must be within a configured library path (not data_gallery_path),
+        so we mock get_all_library_paths to return a test library root.
         """
         import sys
 
@@ -50,14 +53,15 @@ class TestStartImport:
         original = fake_db.async_session
         fake_db.async_session = db_session_factory
         try:
-            gallery_path = "/data/gallery/my_series"
+            gallery_path = "/mnt/test_lib/my_series"
             with (
                 patch("core.config.settings.data_gallery_path", "/data/gallery"),
+                patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
                 patch("os.path.realpath", side_effect=lambda p: p),
             ):
                 resp = await client.post(
                     "/api/import/",
-                    json={"source_dir": gallery_path, "mode": "link"},
+                    json={"source_dir": gallery_path, "mode": "copy"},
                 )
         finally:
             fake_db.async_session = original
@@ -76,9 +80,10 @@ class TestStartImport:
         original = fake_db.async_session
         fake_db.async_session = db_session_factory
         try:
-            gallery_path = "/data/gallery/another_series"
+            gallery_path = "/mnt/test_lib/another_series"
             with (
                 patch("core.config.settings.data_gallery_path", "/data/gallery"),
+                patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
                 patch("os.path.realpath", side_effect=lambda p: p),
             ):
                 resp = await client.post(
@@ -99,16 +104,17 @@ class TestStartImport:
         original = fake_db.async_session
         fake_db.async_session = db_session_factory
         try:
-            gallery_path = "/data/gallery/titled_gallery"
+            gallery_path = "/mnt/test_lib/titled_gallery"
             with (
                 patch("core.config.settings.data_gallery_path", "/data/gallery"),
+                patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
                 patch("os.path.realpath", side_effect=lambda p: p),
             ):
                 resp = await client.post(
                     "/api/import/",
                     json={
                         "source_dir": gallery_path,
-                        "mode": "link",
+                        "mode": "copy",
                         "metadata": {"title": "My Custom Title"},
                     },
                 )
@@ -132,20 +138,20 @@ class TestStartImport:
             json={"source_dir": "/data/gallery/foo", "mode": "move"},
         )
         assert resp.status_code == 400
-        assert "Invalid import mode" in resp.json()["detail"]
+        assert "Only copy mode is supported" in resp.json()["detail"]
 
     async def test_import_path_outside_gallery_returns_400(self, client):
-        """source_dir outside the allowed gallery path should return 400."""
+        """source_dir outside the allowed library paths should return 400."""
         with (
             patch("core.config.settings.data_gallery_path", "/data/gallery"),
             patch("os.path.realpath", side_effect=lambda p: p),
         ):
             resp = await client.post(
                 "/api/import/",
-                json={"source_dir": "/tmp/evil_dir", "mode": "link"},
+                json={"source_dir": "/tmp/evil_dir", "mode": "copy"},
             )
         assert resp.status_code == 400
-        assert "gallery path" in resp.json()["detail"].lower()
+        assert "library path" in resp.json()["detail"].lower()
 
     async def test_import_path_traversal_returns_400(self, client):
         """Path traversal attempt should be rejected."""
@@ -155,27 +161,29 @@ class TestStartImport:
         ):
             resp = await client.post(
                 "/api/import/",
-                json={"source_dir": "/data/gallery/../../../etc/passwd", "mode": "link"},
+                json={"source_dir": "/data/gallery/../../../etc/passwd", "mode": "copy"},
             )
         assert resp.status_code == 400
 
     async def test_import_enqueues_arq_job(self, client, db_session, db_session_factory):
         """After a valid import request the ARQ job should be enqueued."""
         import sys
+
         from main import app
 
         fake_db = sys.modules["core.database"]
         original = fake_db.async_session
         fake_db.async_session = db_session_factory
         try:
-            gallery_path = "/data/gallery/arq_test"
+            gallery_path = "/mnt/test_lib/arq_test"
             with (
                 patch("core.config.settings.data_gallery_path", "/data/gallery"),
+                patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
                 patch("os.path.realpath", side_effect=lambda p: p),
             ):
                 resp = await client.post(
                     "/api/import/",
-                    json={"source_dir": gallery_path, "mode": "link"},
+                    json={"source_dir": gallery_path, "mode": "copy"},
                 )
         finally:
             fake_db.async_session = original
@@ -189,13 +197,13 @@ class TestStartImport:
         """Unauthenticated request should return 401."""
         resp = await unauthed_client.post(
             "/api/import/",
-            json={"source_dir": "/data/gallery/foo", "mode": "link"},
+            json={"source_dir": "/data/gallery/foo", "mode": "copy"},
         )
         assert resp.status_code == 401
 
     async def test_import_missing_source_dir_returns_422(self, client):
         """Missing source_dir field should return 422 validation error."""
-        resp = await client.post("/api/import/", json={"mode": "link"})
+        resp = await client.post("/api/import/", json={"mode": "copy"})
         assert resp.status_code == 422
 
 
