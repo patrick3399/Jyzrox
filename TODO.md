@@ -27,8 +27,8 @@
 - [x] `GET /opds/gallery/{id}` — 回傳 OPDS-PSE 頁面列表，每頁有 `pse:index`、image link、thumbnail link
 - [x] 無 Authorization header → 401 + `WWW-Authenticate: Basic realm="Jyzrox OPDS"` header
 - [x] 錯誤密碼 → 401
-- [ ] nginx `auth_request` 用 Basic Auth 存取 `/media/cas/` 和 `/media/thumbs/` → 200
-- [ ] 實際 OPDS client 測試（Panels iOS / KOReader / Chunky）連線瀏覽 + 圖片載入
+- [ ] nginx `auth_request` 用 Basic Auth 存取 `/media/cas/` 和 `/media/thumbs/` → 200 ⚠️ 需要 running nginx 容器
+- [ ] 實際 OPDS client 測試（Panels iOS / KOReader / Chunky）連線瀏覽 + 圖片載入 ⚠️ 需要實體裝置
 
 ### External API 增強測試（X-API-Token Auth）
 - [x] `GET /api/external/v1/galleries/{id}/images` — 回傳含 `file_url` 和 `thumb_url` 欄位
@@ -40,15 +40,15 @@
 - [x] 多參數組合：`?q=test&favorited=true&min_rating=3&source=ehentai` — 正確 AND 過濾
 
 ### Mihon Extension 測試
-- [ ] `./gradlew assembleDebug` 編譯通過
-- [ ] 安裝到 Android 裝置/模擬器，Mihon 偵測到 Jyzrox 擴充
-- [ ] 設定 Server URL + API Token 後，Popular 頁面載入 gallery 列表
-- [ ] 搜尋功能：輸入關鍵字回傳正確結果
-- [ ] Filter 測試：Source / Rating / Favorites 各篩選功能正常
-- [ ] Gallery detail 顯示正確 metadata（title、author、tags、頁數）
-- [ ] Chapter list 回傳 1 個 chapter
-- [ ] Page list 載入完整圖片列表，圖片正常顯示
-- [ ] 無 Token / 錯誤 Token → 適當錯誤提示
+- [ ] `./gradlew assembleDebug` 編譯通過 ⚠️ 需要 Android SDK / Gradle
+- [ ] 安裝到 Android 裝置/模擬器，Mihon 偵測到 Jyzrox 擴充 ⚠️ 需要 Android 裝置
+- [ ] 設定 Server URL + API Token 後，Popular 頁面載入 gallery 列表 ⚠️ 需要 Android 裝置
+- [ ] 搜尋功能：輸入關鍵字回傳正確結果 ⚠️ 需要 Android 裝置
+- [ ] Filter 測試：Source / Rating / Favorites 各篩選功能正常 ⚠️ 需要 Android 裝置
+- [ ] Gallery detail 顯示正確 metadata（title、author、tags、頁數） ⚠️ 需要 Android 裝置
+- [ ] Chapter list 回傳 1 個 chapter ⚠️ 需要 Android 裝置
+- [ ] Page list 載入完整圖片列表，圖片正常顯示 ⚠️ 需要 Android 裝置
+- [ ] 無 Token / 錯誤 Token → 適當錯誤提示 ⚠️ 需要 Android 裝置
 
 ---
 
@@ -89,7 +89,7 @@
 - [ ] `core/config.py` 新增 `pixiv_max_concurrency` / `pixiv_image_concurrency`
 
 ### i18n 補完
-- [ ] 韓文翻譯補齊缺失的 28 keys（ko.ts 511 → 539）
+- [x] 韓文翻譯補齊缺失的 28 keys（ko.ts 511 → 539）
 - [ ] 使用者 locale 偏好存入 DB（目前僅 localStorage，換裝置需重選）
 
 ### 效能
