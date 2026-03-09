@@ -65,3 +65,13 @@ async def set_credential(source: str, value: str, cred_type: str) -> None:
         )
         await session.execute(stmt)
         await session.commit()
+
+
+async def list_credentials() -> list[dict]:
+    """Return all credential sources with their configured status (values never exposed)."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Credential))
+        return [
+            {"source": c.source, "credential_type": c.credential_type, "configured": True}
+            for c in result.scalars().all()
+        ]

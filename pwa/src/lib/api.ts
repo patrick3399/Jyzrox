@@ -26,6 +26,7 @@ import type {
   SavedSearch,
   BlockedTag,
   CacheStats,
+  PluginInfo,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -50,7 +51,8 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
       throw new Error('Unauthorized')
     }
     const body = await res.json().catch(() => ({}))
-    const msg = body?.detail || `HTTP ${res.status}`
+    const raw = body?.detail
+    const msg = typeof raw === 'string' ? raw : raw ? JSON.stringify(raw) : `HTTP ${res.status}`
     throw new Error(msg)
   }
 
@@ -313,7 +315,7 @@ const settings = {
   setEhCookies: (data: {
     ipb_member_id: string
     ipb_pass_hash: string
-    sk: string
+    sk?: string
     igneous?: string
   }) =>
     apiFetch<{ status: string; account: EhAccount }>('/api/settings/credentials/ehentai', {
@@ -350,8 +352,23 @@ const settings = {
       { method: 'POST' },
     ),
 
-  deleteCredential: (source: 'ehentai' | 'pixiv') =>
+  setGenericCookie: (source: string, cookies: Record<string, string>) =>
+    apiFetch<{ status: string; source: string }>('/api/settings/credentials/generic', {
+      method: 'POST',
+      body: JSON.stringify({ source, cookies }),
+    }),
+
+  deleteCredential: (source: string) =>
     apiFetch<{ status: string }>(`/api/settings/credentials/${source}`, { method: 'DELETE' }),
+
+  getEhSite: () =>
+    apiFetch<{ use_ex: boolean }>('/api/settings/eh-site'),
+
+  setEhSite: (use_ex: boolean) =>
+    apiFetch<{ use_ex: boolean }>('/api/settings/eh-site', {
+      method: 'PATCH',
+      body: JSON.stringify({ use_ex }),
+    }),
 
   getAlerts: () => apiFetch<{ alerts: string[] }>('/api/settings/alerts'),
 
@@ -630,6 +647,12 @@ const exportApi = {
   kohyaUrl: (galleryId: number): string => `/api/export/kohya/${galleryId}`,
 }
 
+// ── Plugins ──────────────────────────────────────────────────────────
+
+const plugins = {
+  list: () => apiFetch<{ plugins: PluginInfo[] }>('/api/plugins/'),
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
 export const api = {
@@ -645,4 +668,5 @@ export const api = {
   import_,
   history,
   savedSearches,
+  plugins,
 }

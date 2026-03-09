@@ -29,6 +29,7 @@ async def download_eh_gallery(
     concurrency: int = 3,
     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
     cancel_key: str | None = None,
+    cancel_check: Callable[[], Awaitable[bool]] | None = None,
 ) -> dict:
     """Download all images of an EH gallery using native EhClient.
 
@@ -40,7 +41,9 @@ async def download_eh_gallery(
         output_dir: Directory to save images
         concurrency: Number of parallel image downloads
         on_progress: Async callback(downloaded_count, total_pages)
-        cancel_key: Redis key to check for cancellation
+        cancel_key: Redis key to check for cancellation (direct / legacy callers)
+        cancel_check: Async callable that returns True when the download should
+            be cancelled (plugin path; takes precedence over cancel_key)
 
     Returns:
         {"status": "done"|"cancelled"|"failed", "downloaded": int, "total": int, "failed_pages": list}
@@ -89,6 +92,13 @@ async def download_eh_gallery(
         lock = asyncio.Lock()
 
         async def _check_cancel() -> bool:
+            # Prefer the injected cancel_check callable (plugin path); fall back
+            # to the Redis cancel_key (direct / legacy callers).
+            if cancel_check is not None:
+                try:
+                    return await cancel_check()
+                except Exception:
+                    return False
             if not cancel_key:
                 return False
             try:

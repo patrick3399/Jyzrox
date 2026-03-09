@@ -251,3 +251,12 @@ class LibraryPath(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     monitor: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class PluginConfig(Base):
+    __tablename__ = "plugin_config"
+
+    source_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    config_json: Mapped[dict] = mapped_column(JSONB, default=dict)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

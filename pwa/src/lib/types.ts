@@ -137,10 +137,7 @@ export interface CredentialStatus {
   configured: boolean
 }
 
-export interface Credentials {
-  ehentai: CredentialStatus
-  pixiv: CredentialStatus
-}
+export type Credentials = Record<string, CredentialStatus>
 
 export interface EhAccount {
   valid: boolean
@@ -270,6 +267,35 @@ export interface TagListResponse {
   total?: number
   next_cursor?: string | null
   has_next?: boolean
+}
+
+// ── Plugin System ────────────────────────────────────────────────────
+
+export interface FieldDef {
+  name: string
+  field_type: 'text' | 'password' | 'textarea' | 'select'
+  label: string
+  required: boolean
+  placeholder: string
+}
+
+export interface BrowseSchema {
+  search_fields: FieldDef[]
+  supports_favorites: boolean
+  supports_popular: boolean
+  supports_toplist: boolean
+}
+
+export interface PluginInfo {
+  name: string
+  source_id: string
+  version: string
+  url_patterns: string[]
+  credential_schema: FieldDef[]
+  has_browse: boolean
+  browse_schema: BrowseSchema | null
+  credential_configured: boolean
+  enabled: boolean
 }
 
 // ── API Params ────────────────────────────────────────────────────────

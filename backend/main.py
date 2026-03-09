@@ -19,6 +19,8 @@ from routers import (
     history,
     import_router,
     library,
+    opds,
+    plugins as plugins_router,
     search,
     system,
     tag,
@@ -39,6 +41,9 @@ async def lifespan(app: FastAPI):
     await init_redis()
     app.state.arq = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     logger.info("Redis + ARQ pool ready")
+    from plugins import init_plugins
+    await init_plugins()
+    logger.info("Plugins initialized")
     yield
     logger.info("Shutting down...")
     await app.state.arq.aclose()
@@ -81,6 +86,8 @@ app.include_router(import_router.router, prefix="/api/import")
 app.include_router(export.router, prefix="/api/export")
 app.include_router(external.router, prefix="/api/external/v1")
 app.include_router(history.router, prefix="/api/history")
+app.include_router(plugins_router.router, prefix="/api/plugins")
+app.include_router(opds.router, prefix="/opds")
 
 
 @app.get("/api/health")

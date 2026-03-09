@@ -254,3 +254,12 @@ CREATE INDEX IF NOT EXISTS idx_blobs_phash_q3 ON blobs(phash_q3) WHERE phash_q3 
 
 CREATE INDEX IF NOT EXISTS idx_galleries_library_path ON galleries (library_path);
 CREATE INDEX IF NOT EXISTS idx_galleries_last_scanned ON galleries (last_scanned_at NULLS FIRST);
+
+-- ── Plugin Config ────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS plugin_config (
+    source_id   TEXT PRIMARY KEY,
+    enabled     BOOLEAN DEFAULT TRUE,
+    config_json JSONB DEFAULT '{}',
+    updated_at  TIMESTAMPTZ DEFAULT NOW()
+);

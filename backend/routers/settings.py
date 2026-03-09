@@ -16,9 +16,10 @@ from sqlalchemy import select, text
 from core.auth import require_auth
 from core.config import settings as app_settings
 from core.database import async_session
+from core.redis_client import get_redis
 from db.models import Credential
 from services.cache import get_system_alerts, push_system_alert
-from services.credential import get_credential, set_credential
+from services.credential import get_credential, list_credentials, set_credential
 from services.eh_client import EhClient
 
 logger = logging.getLogger(__name__)
@@ -31,7 +32,7 @@ router = APIRouter(tags=["settings"])
 class EhCookieRequest(BaseModel):
     ipb_member_id: str
     ipb_pass_hash: str
-    sk: str
+    sk: str | None = None
     igneous: str | None = None
 
 
@@ -57,14 +58,26 @@ class RateLimitPatch(BaseModel):
     enabled: bool | None = None
 
 
+class EhSitePreference(BaseModel):
+    use_ex: bool
+
+
+class GenericCookieRequest(BaseModel):
+    source: str
+    cookies: dict[str, str]
+
+
 # ── Credentials ──────────────────────────────────────────────────────
 
 
 @router.get("/credentials")
-async def list_credentials(_: dict = Depends(require_auth)):
+async def list_credentials_endpoint(_: dict = Depends(require_auth)):
     """Which credential sources are configured (values never exposed)."""
-    sources = ["ehentai", "pixiv"]
-    return {src: {"configured": (await get_credential(src)) is not None} for src in sources}
+    all_creds = await list_credentials()
+    result = {}
+    for c in all_creds:
+        result[c["source"]] = {"configured": True}
+    return result
 
 
 @router.post("/credentials/ehentai/login")
@@ -83,7 +96,11 @@ async def eh_login_with_password(
                 "CookieDate": "1",
                 "temporary_https": "off",
             },
-            headers={"Referer": "https://forums.e-hentai.org/index.php?act=Login&CODE=00"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36",
+                "Referer": "https://forums.e-hentai.org/index.php?act=Login&CODE=00",
+                "Origin": "https://forums.e-hentai.org",
+            },
         )
 
     ipb_member_id = resp.cookies.get("ipb_member_id")
@@ -97,7 +114,10 @@ async def eh_login_with_password(
         follow_redirects=True,
         timeout=15,
     ) as client:
-        resp2 = await client.get("https://e-hentai.org/")
+        resp2 = await client.get(
+            "https://e-hentai.org/",
+            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
+        )
     sk = resp2.cookies.get("sk", "")
 
     cookies = {"ipb_member_id": ipb_member_id, "ipb_pass_hash": ipb_pass_hash, "sk": sk}
@@ -110,7 +130,10 @@ async def eh_login_with_password(
             follow_redirects=True,
             timeout=15,
         ) as ex_client:
-            ex_resp = await ex_client.get("https://exhentai.org/")
+            ex_resp = await ex_client.get(
+                "https://exhentai.org/",
+                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
+            )
             igneous = ex_resp.cookies.get("igneous")
             if not igneous:
                 # Check if it was set on the initial response
@@ -143,21 +166,27 @@ async def set_eh_credentials(
     req: EhCookieRequest,
     _: dict = Depends(require_auth),
 ):
-    """Save E-Hentai cookies after verifying them."""
+    """Save E-Hentai cookies (no server-side validation — same as EhViewer)."""
     cookies = {
         "ipb_member_id": req.ipb_member_id,
         "ipb_pass_hash": req.ipb_pass_hash,
-        "sk": req.sk,
     }
+    if req.sk:
+        cookies["sk"] = req.sk
     if req.igneous:
         cookies["igneous"] = req.igneous
-    use_ex = bool(req.igneous)
-    async with EhClient(cookies=cookies, use_ex=use_ex) as client:
-        if not await client.check_cookies():
-            raise HTTPException(status_code=400, detail="EH cookies are invalid")
-        account = await client.get_account_info()
 
     await set_credential("ehentai", json.dumps(cookies), "cookie")
+
+    # Try to fetch account info but don't fail if it doesn't work
+    account: dict = {}
+    try:
+        use_ex = bool(req.igneous)
+        async with EhClient(cookies=cookies, use_ex=use_ex) as client:
+            account = await client.get_account_info()
+    except Exception as exc:
+        logger.warning("EH account info fetch failed (cookies saved anyway): %s", exc)
+
     return {"status": "ok", "account": account}
 
 
@@ -344,14 +373,26 @@ async def set_pixiv_cookie_credentials(
 
 
 
+@router.post("/credentials/generic")
+async def set_generic_cookie(
+    req: GenericCookieRequest,
+    _: dict = Depends(require_auth),
+):
+    """Save cookies for any site (twitter, instagram, danbooru, etc.)."""
+    if not req.source.strip():
+        raise HTTPException(status_code=400, detail="Source name is required")
+    if not req.cookies:
+        raise HTTPException(status_code=400, detail="At least one cookie is required")
+    await set_credential(req.source.strip().lower(), json.dumps(req.cookies), "cookie")
+    return {"status": "ok", "source": req.source.strip().lower()}
+
+
 @router.delete("/credentials/{source}")
 async def delete_credential_endpoint(
     source: str,
     _: dict = Depends(require_auth),
 ):
-    """Delete stored credential for a source (ehentai, pixiv)."""
-    if source not in ("ehentai", "pixiv"):
-        raise HTTPException(status_code=400, detail="Invalid source")
+    """Delete stored credential for a source."""
     async with async_session() as session:
         result = await session.execute(
             select(Credential).where(Credential.source == source)
@@ -446,6 +487,32 @@ async def patch_rate_limit_settings(
     return {
         "enabled": app_settings.rate_limit_enabled,
     }
+
+
+# ── EH Site Preference ───────────────────────────────────────────────
+
+
+@router.get("/eh-site")
+async def get_eh_site_preference(_: dict = Depends(require_auth)):
+    """Get current E-Hentai / ExHentai preference."""
+    redis = get_redis()
+    pref = await redis.get("setting:eh_use_ex")
+    if pref is not None:
+        use_ex = pref == b"1"
+    else:
+        use_ex = app_settings.eh_use_ex
+    return {"use_ex": use_ex}
+
+
+@router.patch("/eh-site")
+async def set_eh_site_preference(
+    req: EhSitePreference,
+    _: dict = Depends(require_auth),
+):
+    """Toggle between E-Hentai and ExHentai."""
+    redis = get_redis()
+    await redis.set("setting:eh_use_ex", "1" if req.use_ex else "0")
+    return {"use_ex": req.use_ex}
 
 
 # ── Alerts ───────────────────────────────────────────────────────────

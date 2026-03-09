@@ -20,6 +20,8 @@ import {
   X,
   PackageOpen,
   FolderInput,
+  Key,
+  Puzzle,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
@@ -36,6 +38,8 @@ const navLinks = [
   { href: '/tags', label: () => t('nav.tags'), icon: Tags },
   { href: '/export', label: () => t('nav.export'), icon: PackageOpen },
   { href: '/import', label: () => t('nav.import'), icon: FolderInput },
+  { href: '/credentials', label: () => t('nav.credentials'), icon: Key },
+  { href: '/plugins', label: () => t('nav.plugins'), icon: Puzzle },
   { href: '/settings', label: () => t('nav.settings'), icon: Settings },
 ]
 

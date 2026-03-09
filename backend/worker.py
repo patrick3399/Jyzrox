@@ -36,7 +36,6 @@ from db.models import Blob, DownloadJob, Gallery, GalleryTag, Image, Tag
 from services.cas import cas_path, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, store_blob, thumb_dir
 from services.credential import get_credential
 from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
-from services.eh_downloader import download_eh_gallery
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -56,6 +55,8 @@ _watcher = LibraryWatcher()
 async def startup(ctx: dict) -> None:
     logger.info("ARQ Worker started — Jyzrox")
     await init_redis()
+    from plugins import init_plugins
+    await init_plugins()
     r = ctx["redis"]
     for key in ("download:sem:ehentai", "download:sem:pixiv", "download:sem:other"):
         await r.delete(key)
@@ -115,230 +116,157 @@ async def download_job(
     db_job_id: str | None = None,
     total: int | None = None,
 ) -> dict:
-    """Download a gallery via gallery-dl with async subprocess and progress tracking."""
+    """Download a gallery via the plugin registry, falling back to gallery-dl."""
     logger.info("[download] url=%s", url)
 
     await _set_job_status(db_job_id, "running")
     started_at = datetime.now(UTC)
 
-    # Removed domain whitelist to allow any gallery-dl supported site
+    from plugins.registry import plugin_registry
+    from services.credential import list_credentials as _list_creds
 
-    # Pre-flight: check credentials for the source
-    cred_error = await _check_credentials(url)
-    if cred_error:
-        logger.error("[download] %s", cred_error)
-        await _set_job_status(db_job_id, "failed", cred_error)
-        return {"status": "failed", "error": cred_error}
+    # Find the plugin that handles this URL
+    plugin = await plugin_registry.get_handler(url)
+    if not plugin:
+        plugin = plugin_registry.get_fallback()
+    if not plugin:
+        err = "No plugin can handle this URL"
+        logger.error("[download] %s", err)
+        await _set_job_status(db_job_id, "failed", err)
+        return {"status": "failed", "error": err}
 
-    # Native EH download path (bypasses gallery-dl)
-    if _detect_source(url) == "ehentai":
-        return await _eh_native_download(ctx, url, db_job_id, total)
+    source_id = plugin.meta.source_id
 
-    sem = DownloadSemaphore(_detect_source(url))
+    # Load credentials
+    if source_id == "gallery_dl":
+        # gallery-dl needs ALL credentials to build its config file
+        all_creds = await _list_creds()
+        credentials: dict | str | None = {}
+        for c in all_creds:
+            val = await get_credential(c["source"])
+            if val:
+                credentials[c["source"]] = val  # type: ignore[index]
+    else:
+        credentials = await get_credential(source_id)
+
+    # Credential gate for sources that require it
+    if source_id == "ehentai" and not credentials:
+        err = "E-Hentai credentials not configured. Go to Credentials to add cookies."
+        logger.error("[download] %s", err)
+        await _set_job_status(db_job_id, "failed", err)
+        return {"status": "failed", "error": err}
+
+    # Determine output directory
+    if source_id == "ehentai":
+        m = EH_GALLERY_URL_RE.search(url)
+        if m:
+            target_dir = Path(settings.data_gallery_path) / "ehentai" / m.group(1)
+        else:
+            target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
+    else:
+        target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
+
+    # Semaphore — use source_id as the semaphore key (maps to existing keys)
+    sem_key = _detect_source(url)
+    sem = DownloadSemaphore(sem_key)
     _base_progress: dict = {} if total is None else {"total": total}
     await _set_job_progress(db_job_id, {**_base_progress, "status_text": "Waiting for download slot..."})
-    async with sem.acquire():
-        await _build_gallery_dl_config(url)
-        
-        # Isolate this job's downloads into a specific UUID directory
-        target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
-        
-        cmd = [
-            "gallery-dl",
-            "--config-ignore",
-            "--config",
-            settings.gallery_dl_config,
-            "--write-metadata",
-            "--write-tags",
-            "--directory",
-            str(target_dir),
-            url,
-        ]
 
-        redis = ctx["redis"]
-        pid_key = f"download:pid:{db_job_id}" if db_job_id else None
+    # Progress callback
+    async def on_progress(downloaded: int, total_pages: int) -> None:
+        elapsed = (datetime.now(UTC) - started_at).total_seconds()
+        speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
+        status_text = (
+            f"Downloading... ({downloaded}/{total_pages})" if total_pages > 0 else "Downloading..."
+        )
+        await _set_job_progress(db_job_id, {
+            **_base_progress,
+            **({"total": total_pages} if total_pages > 0 else {}),
+            "downloaded": downloaded,
+            "started_at": started_at.isoformat(),
+            "last_update_at": datetime.now(UTC).isoformat(),
+            "speed": speed,
+            "status_text": status_text,
+        })
 
+    # Cancel check — reads the Redis cancel key set by the cancel endpoint
+    redis = ctx["redis"]
+    cancel_key = f"download:cancel:{db_job_id}" if db_job_id else None
+
+    async def cancel_check() -> bool:
+        if not cancel_key:
+            return False
         try:
-            proc = await asyncio.create_subprocess_exec(
-                *cmd,
-                stdout=asyncio.subprocess.PIPE,
-                stderr=asyncio.subprocess.PIPE,
-            )
-        except OSError as exc:
-            err = f"Failed to start gallery-dl: {exc}"
-            logger.error("[download] %s", err)
-            await _set_job_status(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
+            val = await redis.get(cancel_key)
+            return val is not None
+        except Exception:
+            return False
 
-        # Store PID in Redis for pause/resume and cancel
+    # PID callback for gallery-dl pause/resume
+    pid_key = f"download:pid:{db_job_id}" if db_job_id else None
+
+    async def pid_callback(pid: int) -> None:
         if pid_key:
             try:
-                await redis.set(pid_key, proc.pid, ex=3600)
+                await redis.set(pid_key, pid, ex=3600)
             except Exception as exc:
                 logger.warning("[download] failed to store PID in Redis: %s", exc)
 
-        # Stream stdout line by line to track progress
-        downloaded = 0
-        last_progress_update = asyncio.get_event_loop().time()
-
-        async def _read_stdout() -> None:
-            nonlocal downloaded, last_progress_update
-            assert proc.stdout is not None
-            async for raw_line in proc.stdout:
-                line = raw_line.decode("utf-8", errors="replace").rstrip()
-                if _FILE_PATH_RE.search(line) or _IMAGE_EXT_RE.search(line):
-                    downloaded += 1
-                    now = asyncio.get_event_loop().time()
-                    if downloaded % _PROGRESS_EVERY_N == 0 or (now - last_progress_update) >= _PROGRESS_EVERY_S:
-                        last_progress_update = now
-                        elapsed = (datetime.now(UTC) - started_at).total_seconds()
-                        speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
-                        await _set_job_progress(db_job_id, {
-                            **_base_progress,
-                            "downloaded": downloaded,
-                            "started_at": started_at.isoformat(),
-                            "last_update_at": datetime.now(UTC).isoformat(),
-                            "speed": speed,
-                            "status_text": "Downloading...",
-                        })
-
+    async with sem.acquire():
         try:
-            # Read stdout concurrently while waiting for the process; apply a
-            # generous timeout matching the ARQ job_timeout setting.
-            await asyncio.wait_for(
-                asyncio.gather(_read_stdout(), proc.wait()),
-                timeout=3600,
+            result = await plugin.download(
+                url=url,
+                dest_dir=target_dir,
+                credentials=credentials,
+                on_progress=on_progress,
+                cancel_check=cancel_check,
+                pid_callback=pid_callback,
             )
-        except TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            logger.error("[download] timeout: %s", url)
-            # PID key cleanup handled in finally below
-            await _set_job_status(db_job_id, "failed", "download timeout after 3600s")
-            return {"status": "failed", "error": "timeout"}
+        except Exception as exc:
+            err = f"Download failed: {exc}"
+            logger.error("[download] %s", err, exc_info=True)
+            await _set_job_status(db_job_id, "failed", err)
+            return {"status": "failed", "error": err}
         finally:
-            # Always clean up the PID key once the process is done or killed
             if pid_key:
                 try:
                     await redis.delete(pid_key)
                 except Exception:
                     pass
 
-        # Collect stderr for error reporting
-        stderr_bytes = await proc.stderr.read() if proc.stderr else b""
-        stderr_text = stderr_bytes.decode("utf-8", errors="replace")
+    if result.status == "cancelled":
+        await _set_job_status(db_job_id, "cancelled")
+        return {"status": "cancelled"}
 
-        if proc.returncode != 0:
-            err = stderr_text[:500]
-            logger.error("[download] gallery-dl error:\n%s", stderr_text)
-            await _set_job_status(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
+    if result.status == "failed":
+        err = result.error or "Download failed"
+        await _set_job_status(db_job_id, "failed", err)
+        return {"status": "failed", "error": err}
 
-        logger.info("[download] done: %s (files=%d)", url, downloaded)
+    # Final progress update
+    elapsed = (datetime.now(UTC) - started_at).total_seconds()
+    speed = round(result.downloaded / elapsed, 3) if elapsed > 0 else 0
+    await _set_job_progress(db_job_id, {
+        **_base_progress,
+        "total": result.total or result.downloaded,
+        "downloaded": result.downloaded,
+        "started_at": started_at.isoformat(),
+        "last_update_at": datetime.now(UTC).isoformat(),
+        "speed": speed,
+        "status_text": "Complete",
+    })
 
-        # Final progress update with total count
-        elapsed = (datetime.now(UTC) - started_at).total_seconds()
-        speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
-        await _set_job_progress(db_job_id, {
-            **_base_progress,
-            "downloaded": downloaded,
-            "started_at": started_at.isoformat(),
-            "last_update_at": datetime.now(UTC).isoformat(),
-            "speed": speed,
-            "status_text": "Complete",
-        })
+    # Trigger import
+    if target_dir.exists():
+        await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id)
 
-        # Trigger import for the target directory
-        if target_dir.exists():
-            await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id)
+    await _set_job_status(db_job_id, "done")
 
-        await _set_job_status(db_job_id, "done")
-        return {"status": "done", "downloaded": downloaded}
+    if result.failed_pages:
+        logger.warning("[download] %d pages failed: %s", len(result.failed_pages), result.failed_pages)
 
-
-async def _check_credentials(url: str) -> str | None:
-    """Return an error message if required credentials are missing, else None."""
-    is_pixiv = "pixiv.net" in url
-    is_eh = "e-hentai.org" in url or "exhentai.org" in url
-    is_twitter = "twitter.com" in url or "x.com" in url
-
-    if is_pixiv:
-        cred = await get_credential("pixiv")
-        if not cred:
-            return "Pixiv credentials not configured. Go to Credentials to add your refresh token."
-    elif is_eh:
-        cred = await get_credential("ehentai")
-        if not cred:
-            return "E-Hentai credentials not configured. Go to Credentials to add cookies."
-    elif is_twitter:
-        cred = await get_credential("twitter")
-        if not cred:
-            return "Twitter cookies not configured. Go to Credentials to add cookies (auth_token, ct0)."
-    return None
-
-
-def _source_to_extractor(source: str) -> str:
-    """Map our source name to gallery-dl extractor name."""
-    mapping = {
-        "twitter": "twitter",
-        "instagram": "instagram",
-        "danbooru": "danbooru",
-        "kemono": "kemono",
-        "gelbooru": "gelbooru",
-        "sankaku": "sankakucomplex",
-    }
-    return mapping.get(source, source)
-
-
-async def _build_gallery_dl_config(url: str) -> None:
-    """Write source-specific credentials into the gallery-dl config file."""
-    config: dict = {
-        "extractor": {
-            "base-directory": settings.data_gallery_path,
-            "directory": [],
-        },
-    }
-
-    is_eh = "e-hentai.org" in url or "exhentai.org" in url
-    is_pixiv = "pixiv.net" in url
-
-    if is_eh:
-        cred_json = await get_credential("ehentai")
-        if cred_json:
-            cookies = json.loads(cred_json)
-            # Apply to both e-hentai and exhentai extractors
-            config["extractor"]["exhentai"] = {"cookies": cookies}
-            config["extractor"]["e-hentai"] = {"cookies": cookies}
-    elif is_pixiv:
-        token = await get_credential("pixiv")
-        if token:
-            config["extractor"]["pixiv"] = {"refresh-token": token}
-
-    # Inject all generic cookie credentials into their respective extractors
-    from services.credential import list_credentials as _list_creds
-    all_creds = await _list_creds()
-    for cred_info in all_creds:
-        src = cred_info["source"]
-        if src in ("ehentai", "pixiv"):
-            continue  # already handled above with special logic
-        if cred_info["credential_type"] != "cookie":
-            continue
-        cred_val = await get_credential(src)
-        if cred_val:
-            try:
-                cookie_dict = json.loads(cred_val)
-                # Map source name to gallery-dl extractor name
-                extractor_name = _source_to_extractor(src)
-                config["extractor"][extractor_name] = {"cookies": cookie_dict}
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("Invalid cookie JSON for source %s, skipping", src)
-
-    config_path = Path(settings.gallery_dl_config)
-    tmp_path = config_path.with_suffix(".tmp")
-    tmp_path.write_text(json.dumps(config, indent=2))
-    os.rename(tmp_path, config_path)
+    logger.info("[download] done: %s (downloaded=%d)", url, result.downloaded)
+    return {"status": "done", "downloaded": result.downloaded}
 
 
 def _detect_source(url: str) -> str:
@@ -352,109 +280,6 @@ def _detect_source(url: str) -> str:
     except Exception:
         pass
     return "other"
-
-
-async def _eh_native_download(ctx: dict, url: str, db_job_id: str | None, total: int | None) -> dict:
-    """Native EH download using EhClient instead of gallery-dl."""
-    logger.info("[download] native EH path: %s", url)
-    started_at = datetime.now(UTC)
-
-    # Parse gid and token from URL
-    m = EH_GALLERY_URL_RE.search(url)
-    if not m:
-        err = f"Cannot parse EH gallery URL: {url}"
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
-
-    gid = int(m.group(1))
-    token = m.group(2)
-    use_ex = "exhentai.org" in url
-
-    # Load cookies
-    cred_json = await get_credential("ehentai")
-    if not cred_json:
-        err = "E-Hentai credentials not configured"
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
-    cookies = json.loads(cred_json)
-
-    # Output directory
-    output_dir = Path(settings.data_gallery_path) / "ehentai" / str(gid)
-
-    # Cancel key in Redis
-    cancel_key = f"download:cancel:{db_job_id}" if db_job_id else None
-
-    # Progress callback
-    async def on_progress(downloaded: int, total_pages: int) -> None:
-        elapsed = (datetime.now(UTC) - started_at).total_seconds()
-        speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
-        await _set_job_progress(db_job_id, {
-            "total": total_pages,
-            "downloaded": downloaded,
-            "started_at": started_at.isoformat(),
-            "last_update_at": datetime.now(UTC).isoformat(),
-            "speed": speed,
-            "status_text": f"Downloading... ({downloaded}/{total_pages})",
-        })
-
-    sem = DownloadSemaphore("ehentai")
-    await _set_job_progress(db_job_id, {"status_text": "Waiting for download slot...", **({"total": total} if total else {})})
-
-    async with sem.acquire():
-        try:
-            result = await download_eh_gallery(
-                gid=gid,
-                token=token,
-                cookies=cookies,
-                use_ex=use_ex,
-                output_dir=output_dir,
-                concurrency=settings.eh_download_concurrency,
-                on_progress=on_progress,
-                cancel_key=cancel_key,
-            )
-        except PermissionError as exc:
-            err = str(exc)
-            logger.error("[download] EH permission error: %s", err)
-            await _set_job_status(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
-        except Exception as exc:
-            err = f"Native EH download failed: {exc}"
-            logger.error("[download] %s", err, exc_info=True)
-            await _set_job_status(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
-
-    if result["status"] == "cancelled":
-        await _set_job_status(db_job_id, "cancelled")
-        return {"status": "cancelled"}
-
-    if result["status"] == "failed":
-        err = result.get("error", "Download failed")
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
-
-    # Final progress
-    elapsed = (datetime.now(UTC) - started_at).total_seconds()
-    downloaded_count = result.get("downloaded", 0)
-    speed = round(downloaded_count / elapsed, 3) if elapsed > 0 else 0
-    await _set_job_progress(db_job_id, {
-        "total": result.get("total", downloaded_count),
-        "downloaded": downloaded_count,
-        "started_at": started_at.isoformat(),
-        "last_update_at": datetime.now(UTC).isoformat(),
-        "speed": speed,
-        "status_text": "Complete",
-    })
-
-    # Trigger import
-    if output_dir.exists():
-        await ctx["redis"].enqueue_job("import_job", str(output_dir), db_job_id)
-
-    await _set_job_status(db_job_id, "done")
-
-    if result.get("failed_pages"):
-        logger.warning("[download] %d pages failed: %s", len(result["failed_pages"]), result["failed_pages"])
-
-    return {"status": "done", "downloaded": downloaded_count}
 
 
 def _resolve_gallery_dir(url: str) -> Path | None:
