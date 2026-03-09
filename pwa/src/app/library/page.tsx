@@ -8,7 +8,7 @@ import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
-import { t } from '@/lib/i18n'
+import { t, formatNumber } from '@/lib/i18n'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -308,7 +308,7 @@ function LibraryContent() {
 
         {total !== undefined && (
           <div className="text-sm text-vault-text-muted mb-4">
-            {`${total.toLocaleString()} ${t('library.galleries')}`}
+            {`${formatNumber(total)} ${t('library.galleries')}`}
           </div>
         )}
 

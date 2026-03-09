@@ -299,6 +299,9 @@ const en: Record<string, string> = {
   'library.aiTags': 'AI Tags',
   'library.confidence': 'Confidence',
   'library.noAiTagsAboveThreshold': 'No AI tags above threshold',
+  'library.fileCount': '{count} file|{count} files',
+  'library.pageCount': '{count} page|{count} pages',
+  'library.galleryCount': '{count} gallery|{count} galleries',
 
   // ── Queue (extra) ──
   'queue.cancelError': 'Failed to cancel job',

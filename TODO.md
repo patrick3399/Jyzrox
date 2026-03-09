@@ -168,8 +168,8 @@
 - [ ] Tag 翻譯系統已有 — 確認前端有顯示翻譯後的 tag 名稱
 
 ### 前端 i18n 補完
-- [ ] 日期/數字格式化根據 locale（`Intl.DateTimeFormat` / `Intl.NumberFormat`）
-- [ ] 複數形式支援（1 file vs 2 files）
+- [x] 日期/數字格式化根據 locale（`Intl.DateTimeFormat` / `Intl.NumberFormat`）
+- [x] 複數形式支援（1 file vs 2 files）
 
 ---
 

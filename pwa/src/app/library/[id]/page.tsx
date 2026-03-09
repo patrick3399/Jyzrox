@@ -9,7 +9,7 @@ import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { TagBadge } from '@/components/TagBadge'
 import { RatingStars } from '@/components/RatingStars'
-import { t } from '@/lib/i18n'
+import { t, formatDate } from '@/lib/i18n'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
   character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
@@ -241,10 +241,10 @@ export default function GalleryDetailPage() {
                   { label: 'Pages', value: String(gallery.pages) },
                   {
                     label: 'Added',
-                    value: new Date(gallery.added_at).toLocaleDateString(),
+                    value: formatDate(gallery.added_at),
                   },
                   ...(gallery.posted_at
-                    ? [{ label: 'Posted', value: new Date(gallery.posted_at).toLocaleDateString() }]
+                    ? [{ label: 'Posted', value: formatDate(gallery.posted_at) }]
                     : []),
                 ].map(({ label, value }) => (
                   <div key={label}>

@@ -298,6 +298,9 @@ const zhTW: Record<string, string> = {
   'library.aiTags': 'AI 標籤',
   'library.confidence': '信心度',
   'library.noAiTagsAboveThreshold': '沒有超過閾值的 AI 標籤',
+  'library.fileCount': '{count} 個檔案',
+  'library.pageCount': '{count} 頁',
+  'library.galleryCount': '{count} 個圖庫',
 
   // ── Queue (extra) ──
   'queue.cancelError': '取消任務失敗',

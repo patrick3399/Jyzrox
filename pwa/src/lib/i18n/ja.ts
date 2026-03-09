@@ -299,6 +299,9 @@ const ja: Record<string, string> = {
   'library.aiTags': 'AI タグ',
   'library.confidence': '信頼度',
   'library.noAiTagsAboveThreshold': 'しきい値以上の AI タグなし',
+  'library.fileCount': '{count} ファイル',
+  'library.pageCount': '{count} ページ',
+  'library.galleryCount': '{count} ギャラリー',
 
   // ── Queue (extra) ──
   'queue.cancelError': 'ジョブのキャンセルに失敗しました',

@@ -299,6 +299,9 @@ const ko: Record<string, string> = {
   'library.aiTags': 'AI 태그',
   'library.confidence': '신뢰도',
   'library.noAiTagsAboveThreshold': '임계값 이상의 AI 태그 없음',
+  'library.fileCount': '{count}개 파일',
+  'library.pageCount': '{count} 페이지',
+  'library.galleryCount': '{count}개 갤러리',
 
   // ── Queue (extra) ──
   'queue.cancelError': '작업 취소 실패',
