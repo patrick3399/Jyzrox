@@ -123,7 +123,8 @@ _SQLITE_SCHEMA = [
         role TEXT DEFAULT 'admin',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_login_at TIMESTAMP,
-        avatar_style TEXT DEFAULT 'gravatar'
+        avatar_style TEXT DEFAULT 'gravatar',
+        locale TEXT DEFAULT 'en'
     )
     """,
     """

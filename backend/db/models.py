@@ -31,6 +31,7 @@ class User(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     avatar_style: Mapped[str] = mapped_column(Text, default="gravatar")
+    locale: Mapped[str] = mapped_column(Text, default="en")
 
 
 class Gallery(Base):

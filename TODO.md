@@ -90,7 +90,7 @@
 
 ### i18n 補完
 - [x] 韓文翻譯補齊缺失的 28 keys（ko.ts 511 → 539）
-- [ ] 使用者 locale 偏好存入 DB（目前僅 localStorage，換裝置需重選）
+- [x] 使用者 locale 偏好存入 DB（目前僅 localStorage，換裝置需重選）
 
 ### 效能
 - [ ] Gallery 列表頁大量資料效能優化（虛擬滾動 / infinite scroll）

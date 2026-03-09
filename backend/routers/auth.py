@@ -45,6 +45,7 @@ class ChangePasswordRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     email: str | None = None
     avatar_style: str | None = None
+    locale: str | None = None
 
 
 def _avatar_url(user_id: int, username: str, email: str | None, avatar_style: str) -> str:
@@ -300,7 +301,7 @@ async def get_profile(auth: dict = Depends(require_auth)):
     """Return current user's profile info."""
     async with async_session() as session:
         result = await session.execute(
-            text("SELECT username, email, role, created_at, avatar_style FROM users WHERE id = :uid"),
+            text("SELECT username, email, role, created_at, avatar_style, locale FROM users WHERE id = :uid"),
             {"uid": auth["user_id"]},
         )
         user = result.fetchone()
@@ -314,6 +315,7 @@ async def get_profile(auth: dict = Depends(require_auth)):
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "avatar_style": avatar_style,
         "avatar_url": _avatar_url(auth["user_id"], user.username, user.email, avatar_style),
+        "locale": user.locale,
     }
 
 
@@ -338,6 +340,12 @@ async def update_profile(req: UpdateProfileRequest, auth: dict = Depends(require
         if req.avatar_style not in ("gravatar", "manual"):
             raise HTTPException(status_code=400, detail="avatar_style must be 'gravatar' or 'manual'")
         update_values["avatar_style"] = req.avatar_style
+
+    if req.locale is not None:
+        valid_locales = ("en", "zh-TW", "ja", "ko")
+        if req.locale not in valid_locales:
+            raise HTTPException(status_code=400, detail=f"locale must be one of: {', '.join(valid_locales)}")
+        update_values["locale"] = req.locale
 
     if not update_values:
         return {"status": "ok"}

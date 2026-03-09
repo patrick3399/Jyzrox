@@ -124,9 +124,10 @@ const auth = {
       created_at: string | null
       avatar_url: string
       avatar_style: string
+      locale: string | null
     }>('/api/auth/profile'),
 
-  updateProfile: (data: { email?: string | null; avatar_style?: string }) =>
+  updateProfile: (data: { email?: string | null; avatar_style?: string; locale?: string }) =>
     apiFetch<{ status: string }>('/api/auth/profile', {
       method: 'PATCH',
       body: JSON.stringify(data),

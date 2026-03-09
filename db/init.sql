@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS users (
     role            TEXT DEFAULT 'admin',
     created_at      TIMESTAMPTZ DEFAULT now(),
     last_login_at   TIMESTAMPTZ,
-    avatar_style    TEXT DEFAULT 'gravatar'
+    avatar_style    TEXT DEFAULT 'gravatar',
+    locale          TEXT DEFAULT 'en'
 );
 
 -- No default user: first-run setup is done via POST /api/auth/setup
