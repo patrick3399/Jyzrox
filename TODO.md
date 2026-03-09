@@ -10,7 +10,7 @@
 
 ### 安全
 - [x] CSRF protection（目前 cookie-based auth 無 CSRF token）
-- [ ] Rate limiting 全端點覆蓋（目前僅 external API 有）
+- [x] Rate limiting 全端點覆蓋（目前僅 external API 有）
 
 ### Service Worker 版本管理
 - [ ] 自動版本管理 — build 時注入 hash 或時間戳到 `CACHE_NAME`
