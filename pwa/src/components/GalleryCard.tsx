@@ -1,6 +1,6 @@
 import type { Gallery, EhGallery } from '@/lib/types'
 import { RatingStars } from './RatingStars'
-import { DownloadStatusBadge } from './DownloadStatusBadge'
+import { t } from '@/lib/i18n'
 
 // ── Category colours ──────────────────────────────────────────────────
 
@@ -100,6 +100,15 @@ interface LibraryCardProps {
 export function LibraryGalleryCard({ gallery, thumbUrl, onClick }: LibraryCardProps) {
   const colors = getCategoryColors(gallery.category)
 
+  const sourceStyle = (() => {
+    if (gallery.source === 'ehentai') return { label: 'E-Hentai', className: 'bg-purple-900/50 text-purple-300 border-purple-800' }
+    if (gallery.source === 'pixiv') return { label: 'Pixiv', className: 'bg-blue-900/50 text-blue-300 border-blue-800' }
+    if (gallery.source === 'local' && gallery.import_mode === 'link') return { label: t('library.monitored'), className: 'bg-teal-900/50 text-teal-300 border-teal-800' }
+    if (gallery.source === 'local' && gallery.import_mode === 'copy') return { label: t('library.imported'), className: 'bg-amber-900/50 text-amber-300 border-amber-800' }
+    if (gallery.source === 'local') return { label: 'Local', className: 'bg-green-900/50 text-green-300 border-green-800' }
+    return { label: gallery.source.charAt(0).toUpperCase() + gallery.source.slice(1), className: 'bg-vault-card text-vault-text-muted border-vault-border' }
+  })()
+
   return (
     <article
       onClick={onClick}
@@ -143,9 +152,11 @@ export function LibraryGalleryCard({ gallery, thumbUrl, onClick }: LibraryCardPr
           </div>
         )}
 
-        {/* Download status badge */}
+        {/* Source badge */}
         <div className="absolute bottom-1.5 left-1.5">
-          <DownloadStatusBadge status={gallery.download_status} />
+          <span className={`inline-block px-1.5 py-0.5 rounded border text-xs font-medium ${sourceStyle.className}`}>
+            {sourceStyle.label}
+          </span>
         </div>
       </div>
 

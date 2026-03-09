@@ -91,9 +91,16 @@ export default function GalleryDetailPage() {
     }
   }, [gallery])
 
+  const getDeleteConfirmKey = () => {
+    if (gallery?.import_mode === 'link') return 'library.delete.link.confirm'
+    if (gallery?.import_mode === 'copy') return 'library.delete.copy.confirm'
+    return 'library.delete.download.confirm'
+  }
+
   const handleDelete = async () => {
     if (!gallery || !id) return
-    if (!confirm(t('library.deleteConfirm').replace('{title}', gallery.title))) return
+    const confirmMsg = t(getDeleteConfirmKey()).replace('{title}', gallery.title)
+    if (!confirm(confirmMsg)) return
     setIsDeleting(true)
     try {
       await api.library.deleteGallery(id)
@@ -276,7 +283,11 @@ export default function GalleryDetailPage() {
                   disabled={isDeleting}
                   className="px-4 py-2 rounded text-sm font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
                 >
-                  {isDeleting ? t('library.deleting') : t('library.delete')}
+                  {isDeleting
+                    ? t('library.deleting')
+                    : gallery.import_mode === 'link'
+                      ? t('library.delete.link.button')
+                      : t('library.delete')}
                 </button>
                 <button
                   onClick={handleRetag}

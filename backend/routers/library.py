@@ -63,6 +63,7 @@ async def list_galleries(
     favorited: bool | None = Query(default=None),
     min_rating: int | None = Query(default=None, ge=0, le=5),
     source: str | None = Query(default=None),
+    import_mode: str | None = Query(default=None),
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     sort: Literal["added_at", "rating", "pages"] = Query(default="added_at"),
@@ -167,7 +168,7 @@ async def list_galleries(
                 Image.gallery_id.in_(gallery_ids), Image.page_num == 1
             )
             cover_rows = (await db.execute(cover_stmt)).all()
-            cover_map = {r.gallery_id: _to_url(r.thumb_path, "/data/thumbs/", "/media/thumbs/") for r in cover_rows}
+            cover_map = {r.gallery_id: _to_url(r.thumb_path) for r in cover_rows}
         else:
             cover_map = {}
 
@@ -193,7 +194,7 @@ async def list_galleries(
                 Image.gallery_id.in_(gallery_ids), Image.page_num == 1
             )
             cover_rows = (await db.execute(cover_stmt)).all()
-            cover_map = {r.gallery_id: _to_url(r.thumb_path, "/data/thumbs/", "/media/thumbs/") for r in cover_rows}
+            cover_map = {r.gallery_id: _to_url(r.thumb_path) for r in cover_rows}
         else:
             cover_map = {}
 
@@ -212,7 +213,7 @@ async def get_gallery(
             select(Image.thumb_path).where(Image.gallery_id == gallery_id, Image.page_num == 1)
         )
     ).scalar_one_or_none()
-    cover_thumb = _to_url(cover_row, "/data/thumbs/", "/media/thumbs/")
+    cover_thumb = _to_url(cover_row)
     return _g(g, cover_thumb=cover_thumb)
 
 
@@ -258,13 +259,19 @@ async def delete_gallery(
     _: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a gallery and its associated files (images + thumbnails)."""
+    """Delete a gallery and its associated files (images + thumbnails).
+
+    For link-mode galleries (import_mode == "link") only DB records and
+    thumbnail files are removed; source files under /mnt/ are left untouched.
+    For copy/download galleries all files are deleted.
+    """
     import asyncio
     from pathlib import Path
 
     from core.config import settings as app_settings
 
     g = await _get_or_404(db, gallery_id)
+    is_link_mode = g.import_mode == "link"
 
     # Collect file paths before deleting DB records
     stmt = select(Image.file_path, Image.thumb_path).where(Image.gallery_id == gallery_id)
@@ -288,7 +295,9 @@ async def delete_gallery(
     def _delete_files() -> int:
         deleted = 0
         for row in image_rows:
-            for path_str in (row.file_path, row.thumb_path):
+            # For link-mode galleries: only delete thumbnails, never source files.
+            paths_to_delete = (row.thumb_path,) if is_link_mode else (row.file_path, row.thumb_path)
+            for path_str in paths_to_delete:
                 if path_str:
                     p = Path(path_str)
                     if not _is_safe_path(p):
@@ -310,8 +319,8 @@ async def delete_gallery(
                     except OSError:
                         pass
 
-        # Try to remove gallery directory if empty
-        if image_rows and image_rows[0].file_path:
+        # Try to remove gallery directory if empty (only for non-link-mode galleries)
+        if not is_link_mode and image_rows and image_rows[0].file_path:
             gallery_dir = Path(image_rows[0].file_path).parent
             if _is_safe_path(gallery_dir):
                 try:
@@ -433,8 +442,8 @@ async def find_similar_images(
                 "id": r.id,
                 "gallery_id": r.gallery_id,
                 "filename": r.filename,
-                "file_path": _to_url(r.file_path, "/data/gallery/", "/media/gallery/"),
-                "thumb_path": _to_url(r.thumb_path, "/data/thumbs/", "/media/thumbs/"),
+                "file_path": _to_url(r.file_path),
+                "thumb_path": _to_url(r.thumb_path),
                 "phash": r.phash,
                 "distance": r.distance,
             }
@@ -446,10 +455,30 @@ async def find_similar_images(
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
-def _to_url(path: str | None, fs_prefix: str, url_prefix: str) -> str | None:
+def _to_url(path: str | None, fs_prefix: str = "", url_prefix: str = "") -> str | None:
+    """Convert a filesystem path to a URL-accessible path.
+
+    When called with explicit ``fs_prefix`` / ``url_prefix`` arguments the
+    replacement is applied literally (backward-compatible behaviour).
+    When called without those arguments the function auto-detects the prefix:
+
+    - ``/data/gallery/`` → ``/media/gallery/``
+    - ``/data/thumbs/``  → ``/media/thumbs/``
+    - ``/mnt/``          → ``/media/libraries/``
+    """
     if not path:
         return None
-    return path.replace(fs_prefix, url_prefix, 1)
+    # Legacy caller with explicit prefixes
+    if fs_prefix and url_prefix:
+        return path.replace(fs_prefix, url_prefix, 1)
+    # Auto-detect
+    if path.startswith("/data/gallery/"):
+        return path.replace("/data/gallery/", "/media/gallery/", 1)
+    if path.startswith("/data/thumbs/"):
+        return path.replace("/data/thumbs/", "/media/thumbs/", 1)
+    if path.startswith("/mnt/"):
+        return path.replace("/mnt/", "/media/libraries/", 1)
+    return path
 
 
 async def _get_or_404(db: AsyncSession, gallery_id: int) -> Gallery:
@@ -475,6 +504,7 @@ def _g(g: Gallery, cover_thumb: str | None = None) -> dict:
         "favorited": g.favorited,
         "uploader": g.uploader,
         "download_status": g.download_status,
+        "import_mode": g.import_mode,
         "tags_array": g.tags_array or [],
         "cover_thumb": cover_thumb,
     }
@@ -488,8 +518,8 @@ def _i(img: Image) -> dict:
         "filename": img.filename,
         "width": img.width,
         "height": img.height,
-        "file_path": _to_url(img.file_path, "/data/gallery/", "/media/gallery/"),
-        "thumb_path": _to_url(img.thumb_path, "/data/thumbs/", "/media/thumbs/"),
+        "file_path": _to_url(img.file_path),
+        "thumb_path": _to_url(img.thumb_path),
         "file_size": img.file_size,
         "file_hash": img.file_hash,
     }

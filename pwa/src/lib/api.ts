@@ -505,19 +505,22 @@ const import_ = {
     return apiFetch<{
       path: string
       base: string
-      entries: Array<{ name: string; type: 'dir' | 'file'; file_count?: number; size?: number }>
+      entries: Array<{ name: string; type: 'dir' | 'file'; file_count?: number; size?: number; imported?: boolean }>
     }>(`/api/import/browse?${params}`)
   },
 
-  start: (sourceDir: string, mode: 'link' | 'copy', title?: string) =>
+  start: (sourceDir: string, title?: string) =>
     apiFetch<{ status: string; gallery_id: number }>('/api/import/', {
       method: 'POST',
       body: JSON.stringify({
         source_dir: sourceDir,
-        mode,
+        mode: 'copy',
         metadata: title ? { title } : undefined,
       }),
     }),
+
+  rescanLibraryPath: (libraryId: number) =>
+    apiFetch<{ status: string }>(`/api/import/rescan/path/${libraryId}`, { method: 'POST' }),
 
   progress: (galleryId: number) =>
     apiFetch<{ gallery_id: number; processed: number; total: number; status: string }>(
@@ -597,6 +600,16 @@ const import_ = {
         method: 'PATCH',
         body: JSON.stringify(settings),
       },
+    ),
+
+  browseFs: (path?: string) =>
+    apiFetch<{ path: string; parent: string | null; entries: { name: string; type: string }[] }>(
+      `/api/import/browse-fs${path ? `?path=${encodeURIComponent(path)}` : ''}`,
+    ),
+
+  mountPoints: () =>
+    apiFetch<{ mounts: { name: string; path: string; type: string }[] }>(
+      '/api/import/mount-points',
     ),
 }
 

@@ -51,8 +51,9 @@ class Settings(BaseSettings):
 
     # Library management
     library_monitor_enabled: bool = True
-    library_scan_interval_hours: int = 12
+    library_scan_interval_hours: int = 24
     extra_library_paths: str = ""  # Comma-separated extra paths
+    library_base_path: str = "/mnt"  # Default root for user-mounted external media
 
     model_config = {"env_file": ".env", "case_sensitive": False}
 
@@ -66,8 +67,16 @@ settings = get_settings()
 
 
 async def get_all_library_paths() -> list[str]:
-    """Return all library paths: primary + extras from env + DB-stored paths."""
-    paths: list[str] = [settings.data_gallery_path]
+    """Return all user-configured library paths.
+
+    Only returns paths the user has explicitly added (via env var or DB).
+    Does NOT include ``library_base_path`` (/mnt) automatically — users
+    must add paths themselves.  ``data_gallery_path`` (/data/gallery) is
+    never included as it is the download engine's internal workspace.
+    """
+    import os
+
+    paths: list[str] = []
 
     # From env var
     if settings.extra_library_paths:

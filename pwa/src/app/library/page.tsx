@@ -1,7 +1,8 @@
 'use client'
 
-import { useState, useCallback, useRef, useEffect } from 'react'
+import { useState, useCallback, useRef, useEffect, Suspense } from 'react'
 import Link from 'next/link'
+import { useSearchParams, useRouter } from 'next/navigation'
 import { BookOpen, Plus, Minus } from 'lucide-react'
 import { useLibraryGalleries } from '@/hooks/useGalleries'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
@@ -20,23 +21,31 @@ const SOURCE_OPTIONS = [
   { value: '', label: () => t('library.allSources') },
   { value: 'ehentai', label: () => 'E-Hentai' },
   { value: 'pixiv', label: () => 'Pixiv' },
-  { value: 'import', label: () => 'Import' },
+  { value: 'local:link', label: () => t('library.monitored') },
+  { value: 'local:copy', label: () => t('library.imported') },
 ]
 
 const PAGE_SIZE = 24
 
-export default function LibraryPage() {
-  const [searchInput, setSearchInput] = useState('')
-  const [searchQuery, setSearchQuery] = useState('')
+function LibraryContent() {
+  const searchParams = useSearchParams()
+  const router = useRouter()
+
+  const [searchInput, setSearchInput] = useState(searchParams.get('q') ?? '')
+  const [searchQuery, setSearchQuery] = useState(searchParams.get('q') ?? '')
   const [includeTags, setIncludeTags] = useState<string[]>([])
   const [excludeTags, setExcludeTags] = useState<string[]>([])
   const [includeInput, setIncludeInput] = useState('')
   const [excludeInput, setExcludeInput] = useState('')
-  const [minRating, setMinRating] = useState<number | undefined>(undefined)
-  const [onlyFavorited, setOnlyFavorited] = useState(false)
-  const [source, setSource] = useState('')
-  const [sort, setSort] = useState<'added_at' | 'rating' | 'pages'>('added_at')
-  const [page, setPage] = useState(0)
+  const [minRating, setMinRating] = useState<number | undefined>(
+    searchParams.get('rating') ? Number(searchParams.get('rating')) : undefined,
+  )
+  const [onlyFavorited, setOnlyFavorited] = useState(searchParams.get('fav') === '1')
+  const [sourceFilter, setSourceFilter] = useState(searchParams.get('source') ?? '')
+  const [sort, setSort] = useState<'added_at' | 'rating' | 'pages'>(
+    (searchParams.get('sort') as 'added_at' | 'rating' | 'pages') ?? 'added_at',
+  )
+  const [page, setPage] = useState(searchParams.get('page') ? Number(searchParams.get('page')) : 0)
   // cursor-based pagination state
   const [cursor, setCursor] = useState<string | undefined>(undefined)
   // stack of cursors for navigating backwards; each entry is the cursor that
@@ -50,6 +59,21 @@ export default function LibraryPage() {
     }
   }, [])
 
+  // Sync active filters back to URL so browser back restores state
+  useEffect(() => {
+    const params = new URLSearchParams()
+    if (searchQuery) params.set('q', searchQuery)
+    if (sourceFilter) params.set('source', sourceFilter)
+    if (sort !== 'added_at') params.set('sort', sort)
+    if (minRating !== undefined) params.set('rating', String(minRating))
+    if (onlyFavorited) params.set('fav', '1')
+    if (page > 0) params.set('page', String(page))
+
+    const qs = params.toString()
+    const newUrl = qs ? `/library?${qs}` : '/library'
+    router.replace(newUrl, { scroll: false })
+  }, [searchQuery, sourceFilter, sort, minRating, onlyFavorited, page, router])
+
   // Reset all pagination state whenever filters change
   const resetPagination = useCallback(() => {
     setPage(0)
@@ -57,13 +81,22 @@ export default function LibraryPage() {
     setCursorHistory([])
   }, [])
 
+  // Split compound source filter values like "local:link" → source="local", import_mode="link"
+  const [parsedSource, parsedImportMode] = (() => {
+    if (!sourceFilter) return [undefined, undefined]
+    const colonIdx = sourceFilter.indexOf(':')
+    if (colonIdx === -1) return [sourceFilter, undefined]
+    return [sourceFilter.slice(0, colonIdx), sourceFilter.slice(colonIdx + 1)]
+  })()
+
   const { data, isLoading, error } = useLibraryGalleries({
     q: searchQuery || undefined,
     tags: includeTags.length > 0 ? includeTags : undefined,
     exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
     min_rating: minRating,
     favorited: onlyFavorited || undefined,
-    source: source || undefined,
+    source: parsedSource,
+    import_mode: parsedImportMode,
     sort,
     // When a cursor is active, send it instead of the page number so the
     // backend uses keyset pagination. Otherwise fall back to page-based.
@@ -263,9 +296,9 @@ export default function LibraryPage() {
                 {t('library.source')}
               </label>
               <select
-                value={source}
+                value={sourceFilter}
                 onChange={(e) => {
-                  setSource(e.target.value)
+                  setSourceFilter(e.target.value)
                   resetPagination()
                 }}
                 className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
@@ -384,5 +417,13 @@ export default function LibraryPage() {
         )}
       </div>
     </div>
+  )
+}
+
+export default function LibraryPage() {
+  return (
+    <Suspense fallback={<div className="flex justify-center py-20"><LoadingSpinner /></div>}>
+      <LibraryContent />
+    </Suspense>
   )
 }

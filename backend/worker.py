@@ -772,8 +772,12 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
 
         await session.commit()
 
-    # Clear progress key
-    await r.delete(f"import:progress:{gallery_id}")
+    # Write done state with short TTL so frontend can display completion
+    await r.setex(
+        f"import:progress:{gallery_id}",
+        30,
+        _json.dumps({"processed": processed, "total": total, "status": "done"}),
+    )
 
     logger.info("[local_import] gallery_id=%d: %d files imported", gallery_id, processed)
 
@@ -860,6 +864,11 @@ async def rescan_library_job(ctx: dict) -> dict:
                             img.id,
                             img.file_path,
                         )
+                        # Delete thumbnail file from disk before removing the DB record
+                        if img.thumb_path:
+                            tp = Path(img.thumb_path)
+                            if tp.is_file():
+                                tp.unlink(missing_ok=True)
                         await session.delete(img)
                         removed += 1
                         continue
@@ -873,7 +882,22 @@ async def rescan_library_job(ctx: dict) -> dict:
                         select(Image).where(Image.gallery_id == gallery.id)
                     )).scalars().all()
                     gallery.pages = len(surviving)
-                    if gallery.pages == 0:
+                    if gallery.pages == 0 and gallery.import_mode == "link":
+                        # Clean up any remaining thumbnails then delete the gallery entirely
+                        remaining_imgs = (await session.execute(
+                            select(Image.thumb_path).where(Image.gallery_id == gallery.id)
+                        )).scalars().all()
+                        for tp_str in remaining_imgs:
+                            if tp_str and Path(tp_str).is_file():
+                                Path(tp_str).unlink(missing_ok=True)
+                        await session.delete(gallery)
+                        await session.commit()
+                        logger.info(
+                            "[rescan_library] gallery_id=%d removed (link mode, all files gone)",
+                            gallery.id,
+                        )
+                        continue
+                    elif gallery.pages == 0:
                         gallery.download_status = "missing"
                     logger.info(
                         "[rescan_library] gallery_id=%d: removed %d missing images, pages=%d",
@@ -945,6 +969,11 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                     img.id,
                     img.file_path,
                 )
+                # Delete thumbnail file from disk before removing the DB record
+                if img.thumb_path:
+                    tp = Path(img.thumb_path)
+                    if tp.is_file():
+                        tp.unlink(missing_ok=True)
                 await session.delete(img)
                 removed += 1
                 continue
@@ -1016,6 +1045,20 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             select(Image).where(Image.gallery_id == gallery_id)
         )).scalars().all()
         gallery.pages = len(final_images)
+
+        if gallery.pages == 0 and gallery.import_mode == "link":
+            # All source files are gone — clean up remaining thumbnails and remove gallery
+            remaining_imgs = (await session.execute(
+                select(Image.thumb_path).where(Image.gallery_id == gallery_id)
+            )).scalars().all()
+            for tp_str in remaining_imgs:
+                if tp_str and Path(tp_str).is_file():
+                    Path(tp_str).unlink(missing_ok=True)
+            await session.delete(gallery)
+            await session.commit()
+            logger.info("[rescan_gallery] gallery_id=%d removed (link mode, all files gone)", gallery_id)
+            return {"status": "removed", "gallery_id": gallery_id, "removed": removed, "added": 0, "pages": 0}
+
         if gallery.pages == 0:
             gallery.download_status = "missing"
         elif gallery.download_status == "missing":
@@ -1304,6 +1347,56 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
     return {"status": "no_gallery_found", "path": dir_path}
 
 
+# ── WORKER F2: Rescan Library Path ───────────────────────────────────
+
+
+async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
+    """Rescan all galleries that belong to a specific library path."""
+    import json as _json
+
+    logger.info("[rescan_path] starting rescan for path: %s", library_path)
+    r = ctx["redis"]
+
+    async with AsyncSessionLocal() as session:
+        # Find all galleries with this library_path or whose images are under this path
+        gallery_rows = (await session.execute(
+            select(Gallery).where(
+                (Gallery.library_path == library_path) |
+                (Gallery.source == "local")
+            ).order_by(Gallery.id)
+        )).scalars().all()
+
+        # Filter to galleries actually under this path
+        relevant = []
+        for g in gallery_rows:
+            if g.library_path == library_path:
+                relevant.append(g)
+            elif g.library_path is None and g.import_mode == "link":
+                # Check if any image file_path starts with this library_path
+                img = (await session.execute(
+                    select(Image.file_path).where(Image.gallery_id == g.id).limit(1)
+                )).scalar_one_or_none()
+                if img and img.startswith(library_path):
+                    relevant.append(g)
+
+        total = len(relevant)
+        logger.info("[rescan_path] %d galleries under %s", total, library_path)
+
+    # Rescan each gallery using existing job logic
+    for idx, gallery in enumerate(relevant):
+        await r.setex("rescan:progress", 3600, _json.dumps({
+            "processed": idx, "total": total, "status": "running",
+            "current_gallery": gallery.id,
+        }))
+        await rescan_gallery_job(ctx, gallery.id)
+
+    await r.setex("rescan:progress", 30, _json.dumps({
+        "processed": total, "total": total, "status": "done",
+    }))
+    logger.info("[rescan_path] completed, %d galleries processed", total)
+    return {"status": "done", "total": total}
+
+
 # ── WORKER G: Scheduled Scan ──────────────────────────────────────────
 
 
@@ -1406,6 +1499,7 @@ class WorkerSettings:
         rescan_library_job,
         rescan_gallery_job,
         rescan_by_path_job,
+        rescan_library_path_job,
         auto_discover_job,
         tag_job,
         thumbnail_job,

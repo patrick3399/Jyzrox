@@ -7,6 +7,7 @@ services:
       - ./data/thumbs:/data/thumbs:ro
       - ./data/gallery:/data/gallery:ro
       - ./data/avatars:/data/avatars:ro
+      - ./mnt:/mnt:ro
     depends_on:
       - api
     networks:
@@ -47,6 +48,7 @@ services:
       - ./data/avatars:/data/avatars
       # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
+      - ./mnt:/mnt:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -90,12 +92,14 @@ services:
       - ./data/training:/data/training
       # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
+      - ./mnt:/mnt:ro
     depends_on:
       postgres:
         condition: service_healthy
       redis:
         condition: service_healthy
     networks:
+      - frontend
       - backend
     restart: unless-stopped
     healthcheck:

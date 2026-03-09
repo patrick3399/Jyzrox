@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback, useRef } from 'react'
+import { useState, useEffect, useCallback } from 'react'
 import { useLocale } from '@/components/LocaleProvider'
 import { SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
 import { ChevronUp, ChevronDown, Eye, EyeOff, RefreshCw, Shield, Monitor, CalendarClock, Square } from 'lucide-react'
@@ -9,8 +9,8 @@ import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
-import { Copy, Key, BookOpen, X, Plus, Tag, ScanLine, HardDrive, CircleDot } from 'lucide-react'
-import { useRescanLibrary, useRescanStatus, useLibraries, useAddLibrary, useRemoveLibrary, useMonitorStatus, useScanSettings, useUpdateScanSettings, useCancelRescan, useToggleMonitor } from '@/hooks/useImport'
+import { Copy, Key, BookOpen, X, Plus, Tag, ScanLine } from 'lucide-react'
+import { useRescanLibrary, useRescanStatus, useScanSettings, useUpdateScanSettings, useCancelRescan } from '@/hooks/useImport'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
 import type {
@@ -34,7 +34,6 @@ type SectionKey =
   | 'reader'
   | 'blockedTags'
   | 'aiTagging'
-  | 'media'
   | 'schedule'
 
 function SectionHeader({
@@ -111,208 +110,14 @@ function AiTaggingSection() {
   )
 }
 
-// ── Media Library sub-component ──────────────────────────────────────
-
-function MediaLibrarySection() {
-  const { trigger: rescan, isMutating: rescanning } = useRescanLibrary()
-  const { data: rescanStatus } = useRescanStatus()
-  const { data: libraries, mutate: mutateLibraries } = useLibraries()
-  const { trigger: addLib } = useAddLibrary()
-  const { trigger: removeLib } = useRemoveLibrary()
-  const { data: monitorData, mutate: mutateMonitor } = useMonitorStatus()
-  const { trigger: toggleMonitor, isMutating: togglingMonitor } = useToggleMonitor()
-  const { trigger: cancelRescan, isMutating: cancelling } = useCancelRescan()
-  const [newPath, setNewPath] = useState('')
-
-  const handleMonitorToggle = async () => {
-    if (!monitorData) return
-    try {
-      await toggleMonitor(!monitorData.running)
-      mutateMonitor()
-    } catch {
-      toast.error(t('common.failedToLoad'))
-    }
-  }
-
-  const handleRescan = async () => {
-    try {
-      await rescan()
-      toast.success(t('settings.media.rescan'))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
-    }
-  }
-
-  const isRunning = rescanStatus?.running ?? false
-  const processed = rescanStatus?.processed
-  const total = rescanStatus?.total
-
-  const prevIsRunningRef = useRef<boolean | null>(null)
-  useEffect(() => {
-    if (prevIsRunningRef.current === true && !isRunning && rescanStatus?.status === 'done') {
-      toast.success(t('settings.media.rescan.done'))
-    }
-    prevIsRunningRef.current = isRunning
-  }, [isRunning, rescanStatus?.status])
-
-  return (
-    <div className="px-5 pb-5 border-t border-vault-border">
-      {/* File Monitor toggle */}
-      <div className="flex items-center justify-between mt-4 mb-4">
-        <div>
-          <p className="text-sm text-vault-text">
-            {monitorData?.running
-              ? t('settings.media.monitor.active')
-              : t('settings.media.monitor.inactive')}
-          </p>
-          {monitorData?.running && monitorData.watched_paths.length > 0 && (
-            <p className="text-xs text-vault-text-muted mt-0.5">
-              {t('settings.media.monitor.paths', { count: monitorData.watched_paths.length })}
-            </p>
-          )}
-        </div>
-        <button
-          onClick={handleMonitorToggle}
-          disabled={togglingMonitor || !monitorData}
-          className={`relative w-11 h-6 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-            monitorData?.running ? 'bg-vault-accent' : 'bg-vault-border'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow ${
-              monitorData?.running ? 'translate-x-5' : ''
-            }`}
-          />
-        </button>
-      </div>
-
-      {/* Library paths list */}
-      {libraries && (
-        <div className="mb-4">
-          <p className="text-xs text-vault-text-muted mb-2 uppercase tracking-wide">
-            {t('settings.media.paths')}
-          </p>
-          <div className="space-y-1.5">
-            {libraries.map((lib) => (
-              <div
-                key={lib.path}
-                className="flex items-center gap-2 px-3 py-2 bg-vault-input border border-vault-border rounded text-sm"
-              >
-                <HardDrive size={14} className="text-vault-text-muted shrink-0" />
-                <span className="flex-1 font-mono text-xs truncate">{lib.path}</span>
-                <span className="text-xs text-vault-text-muted">{lib.label}</span>
-                {lib.is_primary && (
-                  <span className="text-[10px] text-vault-accent">PRIMARY</span>
-                )}
-                {!lib.exists && (
-                  <span className="text-[10px] text-red-400">MISSING</span>
-                )}
-                {!lib.is_primary && lib.id !== null && (
-                  <button
-                    onClick={async () => {
-                      await removeLib(lib.id!)
-                      mutateLibraries()
-                    }}
-                    className="text-red-400/60 hover:text-red-400 transition-colors"
-                  >
-                    <X size={14} />
-                  </button>
-                )}
-              </div>
-            ))}
-          </div>
-          {/* Add new path */}
-          <div className="flex gap-2 mt-2">
-            <input
-              type="text"
-              value={newPath}
-              onChange={(e) => setNewPath(e.target.value)}
-              placeholder={t('settings.media.addPath.placeholder')}
-              className="flex-1 bg-vault-input border border-vault-border rounded px-3 py-1.5 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
-            />
-            <button
-              onClick={async () => {
-                if (!newPath.trim()) return
-                try {
-                  await addLib({ path: newPath.trim() })
-                  setNewPath('')
-                  mutateLibraries()
-                  toast.success(t('settings.media.pathAdded'))
-                } catch {
-                  toast.error(t('settings.media.pathFailed'))
-                }
-              }}
-              className="px-3 py-1.5 bg-vault-accent text-white rounded text-sm hover:bg-vault-accent/90 transition-colors"
-            >
-              {t('settings.media.addPath')}
-            </button>
-          </div>
-        </div>
-      )}
-
-      <p className="text-xs text-vault-text-muted mb-4">
-        {t('settings.media.rescan.desc')}
-      </p>
-
-      {isRunning && processed !== undefined && total !== undefined && (
-        <div className="mb-4 bg-vault-input border border-vault-border rounded-lg px-4 py-3">
-          <div className="flex items-center justify-between mb-2">
-            <span className="text-sm text-vault-text">
-              {t('settings.media.rescan.running', { processed, total })}
-            </span>
-            <span className="text-xs text-blue-400">
-              {total > 0 ? Math.round((processed / total) * 100) : 0}%
-            </span>
-          </div>
-          <div className="h-1.5 bg-vault-border rounded-full overflow-hidden">
-            <div
-              className="h-full rounded-full bg-blue-500 transition-all duration-500"
-              style={{ width: `${total > 0 ? Math.round((processed / total) * 100) : 0}%` }}
-            />
-          </div>
-          {rescanStatus?.current_gallery && (
-            <p className="text-xs text-vault-text-muted mt-1.5 truncate">
-              {rescanStatus.current_gallery}
-            </p>
-          )}
-          <button
-            onClick={async () => {
-              try { await cancelRescan() } catch { /* ignore */ }
-            }}
-            disabled={cancelling}
-            className="mt-2 flex items-center gap-1.5 px-3 py-1 text-xs text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 rounded transition-colors disabled:opacity-50"
-          >
-            <Square size={11} />
-            {cancelling ? t('settings.media.rescan.cancelling') : t('settings.media.rescan.cancel')}
-          </button>
-        </div>
-      )}
-
-      {!isRunning && rescanStatus?.status === 'cancelled' && (
-        <p className="text-xs text-orange-400 mb-3">{t('settings.media.rescan.cancelled')}</p>
-      )}
-
-      {!isRunning && rescanStatus && processed !== undefined && total !== undefined && processed === total && total > 0 && rescanStatus.status !== 'cancelled' && (
-        <p className="text-xs text-green-400 mb-3">{t('settings.media.rescan.done')}</p>
-      )}
-
-      <button
-        onClick={handleRescan}
-        disabled={rescanning || isRunning}
-        className="flex items-center gap-2 px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-accent/50 text-vault-text-secondary hover:text-vault-text rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        <ScanLine size={15} />
-        {isRunning ? t('settings.loading') : t('settings.media.rescan')}
-      </button>
-    </div>
-  )
-}
-
 // ── Scan Schedule sub-component ──────────────────────────────────────
 
 function ScanScheduleSection() {
   const { data: scanSettings, mutate: mutateScan } = useScanSettings()
   const { trigger: updateSettings } = useUpdateScanSettings()
+  const { trigger: rescan, isMutating: rescanning } = useRescanLibrary()
+  const { data: rescanStatus } = useRescanStatus()
+  const { trigger: cancelRescan, isMutating: cancelling } = useCancelRescan()
 
   const handleToggle = async () => {
     if (!scanSettings) return
@@ -333,7 +138,20 @@ function ScanScheduleSection() {
     }
   }
 
-  const intervalOptions = [1, 2, 3, 4, 6, 8, 12, 24, 48]
+  const handleRescan = async () => {
+    try {
+      await rescan()
+      toast.success(t('settings.media.rescan'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
+    }
+  }
+
+  const isRunning = rescanStatus?.running ?? false
+  const processed = rescanStatus?.processed
+  const total = rescanStatus?.total
+
+  const intervalOptions = [6, 8, 12, 24, 48, 72, 168]
 
   return (
     <div className="px-5 pb-5 border-t border-vault-border">
@@ -384,10 +202,68 @@ function ScanScheduleSection() {
 
       {/* Last run info */}
       {scanSettings?.last_run && (
-        <p className="text-xs text-vault-text-muted">
+        <p className="text-xs text-vault-text-muted mb-4">
           {t('settings.schedule.lastRun')}: {new Date(scanSettings.last_run).toLocaleString()}
         </p>
       )}
+
+      {/* Rescan All Libraries */}
+      <div className="pt-3 border-t border-vault-border/50">
+        <p className="text-xs text-vault-text-muted mb-3">
+          {t('settings.media.rescan.desc')}
+        </p>
+
+        {isRunning && processed !== undefined && total !== undefined && (
+          <div className="mb-3 bg-vault-input border border-vault-border rounded-lg px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-vault-text">
+                {t('settings.media.rescan.running', { processed, total })}
+              </span>
+              <span className="text-xs text-blue-400">
+                {total > 0 ? Math.round((processed / total) * 100) : 0}%
+              </span>
+            </div>
+            <div className="h-1.5 bg-vault-border rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-blue-500 transition-all duration-500"
+                style={{ width: `${total > 0 ? Math.round((processed / total) * 100) : 0}%` }}
+              />
+            </div>
+            {rescanStatus?.current_gallery && (
+              <p className="text-xs text-vault-text-muted mt-1.5 truncate">
+                {rescanStatus.current_gallery}
+              </p>
+            )}
+            <button
+              onClick={async () => {
+                try { await cancelRescan() } catch { /* ignore */ }
+              }}
+              disabled={cancelling}
+              className="mt-2 flex items-center gap-1.5 px-3 py-1 text-xs text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 rounded transition-colors disabled:opacity-50"
+            >
+              <Square size={11} />
+              {cancelling ? t('settings.media.rescan.cancelling') : t('settings.media.rescan.cancel')}
+            </button>
+          </div>
+        )}
+
+        {!isRunning && rescanStatus?.status === 'cancelled' && (
+          <p className="text-xs text-orange-400 mb-3">{t('settings.media.rescan.cancelled')}</p>
+        )}
+
+        {!isRunning && rescanStatus && processed !== undefined && total !== undefined && processed === total && total > 0 && rescanStatus.status !== 'cancelled' && (
+          <p className="text-xs text-green-400 mb-3">{t('settings.media.rescan.done')}</p>
+        )}
+
+        <button
+          onClick={handleRescan}
+          disabled={rescanning || isRunning}
+          className="flex items-center gap-2 px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-accent/50 text-vault-text-secondary hover:text-vault-text rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <ScanLine size={15} />
+          {isRunning ? t('settings.loading') : t('settings.media.rescan')}
+        </button>
+      </div>
     </div>
   )
 }
@@ -2012,23 +1888,6 @@ export default function SettingsPage() {
             )}
           </div>
 
-          {/* ── Media Library ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <SectionHeader
-                  title={t('settings.media')}
-                  sectionKey="media"
-                  activeSection={activeSection}
-                  onToggle={toggleSection}
-                />
-              </div>
-              <div className="pr-5">
-                <ScanLine size={14} className="text-vault-text-muted" />
-              </div>
-            </div>
-            {activeSection === 'media' && <MediaLibrarySection />}
-          </div>
 
           {/* ── Schedule ── */}
           <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">

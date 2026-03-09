@@ -28,9 +28,15 @@ export function useStartImport() {
     'import/start',
     (
       _key: unknown,
-      { arg }: { arg: { sourceDir: string; mode: 'link' | 'copy'; title?: string } },
-    ) => api.import_.start(arg.sourceDir, arg.mode, arg.title),
+      { arg }: { arg: { sourceDir: string; title?: string } },
+    ) => api.import_.start(arg.sourceDir, arg.title),
   )
+}
+
+export function useRescanLibraryPath() {
+  return useSWRMutation('import/rescan/path', async (_key: string, { arg }: { arg: number }) => {
+    return api.import_.rescanLibraryPath(arg)
+  })
 }
 
 export function useRescanLibrary() {
@@ -87,6 +93,18 @@ export function useUpdateScanSettings() {
 
 export function useCancelRescan() {
   return useSWRMutation('import/rescan/cancel', () => api.import_.rescanCancel())
+}
+
+export function useBrowseFs(path: string, options?: { enabled?: boolean }) {
+  const enabled = options?.enabled ?? true
+  return useSWR(
+    enabled ? ['import/browse-fs', path] : null,
+    () => api.import_.browseFs(path),
+  )
+}
+
+export function useMountPoints() {
+  return useSWR('import/mount-points', () => api.import_.mountPoints())
 }
 
 export function useToggleMonitor() {
