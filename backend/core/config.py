@@ -51,6 +51,11 @@ class Settings(BaseSettings):
     pixiv_client_secret: str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
     # To override: set PIXIV_CLIENT_ID and PIXIV_CLIENT_SECRET in .env
 
+    # Pixiv API limits
+    pixiv_max_concurrency: int = 4       # max concurrent API requests
+    pixiv_image_concurrency: int = 6     # max concurrent image proxy downloads
+    pixiv_request_timeout: int = 30
+
     # Library management
     library_monitor_enabled: bool = True
     library_scan_interval_hours: int = 24

@@ -4,77 +4,31 @@
 
 ---
 
-## P0 — 安全 + 已完成功能驗證
+## P0 — 驗證與修復
 
-> 立即處理：安全漏洞與已實作功能的測試驗證。
+> 已實作功能的實機驗證，需要特定環境/裝置。
 
-### 安全
-- [x] CSRF protection（目前 cookie-based auth 無 CSRF token）
-- [x] Rate limiting 全端點覆蓋（目前僅 external API 有）
 
-### Service Worker 版本管理
-- [x] 自動版本管理 — build 時注入 hash 或時間戳到 `CACHE_NAME`
-- [x] SW 更新提示 UI（偵測到新版本時提示使用者重整）
-
-### OPDS 端點測試（HTTP Basic Auth）
-- [x] `GET /opds/` — Root navigation feed 回傳有效 Atom XML，包含 all/recent/favorites/search 四個 entry
-- [x] `GET /opds/all` — 回傳所有 gallery，驗證分頁（`?page=0&limit=5`），確認 `<link rel="next">` 存在
-- [x] `GET /opds/all?page=1` — 第二頁回傳不同 gallery，確認 `<link rel="previous">` 存在
-- [x] `GET /opds/recent` — 回傳最近 50 個 gallery，無分頁連結
-- [x] `GET /opds/favorites` — 僅回傳 `favorited=true` 的 gallery
-- [x] `GET /opds/search?q=關鍵字` — title ILIKE 搜尋結果正確
-- [x] `GET /opds/opensearch.xml` — 回傳有效 OpenSearch descriptor，template URL 正確
-- [x] `GET /opds/gallery/{id}` — 回傳 OPDS-PSE 頁面列表，每頁有 `pse:index`、image link、thumbnail link
-- [x] 無 Authorization header → 401 + `WWW-Authenticate: Basic realm="Jyzrox OPDS"` header
-- [x] 錯誤密碼 → 401
-- [ ] nginx `auth_request` 用 Basic Auth 存取 `/media/cas/` 和 `/media/thumbs/` → 200 ⚠️ 需要 running nginx 容器
-- [ ] 實際 OPDS client 測試（Panels iOS / KOReader / Chunky）連線瀏覽 + 圖片載入 ⚠️ 需要實體裝置
-
-### External API 增強測試（X-API-Token Auth）
-- [x] `GET /api/external/v1/galleries/{id}/images` — 回傳含 `file_url` 和 `thumb_url` 欄位
-- [x] `GET /api/external/v1/galleries/{id}/images/{page}/file` — 回傳正確圖片二進位（Content-Type 正確）
-- [x] 圖片不存在 → 404
-- [x] `GET /api/external/v1/galleries?q=test` — title 搜尋過濾正確
-- [x] `GET /api/external/v1/galleries?favorited=true` — 僅回傳收藏 gallery
-- [x] `GET /api/external/v1/galleries?min_rating=3` — 僅回傳 rating ≥ 3 的 gallery
-- [x] 多參數組合：`?q=test&favorited=true&min_rating=3&source=ehentai` — 正確 AND 過濾
-
-### Mihon Extension 測試
-- [ ] `./gradlew assembleDebug` 編譯通過 ⚠️ 需要 Android SDK / Gradle
-- [ ] 安裝到 Android 裝置/模擬器，Mihon 偵測到 Jyzrox 擴充 ⚠️ 需要 Android 裝置
-- [ ] 設定 Server URL + API Token 後，Popular 頁面載入 gallery 列表 ⚠️ 需要 Android 裝置
-- [ ] 搜尋功能：輸入關鍵字回傳正確結果 ⚠️ 需要 Android 裝置
-- [ ] Filter 測試：Source / Rating / Favorites 各篩選功能正常 ⚠️ 需要 Android 裝置
-- [ ] Gallery detail 顯示正確 metadata（title、author、tags、頁數） ⚠️ 需要 Android 裝置
-- [ ] Chapter list 回傳 1 個 chapter ⚠️ 需要 Android 裝置
-- [ ] Page list 載入完整圖片列表，圖片正常顯示 ⚠️ 需要 Android 裝置
-- [ ] 無 Token / 錯誤 Token → 適當錯誤提示 ⚠️ 需要 Android 裝置
 
 ---
 
 ## P1 — 短期高價值
 
-> 獨立功能，少依賴，能快速上線帶來明顯效果。
-
-### AI Tagging 上線
-- [ ] 測試 `TAG_MODEL_ENABLED=true` 完整流程（模型下載→推理→DB 寫入） ⚠️ 需要 ONNX runtime + 模型下載
-- [x] 前端：Gallery detail 頁顯示 AI 標籤（含信心度）
-- [x] 前端：「重新標記」按鈕整合到 Gallery detail
-- [x] 標籤信心度篩選 UI（滑桿或閾值設定）
+> 獨立功能，少依賴，能快速上線。
 
 ### Pixiv 瀏覽器 Phase 1（Client + Router）
 
 > 依賴：已有 pixivpy3 OAuth refresh_token 機制（settings.py）
 
 #### 服務層
-- [ ] 新建 `services/pixiv_client.py` — async context manager（仿 EhClient）
+- [x] 新建 `services/pixiv_client.py` — async context manager（仿 EhClient）
   - pixivpy3 同步 → `asyncio.to_thread()` 包裝
   - Token 管理：Redis 快取 access_token（TTL 3500s）+ Redis lock 防競爭刷新
   - httpx client（`Referer: https://www.pixiv.net/`）用於圖片下載
   - 方法：search_illust / illust_detail / user_detail / user_illusts / user_bookmarks / illust_follow / user_following / download_image
 
 #### Router
-- [ ] 新建 `routers/pixiv.py` — 所有端點 `Depends(require_auth)`
+- [x] 新建 `routers/pixiv.py` — 所有端點 `Depends(require_auth)`
   - `GET /search` — 搜尋插畫（word, sort, search_target, duration, offset）
   - `GET /illust/{id}` — 插畫詳情
   - `GET /user/{id}` — 使用者資訊 + 近期作品
@@ -82,19 +36,30 @@
   - `GET /user/{id}/bookmarks` — 使用者公開收藏
   - `GET /following/feed` — 已追蹤作者的新作品
   - `GET /image-proxy` — 代理 pximg.net 圖片（domain 白名單 + Redis 24h 快取）
-- [ ] `main.py` 註冊 `/api/pixiv` router
+- [x] `main.py` 註冊 `/api/pixiv` router
 
 #### 基礎設施
-- [ ] `services/cache.py` 新增 Pixiv 快取 helpers（search 5min / illust 1h / user 30min / image 24h）
-- [ ] `core/config.py` 新增 `pixiv_max_concurrency` / `pixiv_image_concurrency`
+- [x] `services/cache.py` 新增 Pixiv 快取 helpers（search 5min / illust 1h / user 30min / image 24h）
+- [x] `core/config.py` 新增 `pixiv_max_concurrency` / `pixiv_image_concurrency`
 
-### i18n 補完
-- [x] 韓文翻譯補齊缺失的 28 keys（ko.ts 511 → 539）
-- [x] 使用者 locale 偏好存入 DB（目前僅 localStorage，換裝置需重選）
+### 效能：Virtual Scrolling
+- [ ] Library 頁面導入虛擬滾動（react-window 或 tanstack-virtual），避免滾動多頁後 DOM 膨脹
+- [ ] Browse 頁面同步導入虛擬滾動
+- [ ] History 頁面改為 infinite scroll + 虛擬滾動（目前為手動按鈕）
 
-### 效能
-- [x] Gallery 列表頁大量資料效能優化（虛擬滾動 / infinite scroll）
-- [x] 縮圖懶載入（Intersection Observer，目前是否已實作待確認）
+### Settings UI 功能開關
+- [ ] CSRF 保護開關（環境變數 `CSRF_ENABLED` + Settings UI toggle）
+- [ ] Rate limiting 開關 / 自訂閾值（每端點可調）
+- [ ] OPDS 啟用/停用
+- [ ] External API 啟用/停用
+- [ ] AI Tagging 啟用/停用（已有 `TAG_MODEL_ENABLED` env，缺 UI）
+- [ ] 下載來源啟用/停用（EH / Pixiv / gallery-dl fallback）
+- [ ] 統一 Settings → Security / Features 分區，集中管理所有開關
+
+### 後端 i18n
+- [ ] API 錯誤訊息 i18n（目前硬編碼中/英文）
+- [ ] 根據 `Accept-Language` header 回傳對應語言
+- [ ] 確認前端有顯示翻譯後的 tag 名稱
 
 ---
 
@@ -159,18 +124,6 @@
 - [ ] 批次任務儀表板（總進度、成功/失敗統計）
 - [ ] 批次下載確認 dialog（預覽數量、預估大小）
 
-### 安全補強
-- [x] 檔案上傳 MIME 驗證（import 時驗證實際檔案類型）
-
-### 後端 i18n
-- [ ] 後端 API 錯誤訊息 i18n（目前後端回傳硬編碼中/英文）
-- [ ] API 錯誤回應根據 `Accept-Language` header 回傳對應語言
-- [ ] Tag 翻譯系統已有 — 確認前端有顯示翻譯後的 tag 名稱
-
-### 前端 i18n 補完
-- [x] 日期/數字格式化根據 locale（`Intl.DateTimeFormat` / `Intl.NumberFormat`）
-- [x] 複數形式支援（1 file vs 2 files）
-
 ---
 
 ## P3 — 長期 / 按需
@@ -223,7 +176,6 @@
 - [ ] 生產環境 HTTPS 配置指南（Let's Encrypt + Nginx）
 
 ### i18n 擴展
-- [x] 簡體中文（zh-CN）翻譯檔
 - [ ] 社群貢獻翻譯指南文件
 
 ### 測試補強
@@ -233,6 +185,13 @@
 - [ ] WebSocket 斷線重連測試
 - [ ] Redis 快取命中率監控端點
 
+### 目前先擱置
+- [ ] nginx `auth_request` 用 Basic Auth 存取 `/media/cas/` 和 `/media/thumbs/` → 200 ⚠️ 需要 running nginx 容器
+- [ ] OPDS 實際 client 測試（Panels iOS / KOReader / Chunky）⚠️ 需要實體裝置
+- [ ] AI Tagging 測試 `TAG_MODEL_ENABLED=true` 完整流程（模型下載→推理→DB 寫入）⚠️ 需要 ONNX runtime + 模型
+- [ ] Mihon Extension 編譯 + 實機測試（gallery 列表、搜尋、篩選、閱讀）⚠️ 需要 Android 裝置
+
+
 ---
 
 ## 已完成（v0.1 歷史記錄）
@@ -240,9 +199,15 @@
 <details>
 <summary>展開已完成項目</summary>
 
+### 安全
+- [x] CSRF protection（double-submit cookie pattern）
+- [x] Rate limiting 全端點覆蓋
+- [x] 檔案上傳 MIME magic byte 驗證
+
 ### 功能
 - [x] E-Hentai 瀏覽器（搜尋、排行榜、收藏夾、圖片代理）
 - [x] 下載引擎（gallery-dl + EH 自有引擎，download→import→thumbnail pipeline）
+- [x] 下載來源自動偵測（移除手動 source 選擇）
 - [x] 本地圖庫瀏覽（GIN 索引、cursor 分頁、封面縮圖）
 - [x] Reader（單頁/瀑布/雙頁模式，進度同步）
 - [x] CAS 儲存（SHA256 去重、hardlink、ref count）
@@ -253,18 +218,31 @@
 - [x] pHash 相似圖搜尋
 - [x] 搜尋排序（前後端）
 - [x] Saved Searches（桌面+手機）
-- [x] i18n 四語系（en/zh-TW/ja/ko）
-- [x] 下載來源自動偵測（移除手動 source 選擇）
 - [x] Stale session 修復
 
+### AI Tagging 前端
+- [x] Gallery detail 頁顯示 AI 標籤（含信心度）
+- [x] 「重新標記」按鈕整合到 Gallery detail
+- [x] 標籤信心度篩選 UI（滑桿或閾值設定）
+
+### i18n
+- [x] 四語系（en/zh-TW/ja/ko）+ 簡體中文（zh-CN）
+- [x] 韓文翻譯補齊缺失 keys
+- [x] 使用者 locale 偏好存入 DB
+- [x] 日期/數字格式化根據 locale
+- [x] 複數形式支援
+
 ### PWA
-- [x] `manifest.json` 加入 `share_target` 宣告（接收 URL text）
-- [x] Share Target 落地頁（`/share-target`）：接收分享的 URL
-- [x] 落地頁自動呼叫 `_detect_source` → 顯示預覽 → 一鍵下載
-- [x] 確認現有 `/api/download/enqueue` 支援從手機端呼叫（CORS/cookie）
-- [x] 新增簡化端點 `POST /api/download/quick`（只需 URL，其餘自動）
-- [x] 分享成功 toast 通知
+- [x] Service Worker 自動版本管理 + 更新提示 UI
+- [x] `manifest.json` share_target 宣告
+- [x] Share Target 落地頁 + 一鍵下載
+- [x] `POST /api/download/quick` 簡化端點
 - [x] 離線時排隊（SW 快取分享請求，上線後補發）
+- [x] Gallery 列表 infinite scroll + 縮圖懶載入
+
+### External API / OPDS
+- [x] OPDS 全端點（root/all/recent/favorites/search/gallery + OpenSearch + Basic Auth）
+- [x] External API galleries/images/tags + download trigger + rate limiting
 
 ### DevOps
 - [x] Docker 雙網路隔離
@@ -272,7 +250,6 @@
 - [x] Multi-stage Dockerfile
 - [x] backup/restore 腳本
 - [x] Worker max_jobs + LOG_LEVEL 環境變數
-- [x] .dockerignore
 
 ### 測試
 - [x] Backend 221 tests

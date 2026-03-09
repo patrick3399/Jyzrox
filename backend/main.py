@@ -22,6 +22,7 @@ from routers import (
     import_router,
     library,
     opds,
+    pixiv,
     plugins as plugins_router,
     search,
     system,
@@ -78,6 +79,7 @@ app.add_middleware(RateLimitMiddleware)
 app.include_router(auth.router, prefix="/api/auth")
 app.include_router(system.router, prefix="/api/system")
 app.include_router(eh.router, prefix="/api/eh")
+app.include_router(pixiv.router, prefix="/api/pixiv")
 app.include_router(library.router, prefix="/api/library")
 app.include_router(download.router, prefix="/api/download")
 app.include_router(settings_router.router, prefix="/api/settings")
