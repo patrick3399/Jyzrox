@@ -1,6 +1,8 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useLocale } from '@/components/LocaleProvider'
+import { SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
 import { ChevronUp, ChevronDown, Eye, EyeOff, RefreshCw, Shield, Monitor } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
@@ -410,6 +412,7 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
 
 export default function SettingsPage() {
   const { logout } = useAuth()
+  const { locale, setLocale: changeLocale } = useLocale()
   const [activeSection, setActiveSection] = useState<SectionKey | null>('ehentai')
 
   // Credentials state
@@ -1003,6 +1006,24 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settings.title')}</h1>
 
         <div className="space-y-3">
+          {/* ── Language ── */}
+          <div className="bg-vault-card rounded-xl border border-vault-border overflow-hidden">
+            <div className="px-5 py-4">
+              <h3 className="font-medium text-vault-text text-sm mb-3">{t('settings.language')}</h3>
+              <select
+                value={locale}
+                onChange={(e) => changeLocale(e.target.value as Locale)}
+                className="bg-vault-input text-vault-text text-sm rounded-lg px-3 py-2 border border-vault-border focus:outline-none focus:ring-1 focus:ring-vault-accent"
+              >
+                {SUPPORTED_LOCALES.map((loc: Locale) => (
+                  <option key={loc} value={loc}>
+                    {t(`common.locale.${loc}`)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {/* ── E-Hentai ── */}
           <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
             <div className="flex items-center justify-between">

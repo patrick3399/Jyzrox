@@ -1,6 +1,7 @@
 import type { Metadata, Viewport } from 'next'
 import Script from 'next/script'
 import { ThemeProvider } from '@/components/ThemeProvider'
+import { LocaleProvider } from '@/components/LocaleProvider'
 import { LayoutShell } from '@/components/LayoutShell'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import './globals.css'
@@ -52,9 +53,11 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
         <ThemeProvider>
-          <LayoutShell>
-            <ErrorBoundary>{children}</ErrorBoundary>
-          </LayoutShell>
+          <LocaleProvider>
+            <LayoutShell>
+              <ErrorBoundary>{children}</ErrorBoundary>
+            </LayoutShell>
+          </LocaleProvider>
         </ThemeProvider>
       </body>
     </html>
