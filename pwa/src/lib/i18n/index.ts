@@ -14,15 +14,17 @@
 
 import en from './en'
 import zhTW from './zh-TW'
+import zhCN from './zh-CN'
 import ja from './ja'
 import ko from './ko'
 
-export const SUPPORTED_LOCALES = ['en', 'zh-TW', 'ja', 'ko'] as const
+export const SUPPORTED_LOCALES = ['en', 'zh-TW', 'zh-CN', 'ja', 'ko'] as const
 export type Locale = (typeof SUPPORTED_LOCALES)[number]
 
 const locales: Record<string, Record<string, string>> = {
   en,
   'zh-TW': zhTW,
+  'zh-CN': zhCN,
   ja,
   ko,
 }
@@ -45,7 +47,7 @@ export function t(key: string, params?: Record<string, string | number>): string
     const forms = value.split('|')
     const count = Number(params.count)
     // CJK languages have no plural distinction — use first form
-    if (currentLocale === 'zh-TW' || currentLocale === 'ja' || currentLocale === 'ko') {
+    if (currentLocale === 'zh-TW' || currentLocale === 'zh-CN' || currentLocale === 'ja' || currentLocale === 'ko') {
       value = forms[0]
     } else {
       value = count === 1 ? forms[0] : (forms[1] || forms[0])
@@ -63,6 +65,7 @@ export function t(key: string, params?: Record<string, string | number>): string
 const LOCALE_TO_INTL: Record<string, string> = {
   'en': 'en-US',
   'zh-TW': 'zh-TW',
+  'zh-CN': 'zh-CN',
   'ja': 'ja-JP',
   'ko': 'ko-KR',
 }

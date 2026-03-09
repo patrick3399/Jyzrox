@@ -701,6 +701,7 @@ const zhTW: Record<string, string> = {
   'common.errorOccurred': '發生錯誤',
   'common.locale.en': 'English',
   'common.locale.zh-TW': '繁體中文',
+  'common.locale.zh-CN': '简体中文',
   'common.locale.ja': '日本語',
   'common.locale.ko': '한국어',
   'common.loadMore': '載入更多',

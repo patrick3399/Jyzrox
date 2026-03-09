@@ -342,7 +342,7 @@ async def update_profile(req: UpdateProfileRequest, auth: dict = Depends(require
         update_values["avatar_style"] = req.avatar_style
 
     if req.locale is not None:
-        valid_locales = ("en", "zh-TW", "ja", "ko")
+        valid_locales = ("en", "zh-TW", "zh-CN", "ja", "ko")
         if req.locale not in valid_locales:
             raise HTTPException(status_code=400, detail=f"locale must be one of: {', '.join(valid_locales)}")
         update_values["locale"] = req.locale

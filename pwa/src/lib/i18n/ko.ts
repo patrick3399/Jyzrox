@@ -702,6 +702,7 @@ const ko: Record<string, string> = {
   'common.errorOccurred': '오류가 발생했습니다',
   'common.locale.en': 'English',
   'common.locale.zh-TW': '繁體中文',
+  'common.locale.zh-CN': '중국어(간체)',
   'common.locale.ja': '日本語',
   'common.locale.ko': '한국어',
   'common.loadMore': '더 보기',

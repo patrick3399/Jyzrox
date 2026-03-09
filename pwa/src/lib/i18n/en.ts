@@ -702,6 +702,7 @@ const en: Record<string, string> = {
   'common.errorOccurred': 'Something went wrong',
   'common.locale.en': 'English',
   'common.locale.zh-TW': '繁體中文',
+  'common.locale.zh-CN': 'Simplified Chinese',
   'common.locale.ja': '日本語',
   'common.locale.ko': '한국어',
   'common.loadMore': 'Load more',

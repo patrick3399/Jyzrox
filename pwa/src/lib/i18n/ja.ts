@@ -702,6 +702,7 @@ const ja: Record<string, string> = {
   'common.errorOccurred': 'エラーが発生しました',
   'common.locale.en': 'English',
   'common.locale.zh-TW': '繁體中文',
+  'common.locale.zh-CN': '簡体中国語',
   'common.locale.ja': '日本語',
   'common.locale.ko': '한국어',
   'common.loadMore': 'もっと見る',
