@@ -13,6 +13,7 @@ from core.rate_limit import RateLimitMiddleware
 from core.database import engine
 from core.redis_client import close_redis, init_redis
 from routers import (
+    artists,
     auth,
     download,
     eh,
@@ -93,6 +94,7 @@ app.include_router(export.router, prefix="/api/export")
 app.include_router(external.router, prefix="/api/external/v1")
 app.include_router(history.router, prefix="/api/history")
 app.include_router(plugins_router.router, prefix="/api/plugins")
+app.include_router(artists.router, prefix="/api/artists")
 app.include_router(opds.router, prefix="/opds")
 
 

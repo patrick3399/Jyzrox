@@ -24,7 +24,7 @@ from urllib.parse import urlparse
 import sqlalchemy.exc
 from arq.connections import RedisSettings
 from arq.cron import cron
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
@@ -51,7 +51,6 @@ _IMAGE_MAGIC = {
     b'\x89PNG\r\n\x1a\n': {'.png'},               # PNG
     b'GIF87a': {'.gif'},                           # GIF87a
     b'GIF89a': {'.gif'},                           # GIF89a
-    b'RIFF': {'.webp'},                            # WebP (RIFF container)
     b'\x00\x00\x00': {'.avif', '.heic'},           # AVIF/HEIC (ftyp box, starts with size bytes)
 }
 
@@ -1820,6 +1819,117 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
         return {"status": "stopped"}
 
 
+# ── WORKER J: Check Followed Artists ─────────────────────────────────
+
+
+async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
+    """Check followed Pixiv artists for new works and optionally enqueue downloads."""
+    import asyncio as _asyncio
+
+    from db.models import FollowedArtist
+    from services.pixiv_client import PixivClient
+
+    refresh_token = await get_credential("pixiv")
+    if not refresh_token:
+        logger.info("[check_followed] no Pixiv credentials configured — skipping")
+        return {"status": "skipped", "reason": "No Pixiv credentials"}
+
+    async with AsyncSessionLocal() as session:
+        query = select(FollowedArtist).where(FollowedArtist.source == "pixiv")
+        if user_id:
+            query = query.where(FollowedArtist.user_id == user_id)
+        result = await session.execute(query)
+        artists = result.scalars().all()
+
+    if not artists:
+        return {"status": "ok", "checked": 0}
+
+    checked = 0
+    new_works = 0
+    pool = ctx.get("redis")
+
+    async with PixivClient(refresh_token) as client:
+        for artist in artists:
+            try:
+                data = await client.user_illusts(int(artist.artist_id))
+                illusts = data.get("illusts", [])
+
+                if illusts:
+                    newest_id = str(illusts[0].get("id", ""))
+
+                    if newest_id and newest_id != artist.last_illust_id:
+                        # Determine how many works are truly new
+                        new_count = 0
+                        if artist.last_illust_id:
+                            for ill in illusts:
+                                if str(ill.get("id", "")) == artist.last_illust_id:
+                                    break
+                                new_count += 1
+                        else:
+                            new_count = len(illusts)
+
+                        new_works += new_count
+
+                        # Derive updated artist name from response
+                        updated_name = (
+                            (illusts[0].get("user") or {}).get("name")
+                            or artist.artist_name
+                        )
+
+                        async with AsyncSessionLocal() as session:
+                            await session.execute(
+                                update(FollowedArtist).where(
+                                    FollowedArtist.id == artist.id
+                                ).values(
+                                    last_checked_at=datetime.now(UTC),
+                                    last_illust_id=newest_id,
+                                    artist_name=updated_name,
+                                )
+                            )
+                            await session.commit()
+
+                        # Auto-download new works if enabled
+                        if artist.auto_download and new_count > 0 and pool:
+                            for ill in illusts[:new_count]:
+                                illust_url = f"https://www.pixiv.net/artworks/{ill['id']}"
+                                try:
+                                    await pool.enqueue_job(
+                                        "download_job",
+                                        illust_url,
+                                        "pixiv",
+                                    )
+                                except Exception as enq_exc:
+                                    logger.warning(
+                                        "[check_followed] failed to enqueue auto-download for illust %s: %s",
+                                        ill.get("id"),
+                                        enq_exc,
+                                    )
+                    else:
+                        # No new works — just update the check timestamp
+                        async with AsyncSessionLocal() as session:
+                            await session.execute(
+                                update(FollowedArtist).where(
+                                    FollowedArtist.id == artist.id
+                                ).values(last_checked_at=datetime.now(UTC))
+                            )
+                            await session.commit()
+
+                checked += 1
+                await _asyncio.sleep(2)  # Pixiv rate limit
+
+            except Exception as exc:
+                logger.error(
+                    "[check_followed] error checking artist %s (%s): %s",
+                    artist.artist_id,
+                    artist.artist_name,
+                    exc,
+                )
+                continue
+
+    logger.info("[check_followed] done: checked=%d new_works=%d", checked, new_works)
+    return {"status": "ok", "checked": checked, "new_works": new_works}
+
+
 # ── ARQ Worker Settings ──────────────────────────────────────────────
 
 
@@ -1839,6 +1949,7 @@ class WorkerSettings:
         reconciliation_job,
         scheduled_scan_job,
         toggle_watcher_job,
+        check_followed_artists,
     ]
     cron_jobs = [
         cron(
@@ -1854,6 +1965,14 @@ class WorkerSettings:
             weekday=0,   # Monday
             hour=3,
             minute=0,
+            unique=True,
+            timeout=3600,
+        ),
+        cron(
+            check_followed_artists,
+            hour={0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22},
+            minute=30,
+            run_at_startup=False,
             unique=True,
             timeout=3600,
         ),

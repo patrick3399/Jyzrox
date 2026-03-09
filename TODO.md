@@ -70,19 +70,19 @@
 ### Pixiv Phase 2: 作者追蹤（依賴 Phase 1）
 
 #### 資料庫
-- [ ] `db/models.py` + `db/init.sql` 新增 `followed_artists` 表
+- [x] `db/models.py` + `db/init.sql` 新增 `followed_artists` 表
   - 欄位：user_id, source, artist_id, artist_name, artist_avatar, last_checked_at, last_illust_id, auto_download, added_at
   - UNIQUE(user_id, source, artist_id)
 
 #### API 端點
-- [ ] `GET /artists/followed` — 列出已追蹤作者
-- [ ] `POST /artists/follow` — 追蹤作者
-- [ ] `DELETE /artists/follow/{artist_id}` — 取消追蹤
-- [ ] `PATCH /artists/follow/{artist_id}` — 切換 auto_download
-- [ ] `POST /artists/check-updates` — 手動觸發更新檢查
+- [x] `GET /artists/followed` — 列出已追蹤作者
+- [x] `POST /artists/follow` — 追蹤作者
+- [x] `DELETE /artists/follow/{artist_id}` — 取消追蹤
+- [x] `PATCH /artists/follow/{artist_id}` — 切換 auto_download
+- [x] `POST /artists/check-updates` — 手動觸發更新檢查
 
 #### Worker 定時任務
-- [ ] `worker.py` 新增 `check_pixiv_artists` cron（每 2 小時）
+- [x] `worker.py` 新增 `check_pixiv_artists` cron（每 2 小時）
   - 遍歷 followed_artists → user_illusts → 比對 last_illust_id → 新作品時更新 DB + 可選自動下載
   - 請求間隔 ≥ 2s（Pixiv 限速較嚴）
 

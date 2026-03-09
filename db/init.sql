@@ -264,3 +264,22 @@ CREATE TABLE IF NOT EXISTS plugin_config (
     config_json JSONB DEFAULT '{}',
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ── Followed Artists (Pixiv Phase 2) ─────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS followed_artists (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    source          TEXT NOT NULL,
+    artist_id       TEXT NOT NULL,
+    artist_name     TEXT,
+    artist_avatar   TEXT,
+    last_checked_at TIMESTAMPTZ,
+    last_illust_id  TEXT,
+    auto_download   BOOLEAN DEFAULT FALSE,
+    added_at        TIMESTAMPTZ DEFAULT now(),
+    UNIQUE (user_id, source, artist_id)
+);
+
+CREATE INDEX IF NOT EXISTS idx_followed_artists_user ON followed_artists (user_id);
+CREATE INDEX IF NOT EXISTS idx_followed_artists_source ON followed_artists (source, artist_id);

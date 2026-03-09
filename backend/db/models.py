@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import (
     ARRAY,
@@ -261,3 +262,22 @@ class PluginConfig(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     config_json: Mapped[dict] = mapped_column(JSONB, default=dict)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class FollowedArtist(Base):
+    __tablename__ = "followed_artists"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    source: Mapped[str] = mapped_column(Text, nullable=False)  # "pixiv", "ehentai", etc.
+    artist_id: Mapped[str] = mapped_column(Text, nullable=False)  # external artist ID
+    artist_name: Mapped[str | None] = mapped_column(Text)
+    artist_avatar: Mapped[str | None] = mapped_column(Text)
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_illust_id: Mapped[str | None] = mapped_column(Text)  # last known illust ID for delta checks
+    auto_download: Mapped[bool] = mapped_column(Boolean, server_default="false")
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "source", "artist_id", name="uq_followed_artist"),
+    )
