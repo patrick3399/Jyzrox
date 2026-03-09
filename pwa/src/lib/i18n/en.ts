@@ -698,6 +698,7 @@ const en: Record<string, string> = {
   'common.locale.zh-TW': '繁體中文',
   'common.locale.ja': '日本語',
   'common.locale.ko': '한국어',
+  'common.loadMore': 'Load more',
 }
 
 export default en

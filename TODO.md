@@ -93,8 +93,8 @@
 - [x] 使用者 locale 偏好存入 DB（目前僅 localStorage，換裝置需重選）
 
 ### 效能
-- [ ] Gallery 列表頁大量資料效能優化（虛擬滾動 / infinite scroll）
-- [ ] 縮圖懶載入（Intersection Observer，目前是否已實作待確認）
+- [x] Gallery 列表頁大量資料效能優化（虛擬滾動 / infinite scroll）
+- [x] 縮圖懶載入（Intersection Observer，目前是否已實作待確認）
 
 ---
 

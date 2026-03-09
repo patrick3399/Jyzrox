@@ -1,8 +1,9 @@
 import useSWR from 'swr'
+import useSWRInfinite from 'swr/infinite'
 import useSWRMutation from 'swr/mutation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
-import type { GallerySearchParams, EhSearchParams } from '@/lib/types'
+import type { GalleryListResponse, GallerySearchParams, EhSearchParams } from '@/lib/types'
 
 // ── Library ───────────────────────────────────────────────────────────
 
@@ -12,6 +13,48 @@ export function useLibraryGalleries(params: GallerySearchParams = {}) {
   return useSWR(['library/galleries', params.cursor ?? params.page ?? 0, params], () =>
     api.library.getGalleries(params),
   )
+}
+
+export function useInfiniteLibraryGalleries(
+  params: Omit<GallerySearchParams, 'page' | 'cursor'> = {},
+) {
+  const getKey = (pageIndex: number, previousPageData: GalleryListResponse | null) => {
+    // First page
+    if (pageIndex === 0) return ['library/galleries/infinite', { ...params, page: 0 }]
+    // No more data — stop fetching
+    if (previousPageData && previousPageData.galleries.length === 0) return null
+    // Prefer cursor-based pagination when the backend provides it
+    if (previousPageData?.next_cursor) {
+      return ['library/galleries/infinite', { ...params, cursor: previousPageData.next_cursor }]
+    }
+    return ['library/galleries/infinite', { ...params, page: pageIndex }]
+  }
+
+  const { data, error, size, setSize, isValidating, isLoading } = useSWRInfinite<GalleryListResponse>(
+    getKey,
+    ([, fetchParams]: [string, GallerySearchParams]) => api.library.getGalleries(fetchParams),
+    { revalidateOnFocus: false, revalidateFirstPage: false },
+  )
+
+  const galleries = data ? data.flatMap((page) => page.galleries) : []
+  const total = data?.[0]?.total
+  const isLoadingMore = isValidating && data !== undefined && data.length === size
+  const isEmpty = data?.[0]?.galleries.length === 0
+  const lastPage = data?.[data.length - 1]
+  const isReachingEnd =
+    isEmpty || (lastPage !== undefined && lastPage.galleries.length < (params.limit ?? 24))
+
+  return {
+    galleries,
+    total,
+    error,
+    isLoading,
+    isLoadingMore,
+    isReachingEnd,
+    size,
+    setSize,
+    loadMore: () => setSize(size + 1),
+  }
 }
 
 export function useLibraryGallery(id: number | null) {

@@ -4,9 +4,8 @@ import { useState, useCallback, useRef, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { BookOpen, Plus, Minus } from 'lucide-react'
-import { useLibraryGalleries } from '@/hooks/useGalleries'
+import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
-import { Pagination } from '@/components/Pagination'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { t } from '@/lib/i18n'
@@ -45,13 +44,8 @@ function LibraryContent() {
   const [sort, setSort] = useState<'added_at' | 'rating' | 'pages'>(
     (searchParams.get('sort') as 'added_at' | 'rating' | 'pages') ?? 'added_at',
   )
-  const [page, setPage] = useState(searchParams.get('page') ? Number(searchParams.get('page')) : 0)
-  // cursor-based pagination state
-  const [cursor, setCursor] = useState<string | undefined>(undefined)
-  // stack of cursors for navigating backwards; each entry is the cursor that
-  // was active when we moved forward (undefined = first page)
-  const [cursorHistory, setCursorHistory] = useState<(string | undefined)[]>([])
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const sentinelRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     return () => {
@@ -67,19 +61,11 @@ function LibraryContent() {
     if (sort !== 'added_at') params.set('sort', sort)
     if (minRating !== undefined) params.set('rating', String(minRating))
     if (onlyFavorited) params.set('fav', '1')
-    if (page > 0) params.set('page', String(page))
 
     const qs = params.toString()
     const newUrl = qs ? `/library?${qs}` : '/library'
     router.replace(newUrl, { scroll: false })
-  }, [searchQuery, sourceFilter, sort, minRating, onlyFavorited, page, router])
-
-  // Reset all pagination state whenever filters change
-  const resetPagination = useCallback(() => {
-    setPage(0)
-    setCursor(undefined)
-    setCursorHistory([])
-  }, [])
+  }, [searchQuery, sourceFilter, sort, minRating, onlyFavorited, router])
 
   // Split compound source filter values like "local:link" → source="local", import_mode="link"
   const [parsedSource, parsedImportMode] = (() => {
@@ -89,99 +75,75 @@ function LibraryContent() {
     return [sourceFilter.slice(0, colonIdx), sourceFilter.slice(colonIdx + 1)]
   })()
 
-  const { data, isLoading, error } = useLibraryGalleries({
-    q: searchQuery || undefined,
-    tags: includeTags.length > 0 ? includeTags : undefined,
-    exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
-    min_rating: minRating,
-    favorited: onlyFavorited || undefined,
-    source: parsedSource,
-    import_mode: parsedImportMode,
-    sort,
-    // When a cursor is active, send it instead of the page number so the
-    // backend uses keyset pagination. Otherwise fall back to page-based.
-    ...(cursor ? { cursor } : { page }),
-    limit: PAGE_SIZE,
-  })
+  const { galleries, total, isLoading, error, isLoadingMore, isReachingEnd, loadMore } =
+    useInfiniteLibraryGalleries({
+      q: searchQuery || undefined,
+      tags: includeTags.length > 0 ? includeTags : undefined,
+      exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
+      min_rating: minRating,
+      favorited: onlyFavorited || undefined,
+      source: parsedSource,
+      import_mode: parsedImportMode,
+      sort,
+      limit: PAGE_SIZE,
+    })
 
-  // Derived: are we in cursor mode (backend returned next_cursor)?
-  const isCursorMode = data !== undefined && data.next_cursor !== undefined
-  const hasNext = isCursorMode ? (data?.has_next ?? false) : false
-  const hasPrev = cursorHistory.length > 0
+  // Intersection Observer: auto-trigger loadMore when sentinel enters viewport
+  useEffect(() => {
+    if (!sentinelRef.current) return
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting && !isLoadingMore && !isReachingEnd) {
+          loadMore()
+        }
+      },
+      { rootMargin: '200px' },
+    )
+    observer.observe(sentinelRef.current)
+    return () => observer.disconnect()
+  }, [isLoadingMore, isReachingEnd, loadMore])
 
-  const handleSearchChange = useCallback(
-    (value: string) => {
-      setSearchInput(value)
-      if (debounceRef.current) clearTimeout(debounceRef.current)
-      debounceRef.current = setTimeout(() => {
-        setSearchQuery(value)
-        resetPagination()
-      }, 400)
-    },
-    [resetPagination],
-  )
+  const handleSearchChange = useCallback((value: string) => {
+    setSearchInput(value)
+    if (debounceRef.current) clearTimeout(debounceRef.current)
+    debounceRef.current = setTimeout(() => {
+      setSearchQuery(value)
+    }, 400)
+  }, [])
 
   const handleSearchKeyDown = useCallback(
     (e: React.KeyboardEvent) => {
       if (e.key === 'Enter') {
         if (debounceRef.current) clearTimeout(debounceRef.current)
         setSearchQuery(searchInput)
-        resetPagination()
       }
     },
-    [searchInput, resetPagination],
+    [searchInput],
   )
 
   const addIncludeTag = useCallback(() => {
     const tag = includeInput.trim()
     if (tag && !includeTags.includes(tag)) {
       setIncludeTags((prev) => [...prev, tag])
-      resetPagination()
     }
     setIncludeInput('')
-  }, [includeInput, includeTags, resetPagination])
+  }, [includeInput, includeTags])
 
   const addExcludeTag = useCallback(() => {
     const tag = excludeInput.trim()
     if (tag && !excludeTags.includes(tag)) {
       setExcludeTags((prev) => [...prev, tag])
-      resetPagination()
     }
     setExcludeInput('')
-  }, [excludeInput, excludeTags, resetPagination])
+  }, [excludeInput, excludeTags])
 
-  const removeIncludeTag = useCallback(
-    (tag: string) => {
-      setIncludeTags((prev) => prev.filter((t) => t !== tag))
-      resetPagination()
-    },
-    [resetPagination],
-  )
+  const removeIncludeTag = useCallback((tag: string) => {
+    setIncludeTags((prev) => prev.filter((t) => t !== tag))
+  }, [])
 
-  const removeExcludeTag = useCallback(
-    (tag: string) => {
-      setExcludeTags((prev) => prev.filter((t) => t !== tag))
-      resetPagination()
-    },
-    [resetPagination],
-  )
-
-  // Page-based: total is known → show numbered pagination
-  const totalPages = data?.total !== undefined ? Math.ceil(data.total / PAGE_SIZE) : 0
-
-  const handleNextCursor = useCallback(() => {
-    if (!data?.next_cursor) return
-    setCursorHistory((prev) => [...prev, cursor])
-    setCursor(data.next_cursor ?? undefined)
-  }, [data, cursor])
-
-  const handlePrevCursor = useCallback(() => {
-    if (cursorHistory.length === 0) return
-    const prev = [...cursorHistory]
-    const restored = prev.pop()
-    setCursorHistory(prev)
-    setCursor(restored)
-  }, [cursorHistory])
+  const removeExcludeTag = useCallback((tag: string) => {
+    setExcludeTags((prev) => prev.filter((t) => t !== tag))
+  }, [])
 
   return (
     <div className="min-h-screen">
@@ -278,7 +240,6 @@ function LibraryContent() {
                 value={minRating ?? ''}
                 onChange={(e) => {
                   setMinRating(e.target.value ? Number(e.target.value) : undefined)
-                  resetPagination()
                 }}
                 className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
               >
@@ -299,7 +260,6 @@ function LibraryContent() {
                 value={sourceFilter}
                 onChange={(e) => {
                   setSourceFilter(e.target.value)
-                  resetPagination()
                 }}
                 className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
               >
@@ -319,7 +279,6 @@ function LibraryContent() {
                 value={sort}
                 onChange={(e) => {
                   setSort(e.target.value as typeof sort)
-                  resetPagination()
                 }}
                 className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
               >
@@ -337,7 +296,6 @@ function LibraryContent() {
                 checked={onlyFavorited}
                 onChange={(e) => {
                   setOnlyFavorited(e.target.checked)
-                  resetPagination()
                 }}
                 className="w-4 h-4 accent-yellow-500"
               />
@@ -348,11 +306,9 @@ function LibraryContent() {
           </div>
         </div>
 
-        {data && (
+        {total !== undefined && (
           <div className="text-sm text-vault-text-muted mb-4">
-            {data.total !== undefined
-              ? `${data.total.toLocaleString()} ${t('library.galleries')}`
-              : `${data.galleries.length} ${t('library.galleries')}`}
+            {`${total.toLocaleString()} ${t('library.galleries')}`}
           </div>
         )}
 
@@ -368,10 +324,10 @@ function LibraryContent() {
           </div>
         )}
 
-        {!isLoading && data && data.galleries.length > 0 && (
+        {!isLoading && galleries.length > 0 && (
           <>
             <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-6">
-              {data.galleries.map((gallery) => (
+              {galleries.map((gallery) => (
                 <Link key={gallery.id} href={`/library/${gallery.id}`}>
                   <LibraryGalleryCard
                     gallery={gallery}
@@ -381,38 +337,25 @@ function LibraryContent() {
               ))}
             </div>
 
-            {/* Cursor-based pagination: shown when backend returns next_cursor */}
-            {isCursorMode && (hasPrev || hasNext) && (
-              <div className="flex items-center justify-center gap-3 py-4">
-                <button
-                  type="button"
-                  onClick={handlePrevCursor}
-                  disabled={!hasPrev}
-                  className="flex items-center gap-1 px-4 py-2 rounded-lg bg-vault-card border border-vault-border hover:border-vault-accent hover:text-vault-text text-vault-text-secondary text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  aria-label="Previous page"
-                >
-                  ← {t('tags.prev')}
-                </button>
-                <button
-                  type="button"
-                  onClick={handleNextCursor}
-                  disabled={!hasNext}
-                  className="flex items-center gap-1 px-4 py-2 rounded-lg bg-vault-card border border-vault-border hover:border-vault-accent hover:text-vault-text text-vault-text-secondary text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                  aria-label="Next page"
-                >
-                  {t('tags.next')} →
-                </button>
+            {/* Infinite scroll sentinel */}
+            {!isReachingEnd && (
+              <div ref={sentinelRef} className="flex justify-center py-8">
+                {isLoadingMore ? (
+                  <LoadingSpinner />
+                ) : (
+                  <button
+                    onClick={loadMore}
+                    className="px-6 py-2 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary text-sm hover:border-vault-accent transition-colors"
+                  >
+                    {t('common.loadMore')}
+                  </button>
+                )}
               </div>
-            )}
-
-            {/* Page-based pagination: shown when backend returns total */}
-            {!isCursorMode && totalPages > 1 && data.total !== undefined && (
-              <Pagination page={page} total={data.total} pageSize={PAGE_SIZE} onChange={setPage} />
             )}
           </>
         )}
 
-        {!isLoading && data && data.galleries.length === 0 && (
+        {!isLoading && galleries.length === 0 && !error && (
           <EmptyState icon={BookOpen} title={t('library.noGalleries')} />
         )}
       </div>
