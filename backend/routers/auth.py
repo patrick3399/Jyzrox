@@ -9,7 +9,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import bcrypt
-from fastapi import APIRouter, Cookie, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Request, Response, UploadFile
 from PIL import Image, ImageOps
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -116,12 +116,24 @@ async def login(req: LoginRequest, request: Request, response: Response):
     )
     await get_redis().setex(f"session:{user.id}:{token}", _SESSION_TTL, session_meta)
 
+    is_https = _is_https(request)
     response.set_cookie(
         key="vault_session",
         value=f"{user.id}:{token}",
         httponly=True,
-        secure=settings.cookie_secure and _is_https(request),
-        samesite="strict" if _is_https(request) else "lax",
+        secure=settings.cookie_secure and is_https,
+        samesite="strict" if is_https else "lax",
+        path="/",
+        max_age=_SESSION_TTL,
+    )
+
+    csrf_token = secrets.token_urlsafe(32)
+    response.set_cookie(
+        key="csrf_token",
+        value=csrf_token,
+        httponly=False,
+        secure=settings.cookie_secure and is_https,
+        samesite="strict" if is_https else "lax",
         path="/",
         max_age=_SESSION_TTL,
     )
@@ -134,18 +146,39 @@ async def login(req: LoginRequest, request: Request, response: Response):
 
 
 @router.get("/check")
-async def check_auth(vault_session: str | None = Cookie(default=None)):
+async def check_auth(
+    vault_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
     """Lightweight session validation for nginx auth_request subrequest."""
-    if not vault_session:
-        raise HTTPException(status_code=401, detail="No session")
-    try:
-        user_id_str, token = vault_session.split(":", 1)
-        session_data = await get_redis().get(f"session:{user_id_str}:{token}")
-        if not session_data:
-            raise HTTPException(status_code=401, detail="Invalid session")
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    return {"status": "ok"}
+    # Try cookie first (existing logic)
+    if vault_session:
+        try:
+            user_id_str, token = vault_session.split(":", 1)
+            session_data = await get_redis().get(f"session:{user_id_str}:{token}")
+            if session_data:
+                return {"status": "ok"}
+        except ValueError:
+            pass
+
+    # Fallback to Basic Auth (for OPDS clients)
+    if authorization and authorization.lower().startswith("basic "):
+        import base64
+        try:
+            decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+            username, password = decoded.split(":", 1)
+            async with async_session() as session:
+                result = await session.execute(
+                    text("SELECT id, password_hash FROM users WHERE username = :uname"),
+                    {"uname": username},
+                )
+                user = result.fetchone()
+            if user and bcrypt.checkpw(password.encode("utf-8"), user.password_hash.encode("utf-8")):
+                return {"status": "ok"}
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
 
 @router.get("/sessions")
@@ -258,6 +291,7 @@ async def logout(
             pass
 
     response.delete_cookie("vault_session", path="/")
+    response.delete_cookie("csrf_token", path="/")
     return {"status": "ok"}
 
 

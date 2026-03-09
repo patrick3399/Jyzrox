@@ -31,12 +31,28 @@ import type {
 
 // ── Base fetch ───────────────────────────────────────────────────────
 
+function getCookie(name: string): string | undefined {
+  if (typeof document === 'undefined') return undefined
+  const match = document.cookie.match(new RegExp(`(?:^|; )${name}=([^;]*)`))
+  return match ? decodeURIComponent(match[1]) : undefined
+}
+
 let isRedirecting = false
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  }
+
+  const method = (options.method || 'GET').toUpperCase()
+  if (method !== 'GET' && method !== 'HEAD') {
+    const csrf = getCookie('csrf_token')
+    if (csrf) headers['X-CSRF-Token'] = csrf
+  }
+
   const res = await fetch(path, {
     credentials: 'include', // always send vault_token cookie
-    headers: { 'Content-Type': 'application/json', ...options.headers },
+    headers: { ...headers, ...(options.headers as Record<string, string>) },
     ...options,
   })
 
@@ -121,9 +137,14 @@ const auth = {
   ): Promise<{ status: string; avatar_url: string; avatar_style: string }> => {
     const form = new FormData()
     form.append('file', file)
+    const csrfHeaders: Record<string, string> = {}
+    const csrf = getCookie('csrf_token')
+    if (csrf) csrfHeaders['X-CSRF-Token'] = csrf
+
     const res = await fetch('/api/auth/avatar', {
       method: 'PUT',
       credentials: 'include',
+      headers: csrfHeaders,
       body: form,
     })
     if (!res.ok) {

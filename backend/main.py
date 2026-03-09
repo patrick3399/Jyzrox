@@ -8,6 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from core.config import settings
+from core.csrf import CSRFMiddleware
 from core.database import engine
 from core.redis_client import close_redis, init_redis
 from routers import (
@@ -68,8 +69,9 @@ app.add_middleware(
     allow_origins=_cors_origins,
     allow_credentials=True,
     allow_methods=["GET", "POST", "PATCH", "DELETE"],
-    allow_headers=["Content-Type"],
+    allow_headers=["Content-Type", "X-CSRF-Token"],
 )
+app.add_middleware(CSRFMiddleware)
 
 app.include_router(auth.router, prefix="/api/auth")
 app.include_router(system.router, prefix="/api/system")

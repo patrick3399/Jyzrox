@@ -1,0 +1,43 @@
+"""CSRF protection via the double-submit cookie pattern."""
+
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.requests import Request
+from starlette.responses import JSONResponse
+
+_SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
+
+_EXEMPT_PATHS = {
+    "/api/auth/login",
+    "/api/auth/setup",
+    "/api/auth/check",
+    "/api/auth/needs-setup",
+    "/api/health",
+    "/api/download/quick",
+}
+
+_EXEMPT_PREFIXES = (
+    "/api/external/v1/",
+    "/opds/",
+    "/api/ws/",
+)
+
+
+class CSRFMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if request.method in _SAFE_METHODS:
+            return await call_next(request)
+
+        path = request.url.path
+        if path in _EXEMPT_PATHS or path.startswith(_EXEMPT_PREFIXES):
+            return await call_next(request)
+
+        cookie_token = request.cookies.get("csrf_token")
+        header_token = request.headers.get("x-csrf-token")
+
+        if not cookie_token or not header_token or cookie_token != header_token:
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "CSRF token missing or invalid"},
+            )
+
+        return await call_next(request)

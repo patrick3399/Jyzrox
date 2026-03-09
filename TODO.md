@@ -9,7 +9,7 @@
 > 立即處理：安全漏洞與已實作功能的測試驗證。
 
 ### 安全
-- [ ] CSRF protection（目前 cookie-based auth 無 CSRF token）
+- [x] CSRF protection（目前 cookie-based auth 無 CSRF token）
 - [ ] Rate limiting 全端點覆蓋（目前僅 external API 有）
 
 ### Service Worker 版本管理
