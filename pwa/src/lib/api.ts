@@ -413,6 +413,24 @@ const settings = {
       method: 'PATCH',
       body: JSON.stringify({ enabled }),
     }),
+
+  getFeatures: () =>
+    apiFetch<{
+      csrf_enabled: boolean
+      rate_limit_enabled: boolean
+      opds_enabled: boolean
+      external_api_enabled: boolean
+      ai_tagging_enabled: boolean
+      download_eh_enabled: boolean
+      download_pixiv_enabled: boolean
+      download_gallery_dl_enabled: boolean
+    }>('/api/settings/features'),
+
+  setFeature: (feature: string, enabled: boolean) =>
+    apiFetch<{ feature: string; enabled: boolean }>(`/api/settings/features/${feature}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ enabled }),
+    }),
 }
 
 // ── History ───────────────────────────────────────────────────────────

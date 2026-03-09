@@ -58,6 +58,10 @@ class RateLimitPatch(BaseModel):
     enabled: bool | None = None
 
 
+class FeatureTogglePatch(BaseModel):
+    enabled: bool
+
+
 class EhSitePreference(BaseModel):
     use_ex: bool
 
@@ -487,6 +491,71 @@ async def patch_rate_limit_settings(
     return {
         "enabled": app_settings.rate_limit_enabled,
     }
+
+
+# ── Feature Toggle Helpers ───────────────────────────────────────────
+
+
+async def _get_toggle(redis_key: str, default: bool) -> bool:
+    """Read a boolean toggle from Redis, falling back to config default."""
+    val = await get_redis().get(redis_key)
+    if val is not None:
+        return val == b"1"
+    return default
+
+
+async def _set_toggle(redis_key: str, enabled: bool) -> bool:
+    """Set a boolean toggle in Redis."""
+    await get_redis().set(redis_key, "1" if enabled else "0")
+    return enabled
+
+
+# ── Feature Toggles ──────────────────────────────────────────────────
+
+
+@router.get("/features")
+async def get_feature_toggles(_: dict = Depends(require_auth)):
+    """Get all feature toggle states."""
+    return {
+        "csrf_enabled": await _get_toggle("setting:csrf_enabled", app_settings.csrf_enabled),
+        "rate_limit_enabled": app_settings.rate_limit_enabled,
+        "opds_enabled": await _get_toggle("setting:opds_enabled", app_settings.opds_enabled),
+        "external_api_enabled": await _get_toggle("setting:external_api_enabled", app_settings.external_api_enabled),
+        "ai_tagging_enabled": await _get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled),
+        "download_eh_enabled": await _get_toggle("setting:download_eh_enabled", app_settings.download_eh_enabled),
+        "download_pixiv_enabled": await _get_toggle("setting:download_pixiv_enabled", app_settings.download_pixiv_enabled),
+        "download_gallery_dl_enabled": await _get_toggle("setting:download_gallery_dl_enabled", app_settings.download_gallery_dl_enabled),
+    }
+
+
+@router.patch("/features/{feature}")
+async def patch_feature_toggle(
+    feature: str,
+    req: FeatureTogglePatch,
+    _: dict = Depends(require_auth),
+):
+    """Toggle a feature on/off."""
+    ALLOWED = {
+        "csrf_enabled": "setting:csrf_enabled",
+        "rate_limit_enabled": None,  # special case: modifies app_settings directly
+        "opds_enabled": "setting:opds_enabled",
+        "external_api_enabled": "setting:external_api_enabled",
+        "ai_tagging_enabled": "setting:ai_tagging_enabled",
+        "download_eh_enabled": "setting:download_eh_enabled",
+        "download_pixiv_enabled": "setting:download_pixiv_enabled",
+        "download_gallery_dl_enabled": "setting:download_gallery_dl_enabled",
+    }
+    if feature not in ALLOWED:
+        raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
+
+    redis_key = ALLOWED.get(feature)
+
+    if feature == "rate_limit_enabled":
+        app_settings.rate_limit_enabled = req.enabled
+        return {"feature": feature, "enabled": req.enabled}
+
+    await _set_toggle(redis_key, req.enabled)
+    return {"feature": feature, "enabled": req.enabled}
 
 
 # ── EH Site Preference ───────────────────────────────────────────────

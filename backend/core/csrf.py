@@ -1,5 +1,7 @@
 """CSRF protection via the double-submit cookie pattern."""
 
+import hmac
+
 from starlette.middleware.base import BaseHTTPMiddleware
 from starlette.requests import Request
 from starlette.responses import JSONResponse
@@ -32,10 +34,24 @@ class CSRFMiddleware(BaseHTTPMiddleware):
         if path in _EXEMPT_PATHS or path.startswith(_EXEMPT_PREFIXES):
             return await call_next(request)
 
+        # Check runtime toggle
+        try:
+            from core.redis_client import get_redis
+            from core.config import settings
+            val = await get_redis().get("setting:csrf_enabled")
+            if val is not None:
+                enabled = val == b"1"
+            else:
+                enabled = settings.csrf_enabled
+            if not enabled:
+                return await call_next(request)
+        except Exception:
+            pass  # If Redis is unavailable, keep CSRF enabled (fail-closed)
+
         cookie_token = request.cookies.get("csrf_token")
         header_token = request.headers.get("x-csrf-token")
 
-        if not cookie_token or not header_token or cookie_token != header_token:
+        if not cookie_token or not header_token or not hmac.compare_digest(cookie_token, header_token):
             return JSONResponse(
                 status_code=403,
                 content={"detail": "CSRF token missing or invalid"},

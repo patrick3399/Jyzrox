@@ -48,13 +48,13 @@
 - [x] History 頁面改為 infinite scroll + 虛擬滾動（目前為手動按鈕）
 
 ### Settings UI 功能開關
-- [ ] CSRF 保護開關（環境變數 `CSRF_ENABLED` + Settings UI toggle）
-- [ ] Rate limiting 開關 / 自訂閾值（每端點可調）
-- [ ] OPDS 啟用/停用
-- [ ] External API 啟用/停用
-- [ ] AI Tagging 啟用/停用（已有 `TAG_MODEL_ENABLED` env，缺 UI）
-- [ ] 下載來源啟用/停用（EH / Pixiv / gallery-dl fallback）
-- [ ] 統一 Settings → Security / Features 分區，集中管理所有開關
+- [x] CSRF 保護開關（環境變數 `CSRF_ENABLED` + Settings UI toggle）
+- [x] Rate limiting 開關 / 自訂閾值（每端點可調）
+- [x] OPDS 啟用/停用
+- [x] External API 啟用/停用
+- [x] AI Tagging 啟用/停用（已有 `TAG_MODEL_ENABLED` env，缺 UI）
+- [x] 下載來源啟用/停用（EH / Pixiv / gallery-dl fallback）
+- [x] 統一 Settings → Security / Features 分區，集中管理所有開關
 
 ### 後端 i18n
 - [ ] API 錯誤訊息 i18n（目前硬編碼中/英文）

@@ -11,6 +11,7 @@ from sqlalchemy import delete, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth
+from core.config import settings as app_settings
 from core.database import get_db
 from core.redis_client import get_redis
 from db.models import DownloadJob
@@ -40,7 +41,31 @@ def _detect_source(url: str) -> str:
         return "pixiv"
     if "e-hentai.org" in url or "exhentai.org" in url:
         return "ehentai"
+    if "twitter.com" in url or "x.com" in url:
+        return "twitter"
     return "unknown"
+
+
+async def _check_source_enabled(source: str) -> None:
+    """Raise 400 if the download source is disabled."""
+    mapping = {
+        "ehentai": ("setting:download_eh_enabled", app_settings.download_eh_enabled),
+        "exhentai": ("setting:download_eh_enabled", app_settings.download_eh_enabled),
+        "pixiv": ("setting:download_pixiv_enabled", app_settings.download_pixiv_enabled),
+    }
+
+    if source in mapping:
+        key, default = mapping[source]
+        val = await get_redis().get(key)
+        enabled = val == b"1" if val is not None else default
+        if not enabled:
+            raise HTTPException(status_code=400, detail=f"Download source '{source}' is disabled")
+    else:
+        # gallery-dl fallback
+        val = await get_redis().get("setting:download_gallery_dl_enabled")
+        enabled = val == b"1" if val is not None else app_settings.download_gallery_dl_enabled
+        if not enabled:
+            raise HTTPException(status_code=400, detail="gallery-dl downloads are disabled")
 
 
 async def _enqueue(
@@ -62,6 +87,8 @@ async def _enqueue(
     job_id = uuid.uuid4()
     source = _detect_source(url)
     initial_progress = {"total": total} if total is not None else None
+
+    await _check_source_enabled(source)
 
     # 1. Enqueue ARQ job first — if this fails, no DB record is created.
     try:

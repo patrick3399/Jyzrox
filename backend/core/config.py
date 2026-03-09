@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     rate_limit_login: int = 5  # max attempts per window
     rate_limit_window: int = 300  # window in seconds (5 min)
 
+    # Feature toggles (defaults, overridable at runtime via Redis)
+    csrf_enabled: bool = True
+    opds_enabled: bool = True
+    external_api_enabled: bool = True
+    download_eh_enabled: bool = True
+    download_pixiv_enabled: bool = True
+    download_gallery_dl_enabled: bool = True
+
     # E-Hentai limits
     eh_max_concurrency: int = 2
     eh_request_timeout: int = 30

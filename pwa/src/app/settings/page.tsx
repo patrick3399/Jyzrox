@@ -1,23 +1,22 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import Link from 'next/link'
 import { useLocale } from '@/components/LocaleProvider'
 import { SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
-import { ChevronUp, ChevronDown, Eye, EyeOff, RefreshCw, Shield, Monitor, CalendarClock, Square } from 'lucide-react'
+import { ChevronUp, ChevronDown, Shield, Monitor, CalendarClock, Square, Key } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
-import { Copy, Key, BookOpen, X, Plus, Tag, ScanLine } from 'lucide-react'
+import { Copy, BookOpen, X, Plus, Tag, ScanLine } from 'lucide-react'
 import { useRescanLibrary, useRescanStatus, useScanSettings, useUpdateScanSettings, useCancelRescan } from '@/hooks/useImport'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
 import type {
   SystemHealth,
   SystemInfo,
-  EhAccount,
-  Credentials,
   SessionInfo,
   ApiTokenInfo,
   BlockedTag,
@@ -25,11 +24,11 @@ import type {
 } from '@/lib/types'
 
 type SectionKey =
-  | 'ehentai'
-  | 'pixiv'
   | 'system'
   | 'account'
   | 'browse'
+  | 'security'
+  | 'features'
   | 'apiTokens'
   | 'reader'
   | 'blockedTags'
@@ -88,6 +87,42 @@ function StatusIndicator({ configured }: { configured: boolean }) {
       />
       {configured ? t('settings.configured') : t('settings.notConfigured')}
     </span>
+  )
+}
+
+function ToggleRow({
+  label,
+  description,
+  checked,
+  onChange,
+  disabled,
+}: {
+  label: string
+  description: string
+  checked: boolean
+  onChange: (checked: boolean) => void
+  disabled?: boolean
+}) {
+  return (
+    <div className="flex items-center justify-between py-3">
+      <div className="flex-1 min-w-0 pr-4">
+        <p className="text-sm font-medium text-vault-text">{label}</p>
+        <p className="text-xs text-vault-text-muted mt-0.5">{description}</p>
+      </div>
+      <button
+        onClick={() => onChange(!checked)}
+        disabled={disabled}
+        className={`relative inline-flex h-5 w-9 flex-shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
+          checked ? 'bg-green-600' : 'bg-vault-border'
+        } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
+      >
+        <span
+          className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ${
+            checked ? 'translate-x-4' : 'translate-x-0'
+          }`}
+        />
+      </button>
+    </div>
   )
 }
 
@@ -588,48 +623,21 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
 export default function SettingsPage() {
   const { logout } = useAuth()
   const { locale, setLocale: changeLocale } = useLocale()
-  const [activeSection, setActiveSection] = useState<SectionKey | null>('ehentai')
-
-  // Credentials state
-  const [credentials, setCredentials] = useState<Credentials | null>(null)
-  const [credLoading, setCredLoading] = useState(true)
-
-  // EH login mode
-  const [ehLoginMode, setEhLoginMode] = useState<'password' | 'cookie'>('password')
-
-  // EH password login
-  const [ehUsername, setEhUsername] = useState('')
-  const [ehPassword, setEhPassword] = useState('')
-  const [ehLoginSaving, setEhLoginSaving] = useState(false)
-
-  // EH Cookie form
-  const [ehMemberId, setEhMemberId] = useState('')
-  const [ehPassHash, setEhPassHash] = useState('')
-  const [ehSk, setEhSk] = useState('')
-  const [ehIgneous, setEhIgneous] = useState('')
-  const [ehSaving, setEhSaving] = useState(false)
-  const [showPassHash, setShowPassHash] = useState(false)
-  const [ehAccount, setEhAccount] = useState<EhAccount | null>(null)
-  const [ehAccountLoading, setEhAccountLoading] = useState(false)
-
-  // Pixiv Token form
-  const [pixivLoginMode, setPixivLoginMode] = useState<'oauth' | 'token' | 'cookie'>('oauth')
-  const [pixivToken, setPixivToken] = useState('')
-  const [pixivCookie, setPixivCookie] = useState('')
-  const [pixivSaving, setPixivSaving] = useState(false)
-  const [pixivUsername, setPixivUsername] = useState<string | null>(null)
-  const [pixivOauthUrl, setPixivOauthUrl] = useState('')
-  const [pixivCodeVerifier, setPixivCodeVerifier] = useState('')
-  const [pixivCallbackUrl, setPixivCallbackUrl] = useState('')
+  const [activeSection, setActiveSection] = useState<SectionKey | null>('system')
 
   // System info
   const [health, setHealth] = useState<SystemHealth | null>(null)
   const [systemInfo, setSystemInfo] = useState<SystemInfo | null>(null)
   const [systemLoading, setSystemLoading] = useState(false)
+  const [systemLoaded, setSystemLoaded] = useState(false)
 
   // Rate limiting
   const [rateLimitEnabled, setRateLimitEnabled] = useState<boolean | null>(null)
   const [rateLimitToggling, setRateLimitToggling] = useState(false)
+
+  // Feature toggles
+  const [features, setFeatures] = useState<Record<string, boolean>>({})
+  const [featuresLoading, setFeaturesLoading] = useState(true)
 
   // Cache stats
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
@@ -677,159 +685,9 @@ export default function SettingsPage() {
   const [tokenCreating, setTokenCreating] = useState(false)
   const [deletingTokenId, setDeletingTokenId] = useState<string | null>(null)
 
-  // Load credentials on mount
-  useEffect(() => {
-    api.settings
-      .getCredentials()
-      .then(setCredentials)
-      .catch((err) => toast.error(err instanceof Error ? err.message : t('common.failedToLoad')))
-      .finally(() => setCredLoading(false))
-  }, [])
-
   const toggleSection = useCallback((key: SectionKey) => {
     setActiveSection((prev) => (prev === key ? null : key))
   }, [])
-
-  // EH: Login with username/password
-  const handleEhLogin = useCallback(async () => {
-    if (!ehUsername.trim() || !ehPassword.trim()) return
-    setEhLoginSaving(true)
-    try {
-      const result = await api.settings.ehLogin(ehUsername.trim(), ehPassword.trim())
-      toast.success(t('settings.ehLoginSuccess'))
-      setEhAccount(result.account)
-      setCredentials((prev) => (prev ? { ...prev, ehentai: { configured: true } } : prev))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.ehLoginFailed'))
-    } finally {
-      setEhLoginSaving(false)
-    }
-  }, [ehUsername, ehPassword])
-
-  // EH: Save cookies
-  const handleEhSave = useCallback(async () => {
-    if (!ehMemberId.trim() || !ehPassHash.trim() || !ehSk.trim()) return
-    setEhSaving(true)
-    try {
-      const data: { ipb_member_id: string; ipb_pass_hash: string; sk: string; igneous?: string } = {
-        ipb_member_id: ehMemberId.trim(),
-        ipb_pass_hash: ehPassHash.trim(),
-        sk: ehSk.trim(),
-      }
-      if (ehIgneous.trim()) data.igneous = ehIgneous.trim()
-      const result = await api.settings.setEhCookies(data)
-      toast.success(t('settings.ehCookiesSaved'))
-      setEhAccount(result.account)
-      setCredentials((prev) => (prev ? { ...prev, ehentai: { configured: true } } : prev))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.ehCookiesFailed'))
-    } finally {
-      setEhSaving(false)
-    }
-  }, [ehMemberId, ehPassHash, ehSk, ehIgneous])
-
-  // EH: Refresh account info
-  const handleEhRefresh = useCallback(async () => {
-    setEhAccountLoading(true)
-    try {
-      const account = await api.settings.getEhAccount()
-      setEhAccount(account)
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.ehRefreshFailed'))
-    } finally {
-      setEhAccountLoading(false)
-    }
-  }, [])
-
-  // Pixiv: Save token
-  const handlePixivSave = useCallback(async () => {
-    if (!pixivToken.trim()) return
-    setPixivSaving(true)
-    try {
-      const result = await api.settings.setPixivToken(pixivToken.trim())
-      toast.success(`${t('settings.pixivSaved')}: ${result.username}`)
-      setPixivUsername(result.username)
-      setCredentials((prev) => (prev ? { ...prev, pixiv: { configured: true } } : prev))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.pixivFailed'))
-    } finally {
-      setPixivSaving(false)
-    }
-  }, [pixivToken])
-
-  // Pixiv: Save cookie
-  const handlePixivCookieSave = useCallback(async () => {
-    if (!pixivCookie.trim()) return
-    setPixivSaving(true)
-    try {
-      const result = await api.settings.setPixivCookie(pixivCookie.trim())
-      toast.success(`${t('settings.pixivSaved')}: ${result.username}`)
-      setPixivUsername(result.username)
-      setCredentials((prev) => (prev ? { ...prev, pixiv: { configured: true } } : prev))
-      setPixivCookie('')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.pixivFailed'))
-    } finally {
-      setPixivSaving(false)
-    }
-  }, [pixivCookie])
-
-  // Pixiv: Get OAuth URL
-  const handlePixivGetOauth = useCallback(async () => {
-    try {
-      const res = await api.settings.getPixivOAuthUrl()
-      setPixivOauthUrl(res.url)
-      setPixivCodeVerifier(res.code_verifier)
-      window.open(res.url, '_blank')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
-    }
-  }, [])
-
-  // Pixiv: Exchange OAuth Callback
-  const handlePixivExchange = useCallback(async () => {
-    if (!pixivCallbackUrl.trim() || !pixivCodeVerifier) return
-    setPixivSaving(true)
-    try {
-      const res = await api.settings.pixivOAuthCallback(pixivCallbackUrl.trim(), pixivCodeVerifier)
-      toast.success(`${t('settings.pixivSaved')}: ${res.username}`)
-      setPixivUsername(res.username)
-      setCredentials((prev) => (prev ? { ...prev, pixiv: { configured: true } } : prev))
-      setPixivCallbackUrl('')
-      setPixivOauthUrl('')
-      setPixivCodeVerifier('')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('settings.pixivFailed'))
-    } finally {
-      setPixivSaving(false)
-    }
-  }, [pixivCallbackUrl, pixivCodeVerifier])
-
-  // EH: Clear credential
-  const handleClearEh = async () => {
-    if (!confirm(t('settings.clearEhConfirm'))) return
-    try {
-      await api.settings.deleteCredential('ehentai')
-      toast.success(t('settings.ehCookiesCleared'))
-      setCredentials((prev) => (prev ? { ...prev, ehentai: { configured: false } } : prev))
-      setEhAccount(null)
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : t('settings.clearFailed'))
-    }
-  }
-
-  // Pixiv: Clear credential
-  const handleClearPixiv = async () => {
-    if (!confirm(t('settings.confirmClearPixiv'))) return
-    try {
-      await api.settings.deleteCredential('pixiv')
-      toast.success(t('settings.pixivTokenCleared'))
-      setCredentials((prev) => (prev ? { ...prev, pixiv: { configured: false } } : prev))
-      setPixivUsername(null)
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : t('settings.clearFailed'))
-    }
-  }
 
   // System: Load health + info + cache
   const handleLoadSystem = useCallback(async () => {
@@ -849,6 +707,31 @@ export default function SettingsPage() {
       toast.error(err instanceof Error ? err.message : t('settings.systemLoadFailed'))
     } finally {
       setSystemLoading(false)
+      setSystemLoaded(true)
+    }
+  }, [])
+
+  // Features: Load
+  const handleLoadFeatures = useCallback(async () => {
+    setFeaturesLoading(true)
+    try {
+      const data = await api.settings.getFeatures()
+      setFeatures(data)
+    } catch {
+      // silently fail — toggles will use defaults
+    } finally {
+      setFeaturesLoading(false)
+    }
+  }, [])
+
+  // Features: Toggle
+  const handleFeatureToggle = useCallback(async (feature: string, enabled: boolean) => {
+    try {
+      await api.settings.setFeature(feature, enabled)
+      setFeatures((prev) => ({ ...prev, [feature]: enabled }))
+      toast.success(t('common.saved'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
     }
   }, [])
 
@@ -1134,7 +1017,7 @@ export default function SettingsPage() {
   }, [])
 
   useEffect(() => {
-    if (activeSection === 'system' && !health && !systemLoading) {
+    if (activeSection === 'system' && !systemLoaded && !systemLoading) {
       handleLoadSystem()
     }
     if (activeSection === 'account') {
@@ -1147,9 +1030,12 @@ export default function SettingsPage() {
     if (activeSection === 'blockedTags' && !blockedTagsLoaded && !blockedTagsLoading) {
       handleLoadBlockedTags()
     }
+    if ((activeSection === 'security' || activeSection === 'features') && featuresLoading && Object.keys(features).length === 0) {
+      handleLoadFeatures()
+    }
   }, [
     activeSection,
-    health,
+    systemLoaded,
     systemLoading,
     handleLoadSystem,
     profileLoaded,
@@ -1163,6 +1049,9 @@ export default function SettingsPage() {
     blockedTagsLoaded,
     blockedTagsLoading,
     handleLoadBlockedTags,
+    features,
+    featuresLoading,
+    handleLoadFeatures,
   ])
 
   const serviceStatusClass = (status: string) =>
@@ -1179,6 +1068,15 @@ export default function SettingsPage() {
     <div className="min-h-screen bg-vault-bg text-vault-text">
       <div className="max-w-2xl mx-auto px-4 py-6">
         <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settings.title')}</h1>
+
+        {/* ── Credentials link ── */}
+        <Link
+          href="/credentials"
+          className="flex items-center gap-2 mb-4 px-4 py-2.5 bg-vault-card border border-vault-border rounded-xl text-sm text-vault-text-secondary hover:text-vault-accent hover:border-vault-accent/50 transition-colors w-full"
+        >
+          <Key size={16} />
+          <span>{t('credentials.manageCredentials')}</span>
+        </Link>
 
         <div className="space-y-3">
           {/* ── Language ── */}
@@ -1197,380 +1095,6 @@ export default function SettingsPage() {
                 ))}
               </select>
             </div>
-          </div>
-
-          {/* ── E-Hentai ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <SectionHeader
-                  title={t('settings.ehentai')}
-                  sectionKey="ehentai"
-                  activeSection={activeSection}
-                  onToggle={toggleSection}
-                />
-              </div>
-              {!credLoading && credentials && (
-                <div className="pr-5">
-                  <StatusIndicator configured={credentials.ehentai.configured} />
-                </div>
-              )}
-            </div>
-
-            {activeSection === 'ehentai' && (
-              <div className="px-5 pb-5 border-t border-vault-border">
-                {/* Mode toggle */}
-                <div className="flex mt-4 bg-vault-input border border-vault-border rounded overflow-hidden">
-                  <button
-                    onClick={() => setEhLoginMode('password')}
-                    className={`flex-1 px-3 py-2 text-sm transition-colors ${ehLoginMode === 'password' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-                  >
-                    {t('settings.usernamePassword')}
-                  </button>
-                  <button
-                    onClick={() => setEhLoginMode('cookie')}
-                    className={`flex-1 px-3 py-2 text-sm transition-colors ${ehLoginMode === 'cookie' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-                  >
-                    {t('settings.cookieAdvanced')}
-                  </button>
-                </div>
-
-                {/* Password login */}
-                {ehLoginMode === 'password' && (
-                  <div className="mt-4 space-y-3">
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">
-                        {t('settings.username')}
-                      </label>
-                      <input
-                        type="text"
-                        value={ehUsername}
-                        onChange={(e) => setEhUsername(e.target.value)}
-                        placeholder={t('settings.ehUsernamePlaceholder')}
-                        autoComplete="username"
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">
-                        {t('settings.password')}
-                      </label>
-                      <input
-                        type="password"
-                        value={ehPassword}
-                        onChange={(e) => setEhPassword(e.target.value)}
-                        placeholder={t('settings.ehPasswordPlaceholder')}
-                        autoComplete="current-password"
-                        onKeyDown={(e) => e.key === 'Enter' && handleEhLogin()}
-                        className={inputClass}
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button
-                        onClick={handleEhLogin}
-                        disabled={ehLoginSaving}
-                        className={btnPrimary}
-                      >
-                        {ehLoginSaving ? t('settings.loggingIn') : t('settings.logIn')}
-                      </button>
-                      <button
-                        onClick={handleEhRefresh}
-                        disabled={ehAccountLoading}
-                        className={btnSecondary}
-                      >
-                        {ehAccountLoading ? t('settings.refreshing') : t('settings.refreshAccount')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Cookie login */}
-                {ehLoginMode === 'cookie' && (
-                  <div className="mt-4 space-y-3">
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">
-                        ipb_member_id
-                      </label>
-                      <input
-                        type="text"
-                        value={ehMemberId}
-                        onChange={(e) => setEhMemberId(e.target.value)}
-                        placeholder={t('settings.enterIpbMemberId')}
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">
-                        ipb_pass_hash
-                      </label>
-                      <div className="relative">
-                        <input
-                          type={showPassHash ? 'text' : 'password'}
-                          value={ehPassHash}
-                          onChange={(e) => setEhPassHash(e.target.value)}
-                          placeholder={t('settings.enterIpbPassHash')}
-                          className={`${inputClass} pr-10`}
-                        />
-                        <button
-                          type="button"
-                          onClick={() => setShowPassHash((v) => !v)}
-                          className="absolute right-2 top-1/2 -translate-y-1/2 text-vault-text-muted hover:text-vault-text transition-colors px-1"
-                        >
-                          {showPassHash ? <EyeOff size={14} /> : <Eye size={14} />}
-                        </button>
-                      </div>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">sk</label>
-                      <input
-                        type="text"
-                        value={ehSk}
-                        onChange={(e) => setEhSk(e.target.value)}
-                        placeholder={t('settings.enterSk')}
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">
-                        igneous{' '}
-                        <span className="text-vault-text-muted">(optional, for ExHentai)</span>
-                      </label>
-                      <input
-                        type="text"
-                        value={ehIgneous}
-                        onChange={(e) => setEhIgneous(e.target.value)}
-                        placeholder={t('settings.enterIgneous')}
-                        className={inputClass}
-                      />
-                    </div>
-                    <div className="flex gap-2">
-                      <button onClick={handleEhSave} disabled={ehSaving} className={btnPrimary}>
-                        {ehSaving ? t('settings.saving') : t('settings.saveCookies')}
-                      </button>
-                      <button
-                        onClick={handleEhRefresh}
-                        disabled={ehAccountLoading}
-                        className={btnSecondary}
-                      >
-                        {ehAccountLoading ? t('settings.refreshing') : t('settings.refreshAccount')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {/* Account Info */}
-                {ehAccount && (
-                  <div className="mt-4 bg-vault-input border border-vault-border rounded-lg p-3">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                      {t('settings.accountStatus')}
-                    </p>
-                    <div className="space-y-1">
-                      <div className="flex justify-between text-sm">
-                        <span className="text-vault-text-muted">{t('settings.valid')}</span>
-                        <span className={ehAccount.valid ? 'text-green-400' : 'text-red-400'}>
-                          {ehAccount.valid ? t('settings.yes') : t('settings.no')}
-                        </span>
-                      </div>
-                      {ehAccount.credits !== undefined && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-vault-text-muted">{t('settings.credits')}</span>
-                          <span className="text-vault-text-secondary">
-                            {ehAccount.credits.toLocaleString()}
-                          </span>
-                        </div>
-                      )}
-                      {ehAccount.hath_perks !== undefined && (
-                        <div className="flex justify-between text-sm">
-                          <span className="text-vault-text-muted">{t('settings.hathPerks')}</span>
-                          <span className="text-vault-text-secondary">{ehAccount.hath_perks}</span>
-                        </div>
-                      )}
-                      {ehAccount.error && (
-                        <p className="text-xs text-red-400 mt-1">{ehAccount.error}</p>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-                {credentials?.ehentai?.configured && (
-                  <button
-                    onClick={handleClearEh}
-                    className="mt-3 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors"
-                  >
-                    {t('settings.clearCookie')}
-                  </button>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* ── Pixiv Token ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <SectionHeader
-                  title={t('settings.pixivToken')}
-                  sectionKey="pixiv"
-                  activeSection={activeSection}
-                  onToggle={toggleSection}
-                />
-              </div>
-              {!credLoading && credentials && (
-                <div className="pr-5">
-                  <StatusIndicator configured={credentials.pixiv.configured} />
-                </div>
-              )}
-            </div>
-
-            {activeSection === 'pixiv' && (
-              <div className="px-5 pb-5 border-t border-vault-border">
-                {/* Mode toggle */}
-                <div className="flex mt-4 bg-vault-input border border-vault-border rounded overflow-hidden">
-                  <button
-                    onClick={() => setPixivLoginMode('oauth')}
-                    className={`flex-1 px-3 py-2 text-sm transition-colors ${pixivLoginMode === 'oauth' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-                  >
-                    Web Login
-                  </button>
-                  <button
-                    onClick={() => setPixivLoginMode('cookie')}
-                    className={`flex-1 px-3 py-2 text-sm transition-colors ${pixivLoginMode === 'cookie' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-                  >
-                    Session Cookie (New)
-                  </button>
-                  <button
-                    onClick={() => setPixivLoginMode('token')}
-                    className={`flex-1 px-3 py-2 text-sm transition-colors ${pixivLoginMode === 'token' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-                  >
-                    Refresh Token (Adv)
-                  </button>
-                </div>
-
-                {pixivLoginMode === 'oauth' && (
-                  <div className="mt-4 space-y-3">
-                    <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3 text-xs text-yellow-300/90 space-y-1.5">
-                      <p className="font-semibold">{t('settings.pixivOauthSteps')}</p>
-                      <p>{t('settings.pixivOauthStep1')}</p>
-                      <p>{t('settings.pixivOauthStep2')}</p>
-                      <p>{t('settings.pixivOauthStep3')}</p>
-                      <p className="text-yellow-400/70">
-                        {t('settings.pixivOauthHint')}{' '}
-                        <code className="bg-black/30 px-1 rounded">
-                          https://app-api.pixiv.net/...?code=xxx
-                        </code>
-                      </p>
-                      <p className="text-yellow-400/70">
-                        {t('settings.pixivOauthHint2')}
-                      </p>
-                    </div>
-                    <button onClick={handlePixivGetOauth} className={btnSecondary + ' w-full'}>
-                      Open Pixiv Login Page
-                    </button>
-                    {pixivCodeVerifier && (
-                      <div>
-                        <p className="text-xs text-vault-text-muted mb-1">
-                          {t('settings.pixivOauthStep4')}
-                        </p>
-                        <input
-                          type="text"
-                          value={pixivCallbackUrl}
-                          onChange={(e) => setPixivCallbackUrl(e.target.value)}
-                          placeholder={t('settings.pixivCallbackPlaceholder')}
-                          className={inputClass}
-                        />
-                        <button
-                          onClick={handlePixivExchange}
-                          disabled={pixivSaving || !pixivCallbackUrl.trim()}
-                          className={btnPrimary + ' mt-3'}
-                        >
-                          {pixivSaving ? t('settings.saving') : t('settings.verifyAndSave')}
-                        </button>
-                      </div>
-                    )}
-                  </div>
-                )}
-
-                {pixivLoginMode === 'cookie' && (
-                  <div className="mt-4 space-y-3">
-                    <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg p-3 text-xs text-blue-300/90 space-y-1.5">
-                      <p className="font-semibold">{t('settings.pixivCookieTitle')}</p>
-                      <p>{t('settings.pixivCookieDesc')}</p>
-                      <ul className="list-disc list-inside mt-1 ml-1">
-                        <li>{t('settings.pixivCookieStep1')}</li>
-                        <li>{t('settings.pixivCookieStep2')}</li>
-                        <li>
-                          {t('settings.pixivCookieStep3')}{' '}
-                          <code className="bg-black/30 px-1 rounded">PHPSESSID</code>
-                        </li>
-                        <li>{t('settings.pixivCookieStep4')}</li>
-                      </ul>
-                    </div>
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">
-                        PHPSESSID (Session Cookie)
-                      </label>
-                      <input
-                        type="password"
-                        value={pixivCookie}
-                        onChange={(e) => setPixivCookie(e.target.value)}
-                        placeholder={t('settings.pixivTokenExample')}
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <button
-                        onClick={handlePixivCookieSave}
-                        disabled={pixivSaving || !pixivCookie.trim()}
-                        className={btnPrimary}
-                      >
-                        {pixivSaving ? t('settings.saving') : t('settings.verifyAndSave')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {pixivLoginMode === 'token' && (
-                  <div className="mt-4">
-                    <label className="block text-xs text-vault-text-muted mb-1">
-                      {t('settings.pixivRefreshToken')}
-                    </label>
-                    <input
-                      type="password"
-                      value={pixivToken}
-                      onChange={(e) => setPixivToken(e.target.value)}
-                      placeholder={t('settings.enterPixivRefreshToken')}
-                      className={inputClass}
-                    />
-                    <p className="text-xs text-vault-text-muted mt-1">{t('settings.pixivHint')}</p>
-                    <div className="mt-4">
-                      <button
-                        onClick={handlePixivSave}
-                        disabled={pixivSaving}
-                        className={btnPrimary}
-                      >
-                        {pixivSaving ? t('settings.saving') : t('settings.saveToken')}
-                      </button>
-                    </div>
-                  </div>
-                )}
-
-                {pixivUsername && (
-                  <div className="mt-4 flex items-center gap-2 text-sm p-3 bg-vault-input border border-vault-border rounded-lg">
-                    <span className="text-vault-text-muted">{t('settings.pixivAccount')}:</span>
-                    <span className="text-vault-text-secondary">{pixivUsername}</span>
-                  </div>
-                )}
-
-                {credentials?.pixiv?.configured && (
-                  <button
-                    onClick={handleClearPixiv}
-                    className="mt-3 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors"
-                  >
-                    {t('settings.clearToken')}
-                  </button>
-                )}
-              </div>
-            )}
           </div>
 
           {/* ── System Info ── */}
@@ -1673,32 +1197,6 @@ export default function SettingsPage() {
                       </div>
                     </div>
 
-                    {/* Rate Limiting */}
-                    <div>
-                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                        {t('settings.security')}
-                      </p>
-                      <div className="bg-vault-input border border-vault-border rounded-lg px-3 py-2">
-                        <div className="flex items-center justify-between">
-                          <div>
-                            <p className="text-sm text-vault-text">{t('settings.rateLimiting')}</p>
-                            <p className="text-xs text-vault-text-muted mt-0.5">
-                              {t('settings.rateLimitDesc')}
-                            </p>
-                          </div>
-                          <button
-                            onClick={handleToggleRateLimit}
-                            disabled={rateLimitToggling || rateLimitEnabled === null}
-                            className={`relative w-11 h-6 rounded-full transition-colors ${rateLimitEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
-                          >
-                            <span
-                              className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${rateLimitEnabled ? 'translate-x-5' : ''}`}
-                            />
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-
                     {/* Cache Management */}
                     <div>
                       <div className="flex items-center justify-between mb-2">
@@ -1789,6 +1287,100 @@ export default function SettingsPage() {
                     </button>
                   </div>
                 )}
+              </div>
+            )}
+          </div>
+
+          {/* ── Security ── */}
+          <div className="bg-vault-card border border-vault-border rounded-lg overflow-hidden">
+            <SectionHeader
+              title={t('settings.security')}
+              sectionKey="security"
+              activeSection={activeSection}
+              onToggle={toggleSection}
+            />
+            {activeSection === 'security' && (
+              <div className="px-5 pb-5 space-y-1 divide-y divide-vault-border">
+                <ToggleRow
+                  label={t('settings.csrfProtection')}
+                  description={t('settings.csrfDesc')}
+                  checked={features.csrf_enabled ?? true}
+                  onChange={(v) => handleFeatureToggle('csrf_enabled', v)}
+                  disabled={featuresLoading}
+                />
+                <ToggleRow
+                  label={t('settings.rateLimiting')}
+                  description={t('settings.rateLimitDesc')}
+                  checked={features.rate_limit_enabled ?? true}
+                  onChange={(v) => handleFeatureToggle('rate_limit_enabled', v)}
+                  disabled={featuresLoading}
+                />
+              </div>
+            )}
+          </div>
+
+          {/* ── Features ── */}
+          <div className="bg-vault-card border border-vault-border rounded-lg overflow-hidden">
+            <SectionHeader
+              title={t('settings.features')}
+              sectionKey="features"
+              activeSection={activeSection}
+              onToggle={toggleSection}
+            />
+            {activeSection === 'features' && (
+              <div className="px-5 pb-5">
+                {/* Service Toggles */}
+                <div className="space-y-1 divide-y divide-vault-border">
+                  <ToggleRow
+                    label={t('settings.opdsServer')}
+                    description={t('settings.opdsDesc')}
+                    checked={features.opds_enabled ?? true}
+                    onChange={(v) => handleFeatureToggle('opds_enabled', v)}
+                    disabled={featuresLoading}
+                  />
+                  <ToggleRow
+                    label={t('settings.externalApi')}
+                    description={t('settings.externalApiDesc')}
+                    checked={features.external_api_enabled ?? true}
+                    onChange={(v) => handleFeatureToggle('external_api_enabled', v)}
+                    disabled={featuresLoading}
+                  />
+                  <ToggleRow
+                    label={t('settings.aiTagging')}
+                    description={t('settings.aiTaggingToggleDesc')}
+                    checked={features.ai_tagging_enabled ?? false}
+                    onChange={(v) => handleFeatureToggle('ai_tagging_enabled', v)}
+                    disabled={featuresLoading}
+                  />
+                </div>
+
+                {/* Download Sources */}
+                <h3 className="text-xs text-vault-text-muted uppercase tracking-wide mt-5 mb-2">
+                  {t('settings.downloadSources')}
+                </h3>
+                <div className="space-y-1 divide-y divide-vault-border">
+                  <ToggleRow
+                    label={t('settings.downloadEh')}
+                    description={t('settings.downloadEhDesc')}
+                    checked={features.download_eh_enabled ?? true}
+                    onChange={(v) => handleFeatureToggle('download_eh_enabled', v)}
+                    disabled={featuresLoading}
+                  />
+                  <ToggleRow
+                    label={t('settings.downloadPixiv')}
+                    description={t('settings.downloadPixivDesc')}
+                    checked={features.download_pixiv_enabled ?? true}
+                    onChange={(v) => handleFeatureToggle('download_pixiv_enabled', v)}
+                    disabled={featuresLoading}
+                  />
+                  <ToggleRow
+                    label={t('settings.downloadGalleryDl')}
+                    description={t('settings.downloadGalleryDlDesc')}
+                    checked={features.download_gallery_dl_enabled ?? true}
+                    onChange={(v) => handleFeatureToggle('download_gallery_dl_enabled', v)}
+                    disabled={featuresLoading}
+                  />
+                </div>
               </div>
             )}
           </div>
