@@ -26,6 +26,10 @@ class DownloadRequest(BaseModel):
     total: int | None = None
 
 
+class QuickDownloadRequest(BaseModel):
+    url: str
+
+
 class JobActionRequest(BaseModel):
     action: str  # "pause" or "resume"
 
@@ -39,33 +43,35 @@ def _detect_source(url: str) -> str:
     return "unknown"
 
 
-@router.post("/")
-async def enqueue_download(
-    req: DownloadRequest,
-    request: Request,
-    _: dict = Depends(require_auth),
-    db: AsyncSession = Depends(get_db),
-):
-    """Create a DB download record and enqueue an ARQ job.
+async def _enqueue(
+    url: str,
+    arq,
+    db: AsyncSession,
+    *,
+    options: dict | None = None,
+    total: int | None = None,
+) -> dict:
+    """Shared enqueue logic: ARQ first, then DB.
 
     Order: ARQ enqueue first, then DB commit. If ARQ fails we never create the
     DB record. If DB insert fails after a successful ARQ enqueue we log a
     warning — the ARQ job will time out naturally without a matching DB record.
+
+    Returns a dict suitable for use as the HTTP response body.
     """
     job_id = uuid.uuid4()
-    source = _detect_source(req.url)
-    initial_progress = {"total": req.total} if req.total is not None else None
+    source = _detect_source(url)
+    initial_progress = {"total": total} if total is not None else None
 
     # 1. Enqueue ARQ job first — if this fails, no DB record is created.
-    arq = request.app.state.arq
     try:
         await arq.enqueue_job(
             "download_job",
-            req.url,
+            url,
             source,
-            req.options,
+            options,
             str(job_id),
-            req.total,
+            total,
             _job_id=str(job_id),
         )
     except Exception as exc:
@@ -75,7 +81,7 @@ async def enqueue_download(
     # 2. Persist DB record. If this fails, log a warning; the ARQ job will
     #    eventually time out without a matching DB row.
     try:
-        job = DownloadJob(id=job_id, url=req.url, source=source, status="queued", progress=initial_progress)
+        job = DownloadJob(id=job_id, url=url, source=source, status="queued", progress=initial_progress)
         db.add(job)
         await db.commit()
     except Exception as exc:
@@ -86,7 +92,32 @@ async def enqueue_download(
         )
         raise HTTPException(status_code=500, detail="Job enqueued but failed to persist to database")
 
-    return {"job_id": str(job_id), "status": "queued"}
+    return {"job_id": str(job_id), "status": "queued", "source": source}
+
+
+@router.post("/")
+async def enqueue_download(
+    req: DownloadRequest,
+    request: Request,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    return await _enqueue(req.url, request.app.state.arq, db, options=req.options, total=req.total)
+
+
+@router.post("/quick")
+async def quick_download(
+    req: QuickDownloadRequest,
+    request: Request,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Share-target endpoint: accepts a bare URL and auto-detects the source.
+
+    Designed for the PWA Web Share Target API — mobile users share a URL
+    directly to the app and the download is enqueued immediately.
+    """
+    return await _enqueue(req.url, request.app.state.arq, db)
 
 
 @router.get("/jobs")

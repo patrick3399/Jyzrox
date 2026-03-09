@@ -606,6 +606,20 @@ const en: Record<string, string> = {
   'settings.pixivCookieStep3': 'Find the following cookie under Cookies:',
   'settings.pixivCookieStep4': 'Copy the value and paste it in the field below',
 
+  // ── Share Target ──
+  'share.title': 'Quick Download',
+  'share.subtitle': 'Shared from your device',
+  'share.source': 'Source',
+  'share.download': 'Download',
+  'share.downloading': 'Queuing...',
+  'share.queued': 'Download queued!',
+  'share.queuedJob': 'Queued (job: {jobId})',
+  'share.failed': 'Failed to queue download',
+  'share.noUrl': 'No URL found',
+  'share.noUrlHint': 'Try sharing the URL again from your browser or app.',
+  'share.cancel': 'Cancel',
+  'share.viewQueue': 'View Queue',
+
   // ── Common ──
   'common.prev': 'Prev',
   'common.next': 'Next',

@@ -68,17 +68,17 @@
 ## 手機分享→PWA 下載
 
 ### PWA 配置
-- [ ] `manifest.json` 加入 `share_target` 宣告（接收 URL text）
-- [ ] Share Target 落地頁（`/share-target`）：接收分享的 URL
-- [ ] 落地頁自動呼叫 `_detect_source` → 顯示預覽 → 一鍵下載
+- [x] `manifest.json` 加入 `share_target` 宣告（接收 URL text）
+- [x] Share Target 落地頁（`/share-target`）：接收分享的 URL
+- [x] 落地頁自動呼叫 `_detect_source` → 顯示預覽 → 一鍵下載
 
 ### 後端
-- [ ] 確認現有 `/api/download/enqueue` 支援從手機端呼叫（CORS/cookie）
-- [ ] 可選：新增簡化端點 `POST /api/download/quick`（只需 URL，其餘自動）
+- [x] 確認現有 `/api/download/enqueue` 支援從手機端呼叫（CORS/cookie）
+- [x] 新增簡化端點 `POST /api/download/quick`（只需 URL，其餘自動）
 
 ### UX
-- [ ] 分享成功 toast 通知
-- [ ] 離線時排隊（SW 快取分享請求，上線後補發）
+- [x] 分享成功 toast 通知
+- [x] 離線時排隊（SW 快取分享請求，上線後補發）
 
 ---
 

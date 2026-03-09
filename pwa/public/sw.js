@@ -1,6 +1,59 @@
 const CACHE_NAME = 'jyzrox-static-v1';
 const OFFLINE_URL = '/offline.html';
 
+// ── Offline Share Queue ──
+const SHARE_QUEUE_DB = 'jyzrox-share-queue';
+const SHARE_QUEUE_STORE = 'pending';
+
+function openShareQueueDB() {
+  return new Promise((resolve, reject) => {
+    const req = indexedDB.open(SHARE_QUEUE_DB, 1);
+    req.onupgradeneeded = () => req.result.createObjectStore(SHARE_QUEUE_STORE, { autoIncrement: true });
+    req.onsuccess = () => resolve(req.result);
+    req.onerror = () => reject(req.error);
+  });
+}
+
+async function queueShareRequest(url) {
+  const db = await openShareQueueDB();
+  const tx = db.transaction(SHARE_QUEUE_STORE, 'readwrite');
+  tx.objectStore(SHARE_QUEUE_STORE).add({ url, timestamp: Date.now() });
+  return new Promise((resolve) => { tx.oncomplete = resolve; });
+}
+
+async function replayShareQueue() {
+  const db = await openShareQueueDB();
+  const tx = db.transaction(SHARE_QUEUE_STORE, 'readwrite');
+  const store = tx.objectStore(SHARE_QUEUE_STORE);
+  const items = await new Promise((resolve) => {
+    const req = store.getAll();
+    req.onsuccess = () => resolve(req.result);
+  });
+
+  for (const item of items) {
+    try {
+      await fetch('/api/download/', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        credentials: 'include',
+        body: JSON.stringify({ url: item.url }),
+      });
+    } catch (e) {
+      // Still offline, stop trying
+      return;
+    }
+  }
+
+  // Clear all successfully replayed items
+  const clearTx = db.transaction(SHARE_QUEUE_STORE, 'readwrite');
+  clearTx.objectStore(SHARE_QUEUE_STORE).clear();
+}
+
+// Listen for online event to replay queue
+self.addEventListener('online', () => {
+  replayShareQueue();
+});
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -17,12 +70,39 @@ self.addEventListener('activate', (event) => {
       return Promise.all(
         keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
       );
+    }).then(() => {
+      // Try to replay any queued share requests that were stored while offline
+      return replayShareQueue();
     })
   );
   self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
+  // Intercept POST requests to /api/download/ to support offline queuing
+  if (event.request.method === 'POST' && event.request.url.includes('/api/download/')) {
+    event.respondWith(
+      fetch(event.request.clone()).catch(async () => {
+        try {
+          const body = await event.request.json();
+          if (body.url) {
+            await queueShareRequest(body.url);
+            return new Response(JSON.stringify({
+              job_id: 'offline-' + Date.now(),
+              status: 'queued-offline',
+            }), {
+              headers: { 'Content-Type': 'application/json' },
+            });
+          }
+        } catch (_) {
+          // body parse failed — fall through to 503
+        }
+        return new Response('', { status: 503 });
+      })
+    );
+    return;
+  }
+
   if (event.request.method !== 'GET') return;
 
   // Cache-first for images/media if possible, otherwise network-first
