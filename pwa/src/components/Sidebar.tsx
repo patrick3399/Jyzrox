@@ -22,6 +22,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
+import { useLocale } from '@/components/LocaleProvider'
 
 const navLinks = [
   { href: '/', label: () => t('nav.dashboard'), icon: LayoutDashboard },
@@ -44,6 +45,7 @@ const themeLabel = {
 }
 
 export function Sidebar() {
+  useLocale()
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()

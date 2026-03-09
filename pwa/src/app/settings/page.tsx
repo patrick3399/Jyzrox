@@ -36,6 +36,21 @@ type SectionKey =
   | 'aiTagging'
   | 'schedule'
 
+const VERSION_LABELS: Record<string, string> = {
+  jyzrox: 'Jyzrox',
+  python: 'Python',
+  fastapi: 'FastAPI',
+  gallery_dl: 'gallery-dl',
+  nextjs: 'Next.js',
+  postgresql: 'PostgreSQL',
+  redis: 'Redis',
+  onnxruntime: 'ONNX Runtime',
+}
+
+function versionLabel(key: string): string {
+  return VERSION_LABELS[key] ?? key
+}
+
 function SectionHeader({
   title,
   sectionKey,
@@ -805,14 +820,14 @@ export default function SettingsPage() {
 
   // Pixiv: Clear credential
   const handleClearPixiv = async () => {
-    if (!confirm('確定要清除 Pixiv Token？')) return
+    if (!confirm(t('settings.confirmClearPixiv'))) return
     try {
       await api.settings.deleteCredential('pixiv')
-      toast.success('Pixiv Token 已清除')
+      toast.success(t('settings.pixivTokenCleared'))
       setCredentials((prev) => (prev ? { ...prev, pixiv: { configured: false } } : prev))
       setPixivUsername(null)
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : '清除失敗')
+      toast.error(e instanceof Error ? e.message : t('settings.clearFailed'))
     }
   }
 
@@ -868,7 +883,7 @@ export default function SettingsPage() {
   // Cache: Clear category
   const handleClearCacheCategory = useCallback(
     async (category: string) => {
-      if (!window.confirm(`清除 ${category} 快取？`)) return
+      if (!window.confirm(t('settings.confirmClearCache', { category }))) return
       setCacheClearingCategory(category)
       try {
         const result = await api.system.clearCacheCategory(category)
@@ -1091,17 +1106,17 @@ export default function SettingsPage() {
     setTokenCreating(true)
     try {
       const expDays = newTokenExpiry ? Number(newTokenExpiry) : undefined
-      await api.tokens.create(newTokenName.trim(), expDays)
+      const created = await api.tokens.create(newTokenName.trim(), expDays)
+      setApiTokens((prev) => [created, ...prev])
       toast.success('Token created')
       setNewTokenName('')
       setNewTokenExpiry('')
-      handleLoadApiTokens()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to create token')
     } finally {
       setTokenCreating(false)
     }
-  }, [newTokenName, newTokenExpiry, handleLoadApiTokens])
+  }, [newTokenName, newTokenExpiry])
 
   // API Tokens: Delete
   const handleDeleteToken = useCallback(async (tokenId: string) => {
@@ -1231,7 +1246,7 @@ export default function SettingsPage() {
                         type="text"
                         value={ehUsername}
                         onChange={(e) => setEhUsername(e.target.value)}
-                        placeholder="E-Hentai username"
+                        placeholder={t('settings.ehUsernamePlaceholder')}
                         autoComplete="username"
                         className={inputClass}
                       />
@@ -1244,7 +1259,7 @@ export default function SettingsPage() {
                         type="password"
                         value={ehPassword}
                         onChange={(e) => setEhPassword(e.target.value)}
-                        placeholder="E-Hentai password"
+                        placeholder={t('settings.ehPasswordPlaceholder')}
                         autoComplete="current-password"
                         onKeyDown={(e) => e.key === 'Enter' && handleEhLogin()}
                         className={inputClass}
@@ -1280,7 +1295,7 @@ export default function SettingsPage() {
                         type="text"
                         value={ehMemberId}
                         onChange={(e) => setEhMemberId(e.target.value)}
-                        placeholder="Enter ipb_member_id"
+                        placeholder={t('settings.enterIpbMemberId')}
                         className={inputClass}
                       />
                     </div>
@@ -1293,7 +1308,7 @@ export default function SettingsPage() {
                           type={showPassHash ? 'text' : 'password'}
                           value={ehPassHash}
                           onChange={(e) => setEhPassHash(e.target.value)}
-                          placeholder="Enter ipb_pass_hash"
+                          placeholder={t('settings.enterIpbPassHash')}
                           className={`${inputClass} pr-10`}
                         />
                         <button
@@ -1311,7 +1326,7 @@ export default function SettingsPage() {
                         type="text"
                         value={ehSk}
                         onChange={(e) => setEhSk(e.target.value)}
-                        placeholder="Enter sk"
+                        placeholder={t('settings.enterSk')}
                         className={inputClass}
                       />
                     </div>
@@ -1324,7 +1339,7 @@ export default function SettingsPage() {
                         type="text"
                         value={ehIgneous}
                         onChange={(e) => setEhIgneous(e.target.value)}
-                        placeholder="Enter igneous (enables ExHentai)"
+                        placeholder={t('settings.enterIgneous')}
                         className={inputClass}
                       />
                     </div>
@@ -1382,7 +1397,7 @@ export default function SettingsPage() {
                     onClick={handleClearEh}
                     className="mt-3 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors"
                   >
-                    清除 Cookie
+                    {t('settings.clearCookie')}
                   </button>
                 )}
               </div>
@@ -1434,22 +1449,18 @@ export default function SettingsPage() {
                 {pixivLoginMode === 'oauth' && (
                   <div className="mt-4 space-y-3">
                     <div className="bg-yellow-900/20 border border-yellow-700/30 rounded-lg p-3 text-xs text-yellow-300/90 space-y-1.5">
-                      <p className="font-semibold">操作步驟：</p>
-                      <p>1. 點擊下方按鈕，會開啟 Pixiv 登入頁面</p>
-                      <p>2. 正常登入你的 Pixiv 帳號</p>
-                      <p>
-                        3. 登入成功後，頁面會跳轉。
-                        <strong>在跳轉的瞬間，快速複製網址列中的 URL</strong>
-                      </p>
+                      <p className="font-semibold">{t('settings.pixivOauthSteps')}</p>
+                      <p>{t('settings.pixivOauthStep1')}</p>
+                      <p>{t('settings.pixivOauthStep2')}</p>
+                      <p>{t('settings.pixivOauthStep3')}</p>
                       <p className="text-yellow-400/70">
-                        提示：URL 格式為{' '}
+                        {t('settings.pixivOauthHint')}{' '}
                         <code className="bg-black/30 px-1 rounded">
                           https://app-api.pixiv.net/...?code=xxx
                         </code>
                       </p>
                       <p className="text-yellow-400/70">
-                        如果來不及複製，可以按 F12 開啟開發者工具 → Network 分頁，找到 callback
-                        請求複製 URL
+                        {t('settings.pixivOauthHint2')}
                       </p>
                     </div>
                     <button onClick={handlePixivGetOauth} className={btnSecondary + ' w-full'}>
@@ -1458,13 +1469,13 @@ export default function SettingsPage() {
                     {pixivCodeVerifier && (
                       <div>
                         <p className="text-xs text-vault-text-muted mb-1">
-                          4. 將複製的 URL 或 <code>code=</code> 後面的值貼到這裡：
+                          {t('settings.pixivOauthStep4')}
                         </p>
                         <input
                           type="text"
                           value={pixivCallbackUrl}
                           onChange={(e) => setPixivCallbackUrl(e.target.value)}
-                          placeholder="https://app-api.pixiv.net/...?code=... 或直接貼 code 值"
+                          placeholder={t('settings.pixivCallbackPlaceholder')}
                           className={inputClass}
                         />
                         <button
@@ -1472,7 +1483,7 @@ export default function SettingsPage() {
                           disabled={pixivSaving || !pixivCallbackUrl.trim()}
                           className={btnPrimary + ' mt-3'}
                         >
-                          {pixivSaving ? t('settings.saving') : 'Verify & Save Token'}
+                          {pixivSaving ? t('settings.saving') : t('settings.verifyAndSave')}
                         </button>
                       </div>
                     )}
@@ -1482,18 +1493,16 @@ export default function SettingsPage() {
                 {pixivLoginMode === 'cookie' && (
                   <div className="mt-4 space-y-3">
                     <div className="bg-blue-900/20 border border-blue-700/30 rounded-lg p-3 text-xs text-blue-300/90 space-y-1.5">
-                      <p className="font-semibold">使用 Session Cookie 自動獲取：</p>
-                      <p>
-                        Web Login 若跳轉太快無法複製 URL，可使用此方法。系統會自動幫您完成交換。
-                      </p>
+                      <p className="font-semibold">{t('settings.pixivCookieTitle')}</p>
+                      <p>{t('settings.pixivCookieDesc')}</p>
                       <ul className="list-disc list-inside mt-1 ml-1">
-                        <li>在瀏覽器開啟並登入 Pixiv (https://www.pixiv.net)</li>
-                        <li>按 F12 開啟開發者工具 → Application (或 Storage)</li>
+                        <li>{t('settings.pixivCookieStep1')}</li>
+                        <li>{t('settings.pixivCookieStep2')}</li>
                         <li>
-                          在 Cookies 中找到{' '}
+                          {t('settings.pixivCookieStep3')}{' '}
                           <code className="bg-black/30 px-1 rounded">PHPSESSID</code>
                         </li>
-                        <li>複製該值，貼到底下欄位即可</li>
+                        <li>{t('settings.pixivCookieStep4')}</li>
                       </ul>
                     </div>
                     <div>
@@ -1504,7 +1513,7 @@ export default function SettingsPage() {
                         type="password"
                         value={pixivCookie}
                         onChange={(e) => setPixivCookie(e.target.value)}
-                        placeholder="e.g. 12345678_abcd..."
+                        placeholder={t('settings.pixivTokenExample')}
                         className={inputClass}
                       />
                     </div>
@@ -1514,7 +1523,7 @@ export default function SettingsPage() {
                         disabled={pixivSaving || !pixivCookie.trim()}
                         className={btnPrimary}
                       >
-                        {pixivSaving ? t('settings.saving') : 'Verify & Save Token'}
+                        {pixivSaving ? t('settings.saving') : t('settings.verifyAndSave')}
                       </button>
                     </div>
                   </div>
@@ -1529,7 +1538,7 @@ export default function SettingsPage() {
                       type="password"
                       value={pixivToken}
                       onChange={(e) => setPixivToken(e.target.value)}
-                      placeholder="Enter Pixiv refresh token"
+                      placeholder={t('settings.enterPixivRefreshToken')}
                       className={inputClass}
                     />
                     <p className="text-xs text-vault-text-muted mt-1">{t('settings.pixivHint')}</p>
@@ -1557,7 +1566,7 @@ export default function SettingsPage() {
                     onClick={handleClearPixiv}
                     className="mt-3 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors"
                   >
-                    清除 Token
+                    {t('settings.clearToken')}
                   </button>
                 )}
               </div>
@@ -1603,6 +1612,34 @@ export default function SettingsPage() {
                       </div>
                     </div>
 
+                    {/* Versions */}
+                    {systemInfo.versions && (
+                      <div>
+                        <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                          {t('settings.versions')}
+                        </p>
+                        <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
+                          {Object.entries({
+                            jyzrox: systemInfo.versions.jyzrox,
+                            python: systemInfo.versions.python,
+                            fastapi: systemInfo.versions.fastapi,
+                            nextjs: process.env.NEXT_PUBLIC_NEXTJS_VERSION ?? null,
+                            gallery_dl: systemInfo.versions.gallery_dl,
+                            postgresql: systemInfo.versions.postgresql,
+                            redis: systemInfo.versions.redis,
+                            onnxruntime: systemInfo.versions.onnxruntime,
+                          })
+                            .filter(([, v]) => v !== null)
+                            .map(([key, value]) => (
+                              <div key={key} className="flex justify-between items-center px-3 py-2">
+                                <span className="text-sm text-vault-text-muted">{versionLabel(key)}</span>
+                                <span className="text-sm font-mono text-vault-text-secondary">{value}</span>
+                              </div>
+                            ))}
+                        </div>
+                      </div>
+                    )}
+
                     {/* Info */}
                     <div>
                       <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
@@ -1610,7 +1647,6 @@ export default function SettingsPage() {
                       </p>
                       <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
                         {[
-                          { label: t('settings.version'), value: systemInfo.version },
                           {
                             label: t('settings.ehMaxConcurrency'),
                             value: String(systemInfo.eh_max_concurrency),
@@ -1703,10 +1739,10 @@ export default function SettingsPage() {
                             <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
                               {Object.entries(cacheStats.breakdown).map(([cat, count]) => {
                                 const catLabels: Record<string, string> = {
-                                  eh_search: 'EH 搜尋快取',
-                                  eh_gallery: 'EH 畫廊快取',
-                                  eh_image: 'EH 圖片快取',
-                                  thumbs: '縮圖快取',
+                                  eh_search: t('settings.cacheEhSearch'),
+                                  eh_gallery: t('settings.cacheEhGallery'),
+                                  eh_image: t('settings.cacheEhImage'),
+                                  thumbs: t('settings.cacheThumbs'),
                                 }
                                 return (
                                   <div
@@ -1739,7 +1775,7 @@ export default function SettingsPage() {
                             disabled={cacheClearingAll || cacheClearingCategory !== null}
                             className="mt-1 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                           >
-                            {cacheClearingAll ? '清除中...' : t('settings.clearCache')}
+                            {cacheClearingAll ? t('settings.clearing') : t('settings.clearCache')}
                           </button>
                         </div>
                       )}
@@ -1809,7 +1845,7 @@ export default function SettingsPage() {
                     value={newBlockedTag}
                     onChange={(e) => setNewBlockedTag(e.target.value)}
                     onKeyDown={(e) => e.key === 'Enter' && handleAddBlockedTag()}
-                    placeholder="artist:xxx 或 tag:xxx"
+                    placeholder={t('settings.blockedTagPlaceholder')}
                     className={inputClass + ' flex-1'}
                   />
                   <button
@@ -1858,7 +1894,7 @@ export default function SettingsPage() {
                             onClick={() => handleRemoveBlockedTag(bt.id)}
                             disabled={removingBlockedTagId === bt.id}
                             className="ml-0.5 text-vault-text-muted hover:text-red-400 transition-colors disabled:opacity-40"
-                            title="Unblock"
+                            title={t('settings.unblock')}
                           >
                             {removingBlockedTagId === bt.id ? (
                               <span className="text-[10px]">...</span>
@@ -1878,7 +1914,7 @@ export default function SettingsPage() {
           {/* ── AI Tagging ── */}
           <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
             <SectionHeader
-              title="AI 標籤"
+              title={t('settings.aiTaggingSection')}
               sectionKey="aiTagging"
               activeSection={activeSection}
               onToggle={toggleSection}
@@ -1937,7 +1973,7 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <SectionHeader
-                  title="API Tokens"
+                  title={t('settings.apiTokensSection')}
                   sectionKey="apiTokens"
                   activeSection={activeSection}
                   onToggle={toggleSection}
@@ -1958,34 +1994,34 @@ export default function SettingsPage() {
                 {/* Create new token */}
                 <div className="mt-4">
                   <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                    Create new token
+                    {t('settings.createToken')}
                   </p>
                   <div className="space-y-3">
                     <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">Name</label>
+                      <label className="block text-xs text-vault-text-muted mb-1">{t('settings.tokenName')}</label>
                       <input
                         type="text"
                         value={newTokenName}
                         onChange={(e) => setNewTokenName(e.target.value)}
-                        placeholder="e.g. Homepage widget, CI/CD"
+                        placeholder={t('settings.tokenNamePlaceholder')}
                         onKeyDown={(e) => e.key === 'Enter' && handleCreateToken()}
                         className={inputClass}
                       />
                     </div>
                     <div>
                       <label className="block text-xs text-vault-text-muted mb-1">
-                        Expires in (days)
+                        {t('settings.expiresIn')}
                       </label>
                       <select
                         value={newTokenExpiry}
                         onChange={(e) => setNewTokenExpiry(e.target.value)}
                         className={inputClass}
                       >
-                        <option value="">Never</option>
-                        <option value="7">7 days</option>
-                        <option value="30">30 days</option>
-                        <option value="90">90 days</option>
-                        <option value="365">1 year</option>
+                        <option value="">{t('settings.never')}</option>
+                        <option value="7">{t('settings.days7')}</option>
+                        <option value="30">{t('settings.days30')}</option>
+                        <option value="90">{t('settings.days90')}</option>
+                        <option value="365">{t('settings.year1')}</option>
                       </select>
                     </div>
                     <button
@@ -1993,7 +2029,7 @@ export default function SettingsPage() {
                       disabled={tokenCreating || !newTokenName.trim()}
                       className={btnPrimary}
                     >
-                      {tokenCreating ? 'Creating...' : 'Create Token'}
+                      {tokenCreating ? t('settings.creating') : t('settings.createToken')}
                     </button>
                   </div>
                 </div>
@@ -2002,7 +2038,7 @@ export default function SettingsPage() {
                 <div className="mt-5 pt-4 border-t border-vault-border">
                   <div className="flex items-center justify-between mb-2">
                     <p className="text-xs text-vault-text-muted uppercase tracking-wide">
-                      Active tokens
+                      {t('settings.activeTokens')}
                     </p>
                     <button
                       onClick={handleLoadApiTokens}
@@ -2018,7 +2054,7 @@ export default function SettingsPage() {
                       <LoadingSpinner />
                     </div>
                   ) : apiTokens.length === 0 ? (
-                    <p className="text-xs text-vault-text-muted py-3">No API tokens created yet.</p>
+                    <p className="text-xs text-vault-text-muted py-3">{t('settings.noTokens')}</p>
                   ) : (
                     <div className="space-y-2">
                       {apiTokens.map((tk) => {
@@ -2034,30 +2070,32 @@ export default function SettingsPage() {
                               <div className="min-w-0 flex-1">
                                 <div className="flex items-center gap-2">
                                   <span className="text-sm text-vault-text font-medium">
-                                    {tk.name || 'Unnamed'}
+                                    {tk.name || t('settings.unnamed')}
                                   </span>
                                   {isExpired && (
                                     <span className="text-[10px] bg-red-900/40 text-red-400 px-1.5 py-0.5 rounded">
-                                      Expired
+                                      {t('settings.tokenExpired')}
                                     </span>
                                   )}
                                 </div>
-                                {/* Token value — always visible */}
-                                {tk.token && (
+                                {/* Token value — raw token after creation, prefix after list reload */}
+                                {(tk.token || tk.token_prefix) && (
                                   <div className="flex items-center gap-1.5 mt-1.5">
                                     <code className="flex-1 text-xs text-vault-text-secondary bg-black/20 rounded px-2 py-1 font-mono break-all select-all">
-                                      {tk.token}
+                                      {tk.token ?? `${tk.token_prefix}...`}
                                     </code>
-                                    <button
-                                      onClick={() => {
-                                        navigator.clipboard.writeText(tk.token)
-                                        toast.success('Copied')
-                                      }}
-                                      className="px-1.5 py-1 text-vault-text-muted hover:text-vault-text transition-colors shrink-0"
-                                      title="Copy"
-                                    >
-                                      <Copy size={12} />
-                                    </button>
+                                    {tk.token && (
+                                      <button
+                                        onClick={() => {
+                                          navigator.clipboard.writeText(tk.token!)
+                                          toast.success(t('settings.copied'))
+                                        }}
+                                        className="px-1.5 py-1 text-vault-text-muted hover:text-vault-text transition-colors shrink-0"
+                                        title="Copy"
+                                      >
+                                        <Copy size={12} />
+                                      </button>
+                                    )}
                                   </div>
                                 )}
                                 <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-vault-text-muted">

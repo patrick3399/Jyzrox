@@ -118,7 +118,7 @@ function SystemAlerts({ alerts }: { alerts: string[] }) {
             <button
               onClick={() => dismiss(msg)}
               className={`flex-shrink-0 p-0.5 rounded transition-colors ${styles.btn}`}
-              aria-label="Dismiss alert"
+              aria-label={t('common.dismissAlert')}
             >
               <X size={14} />
             </button>

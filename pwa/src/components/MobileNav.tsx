@@ -25,6 +25,7 @@ import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
+import { useLocale } from '@/components/LocaleProvider'
 
 const navLinks = [
   { href: '/', label: () => t('nav.dashboard'), icon: LayoutDashboard },
@@ -47,6 +48,7 @@ const themeLabel: Record<string, () => string> = {
 }
 
 export function MobileNav() {
+  useLocale()
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()
@@ -87,7 +89,7 @@ export function MobileNav() {
         <button
           onClick={() => setOpen(true)}
           className="p-2 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
-          aria-label="Open menu"
+          aria-label={t('nav.openMenu')}
         >
           <Menu size={20} />
         </button>
@@ -127,7 +129,7 @@ export function MobileNav() {
           <button
             onClick={() => setOpen(false)}
             className="p-1.5 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
-            aria-label="Close menu"
+            aria-label={t('nav.closeMenu')}
           >
             <X size={18} />
           </button>

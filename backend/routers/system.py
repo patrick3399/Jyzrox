@@ -1,6 +1,9 @@
 import json
 import logging
+import subprocess
+import sys
 
+import fastapi
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import text
 
@@ -11,6 +14,96 @@ from core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
+
+
+# ── Static version detection (executed once at import time) ───────────
+
+def _detect_jyzrox_version() -> str:
+    """Return output of `git describe --tags --always`, fallback 'dev'."""
+    try:
+        result = subprocess.run(
+            ["git", "describe", "--tags", "--always"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        tag = result.stdout.strip()
+        return tag if tag else "dev"
+    except Exception:
+        return "dev"
+
+
+def _detect_gallery_dl_version() -> str | None:
+    """Return gallery-dl version, or None on failure."""
+    try:
+        import gallery_dl  # type: ignore
+        return gallery_dl.version.__version__
+    except Exception:
+        pass
+    try:
+        result = subprocess.run(
+            ["gallery-dl", "--version"],
+            capture_output=True,
+            text=True,
+            timeout=5,
+        )
+        ver = result.stdout.strip()
+        return ver if ver else None
+    except Exception:
+        return None
+
+
+def _detect_onnxruntime_version() -> str | None:
+    """Return onnxruntime version, or None if not installed."""
+    try:
+        import onnxruntime  # type: ignore
+        return onnxruntime.__version__
+    except Exception:
+        return None
+
+
+def _detect_python_version() -> str:
+    """Return Python version string (major.minor.micro)."""
+    v = sys.version_info
+    return f"{v.major}.{v.minor}.{v.micro}"
+
+
+_STATIC_VERSIONS: dict[str, str | None] = {
+    "jyzrox": _detect_jyzrox_version(),
+    "python": _detect_python_version(),
+    "fastapi": fastapi.__version__,
+    "gallery_dl": _detect_gallery_dl_version(),
+    "onnxruntime": _detect_onnxruntime_version(),
+}
+
+
+# ── Dynamic version helpers (queried per request) ─────────────────────
+
+async def _get_postgresql_version() -> str | None:
+    """Query PostgreSQL server version via SELECT version()."""
+    try:
+        async with AsyncSessionLocal() as session:
+            row = await session.execute(text("SELECT version()"))
+            raw: str = row.scalar_one()
+            # raw looks like "PostgreSQL 15.3 on x86_64-pc-linux-gnu ..."
+            # Extract the version number token after "PostgreSQL "
+            parts = raw.split()
+            if len(parts) >= 2:
+                return parts[1]
+            return raw
+    except Exception as exc:
+        logger.warning("Failed to detect PostgreSQL version: %s", exc)
+        return None
+
+
+async def _get_redis_version() -> str | None:
+    """Return redis_version from INFO server."""
+    try:
+        info = await get_redis().info("server")
+        return info.get("redis_version") or None
+    except Exception as exc:
+        logger.warning("Failed to detect Redis version: %s", exc)
+        return None
 
 
 @router.get("/health")
@@ -43,11 +136,23 @@ async def system_health():
 
 @router.get("/info")
 async def system_info(_: dict = Depends(require_auth)):
-    """Return non-sensitive runtime configuration."""
+    """Return non-sensitive runtime configuration including component versions."""
+    pg_ver, redis_ver = await _get_postgresql_version(), await _get_redis_version()
+    jyzrox_ver = _STATIC_VERSIONS["jyzrox"]
     return {
-        "version": "0.1",
+        # Kept for backwards compatibility; identical to versions.jyzrox
+        "version": jyzrox_ver,
         "eh_max_concurrency": settings.eh_max_concurrency,
         "tag_model_enabled": settings.tag_model_enabled,
+        "versions": {
+            "jyzrox": jyzrox_ver,
+            "python": _STATIC_VERSIONS["python"],
+            "fastapi": _STATIC_VERSIONS["fastapi"],
+            "gallery_dl": _STATIC_VERSIONS["gallery_dl"],
+            "postgresql": pg_ver,
+            "redis": redis_ver,
+            "onnxruntime": _STATIC_VERSIONS["onnxruntime"],
+        },
     }
 
 

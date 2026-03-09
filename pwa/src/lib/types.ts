@@ -155,7 +155,8 @@ export interface EhAccount {
 export interface ApiTokenInfo {
   id: string
   name: string | null
-  token: string // raw token, always visible
+  token?: string        // raw token, only present right after creation
+  token_prefix?: string // first 8 chars of hash, from list API
   created_at: string | null
   last_used_at: string | null
   expires_at: string | null
@@ -183,6 +184,15 @@ export interface SystemInfo {
   version: string
   eh_max_concurrency: number
   tag_model_enabled: boolean
+  versions: {
+    jyzrox: string | null
+    python: string | null
+    fastapi: string | null
+    gallery_dl: string | null
+    postgresql: string | null
+    redis: string | null
+    onnxruntime: string | null
+  }
 }
 
 // ── EH Comments ──────────────────────────────────────────────────────

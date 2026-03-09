@@ -77,7 +77,7 @@ export default function SetupPage() {
                 autoFocus
                 required
                 disabled={loading}
-                placeholder="admin"
+                placeholder={t('setup.usernamePlaceholder')}
                 className="w-full bg-vault-input border border-vault-border rounded-xl px-4 py-3 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors disabled:opacity-50"
               />
             </div>

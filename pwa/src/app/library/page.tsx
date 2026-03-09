@@ -211,7 +211,7 @@ function LibraryContent() {
                   value={includeInput}
                   onChange={(e) => setIncludeInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addIncludeTag()}
-                  placeholder="character:rem"
+                  placeholder={t('library.tagFilterPlaceholder')}
                   className="flex-1 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
                 />
                 <button
@@ -244,7 +244,7 @@ function LibraryContent() {
                   value={excludeInput}
                   onChange={(e) => setExcludeInput(e.target.value)}
                   onKeyDown={(e) => e.key === 'Enter' && addExcludeTag()}
-                  placeholder="tag:value"
+                  placeholder={t('library.excludeTagPlaceholder')}
                   className="flex-1 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
                 />
                 <button

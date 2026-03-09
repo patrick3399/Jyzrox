@@ -611,7 +611,7 @@ function ReaderOverlay({
           <button
             onClick={openJump}
             className="font-mono tabular-nums whitespace-nowrap text-xs bg-white/10 hover:bg-white/20 rounded px-1.5 py-0.5 transition-colors"
-            title="Jump to page"
+            title={t('reader.jumpToPage')}
           >
             {currentPage} / {totalPages}
           </button>
@@ -658,7 +658,7 @@ function ReaderOverlay({
           <button
             onClick={onBack}
             className="rounded bg-white/10 hover:bg-white/20 border border-white/20 px-3 py-1.5 text-sm text-red-300 hover:text-red-200 transition-colors"
-            title="Go back"
+            title={t('reader.goBack')}
           >
             ✕
           </button>

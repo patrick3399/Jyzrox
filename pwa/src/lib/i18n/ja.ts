@@ -161,6 +161,7 @@ const ja: Record<string, string> = {
   'settings.hathPerks': 'H@H Perks',
   'settings.serviceHealth': 'サービス状態',
   'settings.overall': '全体',
+  'settings.versions': 'バージョン情報',
   'settings.configuration': '設定',
   'settings.version': 'バージョン',
   'settings.ehMaxConcurrency': 'EH最大同時接続数',

@@ -1,5 +1,6 @@
 import { useState, type KeyboardEvent } from 'react'
 import { TagBadge } from './TagBadge'
+import { t } from '@/lib/i18n'
 
 interface TagInputProps {
   includeTags: string[]
@@ -83,7 +84,7 @@ export function TagInput({
         label="Include Tags"
         tags={includeTags}
         variant="include"
-        placeholder="e.g. character:reimu — press Enter"
+        placeholder={t('tagInput.aliasPlaceholder')}
         onAdd={onAddInclude}
         onRemove={onRemoveInclude}
       />
@@ -91,7 +92,7 @@ export function TagInput({
         label="Exclude Tags"
         tags={excludeTags}
         variant="exclude"
-        placeholder="e.g. artist:foo — press Enter"
+        placeholder={t('tagInput.implicationPlaceholder')}
         onAdd={onAddExclude}
         onRemove={onRemoveExclude}
       />
