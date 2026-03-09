@@ -4,6 +4,7 @@ import base64
 import json
 import logging
 from datetime import UTC, datetime
+from itertools import combinations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -228,6 +229,8 @@ async def get_gallery(
 @router.get("/galleries/{gallery_id}/images")
 async def get_gallery_images(
     gallery_id: int,
+    page: int | None = Query(default=None, ge=1),
+    limit: int | None = Query(default=None, ge=1, le=200),
     _: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -238,6 +241,27 @@ async def get_gallery_images(
         .order_by(Image.page_num)
         .options(selectinload(Image.blob))
     )
+
+    # When limit is provided, return paginated response
+    if limit is not None:
+        p = page or 1
+        total_stmt = select(func.count()).select_from(
+            select(Image.id).where(Image.gallery_id == gallery_id).subquery()
+        )
+        total = (await db.execute(total_stmt)).scalar_one()
+
+        stmt = stmt.offset((p - 1) * limit).limit(limit)
+        images = (await db.execute(stmt)).scalars().all()
+
+        return {
+            "gallery_id": gallery_id,
+            "images": [_i(img) for img in images],
+            "total": total,
+            "page": p,
+            "has_next": (p * limit) < total,
+        }
+
+    # Default: return all images (backward compatible for Reader)
     images = (await db.execute(stmt)).scalars().all()
     return {"gallery_id": gallery_id, "images": [_i(img) for img in images]}
 
@@ -384,6 +408,31 @@ async def save_progress(
 # ── Similar images ───────────────────────────────────────────────────
 
 
+def _hamming_neighbors_all(quarters: list[int], max_dist: int) -> list[set[int]]:
+    """Generate all 16-bit signed integer neighbors within Hamming distance max_dist for each quarter.
+
+    For max_dist=0: 1 value per quarter (exact match only)
+    For max_dist=1: 17 values per quarter (C(16,0) + C(16,1))
+    For max_dist=2: 137 values per quarter (C(16,0) + C(16,1) + C(16,2))
+    """
+    result = []
+    for q_val in quarters:
+        uval = q_val & 0xFFFF
+        neighbors: set[int] = set()
+        for dist in range(max_dist + 1):
+            if dist == 0:
+                neighbors.add(q_val)
+            else:
+                for bits in combinations(range(16), dist):
+                    flipped = uval
+                    for b in bits:
+                        flipped ^= (1 << b)
+                    signed = flipped - 0x10000 if flipped >= 0x8000 else flipped
+                    neighbors.add(signed)
+        result.append(neighbors)
+    return result
+
+
 @router.get("/images/{image_id}/similar")
 async def find_similar_images(
     image_id: int,
@@ -394,8 +443,9 @@ async def find_similar_images(
 ):
     """Find visually similar images by perceptual hash Hamming distance.
 
-    Uses PostgreSQL 15 bit_count() on the XOR of two 64-bit pHash values
-    (stored as hex strings) to compute Hamming distance in pure SQL.
+    Uses pigeonhole pre-filter on pHash quarter columns for indexed lookup,
+    then exact Hamming distance on candidates. At 10M images, pre-filter
+    returns ~1K-10K candidates instead of scanning all rows.
     Threshold 0 = exact match, 10 = visually similar (recommended default),
     32 = very loose match.
     """
@@ -410,39 +460,75 @@ async def find_similar_images(
         raise HTTPException(status_code=400, detail="Image has no perceptual hash")
 
     phash = img_row.blob.phash
+    phash_int_val = int(phash, 16)
 
-    # Join images with blobs so we can return URL fields without N+1 queries
-    stmt = sql_text("""
-        SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension, b.storage, b.external_path, b.phash,
-               bit_count(
-                   ('x' || lpad(:phash, 16, '0'))::bit(64)
-                   #
-                   ('x' || lpad(b.phash, 16, '0'))::bit(64)
-               )::int AS distance
-        FROM images i
-        JOIN blobs b ON i.blob_sha256 = b.sha256
-        WHERE b.phash IS NOT NULL
-          AND i.id != :image_id
-          AND bit_count(
-                  ('x' || lpad(:phash, 16, '0'))::bit(64)
-                  #
-                  ('x' || lpad(b.phash, 16, '0'))::bit(64)
-              )::int <= :threshold
-        ORDER BY distance ASC
-        LIMIT :limit
-    """)
+    def _to_signed16(v: int) -> int:
+        return v - 0x10000 if v >= 0x8000 else v
 
-    results = (
-        await db.execute(
-            stmt,
-            {
-                "phash": phash,
-                "image_id": image_id,
-                "threshold": threshold,
-                "limit": limit,
-            },
-        )
-    ).all()
+    quarters = [
+        _to_signed16((phash_int_val >> 48) & 0xFFFF),
+        _to_signed16((phash_int_val >> 32) & 0xFFFF),
+        _to_signed16((phash_int_val >> 16) & 0xFFFF),
+        _to_signed16(phash_int_val & 0xFFFF),
+    ]
+
+    max_quarter_dist = threshold // 4  # floor(T/4) — pigeonhole guarantee
+
+    if max_quarter_dist > 2 or threshold > 11:
+        # For loose thresholds the neighbor sets become large (>137 per quarter);
+        # fall back to full scan on phash_int with exact bit_count filter.
+        stmt = sql_text("""
+            SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
+                   b.storage, b.external_path, b.phash,
+                   bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
+            FROM images i
+            JOIN blobs b ON i.blob_sha256 = b.sha256
+            WHERE b.phash_int IS NOT NULL
+              AND i.id != :image_id
+              AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
+            ORDER BY distance ASC
+            LIMIT :limit
+        """)
+        results = (await db.execute(stmt, {
+            "phash_int": phash_int_val,
+            "image_id": image_id,
+            "threshold": threshold,
+            "limit": limit,
+        })).all()
+    else:
+        # Phase 1: generate Hamming neighborhoods for each quarter
+        neighbors = _hamming_neighbors_all(quarters, max_quarter_dist)
+
+        # Phase 2: indexed pre-filter — OR across all four quarter columns,
+        # then exact bit_count check on the surviving candidates only.
+        conditions = []
+        params: dict = {
+            "image_id": image_id,
+            "phash_int": phash_int_val,
+            "threshold": threshold,
+            "limit": limit,
+        }
+        for qi, neighbor_set in enumerate(neighbors):
+            param_name = f"q{qi}_neighbors"
+            conditions.append(f"b.phash_q{qi} = ANY(:{param_name})")
+            params[param_name] = list(neighbor_set)
+
+        where_prefilter = " OR ".join(conditions)
+
+        stmt = sql_text(f"""
+            SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
+                   b.storage, b.external_path, b.phash,
+                   bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
+            FROM images i
+            JOIN blobs b ON i.blob_sha256 = b.sha256
+            WHERE b.phash_int IS NOT NULL
+              AND i.id != :image_id
+              AND ({where_prefilter})
+              AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
+            ORDER BY distance ASC
+            LIMIT :limit
+        """)
+        results = (await db.execute(stmt, params)).all()
 
     def _row_to_url(r) -> str:
         if r.storage == "external" and r.external_path:

@@ -7,7 +7,7 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import delete, desc, func, select
+from sqlalchemy import delete, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth
@@ -128,12 +128,16 @@ async def list_jobs(
     _: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    stmt = select(DownloadJob)
     if status:
-        stmt = stmt.where(DownloadJob.status == status)
-
-    total = (await db.execute(select(func.count()).select_from(stmt.subquery()))).scalar_one()
-    stmt = stmt.order_by(desc(DownloadJob.created_at)).offset(page * limit).limit(limit)
+        stmt_filtered = select(DownloadJob).where(DownloadJob.status == status)
+        total = (await db.execute(select(func.count()).select_from(stmt_filtered.subquery()))).scalar_one()
+        stmt = stmt_filtered.order_by(desc(DownloadJob.created_at)).offset(page * limit).limit(limit)
+    else:
+        # Fast estimated count for unfiltered queries
+        total = (await db.execute(
+            text("SELECT n_live_tup::bigint FROM pg_stat_user_tables WHERE relname = 'download_jobs'")
+        )).scalar_one_or_none() or 0
+        stmt = select(DownloadJob).order_by(desc(DownloadJob.created_at)).offset(page * limit).limit(limit)
     jobs = (await db.execute(stmt)).scalars().all()
 
     return {"total": total, "jobs": [_j(j) for j in jobs]}

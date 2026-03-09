@@ -783,8 +783,15 @@ async def rescan_library_job(ctx: dict) -> dict:
     - Enqueue thumbnail_job for galleries with images that have no thumbnail.
     Progress is written to Redis key ``rescan:progress`` during the run and
     deleted on completion so the status endpoint can report accurately.
+
+    Batch processing: galleries are processed in chunks of 500 to avoid the
+    N+1 query problem that arises with per-gallery SELECT FROM images.
     """
     import json as _json
+    import shutil
+    from collections import Counter, defaultdict
+
+    from sqlalchemy.orm import selectinload
 
     logger.info("[rescan_library] starting full library rescan")
     r = ctx["redis"]
@@ -799,119 +806,163 @@ async def rescan_library_job(ctx: dict) -> dict:
     cancelled = False
     try:
         async with AsyncSessionLocal() as session:
-            # Order by last_scanned_at NULLS FIRST so unscanned galleries get priority
-            gallery_rows = (await session.execute(
-                select(Gallery).order_by(Gallery.last_scanned_at.asc().nulls_first())
+            # Fetch only IDs ordered by scan priority (unscanned first)
+            all_gallery_ids = (await session.execute(
+                select(Gallery.id).order_by(Gallery.last_scanned_at.asc().nulls_first())
             )).scalars().all()
-            total = len(gallery_rows)
+            total = len(all_gallery_ids)
             logger.info("[rescan_library] %d galleries to scan", total)
 
-            for idx, gallery in enumerate(gallery_rows):
-                # Check for cancel signal before processing each gallery
+            CHUNK = 500
+            processed = 0
+
+            for chunk_start in range(0, total, CHUNK):
+                # Check for cancel signal once per chunk
                 cancel_flag = await r.get("rescan:cancel")
                 if cancel_flag:
                     await r.delete("rescan:cancel")
                     await r.setex(
                         "rescan:progress",
                         3600,
-                        _json.dumps({"processed": idx, "total": total, "status": "cancelled"}),
+                        _json.dumps({"processed": processed, "total": total, "status": "cancelled"}),
                     )
-                    logger.info("[rescan_library] cancelled at gallery %d/%d", idx, total)
+                    logger.info("[rescan_library] cancelled at %d/%d", processed, total)
                     cancelled = True
                     break
 
-                await r.setex(
-                    "rescan:progress",
-                    3600,
-                    _json.dumps({
-                        "processed": idx,
-                        "total": total,
-                        "status": "running",
-                        "current_gallery": gallery.id,
-                    }),
-                )
+                chunk_ids = all_gallery_ids[chunk_start:chunk_start + CHUNK]
 
-                import shutil
-                from sqlalchemy.orm import selectinload
-                images = (await session.execute(
-                    select(Image).where(Image.gallery_id == gallery.id)
+                # Batch load all images + blobs for this chunk in a single query
+                images_result = (await session.execute(
+                    select(Image)
+                    .where(Image.gallery_id.in_(chunk_ids))
                     .options(selectinload(Image.blob))
                 )).scalars().all()
 
-                missing_thumb = False
-                removed = 0
-                for img in images:
-                    blob = img.blob
-                    if not blob:
-                        await session.delete(img)
-                        removed += 1
-                        continue
-                    src = resolve_blob_path(blob)
-                    if not src.exists():
-                        logger.warning(
-                            "[rescan_library] gallery_id=%d image_id=%d missing file: %s",
-                            gallery.id,
-                            img.id,
-                            str(src),
-                        )
-                        # Delete thumbnail directory before removing the DB record
-                        td = thumb_dir(blob.sha256)
-                        if td.exists():
-                            shutil.rmtree(str(td), ignore_errors=True)
-                        await decrement_ref_count(blob.sha256, session)
-                        await session.delete(img)
-                        removed += 1
-                        continue
-                    td = thumb_dir(blob.sha256)
-                    if not (td / "thumb_160.webp").exists():
-                        missing_thumb = True
+                # Group images by gallery_id
+                images_by_gallery: dict[int, list] = defaultdict(list)
+                for img in images_result:
+                    images_by_gallery[img.gallery_id].append(img)
 
-                if removed:
-                    await session.flush()
-                    # Recount surviving images
-                    surviving = (await session.execute(
-                        select(Image).where(Image.gallery_id == gallery.id)
-                        .options(selectinload(Image.blob))
-                    )).scalars().all()
-                    gallery.pages = len(surviving)
-                    if gallery.pages == 0 and gallery.import_mode == "link":
-                        # Clean up any remaining thumbnail dirs then delete the gallery entirely
-                        remaining_imgs = (await session.execute(
-                            select(Image).where(Image.gallery_id == gallery.id)
-                            .options(selectinload(Image.blob))
-                        )).scalars().all()
-                        for rim in remaining_imgs:
-                            if rim.blob:
-                                td = thumb_dir(rim.blob.sha256)
-                                if td.exists():
-                                    shutil.rmtree(str(td), ignore_errors=True)
-                                await decrement_ref_count(rim.blob.sha256, session)
-                        await session.delete(gallery)
-                        await session.commit()
-                        logger.info(
-                            "[rescan_library] gallery_id=%d removed (link mode, all files gone)",
-                            gallery.id,
-                        )
+                # Batch load Gallery ORM objects for this chunk
+                galleries = (await session.execute(
+                    select(Gallery).where(Gallery.id.in_(chunk_ids))
+                )).scalars().all()
+                gallery_map = {g.id: g for g in galleries}
+
+                # Accumulate batch operations across the chunk
+                shas_to_decrement: list[str] = []
+                images_to_delete: list[int] = []
+                galleries_to_delete: list[int] = []
+                galleries_needing_thumbs: list[int] = []
+
+                for gid in chunk_ids:
+                    gallery = gallery_map.get(gid)
+                    if not gallery:
                         continue
-                    elif gallery.pages == 0:
-                        gallery.download_status = "missing"
-                    logger.info(
-                        "[rescan_library] gallery_id=%d: removed %d missing images, pages=%d",
-                        gallery.id,
-                        removed,
-                        gallery.pages,
+
+                    images = images_by_gallery.get(gid, [])
+                    missing_thumb = False
+                    removed = 0
+
+                    for img in images:
+                        blob = img.blob
+                        if not blob:
+                            images_to_delete.append(img.id)
+                            removed += 1
+                            continue
+                        src = resolve_blob_path(blob)
+                        if not src.exists():
+                            logger.warning(
+                                "[rescan_library] gallery_id=%d image_id=%d missing file: %s",
+                                gid,
+                                img.id,
+                                str(src),
+                            )
+                            # Remove thumbnail directory immediately (filesystem op)
+                            td = thumb_dir(blob.sha256)
+                            if td.exists():
+                                shutil.rmtree(str(td), ignore_errors=True)
+                            shas_to_decrement.append(blob.sha256)
+                            images_to_delete.append(img.id)
+                            removed += 1
+                            continue
+                        td = thumb_dir(blob.sha256)
+                        if not (td / "thumb_160.webp").exists():
+                            missing_thumb = True
+
+                    if removed:
+                        gallery.pages = len(images) - removed
+                        if gallery.pages == 0 and gallery.import_mode == "link":
+                            # Mark for bulk delete — gallery row + its images handled via cascade
+                            galleries_to_delete.append(gid)
+                            logger.info(
+                                "[rescan_library] gallery_id=%d marked for removal (link mode, all files gone)",
+                                gid,
+                            )
+                            continue  # skip last_scanned_at update for this gallery
+                        elif gallery.pages == 0:
+                            gallery.download_status = "missing"
+                        logger.info(
+                            "[rescan_library] gallery_id=%d: removed %d missing images, pages=%d",
+                            gid,
+                            removed,
+                            gallery.pages,
+                        )
+
+                    if missing_thumb:
+                        galleries_needing_thumbs.append(gid)
+
+                    gallery.last_scanned_at = datetime.now(timezone.utc)
+
+                # ── Batch DB operations for this chunk ──────────────────────
+
+                # Batch decrement blob ref_counts, accounting for multiple
+                # images referencing the same sha (each missing image = -1).
+                if shas_to_decrement:
+                    sha_counts = Counter(shas_to_decrement)
+                    unique_shas = list(sha_counts.keys())
+                    decrements = [sha_counts[s] for s in unique_shas]
+                    await session.execute(
+                        text("""
+                            UPDATE blobs SET ref_count = ref_count - v.n
+                            FROM (SELECT unnest(:shas::text[]) AS sha,
+                                         unnest(:ns::int[])  AS n) v
+                            WHERE blobs.sha256 = v.sha
+                        """),
+                        {"shas": unique_shas, "ns": decrements},
                     )
 
-                if missing_thumb:
-                    await r.enqueue_job("thumbnail_job", gallery.id)
+                # Batch delete orphaned/missing images
+                if images_to_delete:
+                    await session.execute(
+                        text("DELETE FROM images WHERE id = ANY(:ids)"),
+                        {"ids": images_to_delete},
+                    )
+
+                # Batch delete zero-page link-mode galleries (cascade removes images)
+                if galleries_to_delete:
+                    await session.execute(
+                        text("DELETE FROM galleries WHERE id = ANY(:ids)"),
+                        {"ids": galleries_to_delete},
+                    )
+
+                await session.commit()
+
+                # Enqueue thumbnail jobs outside the transaction
+                for gid in galleries_needing_thumbs:
+                    await r.enqueue_job("thumbnail_job", gid)
                     logger.info(
                         "[rescan_library] gallery_id=%d: enqueued thumbnail_job (missing thumbs)",
-                        gallery.id,
+                        gid,
                     )
 
-                gallery.last_scanned_at = datetime.now(timezone.utc)
-                # Commit after each gallery so progress is persisted incrementally
-                await session.commit()
+                processed += len(chunk_ids)
+                await r.setex(
+                    "rescan:progress",
+                    3600,
+                    _json.dumps({"processed": processed, "total": total, "status": "running"}),
+                )
 
     finally:
         # Always resume the watcher even if the scan fails or is cancelled
@@ -1247,6 +1298,15 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
                     # Store actual dimensions and phash on the blob
                     blob.width, blob.height = pil.size
                     blob.phash = str(imagehash.phash(pil))
+                    phash_int_val = int(blob.phash, 16)
+                    blob.phash_int = phash_int_val
+                    # Store quarter values as signed 16-bit (PostgreSQL SMALLINT range)
+                    def _to_signed16(v: int) -> int:
+                        return v - 0x10000 if v >= 0x8000 else v
+                    blob.phash_q0 = _to_signed16((phash_int_val >> 48) & 0xFFFF)
+                    blob.phash_q1 = _to_signed16((phash_int_val >> 32) & 0xFFFF)
+                    blob.phash_q2 = _to_signed16((phash_int_val >> 16) & 0xFFFF)
+                    blob.phash_q3 = _to_signed16(phash_int_val & 0xFFFF)
                     rgb = pil.convert("RGB")
                     for size in sizes:
                         dest = td / f"thumb_{size}.webp"
@@ -1279,9 +1339,13 @@ async def reconciliation_job(ctx: dict) -> dict:
     those changes back to the database.
 
     Also runs blob GC: removes unreferenced blobs and their CAS files.
+
+    Batch-optimised for 10M images / 100K galleries:
+    - Phase 1: single scandir pass + chunked batch queries (chunk=500)
+    - Phase 2: chunked NOT-IN queries for orphan galleries
+    - Phase 3: single JOIN query for orphan blobs, batch update/delete
     """
     import shutil
-    from sqlalchemy.orm import selectinload
 
     logger.info("[reconcile] Starting reconciliation")
     r = ctx["redis"]
@@ -1303,120 +1367,254 @@ async def reconciliation_job(ctx: dict) -> dict:
         await r.set(last_run_key, datetime.now(UTC).isoformat())
         return {"status": "done", **stats}
 
-    async with AsyncSessionLocal() as session:
-        # Phase 1: Scan library directories and compare with DB
-        for gallery_dir in sorted(lib_base.iterdir()):
-            if not gallery_dir.is_dir():
-                continue
-            try:
-                gallery_id = int(gallery_dir.name)
-            except ValueError:
-                logger.warning("[reconcile] skipping non-numeric dir: %s", gallery_dir.name)
-                continue
+    # ── Phase 1: Scan filesystem once, batch-query DB, reconcile in chunks ──
 
-            # Get DB images for this gallery
-            db_images = (await session.execute(
-                select(Image)
-                .where(Image.gallery_id == gallery_id)
-                .options(selectinload(Image.blob))
-            )).scalars().all()
+    # Single scandir pass: gallery_map[gallery_id] = set of filenames on disk
+    # Broken symlinks are unlinked here; they are excluded from disk_files so
+    # the subsequent DB diff will mark those image records for deletion.
+    gallery_map: dict[int, set[str]] = {}
+    empty_gallery_dirs: set[int] = set()
 
-            db_filenames = {img.filename: img for img in db_images}
+    logger.info("[reconcile] Phase 1: scanning %s", lib_base)
+    for entry in os.scandir(str(lib_base)):
+        if not entry.is_dir(follow_symlinks=False):
+            continue
+        try:
+            gid = int(entry.name)
+        except ValueError:
+            logger.warning("[reconcile] skipping non-numeric dir: %s", entry.name)
+            continue
 
-            # Check which symlinks exist on disk
-            disk_files: set[str] = set()
-            for entry in gallery_dir.iterdir():
-                disk_files.add(entry.name)
-                # Check for broken symlinks
-                if entry.is_symlink() and not entry.exists():
-                    # Broken symlink — remove it
-                    entry.unlink()
-                    if entry.name in db_filenames:
-                        img = db_filenames[entry.name]
-                        await decrement_ref_count(img.blob_sha256, session)
-                        await session.delete(img)
-                        stats["removed_images"] += 1
-
-            # Check for DB records whose symlinks are missing
-            for filename, img in db_filenames.items():
-                if filename not in disk_files:
-                    await decrement_ref_count(img.blob_sha256, session)
-                    await session.delete(img)
-                    stats["removed_images"] += 1
-
-            # If gallery directory is now empty, remove gallery
-            remaining = list(gallery_dir.iterdir())
-            if not remaining:
-                gallery = await session.get(Gallery, gallery_id)
-                if gallery:
-                    await session.delete(gallery)
-                    stats["removed_galleries"] += 1
+        disk_files: set[str] = set()
+        has_valid = False
+        for fe in os.scandir(entry.path):
+            if fe.is_symlink() and not Path(fe.path).exists():
+                # Broken symlink — remove it silently; absence from disk_files
+                # will cause DB record to be deleted in batch step below.
                 try:
-                    gallery_dir.rmdir()
+                    os.unlink(fe.path)
                 except OSError:
                     pass
+            else:
+                disk_files.add(fe.name)
+                has_valid = True
 
-        # Phase 2: Check for galleries in DB whose library directory doesn't exist
-        # (Only check downloaded/imported galleries, not proxy_only)
-        all_galleries = (await session.execute(
-            select(Gallery).where(Gallery.download_status != "proxy_only")
-        )).scalars().all()
+        gallery_map[gid] = disk_files
+        if not has_valid:
+            empty_gallery_dirs.add(gid)
 
-        for g in all_galleries:
-            gdir = lib_base / str(g.id)
-            if not gdir.exists():
-                # Library directory missing — get images and decrement ref counts
-                images = (await session.execute(
-                    select(Image).where(Image.gallery_id == g.id)
-                )).scalars().all()
-                for img in images:
-                    await decrement_ref_count(img.blob_sha256, session)
-                    stats["removed_images"] += 1
-                await session.delete(g)
-                stats["removed_galleries"] += 1
+    fs_gallery_ids = set(gallery_map.keys())
+    all_fs_ids_list = sorted(fs_gallery_ids)
+    total_fs = len(all_fs_ids_list)
+    logger.info("[reconcile] Phase 1: %d gallery dirs on disk", total_fs)
 
-        await session.commit()
+    _CHUNK = 500
 
-    # Phase 3: Blob GC — clean up unreferenced blobs
     async with AsyncSessionLocal() as session:
-        from sqlalchemy import func as sqlfunc
+        processed_p1 = 0
+        for chunk_start in range(0, total_fs, _CHUNK):
+            chunk_ids = all_fs_ids_list[chunk_start : chunk_start + _CHUNK]
 
-        orphan_blobs = (await session.execute(
-            select(Blob).where(Blob.ref_count <= 0)
+            # Batch query: id, gallery_id, filename, blob_sha256 for this chunk
+            rows = (await session.execute(
+                select(Image.id, Image.gallery_id, Image.filename, Image.blob_sha256)
+                .where(Image.gallery_id.in_(chunk_ids))
+            )).all()
+
+            # Group DB rows by gallery_id
+            db_by_gallery: dict[int, dict[str, tuple[int, str]]] = {}
+            for row in rows:
+                db_by_gallery.setdefault(row.gallery_id, {})[row.filename] = (row.id, row.blob_sha256)
+
+            # Determine which image IDs and blob shas to remove for this chunk
+            dead_image_ids: list[int] = []
+            dead_blob_shas: list[str] = []
+
+            for gid in chunk_ids:
+                disk_files = gallery_map[gid]
+                db_files = db_by_gallery.get(gid, {})
+                for filename, (img_id, sha) in db_files.items():
+                    if filename not in disk_files:
+                        dead_image_ids.append(img_id)
+                        dead_blob_shas.append(sha)
+
+            if dead_image_ids:
+                # Batch decrement ref_counts
+                await session.execute(
+                    text(
+                        "UPDATE blobs SET ref_count = ref_count - 1 "
+                        "WHERE sha256 = ANY(:shas)"
+                    ),
+                    {"shas": dead_blob_shas},
+                )
+                # Batch delete images
+                await session.execute(
+                    text("DELETE FROM images WHERE id = ANY(:ids)"),
+                    {"ids": dead_image_ids},
+                )
+                stats["removed_images"] += len(dead_image_ids)
+
+            # Delete empty gallery dirs and their DB records in this chunk
+            empty_in_chunk = [gid for gid in chunk_ids if gid in empty_gallery_dirs]
+            if empty_in_chunk:
+                await session.execute(
+                    text("DELETE FROM galleries WHERE id = ANY(:ids)"),
+                    {"ids": empty_in_chunk},
+                )
+                stats["removed_galleries"] += len(empty_in_chunk)
+                for gid in empty_in_chunk:
+                    gdir = lib_base / str(gid)
+                    try:
+                        gdir.rmdir()
+                    except OSError:
+                        pass
+
+            await session.commit()
+            processed_p1 += len(chunk_ids)
+            await r.setex(
+                "reconcile:progress",
+                3600,
+                json.dumps({"phase": 1, "processed": processed_p1, "total": total_fs}),
+            )
+
+        logger.info("[reconcile] Phase 1 done: removed %d images, %d galleries",
+                    stats["removed_images"], stats["removed_galleries"])
+
+        # ── Phase 2: Orphan galleries — in DB but missing from filesystem ──
+        # Query gallery IDs that are NOT in fs_gallery_ids, in chunks.
+        # We iterate the DB in chunks using OFFSET/LIMIT on the sorted id list
+        # rather than a NOT IN on a potentially 100K-element set.
+
+        logger.info("[reconcile] Phase 2: checking for orphan DB galleries")
+
+        # Collect all gallery IDs in DB (non-proxy) using a single streaming query
+        db_gallery_ids_result = (await session.execute(
+            select(Gallery.id).where(Gallery.download_status != "proxy_only")
         )).scalars().all()
 
-        for blob in orphan_blobs:
-            # Safety check: verify no images actually reference this blob
-            actual_refs = (await session.execute(
-                select(Image.id).where(Image.blob_sha256 == blob.sha256).limit(1)
-            )).scalar_one_or_none()
+        orphan_gallery_ids = [gid for gid in db_gallery_ids_result if gid not in fs_gallery_ids]
+        total_orphans = len(orphan_gallery_ids)
+        logger.info("[reconcile] Phase 2: %d orphan galleries found", total_orphans)
 
-            if actual_refs is not None:
-                # ref_count drifted — fix it
-                count_result = (await session.execute(
-                    select(sqlfunc.count()).select_from(Image).where(Image.blob_sha256 == blob.sha256)
-                )).scalar_one()
-                blob.ref_count = count_result
-                logger.warning("[reconcile] ref_count drift for %s: corrected to %d", blob.sha256[:12], count_result)
-                continue
+        processed_p2 = 0
+        for chunk_start in range(0, total_orphans, _CHUNK):
+            chunk_ids = orphan_gallery_ids[chunk_start : chunk_start + _CHUNK]
 
-            # No references — safe to delete CAS file and thumbnail
-            cas_file = cas_path(blob.sha256, blob.extension)
-            if cas_file.exists():
-                try:
-                    cas_file.unlink()
-                except OSError as exc:
-                    logger.warning("[reconcile] failed to delete CAS file %s: %s", cas_file, exc)
+            # Batch-fetch blob shas for images in these galleries
+            orphan_rows = (await session.execute(
+                select(Image.id, Image.blob_sha256)
+                .where(Image.gallery_id.in_(chunk_ids))
+            )).all()
 
-            # Delete thumbnail directory
-            td = thumb_dir(blob.sha256)
-            if td.exists():
-                shutil.rmtree(str(td), ignore_errors=True)
+            if orphan_rows:
+                orphan_img_ids = [r.id for r in orphan_rows]
+                orphan_shas = [r.blob_sha256 for r in orphan_rows]
+                await session.execute(
+                    text(
+                        "UPDATE blobs SET ref_count = ref_count - 1 "
+                        "WHERE sha256 = ANY(:shas)"
+                    ),
+                    {"shas": orphan_shas},
+                )
+                await session.execute(
+                    text("DELETE FROM images WHERE id = ANY(:ids)"),
+                    {"ids": orphan_img_ids},
+                )
+                stats["removed_images"] += len(orphan_img_ids)
 
-            await session.delete(blob)
-            stats["orphan_blobs_cleaned"] += 1
+            await session.execute(
+                text("DELETE FROM galleries WHERE id = ANY(:ids)"),
+                {"ids": chunk_ids},
+            )
+            stats["removed_galleries"] += len(chunk_ids)
 
-        await session.commit()
+            await session.commit()
+            processed_p2 += len(chunk_ids)
+            await r.setex(
+                "reconcile:progress",
+                3600,
+                json.dumps({"phase": 2, "processed": processed_p2, "total": total_orphans}),
+            )
+
+        logger.info("[reconcile] Phase 2 done: removed %d orphan galleries", stats["removed_galleries"])
+
+    # ── Phase 3: Blob GC — single batch query with actual ref counts ──
+
+    logger.info("[reconcile] Phase 3: blob GC")
+
+    _BLOB_CHUNK = 1000
+
+    async with AsyncSessionLocal() as session:
+        # Single query: join blobs with actual image ref count
+        # Fetches only blobs where ref_count <= 0, with real count for safety
+        gc_rows = (await session.execute(
+            text("""
+                SELECT b.sha256, b.extension, b.storage, b.external_path,
+                       COUNT(i.id) AS actual_refs
+                FROM blobs b
+                LEFT JOIN images i ON i.blob_sha256 = b.sha256
+                WHERE b.ref_count <= 0
+                GROUP BY b.sha256, b.extension, b.storage, b.external_path
+            """)
+        )).all()
+
+        total_gc = len(gc_rows)
+        logger.info("[reconcile] Phase 3: %d candidate blobs to GC", total_gc)
+
+        # Separate into: truly orphaned vs ref_count-drifted
+        truly_orphaned = [r for r in gc_rows if r.actual_refs == 0]
+        drifted = [r for r in gc_rows if r.actual_refs > 0]
+
+        # Fix drifted ref_counts in batch (chunk to avoid huge IN lists)
+        for chunk_start in range(0, len(drifted), _BLOB_CHUNK):
+            chunk = drifted[chunk_start : chunk_start + _BLOB_CHUNK]
+            for row in chunk:
+                logger.warning(
+                    "[reconcile] ref_count drift for %s: corrected to %d",
+                    row.sha256[:12], row.actual_refs,
+                )
+                await session.execute(
+                    text("UPDATE blobs SET ref_count = :rc WHERE sha256 = :sha"),
+                    {"rc": row.actual_refs, "sha": row.sha256},
+                )
+            await session.commit()
+
+        # Delete truly orphaned blobs in chunks
+        processed_p3 = 0
+        for chunk_start in range(0, len(truly_orphaned), _BLOB_CHUNK):
+            chunk = truly_orphaned[chunk_start : chunk_start + _BLOB_CHUNK]
+            chunk_shas = [r.sha256 for r in chunk]
+
+            # Delete CAS files and thumb dirs first (filesystem ops)
+            for row in chunk:
+                cas_file = cas_path(row.sha256, row.extension)
+                if cas_file.exists():
+                    try:
+                        cas_file.unlink()
+                    except OSError as exc:
+                        logger.warning("[reconcile] failed to delete CAS file %s: %s", cas_file, exc)
+
+                td = thumb_dir(row.sha256)
+                if td.exists():
+                    shutil.rmtree(str(td), ignore_errors=True)
+
+            # Batch delete blob records
+            await session.execute(
+                text("DELETE FROM blobs WHERE sha256 = ANY(:shas)"),
+                {"shas": chunk_shas},
+            )
+            await session.commit()
+
+            stats["orphan_blobs_cleaned"] += len(chunk)
+            processed_p3 += len(chunk)
+            await r.setex(
+                "reconcile:progress",
+                3600,
+                json.dumps({"phase": 3, "processed": processed_p3, "total": total_gc}),
+            )
+
+        logger.info("[reconcile] Phase 3 done: cleaned %d orphan blobs (%d ref_count corrections)",
+                    stats["orphan_blobs_cleaned"], len(drifted))
 
     # Record last run time
     await r.set(last_run_key, datetime.now(UTC).isoformat())

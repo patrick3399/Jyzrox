@@ -128,6 +128,24 @@ async def system_health():
         logger.error("Redis health check failed: %s", exc)
         results["redis"] = f"error: {exc}"
 
+    # Inode check
+    try:
+        result = subprocess.run(
+            ["df", "-i", "--output=ipcent", settings.data_cas_path],
+            capture_output=True, text=True, timeout=5,
+        )
+        lines = result.stdout.strip().split("\n")
+        if len(lines) >= 2:
+            pct = int(lines[1].strip().rstrip("%"))
+            if pct > 90:
+                results["inodes"] = f"warning: {pct}% used"
+            else:
+                results["inodes"] = "ok"
+        else:
+            results["inodes"] = "unknown"
+    except Exception:
+        results["inodes"] = "unknown"
+
     if any(v != "ok" for v in results.values()):
         raise HTTPException(status_code=503, detail=results)
 
@@ -172,15 +190,20 @@ _CACHE_PATTERNS: dict[str, str] = {
 }
 
 
-async def _count_keys(pattern: str) -> int:
-    """Count Redis keys matching a glob pattern (uses SCAN to avoid blocking)."""
+async def _count_keys(pattern: str, max_iterations: int = 500) -> int:
+    """Count Redis keys matching a glob pattern (uses SCAN to avoid blocking).
+
+    Caps at max_iterations SCAN rounds (~100K keys) to prevent blocking on large keyspaces.
+    """
     r = get_redis()
     count = 0
     cursor = 0
+    iterations = 0
     while True:
         cursor, keys = await r.scan(cursor, match=pattern, count=200)
         count += len(keys)
-        if cursor == 0:
+        iterations += 1
+        if cursor == 0 or iterations >= max_iterations:
             break
     return count
 

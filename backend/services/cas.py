@@ -38,12 +38,12 @@ def resolve_blob_path(blob: Blob) -> Path:
 
 def thumb_dir(sha256: str) -> Path:
     """Return the thumbnail directory for a blob."""
-    return Path(settings.data_thumbs_path) / sha256[:2] / sha256
+    return Path(settings.data_thumbs_path) / sha256[:2] / sha256[2:4] / sha256
 
 
 def thumb_url(sha256: str) -> str:
     """Return the 160px thumbnail URL."""
-    return f"/media/thumbs/{sha256[:2]}/{sha256}/thumb_160.webp"
+    return f"/media/thumbs/{sha256[:2]}/{sha256[2:4]}/{sha256}/thumb_160.webp"
 
 
 async def store_blob(

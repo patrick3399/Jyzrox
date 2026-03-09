@@ -56,6 +56,8 @@ class Settings(BaseSettings):
     library_scan_interval_hours: int = 24
     extra_library_paths: str = ""  # Comma-separated extra paths
     library_base_path: str = "/mnt"  # Default root for user-mounted external media
+    watcher_use_polling: bool = False
+    watcher_polling_interval: int = 60  # seconds
 
     model_config = {"env_file": ".env", "case_sensitive": False}
 

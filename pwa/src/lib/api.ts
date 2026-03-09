@@ -219,8 +219,19 @@ const library = {
 
   getGallery: (id: number) => apiFetch<Gallery>(`/api/library/galleries/${id}`),
 
-  getImages: (id: number) =>
-    apiFetch<{ gallery_id: number; images: GalleryImage[] }>(`/api/library/galleries/${id}/images`),
+  getImages: (id: number, opts?: { page?: number; limit?: number }) => {
+    const params = new URLSearchParams()
+    if (opts?.page) params.set('page', String(opts.page))
+    if (opts?.limit) params.set('limit', String(opts.limit))
+    const qs = params.toString()
+    return apiFetch<{
+      gallery_id: number
+      images: GalleryImage[]
+      total?: number
+      page?: number
+      has_next?: boolean
+    }>(`/api/library/galleries/${id}/images${qs ? `?${qs}` : ''}`)
+  },
 
   updateGallery: (id: number, patch: { favorited?: boolean; rating?: number }) =>
     apiFetch<Gallery>(`/api/library/galleries/${id}`, {

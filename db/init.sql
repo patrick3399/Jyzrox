@@ -44,6 +44,11 @@ CREATE TABLE IF NOT EXISTS blobs (
     width         INT,
     height        INT,
     phash         TEXT,
+    phash_int     BIGINT,
+    phash_q0      SMALLINT,
+    phash_q1      SMALLINT,
+    phash_q2      SMALLINT,
+    phash_q3      SMALLINT,
     extension     TEXT NOT NULL,
     storage       TEXT NOT NULL DEFAULT 'cas',
     external_path TEXT,
@@ -51,6 +56,10 @@ CREATE TABLE IF NOT EXISTS blobs (
     created_at    TIMESTAMPTZ DEFAULT now()
 );
 CREATE INDEX IF NOT EXISTS idx_blobs_phash ON blobs (phash) WHERE phash IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_blobs_phash_q0 ON blobs(phash_q0) WHERE phash_q0 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_blobs_phash_q1 ON blobs(phash_q1) WHERE phash_q1 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_blobs_phash_q2 ON blobs(phash_q2) WHERE phash_q2 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_blobs_phash_q3 ON blobs(phash_q3) WHERE phash_q3 IS NOT NULL;
 
 CREATE TABLE IF NOT EXISTS images (
     id              BIGSERIAL PRIMARY KEY,
@@ -163,6 +172,11 @@ CREATE INDEX IF NOT EXISTS idx_gallery_tags_tag ON gallery_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs (status);
 
+-- Composite indexes for keyset pagination (sort_col DESC, id DESC)
+CREATE INDEX IF NOT EXISTS idx_galleries_added_at_id ON galleries (added_at DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_galleries_rating_id   ON galleries (rating DESC, id DESC);
+CREATE INDEX IF NOT EXISTS idx_galleries_pages_id    ON galleries (pages DESC NULLS LAST, id DESC);
+
 -- ── Browse History ────────────────────────────────────────────────────
 
 CREATE TABLE IF NOT EXISTS browse_history (
@@ -226,6 +240,17 @@ CREATE TABLE IF NOT EXISTS library_paths (
 -- Gallery extensions for library management
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS last_scanned_at TIMESTAMPTZ;
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS library_path TEXT;
+
+-- pHash quarter columns for pigeonhole pre-filter (scalability)
+ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_int BIGINT;
+ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_q0 SMALLINT;
+ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_q1 SMALLINT;
+ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_q2 SMALLINT;
+ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_q3 SMALLINT;
+CREATE INDEX IF NOT EXISTS idx_blobs_phash_q0 ON blobs(phash_q0) WHERE phash_q0 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_blobs_phash_q1 ON blobs(phash_q1) WHERE phash_q1 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_blobs_phash_q2 ON blobs(phash_q2) WHERE phash_q2 IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_blobs_phash_q3 ON blobs(phash_q3) WHERE phash_q3 IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_galleries_library_path ON galleries (library_path);
 CREATE INDEX IF NOT EXISTS idx_galleries_last_scanned ON galleries (last_scanned_at NULLS FIRST);
