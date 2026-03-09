@@ -16,6 +16,7 @@ import {
   Moon,
   Monitor,
   PackageOpen,
+  FolderInput,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
@@ -30,6 +31,7 @@ const navLinks = [
   { href: '/queue', label: () => t('nav.queue'), icon: Download },
   { href: '/tags', label: () => t('nav.tags'), icon: Tags },
   { href: '/export', label: () => t('nav.export'), icon: PackageOpen },
+  { href: '/import', label: () => t('nav.import'), icon: FolderInput },
   { href: '/settings', label: () => t('nav.settings'), icon: Settings },
 ]
 

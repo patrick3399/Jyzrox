@@ -1,12 +1,13 @@
 """External API endpoints for third-party integrations."""
 
 import hashlib
+import logging
 import shutil
 import time
 import uuid as _uuid
 
 import psutil
-from fastapi import APIRouter, Depends, Header, HTTPException, Query
+from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from sqlalchemy import func, select, update
 
 from core.config import settings
@@ -14,6 +15,7 @@ from core.database import async_session
 from core.redis_client import get_redis
 from db.models import ApiToken, DownloadJob, Gallery, Image, Tag
 
+logger = logging.getLogger(__name__)
 router = APIRouter(tags=["external"])
 
 
@@ -257,17 +259,59 @@ async def list_tags(
 # ── Download trigger ──────────────────────────────────────────────────
 
 
+def _detect_source(url: str) -> str:
+    """Auto-detect source from URL domain."""
+    if "pixiv.net" in url:
+        return "pixiv"
+    if "e-hentai.org" in url or "exhentai.org" in url:
+        return "ehentai"
+    return "unknown"
+
+
 @router.post("/download")
 async def enqueue_download(
+    request: Request,
     url: str = Query(...),
     token_data: dict = Depends(verify_api_token),
 ):
-    """Enqueue a download job via external API."""
+    """Enqueue a download job via external API.
+
+    Order: ARQ enqueue first, then DB commit. If ARQ fails we never create the
+    DB record. If DB insert fails after a successful ARQ enqueue we log a
+    warning — the ARQ job will time out naturally without a matching DB record.
+    """
     await _check_rate_limit(token_data["token_id"])
     job_id = _uuid.uuid4()
+    source = _detect_source(url)
 
-    async with async_session() as session:
-        session.add(DownloadJob(id=job_id, url=url, status="queued"))
-        await session.commit()
+    # 1. Enqueue ARQ job first — if this fails, no DB record is created.
+    arq = request.app.state.arq
+    try:
+        await arq.enqueue_job(
+            "download_job",
+            url,
+            source,
+            None,   # options
+            str(job_id),
+            None,   # total
+            _job_id=str(job_id),
+        )
+    except Exception as exc:
+        logger.error("[external/enqueue] ARQ enqueue failed: %s", exc)
+        raise HTTPException(status_code=503, detail="Failed to enqueue download job")
+
+    # 2. Persist DB record. If this fails, log a warning; the ARQ job will
+    #    eventually time out without a matching DB row.
+    try:
+        async with async_session() as session:
+            session.add(DownloadJob(id=job_id, url=url, source=source, status="queued"))
+            await session.commit()
+    except Exception as exc:
+        logger.warning(
+            "[external/enqueue] ARQ job %s enqueued but DB insert failed: %s — job will time out naturally",
+            job_id,
+            exc,
+        )
+        raise HTTPException(status_code=500, detail="Job enqueued but failed to persist to database")
 
     return {"job_id": str(job_id), "status": "queued"}

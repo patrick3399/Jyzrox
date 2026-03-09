@@ -271,6 +271,7 @@ export interface GallerySearchParams {
   favorited?: boolean
   min_rating?: number
   source?: string
+  import_mode?: string
   page?: number
   cursor?: string
   limit?: number

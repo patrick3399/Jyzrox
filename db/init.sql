@@ -48,6 +48,7 @@ CREATE TABLE IF NOT EXISTS images (
     thumb_path      TEXT,
     file_size       BIGINT,
     file_hash       TEXT,
+    phash           TEXT,
     media_type      TEXT DEFAULT 'image',
     duration        REAL,
     duplicate_of    BIGINT REFERENCES images(id),
@@ -145,6 +146,7 @@ CREATE INDEX IF NOT EXISTS idx_galleries_favorited ON galleries (favorited) WHER
 CREATE INDEX IF NOT EXISTS idx_images_gallery      ON images (gallery_id, page_num);
 CREATE INDEX IF NOT EXISTS idx_images_hash         ON images (file_hash);
 CREATE INDEX IF NOT EXISTS idx_images_duplicate    ON images (duplicate_of) WHERE duplicate_of IS NOT NULL;
+CREATE INDEX IF NOT EXISTS idx_images_phash        ON images (phash) WHERE phash IS NOT NULL;
 
 -- #4: galleries.source (single-column) — used in WHERE source = 'pixiv' filters
 -- Note: idx_galleries_source above covers (source, source_id); this covers source-only lookups.
@@ -205,3 +207,21 @@ CREATE TABLE IF NOT EXISTS blocked_tags (
     UNIQUE (user_id, namespace, name)
 );
 CREATE INDEX IF NOT EXISTS idx_blocked_tags_user ON blocked_tags (user_id);
+
+-- ── Library Paths ──────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS library_paths (
+    id          SERIAL PRIMARY KEY,
+    path        TEXT NOT NULL UNIQUE,
+    label       TEXT,
+    enabled     BOOLEAN NOT NULL DEFAULT TRUE,
+    monitor     BOOLEAN NOT NULL DEFAULT TRUE,
+    added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
+);
+
+-- Gallery extensions for library management
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS last_scanned_at TIMESTAMPTZ;
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS library_path TEXT;
+
+CREATE INDEX IF NOT EXISTS idx_galleries_library_path ON galleries (library_path);
+CREATE INDEX IF NOT EXISTS idx_galleries_last_scanned ON galleries (last_scanned_at NULLS FIRST);

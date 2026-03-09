@@ -31,6 +31,9 @@ class Settings(BaseSettings):
 
     # AI Tagging
     tag_model_enabled: bool = False
+    tag_model_name: str = "SmilingWolf/wd-swinv2-tagger-v3"
+    tag_general_threshold: float = 0.35
+    tag_character_threshold: float = 0.85
 
     # Storage paths (inside container)
     data_gallery_path: str = "/data/gallery"
@@ -46,6 +49,12 @@ class Settings(BaseSettings):
     pixiv_client_secret: str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
     # To override: set PIXIV_CLIENT_ID and PIXIV_CLIENT_SECRET in .env
 
+    # Library management
+    library_monitor_enabled: bool = True
+    library_scan_interval_hours: int = 24
+    extra_library_paths: str = ""  # Comma-separated extra paths
+    library_base_path: str = "/mnt"  # Default root for user-mounted external media
+
     model_config = {"env_file": ".env", "case_sensitive": False}
 
 
@@ -55,3 +64,41 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+async def get_all_library_paths() -> list[str]:
+    """Return all user-configured library paths.
+
+    Only returns paths the user has explicitly added (via env var or DB).
+    Does NOT include ``library_base_path`` (/mnt) automatically — users
+    must add paths themselves.  ``data_gallery_path`` (/data/gallery) is
+    never included as it is the download engine's internal workspace.
+    """
+    import os
+
+    paths: list[str] = []
+
+    # From env var
+    if settings.extra_library_paths:
+        for p in settings.extra_library_paths.split(","):
+            p = p.strip()
+            if p and p not in paths:
+                paths.append(p)
+
+    # From database
+    try:
+        from core.database import async_session
+        from db.models import LibraryPath
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(LibraryPath.path).where(LibraryPath.enabled == True)  # noqa: E712
+            )
+            for row in result.scalars():
+                if row not in paths:
+                    paths.append(row)
+    except Exception:
+        pass  # DB might not be ready during startup
+
+    return paths

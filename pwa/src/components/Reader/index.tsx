@@ -523,22 +523,22 @@ function ReaderOverlay({
   onPageSelect,
 }: ReaderOverlayProps) {
   const VIEW_MODES: { mode: ViewMode; icon: string; label: string }[] = [
-    { mode: 'single', icon: '▣', label: '單頁' },
-    { mode: 'webtoon', icon: '▥', label: '條漫' },
-    { mode: 'double', icon: '◫', label: '雙頁' },
+    { mode: 'single', icon: '▣', label: t('reader.viewModeSingleShort') },
+    { mode: 'webtoon', icon: '▥', label: t('reader.viewModeWebtoonShort') },
+    { mode: 'double', icon: '◫', label: t('reader.viewModeDoubleShort') },
   ]
 
   const SCALE_MODES: { mode: ScaleMode; icon: string; label: string }[] = [
-    { mode: 'fit-both', icon: '⊞', label: '適合' },
-    { mode: 'fit-width', icon: '↔', label: '寬度' },
-    { mode: 'fit-height', icon: '↕', label: '高度' },
-    { mode: 'original', icon: '1:1', label: '原圖' },
+    { mode: 'fit-both', icon: '⊞', label: t('reader.scaleFitBothShort') },
+    { mode: 'fit-width', icon: '↔', label: t('reader.scaleFitWidthShort') },
+    { mode: 'fit-height', icon: '↕', label: t('reader.scaleFitHeightShort') },
+    { mode: 'original', icon: '1:1', label: t('reader.scaleOriginalShort') },
   ]
 
   const DIRECTIONS: { dir: ReadingDirection; icon: string; label: string }[] = [
-    { dir: 'ltr', icon: '→', label: '左→右' },
-    { dir: 'rtl', icon: '←', label: '右→左' },
-    { dir: 'vertical', icon: '↓', label: '直向' },
+    { dir: 'ltr', icon: '→', label: t('reader.dirLtrShort') },
+    { dir: 'rtl', icon: '←', label: t('reader.dirRtlShort') },
+    { dir: 'vertical', icon: '↓', label: t('reader.dirVerticalShort') },
   ]
 
   const cycleViewMode = () => {

@@ -1,13 +1,16 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
-import { ChevronUp, ChevronDown, Eye, EyeOff, RefreshCw, Shield, Monitor } from 'lucide-react'
+import { useLocale } from '@/components/LocaleProvider'
+import { SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
+import { ChevronUp, ChevronDown, Eye, EyeOff, RefreshCw, Shield, Monitor, CalendarClock, Square } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
-import { Copy, Key, BookOpen, X, Plus, Tag } from 'lucide-react'
+import { Copy, Key, BookOpen, X, Plus, Tag, ScanLine } from 'lucide-react'
+import { useRescanLibrary, useRescanStatus, useScanSettings, useUpdateScanSettings, useCancelRescan } from '@/hooks/useImport'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
 import type {
@@ -30,6 +33,8 @@ type SectionKey =
   | 'apiTokens'
   | 'reader'
   | 'blockedTags'
+  | 'aiTagging'
+  | 'schedule'
 
 function SectionHeader({
   title,
@@ -68,6 +73,198 @@ function StatusIndicator({ configured }: { configured: boolean }) {
       />
       {configured ? t('settings.configured') : t('settings.notConfigured')}
     </span>
+  )
+}
+
+// ── AI Tagging sub-component ──────────────────────────────────────────
+
+function AiTaggingSection() {
+  const [isRetagging, setIsRetagging] = useState(false)
+
+  const handleRetagAll = async () => {
+    if (!window.confirm(t('settings.retagAllConfirm'))) return
+    setIsRetagging(true)
+    try {
+      const result = await api.tags.retagAll()
+      toast.success(t('settings.retagAllQueued', { total: result.total }))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('settings.retagAllFailed'))
+    } finally {
+      setIsRetagging(false)
+    }
+  }
+
+  return (
+    <div className="px-5 pb-5 border-t border-vault-border">
+      <p className="text-xs text-vault-text-muted mt-4 mb-4">
+        {t('settings.aiTaggingDesc')}
+      </p>
+      <button
+        onClick={handleRetagAll}
+        disabled={isRetagging}
+        className="px-4 py-2 bg-purple-900/30 border border-purple-700/50 text-purple-400 hover:bg-purple-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+      >
+        {isRetagging ? t('settings.retagging') : t('settings.retagAll')}
+      </button>
+    </div>
+  )
+}
+
+// ── Scan Schedule sub-component ──────────────────────────────────────
+
+function ScanScheduleSection() {
+  const { data: scanSettings, mutate: mutateScan } = useScanSettings()
+  const { trigger: updateSettings } = useUpdateScanSettings()
+  const { trigger: rescan, isMutating: rescanning } = useRescanLibrary()
+  const { data: rescanStatus } = useRescanStatus()
+  const { trigger: cancelRescan, isMutating: cancelling } = useCancelRescan()
+
+  const handleToggle = async () => {
+    if (!scanSettings) return
+    try {
+      await updateSettings({ enabled: !scanSettings.enabled })
+      mutateScan()
+    } catch {
+      toast.error(t('common.failedToLoad'))
+    }
+  }
+
+  const handleIntervalChange = async (hours: number) => {
+    try {
+      await updateSettings({ interval_hours: hours })
+      mutateScan()
+    } catch {
+      toast.error(t('common.failedToLoad'))
+    }
+  }
+
+  const handleRescan = async () => {
+    try {
+      await rescan()
+      toast.success(t('settings.media.rescan'))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
+    }
+  }
+
+  const isRunning = rescanStatus?.running ?? false
+  const processed = rescanStatus?.processed
+  const total = rescanStatus?.total
+
+  const intervalOptions = [6, 8, 12, 24, 48, 72, 168]
+
+  return (
+    <div className="px-5 pb-5 border-t border-vault-border">
+      <p className="text-xs text-vault-text-muted mt-4 mb-4">
+        {t('settings.schedule.desc')}
+      </p>
+
+      {/* Enable/disable toggle */}
+      <div className="flex items-center justify-between mb-4">
+        <div>
+          <p className="text-sm text-vault-text">{t('settings.schedule.auto')}</p>
+          <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.schedule.autoDesc')}</p>
+        </div>
+        <button
+          onClick={handleToggle}
+          className={`relative w-11 h-6 rounded-full transition-colors ${
+            scanSettings?.enabled ? 'bg-vault-accent' : 'bg-vault-border'
+          }`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow ${
+              scanSettings?.enabled ? 'translate-x-5' : ''
+            }`}
+          />
+        </button>
+      </div>
+
+      {/* Interval selector */}
+      <div className="mb-4">
+        <p className="text-sm text-vault-text mb-2">{t('settings.schedule.interval')}</p>
+        <div className="flex flex-wrap gap-1.5">
+          {intervalOptions.map((h) => (
+            <button
+              key={h}
+              onClick={() => handleIntervalChange(h)}
+              disabled={!scanSettings?.enabled}
+              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
+                scanSettings?.interval_hours === h
+                  ? 'bg-vault-accent text-white'
+                  : 'bg-vault-input border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-accent/50 disabled:opacity-40 disabled:cursor-not-allowed'
+              }`}
+            >
+              {h < 24 ? t('settings.schedule.hours', { count: h }) : t('settings.schedule.days', { count: h / 24 })}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {/* Last run info */}
+      {scanSettings?.last_run && (
+        <p className="text-xs text-vault-text-muted mb-4">
+          {t('settings.schedule.lastRun')}: {new Date(scanSettings.last_run).toLocaleString()}
+        </p>
+      )}
+
+      {/* Rescan All Libraries */}
+      <div className="pt-3 border-t border-vault-border/50">
+        <p className="text-xs text-vault-text-muted mb-3">
+          {t('settings.media.rescan.desc')}
+        </p>
+
+        {isRunning && processed !== undefined && total !== undefined && (
+          <div className="mb-3 bg-vault-input border border-vault-border rounded-lg px-4 py-3">
+            <div className="flex items-center justify-between mb-2">
+              <span className="text-sm text-vault-text">
+                {t('settings.media.rescan.running', { processed, total })}
+              </span>
+              <span className="text-xs text-blue-400">
+                {total > 0 ? Math.round((processed / total) * 100) : 0}%
+              </span>
+            </div>
+            <div className="h-1.5 bg-vault-border rounded-full overflow-hidden">
+              <div
+                className="h-full rounded-full bg-blue-500 transition-all duration-500"
+                style={{ width: `${total > 0 ? Math.round((processed / total) * 100) : 0}%` }}
+              />
+            </div>
+            {rescanStatus?.current_gallery && (
+              <p className="text-xs text-vault-text-muted mt-1.5 truncate">
+                {rescanStatus.current_gallery}
+              </p>
+            )}
+            <button
+              onClick={async () => {
+                try { await cancelRescan() } catch { /* ignore */ }
+              }}
+              disabled={cancelling}
+              className="mt-2 flex items-center gap-1.5 px-3 py-1 text-xs text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 rounded transition-colors disabled:opacity-50"
+            >
+              <Square size={11} />
+              {cancelling ? t('settings.media.rescan.cancelling') : t('settings.media.rescan.cancel')}
+            </button>
+          </div>
+        )}
+
+        {!isRunning && rescanStatus?.status === 'cancelled' && (
+          <p className="text-xs text-orange-400 mb-3">{t('settings.media.rescan.cancelled')}</p>
+        )}
+
+        {!isRunning && rescanStatus && processed !== undefined && total !== undefined && processed === total && total > 0 && rescanStatus.status !== 'cancelled' && (
+          <p className="text-xs text-green-400 mb-3">{t('settings.media.rescan.done')}</p>
+        )}
+
+        <button
+          onClick={handleRescan}
+          disabled={rescanning || isRunning}
+          className="flex items-center gap-2 px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-accent/50 text-vault-text-secondary hover:text-vault-text rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          <ScanLine size={15} />
+          {isRunning ? t('settings.loading') : t('settings.media.rescan')}
+        </button>
+      </div>
+    </div>
   )
 }
 
@@ -168,8 +365,8 @@ function BrowseHistoryToggle({ onForceRerender }: { onForceRerender: () => void 
   return (
     <div className="mt-5 flex items-center justify-between">
       <div>
-        <p className="text-sm text-vault-text">瀏覽記錄</p>
-        <p className="text-xs text-vault-text-muted mt-0.5">記錄瀏覽過的畫廊</p>
+        <p className="text-sm text-vault-text">{t('settings.browseHistory')}</p>
+        <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.browseHistoryDesc')}</p>
       </div>
       <button
         onClick={() => {
@@ -375,6 +572,7 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
 
 export default function SettingsPage() {
   const { logout } = useAuth()
+  const { locale, setLocale: changeLocale } = useLocale()
   const [activeSection, setActiveSection] = useState<SectionKey | null>('ehentai')
 
   // Credentials state
@@ -594,14 +792,14 @@ export default function SettingsPage() {
 
   // EH: Clear credential
   const handleClearEh = async () => {
-    if (!confirm('確定要清除 E-Hentai Cookie？')) return
+    if (!confirm(t('settings.clearEhConfirm'))) return
     try {
       await api.settings.deleteCredential('ehentai')
-      toast.success('E-Hentai Cookie 已清除')
+      toast.success(t('settings.ehCookiesCleared'))
       setCredentials((prev) => (prev ? { ...prev, ehentai: { configured: false } } : prev))
       setEhAccount(null)
     } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : '清除失敗')
+      toast.error(e instanceof Error ? e.message : t('settings.clearFailed'))
     }
   }
 
@@ -968,6 +1166,24 @@ export default function SettingsPage() {
         <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settings.title')}</h1>
 
         <div className="space-y-3">
+          {/* ── Language ── */}
+          <div className="bg-vault-card rounded-xl border border-vault-border overflow-hidden">
+            <div className="px-5 py-4">
+              <h3 className="font-medium text-vault-text text-sm mb-3">{t('settings.language')}</h3>
+              <select
+                value={locale}
+                onChange={(e) => changeLocale(e.target.value as Locale)}
+                className="bg-vault-input text-vault-text text-sm rounded-lg px-3 py-2 border border-vault-border focus:outline-none focus:ring-1 focus:ring-vault-accent"
+              >
+                {SUPPORTED_LOCALES.map((loc: Locale) => (
+                  <option key={loc} value={loc}>
+                    {t(`common.locale.${loc}`)}
+                  </option>
+                ))}
+              </select>
+            </div>
+          </div>
+
           {/* ── E-Hentai ── */}
           <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
             <div className="flex items-center justify-between">
@@ -1657,6 +1873,38 @@ export default function SettingsPage() {
                 </div>
               </div>
             )}
+          </div>
+
+          {/* ── AI Tagging ── */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            <SectionHeader
+              title="AI 標籤"
+              sectionKey="aiTagging"
+              activeSection={activeSection}
+              onToggle={toggleSection}
+            />
+            {activeSection === 'aiTagging' && (
+              <AiTaggingSection />
+            )}
+          </div>
+
+
+          {/* ── Schedule ── */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            <div className="flex items-center justify-between">
+              <div className="flex-1">
+                <SectionHeader
+                  title={t('settings.schedule')}
+                  sectionKey="schedule"
+                  activeSection={activeSection}
+                  onToggle={toggleSection}
+                />
+              </div>
+              <div className="pr-5">
+                <CalendarClock size={14} className="text-vault-text-muted" />
+              </div>
+            </div>
+            {activeSection === 'schedule' && <ScanScheduleSection />}
           </div>
 
           {/* ── Reader Settings ── */}

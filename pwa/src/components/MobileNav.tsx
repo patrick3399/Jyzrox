@@ -19,6 +19,7 @@ import {
   Menu,
   X,
   PackageOpen,
+  FolderInput,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
@@ -33,6 +34,7 @@ const navLinks = [
   { href: '/queue', label: () => t('nav.queue'), icon: Download },
   { href: '/tags', label: () => t('nav.tags'), icon: Tags },
   { href: '/export', label: () => t('nav.export'), icon: PackageOpen },
+  { href: '/import', label: () => t('nav.import'), icon: FolderInput },
   { href: '/settings', label: () => t('nav.settings'), icon: Settings },
 ]
 
@@ -91,21 +93,6 @@ export function MobileNav() {
         </button>
 
         <span className="text-vault-accent font-bold text-lg tracking-wide flex-1">Jyzrox</span>
-
-        <button
-          onClick={cycleTheme}
-          className="p-2 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
-          title={t('common.theme')}
-        >
-          <ThemeIcon size={18} />
-        </button>
-        <button
-          onClick={logout}
-          className="p-2 rounded-lg text-vault-text-secondary hover:text-red-400 hover:bg-red-500/10 transition-colors"
-          title={t('nav.logout')}
-        >
-          <LogOut size={18} />
-        </button>
       </nav>
 
       {/* Backdrop */}

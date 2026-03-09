@@ -57,6 +57,12 @@ _CACHE_PATTERNS: dict[str, str] = {
     "eh_gallery": "eh:gallery:*",
     "eh_image": "thumb:proxied:*",
     "thumbs": "thumb:cdn:*",
+    "eh_popular": "eh:popular",
+    "eh_toplist": "eh:toplist:*",
+    "eh_comments": "eh:comments:*",
+    "eh_favorites": "eh:favorites:*",
+    "eh_previews": "eh:previews:*",
+    "eh_imagelist": "eh:imagelist:*",
 }
 
 
@@ -117,10 +123,6 @@ async def clear_cache(_: dict = Depends(require_auth)):
     """Clear all EH cache (search, gallery, images, thumbs). Does not clear sessions."""
     deleted = 0
     for pattern in _CACHE_PATTERNS.values():
-        deleted += await _delete_keys(pattern)
-    # Also clear popular/toplist/comments/favorites
-    for pattern in ("eh:popular", "eh:toplist:*", "eh:comments:*", "eh:favorites:*",
-                     "eh:previews:*", "eh:imagelist:*"):
         deleted += await _delete_keys(pattern)
     return {"status": "ok", "deleted_keys": deleted}
 
