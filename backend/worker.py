@@ -262,16 +262,34 @@ async def _check_credentials(url: str) -> str | None:
     """Return an error message if required credentials are missing, else None."""
     is_pixiv = "pixiv.net" in url
     is_eh = "e-hentai.org" in url or "exhentai.org" in url
+    is_twitter = "twitter.com" in url or "x.com" in url
 
     if is_pixiv:
         cred = await get_credential("pixiv")
         if not cred:
-            return "Pixiv credentials not configured. Go to Settings to add your refresh token."
+            return "Pixiv credentials not configured. Go to Credentials to add your refresh token."
     elif is_eh:
         cred = await get_credential("ehentai")
         if not cred:
-            return "E-Hentai credentials not configured. Go to Settings to add cookies."
+            return "E-Hentai credentials not configured. Go to Credentials to add cookies."
+    elif is_twitter:
+        cred = await get_credential("twitter")
+        if not cred:
+            return "Twitter cookies not configured. Go to Credentials to add cookies (auth_token, ct0)."
     return None
+
+
+def _source_to_extractor(source: str) -> str:
+    """Map our source name to gallery-dl extractor name."""
+    mapping = {
+        "twitter": "twitter",
+        "instagram": "instagram",
+        "danbooru": "danbooru",
+        "kemono": "kemono",
+        "gelbooru": "gelbooru",
+        "sankaku": "sankakucomplex",
+    }
+    return mapping.get(source, source)
 
 
 async def _build_gallery_dl_config(url: str) -> None:
@@ -279,6 +297,7 @@ async def _build_gallery_dl_config(url: str) -> None:
     config: dict = {
         "extractor": {
             "base-directory": settings.data_gallery_path,
+            "directory": [],
         },
     }
 
@@ -296,6 +315,25 @@ async def _build_gallery_dl_config(url: str) -> None:
         token = await get_credential("pixiv")
         if token:
             config["extractor"]["pixiv"] = {"refresh-token": token}
+
+    # Inject all generic cookie credentials into their respective extractors
+    from services.credential import list_credentials as _list_creds
+    all_creds = await _list_creds()
+    for cred_info in all_creds:
+        src = cred_info["source"]
+        if src in ("ehentai", "pixiv"):
+            continue  # already handled above with special logic
+        if cred_info["credential_type"] != "cookie":
+            continue
+        cred_val = await get_credential(src)
+        if cred_val:
+            try:
+                cookie_dict = json.loads(cred_val)
+                # Map source name to gallery-dl extractor name
+                extractor_name = _source_to_extractor(src)
+                config["extractor"][extractor_name] = {"cookies": cookie_dict}
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("Invalid cookie JSON for source %s, skipping", src)
 
     config_path = Path(settings.gallery_dl_config)
     tmp_path = config_path.with_suffix(".tmp")
@@ -494,7 +532,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
 
     # Read gallery-dl metadata (any .json file, they all have gallery info)
     metadata: dict = {}
-    for meta_file in sorted(gallery_path.glob("*.json")):
+    for meta_file in sorted(gallery_path.rglob("*.json")):
         try:
             metadata = json.loads(meta_file.read_text(encoding="utf-8"))
             break
@@ -631,7 +669,13 @@ def _build_gallery(
     return {
         "source": source,
         "source_id": source_id,
-        "title": meta.get("title") or meta.get("title_en", ""),
+        "title": (
+            meta.get("title")
+            or meta.get("title_en")
+            or (meta.get("description") or "")[:120]  # Twitter text / Pixiv caption 截斷
+            or (meta.get("content") or "")[:120]
+            or f"{source}_{source_id}"  # 最終 fallback：來源+ID
+        ),
         "title_jpn": meta.get("title_jpn") or meta.get("title_original") or "",
         "category": meta.get("category") or meta.get("type", ""),
         "language": meta.get("lang") or meta.get("language", ""),
@@ -1299,6 +1343,9 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
                     blob.width, blob.height = pil.size
                     blob.phash = str(imagehash.phash(pil))
                     phash_int_val = int(blob.phash, 16)
+                    # Convert unsigned 64-bit to signed 64-bit for PostgreSQL BIGINT
+                    if phash_int_val >= (1 << 63):
+                        phash_int_val -= (1 << 64)
                     blob.phash_int = phash_int_val
                     # Store quarter values as signed 16-bit (PostgreSQL SMALLINT range)
                     def _to_signed16(v: int) -> int:
