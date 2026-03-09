@@ -528,4 +528,5 @@ def _i(img: Image) -> dict:
         "thumb_path": _thumb_url(blob),
         "file_size": blob.file_size if blob else None,
         "file_hash": blob.sha256 if blob else None,
+        "media_type": blob.media_type if blob else "image",
     }

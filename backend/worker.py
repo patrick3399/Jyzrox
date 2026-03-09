@@ -831,29 +831,39 @@ async def rescan_library_job(ctx: dict) -> dict:
                     }),
                 )
 
+                import shutil
+                from sqlalchemy.orm import selectinload
                 images = (await session.execute(
                     select(Image).where(Image.gallery_id == gallery.id)
+                    .options(selectinload(Image.blob))
                 )).scalars().all()
 
                 missing_thumb = False
                 removed = 0
                 for img in images:
-                    if not img.file_path or not Path(img.file_path).exists():
+                    blob = img.blob
+                    if not blob:
+                        await session.delete(img)
+                        removed += 1
+                        continue
+                    src = resolve_blob_path(blob)
+                    if not src.exists():
                         logger.warning(
                             "[rescan_library] gallery_id=%d image_id=%d missing file: %s",
                             gallery.id,
                             img.id,
-                            img.file_path,
+                            str(src),
                         )
-                        # Delete thumbnail file from disk before removing the DB record
-                        if img.thumb_path:
-                            tp = Path(img.thumb_path)
-                            if tp.is_file():
-                                tp.unlink(missing_ok=True)
+                        # Delete thumbnail directory before removing the DB record
+                        td = thumb_dir(blob.sha256)
+                        if td.exists():
+                            shutil.rmtree(str(td), ignore_errors=True)
+                        await decrement_ref_count(blob.sha256, session)
                         await session.delete(img)
                         removed += 1
                         continue
-                    if not img.thumb_path or not Path(img.thumb_path).exists():
+                    td = thumb_dir(blob.sha256)
+                    if not (td / "thumb_160.webp").exists():
                         missing_thumb = True
 
                 if removed:
@@ -861,16 +871,21 @@ async def rescan_library_job(ctx: dict) -> dict:
                     # Recount surviving images
                     surviving = (await session.execute(
                         select(Image).where(Image.gallery_id == gallery.id)
+                        .options(selectinload(Image.blob))
                     )).scalars().all()
                     gallery.pages = len(surviving)
                     if gallery.pages == 0 and gallery.import_mode == "link":
-                        # Clean up any remaining thumbnails then delete the gallery entirely
+                        # Clean up any remaining thumbnail dirs then delete the gallery entirely
                         remaining_imgs = (await session.execute(
-                            select(Image.thumb_path).where(Image.gallery_id == gallery.id)
+                            select(Image).where(Image.gallery_id == gallery.id)
+                            .options(selectinload(Image.blob))
                         )).scalars().all()
-                        for tp_str in remaining_imgs:
-                            if tp_str and Path(tp_str).is_file():
-                                Path(tp_str).unlink(missing_ok=True)
+                        for rim in remaining_imgs:
+                            if rim.blob:
+                                td = thumb_dir(rim.blob.sha256)
+                                if td.exists():
+                                    shutil.rmtree(str(td), ignore_errors=True)
+                                await decrement_ref_count(rim.blob.sha256, session)
                         await session.delete(gallery)
                         await session.commit()
                         logger.info(
@@ -934,51 +949,63 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             logger.error("[rescan_gallery] gallery_id=%d not found", gallery_id)
             return {"status": "failed", "error": "gallery not found"}
 
+        import shutil
+        from sqlalchemy.orm import selectinload
         images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .options(selectinload(Image.blob))
         )).scalars().all()
 
         # --- Step 1: Verify existing records ---
-        known_paths: set[str] = set()
+        known_sha256s: set[str] = set()
         missing_thumb = False
         removed = 0
         for img in images:
-            if not img.file_path or not Path(img.file_path).exists():
+            blob = img.blob
+            if not blob:
+                await session.delete(img)
+                removed += 1
+                continue
+            src = resolve_blob_path(blob)
+            if not src.exists():
                 logger.warning(
                     "[rescan_gallery] gallery_id=%d image_id=%d missing: %s",
                     gallery_id,
                     img.id,
-                    img.file_path,
+                    str(src),
                 )
-                # Delete thumbnail file from disk before removing the DB record
-                if img.thumb_path:
-                    tp = Path(img.thumb_path)
-                    if tp.is_file():
-                        tp.unlink(missing_ok=True)
+                # Delete thumbnail directory before removing the DB record
+                td = thumb_dir(blob.sha256)
+                if td.exists():
+                    shutil.rmtree(str(td), ignore_errors=True)
+                await decrement_ref_count(blob.sha256, session)
                 await session.delete(img)
                 removed += 1
                 continue
-            known_paths.add(img.file_path)
-            if not img.thumb_path or not Path(img.thumb_path).exists():
+            known_sha256s.add(blob.sha256)
+            td = thumb_dir(blob.sha256)
+            if not (td / "thumb_160.webp").exists():
                 missing_thumb = True
 
         if removed:
             await session.flush()
 
         # --- Step 2: Discover new files in the gallery directory ---
-        # Infer the gallery directory from the first surviving image's path.
+        # With CAS, the gallery directory is the library symlink directory.
         gallery_dir: Path | None = None
         surviving_images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .options(selectinload(Image.blob))
         )).scalars().all()
 
-        if surviving_images:
-            gallery_dir = Path(surviving_images[0].file_path).parent
-        else:
-            # Attempt to derive path from source/source_id convention.
+        gallery_dir = library_dir(gallery_id)
+        if not gallery_dir.exists():
+            # Fallback: try source/source_id convention
             candidate = Path(settings.data_gallery_path) / gallery.source / gallery.source_id
             if candidate.is_dir():
                 gallery_dir = candidate
+            else:
+                gallery_dir = None
 
         new_files_added = 0
         if gallery_dir and gallery_dir.is_dir():
@@ -996,25 +1023,24 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 dir_files = []
 
             for fpath in dir_files:
-                if str(fpath) in known_paths:
+                file_hash = await asyncio.to_thread(_sha256, fpath)
+                if file_hash in known_sha256s:
                     continue
                 # New file found on disk that is not in the DB.
-                file_hash = await asyncio.to_thread(_sha256, fpath)
-                ext = fpath.suffix.lower()
-                media_type = "video" if ext in (".mp4", ".webm") else "gif" if ext == ".gif" else "image"
+                blob = await store_blob(fpath, file_hash, session)
+                await create_library_symlink(gallery_id, fpath.name, blob)
+                await session.flush()
                 max_page += 1
                 stmt = pg_insert_local(Image).values(
                     gallery_id=gallery_id,
                     page_num=max_page,
                     filename=fpath.name,
-                    file_path=str(fpath),
-                    file_hash=file_hash,
-                    file_size=fpath.stat().st_size,
-                    media_type=media_type,
+                    blob_sha256=file_hash,
                 ).on_conflict_do_nothing()
                 await session.execute(stmt)
                 new_files_added += 1
                 missing_thumb = True  # New file needs a thumbnail.
+                known_sha256s.add(file_hash)
                 logger.info(
                     "[rescan_gallery] gallery_id=%d: added new file %s",
                     gallery_id,
@@ -1024,17 +1050,22 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         # --- Step 3: Update gallery metadata ---
         final_images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .options(selectinload(Image.blob))
         )).scalars().all()
         gallery.pages = len(final_images)
 
         if gallery.pages == 0 and gallery.import_mode == "link":
-            # All source files are gone — clean up remaining thumbnails and remove gallery
+            # All source files are gone — clean up remaining thumbnail dirs and remove gallery
             remaining_imgs = (await session.execute(
-                select(Image.thumb_path).where(Image.gallery_id == gallery_id)
+                select(Image).where(Image.gallery_id == gallery_id)
+                .options(selectinload(Image.blob))
             )).scalars().all()
-            for tp_str in remaining_imgs:
-                if tp_str and Path(tp_str).is_file():
-                    Path(tp_str).unlink(missing_ok=True)
+            for rim in remaining_imgs:
+                if rim.blob:
+                    td = thumb_dir(rim.blob.sha256)
+                    if td.exists():
+                        shutil.rmtree(str(td), ignore_errors=True)
+                    await decrement_ref_count(rim.blob.sha256, session)
             await session.delete(gallery)
             await session.commit()
             logger.info("[rescan_gallery] gallery_id=%d removed (link mode, all files gone)", gallery_id)
@@ -1079,18 +1110,22 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
 
     logger.info("[tag] gallery_id=%d", gallery_id)
 
+    from sqlalchemy.orm import selectinload
+
     from services.tagger import predict
 
     tagged = 0
     async with AsyncSessionLocal() as session:
         images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .options(selectinload(Image.blob))
         )).scalars().all()
 
         for img in images:
-            if not img.file_path:
+            blob = img.blob
+            if not blob:
                 continue
-            src = Path(img.file_path)
+            src = resolve_blob_path(blob)
             if not src.exists() or src.suffix.lower() not in _IMAGE_EXTS:
                 continue
 
@@ -1478,11 +1513,29 @@ async def auto_discover_job(ctx: dict) -> dict:
 
 async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
     """Rescan the gallery whose files reside in dir_path."""
-    async with AsyncSessionLocal() as session:
-        result = await session.execute(
-            select(Image.gallery_id).where(Image.file_path.like(f"{dir_path}%")).limit(1)
-        )
-        gallery_id = result.scalar_one_or_none()
+    # In CAS mode, /data/library/{gallery_id}/ is the gallery directory.
+    lib_base = Path(settings.data_library_path)
+    dir_p = Path(dir_path)
+
+    gallery_id: int | None = None
+    # Check if this path is a library directory (or inside one)
+    try:
+        rel = dir_p.relative_to(lib_base)
+        # The first component should be the gallery_id
+        gallery_id = int(rel.parts[0])
+    except (ValueError, IndexError):
+        pass
+
+    if not gallery_id:
+        # Try checking if it's a blob external path
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(
+                select(Image.gallery_id)
+                .join(Blob, Image.blob_sha256 == Blob.sha256)
+                .where(Blob.external_path.like(f"{dir_path}%"))
+                .limit(1)
+            )
+            gallery_id = result.scalar_one_or_none()
 
     if gallery_id:
         return await rescan_gallery_job(ctx, gallery_id)
@@ -1517,11 +1570,14 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
             if g.library_path == library_path:
                 relevant.append(g)
             elif g.library_path is None and g.import_mode == "link":
-                # Check if any image file_path starts with this library_path
-                img = (await session.execute(
-                    select(Image.file_path).where(Image.gallery_id == g.id).limit(1)
+                # Check if any blob has external_path under this library_path
+                blob_row = (await session.execute(
+                    select(Blob.external_path)
+                    .join(Image, Image.blob_sha256 == Blob.sha256)
+                    .where(Image.gallery_id == g.id, Blob.storage == "external")
+                    .limit(1)
                 )).scalar_one_or_none()
-                if img and img.startswith(library_path):
+                if blob_row and blob_row.startswith(library_path):
                     relevant.append(g)
 
         total = len(relevant)
