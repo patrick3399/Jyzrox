@@ -45,6 +45,49 @@ logger = logging.getLogger(__name__)
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
 
+# Magic byte signatures for image file validation
+_IMAGE_MAGIC = {
+    b'\xff\xd8\xff': {'.jpg', '.jpeg'},           # JPEG
+    b'\x89PNG\r\n\x1a\n': {'.png'},               # PNG
+    b'GIF87a': {'.gif'},                           # GIF87a
+    b'GIF89a': {'.gif'},                           # GIF89a
+    b'RIFF': {'.webp'},                            # WebP (RIFF container)
+    b'\x00\x00\x00': {'.avif', '.heic'},           # AVIF/HEIC (ftyp box, starts with size bytes)
+}
+
+
+def _validate_image_magic(file_path: Path) -> bool:
+    """Validate that a file's content matches expected image magic bytes.
+
+    Returns True if the file appears to be a valid image based on its
+    magic bytes matching its file extension. Returns False for mismatches.
+    """
+    try:
+        with open(file_path, 'rb') as f:
+            header = f.read(12)
+    except OSError:
+        return False
+
+    if len(header) < 3:
+        return False
+
+    ext = file_path.suffix.lower()
+
+    for magic, valid_exts in _IMAGE_MAGIC.items():
+        if header.startswith(magic):
+            return ext in valid_exts
+
+    # Special case: WebP needs RIFF + WEBP check
+    if header[:4] == b'RIFF' and header[8:12] == b'WEBP':
+        return ext == '.webp'
+
+    # Special case: AVIF/HEIC ftyp box (offset 4 = 'ftyp')
+    if len(header) >= 8 and header[4:8] == b'ftyp':
+        return ext in {'.avif', '.heic'}
+
+    # Unknown magic — reject
+    return False
+
 
 # ── Lifecycle ────────────────────────────────────────────────────────
 
@@ -381,10 +424,15 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
     source_id = str(metadata.get("gallery_id") or metadata.get("tweet_id") or metadata.get("id") or gallery_path.name)
 
     tags = _extract_tags(gallery_path, metadata)
+    image_files_raw = [f for f in gallery_path.iterdir() if f.suffix.lower() in _IMAGE_EXTS]
+    # Validate actual file content matches extension (MIME check)
     image_files = sorted(
-        [f for f in gallery_path.iterdir() if f.suffix.lower() in _IMAGE_EXTS],
+        [f for f in image_files_raw if _validate_image_magic(f)],
         key=lambda f: f.name,
     )
+    skipped = len(image_files_raw) - len(image_files)
+    if skipped:
+        logger.warning("[import] %s: skipped %d file(s) with invalid magic bytes", gallery_path.name, skipped)
 
     if not image_files:
         return {"status": "failed", "error": "no images found"}
@@ -570,7 +618,21 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         return {"status": "failed", "error": f"not a directory: {source_dir}"}
 
     _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
-    files = sorted([f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS])
+    _VIDEO_EXTS = {".mp4", ".webm"}
+    files_raw = [f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS]
+    # Validate magic bytes for image files; pass video files through without magic check
+    files_validated = []
+    skipped_magic = 0
+    for f in files_raw:
+        if f.suffix.lower() in _VIDEO_EXTS:
+            files_validated.append(f)
+        elif _validate_image_magic(f):
+            files_validated.append(f)
+        else:
+            skipped_magic += 1
+    if skipped_magic:
+        logger.warning("[local_import] gallery_id=%d: skipped %d file(s) with invalid magic bytes", gallery_id, skipped_magic)
+    files = sorted(files_validated)
 
     if not files:
         return {"status": "failed", "error": "no supported files found"}
