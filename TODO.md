@@ -17,16 +17,16 @@
 - [x] SW 更新提示 UI（偵測到新版本時提示使用者重整）
 
 ### OPDS 端點測試（HTTP Basic Auth）
-- [ ] `GET /opds/` — Root navigation feed 回傳有效 Atom XML，包含 all/recent/favorites/search 四個 entry
-- [ ] `GET /opds/all` — 回傳所有 gallery，驗證分頁（`?page=0&limit=5`），確認 `<link rel="next">` 存在
-- [ ] `GET /opds/all?page=1` — 第二頁回傳不同 gallery，確認 `<link rel="previous">` 存在
-- [ ] `GET /opds/recent` — 回傳最近 50 個 gallery，無分頁連結
-- [ ] `GET /opds/favorites` — 僅回傳 `favorited=true` 的 gallery
-- [ ] `GET /opds/search?q=關鍵字` — title ILIKE 搜尋結果正確
-- [ ] `GET /opds/opensearch.xml` — 回傳有效 OpenSearch descriptor，template URL 正確
-- [ ] `GET /opds/gallery/{id}` — 回傳 OPDS-PSE 頁面列表，每頁有 `pse:index`、image link、thumbnail link
-- [ ] 無 Authorization header → 401 + `WWW-Authenticate: Basic realm="Jyzrox OPDS"` header
-- [ ] 錯誤密碼 → 401
+- [x] `GET /opds/` — Root navigation feed 回傳有效 Atom XML，包含 all/recent/favorites/search 四個 entry
+- [x] `GET /opds/all` — 回傳所有 gallery，驗證分頁（`?page=0&limit=5`），確認 `<link rel="next">` 存在
+- [x] `GET /opds/all?page=1` — 第二頁回傳不同 gallery，確認 `<link rel="previous">` 存在
+- [x] `GET /opds/recent` — 回傳最近 50 個 gallery，無分頁連結
+- [x] `GET /opds/favorites` — 僅回傳 `favorited=true` 的 gallery
+- [x] `GET /opds/search?q=關鍵字` — title ILIKE 搜尋結果正確
+- [x] `GET /opds/opensearch.xml` — 回傳有效 OpenSearch descriptor，template URL 正確
+- [x] `GET /opds/gallery/{id}` — 回傳 OPDS-PSE 頁面列表，每頁有 `pse:index`、image link、thumbnail link
+- [x] 無 Authorization header → 401 + `WWW-Authenticate: Basic realm="Jyzrox OPDS"` header
+- [x] 錯誤密碼 → 401
 - [ ] nginx `auth_request` 用 Basic Auth 存取 `/media/cas/` 和 `/media/thumbs/` → 200
 - [ ] 實際 OPDS client 測試（Panels iOS / KOReader / Chunky）連線瀏覽 + 圖片載入
 

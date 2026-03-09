@@ -8,6 +8,7 @@ _SAFE_METHODS = {"GET", "HEAD", "OPTIONS"}
 
 _EXEMPT_PATHS = {
     "/api/auth/login",
+    "/api/auth/logout",
     "/api/auth/setup",
     "/api/auth/check",
     "/api/auth/needs-setup",

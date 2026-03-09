@@ -150,11 +150,32 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS blobs (
+        sha256 TEXT PRIMARY KEY,
+        file_size INTEGER NOT NULL,
+        media_type TEXT DEFAULT 'image',
+        width INTEGER,
+        height INTEGER,
+        phash TEXT,
+        phash_int INTEGER,
+        phash_q0 INTEGER,
+        phash_q1 INTEGER,
+        phash_q2 INTEGER,
+        phash_q3 INTEGER,
+        extension TEXT NOT NULL,
+        storage TEXT DEFAULT 'cas',
+        external_path TEXT,
+        ref_count INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS images (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
         page_num INTEGER NOT NULL,
         filename TEXT,
+        blob_sha256 TEXT REFERENCES blobs(sha256),
         width INTEGER,
         height INTEGER,
         file_path TEXT,
@@ -403,7 +424,12 @@ async def client(db_session, db_session_factory, mock_redis):
         patch("routers.eh.async_session", db_session_factory),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
             yield ac
 
     _app.dependency_overrides.clear()
@@ -433,7 +459,91 @@ async def unauthed_client(db_session, db_session_factory, mock_redis):
         patch("routers.auth.async_session", db_session_factory),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
+            yield ac
+
+    _app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def opds_client(db_session, db_session_factory, mock_redis):
+    """
+    Authenticated httpx.AsyncClient for OPDS tests.
+
+    Overrides require_opds_auth so every request is treated as user_id=1.
+    Patches routers.opds.async_session to use the SQLite test engine.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from core.auth import require_opds_auth
+
+    async def _override_get_db():
+        yield db_session
+
+    async def _override_opds_auth():
+        return {"user_id": 1}
+
+    _app.dependency_overrides[_fake_get_db] = _override_get_db
+    _app.dependency_overrides[require_opds_auth] = _override_opds_auth
+
+    with (
+        patch("core.redis_client.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.get_redis", return_value=mock_redis),
+        patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.async_session", db_session_factory),
+        patch("routers.opds.async_session", db_session_factory),
+    ):
+        transport = ASGITransport(app=_app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
+            yield ac
+
+    _app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def unauthed_opds_client(db_session, db_session_factory, mock_redis):
+    """
+    Unauthenticated httpx.AsyncClient for OPDS auth tests.
+
+    Does NOT override require_opds_auth — callers control auth headers directly.
+    Patches routers.opds.async_session to use the SQLite test engine.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    async def _override_get_db():
+        yield db_session
+
+    _app.dependency_overrides[_fake_get_db] = _override_get_db
+
+    with (
+        patch("core.redis_client.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.get_redis", return_value=mock_redis),
+        patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.async_session", db_session_factory),
+        patch("routers.opds.async_session", db_session_factory),
+        patch("core.auth.async_session", db_session_factory),
+    ):
+        transport = ASGITransport(app=_app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
             yield ac
 
     _app.dependency_overrides.clear()
@@ -465,7 +575,12 @@ async def ext_client(db_session, db_session_factory, mock_redis):
         patch("routers.external.async_session", db_session_factory),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
             yield ac
 
     _app.dependency_overrides.clear()
@@ -502,7 +617,12 @@ async def hist_client(db_session, db_session_factory, mock_redis):
         patch("routers.history.async_session", db_session_factory),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
             yield ac
 
     _app.dependency_overrides.clear()
