@@ -495,6 +495,111 @@ const tokens = {
     }),
 }
 
+// ── Import ────────────────────────────────────────────────────────────
+
+const import_ = {
+  browse: (path = '', library = '') => {
+    const params = new URLSearchParams()
+    if (path) params.set('path', path)
+    if (library) params.set('library', library)
+    return apiFetch<{
+      path: string
+      base: string
+      entries: Array<{ name: string; type: 'dir' | 'file'; file_count?: number; size?: number }>
+    }>(`/api/import/browse?${params}`)
+  },
+
+  start: (sourceDir: string, mode: 'link' | 'copy', title?: string) =>
+    apiFetch<{ status: string; gallery_id: number }>('/api/import/', {
+      method: 'POST',
+      body: JSON.stringify({
+        source_dir: sourceDir,
+        mode,
+        metadata: title ? { title } : undefined,
+      }),
+    }),
+
+  progress: (galleryId: number) =>
+    apiFetch<{ gallery_id: number; processed: number; total: number; status: string }>(
+      `/api/import/progress/${galleryId}`,
+    ),
+
+  recent: () =>
+    apiFetch<Array<{ id: number; title: string; pages: number; status: string; added_at: string }>>(
+      '/api/import/recent',
+    ),
+
+  rescan: () => apiFetch<{ status: string }>('/api/import/rescan', { method: 'POST' }),
+
+  rescanGallery: (id: number) =>
+    apiFetch<{ status: string; gallery_id: number }>(`/api/import/rescan/${id}`, {
+      method: 'POST',
+    }),
+
+  rescanStatus: () =>
+    apiFetch<{
+      running: boolean
+      processed?: number
+      total?: number
+      current_gallery?: string
+      status?: string
+    }>('/api/import/rescan/status'),
+
+  rescanCancel: () =>
+    apiFetch<{ status: string }>('/api/import/rescan/cancel', { method: 'POST' }),
+
+  libraries: () =>
+    apiFetch<
+      Array<{
+        id: number | null
+        path: string
+        label: string
+        enabled: boolean
+        monitor: boolean
+        is_primary: boolean
+        exists: boolean
+        added_at: string | null
+      }>
+    >('/api/import/libraries'),
+
+  addLibrary: (path: string, label?: string) =>
+    apiFetch<{ status: string; path: string }>('/api/import/libraries', {
+      method: 'POST',
+      body: JSON.stringify({ path, label }),
+    }),
+
+  removeLibrary: (id: number) =>
+    apiFetch<{ status: string }>(`/api/import/libraries/${id}`, { method: 'DELETE' }),
+
+  discover: () =>
+    apiFetch<{ status: string }>('/api/import/discover', { method: 'POST' }),
+
+  monitorStatus: () =>
+    apiFetch<{ enabled: boolean; running: boolean; watched_paths: string[] }>(
+      '/api/import/monitor/status',
+    ),
+
+  toggleMonitor: (enabled: boolean) =>
+    apiFetch<{ status: string }>('/api/import/monitor/toggle', {
+      method: 'POST',
+      body: JSON.stringify({ enabled }),
+    }),
+
+  scanSettings: () =>
+    apiFetch<{ enabled: boolean; interval_hours: number; last_run: string | null }>(
+      '/api/import/scan-settings',
+    ),
+
+  updateScanSettings: (settings: { enabled?: boolean; interval_hours?: number }) =>
+    apiFetch<{ enabled: boolean; interval_hours: number; last_run: string | null }>(
+      '/api/import/scan-settings',
+      {
+        method: 'PATCH',
+        body: JSON.stringify(settings),
+      },
+    ),
+}
+
 // ── Export ────────────────────────────────────────────────────────────
 
 const exportApi = {
@@ -513,6 +618,7 @@ export const api = {
   tags,
   tokens,
   export: exportApi,
+  import_,
   history,
   savedSearches,
 }

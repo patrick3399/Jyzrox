@@ -17,18 +17,21 @@ import logging
 import os
 import re
 import uuid
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timezone
 from pathlib import Path
 from urllib.parse import urlparse
 
 import sqlalchemy.exc
 from arq.connections import RedisSettings
+from arq.cron import cron
+from sqlalchemy import text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
-from core.config import settings
+from core.config import get_all_library_paths, settings
 from core.database import AsyncSessionLocal
 from core.redis_client import DownloadSemaphore, close_redis, init_redis
+from core.watcher import LibraryWatcher
 from db.models import DownloadJob, Gallery, GalleryTag, Image, Tag
 from services.credential import get_credential
 from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
@@ -46,16 +49,51 @@ _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
 # ── Lifecycle ────────────────────────────────────────────────────────
 
 
+_watcher = LibraryWatcher()
+
+
 async def startup(ctx: dict) -> None:
     logger.info("ARQ Worker started — Jyzrox")
     await init_redis()
     r = ctx["redis"]
     for key in ("download:sem:ehentai", "download:sem:pixiv", "download:sem:other"):
         await r.delete(key)
+    # Clean up stale scan progress from previous runs
+    await r.delete("rescan:progress", "rescan:cancel")
+
+    # Start file system watcher.
+    # Honour the runtime override stored by toggle_monitor; fall back to the
+    # static config flag when no override has been set yet.
+    watcher_enabled_raw = await r.get("watcher:enabled")
+    if watcher_enabled_raw is None:
+        # No override stored — initialise from config and persist it.
+        watcher_should_start = settings.library_monitor_enabled
+        await r.set("watcher:enabled", "1" if watcher_should_start else "0")
+    else:
+        watcher_should_start = watcher_enabled_raw not in (b"0", "0")
+
+    if watcher_should_start:
+        paths = await get_all_library_paths()
+        loop = asyncio.get_event_loop()
+        arq_pool = ctx["redis"]
+
+        def enqueue_sync(job_name: str, *args):
+            asyncio.run_coroutine_threadsafe(
+                arq_pool.enqueue_job(job_name, *args), loop
+            )
+
+        _watcher.start(paths, enqueue_sync)
+        await r.set(
+            "watcher:status",
+            json.dumps({"running": True, "paths": paths}),
+        )
 
 
 async def shutdown(ctx: dict) -> None:
     logger.info("ARQ Worker shutting down")
+    _watcher.stop()
+    r = ctx["redis"]
+    await r.delete("watcher:status")
     await close_redis()
 
 
@@ -749,6 +787,263 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     return {"status": "done", "processed": processed}
 
 
+# ── WORKER B3: Rescan Library ────────────────────────────────────────
+
+
+async def rescan_library_job(ctx: dict) -> dict:
+    """
+    Rescan all galleries in the database:
+    - Verify image files still exist on disk; remove DB records for missing files.
+    - Update gallery.pages to the actual file count.
+    - Enqueue thumbnail_job for galleries with images that have no thumbnail.
+    Progress is written to Redis key ``rescan:progress`` during the run and
+    deleted on completion so the status endpoint can report accurately.
+    """
+    import json as _json
+
+    logger.info("[rescan_library] starting full library rescan")
+    r = ctx["redis"]
+
+    # Pause watcher during full rescan to avoid duplicate triggers
+    from core.watcher import watcher_instance as _wi
+    _watcher_was_running = _wi is not None and _wi.is_running
+    if _watcher_was_running:
+        _wi.pause()
+
+    total = 0
+    cancelled = False
+    try:
+        async with AsyncSessionLocal() as session:
+            # Order by last_scanned_at NULLS FIRST so unscanned galleries get priority
+            gallery_rows = (await session.execute(
+                select(Gallery).order_by(Gallery.last_scanned_at.asc().nulls_first())
+            )).scalars().all()
+            total = len(gallery_rows)
+            logger.info("[rescan_library] %d galleries to scan", total)
+
+            for idx, gallery in enumerate(gallery_rows):
+                # Check for cancel signal before processing each gallery
+                cancel_flag = await r.get("rescan:cancel")
+                if cancel_flag:
+                    await r.delete("rescan:cancel")
+                    await r.setex(
+                        "rescan:progress",
+                        3600,
+                        _json.dumps({"processed": idx, "total": total, "status": "cancelled"}),
+                    )
+                    logger.info("[rescan_library] cancelled at gallery %d/%d", idx, total)
+                    cancelled = True
+                    break
+
+                await r.setex(
+                    "rescan:progress",
+                    3600,
+                    _json.dumps({
+                        "processed": idx,
+                        "total": total,
+                        "status": "running",
+                        "current_gallery": gallery.id,
+                    }),
+                )
+
+                images = (await session.execute(
+                    select(Image).where(Image.gallery_id == gallery.id)
+                )).scalars().all()
+
+                missing_thumb = False
+                removed = 0
+                for img in images:
+                    if not img.file_path or not Path(img.file_path).exists():
+                        logger.warning(
+                            "[rescan_library] gallery_id=%d image_id=%d missing file: %s",
+                            gallery.id,
+                            img.id,
+                            img.file_path,
+                        )
+                        await session.delete(img)
+                        removed += 1
+                        continue
+                    if not img.thumb_path or not Path(img.thumb_path).exists():
+                        missing_thumb = True
+
+                if removed:
+                    await session.flush()
+                    # Recount surviving images
+                    surviving = (await session.execute(
+                        select(Image).where(Image.gallery_id == gallery.id)
+                    )).scalars().all()
+                    gallery.pages = len(surviving)
+                    if gallery.pages == 0:
+                        gallery.download_status = "missing"
+                    logger.info(
+                        "[rescan_library] gallery_id=%d: removed %d missing images, pages=%d",
+                        gallery.id,
+                        removed,
+                        gallery.pages,
+                    )
+
+                if missing_thumb:
+                    await r.enqueue_job("thumbnail_job", gallery.id)
+                    logger.info(
+                        "[rescan_library] gallery_id=%d: enqueued thumbnail_job (missing thumbs)",
+                        gallery.id,
+                    )
+
+                gallery.last_scanned_at = datetime.now(timezone.utc)
+                # Commit after each gallery so progress is persisted incrementally
+                await session.commit()
+
+    finally:
+        # Always resume the watcher even if the scan fails or is cancelled
+        if _watcher_was_running and _wi is not None:
+            _wi.resume()
+
+    if not cancelled:
+        await r.setex(
+            "rescan:progress",
+            30,
+            _json.dumps({"processed": total, "total": total, "status": "done"}),
+        )
+        logger.info("[rescan_library] completed, %d galleries processed", total)
+    return {"status": "cancelled" if cancelled else "done", "total": total}
+
+
+# ── WORKER B4: Rescan Gallery ─────────────────────────────────────────
+
+
+async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
+    """
+    Rescan a single gallery:
+    - Verify existing image files; remove DB records for files that have gone missing.
+    - Scan the gallery directory for new files not yet in the DB and insert them.
+    - Update gallery.pages and gallery.download_status.
+    - Re-enqueue thumbnail_job if any thumbnails are absent.
+    """
+    from sqlalchemy.dialects.postgresql import insert as pg_insert_local
+
+    logger.info("[rescan_gallery] gallery_id=%d", gallery_id)
+
+    async with AsyncSessionLocal() as session:
+        gallery = await session.get(Gallery, gallery_id)
+        if not gallery:
+            logger.error("[rescan_gallery] gallery_id=%d not found", gallery_id)
+            return {"status": "failed", "error": "gallery not found"}
+
+        images = (await session.execute(
+            select(Image).where(Image.gallery_id == gallery_id)
+        )).scalars().all()
+
+        # --- Step 1: Verify existing records ---
+        known_paths: set[str] = set()
+        missing_thumb = False
+        removed = 0
+        for img in images:
+            if not img.file_path or not Path(img.file_path).exists():
+                logger.warning(
+                    "[rescan_gallery] gallery_id=%d image_id=%d missing: %s",
+                    gallery_id,
+                    img.id,
+                    img.file_path,
+                )
+                await session.delete(img)
+                removed += 1
+                continue
+            known_paths.add(img.file_path)
+            if not img.thumb_path or not Path(img.thumb_path).exists():
+                missing_thumb = True
+
+        if removed:
+            await session.flush()
+
+        # --- Step 2: Discover new files in the gallery directory ---
+        # Infer the gallery directory from the first surviving image's path.
+        gallery_dir: Path | None = None
+        surviving_images = (await session.execute(
+            select(Image).where(Image.gallery_id == gallery_id)
+        )).scalars().all()
+
+        if surviving_images:
+            gallery_dir = Path(surviving_images[0].file_path).parent
+        else:
+            # Attempt to derive path from source/source_id convention.
+            candidate = Path(settings.data_gallery_path) / gallery.source / gallery.source_id
+            if candidate.is_dir():
+                gallery_dir = candidate
+
+        new_files_added = 0
+        if gallery_dir and gallery_dir.is_dir():
+            _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
+            # Determine the next page_num
+            max_page = max((img.page_num for img in surviving_images), default=0)
+
+            try:
+                dir_files = sorted(
+                    [f for f in gallery_dir.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS],
+                    key=lambda f: f.name,
+                )
+            except OSError as exc:
+                logger.warning("[rescan_gallery] gallery_id=%d failed to read dir: %s", gallery_id, exc)
+                dir_files = []
+
+            for fpath in dir_files:
+                if str(fpath) in known_paths:
+                    continue
+                # New file found on disk that is not in the DB.
+                file_hash = await asyncio.to_thread(_sha256, fpath)
+                ext = fpath.suffix.lower()
+                media_type = "video" if ext in (".mp4", ".webm") else "gif" if ext == ".gif" else "image"
+                max_page += 1
+                stmt = pg_insert_local(Image).values(
+                    gallery_id=gallery_id,
+                    page_num=max_page,
+                    filename=fpath.name,
+                    file_path=str(fpath),
+                    file_hash=file_hash,
+                    file_size=fpath.stat().st_size,
+                    media_type=media_type,
+                ).on_conflict_do_nothing()
+                await session.execute(stmt)
+                new_files_added += 1
+                missing_thumb = True  # New file needs a thumbnail.
+                logger.info(
+                    "[rescan_gallery] gallery_id=%d: added new file %s",
+                    gallery_id,
+                    fpath.name,
+                )
+
+        # --- Step 3: Update gallery metadata ---
+        final_images = (await session.execute(
+            select(Image).where(Image.gallery_id == gallery_id)
+        )).scalars().all()
+        gallery.pages = len(final_images)
+        if gallery.pages == 0:
+            gallery.download_status = "missing"
+        elif gallery.download_status == "missing":
+            gallery.download_status = "complete"
+        gallery.last_scanned_at = datetime.now(timezone.utc)
+
+        await session.commit()
+
+    if missing_thumb:
+        await ctx["redis"].enqueue_job("thumbnail_job", gallery_id)
+        logger.info("[rescan_gallery] gallery_id=%d: enqueued thumbnail_job", gallery_id)
+
+    logger.info(
+        "[rescan_gallery] gallery_id=%d done: removed=%d added=%d pages=%d",
+        gallery_id,
+        removed,
+        new_files_added,
+        gallery.pages,
+    )
+    return {
+        "status": "done",
+        "gallery_id": gallery_id,
+        "removed": removed,
+        "added": new_files_added,
+        "pages": gallery.pages,
+    }
+
+
 # ── WORKER C: Tag ────────────────────────────────────────────────────
 
 
@@ -913,12 +1208,220 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
     return {"status": "done", "processed": processed}
 
 
+# ── WORKER E: Auto-Discovery ──────────────────────────────────────────
+
+_SUPPORTED_MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
+
+
+async def auto_discover_job(ctx: dict) -> dict:
+    """Scan all library paths recursively and auto-create galleries for undiscovered directories containing media files."""
+    logger.info("[auto_discover] Starting auto-discovery")
+
+    paths = await get_all_library_paths()
+
+    discovered = 0
+    async with AsyncSessionLocal() as session:
+        # Get all existing source="local" galleries with their source_id and library_path
+        existing_rows = (await session.execute(
+            select(Gallery.source_id, Gallery.library_path).where(Gallery.source == "local")
+        )).all()
+        existing_set = {(row.source_id, row.library_path) for row in existing_rows}
+
+        for lib_path in paths:
+            lib_dir = Path(lib_path)
+            if not lib_dir.is_dir():
+                continue
+
+            # Walk the directory tree recursively; os.walk is efficient for deep trees
+            for dirpath, dirnames, filenames in os.walk(str(lib_dir)):
+                # Skip hidden directories in-place so os.walk won't descend into them
+                dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+
+                current = Path(dirpath)
+                # Skip the library root itself — only subfolders are gallery candidates
+                if current == lib_dir:
+                    continue
+
+                # Use path relative to the library root as source_id for uniqueness
+                # (e.g. "artist/album" instead of just "album" to avoid collisions)
+                try:
+                    rel_path = str(current.relative_to(lib_dir))
+                except ValueError:
+                    continue
+
+                if (rel_path, lib_path) in existing_set:
+                    continue
+
+                # Only create a gallery if the directory directly contains media files
+                file_count = sum(
+                    1 for f in filenames
+                    if Path(f).suffix.lower() in _SUPPORTED_MEDIA_EXTS
+                )
+                if file_count == 0:
+                    continue
+
+                # Derive a human-readable title from the leaf directory name
+                title = current.name
+
+                result = await session.execute(
+                    text(
+                        "INSERT INTO galleries (source, source_id, title, library_path, download_status)"
+                        " VALUES ('local', :source_id, :title, :lib_path, 'importing')"
+                        " ON CONFLICT (source, source_id) DO NOTHING"
+                        " RETURNING id"
+                    ),
+                    {"source_id": rel_path, "title": title, "lib_path": lib_path},
+                )
+                row = result.scalar_one_or_none()
+                if row:
+                    gallery_id = row
+                    discovered += 1
+                    logger.info("[auto_discover] New gallery: %s (%d files)", rel_path, file_count)
+                    await ctx["redis"].enqueue_job("local_import_job", str(current), "link", gallery_id)
+
+        await session.commit()
+
+    logger.info("[auto_discover] Discovered %d new galleries", discovered)
+    return {"discovered": discovered}
+
+
+# ── WORKER F: Rescan by Path ──────────────────────────────────────────
+
+
+async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
+    """Rescan the gallery whose files reside in dir_path."""
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            select(Image.gallery_id).where(Image.file_path.like(f"{dir_path}%")).limit(1)
+        )
+        gallery_id = result.scalar_one_or_none()
+
+    if gallery_id:
+        return await rescan_gallery_job(ctx, gallery_id)
+
+    # No existing gallery found — might be a new directory, trigger auto-discover
+    await ctx["redis"].enqueue_job("auto_discover_job")
+    return {"status": "no_gallery_found", "path": dir_path}
+
+
+# ── WORKER G: Scheduled Scan ──────────────────────────────────────────
+
+
+async def scheduled_scan_job(ctx: dict) -> dict:
+    """Scheduled library scan — checks Redis settings before running."""
+    r = ctx["redis"]
+
+    # Check if scheduled scanning is enabled
+    enabled = await r.get("scan:schedule:enabled")
+    if enabled == b"0":
+        logger.debug("[scheduled_scan] Skipped — disabled")
+        return {"status": "skipped", "reason": "disabled"}
+
+    # Check interval — only run if enough time has passed
+    interval_raw = await r.get("scan:schedule:interval_hours")
+    interval_hours = int(interval_raw) if interval_raw else settings.library_scan_interval_hours
+
+    last_run_raw = await r.get("scan:schedule:last_run")
+    if last_run_raw:
+        last_run = datetime.fromisoformat(last_run_raw.decode())
+        elapsed = (datetime.now(timezone.utc) - last_run).total_seconds() / 3600
+        if elapsed < interval_hours - 0.1:  # small tolerance
+            logger.debug(
+                "[scheduled_scan] Skipped — last run %.1fh ago, interval=%dh",
+                elapsed,
+                interval_hours,
+            )
+            return {"status": "skipped", "reason": "too_soon"}
+
+    logger.info("[scheduled_scan] Starting scheduled library scan")
+    await auto_discover_job(ctx)
+    await rescan_library_job(ctx)
+
+    # Record last run time
+    await r.set("scan:schedule:last_run", datetime.now(timezone.utc).isoformat())
+
+    logger.info("[scheduled_scan] Scheduled scan complete")
+    return {"status": "done"}
+
+
+# ── WORKER H: Toggle Watcher ──────────────────────────────────────────
+
+
+async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
+    """Start or stop the file system watcher on behalf of the API.
+
+    The API cannot directly touch the watchdog Observer because it lives in the
+    worker process.  Instead the API enqueues this job so the worker acts on the
+    desired state immediately.
+
+    The ``watcher:enabled`` Redis key (already written by the API before
+    enqueuing this job) serves as the durable record that ``startup()`` reads on
+    the next worker restart.
+    """
+    r = ctx["redis"]
+    if enabled:
+        if _watcher.is_running:
+            logger.info("[toggle_watcher] Already running — no-op")
+            return {"status": "already_running"}
+
+        paths = await get_all_library_paths()
+        if not paths:
+            logger.warning("[toggle_watcher] No library paths configured — cannot start watcher")
+            await r.set("watcher:status", json.dumps({"running": False, "paths": []}))
+            return {"status": "no_paths"}
+
+        loop = asyncio.get_event_loop()
+        arq_pool = ctx["redis"]
+
+        def enqueue_sync(job_name: str, *args):
+            asyncio.run_coroutine_threadsafe(
+                arq_pool.enqueue_job(job_name, *args), loop
+            )
+
+        _watcher.start(paths, enqueue_sync)
+        await r.set("watcher:status", json.dumps({"running": True, "paths": paths}))
+        logger.info("[toggle_watcher] Started, watching %d path(s)", len(paths))
+        return {"status": "started", "paths": paths}
+    else:
+        if not _watcher.is_running:
+            logger.info("[toggle_watcher] Already stopped — no-op")
+            await r.set("watcher:status", json.dumps({"running": False, "paths": []}))
+            return {"status": "already_stopped"}
+
+        _watcher.stop()
+        await r.set("watcher:status", json.dumps({"running": False, "paths": []}))
+        logger.info("[toggle_watcher] Stopped")
+        return {"status": "stopped"}
+
+
 # ── ARQ Worker Settings ──────────────────────────────────────────────
 
 
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions = [download_job, import_job, local_import_job, tag_job, thumbnail_job]
+    functions = [
+        download_job,
+        import_job,
+        local_import_job,
+        rescan_library_job,
+        rescan_gallery_job,
+        rescan_by_path_job,
+        auto_discover_job,
+        tag_job,
+        thumbnail_job,
+        scheduled_scan_job,
+        toggle_watcher_job,
+    ]
+    cron_jobs = [
+        cron(
+            scheduled_scan_job,
+            hour=None,   # every hour
+            minute=0,    # at :00
+            run_at_startup=False,
+            unique=True,
+            timeout=7200,
+        ),
+    ]
     on_startup = startup
     on_shutdown = shutdown
     max_jobs = int(os.environ.get("MAX_WORKER_JOBS", "8"))

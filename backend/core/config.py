@@ -49,6 +49,11 @@ class Settings(BaseSettings):
     pixiv_client_secret: str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
     # To override: set PIXIV_CLIENT_ID and PIXIV_CLIENT_SECRET in .env
 
+    # Library management
+    library_monitor_enabled: bool = True
+    library_scan_interval_hours: int = 12
+    extra_library_paths: str = ""  # Comma-separated extra paths
+
     model_config = {"env_file": ".env", "case_sensitive": False}
 
 
@@ -58,3 +63,33 @@ def get_settings() -> Settings:
 
 
 settings = get_settings()
+
+
+async def get_all_library_paths() -> list[str]:
+    """Return all library paths: primary + extras from env + DB-stored paths."""
+    paths: list[str] = [settings.data_gallery_path]
+
+    # From env var
+    if settings.extra_library_paths:
+        for p in settings.extra_library_paths.split(","):
+            p = p.strip()
+            if p and p not in paths:
+                paths.append(p)
+
+    # From database
+    try:
+        from core.database import async_session
+        from db.models import LibraryPath
+        from sqlalchemy import select
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(LibraryPath.path).where(LibraryPath.enabled == True)  # noqa: E712
+            )
+            for row in result.scalars():
+                if row not in paths:
+                    paths.append(row)
+    except Exception:
+        pass  # DB might not be ready during startup
+
+    return paths

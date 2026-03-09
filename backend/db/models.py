@@ -53,6 +53,8 @@ class Gallery(Base):
     download_status: Mapped[str] = mapped_column(Text, default="proxy_only")
     import_mode: Mapped[str | None] = mapped_column(Text)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    last_scanned_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    library_path: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     images: Mapped[list["Image"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
     gallery_tags: Mapped[list["GalleryTag"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
@@ -225,3 +227,14 @@ class BlockedTag(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     namespace: Mapped[str] = mapped_column(Text, nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
+
+
+class LibraryPath(Base):
+    __tablename__ = "library_paths"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
+    label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    monitor: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
+    added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
