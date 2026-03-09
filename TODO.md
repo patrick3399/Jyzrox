@@ -13,8 +13,8 @@
 - [x] Rate limiting 全端點覆蓋（目前僅 external API 有）
 
 ### Service Worker 版本管理
-- [ ] 自動版本管理 — build 時注入 hash 或時間戳到 `CACHE_NAME`
-- [ ] SW 更新提示 UI（偵測到新版本時提示使用者重整）
+- [x] 自動版本管理 — build 時注入 hash 或時間戳到 `CACHE_NAME`
+- [x] SW 更新提示 UI（偵測到新版本時提示使用者重整）
 
 ### OPDS 端點測試（HTTP Basic Auth）
 - [ ] `GET /opds/` — Root navigation feed 回傳有效 Atom XML，包含 all/recent/favorites/search 四個 entry

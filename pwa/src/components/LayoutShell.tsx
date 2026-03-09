@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { Sidebar } from './Sidebar'
 import { MobileNav } from './MobileNav'
 import { Toaster } from 'sonner'
+import { SWUpdatePrompt } from './SWUpdatePrompt'
 
 const AUTH_PATHS = ['/login', '/setup']
 
@@ -16,6 +17,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       <>
         {children}
         <Toaster position="bottom-right" theme="dark" richColors />
+        <SWUpdatePrompt />
       </>
     )
   }
@@ -34,6 +36,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       </main>
 
       <Toaster position="bottom-right" richColors />
+      <SWUpdatePrompt />
     </>
   )
 }

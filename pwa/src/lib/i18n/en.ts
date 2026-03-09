@@ -670,6 +670,9 @@ const en: Record<string, string> = {
   'credentials.ehentai.sk': 'sk (Optional)',
 
   // ── Common ──
+  'common.updateAvailable': 'App updated',
+  'common.updateDescription': 'A new version is available. Refresh to apply.',
+  'common.refresh': 'Refresh',
   'common.prev': 'Prev',
   'common.next': 'Next',
   'common.loading': 'Loading...',

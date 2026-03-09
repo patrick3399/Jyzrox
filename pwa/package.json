@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --port 3000",
-    "build": "next build",
+    "build": "node scripts/build-sw.js && next build",
     "start": "next start --port 3000",
     "test": "vitest run",
     "test:watch": "vitest",
