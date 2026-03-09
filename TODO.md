@@ -57,10 +57,10 @@
 > 獨立功能，少依賴，能快速上線帶來明顯效果。
 
 ### AI Tagging 上線
-- [ ] 測試 `TAG_MODEL_ENABLED=true` 完整流程（模型下載→推理→DB 寫入）
-- [ ] 前端：Gallery detail 頁顯示 AI 標籤（含信心度）
-- [ ] 前端：「重新標記」按鈕整合到 Gallery detail
-- [ ] 標籤信心度篩選 UI（滑桿或閾值設定）
+- [ ] 測試 `TAG_MODEL_ENABLED=true` 完整流程（模型下載→推理→DB 寫入） ⚠️ 需要 ONNX runtime + 模型下載
+- [x] 前端：Gallery detail 頁顯示 AI 標籤（含信心度）
+- [x] 前端：「重新標記」按鈕整合到 Gallery detail
+- [x] 標籤信心度篩選 UI（滑桿或閾值設定）
 
 ### Pixiv 瀏覽器 Phase 1（Client + Router）
 

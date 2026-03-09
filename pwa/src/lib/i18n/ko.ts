@@ -296,6 +296,9 @@ const ko: Record<string, string> = {
   'library.retag': 'AI 태그',
   'library.favorited': '★ 즐겨찾기됨',
   'library.unfavorited': '☆ 즐겨찾기',
+  'library.aiTags': 'AI 태그',
+  'library.confidence': '신뢰도',
+  'library.noAiTagsAboveThreshold': '임계값 이상의 AI 태그 없음',
 
   // ── Queue (extra) ──
   'queue.cancelError': '작업 취소 실패',

@@ -295,6 +295,9 @@ const zhTW: Record<string, string> = {
   'library.retag': 'AI 標籤',
   'library.favorited': '★ 已收藏',
   'library.unfavorited': '☆ 收藏',
+  'library.aiTags': 'AI 標籤',
+  'library.confidence': '信心度',
+  'library.noAiTagsAboveThreshold': '沒有超過閾值的 AI 標籤',
 
   // ── Queue (extra) ──
   'queue.cancelError': '取消任務失敗',

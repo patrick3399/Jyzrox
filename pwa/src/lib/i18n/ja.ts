@@ -296,6 +296,9 @@ const ja: Record<string, string> = {
   'library.retag': 'AIタグ',
   'library.favorited': '★ お気に入り済み',
   'library.unfavorited': '☆ お気に入り',
+  'library.aiTags': 'AI タグ',
+  'library.confidence': '信頼度',
+  'library.noAiTagsAboveThreshold': 'しきい値以上の AI タグなし',
 
   // ── Queue (extra) ──
   'queue.cancelError': 'ジョブのキャンセルに失敗しました',

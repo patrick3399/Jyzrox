@@ -275,6 +275,17 @@ const library = {
       method: 'POST',
       body: JSON.stringify({ last_page }),
     }),
+
+  getGalleryTags: (id: number) =>
+    apiFetch<{
+      gallery_id: number
+      tags: Array<{
+        namespace: string
+        name: string
+        confidence: number
+        source: string
+      }>
+    }>(`/api/library/galleries/${id}/tags`),
 }
 
 // ── Download ──────────────────────────────────────────────────────────

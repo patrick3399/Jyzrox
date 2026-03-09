@@ -69,6 +69,8 @@ export default function GalleryDetailPage() {
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(id ?? 0)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRetagging, setIsRetagging] = useState(false)
+  const [tagData, setTagData] = useState<Array<{ namespace: string; name: string; confidence: number; source: string }>>([])
+  const [confidenceThreshold, setConfidenceThreshold] = useState(0.35)
 
   // Record browse history once when gallery data is loaded
   const historyRecordedRef = useRef(false)
@@ -90,6 +92,11 @@ export default function GalleryDetailPage() {
       // localStorage may be unavailable in some contexts
     }
   }, [gallery])
+
+  useEffect(() => {
+    if (!id) return
+    api.library.getGalleryTags(id).then((res) => setTagData(res.tags)).catch(() => {})
+  }, [id])
 
   const getDeleteConfirmKey = () => {
     if (gallery?.import_mode === 'link') return 'library.delete.link.confirm'
@@ -176,6 +183,7 @@ export default function GalleryDetailPage() {
   if (!gallery) return null
 
   const tagGroups = groupTagsByNamespace(gallery.tags_array)
+  const aiTags = tagData.filter((t) => t.source === 'ai' && t.confidence >= confidenceThreshold)
   const images = imagesData?.images ?? []
   const statusInfo =
     DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
@@ -330,6 +338,51 @@ export default function GalleryDetailPage() {
                   </div>
                 </div>
               ))}
+            </div>
+          )}
+
+          {/* AI Tags (if any) */}
+          {tagData.some((t) => t.source === 'ai') && (
+            <div className="mt-4 pt-4 border-t border-vault-border">
+              <div className="flex items-center justify-between mb-3">
+                <h3 className="text-xs font-semibold text-vault-text-secondary uppercase tracking-wide">
+                  {t('library.aiTags')}
+                </h3>
+                <div className="flex items-center gap-2">
+                  <label className="text-xs text-vault-text-muted">
+                    {t('library.confidence')}: {Math.round(confidenceThreshold * 100)}%
+                  </label>
+                  <input
+                    type="range"
+                    min="0"
+                    max="100"
+                    value={Math.round(confidenceThreshold * 100)}
+                    onChange={(e) => setConfidenceThreshold(Number(e.target.value) / 100)}
+                    className="w-24 h-1.5 accent-purple-500"
+                  />
+                </div>
+              </div>
+              {aiTags.length > 0 ? (
+                <div className="flex flex-wrap gap-1">
+                  {aiTags.map((tag) => (
+                    <span
+                      key={`${tag.namespace}:${tag.name}`}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded border bg-purple-900/30 border-purple-700/40 text-purple-300 text-xs"
+                      title={`${Math.round(tag.confidence * 100)}% confidence`}
+                    >
+                      {tag.namespace !== 'general' && (
+                        <span className="text-purple-400/60">{tag.namespace}:</span>
+                      )}
+                      {tag.name}
+                      <span className="text-purple-400/50 text-[10px]">
+                        {Math.round(tag.confidence * 100)}%
+                      </span>
+                    </span>
+                  ))}
+                </div>
+              ) : (
+                <p className="text-xs text-vault-text-muted">{t('library.noAiTagsAboveThreshold')}</p>
+              )}
             </div>
           )}
         </div>

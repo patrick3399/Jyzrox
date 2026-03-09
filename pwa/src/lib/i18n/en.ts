@@ -296,6 +296,9 @@ const en: Record<string, string> = {
   'library.retag': 'AI Tags',
   'library.favorited': '★ Favorited',
   'library.unfavorited': '☆ Favorite',
+  'library.aiTags': 'AI Tags',
+  'library.confidence': 'Confidence',
+  'library.noAiTagsAboveThreshold': 'No AI tags above threshold',
 
   // ── Queue (extra) ──
   'queue.cancelError': 'Failed to cancel job',

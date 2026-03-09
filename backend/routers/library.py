@@ -17,7 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth
 from core.database import get_db
-from db.models import Blob, BlockedTag, Gallery, Image, ReadProgress
+from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag
 from services.cas import cas_url, decrement_ref_count, library_dir, resolve_blob_path, thumb_dir, thumb_url as cas_thumb_url
 
 logger = logging.getLogger(__name__)
@@ -264,6 +264,35 @@ async def get_gallery_images(
     # Default: return all images (backward compatible for Reader)
     images = (await db.execute(stmt)).scalars().all()
     return {"gallery_id": gallery_id, "images": [_i(img) for img in images]}
+
+
+@router.get("/galleries/{gallery_id}/tags")
+async def get_gallery_tags(
+    gallery_id: int,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get gallery tags with confidence scores and source info."""
+    await _get_or_404(db, gallery_id)
+    rows = (
+        await db.execute(
+            select(GalleryTag)
+            .where(GalleryTag.gallery_id == gallery_id)
+            .options(selectinload(GalleryTag.tag))
+            .order_by(GalleryTag.confidence.desc())
+        )
+    ).scalars().all()
+
+    tags = []
+    for gt in rows:
+        tag = gt.tag
+        tags.append({
+            "namespace": tag.namespace,
+            "name": tag.name,
+            "confidence": gt.confidence,
+            "source": gt.source,
+        })
+    return {"gallery_id": gallery_id, "tags": tags}
 
 
 # ── Gallery update ───────────────────────────────────────────────────
