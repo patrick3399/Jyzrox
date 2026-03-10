@@ -159,7 +159,7 @@ export default function HistoryPage() {
   const handleClick = useCallback(
     (item: BrowseHistoryItem) => {
       if (item.gid != null && item.token) {
-        router.push(`/browse/${item.gid}/${item.token}`)
+        router.push(`/e-hentai/${item.gid}/${item.token}`)
       } else if (item.source === 'local') {
         router.push(`/library/${item.source_id}`)
       }

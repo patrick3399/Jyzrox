@@ -33,7 +33,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
       return (
         <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4 p-8">
           <div className="text-red-500 text-lg font-semibold">{t('common.errorOccurred')}</div>
-          <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md text-center">
+          <p className="text-sm text-vault-text-secondary max-w-md text-center">
             {this.state.error?.message || 'An unexpected error occurred'}
           </p>
           <button

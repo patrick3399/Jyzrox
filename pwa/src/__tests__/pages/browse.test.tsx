@@ -112,7 +112,7 @@ vi.mock('@/components/VirtualGrid', () => ({
 
 // ── Import page after mocks ──────────────────────────────────────────
 
-import BrowsePage from '@/app/browse/page'
+import BrowsePage from '@/app/e-hentai/page'
 
 // ── Factories ─────────────────────────────────────────────────────────
 
@@ -310,6 +310,6 @@ describe('Browse page — gallery navigation', () => {
     await act(async () => {
       await user.click(screen.getByText('Gallery 1'))
     })
-    expect(mockRouterPush).toHaveBeenCalledWith('/browse/1/tok1')
+    expect(mockRouterPush).toHaveBeenCalledWith('/e-hentai/1/tok1')
   })
 })

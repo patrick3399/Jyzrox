@@ -355,7 +355,7 @@ const library = {
 
 const download = {
   enqueue: (url: string, source?: string, options: Record<string, unknown> = {}, total?: number) =>
-    apiFetch<{ job_id: string; status: string }>('/api/download/', {
+    apiFetch<{ job_id: string; status: string; warning?: string }>('/api/download/', {
       method: 'POST',
       body: JSON.stringify({
         url,
@@ -788,6 +788,17 @@ const pixiv = {
     return apiFetch<PixivSearchResult>(`/api/pixiv/search?${p}`)
   },
 
+  searchPublic: (params: { word?: string; order?: string; mode?: string; page?: number; s_mode?: string; type?: string } = {}) => {
+    const p = new URLSearchParams()
+    if (params.word) p.set('word', params.word)
+    if (params.order) p.set('order', params.order)
+    if (params.mode) p.set('mode', params.mode)
+    if (params.page) p.set('page', String(params.page))
+    if (params.s_mode) p.set('s_mode', params.s_mode)
+    if (params.type) p.set('type', params.type)
+    return apiFetch<PixivSearchResult & { popular?: PixivIllust[]; related_tags?: string[] }>(`/api/pixiv/search-public?${p}`)
+  },
+
   getIllust: (id: number) =>
     apiFetch<PixivIllust>(`/api/pixiv/illust/${id}`),
 
@@ -805,6 +816,24 @@ const pixiv = {
 
   imageProxyUrl: (url: string) =>
     `/api/pixiv/image-proxy?url=${encodeURIComponent(url)}`,
+
+  ranking: (params: { mode?: string; content?: string; date?: string; page?: number } = {}) => {
+    const p = new URLSearchParams()
+    if (params.mode) p.set('mode', params.mode)
+    if (params.content) p.set('content', params.content)
+    if (params.date) p.set('date', params.date)
+    if (params.page) p.set('page', String(params.page))
+    return apiFetch<{
+      contents: Array<Record<string, unknown>>
+      mode: string
+      content: string
+      date: string
+      page: number
+      prev_date: string | null
+      next_date: string | null
+      rank_total: number
+    }>(`/api/pixiv/ranking?${p}`)
+  },
 }
 
 // ── Artists ───────────────────────────────────────────────────────────

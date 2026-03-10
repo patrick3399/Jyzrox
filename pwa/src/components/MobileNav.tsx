@@ -6,7 +6,7 @@ import { usePathname } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import {
   LayoutDashboard,
-  Search,
+  Compass,
   BookOpen,
   Clock,
   Download,
@@ -35,7 +35,7 @@ import { useLocale } from '@/components/LocaleProvider'
 
 const navLinks = [
   { href: '/', label: () => t('nav.dashboard'), icon: LayoutDashboard },
-  { href: '/browse', label: () => t('nav.browse'), icon: Search },
+  { href: '/e-hentai', label: () => t('nav.ehentai'), icon: Compass },
   { href: '/pixiv', label: () => t('nav.pixiv'), icon: Palette },
   { href: '/library', label: () => t('nav.library'), icon: BookOpen },
   { href: '/explorer', label: () => t('nav.explorer'), icon: FolderTree },

@@ -9,6 +9,9 @@ import json
 import logging
 import os
 
+from core.compat import patch_asyncio_for_314
+patch_asyncio_for_314()
+
 from arq.connections import RedisSettings
 from arq.cron import cron
 

@@ -1,12 +1,14 @@
 'use client'
 
-import { useState, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import useSWRInfinite from 'swr/infinite'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { VirtualGrid } from '@/components/VirtualGrid'
+import { CredentialBanner } from '@/components/CredentialBanner'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
@@ -62,16 +64,18 @@ function IllustCard({ illust }: { illust: PixivIllust }) {
       <div className="mt-1.5 px-0.5">
         <p className="text-sm text-vault-text truncate font-medium">{illust.title}</p>
         <p className="text-xs text-vault-text-secondary truncate">{illust.user.name}</p>
-        <div className="flex items-center gap-2 mt-0.5 text-[10px] text-vault-text-secondary">
-          <span>{illust.total_view.toLocaleString()} {t('pixiv.views')}</span>
-          <span>{illust.total_bookmarks.toLocaleString()} {t('pixiv.bookmarks')}</span>
-        </div>
+        {(illust.total_view > 0 || illust.total_bookmarks > 0) && (
+          <div className="flex items-center gap-2 mt-0.5 text-[10px] text-vault-text-secondary">
+            <span>{illust.total_view.toLocaleString()} {t('pixiv.views')}</span>
+            <span>{illust.total_bookmarks.toLocaleString()} {t('pixiv.bookmarks')}</span>
+          </div>
+        )}
       </div>
     </Link>
   )
 }
 
-// ── Search Tab ───────────────────────────────────────────────────────────
+// ── Sort/Duration option constants ───────────────────────────────────────
 
 const SORT_OPTIONS = [
   { value: 'date_desc', label: () => t('pixiv.sortDateDesc') },
@@ -86,28 +90,49 @@ const DURATION_OPTIONS = [
   { value: 'within_last_month', label: () => t('pixiv.durationMonth') },
 ]
 
-function SearchTab({ credentialsMissing }: { credentialsMissing: boolean }) {
-  const [query, setQuery] = useState('')
-  const [submittedQuery, setSubmittedQuery] = useState('')
+// ── SearchResults component ──────────────────────────────────────────────
+
+function SearchResults({
+  query,
+  credentialsMissing,
+  onClear,
+}: {
+  query: string
+  credentialsMissing: boolean
+  onClear: () => void
+}) {
   const [sort, setSort] = useState('date_desc')
   const [duration, setDuration] = useState('')
 
+  // Map sort values for public API: date_desc→date_d, date_asc→date, popular_desc→popular_d
+  const publicOrder = sort === 'date_asc' ? 'date' : sort === 'popular_desc' ? 'popular_d' : 'date_d'
+
   const getKey = (pageIndex: number, previous: PixivSearchResult | null) => {
-    if (!submittedQuery) return null
+    if (!query) return null
     if (pageIndex > 0 && previous?.next_offset === null) return null
     const offset = pageIndex === 0 ? 0 : (previous?.next_offset ?? 0)
-    return ['/pixiv/search', submittedQuery, sort, duration, offset]
+    if (credentialsMissing) {
+      const page = Math.floor(offset / 60) + 1
+      return ['/pixiv/search-public', query, publicOrder, page]
+    }
+    return ['/pixiv/search', query, sort, duration, offset]
   }
 
   const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
     getKey,
-    ([, word, s, d, offset]) =>
-      api.pixiv.search({
-        word: word as string,
-        sort: s as string,
-        duration: (d as string) || undefined,
-        offset: offset as number,
-      }),
+    (key) => {
+      if (key[0] === '/pixiv/search-public') {
+        const [, word, order, page] = key as [string, string, string, number]
+        return api.pixiv.searchPublic({ word, order, page })
+      }
+      const [, word, s, d, offset] = key as [string, string, string, string, number]
+      return api.pixiv.search({
+        word,
+        sort: s,
+        duration: d || undefined,
+        offset,
+      })
+    },
     { revalidateFirstPage: false },
   )
 
@@ -115,41 +140,20 @@ function SearchTab({ credentialsMissing }: { credentialsMissing: boolean }) {
   const hasMore = data ? data[data.length - 1]?.next_offset !== null : false
   const isLoading = !data && isValidating
 
-  const handleSearch = (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!query.trim()) return
-    setSubmittedQuery(query.trim())
-  }
-
-  if (credentialsMissing) {
-    return (
-      <div className="text-center py-16 text-vault-text-secondary">
-        <p>{t('pixiv.noCredentials')}</p>
-        <Link href="/credentials" className="text-vault-accent underline mt-2 inline-block">
-          {t('nav.credentials')}
-        </Link>
-      </div>
-    )
-  }
-
   return (
     <div className="space-y-4">
-      {/* Search form */}
-      <form onSubmit={handleSearch} className="flex gap-2">
-        <input
-          type="text"
-          value={query}
-          onChange={(e) => setQuery(e.target.value)}
-          placeholder={t('pixiv.searchPlaceholder')}
-          className="flex-1 px-3 py-2 rounded-lg bg-vault-input border border-vault-border text-vault-text placeholder-vault-text-secondary focus:outline-none focus:border-vault-accent text-sm"
-        />
+      {/* Results header with clear button */}
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2 text-sm text-vault-text-secondary">
+          <span>{t('browse.resultsFor', { query })}</span>
+        </div>
         <button
-          type="submit"
-          className="px-4 py-2 rounded-lg bg-vault-accent text-white text-sm font-medium hover:bg-vault-accent/80 transition-colors"
+          onClick={onClear}
+          className="text-xs text-vault-text-muted hover:text-vault-text transition-colors"
         >
-          {t('pixiv.search')}
+          {t('browse.clearSearch')}
         </button>
-      </form>
+      </div>
 
       {/* Filters */}
       <div className="flex gap-2 flex-wrap">
@@ -164,20 +168,22 @@ function SearchTab({ credentialsMissing }: { credentialsMissing: boolean }) {
             </option>
           ))}
         </select>
-        <select
-          value={duration}
-          onChange={(e) => setDuration(e.target.value)}
-          className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
-        >
-          {DURATION_OPTIONS.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label()}
-            </option>
-          ))}
-        </select>
+        {!credentialsMissing && (
+          <select
+            value={duration}
+            onChange={(e) => setDuration(e.target.value)}
+            className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
+          >
+            {DURATION_OPTIONS.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label()}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
-      {/* Results */}
+      {/* Loading / Error / Empty / Results */}
       {isLoading && (
         <div className="flex justify-center py-12">
           <LoadingSpinner />
@@ -185,34 +191,27 @@ function SearchTab({ credentialsMissing }: { credentialsMissing: boolean }) {
       )}
 
       {error && (
-        <p className="text-center py-8 text-red-400">{t('browse.failedLoadResults')}</p>
+        <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
+          <p className="text-red-400">{t('browse.failedLoadResults')}</p>
+        </div>
       )}
 
-      {!isLoading && !error && submittedQuery && allIllusts.length === 0 && (
+      {!isLoading && !error && allIllusts.length === 0 && (
         <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
       )}
 
-      {allIllusts.length > 0 && (
-        <>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-            {allIllusts.map((illust) => (
-              <IllustCard key={illust.id} illust={illust} />
-            ))}
-          </div>
-
-          {hasMore && (
-            <div className="flex justify-center pt-4">
-              <button
-                onClick={() => setSize(size + 1)}
-                disabled={isValidating}
-                className="px-6 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors disabled:opacity-50"
-              >
-                {isValidating ? t('pixiv.loading') : t('pixiv.loadMore')}
-              </button>
-            </div>
-          )}
-        </>
-      )}
+      <VirtualGrid
+        items={allIllusts}
+        columns={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
+        gap={12}
+        estimateHeight={200}
+        renderItem={(illust) => (
+          <IllustCard key={illust.id} illust={illust} />
+        )}
+        onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
+        hasMore={hasMore}
+        isLoading={isValidating}
+      />
     </div>
   )
 }
@@ -257,7 +256,11 @@ function FeedTab({ credentialsMissing }: { credentialsMissing: boolean }) {
   }
 
   if (error) {
-    return <p className="text-center py-8 text-red-400">{t('common.failedToLoad')}</p>
+    return (
+      <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
+        <p className="text-red-400">{t('common.failedToLoad')}</p>
+      </div>
+    )
   }
 
   if (allIllusts.length === 0) {
@@ -266,23 +269,18 @@ function FeedTab({ credentialsMissing }: { credentialsMissing: boolean }) {
 
   return (
     <div className="space-y-4">
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-        {allIllusts.map((illust) => (
+      <VirtualGrid
+        items={allIllusts}
+        columns={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
+        gap={12}
+        estimateHeight={200}
+        renderItem={(illust) => (
           <IllustCard key={illust.id} illust={illust} />
-        ))}
-      </div>
-
-      {hasMore && (
-        <div className="flex justify-center pt-4">
-          <button
-            onClick={() => setSize(size + 1)}
-            disabled={isValidating}
-            className="px-6 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors disabled:opacity-50"
-          >
-            {isValidating ? t('pixiv.loading') : t('pixiv.loadMore')}
-          </button>
-        </div>
-      )}
+        )}
+        onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
+        hasMore={hasMore}
+        isLoading={isValidating}
+      />
     </div>
   )
 }
@@ -348,7 +346,11 @@ function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
   }
 
   if (error) {
-    return <p className="text-center py-8 text-red-400">{t('common.failedToLoad')}</p>
+    return (
+      <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
+        <p className="text-red-400">{t('common.failedToLoad')}</p>
+      </div>
+    )
   }
 
   const artists = data?.artists ?? []
@@ -429,15 +431,154 @@ function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
   )
 }
 
+// ── Ranking Tab ───────────────────────────────────────────────────────────
+
+const RANKING_MODES = [
+  { value: 'daily', label: () => t('browse.rankingDaily') },
+  { value: 'weekly', label: () => t('browse.rankingWeekly') },
+  { value: 'monthly', label: () => t('browse.rankingMonthly') },
+  { value: 'rookie', label: () => t('browse.rankingRookie') },
+]
+
+const RANKING_CONTENT = [
+  { value: 'all', label: () => t('browse.rankingAll') },
+  { value: 'illust', label: () => t('browse.rankingIllust') },
+  { value: 'manga', label: () => t('browse.rankingManga') },
+  { value: 'ugoira', label: () => t('browse.rankingUgoira') },
+]
+
+function RankingTab() {
+  const [mode, setMode] = useState('daily')
+  const [content, setContent] = useState('all')
+  const [page, setPage] = useState(1)
+
+  const { data, error, isLoading } = useSWR(
+    ['/pixiv/ranking', mode, content, page],
+    () => api.pixiv.ranking({ mode, content, page }),
+  )
+
+  const contents = data?.contents ?? []
+
+  return (
+    <div className="space-y-4">
+      {/* Filters */}
+      <div className="flex gap-2 flex-wrap">
+        <select
+          value={mode}
+          onChange={(e) => { setMode(e.target.value); setPage(1) }}
+          className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
+        >
+          {RANKING_MODES.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label()}
+            </option>
+          ))}
+        </select>
+        <select
+          value={content}
+          onChange={(e) => { setContent(e.target.value); setPage(1) }}
+          className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
+        >
+          {RANKING_CONTENT.map((o) => (
+            <option key={o.value} value={o.value}>
+              {o.label()}
+            </option>
+          ))}
+        </select>
+      </div>
+
+      {isLoading && (
+        <div className="flex justify-center py-12">
+          <LoadingSpinner />
+        </div>
+      )}
+      {error && (
+        <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
+          <p className="text-red-400">{t('browse.failedLoadResults')}</p>
+        </div>
+      )}
+
+      {!isLoading && !error && contents.length === 0 && (
+        <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
+      )}
+
+      {contents.length > 0 && (
+        <>
+          <VirtualGrid
+            items={contents}
+            columns={{ base: 3, sm: 4, md: 5, lg: 7, xl: 8, xxl: 10 }}
+            gap={8}
+            estimateHeight={180}
+            renderItem={(item: Record<string, unknown>) => {
+              const illustId = item.illust_id as number
+              const title = item.title as string
+              const userName = item.user_name as string
+              const thumbUrl = api.pixiv.imageProxyUrl(item.url as string)
+              return (
+                <Link key={illustId} href={`/pixiv/illust/${illustId}`} className="group block">
+                  <div className="relative aspect-square overflow-hidden rounded-lg bg-vault-input">
+                    <img
+                      src={thumbUrl}
+                      alt={title}
+                      className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                      loading="lazy"
+                      onError={(e) => {
+                        ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                      }}
+                    />
+                    <div className="absolute top-1.5 left-1.5 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">
+                      #{item.rank as number}
+                    </div>
+                  </div>
+                  <div className="mt-1.5 px-0.5">
+                    <p className="text-sm text-vault-text truncate font-medium">{title}</p>
+                    <p className="text-xs text-vault-text-secondary truncate">{userName}</p>
+                  </div>
+                </Link>
+              )
+            }}
+          />
+
+          {/* Pagination */}
+          <div className="flex justify-center gap-2 pt-4">
+            <button
+              onClick={() => setPage(Math.max(1, page - 1))}
+              disabled={page <= 1}
+              className="px-4 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover disabled:opacity-50"
+            >
+              {t('common.prev')}
+            </button>
+            <span className="px-4 py-2 text-sm text-vault-text-secondary">{page}</span>
+            <button
+              onClick={() => setPage(page + 1)}
+              disabled={contents.length < 50}
+              className="px-4 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover disabled:opacity-50"
+            >
+              {t('common.next')}
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  )
+}
+
 // ── Main Page ────────────────────────────────────────────────────────────
 
-type Tab = 'search' | 'feed' | 'following'
+type Tab = 'feed' | 'following' | 'ranking'
 
 function PixivPageInner() {
   useLocale()
   const searchParams = useSearchParams()
-  const initialTab = (searchParams.get('tab') as Tab | null) ?? 'search'
+  const rawTab = searchParams.get('tab') as Tab | null
+  const initialTab: Tab =
+    rawTab === 'feed' || rawTab === 'following' ? rawTab : 'ranking'
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
+
+  // Search state
+  const [searchQuery, setSearchQuery] = useState('')
+  const [submittedQuery, setSubmittedQuery] = useState('')
+  const searchInputRef = useRef<HTMLInputElement>(null)
 
   // Check credentials
   const { data: credData, isLoading: credLoading } = useSWR('/api/settings/credentials', () =>
@@ -445,40 +586,109 @@ function PixivPageInner() {
   )
   const credentialsMissing = credLoading ? false : !credData?.['pixiv']?.configured
 
-  const tabs: { key: Tab; label: () => string }[] = [
-    { key: 'search', label: () => t('pixiv.searchTab') },
-    { key: 'feed', label: () => t('pixiv.feedTab') },
-    { key: 'following', label: () => t('pixiv.followingTab') },
-  ]
+  // Dismiss search on Escape key
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && submittedQuery) {
+        setSubmittedQuery('')
+        setSearchQuery('')
+      }
+    }
+    document.addEventListener('keydown', handler)
+    return () => document.removeEventListener('keydown', handler)
+  }, [submittedQuery])
+
+  const handleSearchSubmit = () => {
+    if (searchQuery.trim()) {
+      setSubmittedQuery(searchQuery.trim())
+    }
+  }
+
+  const handleClearSearch = () => {
+    setSubmittedQuery('')
+    setSearchQuery('')
+    searchInputRef.current?.focus()
+  }
 
   return (
     <div className="space-y-4">
-      {/* Header */}
-      <div className="flex items-center justify-between">
-        <h1 className="text-2xl font-bold text-vault-text">{t('pixiv.title')}</h1>
+      {credentialsMissing && <CredentialBanner source="pixiv" />}
+
+      {/* Search bar — always visible */}
+      <div className="flex gap-2">
+        <input
+          ref={searchInputRef}
+          type="text"
+          value={searchQuery}
+          onChange={(e) => setSearchQuery(e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') handleSearchSubmit()
+            else if (e.key === 'Escape') handleClearSearch()
+          }}
+          placeholder={t('pixiv.searchPlaceholder')}
+          className="flex-1 bg-vault-card border border-vault-border rounded-lg px-4 py-2.5 text-sm text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent transition-colors"
+        />
+        <button
+          onClick={handleSearchSubmit}
+          className="px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors shrink-0"
+        >
+          {t('pixiv.search')}
+        </button>
       </div>
 
-      {/* Tabs */}
-      <div className="flex gap-1 border-b border-vault-border">
-        {tabs.map((tab) => (
-          <button
-            key={tab.key}
-            onClick={() => setActiveTab(tab.key)}
-            className={`px-4 py-2.5 text-sm font-medium transition-colors border-b-2 -mb-px ${
-              activeTab === tab.key
-                ? 'border-vault-accent text-vault-accent'
-                : 'border-transparent text-vault-text-secondary hover:text-vault-text'
-            }`}
-          >
-            {tab.label()}
-          </button>
-        ))}
-      </div>
+      {/* Search results mode */}
+      {submittedQuery ? (
+        <SearchResults
+          query={submittedQuery}
+          credentialsMissing={credentialsMissing}
+          onClear={handleClearSearch}
+        />
+      ) : (
+        <>
+          {/* Tab bar — Feed & Following only shown when credentials available */}
+          <div className="flex gap-1 border-b border-vault-border overflow-x-auto scrollbar-hide">
+            <button
+              onClick={() => setActiveTab('ranking')}
+              className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'ranking'
+                  ? 'border-vault-accent text-vault-text'
+                  : 'border-transparent text-vault-text-muted hover:text-vault-text'
+              }`}
+            >
+              {t('browse.ranking')}
+            </button>
+            {!credentialsMissing && (
+              <>
+                <button
+                  onClick={() => setActiveTab('feed')}
+                  className={`shrink-0 ml-3 md:ml-auto px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'feed'
+                      ? 'border-blue-400 text-vault-text'
+                      : 'border-transparent text-vault-text-muted hover:text-vault-text'
+                  }`}
+                >
+                  {t('pixiv.feedTab')}
+                </button>
+                <button
+                  onClick={() => setActiveTab('following')}
+                  className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'following'
+                      ? 'border-[#e91e63] text-vault-text'
+                      : 'border-transparent text-vault-text-muted hover:text-vault-text'
+                  }`}
+                >
+                  {t('pixiv.followingTab')}
+                </button>
+              </>
+            )}
+          </div>
 
-      {/* Tab content */}
-      {activeTab === 'search' && <SearchTab credentialsMissing={credentialsMissing} />}
-      {activeTab === 'feed' && <FeedTab credentialsMissing={credentialsMissing} />}
-      {activeTab === 'following' && <FollowingTab credentialsMissing={credentialsMissing} />}
+          {/* Tab content */}
+          {activeTab === 'ranking' && <RankingTab />}
+          {activeTab === 'feed' && !credentialsMissing && <FeedTab credentialsMissing={false} />}
+          {activeTab === 'following' && !credentialsMissing && <FollowingTab credentialsMissing={false} />}
+        </>
+      )}
     </div>
   )
 }

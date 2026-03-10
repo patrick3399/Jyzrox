@@ -151,7 +151,7 @@ function JobRow({
           )}
         </div>
 
-        <div className="flex items-center gap-2 flex-shrink-0">
+        <div className="flex items-center gap-2 shrink-0">
           <StatusBadge status={job.status} />
           {job.status === 'running' && (
             <button
@@ -214,6 +214,14 @@ export default function QueuePage() {
       toast.success(`${t('queue.queuedSuccess')} (job: ${result.job_id})`)
       setUrlInput('')
       await mutate()
+      if (result.warning) {
+        const warningMap: Record<string, string> = {
+          'eh_credentials_recommended': 'credential.ehRecommended',
+          'pixiv_credentials_required': 'credential.pixivRequired',
+        }
+        const i18nKey = warningMap[result.warning] || result.warning
+        toast(t(i18nKey), { icon: '⚠️' })
+      }
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to enqueue download')
     }

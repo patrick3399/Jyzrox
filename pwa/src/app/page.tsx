@@ -29,9 +29,9 @@ import type { Gallery, DownloadJob } from '@/lib/types'
 
 const QUICK_LINKS = [
   {
-    href: '/browse',
-    label: () => t('dashboard.quickLinks.browse'),
-    desc: () => t('dashboard.quickLinks.browseDesc'),
+    href: '/e-hentai',
+    label: () => t('dashboard.quickLinks.ehentai'),
+    desc: () => t('dashboard.quickLinks.ehentaiDesc'),
     icon: Search,
   },
   {
@@ -182,7 +182,7 @@ function SystemAlerts({ alerts }: { alerts: string[] }) {
             <span className="leading-snug">{msg}</span>
             <button
               onClick={() => dismiss(msg)}
-              className={`flex-shrink-0 p-0.5 rounded transition-colors ${styles.btn}`}
+              className={`shrink-0 p-0.5 rounded transition-colors ${styles.btn}`}
               aria-label={t('common.dismissAlert')}
             >
               <X size={14} />
@@ -299,7 +299,7 @@ export default function Dashboard() {
                 >
                   <p className="text-sm text-vault-text-secondary truncate">{job.url}</p>
                   <span
-                    className={`flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded border ${
+                    className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded border ${
                       job.status === 'running'
                         ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
                         : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
@@ -343,7 +343,7 @@ export default function Dashboard() {
               icon={BookMarked}
               title={t('dashboard.noGalleries')}
               description={t('dashboard.noGalleriesHint')}
-              action={{ label: t('dashboard.quickLinks.browse'), href: '/browse' }}
+              action={{ label: t('dashboard.quickLinks.ehentai'), href: '/e-hentai' }}
             />
           )}
 

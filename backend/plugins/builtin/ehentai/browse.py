@@ -309,9 +309,12 @@ async def search(
             )
         except PermissionError as e:
             detail = str(e)
-            if "Sad Panda" in detail or "509" in detail:
+            if "509" in detail:
                 await push_system_alert(detail)
-                raise HTTPException(status_code=403, detail=detail)
+                raise api_error(403, "eh_bandwidth_exceeded", _locale(request))
+            if "Sad Panda" in detail:
+                await push_system_alert(detail)
+                raise api_error(403, "eh_access_denied", _locale(request))
             await push_system_alert("E-Hentai cookie invalid or expired")
             raise api_error(401, "eh_cookie_invalid", _locale(request))
         except ValueError as e:
@@ -351,9 +354,12 @@ async def get_popular(
             result = await client.get_popular()
         except PermissionError as e:
             detail = str(e)
-            if "Sad Panda" in detail or "509" in detail:
+            if "509" in detail:
                 await push_system_alert(detail)
-                raise HTTPException(status_code=403, detail=detail)
+                raise api_error(403, "eh_bandwidth_exceeded", _locale(request))
+            if "Sad Panda" in detail:
+                await push_system_alert(detail)
+                raise api_error(403, "eh_access_denied", _locale(request))
             await push_system_alert("E-Hentai cookie invalid or expired")
             raise api_error(401, "eh_cookie_invalid", _locale(request))
         except ValueError as e:
@@ -401,9 +407,12 @@ async def get_toplist(
             result = await client.get_toplist(tl=tl, page=page)
         except PermissionError as e:
             detail = str(e)
-            if "Sad Panda" in detail or "509" in detail:
+            if "509" in detail:
                 await push_system_alert(detail)
-                raise HTTPException(status_code=403, detail=detail)
+                raise api_error(403, "eh_bandwidth_exceeded", _locale(request))
+            if "Sad Panda" in detail:
+                await push_system_alert(detail)
+                raise api_error(403, "eh_access_denied", _locale(request))
             await push_system_alert("E-Hentai cookie invalid or expired")
             raise api_error(401, "eh_cookie_invalid", _locale(request))
         except ValueError as e:
@@ -441,8 +450,11 @@ async def get_gallery_comments(
         except PermissionError as e:
             detail = str(e)
             await push_system_alert(detail)
-            status_code = 403 if "Sad Panda" in detail or "509" in detail else 401
-            raise HTTPException(status_code=status_code, detail=detail)
+            if "509" in detail:
+                raise api_error(403, "eh_bandwidth_exceeded", "en")
+            if "Sad Panda" in detail:
+                raise api_error(403, "eh_access_denied", "en")
+            raise api_error(401, "eh_cookie_invalid", "en")
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
@@ -474,8 +486,11 @@ async def get_gallery(
         except PermissionError as e:
             detail = str(e)
             await push_system_alert(detail)
-            status = 403 if "Sad Panda" in detail or "509" in detail else 401
-            raise HTTPException(status_code=status, detail=detail)
+            if "509" in detail:
+                raise api_error(403, "eh_bandwidth_exceeded", "en")
+            if "Sad Panda" in detail:
+                raise api_error(403, "eh_access_denied", "en")
+            raise api_error(401, "eh_cookie_invalid", "en")
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
@@ -514,8 +529,11 @@ async def get_gallery_previews(
         except PermissionError as e:
             detail = str(e)
             await push_system_alert(detail)
-            status = 403 if "Sad Panda" in detail or "509" in detail else 401
-            raise HTTPException(status_code=status, detail=detail)
+            if "509" in detail:
+                raise api_error(403, "eh_bandwidth_exceeded", "en")
+            if "Sad Panda" in detail:
+                raise api_error(403, "eh_access_denied", "en")
+            raise api_error(401, "eh_cookie_invalid", "en")
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))
 
@@ -613,8 +631,11 @@ async def get_gallery_images_paginated(
             except PermissionError as e:
                 detail = str(e)
                 await push_system_alert(detail)
-                status = 403 if "Sad Panda" in detail or "509" in detail else 401
-                raise HTTPException(status_code=status, detail=detail)
+                if "509" in detail:
+                    raise api_error(403, "eh_bandwidth_exceeded", "en")
+                if "Sad Panda" in detail:
+                    raise api_error(403, "eh_access_denied", "en")
+                raise api_error(401, "eh_cookie_invalid", "en")
             except ValueError as e:
                 raise HTTPException(status_code=503, detail=str(e))
         await cache.set_gallery_cache(gid, gallery)
@@ -675,8 +696,11 @@ async def get_gallery_images_paginated(
             except PermissionError as e:
                 detail = str(e)
                 await push_system_alert(detail)
-                status = 403 if "Sad Panda" in detail or "509" in detail else 401
-                raise HTTPException(status_code=status, detail=detail)
+                if "509" in detail:
+                    raise api_error(403, "eh_bandwidth_exceeded", "en")
+                if "Sad Panda" in detail:
+                    raise api_error(403, "eh_access_denied", "en")
+                raise api_error(401, "eh_cookie_invalid", "en")
             except _httpx.HTTPError as e:
                 logger.error("Failed to fetch image tokens for %s dp=%s: %s", gid, missing_dps, e)
                 raise HTTPException(status_code=502, detail=f"EH request failed: {e}")
@@ -775,8 +799,11 @@ async def image_proxy(
         except PermissionError as e:
             detail = str(e)
             await push_system_alert(detail)
-            status = 403 if "Sad Panda" in detail or "509" in detail else 401
-            raise HTTPException(status_code=status, detail=detail)
+            if "509" in detail:
+                raise api_error(403, "eh_bandwidth_exceeded", "en")
+            if "Sad Panda" in detail:
+                raise api_error(403, "eh_access_denied", "en")
+            raise api_error(401, "eh_cookie_invalid", "en")
 
     await cache.set_proxied_image(gid, page, image_bytes)
     return Response(
@@ -820,8 +847,10 @@ async def get_favorites(
         except PermissionError as e:
             detail = str(e)
             await push_system_alert(detail)
-            if "Sad Panda" in detail or "509" in detail:
-                raise HTTPException(status_code=403, detail=detail)
+            if "509" in detail:
+                raise api_error(403, "eh_bandwidth_exceeded", _locale(request))
+            if "Sad Panda" in detail:
+                raise api_error(403, "eh_access_denied", _locale(request))
             raise api_error(401, "eh_cookie_invalid", _locale(request))
         except ValueError as e:
             raise HTTPException(status_code=503, detail=str(e))

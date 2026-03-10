@@ -51,20 +51,22 @@ async def download_job(
     else:
         credentials = await get_credential(source_id)
 
-    # Credential gate — generic via Downloadable protocol
-    downloader = plugin_registry.get_downloader(source_id)
-    if downloader and downloader.requires_credentials() and not credentials:
-        err = f"{plugin.meta.name} credentials not configured. Go to Credentials to set up."
-        logger.error("[download] %s", err)
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
-
-    # Determine output directory via Downloadable protocol
+    # Determine output directory via Downloadable protocol — always use the
+    # original plugin's resolver so files land in the right source-specific
+    # subdirectory (e.g. /data/gallery/pixiv/12345) even when we later swap
+    # the executor to the gallery-dl fallback.
     downloader = plugin_registry.get_downloader(source_id)
     if downloader:
         target_dir = downloader.resolve_output_dir(url, Path(settings.data_gallery_path))
     else:
         target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
+
+    # Credential gate — generic via Downloadable protocol.
+    if downloader and downloader.requires_credentials() and not credentials:
+        err = f"{plugin.meta.name} credentials not configured. Go to Credentials to set up."
+        logger.error("[download] %s", err)
+        await _set_job_status(db_job_id, "failed", err)
+        return {"status": "failed", "error": err}
 
     # Semaphore — use source_id as the semaphore key (maps to existing keys)
     sem_key = plugin.meta.semaphore_key or source_id

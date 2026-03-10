@@ -17,6 +17,7 @@ from core.database import get_db
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites
 from db.models import DownloadJob
+from services.credential import get_credential
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["download"])
@@ -35,6 +36,25 @@ class QuickDownloadRequest(BaseModel):
 
 class JobActionRequest(BaseModel):
     action: str  # "pause" or "resume"
+
+
+async def _credential_warning(source: str) -> str | None:
+    """Return a warning code if the source has no credentials configured.
+
+    Raises HTTPException for sources that strictly require credentials (e.g. Pixiv).
+    """
+    if source in ("ehentai", "exhentai"):
+        cred = await get_credential("ehentai")
+        if not cred:
+            return "eh_credentials_recommended"
+    elif source == "pixiv":
+        cred = await get_credential("pixiv")
+        if not cred:
+            raise HTTPException(
+                status_code=400,
+                detail="Pixiv credentials not configured. Go to Settings → Credentials to set up.",
+            )
+    return None
 
 
 async def _check_source_enabled(source: str) -> None:
@@ -81,6 +101,7 @@ async def _enqueue(
     initial_progress = {"total": total} if total is not None else {}
 
     await _check_source_enabled(source)
+    warning = await _credential_warning(source)
 
     # 1. Persist DB record first so the worker always finds a matching row.
     try:
@@ -112,7 +133,7 @@ async def _enqueue(
             logger.warning("[enqueue] could not mark job %s as failed in DB: %s", job_id, db_exc)
         raise HTTPException(status_code=503, detail="Failed to enqueue download job")
 
-    return {"job_id": str(job_id), "status": "queued", "source": source}
+    return {"job_id": str(job_id), "status": "queued", "source": source, "warning": warning}
 
 
 @router.post("/")

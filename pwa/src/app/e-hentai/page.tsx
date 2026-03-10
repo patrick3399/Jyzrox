@@ -1,12 +1,14 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react'
+import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEhSearch, useEhFavorites, useEhPopular, useEhToplist } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
 
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
+import { CredentialBanner } from '@/components/CredentialBanner'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { RatingStars } from '@/components/RatingStars'
@@ -116,7 +118,7 @@ function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
                  hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors active:bg-vault-card-hover"
     >
       {/* Thumbnail */}
-      <div className="flex-shrink-0 w-[90px] h-[120px] bg-vault-input rounded overflow-hidden">
+      <div className="shrink-0 w-[90px] h-[120px] bg-vault-input rounded overflow-hidden">
         {thumbSrc ? (
           <LazyImage src={thumbSrc} alt={gallery.title} className="w-full h-full object-cover" />
         ) : (
@@ -254,7 +256,7 @@ function GalleryModal({
       >
         <div className="flex gap-4 p-5">
           {/* Thumbnail */}
-          <div className="flex-shrink-0">
+          <div className="shrink-0">
             {thumbSrc ? (
               <img
                 src={thumbSrc}
@@ -420,7 +422,7 @@ function BrowsePage() {
   const initialQ = searchParams.get('q') || ''
   const rawTab = searchParams.get('tab')
   const initialTab: BrowseTab =
-    rawTab === 'favorites' || rawTab === 'popular' || rawTab === 'toplist' ? rawTab : 'search'
+    rawTab === 'search' || rawTab === 'favorites' || rawTab === 'toplist' ? rawTab : 'popular'
   const initialFavCat = searchParams.get('favcat') || 'all'
   const initialFavSearch = searchParams.get('favsearch') || ''
 
@@ -576,7 +578,7 @@ function BrowsePage() {
     if (activeTab === 'toplist' && toplistTl !== 11) params.set('tl', String(toplistTl))
     if (activeTab === 'toplist' && toplistPage > 0) params.set('tlpage', String(toplistPage))
     const qs = params.toString()
-    router.replace(qs ? `/browse?${qs}` : '/browse', { scroll: false })
+    router.replace(qs ? `/e-hentai?${qs}` : '/e-hentai', { scroll: false })
   }, [searchQuery, activeTab, favCat, favSearch, toplistTl, toplistPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Compute f_cats bitmask from selected categories (multi-select)
@@ -614,7 +616,7 @@ function BrowsePage() {
       : {
           category: category || undefined,
         }),
-  }, activeTab === 'search')
+  }, activeTab === 'search' || !!searchQuery)
 
   const {
     data: favData,
@@ -785,7 +787,7 @@ function BrowsePage() {
   const navigateToGallery = useCallback(
     (g: EhGallery) => {
       sessionStorage.setItem('browse_scrollY', String(window.scrollY))
-      router.push(`/browse/${g.gid}/${g.token}`)
+      router.push(`/e-hentai/${g.gid}/${g.token}`)
     },
     [router],
   )
@@ -837,6 +839,19 @@ function BrowsePage() {
     [commitSearch],
   )
 
+  const clearSearch = useCallback(() => {
+    setInputValue('')
+    setSearchQuery('')
+    setCurrentCursor(null)
+    setPrevCursors([])
+    setPageIndex(0)
+    setScrollGalleries([])
+    setScrollPage(0)
+    setScrollNextGid(null)
+    setScrollHasMore(true)
+    scrollNeedsSeedRef.current = true
+  }, [])
+
   const displayGalleries = useMemo(
     () => (loadMode === 'scroll' ? scrollGalleries : (data?.galleries ?? [])),
     [loadMode, scrollGalleries, data?.galleries],
@@ -850,6 +865,9 @@ function BrowsePage() {
 
   return (
     <div className="space-y-4">
+        {/* Credential banner (shown when EH credentials are not configured) */}
+        {!ehConfigured && <CredentialBanner source="ehentai" />}
+
         {/* ── Search bar with history dropdown ── */}
 
         {/* Mobile: expanded search overlay */}
@@ -1195,71 +1213,89 @@ function BrowsePage() {
           </div>
         </div>
 
-        {/* ── Tab switcher ── */}
-        <div className="flex gap-1 border-b border-vault-border overflow-x-auto scrollbar-hide">
-          <button
-            onClick={() => {
-              setActiveTab('search')
-              setCurrentCursor(null)
-              setPrevCursors([])
-              setPageIndex(0)
-            }}
-            className={`flex-shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'search'
-                ? 'border-vault-accent text-vault-text'
-                : 'border-transparent text-vault-text-muted hover:text-vault-text'
-            }`}
-          >
-            {t('browse.searchTab')}
-          </button>
-          <button
-            onClick={() => setActiveTab('popular')}
-            className={`flex-shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'popular'
-                ? 'border-orange-400 text-vault-text'
-                : 'border-transparent text-vault-text-muted hover:text-vault-text'
-            }`}
-          >
-            {t('browse.popularTab')}
-          </button>
-          <button
-            onClick={() => {
-              setActiveTab('toplist')
-              setToplistPage(0)
-            }}
-            className={`flex-shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-              activeTab === 'toplist'
-                ? 'border-yellow-400 text-vault-text'
-                : 'border-transparent text-vault-text-muted hover:text-vault-text'
-            }`}
-          >
-            {t('browse.toplistTab')}
-          </button>
-          {ehConfigured && (
+        {/* ── Search mode: clear header (replaces tabs) ── */}
+        {searchQuery && (
+          <div className="flex items-center justify-between">
+            <span className="text-sm text-vault-text-secondary">
+              {t('browse.resultsFor', { query: searchQuery })}
+            </span>
             <button
-              onClick={() => {
-                setActiveTab('favorites')
-                setFavCursor({})
-              }}
-              className={`flex-shrink-0 ml-3 md:ml-auto px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'favorites'
-                  ? 'border-[#e91e63] text-vault-text'
+              onClick={clearSearch}
+              className="text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+            >
+              {t('browse.clearSearch')}
+            </button>
+          </div>
+        )}
+
+        {/* ── Tab switcher (hidden when searching) ── */}
+        {!searchQuery && (
+          <div className="flex gap-1 border-b border-vault-border overflow-x-auto scrollbar-hide">
+            <button
+              onClick={() => setActiveTab('popular')}
+              className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'popular'
+                  ? 'border-orange-400 text-vault-text'
                   : 'border-transparent text-vault-text-muted hover:text-vault-text'
               }`}
             >
-              {t('browse.favoritesTab')}
+              {t('browse.popularTab')}
             </button>
-          )}
-        </div>
+            <button
+              onClick={() => {
+                setActiveTab('search')
+                setCurrentCursor(null)
+                setPrevCursors([])
+                setPageIndex(0)
+              }}
+              className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'search'
+                  ? 'border-vault-accent text-vault-text'
+                  : 'border-transparent text-vault-text-muted hover:text-vault-text'
+              }`}
+            >
+              {t('browse.latestTab')}
+            </button>
+            <button
+              onClick={() => {
+                setActiveTab('toplist')
+                setToplistPage(0)
+              }}
+              className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'toplist'
+                  ? 'border-yellow-400 text-vault-text'
+                  : 'border-transparent text-vault-text-muted hover:text-vault-text'
+              }`}
+            >
+              {t('browse.toplistTab')}
+            </button>
+            {ehConfigured && (
+              <button
+                onClick={() => {
+                  setActiveTab('favorites')
+                  setFavCursor({})
+                }}
+                className={`shrink-0 ml-3 md:ml-auto px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                  activeTab === 'favorites'
+                    ? 'border-[#e91e63] text-vault-text'
+                    : 'border-transparent text-vault-text-muted hover:text-vault-text'
+                }`}
+              >
+                {t('browse.favoritesTab')}
+              </button>
+            )}
+          </div>
+        )}
 
-        {/* ════════ SEARCH TAB ════════ */}
-        {activeTab === 'search' && (
+        {/* ════════ SEARCH/LATEST CONTENT ════════ */}
+        {/* Show when: searching (any tab) OR on Latest tab (no search query) */}
+        {(searchQuery || activeTab === 'search') && (
           <>
             {/* ── Category filter row ── */}
             <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
               <button
                 onClick={() => handleCategoryClick(null)}
-                className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                   (!showAdvanced && category === null) ||
                   (showAdvanced && selectedCats.size === Object.keys(CATEGORY_META).length)
                     ? 'bg-vault-text text-vault-bg border-vault-text'
@@ -1274,7 +1310,7 @@ function BrowsePage() {
                   <button
                     key={cat.value}
                     onClick={() => handleCategoryClick(cat.value)}
-                    className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-all ${
+                    className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-all ${
                       isActive
                         ? 'border-transparent'
                         : 'bg-transparent text-vault-text-secondary border-vault-border hover:text-white hover:border-transparent'
@@ -1707,7 +1743,7 @@ function BrowsePage() {
         )}
 
         {/* ════════ FAVORITES TAB ════════ */}
-        {activeTab === 'favorites' && ehConfigured && (
+        {!searchQuery && activeTab === 'favorites' && ehConfigured && (
           <>
             {/* ── Favorites category pills (All + 0-9) ── */}
             <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
@@ -1719,7 +1755,7 @@ function BrowsePage() {
                   setFavScrollNextCursor(undefined)
                   setFavScrollHasMore(true)
                 }}
-                className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                   favCat === 'all'
                     ? 'bg-vault-text text-vault-bg border-vault-text'
                     : 'bg-transparent text-vault-text-secondary border-vault-border hover:border-vault-border-hover hover:text-vault-text'
@@ -1743,7 +1779,7 @@ function BrowsePage() {
                       setFavScrollNextCursor(undefined)
                       setFavScrollHasMore(true)
                     }}
-                    className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                    className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                       isActive
                         ? 'text-white border-transparent'
                         : 'bg-transparent text-vault-text-secondary border-vault-border hover:border-vault-border-hover hover:text-vault-text'
@@ -1899,7 +1935,7 @@ function BrowsePage() {
         )}
 
         {/* ════════ POPULAR TAB ════════ */}
-        {activeTab === 'popular' && (
+        {!searchQuery && activeTab === 'popular' && (
           <>
             {popularLoading && !popularData && (
               <div className="flex justify-center py-4">
@@ -1954,7 +1990,7 @@ function BrowsePage() {
         )}
 
         {/* ════════ TOPLIST TAB ════════ */}
-        {activeTab === 'toplist' && (
+        {!searchQuery && activeTab === 'toplist' && (
           <>
             {/* Time-period sub-filter */}
             <div className="flex gap-1.5 overflow-x-auto pb-1 scrollbar-hide">
@@ -1965,7 +2001,7 @@ function BrowsePage() {
                     setToplistTl(tl)
                     setToplistPage(0)
                   }}
-                  className={`flex-shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
+                  className={`shrink-0 px-3 py-1 rounded-full text-xs font-medium border transition-colors ${
                     toplistTl === tl
                       ? 'bg-yellow-500 text-black border-yellow-500'
                       : 'bg-transparent text-vault-text-secondary border-vault-border hover:border-vault-border-hover hover:text-vault-text'

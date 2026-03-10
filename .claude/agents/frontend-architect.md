@@ -16,7 +16,7 @@ maxTurns: 30
 - `pwa/src/hooks/` — SWR hooks
 - `pwa/src/lib/api.ts` — API 呼叫（唯一出口）
 - `pwa/src/lib/types.ts` — TypeScript 型別
-- `pwa/src/middleware.ts` — Auth redirect
+- `pwa/src/proxy.ts` — Auth redirect
 
 ## 易漏改的同步點
 

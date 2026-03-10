@@ -2,6 +2,9 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
+from core.compat import patch_asyncio_for_314
+patch_asyncio_for_314()
+
 from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import FastAPI

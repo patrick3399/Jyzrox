@@ -350,7 +350,7 @@ export default function EhGalleryDetailPage() {
   const handleTagClick = useCallback(
     (ns: string, name: string) => {
       const query = name.includes(' ') ? `${ns}:"${name}"` : `${ns}:${name}`
-      router.push(`/browse?q=${encodeURIComponent(query)}`)
+      router.push(`/e-hentai?q=${encodeURIComponent(query)}`)
     },
     [router],
   )
@@ -368,7 +368,7 @@ export default function EhGalleryDetailPage() {
 
   const handleRead = useCallback(
     (startPage = 1) => {
-      router.push(`/browse/read/${gid}/${token}?page=${startPage}`)
+      router.push(`/e-hentai/read/${gid}/${token}?page=${startPage}`)
     },
     [router, gid, token],
   )
@@ -411,7 +411,7 @@ export default function EhGalleryDetailPage() {
         {/* ── Header section ── */}
         <div className="flex gap-5 flex-col sm:flex-row">
           {/* Cover */}
-          <div className="flex-shrink-0 self-start">
+          <div className="shrink-0 self-start">
             {thumbSrc ? (
               <img
                 src={thumbSrc}
@@ -499,7 +499,7 @@ export default function EhGalleryDetailPage() {
                         className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-vault-text hover:bg-vault-card-hover transition-colors"
                       >
                         <span
-                          className="w-3 h-3 rounded-full flex-shrink-0"
+                          className="w-3 h-3 rounded-full shrink-0"
                           style={{ backgroundColor: FAV_COLORS[i] }}
                         />
                         {name}
@@ -536,7 +536,7 @@ export default function EhGalleryDetailPage() {
                 <div key={ns} className="flex flex-wrap items-start gap-1.5">
                   {/* Namespace label */}
                   <span
-                    className={`text-[11px] font-bold px-2 py-1 rounded ${style.bg} ${style.text} ${style.border} border uppercase tracking-wide min-w-[70px] text-center flex-shrink-0`}
+                    className={`text-[11px] font-bold px-2 py-1 rounded ${style.bg} ${style.text} ${style.border} border uppercase tracking-wide min-w-[70px] text-center shrink-0`}
                   >
                     {ns}
                   </span>

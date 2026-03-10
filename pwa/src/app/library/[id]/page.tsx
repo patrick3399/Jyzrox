@@ -238,7 +238,7 @@ export default function GalleryDetailPage() {
         <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
           <div className="flex flex-col md:flex-row gap-5">
             {/* Thumbnail preview from first image */}
-            <div className="flex-shrink-0">
+            <div className="shrink-0">
               {images[0]?.thumb_path ? (
                 <img
                   src={images[0].thumb_path}
@@ -280,7 +280,7 @@ export default function GalleryDetailPage() {
                   </h1>
                 )}
                 <span
-                  className={`flex-shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
+                  className={`shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
                 >
                   {t(statusInfo.labelKey)}
                 </span>
@@ -434,7 +434,7 @@ export default function GalleryDetailPage() {
             <div className="space-y-2">
               {Object.entries(tagGroups).map(([namespace, values]) => (
                 <div key={namespace} className="flex flex-wrap gap-1 items-start">
-                  <span className="text-xs text-vault-text-muted w-20 flex-shrink-0 pt-0.5 capitalize">
+                  <span className="text-xs text-vault-text-muted w-20 shrink-0 pt-0.5 capitalize">
                     {namespace}:
                   </span>
                   <div className="flex flex-wrap gap-1">

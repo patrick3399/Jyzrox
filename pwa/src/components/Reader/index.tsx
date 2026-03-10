@@ -919,7 +919,7 @@ function ThumbnailStrip({
               key={img.pageNum}
               ref={isActive ? activeRef : null}
               onClick={() => onPageSelect(img.pageNum)}
-              className={`relative flex-shrink-0 overflow-hidden rounded transition-all ${
+              className={`relative shrink-0 overflow-hidden rounded transition-all ${
                 isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
               }`}
               style={{ width: thumbW, height: thumbH }}

@@ -12,12 +12,12 @@ description: Pre-deployment checks — lint, type check, tests, and git status
 
 2. **Backend lint + type check**
    ```bash
-   cd backend && python -m py_compile main.py && python -m py_compile worker/__init__.py
+   cd backend && find . -name '*.py' -not -path './.venv/*' -exec python3 -m py_compile {} +
    ```
 
 3. **Backend tests**
    ```bash
-   cd backend && python -m pytest --tb=short -q
+   cd backend && python3 -m pytest --tb=short -q
    ```
 
 4. **Frontend type check**

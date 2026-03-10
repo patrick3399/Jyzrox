@@ -103,13 +103,11 @@ class EhSourcePlugin(SourcePlugin):
         gid = int(m.group(1))
         token = m.group(2)
 
-        # credentials is a JSON string of EH cookies (or None)
+        # Accept both a JSON-string credential (from worker) and a pre-parsed dict.
+        # When no credentials are provided, fall back to anonymous (empty cookies).
         if not credentials:
-            err = "E-Hentai credentials not configured"
-            return DownloadResult(status="failed", downloaded=0, total=0, error=err)
-
-        # Accept both a JSON-string credential (from worker) and a pre-parsed dict
-        if isinstance(credentials, str):
+            cookies: dict = {}
+        elif isinstance(credentials, str):
             try:
                 cookies = json.loads(credentials)
             except (json.JSONDecodeError, TypeError):
@@ -119,14 +117,18 @@ class EhSourcePlugin(SourcePlugin):
             # credentials passed as dict (e.g. from direct call)
             cookies = credentials
 
-        # Determine use_ex: Redis setting → config → igneous cookie → URL domain
-        from core.database import get_redis
+        # Determine use_ex: Redis setting → config → igneous cookie → URL domain.
+        # Anonymous downloads must use e-hentai.org, not exhentai.
+        from core.redis_client import get_redis
         redis = get_redis()
         pref = await redis.get("setting:eh_use_ex")
         if pref is not None:
             use_ex = pref == b"1"
         else:
             use_ex = settings.eh_use_ex or bool(cookies.get("igneous"))
+
+        if not cookies:
+            use_ex = False  # anonymous access only works on e-hentai.org
 
         # Wrap on_progress to match signature expected by download_eh_gallery
         async def _progress(downloaded: int, total_pages: int) -> None:
@@ -211,8 +213,8 @@ class EhSourcePlugin(SourcePlugin):
         return base_path / "ehentai" / "unknown"
 
     def requires_credentials(self) -> bool:
-        """E-Hentai always requires credentials."""
-        return True
+        """E-Hentai supports anonymous downloads (with limited bandwidth)."""
+        return False
 
     # ------------------------------------------------------------------
     # Parseable protocol method
