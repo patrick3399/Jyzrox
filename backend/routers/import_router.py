@@ -2,11 +2,13 @@
 
 import json
 import os
+import re
+import uuid
 from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth
@@ -18,79 +20,177 @@ from db.models import Gallery, LibraryPath
 router = APIRouter(tags=["import"])
 
 
-class ImportRequest(BaseModel):
-    source_dir: str
-    mode: str = "copy"  # "copy" only; "link" is reserved for auto-discovery
-    metadata: dict | None = None
+class BatchScanRequest(BaseModel):
+    root_dir: str
+    pattern: str = "{title}"
 
 
-@router.post("/")
-async def start_import(
-    req: ImportRequest,
-    request: Request,
-    _: dict = Depends(require_auth),
-):
-    if req.mode != "copy":
-        raise HTTPException(status_code=400, detail="Only copy mode is supported for manual imports")
+class BatchStartRequest(BaseModel):
+    root_dir: str
+    mode: str = "copy"  # "copy" | "link"
+    galleries: list[dict]  # [{path, artist, title}, ...]
 
-    # If source_dir is relative, resolve it against the library base path.
-    source_dir = req.source_dir
-    if not os.path.isabs(source_dir):
-        source_dir = os.path.join(settings.library_base_path, source_dir)
 
-    # Use os.path.realpath to resolve symlinks before validating containment.
-    real_source = os.path.realpath(source_dir)
+async def _validate_root_dir(root_dir: str) -> str:
+    """Resolve and validate root_dir against security constraints.
 
-    # Explicitly reject paths inside the internal download directory.
+    Returns the resolved real path or raises HTTPException.
+    """
+    if not os.path.isabs(root_dir):
+        root_dir = os.path.join(settings.library_base_path, root_dir)
+
+    real_root = os.path.realpath(root_dir)
+
     real_data = os.path.realpath(settings.data_gallery_path)
-    if real_source.startswith(real_data + os.sep) or real_source == real_data:
+    if real_root.startswith(real_data + os.sep) or real_root == real_data:
         raise HTTPException(
             status_code=400,
             detail="Cannot import from internal download directory. Mount external media under /mnt/",
         )
 
-    # Validate the source is within a configured library path or the base path.
     all_library_paths = await get_all_library_paths()
     allowed_real = [os.path.realpath(p) for p in all_library_paths]
     allowed_real.append(os.path.realpath(settings.library_base_path))
 
     if not any(
-        real_source == rp or real_source.startswith(rp + os.sep)
+        real_root == rp or real_root.startswith(rp + os.sep)
         for rp in allowed_real
     ):
-        raise HTTPException(status_code=400, detail="source_dir must be within a configured library path")
+        raise HTTPException(status_code=400, detail="root_dir must be within a configured library path")
 
-    # Validate the resolved path is an accessible directory before creating any DB records.
-    if not os.path.isdir(real_source):
+    if not os.path.isdir(real_root):
         raise HTTPException(status_code=400, detail="Path does not exist or is not a directory")
-    if not os.access(real_source, os.R_OK):
+    if not os.access(real_root, os.R_OK):
         raise HTTPException(status_code=400, detail="Path is not readable")
 
-    # Create DB entry (raw SQL to avoid PostgreSQL-specific ORM types like ARRAY)
-    from sqlalchemy import text
+    return real_root
 
-    from core.database import async_session
 
-    title = req.metadata.get("title", "Imported") if req.metadata else "Imported"
-    async with async_session() as session:
-        result = await session.execute(
-            text(
-                "INSERT INTO galleries (source, source_id, title, import_mode)"
-                " VALUES (:source, :source_id, :title, :mode) RETURNING id"
-            ),
-            {
-                "source": "local",
-                "source_id": os.path.basename(source_dir),
+def _build_pattern_regex(pattern: str) -> re.Pattern:
+    """Build a full-match regex from a pattern string with {name} placeholders."""
+    parts = re.split(r'(\{[^}]+\})', pattern)
+    regex_parts = []
+    for part in parts:
+        if part.startswith('{') and part.endswith('}'):
+            name = part[1:-1]
+            if name == '_':
+                regex_parts.append(r'(?:[^/]+)')
+            else:
+                regex_parts.append(rf'(?P<{name}>[^/]+)')
+        else:
+            regex_parts.append(re.escape(part))
+    return re.compile('^' + ''.join(regex_parts) + '$')
+
+
+@router.post("/batch/scan")
+async def batch_scan(
+    req: BatchScanRequest,
+    _: dict = Depends(require_auth),
+):
+    """Scan root_dir using pattern to find importable gallery directories."""
+    real_root = await _validate_root_dir(req.root_dir)
+    pattern_re = _build_pattern_regex(req.pattern)
+
+    matches = []
+    unmatched = []
+
+    for dirpath, dirnames, filenames in os.walk(real_root):
+        # Skip hidden directories
+        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+
+        media_files = [f for f in filenames if Path(f).suffix.lower() in _SUPPORTED_EXTS]
+        if not media_files:
+            continue
+
+        abs_path = dirpath
+        try:
+            rel_path = os.path.relpath(abs_path, real_root)
+        except ValueError:
+            continue
+
+        # Skip root itself
+        if rel_path == '.':
+            continue
+
+        # Normalize path separators
+        rel_path_normalized = rel_path.replace(os.sep, '/')
+
+        m = pattern_re.match(rel_path_normalized)
+        if m:
+            groups = m.groupdict()
+            artist = groups.get('artist') or None
+            title = groups.get('title') or Path(abs_path).name
+            matches.append({
+                "rel_path": rel_path_normalized,
+                "abs_path": abs_path,
+                "artist": artist,
                 "title": title,
-                "mode": req.mode,
-            },
-        )
-        gallery_id = result.scalar_one()
-        await session.commit()
+                "file_count": len(media_files),
+            })
+        else:
+            unmatched.append({
+                "rel_path": rel_path_normalized,
+                "file_count": len(media_files),
+            })
+
+    return {"matches": matches, "unmatched": unmatched}
+
+
+@router.post("/batch/start")
+async def batch_start(
+    req: BatchStartRequest,
+    request: Request,
+    _: dict = Depends(require_auth),
+):
+    """Start a batch import job for multiple galleries."""
+    real_root = await _validate_root_dir(req.root_dir)
+
+    if req.mode not in ("copy", "link"):
+        raise HTTPException(status_code=400, detail="mode must be 'copy' or 'link'")
+
+    batch_id = str(uuid.uuid4())
+    total = len(req.galleries)
+
+    r = get_redis()
+    await r.setex(
+        f"import:batch:{batch_id}",
+        3600,
+        json.dumps({
+            "total": total,
+            "completed": 0,
+            "failed": 0,
+            "status": "running",
+            "current_gallery_id": None,
+        }),
+    )
+
+    # If link mode, auto-register root_dir as a library path
+    if req.mode == "link":
+        async with async_session() as session:
+            stmt = pg_insert(LibraryPath).values(
+                path=real_root,
+                label=Path(real_root).name,
+            ).on_conflict_do_nothing()
+            await session.execute(stmt)
+            await session.commit()
 
     arq = request.app.state.arq
-    await arq.enqueue_job("local_import_job", source_dir, req.mode, gallery_id)
-    return {"status": "enqueued", "gallery_id": gallery_id}
+    await arq.enqueue_job("batch_import_job", real_root, req.mode, req.galleries, batch_id)
+
+    return {"batch_id": batch_id, "total": total}
+
+
+@router.get("/batch/progress/{batch_id}")
+async def batch_progress(
+    batch_id: str,
+    _: dict = Depends(require_auth),
+):
+    """Get progress for an ongoing or completed batch import."""
+    r = get_redis()
+    data = await r.get(f"import:batch:{batch_id}")
+    if not data:
+        return {"status": "unknown"}
+    return json.loads(data)
 
 
 @router.get("/progress/{gallery_id}")
@@ -466,16 +566,6 @@ async def remove_library(library_id: int, _: dict = Depends(require_auth)):
         await session.delete(lp)
         await session.commit()
     return {"status": "removed"}
-
-
-# ── Auto-Discovery ────────────────────────────────────────────────────
-
-@router.post("/discover")
-async def trigger_discover(request: Request, _: dict = Depends(require_auth)):
-    """Trigger auto-discovery of new galleries across all library paths."""
-    arq = request.app.state.arq
-    await arq.enqueue_job("auto_discover_job")
-    return {"status": "enqueued"}
 
 
 # ── Monitor Status ────────────────────────────────────────────────────

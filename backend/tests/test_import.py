@@ -2,9 +2,10 @@
 Tests for import endpoints (/api/import/*).
 
 Uses the `client` fixture (pre-authenticated). The import router:
-- Creates a gallery row via raw SQL (async_session from core.database)
+- Validates root_dir against library paths and internal data dir
 - Enqueues an ARQ job via request.app.state.arq (mocked in conftest lifespan)
-- Reads Redis for progress data
+- Reads/writes Redis for batch progress data
+- For link mode, upserts into LibraryPath table via async_session
 
 The import router imports `async_session` lazily (inside the function body),
 so we patch `core.database.async_session` to redirect DB writes to the test DB.
@@ -12,199 +13,293 @@ so we patch `core.database.async_session` to redirect DB writes to the test DB.
 
 import json
 import os
-from unittest.mock import AsyncMock, patch
-
-from sqlalchemy import text
-
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
-# Helpers
+# POST /api/import/batch/scan — scan directory with pattern
 # ---------------------------------------------------------------------------
 
 
-async def _gallery_count(db_session) -> int:
-    """Return the number of galleries in the test DB."""
-    result = await db_session.execute(text("SELECT COUNT(*) FROM galleries"))
-    return result.scalar()
+class TestBatchScan:
+    """POST /api/import/batch/scan — scan root_dir using a pattern."""
 
-
-# ---------------------------------------------------------------------------
-# POST /api/import/ — enqueue import job
-# ---------------------------------------------------------------------------
-
-
-class TestStartImport:
-    """POST /api/import/ — start a local import job."""
-
-    async def test_import_valid_copy_mode_explicit(self, client, db_session, db_session_factory):
-        """Valid request with mode=copy should create a gallery and enqueue a job.
-
-        The import router imports async_session lazily inside the function body via
-        `from core.database import async_session`. Since core.database is a fake
-        module injected into sys.modules before any imports, we patch its
-        `async_session` attribute directly on that module object.
-
-        Paths must be within a configured library path (not data_gallery_path),
-        so we mock get_all_library_paths to return a test library root.
-        """
-        import sys
-
-        fake_db = sys.modules["core.database"]
-        original = fake_db.async_session
-        fake_db.async_session = db_session_factory
-        try:
-            gallery_path = "/mnt/test_lib/my_series"
-            with (
-                patch("core.config.settings.data_gallery_path", "/data/gallery"),
-                patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
-                patch("os.path.realpath", side_effect=lambda p: p),
-            ):
-                resp = await client.post(
-                    "/api/import/",
-                    json={"source_dir": gallery_path, "mode": "copy"},
-                )
-        finally:
-            fake_db.async_session = original
+    async def test_scan_with_title_pattern(self, client, mock_redis):
+        """Pattern {title} should match all immediate subdirs that contain media."""
+        walk_data = [
+            ("/mnt/test_lib/root", ["gallery1", "gallery2"], []),
+            ("/mnt/test_lib/root/gallery1", [], ["1.jpg", "2.png"]),
+            ("/mnt/test_lib/root/gallery2", [], ["a.webp"]),
+        ]
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("os.walk", return_value=iter(walk_data)),
+        ):
+            resp = await client.post(
+                "/api/import/batch/scan",
+                json={"root_dir": "/mnt/test_lib/root", "pattern": "{title}"},
+            )
 
         assert resp.status_code == 200
         data = resp.json()
-        assert data["status"] == "enqueued"
-        assert "gallery_id" in data
-        assert isinstance(data["gallery_id"], int)
+        assert "matches" in data
+        assert "unmatched" in data
 
-    async def test_import_valid_copy_mode(self, client, db_session, db_session_factory):
-        """Valid request with mode=copy should also succeed."""
-        import sys
+        titles = {m["title"] for m in data["matches"]}
+        assert "gallery1" in titles
+        assert "gallery2" in titles
 
-        fake_db = sys.modules["core.database"]
-        original = fake_db.async_session
-        fake_db.async_session = db_session_factory
-        try:
-            gallery_path = "/mnt/test_lib/another_series"
-            with (
-                patch("core.config.settings.data_gallery_path", "/data/gallery"),
-                patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
-                patch("os.path.realpath", side_effect=lambda p: p),
-            ):
-                resp = await client.post(
-                    "/api/import/",
-                    json={"source_dir": gallery_path, "mode": "copy"},
-                )
-        finally:
-            fake_db.async_session = original
+        match1 = next(m for m in data["matches"] if m["title"] == "gallery1")
+        assert match1["file_count"] == 2
+        match2 = next(m for m in data["matches"] if m["title"] == "gallery2")
+        assert match2["file_count"] == 1
 
-        assert resp.status_code == 200
-        assert resp.json()["status"] == "enqueued"
+        for m in data["matches"]:
+            assert m["artist"] is None
 
-    async def test_import_with_metadata(self, client, db_session, db_session_factory):
-        """Request with metadata should pass the title to the gallery row."""
-        import sys
-
-        fake_db = sys.modules["core.database"]
-        original = fake_db.async_session
-        fake_db.async_session = db_session_factory
-        try:
-            gallery_path = "/mnt/test_lib/titled_gallery"
-            with (
-                patch("core.config.settings.data_gallery_path", "/data/gallery"),
-                patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
-                patch("os.path.realpath", side_effect=lambda p: p),
-            ):
-                resp = await client.post(
-                    "/api/import/",
-                    json={
-                        "source_dir": gallery_path,
-                        "mode": "copy",
-                        "metadata": {"title": "My Custom Title"},
-                    },
-                )
-        finally:
-            fake_db.async_session = original
-
-        assert resp.status_code == 200
-        gallery_id = resp.json()["gallery_id"]
-
-        # Verify title was stored in the test DB
-        row = await db_session.execute(
-            text("SELECT title FROM galleries WHERE id = :id"), {"id": gallery_id}
-        )
-        title = row.scalar()
-        assert title == "My Custom Title"
-
-    async def test_import_invalid_mode_returns_400(self, client):
-        """Unsupported import mode should return 400."""
-        resp = await client.post(
-            "/api/import/",
-            json={"source_dir": "/data/gallery/foo", "mode": "move"},
-        )
-        assert resp.status_code == 400
-        assert "Only copy mode is supported" in resp.json()["detail"]
-
-    async def test_import_path_outside_gallery_returns_400(self, client):
-        """source_dir outside the allowed library paths should return 400."""
+    async def test_scan_with_artist_title_pattern(self, client, mock_redis):
+        """Pattern {artist}/{title} should extract both artist and title groups."""
+        walk_data = [
+            ("/mnt/test_lib/root", ["artist_name"], []),
+            ("/mnt/test_lib/root/artist_name", ["gallery_name"], []),
+            ("/mnt/test_lib/root/artist_name/gallery_name", [], ["page1.jpg", "page2.jpg", "page3.png"]),
+        ]
         with (
             patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("os.walk", return_value=iter(walk_data)),
         ):
             resp = await client.post(
-                "/api/import/",
-                json={"source_dir": "/tmp/evil_dir", "mode": "copy"},
+                "/api/import/batch/scan",
+                json={"root_dir": "/mnt/test_lib/root", "pattern": "{artist}/{title}"},
             )
-        assert resp.status_code == 400
-        assert "library path" in resp.json()["detail"].lower()
-
-    async def test_import_path_traversal_returns_400(self, client):
-        """Path traversal attempt should be rejected."""
-        with (
-            patch("core.config.settings.data_gallery_path", "/data/gallery"),
-            patch("os.path.realpath", side_effect=os.path.normpath),
-        ):
-            resp = await client.post(
-                "/api/import/",
-                json={"source_dir": "/data/gallery/../../../etc/passwd", "mode": "copy"},
-            )
-        assert resp.status_code == 400
-
-    async def test_import_enqueues_arq_job(self, client, db_session, db_session_factory):
-        """After a valid import request the ARQ job should be enqueued."""
-        import sys
-
-        from main import app
-
-        fake_db = sys.modules["core.database"]
-        original = fake_db.async_session
-        fake_db.async_session = db_session_factory
-        try:
-            gallery_path = "/mnt/test_lib/arq_test"
-            with (
-                patch("core.config.settings.data_gallery_path", "/data/gallery"),
-                patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
-                patch("os.path.realpath", side_effect=lambda p: p),
-            ):
-                resp = await client.post(
-                    "/api/import/",
-                    json={"source_dir": gallery_path, "mode": "copy"},
-                )
-        finally:
-            fake_db.async_session = original
 
         assert resp.status_code == 200
-        app.state.arq.enqueue_job.assert_called()
-        call_args = app.state.arq.enqueue_job.call_args
-        assert call_args[0][0] == "local_import_job"
+        data = resp.json()
+        assert len(data["matches"]) == 1
+        match = data["matches"][0]
+        assert match["artist"] == "artist_name"
+        assert match["title"] == "gallery_name"
+        assert match["file_count"] == 3
+        assert match["rel_path"] == "artist_name/gallery_name"
 
-    async def test_import_requires_auth(self, unauthed_client):
+    async def test_scan_unmatched_directories(self, client, mock_redis):
+        """Directories that do not match the pattern appear in unmatched."""
+        walk_data = [
+            ("/mnt/test_lib/root", ["deep"], []),
+            ("/mnt/test_lib/root/deep", ["nested"], []),
+            ("/mnt/test_lib/root/deep/nested", [], ["img.jpg"]),
+        ]
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("os.walk", return_value=iter(walk_data)),
+        ):
+            # Pattern {title} only matches one level deep — "deep/nested" should not match
+            resp = await client.post(
+                "/api/import/batch/scan",
+                json={"root_dir": "/mnt/test_lib/root", "pattern": "{title}"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        unmatched_paths = {u["rel_path"] for u in data["unmatched"]}
+        assert "deep/nested" in unmatched_paths
+
+    async def test_scan_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""
         resp = await unauthed_client.post(
-            "/api/import/",
-            json={"source_dir": "/data/gallery/foo", "mode": "copy"},
+            "/api/import/batch/scan",
+            json={"root_dir": "/mnt/test_lib/root", "pattern": "{title}"},
         )
         assert resp.status_code == 401
 
-    async def test_import_missing_source_dir_returns_422(self, client):
-        """Missing source_dir field should return 422 validation error."""
-        resp = await client.post("/api/import/", json={"mode": "copy"})
-        assert resp.status_code == 422
+    async def test_scan_rejects_internal_path(self, client):
+        """root_dir inside data_gallery_path should return 400."""
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("os.path.realpath", side_effect=lambda p: p),
+        ):
+            resp = await client.post(
+                "/api/import/batch/scan",
+                json={"root_dir": "/data/gallery/subdir", "pattern": "{title}"},
+            )
+
+        assert resp.status_code == 400
+        assert "internal" in resp.json()["detail"].lower() or "download" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# POST /api/import/batch/start — start batch import job
+# ---------------------------------------------------------------------------
+
+
+class TestBatchStart:
+    """POST /api/import/batch/start — enqueue a batch import job."""
+
+    async def test_start_copy_mode(self, client, mock_redis):
+        """Valid copy-mode request should store progress in Redis and enqueue a job."""
+        from main import app
+
+        galleries = [
+            {"path": "/mnt/test_lib/root/gallery1", "artist": None, "title": "Gallery One"},
+            {"path": "/mnt/test_lib/root/gallery2", "artist": None, "title": "Gallery Two"},
+        ]
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+        ):
+            resp = await client.post(
+                "/api/import/batch/start",
+                json={"root_dir": "/mnt/test_lib/root", "mode": "copy", "galleries": galleries},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "batch_id" in data
+        assert data["total"] == 2
+        assert isinstance(data["batch_id"], str)
+        assert len(data["batch_id"]) == 36  # UUID format
+
+        mock_redis.setex.assert_called_once()
+        call_args = mock_redis.setex.call_args
+        key = call_args[0][0]
+        assert key.startswith("import:batch:")
+
+        app.state.arq.enqueue_job.assert_called()
+        enqueue_call = app.state.arq.enqueue_job.call_args
+        assert enqueue_call[0][0] == "batch_import_job"
+
+    async def test_start_link_mode_registers_library(self, client, mock_redis):
+        """Link mode should upsert the root_dir into the LibraryPath table."""
+        mock_session = AsyncMock()
+        mock_session_ctx = AsyncMock()
+        mock_session_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_session_ctx.__aexit__ = AsyncMock(return_value=False)
+        mock_session_factory = MagicMock(return_value=mock_session_ctx)
+
+        galleries = [
+            {"path": "/mnt/test_lib/root/art1", "artist": "Artist", "title": "Work One"},
+        ]
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+            patch("routers.import_router.async_session", mock_session_factory),
+        ):
+            resp = await client.post(
+                "/api/import/batch/start",
+                json={"root_dir": "/mnt/test_lib/root", "mode": "link", "galleries": galleries},
+            )
+
+        assert resp.status_code == 200
+        # The mock session should have been entered (link mode triggers DB upsert)
+        mock_session_ctx.__aenter__.assert_called_once()
+        mock_session.execute.assert_called_once()
+        mock_session.commit.assert_called_once()
+
+    async def test_start_invalid_mode_returns_400(self, client, mock_redis):
+        """Mode other than copy or link should return 400."""
+        with (
+            patch("core.config.settings.data_gallery_path", "/data/gallery"),
+            patch("core.config.settings.library_base_path", "/mnt"),
+            patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
+            patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.isdir", return_value=True),
+            patch("os.access", return_value=True),
+            patch("routers.import_router.get_redis", return_value=mock_redis),
+        ):
+            resp = await client.post(
+                "/api/import/batch/start",
+                json={
+                    "root_dir": "/mnt/test_lib/root",
+                    "mode": "move",
+                    "galleries": [{"path": "/mnt/test_lib/root/g1", "artist": None, "title": "G1"}],
+                },
+            )
+
+        assert resp.status_code == 400
+        assert "mode" in resp.json()["detail"].lower() or "copy" in resp.json()["detail"].lower() or "link" in resp.json()["detail"].lower()
+
+    async def test_start_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.post(
+            "/api/import/batch/start",
+            json={"root_dir": "/mnt/test_lib/root", "mode": "copy", "galleries": []},
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /api/import/batch/progress/{batch_id} — poll batch import progress
+# ---------------------------------------------------------------------------
+
+
+class TestBatchProgress:
+    """GET /api/import/batch/progress/{batch_id} — batch progress polling."""
+
+    async def test_progress_unknown_batch(self, client, mock_redis):
+        """Unknown batch_id should return status=unknown."""
+        mock_redis.get = AsyncMock(return_value=None)
+        with patch("routers.import_router.get_redis", return_value=mock_redis):
+            resp = await client.get("/api/import/batch/progress/nonexistent-batch-id")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "unknown"
+
+    async def test_progress_with_redis_data(self, client, mock_redis):
+        """Existing batch_id should return parsed progress data from Redis."""
+        batch_id = "test-batch-uuid-1234"
+        progress_payload = {
+            "total": 10,
+            "completed": 4,
+            "failed": 1,
+            "status": "running",
+            "current_gallery_id": None,
+        }
+        mock_redis.get = AsyncMock(return_value=json.dumps(progress_payload).encode())
+        with patch("routers.import_router.get_redis", return_value=mock_redis):
+            resp = await client.get(f"/api/import/batch/progress/{batch_id}")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "running"
+        assert data["total"] == 10
+        assert data["completed"] == 4
+        assert data["failed"] == 1
+
+        mock_redis.get.assert_called_once_with(f"import:batch:{batch_id}")
+
+    async def test_progress_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/import/batch/progress/some-batch-id")
+        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------

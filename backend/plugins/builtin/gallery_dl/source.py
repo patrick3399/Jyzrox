@@ -213,13 +213,18 @@ class GalleryDlPlugin(SourcePlugin):
         for meta_file in sorted(dest_dir.rglob("*.json")):
             try:
                 raw = json.loads(meta_file.read_text(encoding="utf-8"))
+                tags = raw.get("tags", [])
+                rating = raw.get("rating")
+                if rating and isinstance(tags, list):
+                    tags = list(tags)  # don't mutate original
+                    tags.append(f"rating:{rating}")
                 return GalleryMetadata(
                     source=raw.get("category", "gallery_dl"),
                     source_id=str(
                         raw.get("gallery_id") or raw.get("tweet_id") or raw.get("id") or dest_dir.name
                     ),
                     title=raw.get("title") or raw.get("description") or dest_dir.name,
-                    tags=raw.get("tags", []),
+                    tags=tags,
                     pages=raw.get("count", 0),
                     uploader=raw.get("uploader") or raw.get("artist") or "",
                 )

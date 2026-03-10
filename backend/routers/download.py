@@ -3,6 +3,7 @@
 import logging
 import os
 import signal
+import urllib.parse
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -14,7 +15,7 @@ from core.auth import require_auth
 from core.config import settings as app_settings
 from core.database import get_db
 from core.redis_client import get_redis
-from core.utils import detect_source
+from core.utils import detect_source, detect_source_info, get_supported_sites
 from db.models import DownloadJob
 
 logger = logging.getLogger(__name__)
@@ -193,6 +194,45 @@ async def get_stats(
         )
     ).scalar_one()
     return {"running": running_count, "finished": finished_count}
+
+
+@router.get("/check-url")
+async def check_url(
+    url: str = Query(...),
+    _: dict = Depends(require_auth),
+):
+    """Check whether a URL is from a known supported site."""
+    entry = detect_source_info(url)
+    if entry is not None:
+        return {
+            "supported": True,
+            "source_id": entry["source_id"],
+            "name": entry["name"],
+            "category": entry["category"],
+        }
+
+    # Not in registry — treat as supported if it looks like a valid URL (gallery-dl fallback)
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme and parsed.netloc:
+            return {
+                "supported": True,
+                "source_id": "gallery_dl",
+                "name": "gallery-dl",
+                "category": "other",
+            }
+    except Exception:
+        pass
+
+    return {"supported": False}
+
+
+@router.get("/supported-sites")
+async def supported_sites(
+    _: dict = Depends(require_auth),
+):
+    """Return all supported download sites grouped by category."""
+    return {"categories": get_supported_sites()}
 
 
 @router.get("/jobs/{job_id}")

@@ -38,29 +38,29 @@ class TestDetectSource:
 
     def test_pixiv_url(self):
         """pixiv.net URLs should be detected as 'pixiv'."""
-        from routers.download import _detect_source
+        from core.utils import detect_source
 
-        assert _detect_source("https://www.pixiv.net/artworks/12345") == "pixiv"
-        assert _detect_source("https://pixiv.net/en/artworks/67890") == "pixiv"
+        assert detect_source("https://www.pixiv.net/artworks/12345") == "pixiv"
+        assert detect_source("https://pixiv.net/en/artworks/67890") == "pixiv"
 
     def test_ehentai_url(self):
         """e-hentai.org URLs should be detected as 'ehentai'."""
-        from routers.download import _detect_source
+        from core.utils import detect_source
 
-        assert _detect_source("https://e-hentai.org/g/123456/abcdef/") == "ehentai"
+        assert detect_source("https://e-hentai.org/g/123456/abcdef/") == "ehentai"
 
     def test_exhentai_url(self):
         """exhentai.org URLs should be detected as 'ehentai'."""
-        from routers.download import _detect_source
+        from core.utils import detect_source
 
-        assert _detect_source("https://exhentai.org/g/123456/abcdef/") == "ehentai"
+        assert detect_source("https://exhentai.org/g/123456/abcdef/") == "ehentai"
 
     def test_unknown_url(self):
         """Unrecognized domains should return 'unknown'."""
-        from routers.download import _detect_source
+        from core.utils import detect_source
 
-        assert _detect_source("https://example.com/gallery/123") == "unknown"
-        assert _detect_source("https://danbooru.donmai.us/posts/12345") == "unknown"
+        assert detect_source("https://example.com/gallery/123") == "unknown"
+        assert detect_source("https://danbooru.donmai.us/posts/12345") == "danbooru"
 
 
 # ---------------------------------------------------------------------------

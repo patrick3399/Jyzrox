@@ -23,13 +23,27 @@ export function useImportProgress(galleryId: number | null) {
   )
 }
 
-export function useStartImport() {
+export function useBatchScan() {
   return useSWRMutation(
-    'import/start',
-    (
-      _key: unknown,
-      { arg }: { arg: { sourceDir: string; title?: string } },
-    ) => api.import_.start(arg.sourceDir, arg.title),
+    'import/batch/scan',
+    (_key: unknown, { arg }: { arg: { rootDir: string; pattern: string } }) =>
+      api.import_.batchScan(arg.rootDir, arg.pattern),
+  )
+}
+
+export function useBatchStart() {
+  return useSWRMutation(
+    'import/batch/start',
+    (_key: unknown, { arg }: { arg: { rootDir: string; mode: string; galleries: Array<{ path: string; artist: string | null; title: string }> } }) =>
+      api.import_.batchStart(arg.rootDir, arg.mode, arg.galleries),
+  )
+}
+
+export function useBatchProgress(batchId: string | null) {
+  return useSWR(
+    batchId ? ['import/batch/progress', batchId] : null,
+    () => api.import_.batchProgress(batchId!),
+    { refreshInterval: 2000 },
   )
 }
 
@@ -58,10 +72,6 @@ export function useMonitorStatus() {
   return useSWR('import/monitor/status', () => api.import_.monitorStatus(), {
     refreshInterval: 10000,
   })
-}
-
-export function useAutoDiscover() {
-  return useSWRMutation('import/discover', () => api.import_.discover())
 }
 
 export function useAddLibrary() {

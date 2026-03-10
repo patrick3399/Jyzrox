@@ -1,0 +1,498 @@
+"""Import jobs for the worker package."""
+
+import asyncio
+import json
+import os
+from datetime import UTC, datetime
+from pathlib import Path
+
+from sqlalchemy import text
+from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.sql import select
+
+from core.config import settings
+from core.database import AsyncSessionLocal
+from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, Tag
+from services.cas import create_library_symlink, store_blob
+from worker.constants import (
+    NAMESPACE_MAP,
+    _BOORU_SOURCES,
+    _IMAGE_EXTS,
+    _MEDIA_EXTS,
+    _VIDEO_EXTS,
+    logger,
+)
+from worker.helpers import _sha256, _validate_image_magic
+
+
+async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict:
+    """
+    Ingest a downloaded gallery directory into the database.
+    Handles gallery-dl E-Hentai and Pixiv output formats.
+    """
+    gallery_path = Path(path)
+    logger.info("[import] path=%s", gallery_path)
+
+    if not gallery_path.is_dir():
+        return {"status": "failed", "error": f"not a directory: {path}"}
+
+    # Read gallery-dl metadata (any .json file, they all have gallery info)
+    metadata: dict = {}
+    for meta_file in sorted(gallery_path.rglob("*.json")):
+        try:
+            metadata = json.loads(meta_file.read_text(encoding="utf-8"))
+            break
+        except (json.JSONDecodeError, OSError, UnicodeDecodeError) as exc:
+            logger.warning("[import] failed to read metadata %s: %s", meta_file, exc)
+            continue
+
+    # Extract source from Category (gallery-dl uses this for the extractor name)
+    source = metadata.get("category")
+    if not source:
+        # Fallback heuristic
+        parts = gallery_path.parts
+        if "ehentai" in parts:
+            source = "ehentai"
+        elif "pixiv" in parts:
+            source = "pixiv"
+        else:
+            source = "gallery_dl"
+
+    # Extract source ID
+    source_id = str(metadata.get("gallery_id") or metadata.get("tweet_id") or metadata.get("id") or gallery_path.name)
+
+    tags = _normalize_tags(_extract_tags(gallery_path, metadata), source)
+    media_files_raw = [f for f in gallery_path.rglob('*') if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
+    # Validate magic bytes for images; pass video files through without check
+    media_files = []
+    skipped = 0
+    for f in media_files_raw:
+        if f.suffix.lower() in _VIDEO_EXTS:
+            media_files.append(f)
+        elif _validate_image_magic(f):
+            media_files.append(f)
+        else:
+            skipped += 1
+    media_files.sort(key=lambda f: f.name)
+    if skipped:
+        logger.warning("[import] %s: skipped %d file(s) with invalid magic bytes", gallery_path.name, skipped)
+
+    if not media_files:
+        return {"status": "failed", "error": "no media files found"}
+
+    import shutil as _shutil
+
+    async with AsyncSessionLocal() as session:
+        # Upsert gallery
+        gallery_values = _build_gallery(source, source_id, metadata, tags, len(media_files))
+        stmt = (
+            pg_insert(Gallery)
+            .values(**gallery_values)
+            .on_conflict_do_update(
+                index_elements=["source", "source_id"],
+                set_={
+                    "title": pg_insert(Gallery).excluded.title,
+                    "tags_array": pg_insert(Gallery).excluded.tags_array,
+                    "download_status": "complete",
+                    "pages": pg_insert(Gallery).excluded.pages,
+                    "artist_id": pg_insert(Gallery).excluded.artist_id,
+                },
+            )
+            .returning(Gallery.id)
+        )
+        gallery_id = (await session.execute(stmt)).scalar_one()
+
+        # Load excluded blob hashes for this gallery
+        excluded_rows = (await session.execute(
+            select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)
+        )).scalars().all()
+        excluded_set: set[str] = set(excluded_rows)
+
+        # Compute hashes with bounded concurrency to avoid thread pool exhaustion
+        _hash_sem = asyncio.Semaphore(10)
+
+        async def _sha256_limited(f):
+            async with _hash_sem:
+                return await asyncio.to_thread(_sha256, f)
+
+        hashes = await asyncio.gather(*[_sha256_limited(f) for f in media_files])
+
+        # Filter out files whose sha256 is in the excluded set
+        allowed_pairs = [
+            (img_file, sha256)
+            for img_file, sha256 in zip(media_files, hashes, strict=False)
+            if sha256 not in excluded_set
+        ]
+        if len(allowed_pairs) < len(media_files):
+            logger.info(
+                "[import] gallery_id=%d: skipped %d excluded blob(s)",
+                gallery_id,
+                len(media_files) - len(allowed_pairs),
+            )
+
+        # Store each file in CAS and create library symlink
+        for img_file, sha256 in allowed_pairs:
+            blob = await store_blob(img_file, sha256, session)
+            await create_library_symlink(gallery_id, img_file.name, blob)
+
+        # Flush blob upserts before inserting images (FK: blob_sha256 → blobs.sha256)
+        await session.flush()
+
+        # Bulk-insert images
+        image_values = [
+            {
+                "gallery_id": gallery_id,
+                "page_num": page_num,
+                "filename": img_file.name,
+                "blob_sha256": sha256,
+            }
+            for page_num, (img_file, sha256) in enumerate(allowed_pairs, start=1)
+        ]
+        if image_values:
+            img_stmt = pg_insert(Image).values(image_values).on_conflict_do_nothing()
+            await session.execute(img_stmt)
+
+        # Upsert tags + gallery_tags
+        await _upsert_tags(session, gallery_id, tags)
+        await session.commit()
+
+    # Delete the temporary download directory
+    try:
+        _shutil.rmtree(str(gallery_path), ignore_errors=True)
+    except Exception as exc:
+        logger.warning("[import] failed to remove temp dir %s: %s", gallery_path, exc)
+
+    logger.info("[import] gallery_id=%d source=%s/%s", gallery_id, source, source_id)
+
+    # Trigger thumbnail generation
+    await ctx["redis"].enqueue_job("thumbnail_job", gallery_id)
+    if settings.tag_model_enabled:
+        await ctx["redis"].enqueue_job("tag_job", gallery_id)
+    return {"status": "done", "gallery_id": gallery_id}
+
+
+def _extract_tags(gallery_path: Path, metadata: dict) -> list[str]:
+    """Extract tags in 'namespace:name' format from metadata or tags.txt."""
+    tags: list[str] = []
+
+    raw = metadata.get("tags")
+    if isinstance(raw, dict):
+        for ns, names in raw.items():
+            tags.extend(f"{ns}:{n}" for n in names)
+    elif isinstance(raw, list):
+        tags.extend(raw)
+
+    if not tags:
+        tags_file = gallery_path / "tags.txt"
+        if tags_file.exists():
+            tags = [t.strip() for t in tags_file.read_text().splitlines() if t.strip()]
+
+    return tags
+
+
+def _normalize_tags(tags: list[str], source: str) -> list[str]:
+    """Normalize namespace names across sources for consistency."""
+    if source not in _BOORU_SOURCES:
+        return tags
+    normalized = []
+    for tag in tags:
+        if ":" in tag:
+            ns, name = tag.split(":", 1)
+            ns = NAMESPACE_MAP.get(ns, ns)
+            normalized.append(f"{ns}:{name}")
+        else:
+            normalized.append(tag)
+    return normalized
+
+
+def _build_gallery(
+    source: str,
+    source_id: str,
+    meta: dict,
+    tags: list[str],
+    page_count: int,
+) -> dict:
+    posted_at = None
+    raw_date = meta.get("date") or meta.get("posted")
+    if raw_date:
+        try:
+            if isinstance(raw_date, int | float):
+                posted_at = datetime.fromtimestamp(raw_date, tz=UTC)
+            else:
+                posted_at = datetime.fromisoformat(str(raw_date))
+        except (ValueError, TypeError, OverflowError) as exc:
+            logger.warning("[import] failed to parse date %r: %s", raw_date, exc)
+
+    # Artist ID extraction
+    artist_id = None
+    if source == "ehentai":
+        for tag in tags:
+            if tag.startswith("artist:"):
+                artist_id = f"ehentai:{tag[7:]}"
+                break
+    elif source == "pixiv":
+        uploader = meta.get("uploader", "")
+        if uploader:
+            artist_id = f"pixiv:{uploader}"
+    elif meta.get("category") == "twitter" or source == "twitter":
+        handle = None
+        author = meta.get("author")
+        if isinstance(author, dict):
+            handle = author.get("name")
+        if not handle:
+            handle = meta.get("user") if isinstance(meta.get("user"), str) else None
+        if not handle:
+            handle = meta.get("uploader")
+        if handle:
+            artist_id = f"twitter:{handle}"
+    elif source in _BOORU_SOURCES or source in ("nhentai", "hitomi"):
+        for tag in tags:
+            if tag.startswith("artist:"):
+                artist_id = f"{source}:{tag[7:]}"
+                break
+    else:
+        uploader = meta.get("uploader", "")
+        if uploader:
+            artist_id = f"{source}:{uploader}"
+
+    return {
+        "source": source,
+        "source_id": source_id,
+        "title": (
+            meta.get("title")
+            or meta.get("title_en")
+            or (meta.get("description") or "")[:120]  # Twitter text / Pixiv caption 截斷
+            or (meta.get("content") or "")[:120]
+            or f"{source}_{source_id}"  # 最終 fallback：來源+ID
+        ),
+        "title_jpn": meta.get("title_jpn") or meta.get("title_original") or "",
+        "category": meta.get("category") or meta.get("type", ""),
+        "language": meta.get("lang") or meta.get("language", ""),
+        "pages": page_count,
+        "posted_at": posted_at,
+        "uploader": meta.get("uploader", ""),
+        "download_status": "complete",
+        "tags_array": tags,
+        "artist_id": artist_id,
+    }
+
+
+async def _upsert_tags(session, gallery_id: int, tags: list[str]) -> None:
+    if not tags:
+        return
+
+    # Step 1: deduplicate so we don't send duplicate rows to the DB
+    seen: set[tuple[str, str]] = set()
+    tag_values: list[dict] = []
+    for tag_str in tags:
+        if ":" in tag_str:
+            ns, name = tag_str.split(":", 1)
+        else:
+            ns, name = "general", tag_str
+        key = (ns, name)
+        if key not in seen:
+            seen.add(key)
+            tag_values.append({"namespace": ns, "name": name, "count": 1})
+
+    # Step 2: batch upsert all tags, retrieve their IDs in a single round-trip
+    tag_stmt = (
+        pg_insert(Tag)
+        .values(tag_values)
+        .on_conflict_do_update(
+            index_elements=["namespace", "name"],
+            set_={"count": Tag.count + 1},
+        )
+        .returning(Tag.id)
+    )
+    tag_ids = (await session.execute(tag_stmt)).scalars().all()
+
+    # Step 3: batch insert gallery_tag junction rows in a single round-trip
+    gt_values = [{"gallery_id": gallery_id, "tag_id": tid, "confidence": 1.0, "source": "metadata"} for tid in tag_ids]
+    if gt_values:
+        gt_stmt = pg_insert(GalleryTag).values(gt_values).on_conflict_do_nothing()
+        await session.execute(gt_stmt)
+
+
+async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: int) -> dict:
+    """Import a local directory into the database with progress tracking."""
+    import json as _json
+
+    logger.info("[local_import] gallery_id=%d source=%s mode=%s", gallery_id, source_dir, mode)
+
+    src_path = Path(source_dir)
+    if not src_path.is_dir():
+        return {"status": "failed", "error": f"not a directory: {source_dir}"}
+
+    _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
+    _VIDEO_EXTS = {".mp4", ".webm"}
+    files_raw = [f for f in src_path.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS]
+    # Validate magic bytes for image files; pass video files through without magic check
+    files_validated = []
+    skipped_magic = 0
+    for f in files_raw:
+        if f.suffix.lower() in _VIDEO_EXTS:
+            files_validated.append(f)
+        elif _validate_image_magic(f):
+            files_validated.append(f)
+        else:
+            skipped_magic += 1
+    if skipped_magic:
+        logger.warning("[local_import] gallery_id=%d: skipped %d file(s) with invalid magic bytes", gallery_id, skipped_magic)
+    files = sorted(files_validated)
+
+    if not files:
+        return {"status": "failed", "error": "no supported files found"}
+
+    total = len(files)
+    processed = 0
+    r = ctx["redis"]
+
+    # Load excluded blob hashes for this gallery before processing files
+    async with AsyncSessionLocal() as _excl_session:
+        excluded_rows = (await _excl_session.execute(
+            select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)
+        )).scalars().all()
+    excluded_set: set[str] = set(excluded_rows)
+
+    async with AsyncSessionLocal() as session:
+        for idx, f in enumerate(files):
+            sha256 = await asyncio.to_thread(_sha256, f)
+
+            if sha256 in excluded_set:
+                logger.debug("[local_import] gallery_id=%d: skipping excluded blob %s", gallery_id, sha256[:12])
+                continue
+
+            if mode == "copy":
+                # Hardlink/copy into CAS; create library symlink
+                blob = await store_blob(f, sha256, session)
+            else:
+                # Link mode: record external path, do not copy file
+                blob = await store_blob(f, sha256, session, storage="external", external_path=str(f))
+
+            await create_library_symlink(gallery_id, f.name, blob)
+
+            # Flush blob upsert before inserting image (FK constraint)
+            await session.flush()
+
+            stmt = pg_insert(Image).values(
+                gallery_id=gallery_id,
+                page_num=idx + 1,
+                filename=f.name,
+                blob_sha256=sha256,
+            ).on_conflict_do_nothing()
+            await session.execute(stmt)
+
+            processed += 1
+
+            # Update progress every 5 files or proportionally for small batches
+            update_every = max(1, min(5, total // 10))
+            if processed % update_every == 0 or processed == total:
+                await r.setex(
+                    f"import:progress:{gallery_id}",
+                    3600,
+                    _json.dumps({"processed": processed, "total": total, "status": "running"}),
+                )
+
+        # Update gallery page count and status
+        gallery = await session.get(Gallery, gallery_id)
+        if gallery:
+            gallery.pages = processed
+            gallery.download_status = "complete"
+
+        await session.commit()
+
+    # Write done state with short TTL so frontend can display completion
+    await r.setex(
+        f"import:progress:{gallery_id}",
+        30,
+        _json.dumps({"processed": processed, "total": total, "status": "done"}),
+    )
+
+    logger.info("[local_import] gallery_id=%d: %d files imported", gallery_id, processed)
+
+    # Trigger thumbnail generation
+    await ctx["redis"].enqueue_job("thumbnail_job", gallery_id)
+
+    # Trigger AI tagging if enabled
+    if settings.tag_model_enabled:
+        await ctx["redis"].enqueue_job("tag_job", gallery_id)
+
+    return {"status": "done", "processed": processed}
+
+
+async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[dict], batch_id: str) -> dict:
+    """Batch import multiple galleries from a root directory."""
+    import json as _json
+
+    r = ctx["redis"]
+    total = len(galleries)
+    completed = 0
+    failed = 0
+
+    for entry in galleries:
+        abs_path = entry["path"]
+        artist = entry.get("artist")
+        title = entry.get("title", Path(abs_path).name)
+
+        # Use relative path as source_id to avoid collisions
+        rel_path = os.path.relpath(abs_path, root_dir)
+
+        try:
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    text(
+                        "INSERT INTO galleries (source, source_id, title, import_mode, library_path, artist_id)"
+                        " VALUES (:source, :source_id, :title, :mode, :library_path, :artist_id) RETURNING id"
+                    ),
+                    {
+                        "source": "local",
+                        "source_id": rel_path,
+                        "title": title,
+                        "mode": mode,
+                        "library_path": root_dir if mode == "link" else None,
+                        "artist_id": f"local:{artist}" if artist else None,
+                    },
+                )
+                gallery_id = result.scalar_one()
+                await session.commit()
+
+            # Update progress with current gallery
+            await r.setex(
+                f"import:batch:{batch_id}",
+                3600,
+                _json.dumps({
+                    "total": total, "completed": completed, "failed": failed,
+                    "status": "running", "current_gallery_id": gallery_id,
+                }),
+            )
+
+            # Directly call local_import_job logic
+            await local_import_job(ctx, abs_path, mode, gallery_id)
+            completed += 1
+
+        except Exception as e:
+            logger.error("[batch_import] failed for %s: %s", abs_path, e)
+            failed += 1
+
+        # Update progress after each gallery
+        await r.setex(
+            f"import:batch:{batch_id}",
+            3600,
+            _json.dumps({
+                "total": total, "completed": completed, "failed": failed,
+                "status": "running", "current_gallery_id": None,
+            }),
+        )
+
+    # Final status
+    await r.setex(
+        f"import:batch:{batch_id}",
+        300,
+        _json.dumps({
+            "total": total, "completed": completed, "failed": failed,
+            "status": "done", "current_gallery_id": None,
+        }),
+    )
+
+    logger.info("[batch_import] batch_id=%s: %d completed, %d failed", batch_id, completed, failed)
+    return {"status": "done", "completed": completed, "failed": failed}

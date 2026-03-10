@@ -395,6 +395,16 @@ const download = {
       method: 'PATCH',
       body: JSON.stringify({ action: 'resume' }),
     }),
+
+  checkUrl: (url: string) =>
+    apiFetch<{ supported: boolean; source_id?: string; name?: string; category?: string }>(
+      `/api/download/check-url${qs({ url })}`,
+    ),
+
+  supportedSites: () =>
+    apiFetch<{ categories: Record<string, Array<{ source_id: string; name: string; domain: string; has_tags: boolean }>> }>(
+      '/api/download/supported-sites',
+    ),
 }
 
 // ── Settings ──────────────────────────────────────────────────────────
@@ -651,15 +661,25 @@ const import_ = {
     }>(`/api/import/browse?${params}`)
   },
 
-  start: (sourceDir: string, title?: string) =>
-    apiFetch<{ status: string; gallery_id: number }>('/api/import/', {
+  batchScan: (rootDir: string, pattern: string) =>
+    apiFetch<{
+      matches: Array<{ rel_path: string; abs_path: string; artist: string | null; title: string; file_count: number }>
+      unmatched: Array<{ rel_path: string; file_count: number }>
+    }>('/api/import/batch/scan', {
       method: 'POST',
-      body: JSON.stringify({
-        source_dir: sourceDir,
-        mode: 'copy',
-        metadata: title ? { title } : undefined,
-      }),
+      body: JSON.stringify({ root_dir: rootDir, pattern }),
     }),
+
+  batchStart: (rootDir: string, mode: string, galleries: Array<{ path: string; artist: string | null; title: string }>) =>
+    apiFetch<{ batch_id: string; total: number }>('/api/import/batch/start', {
+      method: 'POST',
+      body: JSON.stringify({ root_dir: rootDir, mode, galleries }),
+    }),
+
+  batchProgress: (batchId: string) =>
+    apiFetch<{ total: number; completed: number; failed: number; current_gallery_id: number | null; status: string }>(
+      `/api/import/batch/progress/${batchId}`,
+    ),
 
   rescanLibraryPath: (libraryId: number) =>
     apiFetch<{ status: string }>(`/api/import/rescan/path/${libraryId}`, { method: 'POST' }),
@@ -715,9 +735,6 @@ const import_ = {
 
   removeLibrary: (id: number) =>
     apiFetch<{ status: string }>(`/api/import/libraries/${id}`, { method: 'DELETE' }),
-
-  discover: () =>
-    apiFetch<{ status: string }>('/api/import/discover', { method: 'POST' }),
 
   monitorStatus: () =>
     apiFetch<{ enabled: boolean; running: boolean; watched_paths: string[] }>(

@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useCallback } from 'react'
-import { Download, ChevronUp, ChevronDown, X, Plus, Trash2, Pause, Play } from 'lucide-react'
+import { useState, useCallback, useEffect } from 'react'
+import { Download, X, Plus, Trash2, Pause, Play, ChevronRight, Globe } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   useDownloadJobs,
@@ -9,6 +9,8 @@ import {
   useCancelJob,
   useClearFinishedJobs,
   usePauseJob,
+  useCheckUrl,
+  useSupportedSites,
 } from '@/hooks/useDownloadQueue'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
@@ -187,7 +189,16 @@ function JobRow({
 
 export default function QueuePage() {
   const [urlInput, setUrlInput] = useState('')
-  const [completedOpen, setCompletedOpen] = useState(false)
+  const [sitesOpen, setSitesOpen] = useState(false)
+  const [debouncedUrl, setDebouncedUrl] = useState('')
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedUrl(urlInput), 300)
+    return () => clearTimeout(timer)
+  }, [urlInput])
+
+  const { data: checkResult } = useCheckUrl(debouncedUrl)
+  const { data: sitesData } = useSupportedSites()
 
   const { data, isLoading, error, mutate } = useDownloadJobs({})
   const { trigger: enqueue, isMutating: isEnqueuing } = useEnqueueDownload()
@@ -287,6 +298,65 @@ export default function QueuePage() {
               {isEnqueuing ? t('queue.adding') : t('queue.add')}
             </button>
           </div>
+          {/* URL Recognition Badge */}
+          {debouncedUrl.trim() && checkResult && (
+            <div className="mt-2 flex items-center gap-2">
+              {checkResult.supported ? (
+                checkResult.source_id !== 'gallery_dl' ? (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 border border-green-500/30 text-green-400 text-xs font-medium">
+                    <Globe size={12} />
+                    {checkResult.name}
+                  </span>
+                ) : (
+                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-medium">
+                    <Globe size={12} />
+                    {t('queue.supportedViaGalleryDl')}
+                  </span>
+                )
+              ) : null}
+            </div>
+          )}
+        </div>
+
+        {/* Supported Sites */}
+        <div className="bg-vault-card border border-vault-border rounded-lg mb-6 overflow-hidden">
+          <button
+            onClick={() => setSitesOpen((o) => !o)}
+            className="w-full flex items-center justify-between px-4 py-3 text-sm text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+          >
+            <span className="flex items-center gap-2">
+              <Globe size={14} />
+              {t('queue.supportedSites')}
+            </span>
+            <ChevronRight
+              size={14}
+              className={`transition-transform ${sitesOpen ? 'rotate-90' : ''}`}
+            />
+          </button>
+          {sitesOpen && sitesData?.categories && (
+            <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+              {Object.entries(sitesData.categories).map(([category, sites]) => (
+                <div key={category}>
+                  <h3 className="text-xs font-semibold text-vault-text-muted uppercase tracking-wide mb-2">
+                    {t(`queue.category${category.charAt(0).toUpperCase() + category.slice(1)}`)}
+                  </h3>
+                  <div className="flex flex-wrap gap-1.5">
+                    {sites.map((site) => (
+                      <span
+                        key={site.source_id}
+                        className="inline-flex items-center px-2 py-0.5 rounded bg-vault-border/50 text-xs text-vault-text-secondary"
+                      >
+                        {site.name}
+                      </span>
+                    ))}
+                  </div>
+                </div>
+              ))}
+              <div className="col-span-full text-xs text-vault-text-muted mt-1">
+                {t('queue.moreViaGalleryDl')}
+              </div>
+            </div>
+          )}
         </div>
 
         {isLoading && (
@@ -333,19 +403,9 @@ export default function QueuePage() {
         {!isLoading && sortedCompleted.length > 0 && (
           <div>
             <div className="flex items-center justify-between mb-3">
-              <button
-                onClick={() => setCompletedOpen((o) => !o)}
-                className="flex items-center gap-2 text-left"
-              >
-                <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
-                  {t('queue.completedFailed')} ({sortedCompleted.length})
-                </h2>
-                {completedOpen ? (
-                  <ChevronUp size={16} className="text-vault-text-muted" />
-                ) : (
-                  <ChevronDown size={16} className="text-vault-text-muted" />
-                )}
-              </button>
+              <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
+                {t('queue.completedFailed')} ({sortedCompleted.length})
+              </h2>
               <button
                 onClick={handleClear}
                 disabled={isClearing || sortedCompleted.length === 0}
@@ -356,19 +416,17 @@ export default function QueuePage() {
               </button>
             </div>
 
-            {completedOpen && (
-              <div className="space-y-2">
-                {sortedCompleted.map((job) => (
-                  <JobRow
-                    key={job.id}
-                    job={job}
-                    onCancel={handleCancel}
-                    onPause={handlePause}
-                    isCancelling={false}
-                  />
-                ))}
-              </div>
-            )}
+            <div className="space-y-2">
+              {sortedCompleted.map((job) => (
+                <JobRow
+                  key={job.id}
+                  job={job}
+                  onCancel={handleCancel}
+                  onPause={handlePause}
+                  isCancelling={false}
+                />
+              ))}
+            </div>
           </div>
         )}
     </div>

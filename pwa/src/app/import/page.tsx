@@ -6,22 +6,23 @@ import {
   ChevronRight,
   FolderInput,
   ArrowLeft,
-  Search,
   HardDrive,
   X,
   Plus,
   RefreshCw,
   CircleDot,
+  Check,
+  ChevronDown,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   useBrowseFs,
   useMountPoints,
-  useImportProgress,
-  useStartImport,
+  useBatchScan,
+  useBatchStart,
+  useBatchProgress,
   useLibraries,
   useMonitorStatus,
-  useAutoDiscover,
   useAddLibrary,
   useRemoveLibrary,
   useToggleMonitor,
@@ -29,53 +30,6 @@ import {
 } from '@/hooks/useImport'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
-
-// ── Progress bar for active import ───────────────────────────────────
-
-function ActiveImportRow({ galleryId, onDone }: { galleryId: number; onDone: () => void }) {
-  const { data } = useImportProgress(galleryId)
-
-  const isTerminal =
-    data?.status === 'done' ||
-    data?.status === 'imported' ||
-    data?.status === 'unknown'
-
-  useEffect(() => {
-    if (!isTerminal) return
-    const timer = setTimeout(onDone, 5000)
-    return () => clearTimeout(timer)
-  }, [isTerminal, onDone])
-
-  if (!data) return null
-
-  const pct =
-    data.total > 0 ? Math.round((data.processed / data.total) * 100) : 0
-  const isUnknown = data.status === 'unknown'
-
-  return (
-    <div className="bg-vault-input border border-vault-border rounded-lg px-4 py-3">
-      <div className="flex items-center justify-between mb-2">
-        <span className="text-sm text-vault-text">
-          {t('import.progress', { processed: data.processed, total: data.total })}
-        </span>
-        <span
-          className={`text-xs font-medium ${isTerminal ? 'text-green-400' : 'text-blue-400'}`}
-        >
-          {isTerminal ? '100%' : `${pct}%`}
-        </span>
-      </div>
-      <div className="h-1.5 bg-vault-border rounded-full overflow-hidden">
-        <div
-          className={`h-full rounded-full transition-all duration-500 ${isTerminal ? 'bg-green-500' : 'bg-blue-500'}`}
-          style={{ width: `${isTerminal ? 100 : pct}%` }}
-        />
-      </div>
-      {isUnknown && (
-        <p className="text-xs text-vault-text-muted mt-1">{t('import.done')}</p>
-      )}
-    </div>
-  )
-}
 
 // ── Folder Picker modal ───────────────────────────────────────────────
 
@@ -270,7 +224,6 @@ function ZoneA() {
   const { trigger: removeLib } = useRemoveLibrary()
   const { trigger: toggleMonitor, isMutating: togglingMonitor } = useToggleMonitor()
   const { trigger: rescanPath } = useRescanLibraryPath()
-  const { trigger: discover, isMutating: discovering } = useAutoDiscover()
   const [rescanningId, setRescanningId] = useState<number | null>(null)
   const [showFolderPicker, setShowFolderPicker] = useState(false)
 
@@ -293,15 +246,6 @@ function ZoneA() {
       toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
     } finally {
       setRescanningId(null)
-    }
-  }
-
-  const handleDiscover = async () => {
-    try {
-      await discover()
-      toast.success(t('import.discover.started'))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
     }
   }
 
@@ -401,35 +345,25 @@ function ZoneA() {
           />
         )}
 
-        {/* File Monitor toggle + Auto-discover */}
-        <div className="flex items-center justify-between pt-1">
-          <div className="flex items-center gap-3">
-            <span className="text-sm text-vault-text">
-              {monitorData?.running
-                ? t('settings.media.monitor.active')
-                : t('settings.media.monitor.inactive')}
-            </span>
-            <button
-              onClick={handleMonitorToggle}
-              disabled={togglingMonitor || !monitorData}
-              className={`relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
-                monitorData?.running ? 'bg-vault-accent' : 'bg-vault-border'
-              }`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${
-                  monitorData?.running ? 'translate-x-5' : ''
-                }`}
-              />
-            </button>
-          </div>
+        {/* File Monitor toggle */}
+        <div className="flex items-center gap-3 pt-1">
+          <span className="text-sm text-vault-text">
+            {monitorData?.running
+              ? t('settings.media.monitor.active')
+              : t('settings.media.monitor.inactive')}
+          </span>
           <button
-            onClick={handleDiscover}
-            disabled={discovering}
-            className="flex items-center gap-1.5 px-3 py-1.5 bg-vault-input border border-vault-border hover:border-vault-accent/50 text-vault-text-secondary hover:text-vault-text rounded-lg text-xs font-medium transition-colors disabled:opacity-50"
+            onClick={handleMonitorToggle}
+            disabled={togglingMonitor || !monitorData}
+            className={`relative w-10 h-5 rounded-full transition-colors disabled:opacity-50 disabled:cursor-not-allowed ${
+              monitorData?.running ? 'bg-vault-accent' : 'bg-vault-border'
+            }`}
           >
-            <Search size={12} />
-            {discovering ? t('import.discover.running') : t('import.discover')}
+            <span
+              className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${
+                monitorData?.running ? 'translate-x-5' : ''
+              }`}
+            />
           </button>
         </div>
       </div>
@@ -437,34 +371,88 @@ function ZoneA() {
   )
 }
 
-// ── Zone B: Import into System ────────────────────────────────────────
+// ── Zone B: Batch Import ──────────────────────────────────────────────
+
+type BatchMatch = {
+  rel_path: string
+  abs_path: string
+  artist: string | null
+  title: string
+  file_count: number
+  selected: boolean
+}
 
 function ZoneB() {
+  const [phase, setPhase] = useState<'idle' | 'scanning' | 'previewing' | 'importing' | 'done'>('idle')
   const [selectedDir, setSelectedDir] = useState<string | null>(null)
-  const [titleInput, setTitleInput] = useState('')
-  const [activeImports, setActiveImports] = useState<number[]>([])
-  const [showImportPicker, setShowImportPicker] = useState(false)
+  const [pattern, setPattern] = useState('{title}')
+  const [mode, setMode] = useState<'copy' | 'link'>('copy')
+  const [showPicker, setShowPicker] = useState(false)
+  const [matches, setMatches] = useState<BatchMatch[]>([])
+  const [unmatched, setUnmatched] = useState<Array<{ rel_path: string; file_count: number }>>([])
+  const [batchId, setBatchId] = useState<string | null>(null)
+  const [unmatchedOpen, setUnmatchedOpen] = useState(false)
 
-  const { trigger: startImport, isMutating: importing } = useStartImport()
+  const { trigger: scan, isMutating: scanLoading } = useBatchScan()
+  const { trigger: startBatch } = useBatchStart()
+  const { data: progress } = useBatchProgress(batchId)
 
-  const handleStartImport = async () => {
+  const presets = ['{title}', '{artist}/{title}', '{_}/{artist}/{title}']
+
+  const updateMatch = (idx: number, field: string, value: string | boolean | null) => {
+    setMatches((prev) => prev.map((m, i) => (i === idx ? { ...m, [field]: value } : m)))
+  }
+
+  const handleScan = async () => {
     if (!selectedDir) return
     try {
-      const result = await startImport({
-        sourceDir: selectedDir,
-        title: titleInput.trim() || undefined,
-      })
-      toast.success(t('import.importing'))
-      setActiveImports((prev) => [...prev, result.gallery_id])
-      setSelectedDir(null)
-      setTitleInput('')
+      const result = await scan({ rootDir: selectedDir, pattern })
+      setMatches(result.matches.map((m) => ({ ...m, selected: true })))
+      setUnmatched(result.unmatched)
+      setPhase('previewing')
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
     }
   }
 
-  const inputClass =
-    'w-full bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent text-sm'
+  const handleImport = async () => {
+    const selected = matches.filter((m) => m.selected)
+    if (selected.length === 0) return
+    try {
+      const result = await startBatch({
+        rootDir: selectedDir!,
+        mode,
+        galleries: selected.map((m) => ({ path: m.abs_path, artist: m.artist, title: m.title })),
+      })
+      setBatchId(result.batch_id)
+      setPhase('importing')
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
+    }
+  }
+
+  const handleReset = () => {
+    setPhase('idle')
+    setSelectedDir(null)
+    setPattern('{title}')
+    setMode('copy')
+    setMatches([])
+    setUnmatched([])
+    setBatchId(null)
+    setUnmatchedOpen(false)
+  }
+
+  useEffect(() => {
+    if (progress?.status === 'done') {
+      setPhase('done')
+    }
+  }, [progress?.status])
+
+  const selectedCount = matches.filter((m) => m.selected).length
+  const allSelected = matches.length > 0 && selectedCount === matches.length
+
+  const editInputClass =
+    'bg-transparent border-b border-vault-border focus:border-vault-accent focus:outline-none text-sm text-vault-text w-full'
 
   return (
     <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden mb-4">
@@ -477,84 +465,299 @@ function ZoneB() {
         <p className="text-xs text-vault-text-muted">{t('import.zoneB.desc')}</p>
       </div>
 
-      <div className="p-4 space-y-3">
-        {/* Active Imports */}
-        {activeImports.length > 0 && (
-          <div>
-            <h3 className="text-xs font-medium text-vault-text-secondary uppercase tracking-wide mb-2">
-              {t('import.active')}
-            </h3>
-            <div className="space-y-2">
-              {activeImports.map((id) => (
-                <ActiveImportRow
-                  key={id}
-                  galleryId={id}
-                  onDone={() => setActiveImports((prev) => prev.filter((i) => i !== id))}
-                />
-              ))}
-            </div>
-          </div>
+      <div className="p-4 space-y-4">
+
+        {/* ── idle: select folder ── */}
+        {phase === 'idle' && (
+          <>
+            <button
+              onClick={() => setShowPicker(true)}
+              className="flex items-center gap-1.5 px-3 py-1.5 bg-vault-accent text-white rounded text-sm hover:bg-vault-accent/90 transition-colors"
+            >
+              <Plus size={14} />
+              {t('import.zoneB.selectFolder')}
+            </button>
+            {showPicker && (
+              <FolderPicker
+                onSelect={(path) => {
+                  setSelectedDir(path)
+                  setShowPicker(false)
+                  setPhase('scanning')
+                }}
+                onClose={() => setShowPicker(false)}
+              />
+            )}
+          </>
         )}
 
-        {/* Folder picker trigger */}
-        <button
-          onClick={() => setShowImportPicker(true)}
-          className="flex items-center gap-1.5 px-3 py-1.5 bg-vault-accent text-white rounded text-sm hover:bg-vault-accent/90 transition-colors"
-        >
-          <Plus size={14} />
-          {t('import.zoneB.selectFolder')}
-        </button>
-
-        {/* FolderPicker modal */}
-        {showImportPicker && (
-          <FolderPicker
-            onSelect={(path) => {
-              setSelectedDir(path)
-              setTitleInput(path.split('/').pop() ?? 'Imported')
-              setShowImportPicker(false)
-            }}
-            onClose={() => setShowImportPicker(false)}
-          />
-        )}
-
-        {/* Import options panel — shown when a dir is selected */}
-        {selectedDir && (
-          <div className="bg-vault-card border border-vault-accent/30 rounded-xl p-5 space-y-4">
-            <div>
-              <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-1">
-                {t('import.browse')}
-              </p>
-              <div className="flex items-center gap-2">
-                <p className="text-sm text-vault-text font-mono truncate flex-1">{selectedDir}</p>
-                <button
-                  onClick={() => setShowImportPicker(true)}
-                  className="shrink-0 text-xs text-vault-text-muted hover:text-vault-accent transition-colors"
-                >
-                  {t('import.zoneB.change')}
-                </button>
-              </div>
+        {/* ── scanning: show path + pattern + mode + scan button ── */}
+        {phase === 'scanning' && (
+          <div className="space-y-4">
+            {/* Selected path */}
+            <div className="flex items-center gap-2">
+              <p className="text-sm font-mono text-vault-text truncate flex-1">{selectedDir}</p>
+              <button
+                onClick={() => setShowPicker(true)}
+                className="shrink-0 text-xs text-vault-text-muted hover:text-vault-accent transition-colors"
+              >
+                {t('import.zoneB.change')}
+              </button>
             </div>
 
-            {/* Title */}
+            {/* Pattern input */}
             <div>
               <label className="block text-xs text-vault-text-muted mb-1">
-                {t('import.gallery.title')}
+                {t('import.batch.pattern')}
               </label>
               <input
                 type="text"
-                value={titleInput}
-                onChange={(e) => setTitleInput(e.target.value)}
-                placeholder={selectedDir.split('/').pop() ?? ''}
-                className={inputClass}
+                value={pattern}
+                onChange={(e) => setPattern(e.target.value)}
+                placeholder="{title}"
+                className="w-full bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent text-sm font-mono"
               />
+              <p className="text-[11px] text-vault-text-muted mt-1">{t('import.batch.patternHelp')}</p>
             </div>
 
+            {/* Preset chips */}
+            <div>
+              <p className="text-xs text-vault-text-muted mb-1.5">{t('import.batch.presets')}</p>
+              <div className="flex flex-wrap gap-1.5">
+                {presets.map((p) => (
+                  <button
+                    key={p}
+                    onClick={() => setPattern(p)}
+                    className={`px-2 py-1 rounded text-xs font-mono transition-colors ${
+                      pattern === p
+                        ? 'bg-vault-accent text-white'
+                        : 'bg-vault-input text-vault-text-muted hover:text-vault-text'
+                    }`}
+                  >
+                    {p}
+                  </button>
+                ))}
+              </div>
+            </div>
+
+            {/* Mode toggle */}
+            <div>
+              <div className="flex rounded overflow-hidden border border-vault-border w-fit">
+                <button
+                  onClick={() => setMode('copy')}
+                  className={`px-4 py-1.5 text-xs font-medium transition-colors ${
+                    mode === 'copy' ? 'bg-vault-accent text-white' : 'bg-vault-input text-vault-text-muted hover:text-vault-text'
+                  }`}
+                >
+                  {t('import.batch.modeCopy')}
+                </button>
+                <button
+                  onClick={() => setMode('link')}
+                  className={`px-4 py-1.5 text-xs font-medium transition-colors ${
+                    mode === 'link' ? 'bg-vault-accent text-white' : 'bg-vault-input text-vault-text-muted hover:text-vault-text'
+                  }`}
+                >
+                  {t('import.batch.modeLink')}
+                </button>
+              </div>
+              <p className="text-[11px] text-vault-text-muted mt-1">
+                {mode === 'copy' ? t('import.batch.modeCopyDesc') : t('import.batch.modeLinkDesc')}
+              </p>
+            </div>
+
+            {/* Scan button */}
             <button
-              onClick={handleStartImport}
-              disabled={importing}
-              className="w-full px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-sm font-medium transition-colors"
+              onClick={handleScan}
+              disabled={scanLoading || !pattern.trim()}
+              className="flex items-center gap-1.5 px-4 py-2 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed text-white rounded text-sm font-medium transition-colors"
             >
-              {importing ? t('import.importing') : t('import.start')}
+              {scanLoading ? (
+                <>
+                  <LoadingSpinner />
+                  {t('import.batch.scanning')}
+                </>
+              ) : (
+                t('import.batch.scan')
+              )}
+            </button>
+
+            {showPicker && (
+              <FolderPicker
+                onSelect={(path) => {
+                  setSelectedDir(path)
+                  setShowPicker(false)
+                }}
+                onClose={() => setShowPicker(false)}
+              />
+            )}
+          </div>
+        )}
+
+        {/* ── previewing: table of matches ── */}
+        {phase === 'previewing' && (
+          <div className="space-y-4">
+            {/* Summary */}
+            <div className="flex flex-wrap items-center gap-3">
+              <span className="text-sm text-vault-text">
+                {t('import.batch.matchCount', { count: String(matches.length) })}
+              </span>
+              {unmatched.length > 0 && (
+                <span className="text-sm text-vault-text-muted">
+                  {t('import.batch.unmatchedCount', { count: String(unmatched.length) })}
+                </span>
+              )}
+              <button
+                onClick={() => { setPhase('scanning'); }}
+                className="ml-auto text-xs text-vault-text-muted hover:text-vault-accent transition-colors"
+              >
+                {t('import.zoneB.change')}
+              </button>
+            </div>
+
+            {matches.length === 0 ? (
+              <p className="text-sm text-vault-text-muted py-4 text-center">
+                {t('import.batch.noMatches')}
+              </p>
+            ) : (
+              <div className="border border-vault-border rounded-lg overflow-hidden">
+                {/* Table header */}
+                <div className="grid grid-cols-[auto_1fr_1fr_auto] gap-2 px-3 py-2 bg-vault-input border-b border-vault-border text-xs text-vault-text-muted font-medium">
+                  <input
+                    type="checkbox"
+                    checked={allSelected}
+                    onChange={(e) =>
+                      setMatches((prev) => prev.map((m) => ({ ...m, selected: e.target.checked })))
+                    }
+                    className="accent-vault-accent"
+                  />
+                  <span>{t('import.batch.artist')}</span>
+                  <span>{t('import.gallery.title')}</span>
+                  <span className="text-right">{t('import.batch.fileCount')}</span>
+                </div>
+                {/* Table rows */}
+                <div className="divide-y divide-vault-border/50">
+                  {matches.map((m, idx) => (
+                    <div
+                      key={m.abs_path}
+                      className={`grid grid-cols-[auto_1fr_1fr_auto] gap-2 px-3 py-2 items-center text-sm hover:bg-vault-card-hover transition-colors ${
+                        !m.selected ? 'opacity-50' : ''
+                      }`}
+                    >
+                      <input
+                        type="checkbox"
+                        checked={m.selected}
+                        onChange={(e) => updateMatch(idx, 'selected', e.target.checked)}
+                        className="accent-vault-accent"
+                      />
+                      <input
+                        type="text"
+                        value={m.artist ?? ''}
+                        onChange={(e) => updateMatch(idx, 'artist', e.target.value || null)}
+                        className={editInputClass}
+                        placeholder="—"
+                      />
+                      <input
+                        type="text"
+                        value={m.title}
+                        onChange={(e) => updateMatch(idx, 'title', e.target.value)}
+                        className={editInputClass}
+                      />
+                      <span className="text-xs text-vault-text-muted text-right tabular-nums">
+                        {m.file_count}
+                      </span>
+                    </div>
+                  ))}
+                </div>
+              </div>
+            )}
+
+            {/* Unmatched collapsible */}
+            {unmatched.length > 0 && (
+              <div className="border border-vault-border rounded-lg overflow-hidden">
+                <button
+                  onClick={() => setUnmatchedOpen((o) => !o)}
+                  className="w-full flex items-center gap-2 px-3 py-2 text-xs text-vault-text-muted hover:text-vault-text transition-colors bg-vault-input"
+                >
+                  <ChevronDown
+                    size={13}
+                    className={`transition-transform ${unmatchedOpen ? 'rotate-180' : ''}`}
+                  />
+                  {t('import.batch.unmatchedCount', { count: String(unmatched.length) })}
+                </button>
+                {unmatchedOpen && (
+                  <div className="divide-y divide-vault-border/50">
+                    {unmatched.map((u) => (
+                      <div key={u.rel_path} className="flex items-center gap-2 px-3 py-1.5 text-xs">
+                        <span className="font-mono text-vault-text-muted truncate flex-1">{u.rel_path}</span>
+                        <span className="text-vault-text-muted tabular-nums shrink-0">{u.file_count}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+              </div>
+            )}
+
+            {/* Import button */}
+            {matches.length > 0 && (
+              <button
+                onClick={handleImport}
+                disabled={selectedCount === 0}
+                className="w-full px-4 py-2.5 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 disabled:cursor-not-allowed rounded text-white text-sm font-medium transition-colors"
+              >
+                {selectedCount === matches.length
+                  ? t('import.batch.importAll', { count: String(selectedCount) })
+                  : t('import.batch.importSelected', { count: String(selectedCount) })}
+              </button>
+            )}
+          </div>
+        )}
+
+        {/* ── importing: progress ── */}
+        {phase === 'importing' && progress && (
+          <div className="space-y-3">
+            <p className="text-sm text-vault-text">
+              {t('import.batch.progress', {
+                completed: String(progress.completed),
+                total: String(progress.total),
+              })}
+            </p>
+            <div className="h-2 bg-vault-border rounded-full overflow-hidden">
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-500"
+                style={{
+                  width: progress.total > 0
+                    ? `${Math.round((progress.completed / progress.total) * 100)}%`
+                    : '0%',
+                }}
+              />
+            </div>
+            {progress.failed > 0 && (
+              <p className="text-xs text-red-400">
+                {t('import.batch.done', {
+                  completed: String(progress.completed),
+                  failed: String(progress.failed),
+                })}
+              </p>
+            )}
+          </div>
+        )}
+
+        {/* ── done ── */}
+        {phase === 'done' && progress && (
+          <div className="space-y-3">
+            <div className="flex items-center gap-2">
+              <Check size={16} className="text-green-400 shrink-0" />
+              <p className="text-sm text-vault-text">
+                {t('import.batch.done', {
+                  completed: String(progress.completed),
+                  failed: String(progress.failed),
+                })}
+              </p>
+            </div>
+            <button
+              onClick={handleReset}
+              className="px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-accent/50 text-vault-text rounded text-sm transition-colors"
+            >
+              {t('import.zoneB.selectFolder')}
             </button>
           </div>
         )}
