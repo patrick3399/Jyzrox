@@ -33,7 +33,7 @@ export function useInfiniteLibraryGalleries(
   const { data, error, size, setSize, isValidating, isLoading } = useSWRInfinite<GalleryListResponse>(
     getKey,
     ([, fetchParams]: [string, GallerySearchParams]) => api.library.getGalleries(fetchParams),
-    { revalidateOnFocus: false, revalidateFirstPage: false },
+    { revalidateOnFocus: false },
   )
 
   const galleries = data ? data.flatMap((page) => page.galleries) : []

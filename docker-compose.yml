@@ -94,6 +94,7 @@ services:
       redis:
         condition: service_healthy
     networks:
+      - frontend
       - backend
     restart: unless-stopped
     healthcheck:
