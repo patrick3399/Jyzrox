@@ -1,10 +1,10 @@
 'use client'
 
-import { useState, useRef, useCallback, useEffect, Suspense } from 'react'
+import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEhSearch, useEhFavorites, useEhPopular, useEhToplist } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
-import { Pagination } from '@/components/Pagination'
+
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
 import { toast } from 'sonner'
@@ -418,7 +418,6 @@ function BrowsePage() {
   const searchParams = useSearchParams()
 
   const initialQ = searchParams.get('q') || ''
-  const initialPage = Number(searchParams.get('page') || '0')
   const rawTab = searchParams.get('tab')
   const initialTab: BrowseTab =
     rawTab === 'favorites' || rawTab === 'popular' || rawTab === 'toplist' ? rawTab : 'search'
@@ -429,10 +428,14 @@ function BrowsePage() {
   const [inputValue, setInputValue] = useState(initialQ)
   const [searchQuery, setSearchQuery] = useState(initialQ)
   const [category, setCategory] = useState<string | null>(null)
-  const [page, setPage] = useState(initialPage)
+
+  // Cursor-based pagination for search tab
+  const [currentCursor, setCurrentCursor] = useState<number | null>(null)
+  const [prevCursors, setPrevCursors] = useState<number[]>([])
+  const [pageIndex, setPageIndex] = useState(0)
+
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [selectedGallery, setSelectedGallery] = useState<EhGallery | null>(null)
-  const [downloadUrl, setDownloadUrl] = useState('')
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Advanced search state
@@ -448,10 +451,15 @@ function BrowsePage() {
   const [favCursor, setFavCursor] = useState<{ next?: string; prev?: string }>({})
   const [favSearch, setFavSearch] = useState(initialFavSearch)
 
+  // Page input for search pagination
+  const [pageInputValue, setPageInputValue] = useState('1')
+
   // Infinite scroll state
   const [loadMode] = useState<LoadMode>(getLoadMode)
   const [scrollGalleries, setScrollGalleries] = useState<EhGallery[]>([])
   const [scrollPage, setScrollPage] = useState(0)
+  const [scrollNextGid, setScrollNextGid] = useState<number | null>(null)
+  const scrollNeedsSeedRef = useRef(true)
   const [scrollLoading, setScrollLoading] = useState(false)
   const [scrollHasMore, setScrollHasMore] = useState(true)
   // Same for favorites scroll (cursor-based)
@@ -540,14 +548,16 @@ function BrowsePage() {
   }, [])
 
   // Sync URL ?q= changes (e.g. from tag clicks in detail page)
-  // Only react to the q param itself, not to other searchParams changes (page, tab, etc.)
-  // to avoid a feedback loop where the URL sync effect resets page to 0.
+  // Only react to the q param itself, not to other searchParams changes (tab, etc.)
+  // to avoid a feedback loop where the URL sync effect resets cursors.
   const urlQ = searchParams.get('q') || ''
   useEffect(() => {
     if (urlQ !== searchQuery) {
       setInputValue(urlQ)
       setSearchQuery(urlQ)
-      setPage(0)
+      setCurrentCursor(null)
+      setPrevCursors([])
+      setPageIndex(0)
     }
   }, [urlQ]) // eslint-disable-line react-hooks/exhaustive-deps
 
@@ -560,7 +570,6 @@ function BrowsePage() {
     }
     const params = new URLSearchParams()
     if (searchQuery) params.set('q', searchQuery)
-    if (page > 0) params.set('page', String(page))
     if (activeTab !== 'search') params.set('tab', activeTab)
     if (activeTab === 'favorites' && favCat !== 'all') params.set('favcat', favCat)
     if (activeTab === 'favorites' && favSearch) params.set('favsearch', favSearch)
@@ -568,7 +577,7 @@ function BrowsePage() {
     if (activeTab === 'toplist' && toplistPage > 0) params.set('tlpage', String(toplistPage))
     const qs = params.toString()
     router.replace(qs ? `/browse?${qs}` : '/browse', { scroll: false })
-  }, [searchQuery, page, activeTab, favCat, favSearch, toplistTl, toplistPage]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchQuery, activeTab, favCat, favSearch, toplistTl, toplistPage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Compute f_cats bitmask from selected categories (multi-select)
   const computedFCats = (() => {
@@ -588,9 +597,11 @@ function BrowsePage() {
     return ALL_CATS_MASK ^ selectedMask
   })()
 
+  // SWR only handles the current view (first page in scroll mode, cursor page in pagination mode).
+  // Scroll mode fetches subsequent pages imperatively via onLoadMore.
   const { data, isLoading, error } = useEhSearch({
     q: searchQuery || undefined,
-    page,
+    ...(loadMode === 'pagination' && currentCursor != null ? { next_gid: currentCursor } : {}),
     ...(showAdvanced
       ? {
           f_cats: computedFCats,
@@ -603,7 +614,7 @@ function BrowsePage() {
       : {
           category: category || undefined,
         }),
-  })
+  }, activeTab === 'search')
 
   const {
     data: favData,
@@ -618,13 +629,13 @@ function BrowsePage() {
     data: popularData,
     isLoading: popularLoading,
     error: popularError,
-  } = useEhPopular()
+  } = useEhPopular(activeTab === 'popular')
 
   const {
     data: toplistData,
     isLoading: toplistLoading,
     error: toplistError,
-  } = useEhToplist(toplistTl, toplistPage)
+  } = useEhToplist(toplistTl, toplistPage, activeTab === 'toplist')
 
   // Restore scroll position after back-navigation (once data is loaded)
   const scrollRestoredRef = useRef(false)
@@ -644,26 +655,32 @@ function BrowsePage() {
     }
   }, [data, favData, activeTab])
 
+  // Sync page input with pageIndex
+  useEffect(() => {
+    setPageInputValue(String(pageIndex + 1))
+  }, [pageIndex])
+
   // ── Infinite scroll: reset when search changes ─────────
   useEffect(() => {
     if (loadMode === 'scroll') {
       setScrollGalleries([])
       setScrollPage(0)
+      setScrollNextGid(null)
       setScrollHasMore(true)
+      scrollNeedsSeedRef.current = true  // Mark for re-seeding
     }
   }, [searchQuery, category, loadMode, advSearch, minRating, pageFrom, pageTo, selectedCats.size])
 
-  // Append search results in scroll mode
+  // Initialize scroll mode with first page from SWR
   useEffect(() => {
     if (loadMode !== 'scroll' || !data || activeTab !== 'search') return
-    setScrollGalleries((prev) => {
-      if (scrollPage === 0) return data.galleries
-      const existingIds = new Set(prev.map((g) => g.gid))
-      const newOnes = data.galleries.filter((g) => !existingIds.has(g.gid))
-      return [...prev, ...newOnes]
-    })
-    setScrollHasMore(data.galleries.length >= EH_PAGE_SIZE)
-    setScrollLoading(false)
+    if (scrollNeedsSeedRef.current) {
+      setScrollGalleries(data.galleries)
+      setScrollNextGid(data.next_gid ?? null)
+      setScrollHasMore(data.next_gid != null)
+      setScrollPage(0)
+      scrollNeedsSeedRef.current = false
+    }
   }, [data]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Reset favorites scroll when filters change
@@ -694,9 +711,12 @@ function BrowsePage() {
   const commitSearch = useCallback((q: string) => {
     addSearchHistory(q)
     setSearchQuery(q)
-    setPage(0)
+    setCurrentCursor(null)
+    setPrevCursors([])
+    setPageIndex(0)
     setScrollGalleries([])
     setScrollPage(0)
+    setScrollNextGid(null)
     setScrollHasMore(true)
     setShowHistory(false)
   }, [])
@@ -755,7 +775,9 @@ function BrowsePage() {
       } else {
         setCategory((prev) => (prev === val ? null : val))
       }
-      setPage(0)
+      setCurrentCursor(null)
+      setPrevCursors([])
+      setPageIndex(0)
     },
     [showAdvanced],
   )
@@ -777,17 +799,6 @@ function BrowsePage() {
       toast.error(err instanceof Error ? err.message : 'Failed')
     }
   }, [])
-
-  const handleUrlDownload = useCallback(async () => {
-    if (!downloadUrl.trim()) return
-    try {
-      const res = await api.download.enqueue(downloadUrl.trim())
-      toast.success(t('browse.addedToQueueJob', { jobId: res.job_id }))
-      setDownloadUrl('')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed')
-    }
-  }, [downloadUrl])
 
   const handleSaveSearch = useCallback(async () => {
     const name = saveSearchName.trim() || searchQuery || 'Search'
@@ -826,16 +837,19 @@ function BrowsePage() {
     [commitSearch],
   )
 
-  const displayGalleries = loadMode === 'scroll' ? scrollGalleries : (data?.galleries ?? [])
-  const favDisplayGalleries =
-    loadMode === 'scroll' ? favScrollGalleries : (favData?.galleries ?? [])
-  const totalPages = data ? Math.ceil(data.total / EH_PAGE_SIZE) : 0
+  const displayGalleries = useMemo(
+    () => (loadMode === 'scroll' ? scrollGalleries : (data?.galleries ?? [])),
+    [loadMode, scrollGalleries, data?.galleries],
+  )
+  const favDisplayGalleries = useMemo(
+    () => (loadMode === 'scroll' ? favScrollGalleries : (favData?.galleries ?? [])),
+    [loadMode, favScrollGalleries, favData?.galleries],
+  )
 
   // ── Render ─────────────────────────────────────────────
 
   return (
-    <div className="min-h-screen bg-vault-bg text-vault-text">
-      <div className="max-w-5xl mx-auto px-4 py-5 space-y-4">
+    <div className="space-y-4">
         {/* ── Search bar with history dropdown ── */}
 
         {/* Mobile: expanded search overlay */}
@@ -1186,7 +1200,9 @@ function BrowsePage() {
           <button
             onClick={() => {
               setActiveTab('search')
-              setPage(0)
+              setCurrentCursor(null)
+              setPrevCursors([])
+              setPageIndex(0)
             }}
             className={`flex-shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
               activeTab === 'search'
@@ -1439,14 +1455,14 @@ function BrowsePage() {
                       {t('browse.saveSearch')}
                     </button>
                   )}
-                  <span>Page {page + 1}</span>
+                  <span>{t('browse.pageN', { page: String(pageIndex + 1) })}</span>
                 </div>
               </div>
             )}
 
-            {/* ── Loading ── */}
-            {isLoading && (
-              <div className="flex justify-center py-20">
+            {/* ── Loading (only when no data yet) ── */}
+            {isLoading && displayGalleries.length === 0 && (
+              <div className="flex justify-center py-4">
                 <LoadingSpinner />
               </div>
             )}
@@ -1481,7 +1497,7 @@ function BrowsePage() {
                 ) : (
                   <VirtualGrid
                     items={displayGalleries}
-                    columns={{ base: 3, sm: 4, md: 5 }}
+                    columns={{ base: 3, sm: 4, md: 5, lg: 6, xl: 7, xxl: 8 }}
                     gap={8}
                     estimateHeight={220}
                     renderItem={(g) => (
@@ -1494,11 +1510,35 @@ function BrowsePage() {
                     onLoadMore={
                       loadMode === 'scroll'
                         ? () => {
-                            if (scrollHasMore && !scrollLoading && !isLoading) {
-                              setScrollLoading(true)
+                            if (!scrollHasMore || scrollLoading || !scrollNextGid) return
+                            setScrollLoading(true)
+                            const cursor = scrollNextGid
+                            api.eh.search({
+                              q: searchQuery || undefined,
+                              next_gid: cursor,
+                              ...(showAdvanced
+                                ? {
+                                    f_cats: computedFCats,
+                                    advance: advSearch !== 0 || minRating !== null || pageFrom !== '' || pageTo !== '',
+                                    adv_search: advSearch || undefined,
+                                    min_rating: minRating || undefined,
+                                    page_from: pageFrom ? Number(pageFrom) : undefined,
+                                    page_to: pageTo ? Number(pageTo) : undefined,
+                                  }
+                                : { category: category || undefined }),
+                            }).then((result) => {
+                              setScrollGalleries((prev) => {
+                                const existingIds = new Set(prev.map((g) => g.gid))
+                                const newOnes = result.galleries.filter((g) => !existingIds.has(g.gid))
+                                return [...prev, ...newOnes]
+                              })
+                              setScrollNextGid(result.next_gid ?? null)
+                              setScrollHasMore(result.next_gid != null)
                               setScrollPage((p) => p + 1)
-                              setPage((p) => p + 1)
-                            }
+                              setScrollLoading(false)
+                            }).catch(() => {
+                              setScrollLoading(false)
+                            })
                           }
                         : undefined
                     }
@@ -1507,18 +1547,142 @@ function BrowsePage() {
                   />
                 )}
 
-                {/* Pagination mode */}
-                {loadMode === 'pagination' && totalPages > 1 && (
-                  <div className="pt-2">
-                    <Pagination
-                      page={page}
-                      total={data?.total ?? 0}
-                      pageSize={EH_PAGE_SIZE}
-                      onChange={(p) => {
-                        setPage(p)
+                {/* Pagination mode — cursor-based prev/next */}
+                {loadMode === 'pagination' && data && (data.has_prev || data.next_gid) && (
+                  <div className="flex justify-center items-center gap-2 pt-2">
+                    {/* First page */}
+                    <button
+                      onClick={() => {
+                        setCurrentCursor(null)
+                        setPrevCursors([])
+                        setPageIndex(0)
                         window.scrollTo(0, 0)
                       }}
+                      disabled={pageIndex === 0}
+                      title={t('common.firstPage')}
+                      className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
+                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
+                    >
+                      «
+                    </button>
+                    <button
+                      onClick={() => {
+                        if (pageIndex === 0) return
+                        const stack = [...prevCursors]
+                        const prev = stack.pop()
+                        setPrevCursors(stack)
+                        setCurrentCursor(prev === 0 ? null : prev ?? null)
+                        setPageIndex((p) => p - 1)
+                        window.scrollTo(0, 0)
+                      }}
+                      disabled={pageIndex === 0}
+                      className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
+                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
+                    >
+                      ‹
+                    </button>
+                    <input
+                      type="number"
+                      min={1}
+                      value={pageInputValue}
+                      onChange={(e) => setPageInputValue(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          const target = parseInt(pageInputValue)
+                          if (isNaN(target) || target < 1) return
+                          if (target === pageIndex + 1) return // Already on this page
+                          if (target === 1) {
+                            // Jump to first page
+                            setCurrentCursor(null)
+                            setPrevCursors([])
+                            setPageIndex(0)
+                            window.scrollTo(0, 0)
+                          } else if (target <= pageIndex) {
+                            // Jump backward using prevCursors stack
+                            const stepsBack = pageIndex + 1 - target
+                            const stack = [...prevCursors]
+                            for (let i = 0; i < stepsBack - 1; i++) stack.pop()
+                            const cursor = stack.pop() ?? null
+                            setPrevCursors(stack)
+                            setCurrentCursor(cursor === 0 ? null : cursor)
+                            setPageIndex(target - 1)
+                            window.scrollTo(0, 0)
+                          } else {
+                            // Jump forward — sequentially fetch cursors
+                            e.currentTarget.blur()
+                            const stepsForward = target - (pageIndex + 1)
+                            // Build current search params for the sequential fetches
+                            const searchParams = {
+                              q: searchQuery || undefined,
+                              ...(showAdvanced
+                                ? {
+                                    f_cats: computedFCats,
+                                    advance: advSearch !== 0 || minRating !== null || pageFrom !== '' || pageTo !== '',
+                                    adv_search: advSearch || undefined,
+                                    min_rating: minRating || undefined,
+                                    page_from: pageFrom ? Number(pageFrom) : undefined,
+                                    page_to: pageTo ? Number(pageTo) : undefined,
+                                  }
+                                : { category: category || undefined }),
+                            }
+                            // Start from current page's next cursor
+                            let cursor = data?.next_gid
+                            if (!cursor) {
+                              setPageInputValue(String(pageIndex + 1))
+                              toast.error(t('browse.cannotJumpForward'))
+                              return
+                            }
+                            const newCursors = [...prevCursors, currentCursor ?? 0]
+                            // Sequential fetch
+                            ;(async () => {
+                              try {
+                                for (let i = 0; i < stepsForward - 1; i++) {
+                                  const result = await api.eh.search({ ...searchParams, next_gid: cursor })
+                                  if (!result.next_gid) {
+                                    // Reached the last page before target
+                                    newCursors.push(cursor!)
+                                    setPrevCursors(newCursors)
+                                    setCurrentCursor(cursor!)
+                                    setPageIndex(pageIndex + i + 1)
+                                    setPageInputValue(String(pageIndex + i + 2))
+                                    window.scrollTo(0, 0)
+                                    toast.error(t('browse.cannotJumpForward'))
+                                    return
+                                  }
+                                  newCursors.push(cursor!)
+                                  cursor = result.next_gid
+                                }
+                                // We now have the cursor for the target page
+                                setPrevCursors(newCursors)
+                                setCurrentCursor(cursor!)
+                                setPageIndex(target - 1)
+                                window.scrollTo(0, 0)
+                              } catch {
+                                setPageInputValue(String(pageIndex + 1))
+                                toast.error(t('browse.cannotJumpForward'))
+                              }
+                            })()
+                          }
+                        }
+                      }}
+                      onBlur={() => setPageInputValue(String(pageIndex + 1))}
+                      className="w-14 text-center bg-vault-card border border-vault-border rounded-lg py-2 text-sm text-vault-text
+                                 focus:outline-none focus:border-vault-accent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
                     />
+                    <button
+                      onClick={() => {
+                        if (!data?.next_gid) return
+                        setPrevCursors((prev) => [...prev, currentCursor ?? 0])
+                        setCurrentCursor(data.next_gid)
+                        setPageIndex((p) => p + 1)
+                        window.scrollTo(0, 0)
+                      }}
+                      disabled={!data.next_gid}
+                      className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
+                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
+                    >
+                      ›
+                    </button>
                   </div>
                 )}
 
@@ -1613,9 +1777,9 @@ function BrowsePage() {
               </div>
             )}
 
-            {/* Favorites loading */}
-            {favLoading && (
-              <div className="flex justify-center py-20">
+            {/* Favorites loading (only when no data yet) */}
+            {favLoading && favDisplayGalleries.length === 0 && (
+              <div className="flex justify-center py-4">
                 <LoadingSpinner />
               </div>
             )}
@@ -1643,7 +1807,7 @@ function BrowsePage() {
                 ) : (
                   <VirtualGrid
                     items={favDisplayGalleries}
-                    columns={{ base: 3, sm: 4, md: 5 }}
+                    columns={{ base: 3, sm: 4, md: 5, lg: 6, xl: 7, xxl: 8 }}
                     gap={8}
                     estimateHeight={220}
                     renderItem={(g) => (
@@ -1670,7 +1834,19 @@ function BrowsePage() {
 
                 {/* Pagination mode — cursor-based prev/next */}
                 {loadMode === 'pagination' && (favData?.has_prev || favData?.has_next) && (
-                  <div className="flex justify-center gap-4 pt-2">
+                  <div className="flex justify-center items-center gap-2 pt-2">
+                    <button
+                      disabled={!favData?.has_prev}
+                      onClick={() => {
+                        setFavCursor({})
+                        window.scrollTo(0, 0)
+                      }}
+                      title={t('common.firstPage')}
+                      className="rounded-lg bg-vault-card border border-vault-border px-3 py-2 text-sm text-vault-text
+                             hover:border-vault-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                    >
+                      «
+                    </button>
                     <button
                       disabled={!favData?.has_prev}
                       onClick={() => {
@@ -1679,10 +1855,10 @@ function BrowsePage() {
                           window.scrollTo(0, 0)
                         }
                       }}
-                      className="rounded-lg bg-vault-card border border-vault-border px-4 py-2 text-sm text-vault-text
-                             hover:bg-vault-card-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      className="rounded-lg bg-vault-card border border-vault-border px-3 py-2 text-sm text-vault-text
+                             hover:border-vault-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     >
-                      {t('common.prev')}
+                      ‹
                     </button>
                     <button
                       disabled={!favData?.has_next}
@@ -1692,10 +1868,10 @@ function BrowsePage() {
                           window.scrollTo(0, 0)
                         }
                       }}
-                      className="rounded-lg bg-vault-card border border-vault-border px-4 py-2 text-sm text-vault-text
-                             hover:bg-vault-card-hover disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
+                      className="rounded-lg bg-vault-card border border-vault-border px-3 py-2 text-sm text-vault-text
+                             hover:border-vault-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
                     >
-                      {t('common.next')}
+                      ›
                     </button>
                   </div>
                 )}
@@ -1723,8 +1899,8 @@ function BrowsePage() {
         {/* ════════ POPULAR TAB ════════ */}
         {activeTab === 'popular' && (
           <>
-            {popularLoading && (
-              <div className="flex justify-center py-20">
+            {popularLoading && !popularData && (
+              <div className="flex justify-center py-4">
                 <LoadingSpinner />
               </div>
             )}
@@ -1754,7 +1930,7 @@ function BrowsePage() {
                 ) : (
                   <VirtualGrid
                     items={popularData.galleries}
-                    columns={{ base: 3, sm: 4, md: 5 }}
+                    columns={{ base: 3, sm: 4, md: 5, lg: 6, xl: 7, xxl: 8 }}
                     gap={8}
                     estimateHeight={220}
                     renderItem={(g) => (
@@ -1798,8 +1974,8 @@ function BrowsePage() {
               ))}
             </div>
 
-            {toplistLoading && (
-              <div className="flex justify-center py-20">
+            {toplistLoading && !toplistData && (
+              <div className="flex justify-center py-4">
                 <LoadingSpinner />
               </div>
             )}
@@ -1817,7 +1993,7 @@ function BrowsePage() {
                     {toplistData.total.toLocaleString()} {t('browse.results')}
                   </span>
                   <span>
-                    {t('browse.page')} {toplistPage + 1}
+                    {t('browse.pageN', { page: String(toplistPage + 1) })}
                   </span>
                 </div>
 
@@ -1834,7 +2010,7 @@ function BrowsePage() {
                 ) : (
                   <VirtualGrid
                     items={toplistData.galleries}
-                    columns={{ base: 3, sm: 4, md: 5 }}
+                    columns={{ base: 3, sm: 4, md: 5, lg: 6, xl: 7, xxl: 8 }}
                     gap={8}
                     estimateHeight={220}
                     renderItem={(g) => (
@@ -1849,16 +2025,35 @@ function BrowsePage() {
 
                 {/* Toplist pagination */}
                 {toplistData.galleries.length > 0 && (
-                  <div className="pt-2">
-                    <Pagination
-                      page={toplistPage}
-                      total={toplistData.total}
-                      pageSize={EH_PAGE_SIZE}
-                      onChange={(p) => {
-                        setToplistPage(p)
-                        window.scrollTo(0, 0)
-                      }}
-                    />
+                  <div className="flex justify-center items-center gap-2 pt-2">
+                    <button
+                      onClick={() => { setToplistPage(0); window.scrollTo(0, 0) }}
+                      disabled={toplistPage === 0}
+                      title={t('common.firstPage')}
+                      className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
+                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
+                    >
+                      «
+                    </button>
+                    <button
+                      onClick={() => { setToplistPage((p) => Math.max(0, p - 1)); window.scrollTo(0, 0) }}
+                      disabled={toplistPage === 0}
+                      className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
+                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
+                    >
+                      ‹
+                    </button>
+                    <span className="text-sm text-vault-text-muted px-2">
+                      {t('browse.pageN', { page: String(toplistPage + 1) })}
+                    </span>
+                    <button
+                      onClick={() => { setToplistPage((p) => p + 1); window.scrollTo(0, 0) }}
+                      disabled={toplistData.galleries.length < EH_PAGE_SIZE}
+                      className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
+                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
+                    >
+                      ›
+                    </button>
                   </div>
                 )}
               </>
@@ -1869,32 +2064,6 @@ function BrowsePage() {
             )}
           </>
         )}
-
-        {/* ── Quick URL download ── */}
-        <div className="mt-4 pt-4 border-t border-vault-border">
-          <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-            {t('browse.quickDownload')}
-          </p>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={downloadUrl}
-              onChange={(e) => setDownloadUrl(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleUrlDownload()}
-              placeholder="https://e-hentai.org/g/…"
-              className="flex-1 bg-vault-card border border-vault-border rounded-lg px-3 py-2 text-vault-text
-                         placeholder-vault-text-muted text-sm focus:outline-none focus:border-vault-accent transition-colors"
-            />
-            <button
-              onClick={handleUrlDownload}
-              disabled={!downloadUrl.trim()}
-              className="px-4 py-2 bg-green-800 hover:bg-green-700 disabled:opacity-40 rounded-lg text-white text-sm font-medium transition-colors"
-            >
-              {t('browse.add')}
-            </button>
-          </div>
-        </div>
-      </div>
 
       {/* Gallery detail modal */}
       {selectedGallery && (

@@ -22,7 +22,7 @@ from plugins.models import DownloadResult, FieldDef, GalleryMetadata, PluginMeta
 logger = logging.getLogger(__name__)
 
 _FILE_PATH_RE = re.compile(r"/data/")
-_IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|gif|webp|avif|heic)$", re.IGNORECASE)
+_IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|gif|webp|avif|heic|mp4|webm)$", re.IGNORECASE)
 _PROGRESS_EVERY_N = 5
 _PROGRESS_EVERY_S = 10.0
 

@@ -44,6 +44,8 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
+_VIDEO_EXTS = {".mp4", ".webm"}
+_MEDIA_EXTS = _IMAGE_EXTS | _VIDEO_EXTS
 
 # Magic byte signatures for image file validation
 _IMAGE_MAGIC = {
@@ -442,24 +444,29 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
     source_id = str(metadata.get("gallery_id") or metadata.get("tweet_id") or metadata.get("id") or gallery_path.name)
 
     tags = _extract_tags(gallery_path, metadata)
-    image_files_raw = [f for f in gallery_path.rglob('*') if f.is_file() and f.suffix.lower() in _IMAGE_EXTS]
-    # Validate actual file content matches extension (MIME check)
-    image_files = sorted(
-        [f for f in image_files_raw if _validate_image_magic(f)],
-        key=lambda f: f.name,
-    )
-    skipped = len(image_files_raw) - len(image_files)
+    media_files_raw = [f for f in gallery_path.rglob('*') if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
+    # Validate magic bytes for images; pass video files through without check
+    media_files = []
+    skipped = 0
+    for f in media_files_raw:
+        if f.suffix.lower() in _VIDEO_EXTS:
+            media_files.append(f)
+        elif _validate_image_magic(f):
+            media_files.append(f)
+        else:
+            skipped += 1
+    media_files.sort(key=lambda f: f.name)
     if skipped:
         logger.warning("[import] %s: skipped %d file(s) with invalid magic bytes", gallery_path.name, skipped)
 
-    if not image_files:
-        return {"status": "failed", "error": "no images found"}
+    if not media_files:
+        return {"status": "failed", "error": "no media files found"}
 
     import shutil as _shutil
 
     async with AsyncSessionLocal() as session:
         # Upsert gallery
-        gallery_values = _build_gallery(source, source_id, metadata, tags, len(image_files))
+        gallery_values = _build_gallery(source, source_id, metadata, tags, len(media_files))
         stmt = (
             pg_insert(Gallery)
             .values(**gallery_values)
@@ -470,6 +477,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
                     "tags_array": pg_insert(Gallery).excluded.tags_array,
                     "download_status": "complete",
                     "pages": pg_insert(Gallery).excluded.pages,
+                    "artist_id": pg_insert(Gallery).excluded.artist_id,
                 },
             )
             .returning(Gallery.id)
@@ -483,10 +491,10 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
             async with _hash_sem:
                 return await asyncio.to_thread(_sha256, f)
 
-        hashes = await asyncio.gather(*[_sha256_limited(f) for f in image_files])
+        hashes = await asyncio.gather(*[_sha256_limited(f) for f in media_files])
 
         # Store each file in CAS and create library symlink
-        for img_file, sha256 in zip(image_files, hashes, strict=False):
+        for img_file, sha256 in zip(media_files, hashes, strict=False):
             blob = await store_blob(img_file, sha256, session)
             await create_library_symlink(gallery_id, img_file.name, blob)
 
@@ -501,7 +509,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
                 "filename": img_file.name,
                 "blob_sha256": sha256,
             }
-            for page_num, (img_file, sha256) in enumerate(zip(image_files, hashes, strict=False), start=1)
+            for page_num, (img_file, sha256) in enumerate(zip(media_files, hashes, strict=False), start=1)
         ]
         if image_values:
             img_stmt = pg_insert(Image).values(image_values).on_conflict_do_nothing()
@@ -563,6 +571,33 @@ def _build_gallery(
         except (ValueError, TypeError, OverflowError) as exc:
             logger.warning("[import] failed to parse date %r: %s", raw_date, exc)
 
+    # Artist ID extraction
+    artist_id = None
+    if source == "ehentai":
+        for tag in tags:
+            if tag.startswith("artist:"):
+                artist_id = f"ehentai:{tag[7:]}"
+                break
+    elif source == "pixiv":
+        uploader = meta.get("uploader", "")
+        if uploader:
+            artist_id = f"pixiv:{uploader}"
+    elif meta.get("category") == "twitter" or source == "twitter":
+        handle = None
+        author = meta.get("author")
+        if isinstance(author, dict):
+            handle = author.get("name")
+        if not handle:
+            handle = meta.get("user") if isinstance(meta.get("user"), str) else None
+        if not handle:
+            handle = meta.get("uploader")
+        if handle:
+            artist_id = f"twitter:{handle}"
+    else:
+        uploader = meta.get("uploader", "")
+        if uploader:
+            artist_id = f"{source}:{uploader}"
+
     return {
         "source": source,
         "source_id": source_id,
@@ -581,6 +616,7 @@ def _build_gallery(
         "uploader": meta.get("uploader", ""),
         "download_status": "complete",
         "tags_array": tags,
+        "artist_id": artist_id,
     }
 
 
@@ -1241,6 +1277,11 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
                 continue
             src = resolve_blob_path(blob)
             if not src.exists():
+                continue
+
+            # Skip video files — PIL cannot process them
+            if blob.media_type == "video":
+                processed += 1
                 continue
 
             td = thumb_dir(blob.sha256)
@@ -1970,6 +2011,46 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
     return {"status": "ok", "checked": checked, "new_works": new_works}
 
 
+# ── WORKER K: Backfill Artist IDs ─────────────────────────────────────
+
+
+async def backfill_artist_ids(ctx: dict) -> dict:
+    """One-time backfill: populate artist_id for existing galleries."""
+    logger.info("[backfill] starting artist_id backfill")
+    updated = 0
+    async with AsyncSessionLocal() as session:
+        # Fetch all galleries without artist_id
+        rows = (await session.execute(
+            select(Gallery).where(Gallery.artist_id.is_(None))
+        )).scalars().all()
+
+        for g in rows:
+            aid = None
+            if g.source == "ehentai":
+                for tag in (g.tags_array or []):
+                    if tag.startswith("artist:"):
+                        aid = f"ehentai:{tag[7:]}"
+                        break
+            elif g.source == "pixiv":
+                if g.uploader:
+                    aid = f"pixiv:{g.uploader}"
+            elif g.source in ("twitter", "gallery_dl") and g.category == "twitter":
+                if g.uploader:
+                    aid = f"twitter:{g.uploader}"
+            else:
+                if g.uploader:
+                    aid = f"{g.source}:{g.uploader}"
+
+            if aid:
+                g.artist_id = aid
+                updated += 1
+
+        await session.commit()
+
+    logger.info("[backfill] updated %d galleries", updated)
+    return {"status": "done", "updated": updated}
+
+
 # ── ARQ Worker Settings ──────────────────────────────────────────────
 
 
@@ -1990,6 +2071,7 @@ class WorkerSettings:
         scheduled_scan_job,
         toggle_watcher_job,
         check_followed_artists,
+        backfill_artist_ids,
     ]
     cron_jobs = [
         cron(

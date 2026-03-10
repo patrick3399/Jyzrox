@@ -172,7 +172,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
   const { user, recent_illusts: recentWorks } = userResult
 
   return (
-    <div className="p-4 md:p-6 max-w-6xl mx-auto space-y-6">
+    <div className="space-y-6">
       {/* Back link */}
       <Link
         href="/pixiv"

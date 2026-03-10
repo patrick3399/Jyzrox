@@ -189,8 +189,7 @@ export default function GalleryDetailPage() {
     DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
 
   return (
-    <div className="min-h-screen bg-vault-bg text-vault-text">
-      <div className="max-w-6xl mx-auto px-4 py-6">
+    <div>
         {/* Back */}
         <button
           onClick={() => router.back()}
@@ -237,7 +236,6 @@ export default function GalleryDetailPage() {
                   { labelKey: 'library.metaSource', value: gallery.source },
                   { labelKey: 'library.metaCategory', value: gallery.category },
                   { labelKey: 'library.metaLanguage', value: gallery.language || 'N/A' },
-                  { labelKey: 'library.metaUploader', value: gallery.uploader || 'N/A' },
                   { labelKey: 'library.metaPages', value: String(gallery.pages) },
                   {
                     labelKey: 'library.metaAdded',
@@ -252,6 +250,20 @@ export default function GalleryDetailPage() {
                     <span className="text-vault-text">{value}</span>
                   </div>
                 ))}
+                {/* Uploader — clickable when artist_id is available */}
+                <div>
+                  <span className="text-vault-text-muted">{t('library.metaUploader')}: </span>
+                  {gallery.artist_id ? (
+                    <Link
+                      href={`/library?artist=${encodeURIComponent(gallery.artist_id)}`}
+                      className="text-vault-text hover:text-vault-accent hover:underline transition-colors"
+                    >
+                      {gallery.uploader || 'N/A'}
+                    </Link>
+                  ) : (
+                    <span className="text-vault-text">{gallery.uploader || 'N/A'}</span>
+                  )}
+                </div>
               </div>
 
               {/* Rating */}
@@ -275,6 +287,14 @@ export default function GalleryDetailPage() {
                 >
                   {t('browse.read')}
                 </Link>
+                {gallery.artist_id && (
+                  <Link
+                    href={`/library?artist=${encodeURIComponent(gallery.artist_id)}`}
+                    className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
+                  >
+                    {t('library.viewAllByArtist')}
+                  </Link>
+                )}
                 <button
                   onClick={handleFavoriteToggle}
                   disabled={isUpdating}
@@ -435,7 +455,6 @@ export default function GalleryDetailPage() {
             </div>
           )}
         </div>
-      </div>
     </div>
   )
 }

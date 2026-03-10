@@ -21,8 +21,7 @@ export default function PluginsPage() {
   }, [])
 
   return (
-    <div className="min-h-screen bg-vault-bg text-vault-text">
-      <div className="max-w-3xl mx-auto px-4 py-6">
+    <div className="max-w-3xl">
         <div className="flex items-center gap-3 mb-6">
           <Puzzle size={22} className="text-vault-accent" />
           <h1 className="text-2xl font-bold">{t('plugins.title')}</h1>
@@ -97,6 +96,5 @@ export default function PluginsPage() {
           </div>
         )}
       </div>
-    </div>
   )
 }

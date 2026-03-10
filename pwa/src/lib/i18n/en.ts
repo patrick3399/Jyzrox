@@ -5,6 +5,7 @@ const en: Record<string, string> = {
   'nav.closeMenu': 'Close menu',
   'nav.browse': 'Browse',
   'nav.library': 'Library',
+  'nav.artists': 'Artists',
   'nav.history': 'History',
   'nav.queue': 'Queue',
   'nav.tags': 'Tags',
@@ -325,6 +326,18 @@ const en: Record<string, string> = {
   'library.fileCount': '{count} file|{count} files',
   'library.pageCount': '{count} page|{count} pages',
   'library.galleryCount': '{count} gallery|{count} galleries',
+  'library.artistFilter': 'Artist',
+  'library.viewAllByArtist': 'View all by this artist',
+
+  // ── Artists ──
+  'artists.title': 'Artists',
+  'artists.searchPlaceholder': 'Search artists...',
+  'artists.galleryCount': '{count} galleries',
+  'artists.totalPages': '{count} pages',
+  'artists.noArtists': 'No artists found.',
+  'artists.sortGalleryCount': 'Gallery Count',
+  'artists.sortTotalPages': 'Total Pages',
+  'artists.sortLatest': 'Latest',
 
   // ── Queue (extra) ──
   'queue.cancelError': 'Failed to cancel job',
@@ -420,6 +433,7 @@ const en: Record<string, string> = {
   'browse.resultsCount': '{count} results',
   'browse.resultsFor': 'results for "{query}"',
   'browse.pageN': 'Page {page}',
+  'browse.cannotJumpForward': 'Reached the last available page',
   'browse.failedLoadResults': 'Failed to load results',
   'browse.favoritesN': 'Favorites {n}',
   'browse.matchingQuery': 'matching "{query}"',
@@ -779,6 +793,7 @@ const en: Record<string, string> = {
   'common.locale.ja': '日本語',
   'common.locale.ko': '한국어',
   'common.loadMore': 'Load more',
+  'common.firstPage': 'First page',
 
   // ── API Error Codes ──
   'error.not_authenticated': 'Not authenticated',

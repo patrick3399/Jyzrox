@@ -79,9 +79,12 @@ export function useUpdateGallery(id: number) {
 
 // ── E-Hentai ──────────────────────────────────────────────────────────
 
-export function useEhSearch(params: EhSearchParams) {
-  // Always fire — empty params = EH homepage (like EhViewer default behaviour)
-  return useSWR(['eh/search', params], () => api.eh.search(params), { revalidateOnFocus: false })
+export function useEhSearch(params: EhSearchParams, enabled = true) {
+  return useSWR(enabled ? ['eh/search', params] : null, () => api.eh.search(params), {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    dedupingInterval: 60000,
+  })
 }
 
 export function useEhGallery(gid: number | null, token: string | null) {
@@ -266,12 +269,12 @@ export function useEhGalleryImagesPaginated(
   return { tokenMap, previewMap, isLoading, error, onPageChange, fetchUpTo, isDone: doneRef.current }
 }
 
-export function useEhPopular() {
-  return useSWR('eh/popular', () => api.eh.getPopular(), { revalidateOnFocus: false })
+export function useEhPopular(enabled = true) {
+  return useSWR(enabled ? 'eh/popular' : null, () => api.eh.getPopular(), { revalidateOnFocus: false })
 }
 
-export function useEhToplist(tl: number, page = 0) {
-  return useSWR(['eh/toplist', tl, page], () => api.eh.getToplist({ tl, page }), {
+export function useEhToplist(tl: number, page = 0, enabled = true) {
+  return useSWR(enabled ? ['eh/toplist', tl, page] : null, () => api.eh.getToplist({ tl, page }), {
     revalidateOnFocus: false,
   })
 }

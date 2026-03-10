@@ -178,8 +178,7 @@ export default function Dashboard() {
   )
 
   return (
-    <div className="min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 py-6 space-y-8">
+    <div className="space-y-8">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -191,7 +190,7 @@ export default function Dashboard() {
         {alerts.length > 0 && <SystemAlerts alerts={alerts} />}
 
         {/* Quick Links */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
           {QUICK_LINKS.map((link) => {
             const Icon = link.icon
             return (
@@ -284,14 +283,13 @@ export default function Dashboard() {
           )}
 
           {!libraryLoading && libraryData && libraryData.galleries.length > 0 && (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-3">
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 gap-3">
               {libraryData.galleries.map((gallery) => (
                 <GalleryThumb key={gallery.id} gallery={gallery} />
               ))}
             </div>
           )}
         </div>
-      </div>
     </div>
   )
 }

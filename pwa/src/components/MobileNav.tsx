@@ -23,6 +23,7 @@ import {
   Key,
   Puzzle,
   Palette,
+  Users,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
@@ -35,6 +36,7 @@ const navLinks = [
   { href: '/browse', label: () => t('nav.browse'), icon: Search },
   { href: '/pixiv', label: () => t('nav.pixiv'), icon: Palette },
   { href: '/library', label: () => t('nav.library'), icon: BookOpen },
+  { href: '/artists', label: () => t('nav.artists'), icon: Users },
   { href: '/history', label: () => t('nav.history'), icon: Clock },
   { href: '/queue', label: () => t('nav.queue'), icon: Download },
   { href: '/tags', label: () => t('nav.tags'), icon: Tags },

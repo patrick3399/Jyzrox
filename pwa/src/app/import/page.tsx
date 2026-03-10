@@ -570,8 +570,7 @@ export default function ImportPage() {
   const { data: monitorData } = useMonitorStatus()
 
   return (
-    <div className="min-h-screen bg-vault-bg text-vault-text">
-      <div className="max-w-3xl mx-auto px-4 py-6">
+    <div className="max-w-3xl">
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <FolderInput size={22} className="text-vault-accent shrink-0" />
@@ -596,6 +595,5 @@ export default function ImportPage() {
         {/* B Zone: Import into System */}
         <ZoneB />
       </div>
-    </div>
   )
 }

@@ -261,9 +261,8 @@ export default function QueuePage() {
   )
 
   return (
-    <div className="min-h-screen">
-      <div className="max-w-4xl mx-auto px-4 py-6">
-        <h1 className="text-2xl font-bold mb-6">{t('queue.title')}</h1>
+    <div>
+      <h1 className="text-2xl font-bold mb-6">{t('queue.title')}</h1>
 
         {/* Add Download Form */}
         <div className="bg-vault-card border border-vault-border rounded-lg p-4 mb-6">
@@ -372,7 +371,6 @@ export default function QueuePage() {
             )}
           </div>
         )}
-      </div>
     </div>
   )
 }

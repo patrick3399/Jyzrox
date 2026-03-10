@@ -3,7 +3,7 @@
 import { useState, useCallback, useRef, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
-import { BookOpen, Plus, Minus } from 'lucide-react'
+import { BookOpen, Plus, Minus, X } from 'lucide-react'
 import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -42,6 +42,7 @@ function LibraryContent() {
   )
   const [onlyFavorited, setOnlyFavorited] = useState(searchParams.get('fav') === '1')
   const [sourceFilter, setSourceFilter] = useState(searchParams.get('source') ?? '')
+  const [artistFilter, setArtistFilter] = useState(searchParams.get('artist') ?? '')
   const [sort, setSort] = useState<'added_at' | 'rating' | 'pages'>(
     (searchParams.get('sort') as 'added_at' | 'rating' | 'pages') ?? 'added_at',
   )
@@ -61,11 +62,12 @@ function LibraryContent() {
     if (sort !== 'added_at') params.set('sort', sort)
     if (minRating !== undefined) params.set('rating', String(minRating))
     if (onlyFavorited) params.set('fav', '1')
+    if (artistFilter) params.set('artist', artistFilter)
 
     const qs = params.toString()
     const newUrl = qs ? `/library?${qs}` : '/library'
     router.replace(newUrl, { scroll: false })
-  }, [searchQuery, sourceFilter, sort, minRating, onlyFavorited, router])
+  }, [searchQuery, sourceFilter, sort, minRating, onlyFavorited, artistFilter, router])
 
   // Split compound source filter values like "local:link" → source="local", import_mode="link"
   const [parsedSource, parsedImportMode] = (() => {
@@ -84,6 +86,7 @@ function LibraryContent() {
       favorited: onlyFavorited || undefined,
       source: parsedSource,
       import_mode: parsedImportMode,
+      artist: artistFilter || undefined,
       sort,
       limit: PAGE_SIZE,
     })
@@ -131,9 +134,8 @@ function LibraryContent() {
   }, [])
 
   return (
-    <div className="min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 py-6">
-        <h1 className="text-2xl font-bold mb-6">{t('library.title')}</h1>
+    <div>
+      <h1 className="text-2xl font-bold mb-6">{t('library.title')}</h1>
 
         {/* Filters Panel */}
         <div className="bg-vault-card border border-vault-border rounded-lg p-4 mb-6 space-y-4">
@@ -291,6 +293,24 @@ function LibraryContent() {
           </div>
         </div>
 
+        {artistFilter && (
+          <div className="flex items-center gap-2 mb-4">
+            <span className="text-xs text-vault-text-muted uppercase tracking-wide">
+              {t('library.artistFilter')}:
+            </span>
+            <span className="flex items-center gap-1 px-2 py-0.5 bg-vault-accent/10 border border-vault-accent/30 text-vault-accent rounded text-xs">
+              {artistFilter}
+              <button
+                onClick={() => setArtistFilter('')}
+                className="ml-1 hover:text-red-400 transition-colors"
+                aria-label="Clear artist filter"
+              >
+                <X size={12} />
+              </button>
+            </span>
+          </div>
+        )}
+
         {total !== undefined && (
           <div className="text-sm text-vault-text-muted mb-4">
             {`${formatNumber(total)} ${t('library.galleries')}`}
@@ -312,8 +332,8 @@ function LibraryContent() {
         {!isLoading && galleries.length > 0 && (
           <VirtualGrid
             items={galleries}
-            columns={{ base: 2, md: 4 }}
-            gap={16}
+            columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }}
+            gap={12}
             estimateHeight={300}
             renderItem={(gallery) => (
               <Link href={`/library/${gallery.id}`}>
@@ -332,7 +352,6 @@ function LibraryContent() {
         {!isLoading && galleries.length === 0 && !error && (
           <EmptyState icon={BookOpen} title={t('library.noGalleries')} />
         )}
-      </div>
     </div>
   )
 }

@@ -66,6 +66,7 @@ async def list_galleries(
     favorited: bool | None = Query(default=None),
     min_rating: int | None = Query(default=None, ge=0, le=5),
     source: str | None = Query(default=None),
+    artist: str | None = Query(default=None),
     import_mode: str | None = Query(default=None),
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
@@ -98,6 +99,8 @@ async def list_galleries(
         stmt = stmt.where(Gallery.rating >= min_rating)
     if source:
         stmt = stmt.where(Gallery.source == source)
+    if artist:
+        stmt = stmt.where(Gallery.artist_id == artist)
     if import_mode:
         stmt = stmt.where(Gallery.import_mode == import_mode)
     if q:
@@ -208,6 +211,83 @@ async def list_galleries(
             cover_map = {}
 
         return {"total": total, "page": page, "galleries": [_g(g, cover_thumb=cover_map.get(g.id)) for g in galleries]}
+
+
+@router.get("/artists")
+async def list_artists(
+    q: str = Query(default=""),
+    source: str | None = Query(default=None),
+    sort: Literal["gallery_count", "total_pages", "latest"] = Query(default="latest"),
+    page: int = Query(default=0, ge=0),
+    limit: int = Query(default=30, ge=1, le=100),
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List artists grouped from gallery artist_id field."""
+    # Base query: group galleries by artist_id
+    base = select(
+        Gallery.artist_id,
+        func.max(Gallery.uploader).label("artist_name"),
+        func.count().label("gallery_count"),
+        func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
+        func.max(Gallery.added_at).label("latest_added_at"),
+    ).where(Gallery.artist_id.is_not(None)).group_by(Gallery.artist_id)
+
+    if q:
+        base = base.having(func.max(Gallery.uploader).ilike(f"%{q}%"))
+    if source:
+        base = base.where(Gallery.artist_id.startswith(f"{source}:"))
+
+    # Count total
+    count_q = select(func.count()).select_from(base.subquery())
+    total = (await db.execute(count_q)).scalar_one()
+
+    # Sort
+    sort_col = {
+        "gallery_count": desc(func.count()),
+        "total_pages": desc(func.coalesce(func.sum(Gallery.pages), 0)),
+        "latest": desc(func.max(Gallery.added_at)),
+    }[sort]
+    base = base.order_by(sort_col).offset(page * limit).limit(limit)
+
+    rows = (await db.execute(base)).all()
+
+    # Fetch cover thumbs for each artist (most recent gallery's first image)
+    artist_ids = [r.artist_id for r in rows]
+    cover_map: dict[str, str | None] = {}
+    if artist_ids:
+        # Subquery: for each artist_id, get the gallery with the latest added_at
+        latest_gallery_sub = (
+            select(Gallery.id, Gallery.artist_id)
+            .where(Gallery.artist_id.in_(artist_ids))
+            .order_by(Gallery.artist_id, desc(Gallery.added_at))
+            .distinct(Gallery.artist_id)
+        ).subquery()
+
+        cover_stmt = (
+            select(latest_gallery_sub.c.artist_id, Blob.sha256)
+            .join(Image, Image.gallery_id == latest_gallery_sub.c.id)
+            .join(Blob, Image.blob_sha256 == Blob.sha256)
+            .where(Image.page_num == 1)
+        )
+        cover_rows = (await db.execute(cover_stmt)).all()
+        cover_map = {r.artist_id: cas_thumb_url(r.sha256) for r in cover_rows}
+
+    result = []
+    for r in rows:
+        aid = r.artist_id
+        src = aid.split(":", 1)[0] if ":" in aid else ""
+        result.append({
+            "artist_id": aid,
+            "artist_name": r.artist_name or "",
+            "source": src,
+            "gallery_count": r.gallery_count,
+            "total_pages": r.total_pages,
+            "cover_thumb": cover_map.get(aid),
+            "latest_added_at": r.latest_added_at.isoformat() if r.latest_added_at else None,
+        })
+
+    return {"artists": result, "total": total}
 
 
 @router.get("/galleries/{gallery_id}")
@@ -625,6 +705,7 @@ def _g(g: Gallery, cover_thumb: str | None = None) -> dict:
         "rating": g.rating,
         "favorited": g.favorited,
         "uploader": g.uploader,
+        "artist_id": g.artist_id,
         "download_status": g.download_status,
         "import_mode": g.import_mode,
         "tags_array": g.tags_array or [],

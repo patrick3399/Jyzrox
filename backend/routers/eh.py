@@ -73,6 +73,8 @@ async def search(
     request: Request,
     q: str = Query(default=""),
     page: int = Query(default=0, ge=0),
+    next_gid: int | None = Query(default=None),
+    prev: bool = Query(default=False),
     category: str | None = Query(default=None),
     f_cats: int | None = Query(default=None),
     advance: bool = Query(default=False),
@@ -83,14 +85,20 @@ async def search(
     language: str | None = Query(default=None),
     auth: dict = Depends(require_auth),
 ):
-    """Search E-Hentai galleries (scrape + gdata batch)."""
+    """Search E-Hentai galleries (scrape + gdata batch).
+
+    Pagination uses EH cursor-based params: next_gid (gid of next page boundary)
+    and prev (go to previous page). The legacy `page` param is kept for backward
+    compatibility but is not forwarded to EH — the server ignores it.
+    """
     # Prepend language filter to query if specified
     effective_q = q
     if language:
         lang_tag = f"language:{language}"
         effective_q = f"{lang_tag} {q}".strip() if q else lang_tag
 
-    cache_key = f"eh:search:{effective_q}:{page}:{category}:{f_cats}:{advance}:{adv_search}:{min_rating}:{page_from}:{page_to}"
+    # Cache key uses cursors instead of page number — page is meaningless on EH
+    cache_key = f"eh:search:{effective_q}:{next_gid}:{prev}:{category}:{f_cats}:{advance}:{adv_search}:{min_rating}:{page_from}:{page_to}"
     cached = await cache.get_json(cache_key)
     if cached:
         # Apply blocked tag filter from cache too
@@ -106,6 +114,8 @@ async def search(
             result = await client.search(
                 query=effective_q,
                 page=page,
+                next_gid=next_gid,
+                prev=prev,
                 category=category,
                 f_cats=f_cats,
                 advance=advance,

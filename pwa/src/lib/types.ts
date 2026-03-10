@@ -14,6 +14,7 @@ export interface Gallery {
   rating: number // 0–5
   favorited: boolean
   uploader: string
+  artist_id: string | null
   download_status: 'proxy_only' | 'partial' | 'complete'
   import_mode: string | null
   tags_array: string[]
@@ -61,6 +62,8 @@ export interface EhSearchResult {
   galleries: EhGallery[]
   total: number
   page: number
+  next_gid?: number | null  // cursor for next page
+  has_prev?: boolean         // whether previous page exists
 }
 
 export interface EhFavCategory {
@@ -250,6 +253,16 @@ export interface WsMessage {
 
 // ── Pagination responses ──────────────────────────────────────────────
 
+export interface ArtistSummary {
+  artist_id: string
+  artist_name: string
+  source: string
+  gallery_count: number
+  total_pages: number
+  cover_thumb: string | null
+  latest_added_at: string | null
+}
+
 /** Page-based response (total always present) */
 export interface GalleryListResponse {
   galleries: Gallery[]
@@ -380,6 +393,7 @@ export interface GallerySearchParams {
   favorited?: boolean
   min_rating?: number
   source?: string
+  artist?: string
   import_mode?: string
   page?: number
   cursor?: string
@@ -390,6 +404,8 @@ export interface GallerySearchParams {
 export interface EhSearchParams {
   q?: string
   page?: number
+  next_gid?: number
+  prev?: boolean
   category?: string
   f_cats?: number
   advance?: boolean

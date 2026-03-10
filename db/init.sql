@@ -283,3 +283,7 @@ CREATE TABLE IF NOT EXISTS followed_artists (
 
 CREATE INDEX IF NOT EXISTS idx_followed_artists_user ON followed_artists (user_id);
 CREATE INDEX IF NOT EXISTS idx_followed_artists_source ON followed_artists (source, artist_id);
+
+-- Artist grouping
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS artist_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_galleries_artist_id ON galleries (artist_id) WHERE artist_id IS NOT NULL;

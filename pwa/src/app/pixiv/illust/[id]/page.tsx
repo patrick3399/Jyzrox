@@ -69,7 +69,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
   const squareUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
 
   return (
-    <div className="p-4 md:p-6 max-w-4xl mx-auto space-y-6">
+    <div className="space-y-6">
       {/* Back link */}
       <Link
         href="/pixiv"

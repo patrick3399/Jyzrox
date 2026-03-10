@@ -57,6 +57,7 @@ class Gallery(Base):
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     last_scanned_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     library_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    artist_id: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
 
     images: Mapped[list["Image"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
     gallery_tags: Mapped[list["GalleryTag"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")

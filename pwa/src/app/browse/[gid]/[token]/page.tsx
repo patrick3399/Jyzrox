@@ -406,8 +406,8 @@ export default function EhGalleryDetailPage() {
     : ''
 
   return (
-    <div className="min-h-screen bg-vault-bg text-vault-text">
-      <div className="max-w-5xl mx-auto px-4 py-5 space-y-6">
+    <>
+      <div className="space-y-6">
         {/* ── Header section ── */}
         <div className="flex gap-5 flex-col sm:flex-row">
           {/* Cover */}
@@ -580,6 +580,6 @@ export default function EhGalleryDetailPage() {
       >
         <ArrowLeft size={20} />
       </button>
-    </div>
+    </>
   )
 }

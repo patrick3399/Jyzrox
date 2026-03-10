@@ -33,6 +33,7 @@ import type {
   PixivSearchResult,
   PixivUserResult,
   FollowedArtist,
+  ArtistSummary,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -301,6 +302,9 @@ const library = {
         source: string
       }>
     }>(`/api/library/galleries/${id}/tags`),
+
+  getArtists: (params: { q?: string; source?: string; sort?: string; page?: number; limit?: number } = {}) =>
+    apiFetch<{ artists: ArtistSummary[]; total: number }>(`/api/library/artists${qs(params as Record<string, unknown>)}`),
 }
 
 // ── Download ──────────────────────────────────────────────────────────

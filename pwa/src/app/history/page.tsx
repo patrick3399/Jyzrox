@@ -170,8 +170,7 @@ export default function HistoryPage() {
   const hasMore = items.length < total
 
   return (
-    <div className="min-h-screen bg-vault-bg">
-      <div className="max-w-6xl mx-auto px-4 py-6">
+    <>
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -212,7 +211,7 @@ export default function HistoryPage() {
         ) : (
           <VirtualGrid
             items={items}
-            columns={{ base: 2, sm: 3, md: 4, lg: 6 }}
+            columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 12, xxl: 15 }}
             gap={12}
             estimateHeight={250}
             renderItem={(item) => (
@@ -228,7 +227,6 @@ export default function HistoryPage() {
             isLoading={loadingMore}
           />
         )}
-      </div>
-    </div>
+    </>
   )
 }

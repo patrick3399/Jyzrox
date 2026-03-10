@@ -320,19 +320,22 @@ function ScanScheduleSection() {
 
 // ── Browse Settings sub-component ────────────────────────────────────
 
-function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
-  const [historyEnabled] = useState(
+function BrowseSettings() {
+  const [historyEnabled, setHistoryEnabled] = useState(
     () => typeof window !== 'undefined' && localStorage.getItem('eh_search_history_enabled') !== 'false',
   )
-  const [loadMode] = useState(
+  const [loadMode, setLoadMode] = useState(
     () =>
       typeof window !== 'undefined'
         ? localStorage.getItem('browse_load_mode') || 'pagination'
         : 'pagination',
   )
-  const [perPage] = useState(
+  const [perPage, setPerPage] = useState(
     () =>
       typeof window !== 'undefined' ? localStorage.getItem('browse_per_page') || '25' : '25',
+  )
+  const [browseHistoryEnabled, setBrowseHistoryEnabled] = useState(
+    () => typeof window !== 'undefined' && localStorage.getItem('history_enabled') !== 'false',
   )
 
   return (
@@ -345,10 +348,10 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
         </div>
         <button
           onClick={() => {
-            const next = localStorage.getItem('eh_search_history_enabled') === 'false'
+            const next = !historyEnabled
             localStorage.setItem('eh_search_history_enabled', next ? 'true' : 'false')
             if (!next) localStorage.removeItem('eh_search_history')
-            onForceRerender()
+            setHistoryEnabled(next)
           }}
           className={`relative w-11 h-6 rounded-full transition-colors ${historyEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
         >
@@ -368,7 +371,7 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
           <button
             onClick={() => {
               localStorage.setItem('browse_load_mode', 'pagination')
-              onForceRerender()
+              setLoadMode('pagination')
             }}
             className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'pagination' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
           >
@@ -377,7 +380,7 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
           <button
             onClick={() => {
               localStorage.setItem('browse_load_mode', 'scroll')
-              onForceRerender()
+              setLoadMode('scroll')
             }}
             className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'scroll' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
           >
@@ -396,7 +399,7 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
           value={perPage}
           onChange={(e) => {
             localStorage.setItem('browse_per_page', e.target.value)
-            onForceRerender()
+            setPerPage(e.target.value)
           }}
           className="bg-vault-input border border-vault-border rounded px-3 py-1.5 text-sm text-vault-text focus:outline-none"
         >
@@ -407,34 +410,24 @@ function BrowseSettings({ onForceRerender }: { onForceRerender: () => void }) {
       </div>
 
       {/* Browse History toggle */}
-      <BrowseHistoryToggle onForceRerender={onForceRerender} />
-    </div>
-  )
-}
-
-// ── Browse History Toggle sub-component ──────────────────────────────
-
-function BrowseHistoryToggle({ onForceRerender }: { onForceRerender: () => void }) {
-  const historyEnabled =
-    typeof window !== 'undefined' && localStorage.getItem('history_enabled') !== 'false'
-  return (
-    <div className="mt-5 flex items-center justify-between">
-      <div>
-        <p className="text-sm text-vault-text">{t('settings.browseHistory')}</p>
-        <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.browseHistoryDesc')}</p>
+      <div className="mt-5 flex items-center justify-between">
+        <div>
+          <p className="text-sm text-vault-text">{t('settings.browseHistory')}</p>
+          <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.browseHistoryDesc')}</p>
+        </div>
+        <button
+          onClick={() => {
+            const next = !browseHistoryEnabled
+            localStorage.setItem('history_enabled', next ? 'true' : 'false')
+            setBrowseHistoryEnabled(next)
+          }}
+          className={`relative w-11 h-6 rounded-full transition-colors ${browseHistoryEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
+        >
+          <span
+            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${browseHistoryEnabled ? 'translate-x-5' : ''}`}
+          />
+        </button>
       </div>
-      <button
-        onClick={() => {
-          const next = localStorage.getItem('history_enabled') === 'false'
-          localStorage.setItem('history_enabled', next ? 'true' : 'false')
-          onForceRerender()
-        }}
-        className={`relative w-11 h-6 rounded-full transition-colors ${historyEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
-      >
-        <span
-          className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${historyEnabled ? 'translate-x-5' : ''}`}
-        />
-      </button>
     </div>
   )
 }
@@ -1070,8 +1063,7 @@ export default function SettingsPage() {
     'px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors'
 
   return (
-    <div className="min-h-screen bg-vault-bg text-vault-text">
-      <div className="max-w-2xl mx-auto px-4 py-6">
+    <div className="max-w-2xl">
         <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settings.title')}</h1>
 
         {/* ── Credentials link ── */}
@@ -1399,12 +1391,7 @@ export default function SettingsPage() {
               onToggle={toggleSection}
             />
             {activeSection === 'browse' && (
-              <BrowseSettings
-                onForceRerender={() => {
-                  setActiveSection(null)
-                  setTimeout(() => setActiveSection('browse'), 0)
-                }}
-              />
+              <BrowseSettings />
             )}
           </div>
 
@@ -2042,6 +2029,5 @@ export default function SettingsPage() {
           </div>
         </div>
       </div>
-    </div>
   )
 }
