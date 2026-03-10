@@ -67,8 +67,8 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 |--------|------|------|-------------|
 | `/api/auth` | `routers/auth.py` | Public + session | Login, logout, setup, sessions, profile, avatar, password |
 | `/api/system` | `routers/system.py` | Session | Health, info, cache stats/clear |
-| `/api/eh` | `routers/eh.py` | Session | EH search, gallery, images, proxy, favorites, popular, toplists |
-| `/api/pixiv` | `routers/pixiv.py` | Session | Pixiv search, illust, user, following |
+| `/api/eh` | `plugins/builtin/ehentai/browse.py` (dynamic) | Session | EH search, gallery, images, proxy, favorites, popular, toplists |
+| `/api/pixiv` | `plugins/builtin/pixiv/_browse.py` (dynamic) | Session | Pixiv search, illust, user, following, image proxy |
 | `/api/library` | `routers/library.py` | Session | Gallery CRUD, images, tags, progress, artists |
 | `/api/download` | `routers/download.py` | Session | Enqueue, list/cancel jobs, stats |
 | `/api/settings` | `routers/settings.py` | Session | Credentials, API tokens, feature flags, EH site toggle, rate limit |
@@ -79,8 +79,11 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `/api/export` | `routers/export.py` | Session | Kohya zip export |
 | `/api/external/v1` | `routers/external.py` | `X-API-Token` header | External API for third-party integrations |
 | `/api/history` | `routers/history.py` | Session | Browse history CRUD |
-| `/api/plugins` | `routers/plugins.py` | Session | List registered plugins |
+| `/api/plugins` | `routers/plugins.py` | Session | List plugins with credential_flows, browse schema |
 | `/api/artists` | `routers/artists.py` | Session | Followed artists (Pixiv/EH) |
+| `/api/collections` | `routers/collections.py` | Session | Collection CRUD, add/remove galleries |
+| `/api/scheduled-tasks` | `routers/scheduled_tasks.py` | Session | Scheduled task listing, enable/disable, manual run |
+| `/api/subscriptions` | `routers/subscriptions.py` | Session | Subscription CRUD, manual check trigger |
 | `/opds` | `routers/opds.py` | HTTP Basic Auth | OPDS catalog for e-readers |
 | `/api/health` | `main.py` inline | Public | Liveness probe |
 
@@ -111,8 +114,11 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `blocked_tags` | Per-user tag blocklist | `id`, `(user_id, namespace, name)` UNIQUE |
 | `library_paths` | User-configured scan paths | `id`, `path` UNIQUE, `label`, `enabled`, `monitor` |
 | `plugin_config` | Plugin enable/config | `source_id` PK, `enabled`, `config_json` JSONB |
-| `followed_artists` | Followed artist records | `id`, `(user_id, source, artist_id)` UNIQUE, `auto_download`, `last_illust_id` |
-| `audit_logs` | Security audit trail | `id`, `user_id` FK, `action`, `resource_type`, `ip_address`, `created_at` |
+| `audit_logs` | Security audit trail | `id`, `user_id` FK, `action`, `resource_type`, `resource_id`, `details` JSONB, `ip_address`, `created_at` |
+| `subscriptions` | Artist/source subscriptions | `id`, `(user_id, url)` UNIQUE, `name`, `url`, `source`, `source_id`, `avatar_url`, `enabled`, `auto_download`, `cron_expr`, `last_checked_at`, `last_item_id`, `last_status`, `last_error`, `next_check_at`, `created_at` |
+| `collections` | Gallery collections | `id`, `user_id` FK, `name`, `description`, `cover_gallery_id` |
+| `collection_galleries` | Collection↔Gallery join | `(collection_id, gallery_id)` PK, `position` |
+| `excluded_blobs` | Per-gallery blob exclusions | `(gallery_id, blob_sha256)` PK, `excluded_at` |
 
 #### Key Indexes
 
@@ -154,13 +160,16 @@ All models are in `backend/db/models.py`.
 | `BlockedTag` | `blocked_tags` |
 | `LibraryPath` | `library_paths` |
 | `PluginConfig` | `plugin_config` |
-| `FollowedArtist` | `followed_artists` |
+| `Subscription` | `subscriptions` |
+| `Collection` | `collections` |
+| `CollectionGallery` | `collection_galleries` |
+| `ExcludedBlob` | `excluded_blobs` |
 
 ---
 
 ### Worker Pipeline (ARQ)
 
-Entry: `arq worker.WorkerSettings`
+Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `download.py`, `importer.py`, `subscription.py`)
 
 #### Job Functions
 
@@ -179,6 +188,9 @@ Entry: `arq worker.WorkerSettings`
 | `rescan_library_path_job` | `/api/import/rescan/path/{id}` | Rescan one configured library path |
 | `scheduled_scan_job` | ARQ cron | Periodic full library scan (interval from `library_scan_interval_hours`) |
 | `toggle_watcher_job` | `/api/import/monitor/toggle` | Start/stop the LibraryWatcher file monitor |
+| `check_followed_artists` | ARQ cron / `/api/subscriptions/` POST | Check all subscribable sources for new works; enqueues `download_job` per work when `auto_download=true`; cron default `30 */2 * * *` |
+| `check_single_subscription` | `/api/subscriptions/{id}/check` | Check a single subscription for new works |
+| `batch_import_job` | `/api/import/batch/start` | Batch import multiple local directories |
 
 #### Standard Pipeline
 
@@ -205,6 +217,18 @@ Base module: `backend/plugins/`
 | `BrowsePlugin` | `browse_schema()`, `search(params, creds)`, `proxy_image(url, creds)` | Browse/search remote sources |
 | `TaggerPlugin` | `tag_images(image_paths)` | AI/ML image tagging |
 
+#### Protocol Interfaces (`plugins/base.py`)
+
+| Protocol | Methods | Purpose |
+|----------|---------|---------|
+| `HasMeta` | `meta: PluginMeta` | Base protocol — all plugins have metadata |
+| `Downloadable` | `can_handle(url)`, `download(...)`, `resolve_output_dir(...)`, `requires_credentials()` | Downloads galleries |
+| `Browsable` | `get_browse_router()` | Provides a FastAPI router for browse endpoints |
+| `Parseable` | `parse_import(dest_dir, raw_meta)` | Parses downloaded directory into GalleryImportData |
+| `Subscribable` | `check_new_works(artist_id, last_known, creds)` | Checks for new works from a subscribed artist |
+| `CredentialProvider` | `credential_flows()`, `verify_credential(creds)` | Declares credential auth flows and verification |
+| `Taggable` | `tag_images(image_paths)` | AI/ML image tagging |
+
 #### Pydantic Models (`plugins/models.py`)
 
 | Model | Purpose |
@@ -216,19 +240,26 @@ Base module: `backend/plugins/`
 | `SearchResult` | Paginated browse results |
 | `BrowseSchema` | Describes search fields and capabilities |
 | `TagResult` | Per-image AI tagging output |
+| `CredentialFlow` | Credential auth flow descriptor (fields/oauth/login) |
+| `OAuthConfig` | OAuth endpoint configuration |
+| `CredentialStatus` | Credential verification result |
+| `GalleryImportData` | Structured gallery import data from parser |
+| `NewWork` | New work notification from subscription check |
+| `SiteInfo` | Site domain/name/category info for site index |
 
 #### Registry (`plugins/registry.py`)
 
-Singleton `plugin_registry` (`PluginRegistry`). Routes URLs to the first matching `SourcePlugin`; `gallery_dl` is the registered fallback. Browsers and taggers are keyed by `source_id`.
+Singleton `plugin_registry` (`PluginRegistry`). Maintains a site index (domain→SiteInfo) for URL detection, routes downloads to matching plugins with `gallery_dl` as fallback. Also tracks capability maps: `_browsable`, `_downloadable`, `_parseable`, `_subscribable`, `_credential_providers`, `_taggable`. Browse routers are dynamically mounted at startup via `get_browse_routers()`.
 
 #### Built-in Plugins
 
-| Plugin | source_id | ABCs | Description |
-|--------|-----------|------|-------------|
-| `ehentai/source.py` | `ehentai` | SourcePlugin | Native EH download via `EhClient` |
-| `ehentai/browse.py` | `ehentai` | BrowsePlugin | EH search/favorites/popular/toplists |
-| `pixiv/source.py` | `pixiv` | SourcePlugin | Pixiv artwork download via OAuth API |
-| `gallery_dl/source.py` | `gallery_dl` | SourcePlugin | gallery-dl subprocess fallback (any URL) |
+| Plugin | source_id | Interfaces | Description |
+|--------|-----------|------------|-------------|
+| `ehentai/source.py` | `ehentai` | Downloadable, Parseable | Native EH download via `EhClient` |
+| `ehentai/browse.py` | `ehentai` | BrowsePlugin, Browsable, CredentialProvider | EH browse endpoints + credential flows |
+| `pixiv/source.py` | `pixiv` | Downloadable, Parseable, Subscribable | Pixiv artwork download + subscription checks |
+| `pixiv/_browse.py` | `pixiv` | BrowsePlugin, Browsable, CredentialProvider | Pixiv browse endpoints + credential flows |
+| `gallery_dl/source.py` | `gallery_dl` | SourcePlugin, CredentialProvider | gallery-dl subprocess fallback (any URL) + generic cookie flows |
 
 ---
 

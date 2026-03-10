@@ -14,39 +14,23 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth
 from core.database import async_session
+from core.utils import detect_source
 from db.models import Subscription
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["subscriptions"])
 
 
-def _detect_source(url: str) -> tuple[str | None, str | None]:
-    """Auto-detect source and source_id from URL."""
+def _extract_source_id(url: str, source: str) -> str | None:
+    """Extract artist/user ID from URL for subscription tracking."""
     parsed = urlparse(url)
-    host = parsed.hostname or ""
-
-    if "pixiv" in host:
+    if source == "pixiv":
         m = re.search(r"/users/(\d+)", parsed.path)
-        if m:
-            return "pixiv", m.group(1)
-        return "pixiv", None
-
-    if "twitter" in host or "x.com" in host:
+        return m.group(1) if m else None
+    if source == "twitter":
         parts = parsed.path.strip("/").split("/")
-        if parts and parts[0]:
-            return "twitter", parts[0]
-        return "twitter", None
-
-    if "e-hentai" in host or "exhentai" in host:
-        return "ehentai", None
-
-    if "nijie" in host:
-        return "nijie", None
-
-    if "fanbox" in host:
-        return "fanbox", None
-
-    return None, None
+        return parts[0] if parts and parts[0] else None
+    return None
 
 
 class CreateSubscriptionRequest(BaseModel):
@@ -123,7 +107,10 @@ async def create_subscription(
 ):
     """Create a new subscription."""
     user_id = auth["user_id"]
-    source, source_id = _detect_source(req.url)
+    source: str | None = detect_source(req.url)
+    if source == "unknown":
+        source = None
+    source_id = _extract_source_id(req.url, source) if source else None
 
     if req.cron_expr:
         try:

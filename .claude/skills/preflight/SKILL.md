@@ -12,7 +12,7 @@ description: Pre-deployment checks — lint, type check, tests, and git status
 
 2. **Backend lint + type check**
    ```bash
-   cd backend && python -m py_compile main.py && python -m py_compile worker.py
+   cd backend && python -m py_compile main.py && python -m py_compile worker/__init__.py
    ```
 
 3. **Backend tests**

@@ -8,11 +8,13 @@ A self-hosted gallery management platform built with Docker Compose. Browse, dow
 
 ## Features
 
-- **Gallery Browser** — Search and browse E-Hentai with favorites sync
-- **Download Engine** — Queue-based downloads (native for E-Hentai, gallery-dl for others) with progress tracking
+- **Gallery Browser** — Search and browse E-Hentai / Pixiv with favorites sync
+- **Download Engine** — Plugin-based downloads (native E-Hentai & Pixiv, gallery-dl fallback for 25+ sites) with progress tracking
 - **Reader** — Single page, double page, and webtoon (scroll) modes with touch/keyboard navigation
 - **Library** — Local gallery management with tag filtering, rating, and read progress
-- **Tag System** — Namespace-based tags (alias and implication support currently API-only)
+- **Tag System** — Namespace-based tags with alias, implication, and blocked tag support
+- **Subscriptions** — Follow artists with automatic new-work checking
+- **Collections** — Organize galleries into custom collections
 - **PWA** — Installable, mobile-friendly, works offline for local content
 
 ## Tech Stack
@@ -23,7 +25,7 @@ A self-hosted gallery management platform built with Docker Compose. Browse, dow
 | Frontend | Next.js 15 App Router (PWA) |
 | Database | PostgreSQL 15 + Redis 7 |
 | Proxy | Nginx |
-| Downloads | gallery-dl |
+| Downloads | Plugin system + gallery-dl fallback |
 
 ## Quick Start
 
@@ -41,12 +43,12 @@ docker compose up -d
 
 ## Roadmap
 
-- [x] Pixiv source integration (API & basic download implemented)
+- [x] Pixiv source integration
+- [x] Subscription system (artist following)
+- [x] Plugin-driven credential management
 - [ ] AI-based auto-tagging (WD14)
 - [ ] Duplicate detection and management
-- [ ] Batch operations (tag editing, export)
 - [ ] Multi-user support
-- [ ] Mobile gesture improvements
 
 ## License
 

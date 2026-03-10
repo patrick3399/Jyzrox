@@ -14,7 +14,7 @@
 | Frontend | Next.js 15 App Router (PWA) |
 | DB | PostgreSQL 15 + Redis 7 |
 | 反向代理 | Nginx |
-| 下載引擎 | gallery-dl (subprocess) |
+| 下載引擎 | Plugin system + gallery-dl fallback |
 
 ---
 
