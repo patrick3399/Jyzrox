@@ -104,10 +104,14 @@ function MediaElement({
   overlayVisible?: boolean
 }) {
   if (image.mediaType === 'video') {
+    // VideoPlayer must fill its parent entirely so that the controls overlay anchors
+    // to the viewport bottom, not to the middle of a shrink-wrapped box.
+    // The image scale class (pointer-events-none, max-h-full, …) is designed for
+    // <img> elements and must NOT be forwarded to VideoPlayer.
     return (
       <VideoPlayer
         image={image}
-        className={className}
+        className="w-full h-full"
         style={style}
         innerRef={innerRef as React.Ref<HTMLVideoElement>}
         onLoad={onLoad}
@@ -670,7 +674,7 @@ function ReaderOverlay({
           </button>
           <button
             onClick={onBack}
-            className="rounded bg-white/10 hover:bg-white/20 border border-white/20 px-3 py-1.5 text-sm text-red-300 hover:text-red-200 transition-colors"
+            className="rounded bg-red-600 hover:bg-red-500 px-6 py-1.5 text-base text-black font-bold transition-colors"
             title={t('reader.goBack')}
           >
             ✕
@@ -678,7 +682,7 @@ function ReaderOverlay({
         </div>
       </div>
 
-      {/* Row 2: cycle buttons — view / scale / direction */}
+      {/* Row 2: cycle buttons — view / scale / direction — plus auto advance on the right */}
       <div className="flex items-center gap-2 px-4 pb-2 border-t border-white/10 pt-2">
         <button onClick={cycleViewMode} className={cycleBtnClass} title={currentView.label}>
           <span>{currentView.icon}</span>
@@ -689,10 +693,9 @@ function ReaderOverlay({
         <button onClick={cycleDirection} className={cycleBtnClass} title={currentDir.label}>
           <span>{currentDir.icon}</span>
         </button>
-      </div>
 
-      {/* Row 3: Auto advance controls */}
-      <div className="flex items-center gap-3 px-4 pb-2 border-t border-white/10 pt-2">
+        <div className="flex-1" />
+
         <span className="text-[11px] text-white/60 shrink-0">{t('reader.autoAdvance')}</span>
         <button
           onClick={onAutoAdvanceToggle}
@@ -865,8 +868,8 @@ function ThumbnailStrip({
 
           // Thumb container dimensions — portrait default; landscape cells get
           // a wider button so the image is never cropped or squashed.
-          let thumbW = 48
-          let thumbH = 64
+          let thumbW = 60
+          let thumbH = 80
 
           if (previewRaw) {
             if (previewRaw.includes('|')) {
@@ -875,11 +878,11 @@ function ThumbnailStrip({
               const ox = Number(parts[1])
               const cellW = Number(parts[2]) || 200
               const cellH = Number(parts[3]) || 300
-              // Scale to fit within a fixed 64px tall strip. Width adapts to
+              // Scale to fit within a fixed 80px tall strip. Width adapts to
               // the cell's aspect ratio: portrait gets narrower, landscape gets wider.
-              // Cap at 80px wide so extremely wide cells don't overflow the strip.
-              const maxH = 64
-              const maxW = 80
+              // Cap at 100px wide so extremely wide cells don't overflow the strip.
+              const maxH = 80
+              const maxW = 100
               const scaleByH = maxH / cellH
               const scaleByW = maxW / cellW
               const scale = Math.min(scaleByH, scaleByW)
@@ -1275,6 +1278,21 @@ export default function Reader({
 
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Prevent background scroll while Reader is mounted.
+  // IMPORTANT: Do NOT set body.position=fixed — on iOS Safari, that makes
+  // child position:fixed elements behave as position:absolute relative to body.
+  useEffect(() => {
+    const html = document.documentElement
+    const body = document.body
+    html.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
+
+    return () => {
+      html.style.overflow = ''
+      body.style.overflow = ''
+    }
+  }, [])
+
   // Track image loading state for single/double page views
   const [pageLoading, setPageLoading] = useState(false)
   const loadingPageRef = useRef(state.currentPage)
@@ -1381,7 +1399,7 @@ export default function Reader({
   const nextImage = images.find((i) => i.pageNum === state.currentPage + 1) ?? null
 
   return (
-    <div ref={containerRef} className="reader-container relative flex flex-col bg-black">
+    <div ref={containerRef} className="reader-container flex flex-col bg-black">
       {/* Top overlay — always rendered, slides in/out */}
       <div
         className={`absolute top-0 left-0 right-0 z-20 transition-transform duration-300 ${
@@ -1464,8 +1482,12 @@ export default function Reader({
         />
       </div>
 
-      {/* Status bar — always visible (thumbnail strip at z-20 covers it when overlay is shown) */}
-      <div className="absolute left-0 right-0 bottom-0 z-10" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }} onClick={(e) => e.stopPropagation()}>
+      {/* Status bar — hidden via opacity when overlay is shown to avoid bleed-through the thumbnail strip */}
+      <div
+        className={`absolute left-0 right-0 bottom-0 z-10 transition-opacity duration-300 ${state.showOverlay ? 'opacity-0' : 'opacity-100'}`}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <StatusBar
           currentPage={state.currentPage}
           totalPages={totalPages}

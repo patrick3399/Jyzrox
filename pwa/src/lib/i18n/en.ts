@@ -494,7 +494,6 @@ const en: Record<string, string> = {
   'reader.videoPause': 'Pause',
   'reader.videoMute': 'Mute',
   'reader.videoUnmute': 'Unmute',
-  'reader.videoToggleOverlay': 'Toggle reader controls',
   'reader.progressSaveFailed': 'Failed to save reading progress',
   'reader.loadingMetadata': 'Loading metadata...',
   'reader.loadingTokens': 'Loading image tokens...',

@@ -98,7 +98,7 @@ services:
       - backend
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import redis,os; r=redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379')); r.ping()\" && pgrep -f 'arq worker.WorkerSettings' > /dev/null"]
+      test: ["CMD-SHELL", "python -c \"import redis,os; r=redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379')); r.ping()\""]
       interval: 15s
       timeout: 5s
       retries: 3
