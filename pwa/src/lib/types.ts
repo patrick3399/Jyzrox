@@ -326,12 +326,27 @@ export interface BrowseSchema {
   supports_toplist: boolean
 }
 
+export interface OAuthConfig {
+  auth_url_endpoint: string
+  callback_endpoint: string
+  display_name: string
+}
+
+export interface CredentialFlow {
+  flow_type: 'fields' | 'oauth' | 'login'
+  fields: FieldDef[]
+  oauth_config: OAuthConfig | null
+  login_endpoint: string | null
+  verify_endpoint: string | null
+}
+
 export interface PluginInfo {
   name: string
   source_id: string
   version: string
   url_patterns: string[]
   credential_schema: FieldDef[]
+  credential_flows: CredentialFlow[]
   has_browse: boolean
   browse_schema: BrowseSchema | null
   credential_configured: boolean

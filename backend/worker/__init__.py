@@ -16,7 +16,7 @@ from core.config import get_all_library_paths, settings
 from core.redis_client import close_redis, init_redis
 from core.watcher import LibraryWatcher
 
-from worker.download import download_job, _detect_source, _resolve_gallery_dir
+from worker.download import download_job
 from worker.importer import (
     import_job,
     local_import_job,
@@ -40,7 +40,6 @@ from worker.tagging import tag_job
 from worker.subscription import (
     check_followed_artists,
     check_single_subscription,
-    backfill_artist_ids,
 )
 from worker.helpers import _sha256
 
@@ -175,7 +174,6 @@ class WorkerSettings:
         toggle_watcher_job,
         check_followed_artists,
         check_single_subscription,
-        backfill_artist_ids,
     ]
     cron_jobs = [
         cron(
@@ -225,14 +223,11 @@ __all__ = [
     "tag_job",
     "check_followed_artists",
     "check_single_subscription",
-    "backfill_artist_ids",
     "toggle_watcher_job",
     "startup",
     "shutdown",
     "WorkerSettings",
     # Internal helpers re-exported for tests
-    "_detect_source",
-    "_resolve_gallery_dir",
     "_extract_tags",
     "_normalize_tags",
     "_build_gallery",

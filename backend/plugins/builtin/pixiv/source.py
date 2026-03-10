@@ -15,7 +15,17 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from plugins.base import SourcePlugin
-from plugins.models import DownloadResult, FieldDef, GalleryMetadata, PluginMeta
+from plugins.models import (
+    CredentialFlow,
+    CredentialStatus,
+    DownloadResult,
+    FieldDef,
+    GalleryImportData,
+    GalleryMetadata,
+    NewWork,
+    PluginMeta,
+    SiteInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -32,6 +42,7 @@ class PixivSourcePlugin(SourcePlugin):
         name="Pixiv",
         source_id="pixiv",
         version="1.0.0",
+        description="Pixiv artwork and user downloader",
         url_patterns=["pixiv.net"],
         credential_schema=[
             FieldDef(
@@ -42,7 +53,11 @@ class PixivSourcePlugin(SourcePlugin):
                 placeholder="",
             ),
         ],
+        supported_sites=[
+            SiteInfo(domain="pixiv.net", name="Pixiv", source_id="pixiv", category="art", has_tags=True),
+        ],
         concurrency=4,
+        semaphore_key="pixiv",
     )
 
     async def can_handle(self, url: str) -> bool:
@@ -130,6 +145,55 @@ class PixivSourcePlugin(SourcePlugin):
             failed_pages=result.get("failed_pages", []),
             error=result.get("error"),
         )
+
+    # ── Downloadable protocol methods ─────────────────────────────────
+
+    def resolve_output_dir(self, url: str, base_path: Path) -> Path:
+        """Determine output directory for Pixiv download."""
+        art_match = _PIXIV_ART_RE.search(url)
+        user_match = _PIXIV_USER_RE.search(url)
+        if art_match:
+            return base_path / "pixiv" / art_match.group(1)
+        elif user_match:
+            return base_path / "pixiv" / f"user_{user_match.group(1)}"
+        return base_path / "pixiv" / "unknown"
+
+    def requires_credentials(self) -> bool:
+        """Pixiv always requires credentials."""
+        return True
+
+    # ── Parseable protocol methods ─────────────────────────────────────
+
+    def parse_import(self, dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
+        """Parse downloaded Pixiv gallery into structured import data."""
+        from plugins.builtin.pixiv._metadata import parse_pixiv_import
+        return parse_pixiv_import(dest_dir, raw_meta)
+
+    # ── CredentialProvider protocol methods ───────────────────────────
+
+    def credential_flows(self) -> list[CredentialFlow]:
+        """Declare Pixiv credential flows: token + OAuth + cookie."""
+        from plugins.builtin.pixiv._credentials import pixiv_credential_flows
+        return pixiv_credential_flows()
+
+    async def verify_credential(self, credentials: dict) -> CredentialStatus:
+        """Verify Pixiv refresh token."""
+        from plugins.builtin.pixiv._credentials import verify_pixiv_credential
+        return await verify_pixiv_credential(credentials)
+
+    # ── Subscribable protocol methods ─────────────────────────────────
+
+    async def check_new_works(
+        self,
+        artist_id: str,
+        last_known: str | None,
+        credentials: dict | None,
+    ) -> list[NewWork]:
+        """Check a Pixiv artist for new works since last_known."""
+        from plugins.builtin.pixiv._subscribe import check_pixiv_new_works
+        return await check_pixiv_new_works(artist_id, last_known, credentials)
+
+    # ── Legacy SourcePlugin abstract method ───────────────────────────
 
     def parse_metadata(self, dest_dir: Path) -> GalleryMetadata | None:
         """Read metadata.json written by download_pixiv_illust."""

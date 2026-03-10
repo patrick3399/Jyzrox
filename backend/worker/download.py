@@ -1,15 +1,11 @@
 """Download job for the worker package."""
 
-import os
-import re
 from datetime import UTC, datetime
 from pathlib import Path
-from urllib.parse import urlparse
 
 from core.config import settings
 from core.redis_client import DownloadSemaphore
 from services.credential import get_credential
-from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
 from worker.constants import logger
 from worker.helpers import _set_job_progress, _set_job_status
 
@@ -55,44 +51,23 @@ async def download_job(
     else:
         credentials = await get_credential(source_id)
 
-    # Credential gate for sources that require it
-    if source_id == "ehentai" and not credentials:
-        err = "E-Hentai credentials not configured. Go to Credentials to add cookies."
+    # Credential gate — generic via Downloadable protocol
+    downloader = plugin_registry.get_downloader(source_id)
+    if downloader and downloader.requires_credentials() and not credentials:
+        err = f"{plugin.meta.name} credentials not configured. Go to Credentials to set up."
         logger.error("[download] %s", err)
         await _set_job_status(db_job_id, "failed", err)
         return {"status": "failed", "error": err}
 
-    if source_id == "pixiv" and not credentials:
-        err = "Pixiv credentials not configured. Go to Credentials to add a refresh token."
-        logger.error("[download] %s", err)
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
-
-    # Determine output directory
-    if source_id == "ehentai":
-        m = EH_GALLERY_URL_RE.search(url)
-        if m:
-            target_dir = Path(settings.data_gallery_path) / "ehentai" / m.group(1)
-        else:
-            target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
-    elif source_id == "pixiv":
-        # Route single artworks to pixiv/{illust_id}/ so import_job detects
-        # "pixiv" in path parts and sets source correctly.
-        # User-profile downloads go to pixiv/{db_job_id}/ and each illust
-        # creates its own subdirectory inside.
-        art_m = re.search(r"pixiv\.net/(?:en/)?(?:artworks|i)/(\d+)", url)
-        user_m = re.search(r"pixiv\.net/(?:en/)?users/(\d+)", url)
-        if art_m:
-            target_dir = Path(settings.data_gallery_path) / "pixiv" / art_m.group(1)
-        elif user_m:
-            target_dir = Path(settings.data_gallery_path) / "pixiv" / (db_job_id or f"user_{user_m.group(1)}")
-        else:
-            target_dir = Path(settings.data_gallery_path) / "pixiv" / (db_job_id or "local_test")
+    # Determine output directory via Downloadable protocol
+    downloader = plugin_registry.get_downloader(source_id)
+    if downloader:
+        target_dir = downloader.resolve_output_dir(url, Path(settings.data_gallery_path))
     else:
         target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
 
     # Semaphore — use source_id as the semaphore key (maps to existing keys)
-    sem_key = _detect_source(url)
+    sem_key = plugin.meta.semaphore_key or source_id
     sem = DownloadSemaphore(sem_key)
     _base_progress: dict = {} if total is None else {"total": total}
     await _set_job_progress(db_job_id, {**_base_progress, "status_text": "Waiting for download slot..."})
@@ -192,43 +167,3 @@ async def download_job(
 
     logger.info("[download] done: %s (downloaded=%d)", url, result.downloaded)
     return {"status": "done", "downloaded": result.downloaded}
-
-
-def _detect_source(url: str) -> str:
-    """Detect download source from URL for semaphore selection."""
-    if "e-hentai.org" in url or "exhentai.org" in url:
-        return "ehentai"
-    try:
-        parsed = urlparse(url)
-        if parsed.hostname:
-            return parsed.hostname
-    except Exception:
-        pass
-    return "other"
-
-
-def _resolve_gallery_dir(url: str) -> Path | None:
-    """Guess the gallery directory path from the URL."""
-    m = re.search(r"e[x\-]hentai\.org/g/(\d+)/", url)
-    if m:
-        p = Path(settings.data_gallery_path) / "ehentai" / m.group(1)
-        return p if p.exists() else None
-
-    m = re.search(r"pixiv\.net/.*?artworks?/(\d+)", url)
-    if m:
-        artwork_id = m.group(1)
-        # Use os.scandir instead of glob — avoids building a full generator
-        # of all artist subdirectories; scandir yields DirEntry objects with
-        # cached stat data, making is_dir() free on Linux (d_type from readdir).
-        pixiv_root = Path(settings.data_gallery_path) / "pixiv"
-        if pixiv_root.is_dir():
-            try:
-                with os.scandir(pixiv_root) as it:
-                    for entry in it:
-                        if entry.is_dir():
-                            candidate = Path(entry.path) / artwork_id
-                            if candidate.exists():
-                                return candidate
-            except OSError as exc:
-                logger.warning("[download] scandir pixiv root failed: %s", exc)
-    return None

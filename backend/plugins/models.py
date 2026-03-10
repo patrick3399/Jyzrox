@@ -16,13 +16,68 @@ class FieldDef(BaseModel):
     placeholder: str = ""
 
 
+class SiteInfo(BaseModel):
+    domain: str
+    name: str
+    source_id: str
+    category: str
+    has_tags: bool = False
+
+
+class OAuthConfig(BaseModel):
+    auth_url_endpoint: str
+    callback_endpoint: str
+    display_name: str
+
+
+class CredentialFlow(BaseModel):
+    flow_type: Literal["fields", "oauth", "login"]
+    fields: list[FieldDef] = []
+    oauth_config: OAuthConfig | None = None
+    login_endpoint: str | None = None
+    verify_endpoint: str | None = None
+
+
+class CredentialStatus(BaseModel):
+    valid: bool
+    username: str | None = None
+    error: str | None = None
+    expires_at: datetime | None = None
+
+
+class GalleryImportData(BaseModel):
+    source: str
+    source_id: str
+    title: str
+    title_jpn: str = ""
+    category: str = ""
+    language: str = ""
+    tags: list[str] = []
+    artist_id: str | None = None
+    page_count: int = 0
+    posted_at: datetime | None = None
+    uploader: str = ""
+    extra: dict = {}
+
+
+class NewWork(BaseModel):
+    url: str
+    title: str = ""
+    source_id: str = ""
+    thumbnail_url: str | None = None
+    posted_at: datetime | None = None
+
+
 class PluginMeta(BaseModel):
     name: str
     source_id: str
     version: str
+    description: str = ""
     url_patterns: list[str]
     credential_schema: list[FieldDef]
+    supported_sites: list[SiteInfo] = []
     concurrency: int = 1
+    semaphore_key: str | None = None
 
 
 class GalleryMetadata(BaseModel):

@@ -14,7 +14,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from plugins.base import SourcePlugin
-from plugins.models import DownloadResult, FieldDef, GalleryMetadata, PluginMeta
+from plugins.models import (
+    CredentialFlow,
+    CredentialStatus,
+    DownloadResult,
+    FieldDef,
+    GalleryImportData,
+    GalleryMetadata,
+    PluginMeta,
+    SiteInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +37,7 @@ class EhSourcePlugin(SourcePlugin):
         name="E-Hentai",
         source_id="ehentai",
         version="1.0.0",
+        description="E-Hentai / ExHentai gallery downloader",
         url_patterns=["e-hentai.org", "exhentai.org"],
         credential_schema=[
             FieldDef(
@@ -59,7 +69,12 @@ class EhSourcePlugin(SourcePlugin):
                 placeholder="",
             ),
         ],
+        supported_sites=[
+            SiteInfo(domain="e-hentai.org", name="E-Hentai", source_id="ehentai", category="gallery", has_tags=True),
+            SiteInfo(domain="exhentai.org", name="ExHentai", source_id="ehentai", category="gallery", has_tags=True),
+        ],
         concurrency=3,
+        semaphore_key="ehentai",
     )
 
     async def can_handle(self, url: str) -> bool:
@@ -183,3 +198,41 @@ class EhSourcePlugin(SourcePlugin):
                 "token": raw.get("token", ""),
             },
         )
+
+    # ------------------------------------------------------------------
+    # Downloadable protocol methods
+    # ------------------------------------------------------------------
+
+    def resolve_output_dir(self, url: str, base_path: Path) -> Path:
+        """Determine output directory for an EH gallery download."""
+        m = _EH_URL_RE.search(url)
+        if m:
+            return base_path / "ehentai" / m.group(1)
+        return base_path / "ehentai" / "unknown"
+
+    def requires_credentials(self) -> bool:
+        """E-Hentai always requires credentials."""
+        return True
+
+    # ------------------------------------------------------------------
+    # Parseable protocol method
+    # ------------------------------------------------------------------
+
+    def parse_import(self, dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
+        """Parse a downloaded EH gallery directory into GalleryImportData."""
+        from plugins.builtin.ehentai._metadata import parse_eh_import
+        return parse_eh_import(dest_dir, raw_meta)
+
+    # ------------------------------------------------------------------
+    # CredentialProvider protocol methods
+    # ------------------------------------------------------------------
+
+    def credential_flows(self) -> list[CredentialFlow]:
+        """Declare EH credential flows: cookie fields + login."""
+        from plugins.builtin.ehentai._credentials import eh_credential_flows
+        return eh_credential_flows()
+
+    async def verify_credential(self, credentials: dict) -> CredentialStatus:
+        """Verify EH cookies by testing access against the EhClient."""
+        from plugins.builtin.ehentai._credentials import verify_eh_credential
+        return await verify_eh_credential(credentials)

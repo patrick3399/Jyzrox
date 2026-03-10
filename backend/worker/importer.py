@@ -83,8 +83,29 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
     import shutil as _shutil
 
     async with AsyncSessionLocal() as session:
-        # Upsert gallery
-        gallery_values = _build_gallery(source, source_id, metadata, tags, len(media_files))
+        # Try Parseable plugin first, fallback to legacy _build_gallery
+        from plugins.registry import plugin_registry
+        parser = plugin_registry.get_parser(source)
+        if parser:
+            import_data = parser.parse_import(gallery_path, metadata)
+            gallery_values = {
+                "source": import_data.source,
+                "source_id": import_data.source_id,
+                "title": import_data.title,
+                "title_jpn": import_data.title_jpn,
+                "category": import_data.category,
+                "language": import_data.language,
+                "pages": len(media_files),
+                "posted_at": import_data.posted_at,
+                "uploader": import_data.uploader,
+                "download_status": "complete",
+                "tags_array": import_data.tags,
+                "artist_id": import_data.artist_id,
+            }
+            tags = import_data.tags
+            source_id = import_data.source_id
+        else:
+            gallery_values = _build_gallery(source, source_id, metadata, tags, len(media_files))
         stmt = (
             pg_insert(Gallery)
             .values(**gallery_values)

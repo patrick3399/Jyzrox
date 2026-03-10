@@ -9,6 +9,7 @@ async def init_plugins() -> None:
     from plugins.builtin.ehentai.browse import EhBrowsePlugin
     from plugins.builtin.ehentai.source import EhSourcePlugin
     from plugins.builtin.pixiv.source import PixivSourcePlugin
+    from plugins.builtin.pixiv._browse import PixivBrowsePlugin
 
     plugin_registry.register(GalleryDlPlugin())
     plugin_registry.register(EhBrowsePlugin())
@@ -16,3 +17,4 @@ async def init_plugins() -> None:
     plugin_registry.register(EhSourcePlugin())
     # Pixiv native downloader — takes precedence over gallery-dl for pixiv.net URLs
     plugin_registry.register(PixivSourcePlugin())
+    plugin_registry.register(PixivBrowsePlugin())

@@ -17,14 +17,12 @@ from routers import (
     auth,
     collections,
     download,
-    eh,
     export,
     external,
     history,
     import_router,
     library,
     opds,
-    pixiv,
     plugins as plugins_router,
     scheduled_tasks,
     search,
@@ -51,6 +49,13 @@ async def lifespan(app: FastAPI):
     from plugins import init_plugins
     await init_plugins()
     logger.info("Plugins initialized")
+    # Mount browse routers dynamically from plugins
+    from plugins.registry import plugin_registry
+    _BROWSE_PREFIX_MAP = {"ehentai": "/api/eh", "pixiv": "/api/pixiv"}
+    for sid, router in plugin_registry.get_browse_routers():
+        prefix = _BROWSE_PREFIX_MAP.get(sid, f"/api/browse/{sid}")
+        app.include_router(router, prefix=prefix)
+        logger.info("Mounted browse router: %s → %s", sid, prefix)
     yield
     logger.info("Shutting down...")
     await app.state.arq.aclose()
@@ -82,8 +87,6 @@ app.add_middleware(RateLimitMiddleware)
 
 app.include_router(auth.router, prefix="/api/auth")
 app.include_router(system.router, prefix="/api/system")
-app.include_router(eh.router, prefix="/api/eh")
-app.include_router(pixiv.router, prefix="/api/pixiv")
 app.include_router(library.router, prefix="/api/library")
 app.include_router(download.router, prefix="/api/download")
 app.include_router(settings_router.router, prefix="/api/settings")
