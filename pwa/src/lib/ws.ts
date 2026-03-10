@@ -6,7 +6,7 @@ export function useWebSocket() {
   const [alerts, setAlerts] = useState<string[]>([])
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
-  const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
+  const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const mountedRef = useRef(true)
 
   const connect = useCallback(() => {

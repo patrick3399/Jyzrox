@@ -146,7 +146,7 @@ services:
         max-file: "5"
 
   postgres:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     env_file: .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -173,7 +173,7 @@ services:
         max-file: "5"
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     command: redis-server --appendonly yes --maxmemory 768mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data

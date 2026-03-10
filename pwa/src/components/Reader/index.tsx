@@ -270,7 +270,7 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
   // Suppresses IntersectionObserver callbacks during programmatic scrolls to
   // prevent the observer from triggering onPageChange → fetchUpTo re-entry.
   const isProgrammaticScrollRef = useRef(false)
-  const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return
@@ -766,8 +766,8 @@ function ThumbnailStrip({
     }
     return [...urls]
   }, [previews])
-  const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>()
-  const scrollNotifyThrottleRef = useRef<ReturnType<typeof setTimeout>>()
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const scrollNotifyThrottleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const lastScrollNotifyPageRef = useRef(0)
   const onScrollToPageRef = useRef(onScrollToPage)
   useEffect(() => {
@@ -1296,7 +1296,7 @@ export default function Reader({
   // Track image loading state for single/double page views
   const [pageLoading, setPageLoading] = useState(false)
   const loadingPageRef = useRef(state.currentPage)
-  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   // When page changes, start a short timer before showing the spinner.
   // If the image loads before the timer fires, the spinner never appears.
@@ -1320,7 +1320,7 @@ export default function Reader({
   const handleImageLoaded = useCallback(() => {
     if (loadingTimerRef.current) {
       clearTimeout(loadingTimerRef.current)
-      loadingTimerRef.current = null
+      loadingTimerRef.current = undefined
     }
     setPageLoading(false)
   }, [])

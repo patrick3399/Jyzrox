@@ -18,30 +18,45 @@
  *
  * Mock strategy:
  *   - @/hooks/useGalleries → control hook return values per test
- *   - next/link → renders <a href=...> so we can assert hrefs
+ *   - @/hooks/useCollections → stub with empty data
  *   - @/components/* → stub heavy sub-components to simple divs
  *   - @/lib/i18n → returns key as-is for predictable text assertions
+ *   - sonner → stub toast helpers
+ *   - @/lib/api → stub batchUpdate
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 import React from 'react'
-import { render, screen, fireEvent, act } from '@testing-library/react'
+import { render, screen } from '@testing-library/react'
 import userEvent from '@testing-library/user-event'
 
 // ── Hoisted mock helpers ───────────────────────────────────────────────
 
-const { mockUseLibraryGalleries } = vi.hoisted(() => ({
-  mockUseLibraryGalleries: vi.fn(),
+const { mockUseInfiniteLibraryGalleries } = vi.hoisted(() => ({
+  mockUseInfiniteLibraryGalleries: vi.fn(),
 }))
 
 // ── Module mocks ───────────────────────────────────────────────────────
 
 vi.mock('@/hooks/useGalleries', () => ({
-  useLibraryGalleries: mockUseLibraryGalleries,
+  useInfiniteLibraryGalleries: mockUseInfiniteLibraryGalleries,
+}))
+
+vi.mock('@/hooks/useCollections', () => ({
+  useCollections: () => ({ data: undefined }),
 }))
 
 vi.mock('@/lib/i18n', () => ({
   t: (key: string) => key,
+  formatNumber: (n: number) => String(n),
+}))
+
+vi.mock('sonner', () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
+
+vi.mock('@/lib/api', () => ({
+  api: { library: { batchUpdate: vi.fn() } },
 }))
 
 // Stub Next.js Link so it renders a plain <a> element
@@ -51,9 +66,20 @@ vi.mock('next/link', () => ({
   ),
 }))
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}))
+
 vi.mock('@/components/GalleryCard', () => ({
   LibraryGalleryCard: ({ gallery }: { gallery: { title: string } }) => (
     <div data-testid="gallery-card">{gallery.title}</div>
+  ),
+}))
+
+vi.mock('@/components/VirtualGrid', () => ({
+  VirtualGrid: ({ items, renderItem }: { items: unknown[]; renderItem: (item: unknown, index: number) => React.ReactNode }) => (
+    <div data-testid="virtual-grid">{items.map((item, i) => renderItem(item, i))}</div>
   ),
 }))
 
@@ -100,34 +126,50 @@ function makeGallery(id: number, title = `Gallery ${id}`) {
 // ── Default hook return value ─────────────────────────────────────────
 
 function setLoadingState() {
-  mockUseLibraryGalleries.mockReturnValue({
-    data: undefined,
+  mockUseInfiniteLibraryGalleries.mockReturnValue({
+    galleries: [],
+    total: 0,
     isLoading: true,
     error: null,
+    isLoadingMore: false,
+    isReachingEnd: false,
+    loadMore: vi.fn(),
   })
 }
 
 function setEmptyState() {
-  mockUseLibraryGalleries.mockReturnValue({
-    data: { galleries: [], total: 0 },
+  mockUseInfiniteLibraryGalleries.mockReturnValue({
+    galleries: [],
+    total: 0,
     isLoading: false,
     error: null,
+    isLoadingMore: false,
+    isReachingEnd: true,
+    loadMore: vi.fn(),
   })
 }
 
 function setGalleriesState(galleries: ReturnType<typeof makeGallery>[], total?: number) {
-  mockUseLibraryGalleries.mockReturnValue({
-    data: { galleries, total: total ?? galleries.length },
+  mockUseInfiniteLibraryGalleries.mockReturnValue({
+    galleries,
+    total: total ?? galleries.length,
     isLoading: false,
     error: null,
+    isLoadingMore: false,
+    isReachingEnd: false,
+    loadMore: vi.fn(),
   })
 }
 
 function setErrorState(message = 'Failed to load') {
-  mockUseLibraryGalleries.mockReturnValue({
-    data: undefined,
+  mockUseInfiniteLibraryGalleries.mockReturnValue({
+    galleries: [],
+    total: 0,
     isLoading: false,
     error: new Error(message),
+    isLoadingMore: false,
+    isReachingEnd: false,
+    loadMore: vi.fn(),
   })
 }
 
@@ -211,7 +253,7 @@ describe('Library page — sort dropdown', () => {
     const select = screen.getByDisplayValue('library.dateAdded')
     await user.selectOptions(select, 'rating')
     // After sort change, the hook should have been called again with sort: 'rating'
-    const lastCall = mockUseLibraryGalleries.mock.calls[mockUseLibraryGalleries.mock.calls.length - 1]
+    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
     expect(lastCall[0]).toMatchObject({ sort: 'rating' })
   })
 })
@@ -232,7 +274,7 @@ describe('Library page — source dropdown', () => {
     render(<LibraryPage />)
     const select = screen.getByDisplayValue('library.allSources')
     await user.selectOptions(select, 'ehentai')
-    const lastCall = mockUseLibraryGalleries.mock.calls[mockUseLibraryGalleries.mock.calls.length - 1]
+    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
     expect(lastCall[0]).toMatchObject({ source: 'ehentai' })
   })
 })
@@ -316,7 +358,7 @@ describe('Library page — tag filters', () => {
   it('test_library_includeTag_addingTagViaButton', async () => {
     const user = userEvent.setup()
     render(<LibraryPage />)
-    const input = screen.getByPlaceholderText('character:rem')
+    const input = screen.getByPlaceholderText('library.tagFilterPlaceholder')
     await user.type(input, 'artist:cloba')
     // The add-include-tag button is the green button next to the include input.
     // It is the first button that follows the include input (green bg class).
@@ -325,25 +367,25 @@ describe('Library page — tag filters', () => {
     )!
     await user.click(addBtn)
     // After adding, hook should be called with tags containing 'artist:cloba'
-    const lastCall = mockUseLibraryGalleries.mock.calls[mockUseLibraryGalleries.mock.calls.length - 1]
+    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
     expect(lastCall[0]?.tags).toContain('artist:cloba')
   })
 
   it('test_library_includeTag_addingTagViaEnterKey', async () => {
     const user = userEvent.setup()
     render(<LibraryPage />)
-    const input = screen.getByPlaceholderText('character:rem')
+    const input = screen.getByPlaceholderText('library.tagFilterPlaceholder')
     await user.type(input, 'character:rem{Enter}')
-    const lastCall = mockUseLibraryGalleries.mock.calls[mockUseLibraryGalleries.mock.calls.length - 1]
+    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
     expect(lastCall[0]?.tags).toContain('character:rem')
   })
 
   it('test_library_excludeTag_addingTagViaEnterKey', async () => {
     const user = userEvent.setup()
     render(<LibraryPage />)
-    const input = screen.getByPlaceholderText('tag:value')
+    const input = screen.getByPlaceholderText('library.excludeTagPlaceholder')
     await user.type(input, 'language:chinese{Enter}')
-    const lastCall = mockUseLibraryGalleries.mock.calls[mockUseLibraryGalleries.mock.calls.length - 1]
+    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
     expect(lastCall[0]?.exclude_tags).toContain('language:chinese')
   })
 })
@@ -360,7 +402,7 @@ describe('Library page — favorites filter', () => {
     render(<LibraryPage />)
     const checkbox = screen.getByRole('checkbox')
     await user.click(checkbox)
-    const lastCall = mockUseLibraryGalleries.mock.calls[mockUseLibraryGalleries.mock.calls.length - 1]
+    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
     // favorited: true or truthy
     expect(lastCall[0]?.favorited).toBeTruthy()
   })

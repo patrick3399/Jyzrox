@@ -350,8 +350,8 @@ export function useKeyboardNav(
 // ── useProgressSave ───────────────────────────────────────────────────
 
 export function useProgressSave(galleryId: number, currentPage: number) {
-  const timerRef = useRef<ReturnType<typeof setTimeout>>()
-  const retryRef = useRef<ReturnType<typeof setTimeout>>()
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const retryRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     // Skip progress save for proxy-only browsing (galleryId === 0)
@@ -387,13 +387,13 @@ export function useAutoAdvance(
   isLastPage: boolean,
   overlayVisible: boolean,
 ) {
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
   const [countdown, setCountdown] = useState<number>(intervalSeconds)
 
   const clearTimer = useCallback(() => {
-    if (timerRef.current !== null) {
+    if (timerRef.current !== undefined) {
       clearInterval(timerRef.current)
-      timerRef.current = null
+      timerRef.current = undefined
     }
   }, [])
 
