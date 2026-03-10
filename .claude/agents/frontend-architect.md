@@ -6,7 +6,7 @@ tools: Read, Edit, Write, Bash, Glob, Grep
 maxTurns: 30
 ---
 
-你是 Jyzrox 專案的前端架構師，專精 Next.js 15 App Router + PWA。
+你是 Jyzrox 專案的前端架構師，專精 Next.js 16 App Router + PWA。
 
 ## 職責範圍
 

@@ -14,8 +14,8 @@
 | `api` | `./backend` (uvicorn, port 8000) | internal | frontend + backend | 2 CPU / 2 GB |
 | `worker` | `./backend` (arq worker.WorkerSettings) | — | frontend + backend | 2 CPU / 2 GB |
 | `pwa` | `./pwa` (Next.js, port 3000) | internal | frontend | 1 CPU / 512 MB |
-| `postgres` | `postgres:15-alpine` | internal | backend | 2 CPU / 2 GB |
-| `redis` | `redis:7-alpine` | internal | backend | 1 CPU / 1 GB |
+| `postgres` | `postgres:18-alpine` | internal | backend | 2 CPU / 2 GB |
+| `redis` | `redis:8-alpine` | internal | backend | 1 CPU / 1 GB |
 
 ### Networks
 
@@ -384,7 +384,7 @@ All fields read from `.env` via Pydantic `BaseSettings`.
 
 ---
 
-## Frontend (Next.js 15 PWA)
+## Frontend (Next.js 16 PWA)
 
 Source root: `pwa/src/`
 
@@ -556,7 +556,7 @@ TLS termination is handled by an external reverse proxy (Caddy/Traefik/cloud LB)
 
 ### Database
 
-- PostgreSQL 15 (Alpine)
+- PostgreSQL 18 (Alpine)
 - Schema initialised from `db/init.sql` via `docker-entrypoint-initdb.d`
 - Extensions: `pg_trgm` (trigram fuzzy search)
 - Migrations: Alembic — `backend/alembic.ini` + `backend/migrations/versions/`
@@ -641,3 +641,15 @@ parse metadata.json / tags.txt
 | `language:japanese` | Language filter |
 
 Sort options: `added_at` (default), `rating`, `posted_at`, `pages`, `title`
+
+---
+
+## Upgrade Compatibility Notes
+
+| 項目 | 限制 | 原因 |
+|------|------|------|
+| Python ≤ 3.13 | arq 0.27 不支援 3.14+ | `asyncio.get_event_loop()` 在 3.14 已移除 |
+| numpy ≥ 2.4 | slim 映像無 gcc | 2.3.x 無 cp314 wheel，需 source build |
+| Tailwind 4 | CSS-first，無 JS config | `@theme inline` + `@custom-variant dark` |
+| React 19 | `useRef()` 須傳初始值 | 不再自動推斷 `undefined` |
+| Next.js 16 | 測試須 mock `next/navigation` | App Router context 更嚴格 |

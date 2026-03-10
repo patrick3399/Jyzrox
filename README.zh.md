@@ -22,8 +22,8 @@
 | 層級 | 技術 |
 |------|------|
 | 後端 | FastAPI + SQLAlchemy (asyncpg) + ARQ |
-| 前端 | Next.js 15 App Router (PWA) |
-| 資料庫 | PostgreSQL 15 + Redis 7 |
+| 前端 | Next.js 16 App Router (PWA) |
+| 資料庫 | PostgreSQL 18 + Redis 8 |
 | 反向代理 | Nginx |
 | 下載引擎 | Plugin system + gallery-dl fallback |
 

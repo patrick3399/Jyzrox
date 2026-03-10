@@ -11,8 +11,8 @@
 | 層級 | 技術 |
 |------|------|
 | Backend API | FastAPI + SQLAlchemy (asyncpg) + ARQ |
-| Frontend | Next.js 15 App Router (PWA) |
-| DB | PostgreSQL 15 + Redis 7 |
+| Frontend | Next.js 16 App Router (PWA) |
+| DB | PostgreSQL 18 + Redis 8 |
 | 反向代理 | Nginx |
 | 下載引擎 | Plugin system + gallery-dl fallback |
 
@@ -84,6 +84,32 @@ from core.auth import require_auth
 @router.get("/")
 async def endpoint(_: dict = Depends(require_auth)):
     ...
+```
+
+### Python 版本限制：目前鎖定 3.13
+arq==0.27.0 使用已移除的 `asyncio.get_event_loop()`，Python 3.14+ 會 crash。待 arq 上游修復後才能升級。
+
+### Tailwind 4 CSS-first 配置
+- 無 `tailwind.config.ts`，所有配置在 `globals.css`
+- 顏色註冊用 `@theme inline`，暗色模式用 `@custom-variant dark`
+- CSS 變數使用 hex 格式（非 space-separated RGB）
+
+### React 19 useRef 必須傳初始值
+```tsx
+// ✅ 正確
+const ref = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+// ❌ React 19 會報錯
+const ref = useRef<ReturnType<typeof setTimeout>>()
+```
+
+### Next.js 16 測試須 mock next/navigation
+測試中使用 `useRouter()` / `useSearchParams()` 須加 mock，否則 throw `invariant expected app router to be mounted`：
+```ts
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}))
 ```
 
 ### 前端 UI 文字必須使用 i18n 抽象層
