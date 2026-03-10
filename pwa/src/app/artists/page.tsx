@@ -86,7 +86,7 @@ export default function ArtistsPage() {
           {data.artists.map((a) => (
             <button
               key={a.artist_id}
-              onClick={() => router.push(`/library?artist=${encodeURIComponent(a.artist_id)}`)}
+              onClick={() => router.push(`/artists/${encodeURIComponent(a.artist_id)}`)}
               className="bg-vault-card border border-vault-border rounded-xl overflow-hidden hover:border-vault-accent/50 hover:shadow-lg transition-all text-left group"
             >
               {/* Cover */}

@@ -4,110 +4,9 @@
 
 ---
 
-## P0 — 驗證與修復
-
-> 已實作功能的實機驗證，需要特定環境/裝置。
-
-
-
----
-
 ## P1 — 短期高價值
 
 > 獨立功能，少依賴，能快速上線。
-
-### Pixiv 瀏覽器 Phase 1（Client + Router）
-
-> 依賴：已有 pixivpy3 OAuth refresh_token 機制（settings.py）
-
-#### 服務層
-- [x] 新建 `services/pixiv_client.py` — async context manager（仿 EhClient）
-  - pixivpy3 同步 → `asyncio.to_thread()` 包裝
-  - Token 管理：Redis 快取 access_token（TTL 3500s）+ Redis lock 防競爭刷新
-  - httpx client（`Referer: https://www.pixiv.net/`）用於圖片下載
-  - 方法：search_illust / illust_detail / user_detail / user_illusts / user_bookmarks / illust_follow / user_following / download_image
-
-#### Router
-- [x] 新建 `routers/pixiv.py` — 所有端點 `Depends(require_auth)`
-  - `GET /search` — 搜尋插畫（word, sort, search_target, duration, offset）
-  - `GET /illust/{id}` — 插畫詳情
-  - `GET /user/{id}` — 使用者資訊 + 近期作品
-  - `GET /user/{id}/illusts` — 分頁使用者作品
-  - `GET /user/{id}/bookmarks` — 使用者公開收藏
-  - `GET /following/feed` — 已追蹤作者的新作品
-  - `GET /image-proxy` — 代理 pximg.net 圖片（domain 白名單 + Redis 24h 快取）
-- [x] `main.py` 註冊 `/api/pixiv` router
-
-#### 基礎設施
-- [x] `services/cache.py` 新增 Pixiv 快取 helpers（search 5min / illust 1h / user 30min / image 24h）
-- [x] `core/config.py` 新增 `pixiv_max_concurrency` / `pixiv_image_concurrency`
-
-### 效能：Virtual Scrolling
-- [x] Library 頁面導入虛擬滾動（react-window 或 tanstack-virtual），避免滾動多頁後 DOM 膨脹
-- [x] Browse 頁面同步導入虛擬滾動
-- [x] History 頁面改為 infinite scroll + 虛擬滾動（目前為手動按鈕）
-
-### Settings UI 功能開關
-- [x] CSRF 保護開關（環境變數 `CSRF_ENABLED` + Settings UI toggle）
-- [x] Rate limiting 開關 / 自訂閾值（每端點可調）
-- [x] OPDS 啟用/停用
-- [x] External API 啟用/停用
-- [x] AI Tagging 啟用/停用（已有 `TAG_MODEL_ENABLED` env，缺 UI）
-- [x] 下載來源啟用/停用（EH / Pixiv / gallery-dl fallback）
-- [x] 統一 Settings → Security / Features 分區，集中管理所有開關
-
-### 後端 i18n
-- [x] API 錯誤訊息 i18n（目前硬編碼中/英文）
-- [x] 根據 `Accept-Language` header 回傳對應語言
-- [x] 確認前端有顯示翻譯後的 tag 名稱
-
----
-
-## P2 — 中期功能（有依賴鏈）
-
-> 依賴 P1 完成或需多階段實施。
-
-### Pixiv Phase 2: 作者追蹤（依賴 Phase 1）
-
-#### 資料庫
-- [x] `db/models.py` + `db/init.sql` 新增 `followed_artists` 表
-  - 欄位：user_id, source, artist_id, artist_name, artist_avatar, last_checked_at, last_illust_id, auto_download, added_at
-  - UNIQUE(user_id, source, artist_id)
-
-#### API 端點
-- [x] `GET /artists/followed` — 列出已追蹤作者
-- [x] `POST /artists/follow` — 追蹤作者
-- [x] `DELETE /artists/follow/{artist_id}` — 取消追蹤
-- [x] `PATCH /artists/follow/{artist_id}` — 切換 auto_download
-- [x] `POST /artists/check-updates` — 手動觸發更新檢查
-
-#### Worker 定時任務
-- [x] `worker.py` 新增 `check_pixiv_artists` cron（每 2 小時）
-  - 遍歷 followed_artists → user_illusts → 比對 last_illust_id → 新作品時更新 DB + 可選自動下載
-  - 請求間隔 ≥ 2s（Pixiv 限速較嚴）
-
-### Pixiv Phase 3: 原生下載器（依賴 Phase 1）
-- [x] 新建 `services/pixiv_downloader.py`（仿 eh_downloader.py）
-  - `download_pixiv_illust()` — 下載單一插畫（含多頁漫畫）
-  - `download_pixiv_user_works()` — 下載作者全部作品
-  - 輸出 `metadata.json` 相容現有 `import_job`
-- [x] `worker.py` download_job 新增 Pixiv 分支（URL 偵測 → 原生下載器，取代 gallery-dl subprocess）
-
-### Pixiv Phase 4: 前端頁面（依賴 Phase 1-3）
-
-#### Types / API / i18n
-- [x] `types.ts` 新增 PixivIllust / PixivUser / PixivSearchResult 型別
-- [x] `api.ts` 新增 pixiv namespace（search, illust, user, imageProxy, follow）
-- [x] `i18n/en.ts` 新增 `pixiv.*` keys
-
-#### 頁面
-- [x] `/pixiv` 搜尋頁 — 關鍵字搜尋 + 排序/時間篩選 + 結果 grid（仿 `/browse`）
-- [x] `/pixiv/illust/[id]` 插畫詳情 — 大圖、tags、stats、下載按鈕
-- [x] `/pixiv/user/[id]` 作者頁 — 作品 grid、追蹤按鈕
-- [x] `/pixiv/following` 追蹤管理 — 已追蹤作者列表 + 新作品 feed
-
-#### 導航
-- [x] Sidebar + MobileNav 新增 Pixiv 入口
 
 ### 大量下載
 
@@ -126,9 +25,9 @@
 
 ---
 
-## P3 — 長期 / 按需
+## P2 — 中期功能（有依賴鏈）
 
-> 非核心功能、大型重構、按需啟動。
+> 需多階段實施或依賴較多。
 
 ### 多人權限管理
 
@@ -149,6 +48,12 @@
 - [ ] Gallery 分享 UI：設定可見性、邀請使用者
 - [ ] 角色不足時的 403 提示頁面
 - [ ] 側邊欄根據角色隱藏管理入口
+
+---
+
+## P3 — 長期 / 按需
+
+> 非核心功能、大型重構、按需啟動。
 
 ### Plugin 系統完善
 
@@ -191,7 +96,6 @@
 - [ ] AI Tagging 測試 `TAG_MODEL_ENABLED=true` 完整流程（模型下載→推理→DB 寫入）⚠️ 需要 ONNX runtime + 模型
 - [ ] Mihon Extension 編譯 + 實機測試（gallery 列表、搜尋、篩選、閱讀）⚠️ 需要 Android 裝置
 
-
 ---
 
 ## 已完成（v0.1 歷史記錄）
@@ -219,6 +123,23 @@
 - [x] 搜尋排序（前後端）
 - [x] Saved Searches（桌面+手機）
 - [x] Stale session 修復
+
+### Pixiv 全功能
+- [x] Phase 1：Client + Router（pixivpy3 async 包裝、搜尋/詳情/代理端點、Redis 快取）
+- [x] Phase 2：作者追蹤系統（followed_artists 表、追蹤 API、Worker cron 定時檢查）
+- [x] Phase 3：原生下載器（pixiv_downloader.py、worker 整合、取代 gallery-dl）
+- [x] Phase 4：前端頁面（搜尋/詳情/作者/追蹤管理頁面、導航整合）
+
+### 效能
+- [x] Virtual Scrolling（Library / Browse / History 頁面）
+
+### Settings UI
+- [x] 功能開關統一管理（CSRF / Rate Limiting / OPDS / External API / AI Tagging / 下載來源）
+- [x] Security / Features 分區
+
+### 後端 i18n
+- [x] API 錯誤訊息 i18n + Accept-Language 自動偵測
+- [x] Tag 名稱翻譯
 
 ### AI Tagging 前端
 - [x] Gallery detail 頁顯示 AI 標籤（含信心度）

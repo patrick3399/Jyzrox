@@ -33,6 +33,22 @@ export interface GalleryImage {
   file_size: number | null
   file_hash: string | null
   media_type: 'image' | 'video' | 'gif'
+  duration: number | null
+}
+
+export interface ArtistImageItem extends GalleryImage {
+  gallery_title: string
+}
+
+export interface ArtistDetail {
+  artist_id: string
+  artist_name: string
+  source: string
+  gallery_count: number
+  total_pages: number
+  total_images: number
+  latest_added_at: string | null
+  cover_thumb: string | null
 }
 
 export interface ReadProgress {
@@ -274,6 +290,17 @@ export interface GalleryListResponse {
   has_next?: boolean
 }
 
+export interface Collection {
+  id: number
+  name: string
+  description: string | null
+  cover_gallery_id: number | null
+  gallery_count: number
+  cover_thumb: string | null
+  created_at: string | null
+  updated_at: string | null
+}
+
 /** Page-based tag list response */
 export interface TagListResponse {
   tags: TagItem[]
@@ -384,6 +411,33 @@ export interface FollowedArtist {
   added_at: string | null
 }
 
+// ── File Explorer ────────────────────────────────────────────────────
+
+export interface LibraryDirectory {
+  gallery_id: number
+  title: string
+  category: string | null
+  file_count: number
+  rating: number
+  favorited: boolean
+  source: string | null
+  disk_size: number
+}
+
+export interface LibraryFile {
+  filename: string
+  page_num: number | null
+  width: number | null
+  height: number | null
+  file_size: number | null
+  media_type: string
+  thumb_path: string | null
+  file_path: string | null
+  is_symlink: boolean
+  is_broken: boolean
+  symlink_target: string | null
+}
+
 // ── API Params ────────────────────────────────────────────────────────
 
 export interface GallerySearchParams {
@@ -399,6 +453,7 @@ export interface GallerySearchParams {
   cursor?: string
   limit?: number
   sort?: 'added_at' | 'rating' | 'pages'
+  collection?: number
 }
 
 export interface EhSearchParams {

@@ -95,9 +95,11 @@ interface LibraryCardProps {
   gallery: Gallery
   thumbUrl?: string
   onClick?: () => void
+  selected?: boolean
+  selectMode?: boolean
 }
 
-export function LibraryGalleryCard({ gallery, thumbUrl, onClick }: LibraryCardProps) {
+export function LibraryGalleryCard({ gallery, thumbUrl, onClick, selected, selectMode }: LibraryCardProps) {
   const colors = getCategoryColors(gallery.category)
 
   const sourceStyle = (() => {
@@ -117,12 +119,24 @@ export function LibraryGalleryCard({ gallery, thumbUrl, onClick }: LibraryCardPr
       onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
       className={`
         relative flex flex-col
-        bg-vault-card border border-vault-border rounded-lg overflow-hidden
+        bg-vault-card rounded-lg overflow-hidden
         transition-all duration-200 cursor-pointer
-        hover:scale-[1.02] hover:border-vault-accent hover:shadow-lg hover:shadow-vault-accent/20
+        hover:scale-[1.02] hover:shadow-lg hover:shadow-vault-accent/20
         focus:outline-none focus:ring-2 focus:ring-vault-accent
+        ${selected ? 'border-2 border-vault-accent' : 'border border-vault-border hover:border-vault-accent'}
       `}
     >
+      {/* Select-mode checkbox overlay */}
+      {selectMode && (
+        <div className="absolute top-1.5 left-1.5 z-10">
+          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+            selected ? 'bg-vault-accent border-vault-accent text-white' : 'border-white/60 bg-black/30'
+          }`}>
+            {selected && <span className="text-xs">✓</span>}
+          </div>
+        </div>
+      )}
+
       {/* Favourite indicator */}
       {gallery.favorited && (
         <span

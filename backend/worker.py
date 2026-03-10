@@ -16,6 +16,7 @@ import json
 import logging
 import os
 import re
+import subprocess
 import uuid
 from datetime import UTC, datetime, timezone
 from pathlib import Path
@@ -1252,6 +1253,47 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
 # ── WORKER D: Thumbnail ──────────────────────────────────────────────
 
 
+def _ffprobe_metadata(src: Path) -> dict:
+    """Extract width, height, duration from video using ffprobe."""
+    cmd = [
+        "ffprobe", "-v", "quiet",
+        "-print_format", "json",
+        "-show_streams", "-show_format",
+        str(src),
+    ]
+    result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
+    data = json.loads(result.stdout)
+
+    # Find the video stream
+    width, height, duration = None, None, None
+    for stream in data.get("streams", []):
+        if stream.get("codec_type") == "video":
+            width = int(stream.get("width", 0)) or None
+            height = int(stream.get("height", 0)) or None
+            break
+
+    # Duration from format (more reliable)
+    fmt = data.get("format", {})
+    dur_str = fmt.get("duration")
+    if dur_str:
+        duration = float(dur_str)
+
+    return {"width": width, "height": height, "duration": duration}
+
+
+def _extract_video_frame(src: Path, output: Path, seek: float) -> None:
+    """Extract a single frame from video at `seek` seconds as JPEG."""
+    cmd = [
+        "ffmpeg", "-y",
+        "-ss", str(seek),
+        "-i", str(src),
+        "-frames:v", "1",
+        "-q:v", "2",
+        str(output),
+    ]
+    subprocess.run(cmd, capture_output=True, timeout=30, check=True)
+
+
 async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
     """Generate 160/360/720px WebP thumbnails for all images in a gallery."""
     import imagehash
@@ -1279,8 +1321,36 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
             if not src.exists():
                 continue
 
-            # Skip video files — PIL cannot process them
+            # Video files: extract metadata + thumbnail frame via ffmpeg
             if blob.media_type == "video":
+                td = thumb_dir(blob.sha256)
+                td.mkdir(parents=True, exist_ok=True)
+                try:
+                    meta = _ffprobe_metadata(src)
+                    blob.width = meta["width"]
+                    blob.height = meta["height"]
+                    blob.duration = meta["duration"]
+
+                    seek = min((meta["duration"] or 0) * 0.1, 1.0) if meta["duration"] else 0
+                    tmp_frame = td / "frame_tmp.jpg"
+                    _extract_video_frame(src, tmp_frame, seek)
+
+                    with PILImage.open(tmp_frame) as pil:
+                        rgb = pil.convert("RGB")
+                        for size in sizes:
+                            dest = td / f"thumb_{size}.webp"
+                            if dest.exists():
+                                continue
+                            thumb = rgb.copy()
+                            thumb.thumbnail((size, size * 2), PILImage.LANCZOS)
+                            tmp = dest.with_suffix(".tmp")
+                            thumb.save(str(tmp), "WEBP", quality=85)
+                            os.rename(tmp, dest)
+
+                    tmp_frame.unlink(missing_ok=True)
+                except (subprocess.SubprocessError, json.JSONDecodeError, OSError, ValueError) as exc:
+                    logger.error("[thumbnail] video %s: %s", src, exc)
+
                 processed += 1
                 continue
 

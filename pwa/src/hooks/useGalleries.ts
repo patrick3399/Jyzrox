@@ -72,7 +72,7 @@ export function useGalleryProgress(id: number | null) {
 export function useUpdateGallery(id: number) {
   return useSWRMutation(
     ['library/gallery', id],
-    (_key: unknown, { arg }: { arg: { favorited?: boolean; rating?: number } }) =>
+    (_key: unknown, { arg }: { arg: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string } }) =>
       api.library.updateGallery(id, arg),
   )
 }

@@ -72,6 +72,7 @@ class Blob(Base):
     media_type: Mapped[str] = mapped_column(Text, default="image")
     width: Mapped[int | None] = mapped_column(Integer)
     height: Mapped[int | None] = mapped_column(Integer)
+    duration: Mapped[float | None] = mapped_column(Float)
     phash: Mapped[str | None] = mapped_column(Text)
     phash_int: Mapped[int | None] = mapped_column(BigInteger)
     phash_q0: Mapped[int | None] = mapped_column(SmallInteger)
@@ -283,3 +284,29 @@ class FollowedArtist(Base):
     __table_args__ = (
         UniqueConstraint("user_id", "source", "artist_id", name="uq_followed_artist"),
     )
+
+
+class Collection(Base):
+    __tablename__ = "collections"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    cover_gallery_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"))
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    cover_gallery: Mapped["Gallery | None"] = relationship()
+    collection_galleries: Mapped[list["CollectionGallery"]] = relationship(back_populates="collection", cascade="all, delete-orphan")
+
+
+class CollectionGallery(Base):
+    __tablename__ = "collection_galleries"
+
+    collection_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("collections.id", ondelete="CASCADE"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    collection: Mapped["Collection"] = relationship(back_populates="collection_galleries")
+    gallery: Mapped["Gallery"] = relationship()

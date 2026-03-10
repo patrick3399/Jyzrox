@@ -17,6 +17,7 @@ import {
   loadReaderSettings,
   saveReaderSettings,
 } from './hooks'
+import VideoPlayer from './VideoPlayer'
 
 // ── URL resolver ──────────────────────────────────────────────────────
 
@@ -100,18 +101,12 @@ function MediaElement({
 }) {
   if (image.mediaType === 'video') {
     return (
-      <video
-        ref={innerRef as React.Ref<HTMLVideoElement>}
-        src={image.url}
+      <VideoPlayer
+        image={image}
         className={className}
         style={style}
-        data-page={dataPage}
-        autoPlay
-        loop
-        muted
-        playsInline
-        controls
-        onLoadedData={onLoad}
+        innerRef={innerRef as React.Ref<HTMLVideoElement>}
+        onLoad={onLoad}
       />
     )
   }
@@ -1197,6 +1192,7 @@ export default function Reader({
     width: img.width ?? undefined,
     height: img.height ?? undefined,
     mediaType: img.media_type,
+    duration: img.duration ?? undefined,
   }))
 
   const {

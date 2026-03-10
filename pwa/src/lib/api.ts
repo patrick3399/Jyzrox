@@ -34,6 +34,11 @@ import type {
   PixivUserResult,
   FollowedArtist,
   ArtistSummary,
+  ArtistImageItem,
+  ArtistDetail,
+  Collection,
+  LibraryDirectory,
+  LibraryFile,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -276,10 +281,16 @@ const library = {
     }>(`/api/library/galleries/${id}/images${qs ? `?${qs}` : ''}`)
   },
 
-  updateGallery: (id: number, patch: { favorited?: boolean; rating?: number }) =>
+  updateGallery: (id: number, patch: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string }) =>
     apiFetch<Gallery>(`/api/library/galleries/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
+    }),
+
+  batchGalleries: (body: { action: 'delete' | 'favorite' | 'unfavorite' | 'rate' | 'add_to_collection'; gallery_ids: number[]; rating?: number; collection_id?: number }) =>
+    apiFetch<{ status: string; affected: number; deleted_dirs?: number }>('/api/library/galleries/batch', {
+      method: 'POST',
+      body: JSON.stringify(body),
     }),
 
   deleteGallery: (id: number) =>
@@ -308,6 +319,34 @@ const library = {
 
   getArtists: (params: { q?: string; source?: string; sort?: string; page?: number; limit?: number } = {}) =>
     apiFetch<{ artists: ArtistSummary[]; total: number }>(`/api/library/artists${qs(params as Record<string, unknown>)}`),
+
+  getArtistSummary: (artistId: string) =>
+    apiFetch<ArtistDetail>(`/api/library/artists/${encodeURIComponent(artistId)}/summary`),
+
+  getArtistImages: (artistId: string, params: { page?: number; limit?: number; sort?: 'newest' | 'oldest' } = {}) =>
+    apiFetch<{
+      artist_id: string
+      images: ArtistImageItem[]
+      total: number
+      page: number
+      has_next: boolean
+    }>(`/api/library/artists/${encodeURIComponent(artistId)}/images${qs(params as Record<string, unknown>)}`),
+
+  listFiles: (params: { q?: string; page?: number; limit?: number } = {}) =>
+    apiFetch<{ directories: LibraryDirectory[]; total: number; page: number }>(
+      `/api/library/files${qs(params as Record<string, unknown>)}`
+    ),
+
+  listGalleryFiles: (galleryId: number) =>
+    apiFetch<{ gallery_id: number; title: string; category: string | null; files: LibraryFile[]; total_files: number }>(
+      `/api/library/files/${galleryId}`
+    ),
+
+  deleteImage: (galleryId: number, pageNum: number) =>
+    apiFetch<{ status: string; remaining_pages: number }>(
+      `/api/library/galleries/${galleryId}/delete-image`,
+      { method: 'POST', body: JSON.stringify({ page_num: pageNum }) }
+    ),
 }
 
 // ── Download ──────────────────────────────────────────────────────────
@@ -790,6 +829,55 @@ const artists = {
     apiFetch<{ status: string }>('/api/artists/check-updates', { method: 'POST' }),
 }
 
+// ── Collections ──────────────────────────────────────────────────────
+
+const collections = {
+  list: () =>
+    apiFetch<{ collections: Collection[] }>('/api/collections/'),
+
+  get: (id: number, params: { page?: number; limit?: number } = {}) =>
+    apiFetch<{
+      id: number
+      name: string
+      description: string | null
+      cover_gallery_id: number | null
+      gallery_count: number
+      galleries: Array<Gallery & { position: number; added_to_collection_at: string | null }>
+      page: number
+      has_next: boolean
+      created_at: string | null
+      updated_at: string | null
+    }>(`/api/collections/${id}${qs(params as Record<string, unknown>)}`),
+
+  create: (data: { name: string; description?: string }) =>
+    apiFetch<{ id: number; name: string; description: string | null; created_at: string | null }>('/api/collections/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (id: number, patch: { name?: string; description?: string; cover_gallery_id?: number }) =>
+    apiFetch<{ status: string }>(`/api/collections/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  delete: (id: number) =>
+    apiFetch<{ status: string }>(`/api/collections/${id}`, {
+      method: 'DELETE',
+    }),
+
+  addGalleries: (id: number, gallery_ids: number[]) =>
+    apiFetch<{ status: string; added: number }>(`/api/collections/${id}/galleries`, {
+      method: 'POST',
+      body: JSON.stringify({ gallery_ids }),
+    }),
+
+  removeGallery: (id: number, galleryId: number) =>
+    apiFetch<{ status: string }>(`/api/collections/${id}/galleries/${galleryId}`, {
+      method: 'DELETE',
+    }),
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
 export const api = {
@@ -808,4 +896,5 @@ export const api = {
   plugins,
   pixiv,
   artists,
+  collections,
 }
