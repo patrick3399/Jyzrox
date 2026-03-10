@@ -145,6 +145,39 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  tagger:
+    build: ./tagger
+    environment:
+      - TAG_MODEL_NAME=SmilingWolf/wd-swinv2-tagger-v3
+      - ONNX_PROVIDERS=CPUExecutionProvider
+    volumes:
+      - app_data:/data:ro
+      - ./mnt:/mnt:ro
+      - tagger_models:/app/models
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8100/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+        reservations:
+          memory: 1G
+    profiles:
+      - tagging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
   postgres:
     image: postgres:18-alpine
     env_file: .env
@@ -202,6 +235,7 @@ volumes:
   app_data:
   postgres_data:
   redis_data:
+  tagger_models:
 
 networks:
   frontend:

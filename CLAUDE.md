@@ -26,7 +26,7 @@
 - **所有需要保護的端點都必須加 `_: dict = Depends(require_auth)`**
 - 登入流程：`/login` → POST `/api/auth/login` (`{username, password}`) → 設定 cookie
 - 初次設定：`/setup` → POST `/api/auth/setup`（僅在無用戶時可用）
-- 前端 middleware (`middleware.ts`) 自動將未登入請求導向 `/login`
+- 前端 proxy (`proxy.ts`) 自動將未登入請求導向 `/login`
 
 ---
 
@@ -40,6 +40,10 @@ docker compose build api worker pwa
 docker compose up -d api worker pwa
 # ⚠️ 重要：容器重建後 nginx 需 reload，否則 502（IP 變更）
 docker compose exec nginx nginx -s reload
+
+# 若需 AI tagging 功能：
+docker compose --profile tagging build
+docker compose --profile tagging up -d
 ```
 
 ### 查看日誌
@@ -88,6 +92,18 @@ async def endpoint(_: dict = Depends(require_auth)):
 
 ### Python 版本限制：目前鎖定 3.13
 arq==0.27.0 使用已移除的 `asyncio.get_event_loop()`，Python 3.14+ 會 crash。待 arq 上游修復後才能升級。
+
+### WD14 Tagger 獨立容器
+AI tagging 已拆為獨立微服務（`tagger/`），透過 `--profile tagging` 按需啟動：
+```bash
+# 啟動 tagger
+docker compose --profile tagging up -d
+
+# 檢查狀態
+curl http://localhost:8100/health
+```
+Worker 透過 HTTP 呼叫 tagger，tagger 離線時 tag_job 自動 skip。
+設定：`TAGGER_URL`（default `http://tagger:8100`）、`TAGGER_TIMEOUT`（default 30s）。
 
 ### Tailwind 4 CSS-first 配置
 - 無 `tailwind.config.ts`，所有配置在 `globals.css`

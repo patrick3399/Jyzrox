@@ -54,15 +54,6 @@ def _detect_gallery_dl_version() -> str | None:
         return None
 
 
-def _detect_onnxruntime_version() -> str | None:
-    """Return onnxruntime version, or None if not installed."""
-    try:
-        import onnxruntime  # type: ignore
-        return onnxruntime.__version__
-    except Exception:
-        return None
-
-
 def _detect_python_version() -> str:
     """Return Python version string (major.minor.micro)."""
     v = sys.version_info
@@ -74,7 +65,6 @@ _STATIC_VERSIONS: dict[str, str | None] = {
     "python": _detect_python_version(),
     "fastapi": fastapi.__version__,
     "gallery_dl": _detect_gallery_dl_version(),
-    "onnxruntime": _detect_onnxruntime_version(),
 }
 
 
@@ -155,13 +145,29 @@ async def system_health():
     return {"status": "ok", "services": results}
 
 
+async def _get_tagger_info() -> dict | None:
+    """Fetch tagger service health info, or None if offline."""
+    try:
+        import httpx
+        async with httpx.AsyncClient() as client:
+            resp = await client.get(f"{settings.tagger_url}/health", timeout=5)
+            if resp.status_code == 200:
+                return resp.json()
+    except Exception:
+        pass
+    return None
+
+
 @router.get("/info")
 async def system_info(_: dict = Depends(require_auth)):
     """Return non-sensitive runtime configuration including component versions."""
-    pg_ver, redis_ver = await _get_postgresql_version(), await _get_redis_version()
+    pg_ver, redis_ver, tagger_info = await asyncio.gather(
+        _get_postgresql_version(),
+        _get_redis_version(),
+        _get_tagger_info(),
+    )
     jyzrox_ver = _STATIC_VERSIONS["jyzrox"]
     return {
-        # Kept for backwards compatibility; identical to versions.jyzrox
         "version": jyzrox_ver,
         "eh_max_concurrency": settings.eh_max_concurrency,
         "tag_model_enabled": settings.tag_model_enabled,
@@ -172,8 +178,9 @@ async def system_info(_: dict = Depends(require_auth)):
             "gallery_dl": _STATIC_VERSIONS["gallery_dl"],
             "postgresql": pg_ver,
             "redis": redis_ver,
-            "onnxruntime": _STATIC_VERSIONS["onnxruntime"],
+            "onnxruntime": tagger_info.get("onnxruntime_version") if tagger_info else None,
         },
+        "tagger": tagger_info,
     }
 
 
