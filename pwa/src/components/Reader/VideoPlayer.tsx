@@ -16,9 +16,11 @@ interface VideoPlayerProps {
   style?: React.CSSProperties
   innerRef?: React.Ref<HTMLVideoElement>
   onLoad?: () => void
+  onToggleOverlay?: () => void
+  overlayVisible?: boolean
 }
 
-export default function VideoPlayer({ image, className, style, innerRef, onLoad }: VideoPlayerProps) {
+export default function VideoPlayer({ image, className, style, innerRef, onLoad, onToggleOverlay, overlayVisible }: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
   const hideTimer = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -124,16 +126,16 @@ export default function VideoPlayer({ image, className, style, innerRef, onLoad 
       <div
         style={{
           position: 'absolute',
-          bottom: 0,
+          bottom: overlayVisible ? 'calc(80px + env(safe-area-inset-bottom))' : '0px',
           left: 0,
           right: 0,
           background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
-          padding: '24px 12px 8px',
+          padding: overlayVisible ? '24px 12px 8px' : '24px 12px calc(8px + env(safe-area-inset-bottom))',
           display: 'flex',
           flexDirection: 'column',
           gap: '4px',
           opacity: showControls ? 1 : 0,
-          transition: 'opacity 0.3s',
+          transition: 'opacity 0.3s, bottom 0.3s',
           pointerEvents: showControls ? 'auto' : 'none',
         }}
         onClick={(e) => e.stopPropagation()}
@@ -186,6 +188,17 @@ export default function VideoPlayer({ image, className, style, innerRef, onLoad 
             aria-label="Volume"
             style={{ width: '60px', height: '4px', cursor: 'pointer', accentColor: '#3b82f6' }}
           />
+
+          {/* Toggle overlay */}
+          {onToggleOverlay && (
+            <button
+              onClick={onToggleOverlay}
+              aria-label={t('reader.videoToggleOverlay')}
+              style={{ background: 'none', border: 'none', color: '#fff', cursor: 'pointer', fontSize: '16px', padding: '2px 4px' }}
+            >
+              &#9776;
+            </button>
+          )}
         </div>
       </div>
     </div>

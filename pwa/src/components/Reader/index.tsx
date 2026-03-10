@@ -89,6 +89,8 @@ function MediaElement({
   dataPage,
   innerRef,
   onLoad,
+  onToggleOverlay,
+  overlayVisible,
 }: {
   image: ReaderImage
   className?: string
@@ -98,6 +100,8 @@ function MediaElement({
   dataPage?: number
   innerRef?: React.Ref<HTMLImageElement | HTMLVideoElement>
   onLoad?: () => void
+  onToggleOverlay?: () => void
+  overlayVisible?: boolean
 }) {
   if (image.mediaType === 'video') {
     return (
@@ -107,6 +111,8 @@ function MediaElement({
         style={style}
         innerRef={innerRef as React.Ref<HTMLVideoElement>}
         onLoad={onLoad}
+        onToggleOverlay={onToggleOverlay}
+        overlayVisible={overlayVisible}
       />
     )
   }
@@ -154,6 +160,7 @@ interface SinglePageViewProps {
   onImageLoaded: () => void
   scaleMode: ScaleMode
   readingDirection: ReadingDirection
+  showOverlay: boolean
 }
 
 function SinglePageView({
@@ -165,12 +172,14 @@ function SinglePageView({
   onImageLoaded,
   scaleMode,
   readingDirection,
+  showOverlay,
 }: SinglePageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const { isZoomed, transform } = usePinchZoom(containerRef as React.RefObject<HTMLElement | null>)
 
   const leftAction = readingDirection === 'rtl' ? onNext : onPrev
   const rightAction = readingDirection === 'rtl' ? onPrev : onNext
+  const isVideo = image.mediaType === 'video'
 
   return (
     <div ref={containerRef} className={`${getScaleContainerClass(scaleMode)} h-full w-full`}>
@@ -187,6 +196,8 @@ function SinglePageView({
           className={getScaleImageClass(scaleMode)}
           draggable={false}
           onLoad={onImageLoaded}
+          onToggleOverlay={onToggleOverlay}
+          overlayVisible={showOverlay}
         />
       </div>
       {isLoading && (
@@ -194,7 +205,7 @@ function SinglePageView({
           <Spinner />
         </div>
       )}
-      {!isZoomed && readingDirection === 'vertical' ? (
+      {!isZoomed && !isVideo && readingDirection === 'vertical' ? (
         <>
           <div
             className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -212,7 +223,7 @@ function SinglePageView({
             aria-label="Next page"
           />
         </>
-      ) : !isZoomed ? (
+      ) : !isZoomed && !isVideo ? (
         <>
           <div
             className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -371,6 +382,7 @@ interface DoublePageViewProps {
   onImageLoaded: () => void
   scaleMode: ScaleMode
   readingDirection: ReadingDirection
+  showOverlay: boolean
 }
 
 function DoublePageView({
@@ -383,6 +395,7 @@ function DoublePageView({
   onImageLoaded,
   scaleMode,
   readingDirection,
+  showOverlay,
 }: DoublePageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const { isZoomed, transform } = usePinchZoom(containerRef as React.RefObject<HTMLElement | null>)
@@ -395,6 +408,7 @@ function DoublePageView({
   const secondImage = readingDirection === 'rtl' ? leftImage : rightImage
 
   const imgClass = getScaleImageClass(scaleMode === 'fit-both' ? 'fit-both' : scaleMode)
+  const hasVideo = leftImage?.mediaType === 'video' || rightImage?.mediaType === 'video'
 
   return (
     <div
@@ -416,6 +430,8 @@ function DoublePageView({
               className={imgClass}
               draggable={false}
               onLoad={onImageLoaded}
+              onToggleOverlay={onToggleOverlay}
+              overlayVisible={showOverlay}
             />
           ) : (
             <div className="h-full w-full" />
@@ -428,6 +444,8 @@ function DoublePageView({
               className={imgClass}
               draggable={false}
               onLoad={onImageLoaded}
+              onToggleOverlay={onToggleOverlay}
+              overlayVisible={showOverlay}
             />
           ) : (
             <div className="h-full w-full" />
@@ -439,7 +457,7 @@ function DoublePageView({
           <Spinner />
         </div>
       )}
-      {!isZoomed && readingDirection === 'vertical' ? (
+      {!isZoomed && !hasVideo && readingDirection === 'vertical' ? (
         <>
           <div
             className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -457,7 +475,7 @@ function DoublePageView({
             aria-label="Next page"
           />
         </>
-      ) : !isZoomed ? (
+      ) : !isZoomed && !hasVideo ? (
         <>
           <div
             className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -836,6 +854,7 @@ function ThumbnailStrip({
       <div
         ref={stripRef}
         className="reader-thumb-strip flex gap-1 bg-black/70 px-2 py-2 backdrop-blur-sm overflow-x-auto"
+        style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))' }}
       >
         {images.map((img) => {
           const isActive = img.pageNum === currentPage
@@ -1400,6 +1419,7 @@ export default function Reader({
             onImageLoaded={handleImageLoaded}
             scaleMode={state.scaleMode}
             readingDirection={state.readingDirection}
+            showOverlay={state.showOverlay}
           />
         )}
 
@@ -1423,6 +1443,7 @@ export default function Reader({
             onImageLoaded={handleImageLoaded}
             scaleMode={state.scaleMode}
             readingDirection={state.readingDirection}
+            showOverlay={state.showOverlay}
           />
         )}
       </div>
@@ -1444,7 +1465,7 @@ export default function Reader({
       </div>
 
       {/* Status bar — always visible (thumbnail strip at z-20 covers it when overlay is shown) */}
-      <div className="absolute left-0 right-0 bottom-0 z-10" onClick={(e) => e.stopPropagation()}>
+      <div className="absolute left-0 right-0 bottom-0 z-10" style={{ paddingBottom: 'env(safe-area-inset-bottom)' }} onClick={(e) => e.stopPropagation()}>
         <StatusBar
           currentPage={state.currentPage}
           totalPages={totalPages}
