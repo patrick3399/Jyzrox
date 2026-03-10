@@ -96,6 +96,7 @@ _WRITE_RATE_WINDOW = 60  # seconds
 _SKIP_GLOBAL: frozenset[str] = frozenset({
     "/api/auth/login",
     "/api/auth/setup",
+    "/api/auth/check",
 })
 _SKIP_GLOBAL_PREFIXES: tuple[str, ...] = (
     "/api/external/v1/",  # has its own per-token limiter

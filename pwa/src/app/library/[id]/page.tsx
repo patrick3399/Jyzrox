@@ -515,7 +515,7 @@ export default function GalleryDetailPage() {
 
           {!imagesLoading && (
             <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
-              {images.map((image) => (
+              {images.map((image, idx) => (
                 <Link
                   key={image.id}
                   href={`/reader/${gallery.id}?page=${image.page_num}`}
@@ -525,6 +525,7 @@ export default function GalleryDetailPage() {
                     <img
                       src={image.thumb_path}
                       alt={`Page ${image.page_num}`}
+                      loading={idx < 20 ? undefined : 'lazy'}
                       className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
                     />
                   ) : (
