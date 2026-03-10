@@ -1268,7 +1268,6 @@ export default function Reader({
     autoAdvanceSeconds,
     rawNextPage,
     isLastPage,
-    state.showOverlay,
   )
 
   // Reset countdown on manual page change
@@ -1296,13 +1295,32 @@ export default function Reader({
   // Track image loading state for single/double page views
   const [pageLoading, setPageLoading] = useState(false)
   const loadingPageRef = useRef(state.currentPage)
+  const loadedPagesRef = useRef<Set<number>>(new Set())
   const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
+  const handleImageLoaded = useCallback(() => {
+    loadedPagesRef.current.add(state.currentPage)
+    if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current)
+      loadingTimerRef.current = undefined
+    }
+    setPageLoading(false)
+  }, [state.currentPage])
+
   // When page changes, start a short timer before showing the spinner.
-  // If the image loads before the timer fires, the spinner never appears.
+  // If the image loads before the timer fires (onLoad clears the timer), the spinner never appears.
+  // Key fix: check if the page was already loaded (onLoad fired before this effect ran).
   useEffect(() => {
     if (state.viewMode !== 'webtoon' && state.currentPage !== loadingPageRef.current) {
       loadingPageRef.current = state.currentPage
+
+      // If onLoad already fired for this page before this effect ran, skip the spinner
+      if (loadedPagesRef.current.has(state.currentPage)) {
+        loadedPagesRef.current.delete(state.currentPage)
+        setPageLoading(false)
+        return
+      }
+
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
       loadingTimerRef.current = setTimeout(() => {
         setPageLoading(true)
@@ -1315,14 +1333,6 @@ export default function Reader({
     return () => {
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
     }
-  }, [])
-
-  const handleImageLoaded = useCallback(() => {
-    if (loadingTimerRef.current) {
-      clearTimeout(loadingTimerRef.current)
-      loadingTimerRef.current = undefined
-    }
-    setPageLoading(false)
   }, [])
 
   // Notify parent of page changes (used for paginated token loading in EH proxy mode)

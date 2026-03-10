@@ -385,10 +385,16 @@ export function useAutoAdvance(
   intervalSeconds: number,
   nextPage: () => void,
   isLastPage: boolean,
-  overlayVisible: boolean,
 ) {
   const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
   const [countdown, setCountdown] = useState<number>(intervalSeconds)
+  const nextPageRef = useRef(nextPage)
+  const countdownRef = useRef(intervalSeconds)
+
+  // Always keep ref up to date without affecting the interval effect
+  useEffect(() => {
+    nextPageRef.current = nextPage
+  }, [nextPage])
 
   const clearTimer = useCallback(() => {
     if (timerRef.current !== undefined) {
@@ -397,36 +403,41 @@ export function useAutoAdvance(
     }
   }, [])
 
-  // Reset countdown when page changes or interval changes
+  // Reset countdown when interval changes
   useEffect(() => {
     setCountdown(intervalSeconds)
   }, [intervalSeconds])
 
   useEffect(() => {
-    if (!enabled || isLastPage || overlayVisible) {
+    if (!enabled || isLastPage) {
       clearTimer()
       setCountdown(intervalSeconds)
+      countdownRef.current = intervalSeconds
       return
     }
 
     setCountdown(intervalSeconds)
+    countdownRef.current = intervalSeconds
 
     timerRef.current = setInterval(() => {
       setCountdown((prev) => {
-        if (prev <= 1) {
-          nextPage()
-          return intervalSeconds
-        }
-        return prev - 1
+        const next = prev <= 1 ? intervalSeconds : prev - 1
+        return next
       })
+      countdownRef.current -= 1
+      if (countdownRef.current <= 0) {
+        countdownRef.current = intervalSeconds
+        nextPageRef.current()
+      }
     }, 1000)
 
     return clearTimer
-  }, [enabled, intervalSeconds, isLastPage, overlayVisible, nextPage, clearTimer])
+  }, [enabled, intervalSeconds, isLastPage, clearTimer])
 
   // Reset countdown on manual page change (called externally)
   const resetCountdown = useCallback(() => {
     setCountdown(intervalSeconds)
+    countdownRef.current = intervalSeconds
   }, [intervalSeconds])
 
   return { countdown, resetCountdown }
