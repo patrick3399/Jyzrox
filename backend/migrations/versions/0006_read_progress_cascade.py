@@ -1,14 +1,14 @@
 """Add ON DELETE CASCADE to read_progress.gallery_id foreign key.
 
 Revision ID: 0006
-Revises: 0005
+Revises: 0005b
 Create Date: 2026-03-10
 """
 from alembic import op
 import sqlalchemy as sa
 
 revision = "0006"
-down_revision = "0005"
+down_revision = "0005b"
 branch_labels = None
 depends_on = None
 

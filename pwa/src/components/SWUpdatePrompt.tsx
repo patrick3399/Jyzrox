@@ -3,6 +3,7 @@
 import { useEffect } from 'react'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
+import { loadSWCacheConfig, sendConfigToSW } from '@/lib/swCacheConfig'
 
 export function SWUpdatePrompt() {
   useEffect(() => {
@@ -22,6 +23,10 @@ export function SWUpdatePrompt() {
     }
 
     navigator.serviceWorker.addEventListener('message', handler)
+
+    // Sync cache config to SW on mount
+    sendConfigToSW(loadSWCacheConfig())
+
     return () => navigator.serviceWorker.removeEventListener('message', handler)
   }, [])
 

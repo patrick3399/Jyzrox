@@ -267,22 +267,28 @@ class PluginConfig(Base):
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
-class FollowedArtist(Base):
-    __tablename__ = "followed_artists"
+class Subscription(Base):
+    __tablename__ = "subscriptions"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
-    source: Mapped[str] = mapped_column(Text, nullable=False)  # "pixiv", "ehentai", etc.
-    artist_id: Mapped[str] = mapped_column(Text, nullable=False)  # external artist ID
-    artist_name: Mapped[str | None] = mapped_column(Text)
-    artist_avatar: Mapped[str | None] = mapped_column(Text)
+    name: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str | None] = mapped_column(Text)
+    source_id: Mapped[str | None] = mapped_column(Text)
+    avatar_url: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_download: Mapped[bool] = mapped_column(Boolean, default=True)
+    cron_expr: Mapped[str | None] = mapped_column(Text, default="0 */2 * * *")
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
-    last_illust_id: Mapped[str | None] = mapped_column(Text)  # last known illust ID for delta checks
-    auto_download: Mapped[bool] = mapped_column(Boolean, server_default="false")
-    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_item_id: Mapped[str | None] = mapped_column(Text)
+    last_status: Mapped[str] = mapped_column(Text, default="pending")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     __table_args__ = (
-        UniqueConstraint("user_id", "source", "artist_id", name="uq_followed_artist"),
+        UniqueConstraint("user_id", "url", name="uq_subscription_user_url"),
     )
 
 
@@ -310,3 +316,11 @@ class CollectionGallery(Base):
 
     collection: Mapped["Collection"] = relationship(back_populates="collection_galleries")
     gallery: Mapped["Gallery"] = relationship()
+
+
+class ExcludedBlob(Base):
+    __tablename__ = "excluded_blobs"
+
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    blob_sha256: Mapped[str] = mapped_column(Text, primary_key=True)
+    excluded_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

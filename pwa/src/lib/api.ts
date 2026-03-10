@@ -39,6 +39,8 @@ import type {
   Collection,
   LibraryDirectory,
   LibraryFile,
+  ScheduledTask,
+  Subscription,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -878,6 +880,58 @@ const collections = {
     }),
 }
 
+// ── Scheduled Tasks ──────────────────────────────────────────────────
+
+const scheduledTasks = {
+  list: () =>
+    apiFetch<{ tasks: ScheduledTask[] }>('/api/scheduled-tasks/'),
+
+  update: (taskId: string, data: { enabled?: boolean; cron_expr?: string }) =>
+    apiFetch<{ status: string }>(`/api/scheduled-tasks/${taskId}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  run: (taskId: string) =>
+    apiFetch<{ status: string }>(`/api/scheduled-tasks/${taskId}/run`, {
+      method: 'POST',
+    }),
+}
+
+// ── Subscriptions ────────────────────────────────────────────────────
+
+const subscriptions = {
+  list: (params: { source?: string; enabled?: boolean; limit?: number; offset?: number } = {}) =>
+    apiFetch<{ subscriptions: Subscription[]; total: number }>(
+      `/api/subscriptions/${qs(params as Record<string, unknown>)}`
+    ),
+
+  create: (data: { url: string; name?: string; cron_expr?: string; auto_download?: boolean }) =>
+    apiFetch<{ status: string; id: number; source: string | null }>('/api/subscriptions/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  get: (id: number) =>
+    apiFetch<Subscription>(`/api/subscriptions/${id}`),
+
+  update: (id: number, data: { name?: string; enabled?: boolean; auto_download?: boolean; cron_expr?: string }) =>
+    apiFetch<{ status: string }>(`/api/subscriptions/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: number) =>
+    apiFetch<{ status: string }>(`/api/subscriptions/${id}`, {
+      method: 'DELETE',
+    }),
+
+  check: (id: number) =>
+    apiFetch<{ status: string }>(`/api/subscriptions/${id}/check`, {
+      method: 'POST',
+    }),
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
 export const api = {
@@ -897,4 +951,6 @@ export const api = {
   pixiv,
   artists,
   collections,
+  scheduledTasks,
+  subscriptions,
 }

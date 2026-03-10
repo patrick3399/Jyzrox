@@ -26,7 +26,9 @@ from routers import (
     opds,
     pixiv,
     plugins as plugins_router,
+    scheduled_tasks,
     search,
+    subscriptions,
     system,
     tag,
     ws,
@@ -98,6 +100,8 @@ app.include_router(plugins_router.router, prefix="/api/plugins")
 app.include_router(artists.router, prefix="/api/artists")
 app.include_router(collections.router, prefix="/api/collections")
 app.include_router(opds.router, prefix="/opds")
+app.include_router(scheduled_tasks.router, prefix="/api/scheduled-tasks")
+app.include_router(subscriptions.router, prefix="/api/subscriptions")
 
 
 @app.get("/api/health")

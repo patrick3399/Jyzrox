@@ -1016,6 +1016,13 @@ async def delete_gallery_image(
     blob_sha256 = img.blob_sha256
     filename = img.filename
 
+    # Record blob as excluded so re-imports skip it
+    from db.models import ExcludedBlob
+    excl_stmt = pg_insert(ExcludedBlob).values(
+        gallery_id=gallery_id, blob_sha256=blob_sha256,
+    ).on_conflict_do_nothing()
+    await db.execute(excl_stmt)
+
     # Remove the symlink from the library directory
     symlink_path = library_dir(gallery_id) / filename
     await asyncio.to_thread(symlink_path.unlink, True)
@@ -1271,6 +1278,55 @@ async def find_similar_images(
             for r in results
         ],
     }
+
+
+# ── Excluded Blobs ───────────────────────────────────────────────────
+
+
+@router.get("/galleries/{gallery_id}/excluded")
+async def list_excluded_blobs(
+    gallery_id: int,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List excluded blob hashes for a gallery."""
+    from db.models import ExcludedBlob
+    result = await db.execute(
+        select(ExcludedBlob)
+        .where(ExcludedBlob.gallery_id == gallery_id)
+        .order_by(ExcludedBlob.excluded_at.desc())
+    )
+    blobs = result.scalars().all()
+    return {
+        "gallery_id": gallery_id,
+        "excluded": [
+            {"blob_sha256": b.blob_sha256, "excluded_at": b.excluded_at.isoformat() if b.excluded_at else None}
+            for b in blobs
+        ],
+    }
+
+
+@router.delete("/galleries/{gallery_id}/excluded/{sha256}")
+async def restore_excluded_blob(
+    gallery_id: int,
+    sha256: str,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a blob from the exclusion list (un-exclude)."""
+    from db.models import ExcludedBlob
+    result = await db.execute(
+        select(ExcludedBlob).where(
+            ExcludedBlob.gallery_id == gallery_id,
+            ExcludedBlob.blob_sha256 == sha256,
+        )
+    )
+    blob = result.scalar_one_or_none()
+    if not blob:
+        raise HTTPException(status_code=404, detail="Excluded blob not found")
+    await db.delete(blob)
+    await db.commit()
+    return {"status": "ok"}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────

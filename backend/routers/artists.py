@@ -1,7 +1,6 @@
-"""Artist following management endpoints."""
+"""Artist following management endpoints — backed by subscriptions table."""
 
 import logging
-from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
@@ -12,14 +11,25 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from core.auth import require_auth
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
-from db.models import FollowedArtist
+from db.models import Subscription
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["artists"])
 
 
+def _artist_url(source: str, artist_id: str) -> str:
+    """Generate a canonical URL for an artist."""
+    if source == "pixiv":
+        return f"https://www.pixiv.net/users/{artist_id}"
+    if source == "twitter":
+        return f"https://x.com/{artist_id}"
+    if source == "ehentai":
+        return f"https://e-hentai.org/tag/artist:{artist_id}"
+    return f"https://{source}/{artist_id}"
+
+
 class FollowArtistRequest(BaseModel):
-    source: str  # "pixiv", "ehentai"
+    source: str
     artist_id: str
     artist_name: str | None = None
     artist_avatar: str | None = None
@@ -42,34 +52,33 @@ async def list_followed(
     """List followed artists for the current user."""
     user_id = auth["user_id"]
     async with async_session() as session:
-        query = select(FollowedArtist).where(FollowedArtist.user_id == user_id)
+        query = select(Subscription).where(Subscription.user_id == user_id)
         if source:
-            query = query.where(FollowedArtist.source == source)
-        query = query.order_by(FollowedArtist.added_at.desc()).offset(offset).limit(limit)
+            query = query.where(Subscription.source == source)
+        query = query.order_by(Subscription.created_at.desc()).offset(offset).limit(limit)
 
         result = await session.execute(query)
-        artists = result.scalars().all()
+        subs = result.scalars().all()
 
-        # Get total count
-        count_q = select(sa_func.count(FollowedArtist.id)).where(FollowedArtist.user_id == user_id)
+        count_q = select(sa_func.count(Subscription.id)).where(Subscription.user_id == user_id)
         if source:
-            count_q = count_q.where(FollowedArtist.source == source)
+            count_q = count_q.where(Subscription.source == source)
         total = (await session.execute(count_q)).scalar() or 0
 
     return {
         "artists": [
             {
-                "id": a.id,
-                "source": a.source,
-                "artist_id": a.artist_id,
-                "artist_name": a.artist_name,
-                "artist_avatar": a.artist_avatar,
-                "last_checked_at": a.last_checked_at.isoformat() if a.last_checked_at else None,
-                "last_illust_id": a.last_illust_id,
-                "auto_download": a.auto_download,
-                "added_at": a.added_at.isoformat() if a.added_at else None,
+                "id": s.id,
+                "source": s.source,
+                "artist_id": s.source_id,
+                "artist_name": s.name,
+                "artist_avatar": s.avatar_url,
+                "last_checked_at": s.last_checked_at.isoformat() if s.last_checked_at else None,
+                "last_illust_id": s.last_item_id,
+                "auto_download": s.auto_download,
+                "added_at": s.created_at.isoformat() if s.created_at else None,
             }
-            for a in artists
+            for s in subs
         ],
         "total": total,
     }
@@ -81,26 +90,28 @@ async def follow_artist(
     auth: dict = Depends(require_auth),
     request: Request = None,
 ):
-    """Follow an artist."""
+    """Follow an artist (creates a subscription)."""
     user_id = auth["user_id"]
-    locale = parse_accept_language(request.headers.get("accept-language")) if request else "en"
+    url = _artist_url(req.source, req.artist_id)
 
     async with async_session() as session:
-        stmt = pg_insert(FollowedArtist).values(
+        stmt = pg_insert(Subscription).values(
             user_id=user_id,
+            url=url,
+            name=req.artist_name,
             source=req.source,
-            artist_id=req.artist_id,
-            artist_name=req.artist_name,
-            artist_avatar=req.artist_avatar,
+            source_id=req.artist_id,
+            avatar_url=req.artist_avatar,
             auto_download=req.auto_download,
         ).on_conflict_do_update(
-            constraint="uq_followed_artist",
+            constraint="uq_subscription_user_url",
             set_={
-                "artist_name": req.artist_name,
-                "artist_avatar": req.artist_avatar,
+                "name": req.artist_name,
+                "avatar_url": req.artist_avatar,
                 "auto_download": req.auto_download,
+                "enabled": True,
             },
-        ).returning(FollowedArtist.id)
+        ).returning(Subscription.id)
 
         result = await session.execute(stmt)
         row = result.fetchone()
@@ -116,17 +127,17 @@ async def unfollow_artist(
     auth: dict = Depends(require_auth),
     request: Request = None,
 ):
-    """Unfollow an artist."""
+    """Unfollow an artist (deletes the subscription)."""
     user_id = auth["user_id"]
     locale = parse_accept_language(request.headers.get("accept-language")) if request else "en"
 
     async with async_session() as session:
         result = await session.execute(
-            delete(FollowedArtist).where(
-                FollowedArtist.user_id == user_id,
-                FollowedArtist.source == source,
-                FollowedArtist.artist_id == artist_id,
-            ).returning(FollowedArtist.id)
+            delete(Subscription).where(
+                Subscription.user_id == user_id,
+                Subscription.source == source,
+                Subscription.source_id == artist_id,
+            ).returning(Subscription.id)
         )
         deleted = result.fetchone()
         await session.commit()
@@ -152,20 +163,20 @@ async def patch_follow(
     if req.auto_download is not None:
         updates["auto_download"] = req.auto_download
     if req.artist_name is not None:
-        updates["artist_name"] = req.artist_name
+        updates["name"] = req.artist_name
     if req.artist_avatar is not None:
-        updates["artist_avatar"] = req.artist_avatar
+        updates["avatar_url"] = req.artist_avatar
 
     if not updates:
         raise api_error(400, "invalid_request", locale)
 
     async with async_session() as session:
         result = await session.execute(
-            update(FollowedArtist).where(
-                FollowedArtist.user_id == user_id,
-                FollowedArtist.source == source,
-                FollowedArtist.artist_id == artist_id,
-            ).values(**updates).returning(FollowedArtist.id)
+            update(Subscription).where(
+                Subscription.user_id == user_id,
+                Subscription.source == source,
+                Subscription.source_id == artist_id,
+            ).values(**updates).returning(Subscription.id)
         )
         updated = result.fetchone()
         await session.commit()
@@ -181,7 +192,6 @@ async def check_updates(
     request: Request = None,
 ):
     """Manually trigger update check for followed artists."""
-    # Enqueue the check job via ARQ using the app-level pool
     try:
         arq = request.app.state.arq
         await arq.enqueue_job("check_followed_artists", auth["user_id"])

@@ -29,11 +29,13 @@ from sqlalchemy import text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
+from croniter import croniter as _croniter_cls
+
 from core.config import get_all_library_paths, settings
 from core.database import AsyncSessionLocal
 from core.redis_client import DownloadSemaphore, close_redis, init_redis
 from core.watcher import LibraryWatcher
-from db.models import Blob, DownloadJob, Gallery, GalleryTag, Image, Tag
+from db.models import Blob, DownloadJob, ExcludedBlob, Gallery, GalleryTag, Image, Tag
 from services.cas import cas_path, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, store_blob, thumb_dir
 from services.credential import get_credential
 from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
@@ -485,6 +487,12 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
         )
         gallery_id = (await session.execute(stmt)).scalar_one()
 
+        # Load excluded blob hashes for this gallery
+        excluded_rows = (await session.execute(
+            select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)
+        )).scalars().all()
+        excluded_set: set[str] = set(excluded_rows)
+
         # Compute hashes with bounded concurrency to avoid thread pool exhaustion
         _hash_sem = asyncio.Semaphore(10)
 
@@ -494,8 +502,21 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
 
         hashes = await asyncio.gather(*[_sha256_limited(f) for f in media_files])
 
+        # Filter out files whose sha256 is in the excluded set
+        allowed_pairs = [
+            (img_file, sha256)
+            for img_file, sha256 in zip(media_files, hashes, strict=False)
+            if sha256 not in excluded_set
+        ]
+        if len(allowed_pairs) < len(media_files):
+            logger.info(
+                "[import] gallery_id=%d: skipped %d excluded blob(s)",
+                gallery_id,
+                len(media_files) - len(allowed_pairs),
+            )
+
         # Store each file in CAS and create library symlink
-        for img_file, sha256 in zip(media_files, hashes, strict=False):
+        for img_file, sha256 in allowed_pairs:
             blob = await store_blob(img_file, sha256, session)
             await create_library_symlink(gallery_id, img_file.name, blob)
 
@@ -510,7 +531,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
                 "filename": img_file.name,
                 "blob_sha256": sha256,
             }
-            for page_num, (img_file, sha256) in enumerate(zip(media_files, hashes, strict=False), start=1)
+            for page_num, (img_file, sha256) in enumerate(allowed_pairs, start=1)
         ]
         if image_values:
             img_stmt = pg_insert(Image).values(image_values).on_conflict_do_nothing()
@@ -702,9 +723,20 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     processed = 0
     r = ctx["redis"]
 
+    # Load excluded blob hashes for this gallery before processing files
+    async with AsyncSessionLocal() as _excl_session:
+        excluded_rows = (await _excl_session.execute(
+            select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)
+        )).scalars().all()
+    excluded_set: set[str] = set(excluded_rows)
+
     async with AsyncSessionLocal() as session:
         for idx, f in enumerate(files):
             sha256 = await asyncio.to_thread(_sha256, f)
+
+            if sha256 in excluded_set:
+                logger.debug("[local_import] gallery_id=%d: skipping excluded blob %s", gallery_id, sha256[:12])
+                continue
 
             if mode == "copy":
                 # Hardlink/copy into CAS; create library symlink
@@ -992,6 +1024,12 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             logger.error("[rescan_gallery] gallery_id=%d not found", gallery_id)
             return {"status": "failed", "error": "gallery not found"}
 
+        # Load excluded blob hashes for this gallery
+        excluded_rows = (await session.execute(
+            select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)
+        )).scalars().all()
+        excluded_set: set[str] = set(excluded_rows)
+
         import shutil
         from sqlalchemy.orm import selectinload
         images = (await session.execute(
@@ -1068,6 +1106,12 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             for fpath in dir_files:
                 file_hash = await asyncio.to_thread(_sha256, fpath)
                 if file_hash in known_sha256s:
+                    continue
+                if file_hash in excluded_set:
+                    logger.debug(
+                        "[rescan_gallery] gallery_id=%d: skipping excluded blob %s (%s)",
+                        gallery_id, file_hash[:12], fpath.name,
+                    )
                     continue
                 # New file found on disk that is not in the DB.
                 blob = await store_blob(fpath, file_hash, session)
@@ -1417,21 +1461,18 @@ async def reconciliation_job(ctx: dict) -> dict:
     logger.info("[reconcile] Starting reconciliation")
     r = ctx["redis"]
 
-    # Check 14-day interval via Redis
-    last_run_key = "reconcile:last_run"
-    last_run = await r.get(last_run_key)
-    if last_run:
-        last_dt = datetime.fromisoformat(last_run.decode())
-        if (datetime.now(UTC) - last_dt).days < 14:
-            logger.info("[reconcile] Skipping — last run was %s (< 14 days ago)", last_run.decode())
-            return {"status": "skipped", "reason": "interval_not_reached"}
+    if not await _cron_should_run(ctx, "reconciliation", "0 3 * * 1"):
+        logger.info("[reconcile] Skipping — cron gate not reached")
+        return {"status": "skipped", "reason": "interval_not_reached"}
+
+    await _cron_record(ctx, "reconciliation", "running")
 
     stats = {"removed_images": 0, "removed_galleries": 0, "orphan_blobs_cleaned": 0}
 
     lib_base = Path(settings.data_library_path)
     if not lib_base.exists():
         logger.info("[reconcile] library path does not exist, nothing to do")
-        await r.set(last_run_key, datetime.now(UTC).isoformat())
+        await _cron_record(ctx, "reconciliation", "ok")
         return {"status": "done", **stats}
 
     # ── Phase 1: Scan filesystem once, batch-query DB, reconcile in chunks ──
@@ -1683,8 +1724,7 @@ async def reconciliation_job(ctx: dict) -> dict:
         logger.info("[reconcile] Phase 3 done: cleaned %d orphan blobs (%d ref_count corrections)",
                     stats["orphan_blobs_cleaned"], len(drifted))
 
-    # Record last run time
-    await r.set(last_run_key, datetime.now(UTC).isoformat())
+    await _cron_record(ctx, "reconciliation", "ok")
 
     # Store result in Redis for API query (30-day TTL)
     await r.setex("reconcile:last_result", 86400 * 30, json.dumps({
@@ -1866,44 +1906,61 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
     return {"status": "done", "total": total}
 
 
+# ── Cron Helpers ────────────────────────────────────────────────────
+
+
+async def _cron_should_run(ctx: dict, task_id: str, default_cron: str, default_enabled: bool = True) -> bool:
+    """Check Redis cron config to determine if a scheduled job should run now."""
+    r = ctx["redis"]
+    enabled = await r.get(f"cron:{task_id}:enabled")
+    if enabled == b"0":
+        return False
+    if enabled is None and not default_enabled:
+        return False
+
+    cron_expr = (await r.get(f"cron:{task_id}:cron_expr") or default_cron.encode()).decode()
+    last_run_raw = await r.get(f"cron:{task_id}:last_run")
+    if last_run_raw:
+        last_run = datetime.fromisoformat(last_run_raw.decode())
+        it = _croniter_cls(cron_expr, last_run)
+        next_run = it.get_next(datetime)
+        if datetime.now(UTC) < next_run:
+            return False
+    return True
+
+
+async def _cron_record(ctx: dict, task_id: str, status: str, error: str | None = None) -> None:
+    """Record the result of a scheduled job execution."""
+    r = ctx["redis"]
+    pipe = r.pipeline()
+    pipe.set(f"cron:{task_id}:last_run", datetime.now(UTC).isoformat())
+    pipe.set(f"cron:{task_id}:last_status", status)
+    if error:
+        pipe.set(f"cron:{task_id}:last_error", error)
+    else:
+        pipe.delete(f"cron:{task_id}:last_error")
+    await pipe.execute()
+
+
 # ── WORKER G: Scheduled Scan ──────────────────────────────────────────
 
 
 async def scheduled_scan_job(ctx: dict) -> dict:
-    """Scheduled library scan — checks Redis settings before running."""
-    r = ctx["redis"]
+    """Scheduled library scan — uses croniter-based gating."""
+    if not await _cron_should_run(ctx, "library_scan", "0 * * * *"):
+        return {"status": "skipped"}
 
-    # Check if scheduled scanning is enabled
-    enabled = await r.get("scan:schedule:enabled")
-    if enabled == b"0":
-        logger.debug("[scheduled_scan] Skipped — disabled")
-        return {"status": "skipped", "reason": "disabled"}
-
-    # Check interval — only run if enough time has passed
-    interval_raw = await r.get("scan:schedule:interval_hours")
-    interval_hours = int(interval_raw) if interval_raw else settings.library_scan_interval_hours
-
-    last_run_raw = await r.get("scan:schedule:last_run")
-    if last_run_raw:
-        last_run = datetime.fromisoformat(last_run_raw.decode())
-        elapsed = (datetime.now(timezone.utc) - last_run).total_seconds() / 3600
-        if elapsed < interval_hours - 0.1:  # small tolerance
-            logger.debug(
-                "[scheduled_scan] Skipped — last run %.1fh ago, interval=%dh",
-                elapsed,
-                interval_hours,
-            )
-            return {"status": "skipped", "reason": "too_soon"}
-
-    logger.info("[scheduled_scan] Starting scheduled library scan")
-    await auto_discover_job(ctx)
-    await rescan_library_job(ctx)
-
-    # Record last run time
-    await r.set("scan:schedule:last_run", datetime.now(timezone.utc).isoformat())
-
-    logger.info("[scheduled_scan] Scheduled scan complete")
-    return {"status": "done"}
+    try:
+        await _cron_record(ctx, "library_scan", "running")
+        logger.info("[scheduled_scan] Starting scheduled library scan")
+        await auto_discover_job(ctx)
+        await rescan_library_job(ctx)
+        await _cron_record(ctx, "library_scan", "ok")
+        logger.info("[scheduled_scan] Scheduled scan complete")
+        return {"status": "done"}
+    except Exception as exc:
+        await _cron_record(ctx, "library_scan", "failed", str(exc))
+        raise
 
 
 # ── WORKER H: Toggle Watcher ──────────────────────────────────────────
@@ -1963,8 +2020,16 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
     """Check followed Pixiv artists for new works and optionally enqueue downloads."""
     import asyncio as _asyncio
 
-    from db.models import FollowedArtist
+    from db.models import Subscription
     from services.pixiv_client import PixivClient
+
+    # When called as a cron job (no explicit user_id), apply cron gating.
+    # When called directly with a user_id (manual trigger), always run.
+    if user_id is None:
+        if not await _cron_should_run(ctx, "check_subscriptions", "30 */2 * * *"):
+            logger.info("[check_followed] Skipping — cron gate not reached")
+            return {"status": "skipped"}
+        await _cron_record(ctx, "check_subscriptions", "running")
 
     refresh_token = await get_credential("pixiv")
     if not refresh_token:
@@ -1972,9 +2037,9 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
         return {"status": "skipped", "reason": "No Pixiv credentials"}
 
     async with AsyncSessionLocal() as session:
-        query = select(FollowedArtist).where(FollowedArtist.source == "pixiv")
+        query = select(Subscription).where(Subscription.source == "pixiv")
         if user_id:
-            query = query.where(FollowedArtist.user_id == user_id)
+            query = query.where(Subscription.user_id == user_id)
         result = await session.execute(query)
         artists = result.scalars().all()
 
@@ -1988,18 +2053,18 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
     async with PixivClient(refresh_token) as client:
         for artist in artists:
             try:
-                data = await client.user_illusts(int(artist.artist_id))
+                data = await client.user_illusts(int(artist.source_id))
                 illusts = data.get("illusts", [])
 
                 if illusts:
                     newest_id = str(illusts[0].get("id", ""))
 
-                    if newest_id and newest_id != artist.last_illust_id:
+                    if newest_id and newest_id != artist.last_item_id:
                         # Determine how many works are truly new
                         new_count = 0
-                        if artist.last_illust_id:
+                        if artist.last_item_id:
                             for ill in illusts:
-                                if str(ill.get("id", "")) == artist.last_illust_id:
+                                if str(ill.get("id", "")) == artist.last_item_id:
                                     break
                                 new_count += 1
                         else:
@@ -2010,17 +2075,17 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
                         # Derive updated artist name from response
                         updated_name = (
                             (illusts[0].get("user") or {}).get("name")
-                            or artist.artist_name
+                            or artist.name
                         )
 
                         async with AsyncSessionLocal() as session:
                             await session.execute(
-                                update(FollowedArtist).where(
-                                    FollowedArtist.id == artist.id
+                                update(Subscription).where(
+                                    Subscription.id == artist.id
                                 ).values(
                                     last_checked_at=datetime.now(UTC),
-                                    last_illust_id=newest_id,
-                                    artist_name=updated_name,
+                                    last_item_id=newest_id,
+                                    name=updated_name,
                                 )
                             )
                             await session.commit()
@@ -2059,8 +2124,8 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
                         # No new works — just update the check timestamp
                         async with AsyncSessionLocal() as session:
                             await session.execute(
-                                update(FollowedArtist).where(
-                                    FollowedArtist.id == artist.id
+                                update(Subscription).where(
+                                    Subscription.id == artist.id
                                 ).values(last_checked_at=datetime.now(UTC))
                             )
                             await session.commit()
@@ -2071,14 +2136,145 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
             except Exception as exc:
                 logger.error(
                     "[check_followed] error checking artist %s (%s): %s",
-                    artist.artist_id,
-                    artist.artist_name,
+                    artist.source_id,
+                    artist.name,
                     exc,
                 )
                 continue
 
     logger.info("[check_followed] done: checked=%d new_works=%d", checked, new_works)
+    if user_id is None:
+        await _cron_record(ctx, "check_subscriptions", "ok")
     return {"status": "ok", "checked": checked, "new_works": new_works}
+
+
+async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
+    """Check a single subscription for new works."""
+    from db.models import Subscription
+    from services.pixiv_client import PixivClient
+
+    async with AsyncSessionLocal() as session:
+        sub = await session.get(Subscription, sub_id)
+        if not sub:
+            return {"status": "failed", "error": "subscription not found"}
+
+    if sub.source == "pixiv" and sub.source_id:
+        refresh_token = await get_credential("pixiv")
+        if not refresh_token:
+            return {"status": "failed", "error": "No Pixiv credentials"}
+
+        new_count = 0
+        try:
+            async with PixivClient(refresh_token) as client:
+                data = await client.user_illusts(int(sub.source_id))
+                illusts = data.get("illusts", [])
+
+                if illusts:
+                    newest_id = str(illusts[0].get("id", ""))
+
+                    if newest_id and newest_id != sub.last_item_id:
+                        if sub.last_item_id:
+                            for ill in illusts:
+                                if str(ill.get("id", "")) == sub.last_item_id:
+                                    break
+                                new_count += 1
+                        else:
+                            new_count = len(illusts)
+
+                        async with AsyncSessionLocal() as session:
+                            await session.execute(
+                                update(Subscription).where(
+                                    Subscription.id == sub.id
+                                ).values(
+                                    last_checked_at=datetime.now(UTC),
+                                    last_item_id=newest_id,
+                                    name=(illusts[0].get("user") or {}).get("name") or sub.name,
+                                    last_status="ok",
+                                    last_error=None,
+                                )
+                            )
+                            await session.commit()
+
+                        if sub.auto_download and new_count > 0:
+                            pool = ctx.get("redis")
+                            if pool:
+                                for ill in illusts[:new_count]:
+                                    illust_url = f"https://www.pixiv.net/artworks/{ill['id']}"
+                                    try:
+                                        job_id = uuid.uuid4()
+                                        async with AsyncSessionLocal() as db_session:
+                                            db_session.add(DownloadJob(
+                                                id=job_id, url=illust_url,
+                                                source="pixiv", status="queued", progress={},
+                                            ))
+                                            await db_session.commit()
+                                        await pool.enqueue_job(
+                                            "download_job", illust_url, "pixiv",
+                                            None, str(job_id), None,
+                                            _job_id=str(job_id),
+                                        )
+                                    except Exception as enq_exc:
+                                        logger.warning("[check_sub] failed to enqueue: %s", enq_exc)
+                    else:
+                        async with AsyncSessionLocal() as session:
+                            await session.execute(
+                                update(Subscription).where(
+                                    Subscription.id == sub.id
+                                ).values(
+                                    last_checked_at=datetime.now(UTC),
+                                    last_status="ok",
+                                    last_error=None,
+                                )
+                            )
+                            await session.commit()
+
+            return {"status": "ok", "new_works": new_count}
+
+        except Exception as exc:
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(Subscription).where(Subscription.id == sub.id).values(
+                        last_checked_at=datetime.now(UTC),
+                        last_status="failed",
+                        last_error=str(exc)[:500],
+                    )
+                )
+                await session.commit()
+            return {"status": "failed", "error": str(exc)}
+
+    else:
+        # Generic: enqueue download_job for the URL
+        pool = ctx.get("redis")
+        if pool and sub.auto_download:
+            try:
+                job_id = uuid.uuid4()
+                async with AsyncSessionLocal() as db_session:
+                    db_session.add(DownloadJob(
+                        id=job_id, url=sub.url,
+                        source=sub.source or "gallery_dl", status="queued", progress={},
+                    ))
+                    await db_session.commit()
+                await pool.enqueue_job(
+                    "download_job", sub.url, sub.source or "gallery_dl",
+                    None, str(job_id), None,
+                    _job_id=str(job_id),
+                )
+            except Exception as exc:
+                logger.warning("[check_sub] failed to enqueue generic download: %s", exc)
+
+        async with AsyncSessionLocal() as session:
+            next_check = _croniter_cls(sub.cron_expr or "0 */2 * * *", datetime.now(UTC)).get_next(datetime)
+            await session.execute(
+                update(Subscription).where(Subscription.id == sub.id).values(
+                    last_checked_at=datetime.now(UTC),
+                    last_status="ok",
+                    last_error=None,
+                    next_check_at=next_check,
+                )
+            )
+            await session.commit()
+
+        return {"status": "ok"}
 
 
 # ── WORKER K: Backfill Artist IDs ─────────────────────────────────────
@@ -2141,6 +2337,7 @@ class WorkerSettings:
         scheduled_scan_job,
         toggle_watcher_job,
         check_followed_artists,
+        check_single_subscription,
         backfill_artist_ids,
     ]
     cron_jobs = [

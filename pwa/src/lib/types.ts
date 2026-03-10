@@ -411,6 +411,40 @@ export interface FollowedArtist {
   added_at: string | null
 }
 
+// ── Scheduled Tasks ─────────────────────────────────────────────────
+
+export interface ScheduledTask {
+  id: string
+  name: string
+  description: string
+  enabled: boolean
+  cron_expr: string
+  default_cron: string
+  last_run: string | null
+  last_status: string | null
+  last_error: string | null
+}
+
+// ── Subscriptions ───────────────────────────────────────────────────
+
+export interface Subscription {
+  id: number
+  name: string | null
+  url: string
+  source: string | null
+  source_id: string | null
+  avatar_url: string | null
+  enabled: boolean
+  auto_download: boolean
+  cron_expr: string | null
+  last_checked_at: string | null
+  last_item_id: string | null
+  last_status: string
+  last_error: string | null
+  next_check_at: string | null
+  created_at: string | null
+}
+
 // ── File Explorer ────────────────────────────────────────────────────
 
 export interface LibraryDirectory {

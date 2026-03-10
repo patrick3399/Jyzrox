@@ -18,6 +18,10 @@ maxTurns: 30
 - `pwa/src/lib/types.ts` — TypeScript 型別
 - `pwa/src/middleware.ts` — Auth redirect
 
+## 易漏改的同步點
+
+- **`Sidebar.tsx` 與 `MobileNav.tsx` 的 `navLinks` 陣列必須保持一致**：新增/刪除/重新排序導航項目時，兩個檔案都要同步修改（含 icon import）。
+
 ## 審查重點
 
 - 所有 API 呼叫統一走 `pwa/src/lib/api.ts`，不直接 fetch

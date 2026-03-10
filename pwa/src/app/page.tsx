@@ -3,7 +3,24 @@
 import Link from 'next/link'
 import useSWR from 'swr'
 import { useState } from 'react'
-import { Search, BookOpen, Download, Tags, Settings, ArrowRight, BookMarked, X } from 'lucide-react'
+import {
+  Search,
+  BookOpen,
+  Download,
+  Tags,
+  Settings,
+  ArrowRight,
+  BookMarked,
+  X,
+  Palette,
+  FolderTree,
+  Users,
+  Clock,
+  PackageOpen,
+  FolderInput,
+  Key,
+  Puzzle,
+} from 'lucide-react'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -18,10 +35,34 @@ const QUICK_LINKS = [
     icon: Search,
   },
   {
+    href: '/pixiv',
+    label: () => t('dashboard.quickLinks.pixiv'),
+    desc: () => t('dashboard.quickLinks.pixivDesc'),
+    icon: Palette,
+  },
+  {
     href: '/library',
     label: () => t('dashboard.quickLinks.library'),
     desc: () => t('dashboard.quickLinks.libraryDesc'),
     icon: BookOpen,
+  },
+  {
+    href: '/explorer',
+    label: () => t('dashboard.quickLinks.explorer'),
+    desc: () => t('dashboard.quickLinks.explorerDesc'),
+    icon: FolderTree,
+  },
+  {
+    href: '/artists',
+    label: () => t('dashboard.quickLinks.artists'),
+    desc: () => t('dashboard.quickLinks.artistsDesc'),
+    icon: Users,
+  },
+  {
+    href: '/history',
+    label: () => t('dashboard.quickLinks.history'),
+    desc: () => t('dashboard.quickLinks.historyDesc'),
+    icon: Clock,
   },
   {
     href: '/queue',
@@ -34,6 +75,30 @@ const QUICK_LINKS = [
     label: () => t('dashboard.quickLinks.tags'),
     desc: () => t('dashboard.quickLinks.tagsDesc'),
     icon: Tags,
+  },
+  {
+    href: '/export',
+    label: () => t('dashboard.quickLinks.export'),
+    desc: () => t('dashboard.quickLinks.exportDesc'),
+    icon: PackageOpen,
+  },
+  {
+    href: '/import',
+    label: () => t('dashboard.quickLinks.import'),
+    desc: () => t('dashboard.quickLinks.importDesc'),
+    icon: FolderInput,
+  },
+  {
+    href: '/credentials',
+    label: () => t('dashboard.quickLinks.credentials'),
+    desc: () => t('dashboard.quickLinks.credentialsDesc'),
+    icon: Key,
+  },
+  {
+    href: '/plugins',
+    label: () => t('dashboard.quickLinks.plugins'),
+    desc: () => t('dashboard.quickLinks.pluginsDesc'),
+    icon: Puzzle,
   },
   {
     href: '/settings',

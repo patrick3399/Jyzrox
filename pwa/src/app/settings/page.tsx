@@ -4,15 +4,17 @@ import { useState, useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { useLocale } from '@/components/LocaleProvider'
 import { SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
-import { ChevronUp, ChevronDown, Shield, Monitor, CalendarClock, Square, Key } from 'lucide-react'
+import { ChevronUp, ChevronDown, Shield, Monitor, CalendarClock, Key } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
 import { Copy, BookOpen, X, Plus, Tag, ScanLine } from 'lucide-react'
-import { useRescanLibrary, useRescanStatus, useScanSettings, useUpdateScanSettings, useCancelRescan } from '@/hooks/useImport'
+import { useRescanLibrary, useRescanStatus, useCancelRescan } from '@/hooks/useImport'
+import { useScheduledTasks, useUpdateTask, useRunTask } from '@/hooks/useScheduledTasks'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
+import { loadSWCacheConfig, saveSWCacheConfig, type SWCacheConfig, DEFAULT_SW_CACHE_CONFIG } from '@/lib/swCacheConfig'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
 import type {
   SystemHealth,
@@ -34,6 +36,7 @@ type SectionKey =
   | 'blockedTags'
   | 'aiTagging'
   | 'schedule'
+  | 'browserCache'
 
 const VERSION_LABELS: Record<string, string> = {
   jyzrox: 'Jyzrox',
@@ -53,15 +56,15 @@ function versionLabel(key: string): string {
 function SectionHeader({
   title,
   sectionKey,
-  activeSection,
+  openSections,
   onToggle,
 }: {
   title: string
   sectionKey: SectionKey
-  activeSection: SectionKey | null
+  openSections: Set<SectionKey>
   onToggle: (key: SectionKey) => void
 }) {
-  const isOpen = activeSection === sectionKey
+  const isOpen = openSections.has(sectionKey)
   return (
     <button
       onClick={() => onToggle(sectionKey)}
@@ -160,31 +163,49 @@ function AiTaggingSection() {
   )
 }
 
-// ── Scan Schedule sub-component ──────────────────────────────────────
+// ── Scheduled Tasks sub-component ────────────────────────────────────
 
-function ScanScheduleSection() {
-  const { data: scanSettings, mutate: mutateScan } = useScanSettings()
-  const { trigger: updateSettings } = useUpdateScanSettings()
+function ScheduledTasksSection() {
+  const { data: tasksData, mutate: mutateTasks } = useScheduledTasks()
+  const { trigger: updateTask } = useUpdateTask()
+  const { trigger: runTask } = useRunTask()
   const { trigger: rescan, isMutating: rescanning } = useRescanLibrary()
   const { data: rescanStatus } = useRescanStatus()
   const { trigger: cancelRescan, isMutating: cancelling } = useCancelRescan()
+  const [editingCron, setEditingCron] = useState<Record<string, string>>({})
 
-  const handleToggle = async () => {
-    if (!scanSettings) return
+  const handleToggle = async (taskId: string, currentEnabled: boolean) => {
     try {
-      await updateSettings({ enabled: !scanSettings.enabled })
-      mutateScan()
+      await updateTask({ taskId, data: { enabled: !currentEnabled } })
+      mutateTasks()
+      toast.success(t('settings.tasks.updated'))
     } catch {
-      toast.error(t('common.failedToLoad'))
+      toast.error(t('settings.tasks.updateFailed'))
     }
   }
 
-  const handleIntervalChange = async (hours: number) => {
+  const handleCronUpdate = async (taskId: string, cronExpr: string) => {
     try {
-      await updateSettings({ interval_hours: hours })
-      mutateScan()
+      await updateTask({ taskId, data: { cron_expr: cronExpr } })
+      mutateTasks()
+      setEditingCron((prev) => {
+        const next = { ...prev }
+        delete next[taskId]
+        return next
+      })
+      toast.success(t('settings.tasks.updated'))
     } catch {
-      toast.error(t('common.failedToLoad'))
+      toast.error(t('settings.tasks.updateFailed'))
+    }
+  }
+
+  const handleRunNow = async (taskId: string) => {
+    try {
+      await runTask(taskId)
+      mutateTasks()
+      toast.success(t('settings.tasks.queued'))
+    } catch {
+      toast.error(t('settings.tasks.queueFailed'))
     }
   }
 
@@ -201,118 +222,180 @@ function ScanScheduleSection() {
   const processed = rescanStatus?.processed
   const total = rescanStatus?.total
 
-  const intervalOptions = [6, 8, 12, 24, 48, 72, 168]
+  const CRON_PRESETS = [
+    { label: () => t('settings.tasks.presetEveryHour'), value: '0 * * * *' },
+    { label: () => t('settings.tasks.presetEvery2Hours'), value: '0 */2 * * *' },
+    { label: () => t('settings.tasks.presetDaily2am'), value: '0 2 * * *' },
+    { label: () => t('settings.tasks.presetWeeklyMon3am'), value: '0 3 * * 1' },
+  ]
+
+  const statusColor = (status: string | null) => {
+    if (!status) return 'text-vault-text-muted'
+    switch (status) {
+      case 'ok': return 'text-green-400'
+      case 'failed': return 'text-red-400'
+      case 'running': return 'text-blue-400'
+      case 'skipped': return 'text-yellow-400'
+      default: return 'text-vault-text-muted'
+    }
+  }
+
+  const statusLabel = (status: string | null) => {
+    if (!status) return t('settings.tasks.never')
+    switch (status) {
+      case 'ok': return t('settings.tasks.statusOk')
+      case 'failed': return t('settings.tasks.statusFailed')
+      case 'running': return t('settings.tasks.statusRunning')
+      case 'skipped': return t('settings.tasks.statusSkipped')
+      default: return status
+    }
+  }
 
   return (
     <div className="px-5 pb-5 border-t border-vault-border">
       <p className="text-xs text-vault-text-muted mt-4 mb-4">
-        {t('settings.schedule.desc')}
+        {t('settings.tasks.desc')}
       </p>
 
-      {/* Enable/disable toggle */}
-      <div className="flex items-center justify-between mb-4">
-        <div>
-          <p className="text-sm text-vault-text">{t('settings.schedule.auto')}</p>
-          <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.schedule.autoDesc')}</p>
-        </div>
-        <button
-          onClick={handleToggle}
-          className={`relative w-11 h-6 rounded-full transition-colors ${
-            scanSettings?.enabled ? 'bg-vault-accent' : 'bg-vault-border'
-          }`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform shadow ${
-              scanSettings?.enabled ? 'translate-x-5' : ''
-            }`}
-          />
-        </button>
-      </div>
-
-      {/* Interval selector */}
-      <div className="mb-4">
-        <p className="text-sm text-vault-text mb-2">{t('settings.schedule.interval')}</p>
-        <div className="flex flex-wrap gap-1.5">
-          {intervalOptions.map((h) => (
-            <button
-              key={h}
-              onClick={() => handleIntervalChange(h)}
-              disabled={!scanSettings?.enabled}
-              className={`px-3 py-1.5 rounded text-xs font-medium transition-colors ${
-                scanSettings?.interval_hours === h
-                  ? 'bg-vault-accent text-white'
-                  : 'bg-vault-input border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-accent/50 disabled:opacity-40 disabled:cursor-not-allowed'
-              }`}
-            >
-              {h < 24 ? t('settings.schedule.hours', { count: h }) : t('settings.schedule.days', { count: h / 24 })}
-            </button>
-          ))}
-        </div>
-      </div>
-
-      {/* Last run info */}
-      {scanSettings?.last_run && (
-        <p className="text-xs text-vault-text-muted mb-4">
-          {t('settings.schedule.lastRun')}: {new Date(scanSettings.last_run).toLocaleString()}
-        </p>
-      )}
-
-      {/* Rescan All Libraries */}
-      <div className="pt-3 border-t border-vault-border/50">
-        <p className="text-xs text-vault-text-muted mb-3">
-          {t('settings.media.rescan.desc')}
-        </p>
-
-        {isRunning && processed !== undefined && total !== undefined && (
-          <div className="mb-3 bg-vault-input border border-vault-border rounded-lg px-4 py-3">
-            <div className="flex items-center justify-between mb-2">
-              <span className="text-sm text-vault-text">
-                {t('settings.media.rescan.running', { processed, total })}
-              </span>
-              <span className="text-xs text-blue-400">
-                {total > 0 ? Math.round((processed / total) * 100) : 0}%
-              </span>
-            </div>
-            <div className="h-1.5 bg-vault-border rounded-full overflow-hidden">
-              <div
-                className="h-full rounded-full bg-blue-500 transition-all duration-500"
-                style={{ width: `${total > 0 ? Math.round((processed / total) * 100) : 0}%` }}
-              />
-            </div>
-            {rescanStatus?.current_gallery && (
-              <p className="text-xs text-vault-text-muted mt-1.5 truncate">
-                {rescanStatus.current_gallery}
-              </p>
-            )}
+      {/* Rescan Library button + progress */}
+      <div className="mb-5 pb-4 border-b border-vault-border">
+        <div className="flex items-center justify-between mb-2">
+          <div>
+            <p className="text-sm text-vault-text">{t('settings.media.rescan')}</p>
+            <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.media.rescan.desc')}</p>
+          </div>
+          {isRunning ? (
             <button
               onClick={async () => {
-                try { await cancelRescan() } catch { /* ignore */ }
+                try {
+                  await cancelRescan()
+                  toast.success(t('settings.media.rescan.cancelled'))
+                } catch {
+                  toast.error(t('common.failedToLoad'))
+                }
               }}
               disabled={cancelling}
-              className="mt-2 flex items-center gap-1.5 px-3 py-1 text-xs text-red-400 hover:text-red-300 border border-red-500/30 hover:border-red-500/50 rounded transition-colors disabled:opacity-50"
+              className="px-3 py-1.5 rounded text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
             >
-              <Square size={11} />
               {cancelling ? t('settings.media.rescan.cancelling') : t('settings.media.rescan.cancel')}
             </button>
+          ) : (
+            <button
+              onClick={handleRescan}
+              disabled={rescanning}
+              className="px-3 py-1.5 rounded text-xs font-medium bg-vault-accent/20 text-vault-accent hover:bg-vault-accent/30 transition-colors flex items-center gap-1.5"
+            >
+              <ScanLine size={14} />
+              {t('settings.media.rescan')}
+            </button>
+          )}
+        </div>
+        {isRunning && processed != null && total != null && (
+          <div className="space-y-1">
+            <div className="w-full bg-vault-input rounded-full h-1.5">
+              <div
+                className="bg-vault-accent rounded-full h-1.5 transition-all"
+                style={{ width: `${total > 0 ? (processed / total) * 100 : 0}%` }}
+              />
+            </div>
+            <p className="text-xs text-vault-text-muted">
+              {t('settings.media.rescan.running', { processed: String(processed), total: String(total) })}
+            </p>
           </div>
         )}
+      </div>
 
-        {!isRunning && rescanStatus?.status === 'cancelled' && (
-          <p className="text-xs text-orange-400 mb-3">{t('settings.media.rescan.cancelled')}</p>
-        )}
+      {/* Scheduled Tasks list */}
+      <div className="space-y-3">
+        {tasksData?.tasks.map((task) => {
+          const cronValue = editingCron[task.id] ?? task.cron_expr
+          return (
+            <div key={task.id} className="bg-vault-input border border-vault-border rounded-lg p-3">
+              <div className="flex items-start justify-between gap-3">
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center gap-2 mb-1">
+                    <span className="text-sm font-medium text-vault-text">{task.name}</span>
+                    <span className={`text-[10px] font-medium ${statusColor(task.last_status)}`}>
+                      {statusLabel(task.last_status)}
+                    </span>
+                  </div>
+                  <p className="text-xs text-vault-text-muted mb-2">{task.description}</p>
 
-        {!isRunning && rescanStatus && processed !== undefined && total !== undefined && processed === total && total > 0 && rescanStatus.status !== 'cancelled' && (
-          <p className="text-xs text-green-400 mb-3">{t('settings.media.rescan.done')}</p>
-        )}
+                  {/* Cron expression */}
+                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
+                    <input
+                      type="text"
+                      value={cronValue}
+                      onChange={(e) => setEditingCron((prev) => ({ ...prev, [task.id]: e.target.value }))}
+                      onBlur={() => {
+                        if (editingCron[task.id] && editingCron[task.id] !== task.cron_expr) {
+                          handleCronUpdate(task.id, editingCron[task.id])
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' && editingCron[task.id]) {
+                          handleCronUpdate(task.id, editingCron[task.id])
+                        }
+                      }}
+                      className="w-32 px-2 py-1 bg-vault-bg border border-vault-border rounded text-xs text-vault-text font-mono"
+                      disabled={!task.enabled}
+                    />
+                    {CRON_PRESETS.map((p) => (
+                      <button
+                        key={p.value}
+                        onClick={() => handleCronUpdate(task.id, p.value)}
+                        disabled={!task.enabled}
+                        className={`px-2 py-1 rounded text-[10px] transition-colors ${
+                          task.cron_expr === p.value
+                            ? 'bg-vault-accent/20 text-vault-accent'
+                            : 'bg-vault-bg border border-vault-border text-vault-text-muted hover:text-vault-text disabled:opacity-40'
+                        }`}
+                      >
+                        {p.label()}
+                      </button>
+                    ))}
+                  </div>
 
-        <button
-          onClick={handleRescan}
-          disabled={rescanning || isRunning}
-          className="flex items-center gap-2 px-4 py-2 bg-vault-input border border-vault-border hover:border-vault-accent/50 text-vault-text-secondary hover:text-vault-text rounded text-sm transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-        >
-          <ScanLine size={15} />
-          {isRunning ? t('settings.loading') : t('settings.media.rescan')}
-        </button>
+                  {/* Last run info */}
+                  {task.last_run && (
+                    <p className="text-[10px] text-vault-text-muted">
+                      {t('settings.tasks.lastRun')}: {new Date(task.last_run).toLocaleString()}
+                    </p>
+                  )}
+                  {task.last_error && (
+                    <p className="text-[10px] text-red-400 mt-0.5 truncate" title={task.last_error}>
+                      {task.last_error}
+                    </p>
+                  )}
+                </div>
+
+                <div className="flex flex-col items-end gap-2 shrink-0">
+                  {/* Enable toggle */}
+                  <button
+                    onClick={() => handleToggle(task.id, task.enabled)}
+                    className={`relative w-9 h-5 rounded-full transition-colors ${
+                      task.enabled ? 'bg-vault-accent' : 'bg-vault-border'
+                    }`}
+                  >
+                    <span
+                      className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${
+                        task.enabled ? 'translate-x-4' : ''
+                      }`}
+                    />
+                  </button>
+
+                  {/* Run Now button */}
+                  <button
+                    onClick={() => handleRunNow(task.id)}
+                    className="px-2 py-1 rounded text-[10px] font-medium bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 transition-colors"
+                  >
+                    {t('settings.tasks.runNow')}
+                  </button>
+                </div>
+              </div>
+            </div>
+          )
+        })}
       </div>
     </div>
   )
@@ -621,7 +704,7 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
 export default function SettingsPage() {
   const { logout } = useAuth()
   const { locale, setLocale: changeLocale } = useLocale()
-  const [activeSection, setActiveSection] = useState<SectionKey | null>('system')
+  const [openSections, setOpenSections] = useState<Set<SectionKey>>(new Set(['system']))
 
   // System info
   const [health, setHealth] = useState<SystemHealth | null>(null)
@@ -683,8 +766,16 @@ export default function SettingsPage() {
   const [tokenCreating, setTokenCreating] = useState(false)
   const [deletingTokenId, setDeletingTokenId] = useState<string | null>(null)
 
+  // Browser Cache (SW)
+  const [swCacheConfig, setSwCacheConfig] = useState<SWCacheConfig>(DEFAULT_SW_CACHE_CONFIG)
+
   const toggleSection = useCallback((key: SectionKey) => {
-    setActiveSection((prev) => (prev === key ? null : key))
+    setOpenSections((prev) => {
+      const next = new Set(prev)
+      if (next.has(key)) next.delete(key)
+      else next.add(key)
+      return next
+    })
   }, [])
 
   // System: Load health + info + cache
@@ -1014,25 +1105,47 @@ export default function SettingsPage() {
     }
   }, [])
 
+  useEffect(() => { setSwCacheConfig(loadSWCacheConfig()) }, [])
+
+  const handleSWCacheChange = useCallback((key: keyof SWCacheConfig, value: number) => {
+    setSwCacheConfig((prev) => ({ ...prev, [key]: value }))
+  }, [])
+
+  const handleSWCacheBlur = useCallback(() => {
+    setSwCacheConfig((prev) => {
+      saveSWCacheConfig(prev)
+      return prev
+    })
+    toast.success(t('common.saved'))
+  }, [])
+
+  const handleClearBrowserCache = useCallback(async () => {
+    if (!window.confirm(t('settings.clearBrowserCacheConfirm'))) return
+    const names = await caches.keys()
+    await Promise.all(names.map((name) => caches.delete(name)))
+    toast.success(t('settings.browserCacheCleared'))
+    window.location.reload()
+  }, [])
+
   useEffect(() => {
-    if (activeSection === 'system' && !systemLoaded && !systemLoading) {
+    if (openSections.has('system') && !systemLoaded && !systemLoading) {
       handleLoadSystem()
     }
-    if (activeSection === 'account') {
+    if (openSections.has('account')) {
       if (!profileLoaded) handleLoadProfile()
       if (sessions.length === 0 && !sessionsLoading) handleLoadSessions()
     }
-    if (activeSection === 'apiTokens' && !apiTokensLoaded && !apiTokensLoading) {
+    if (openSections.has('apiTokens') && !apiTokensLoaded && !apiTokensLoading) {
       handleLoadApiTokens()
     }
-    if (activeSection === 'blockedTags' && !blockedTagsLoaded && !blockedTagsLoading) {
+    if (openSections.has('blockedTags') && !blockedTagsLoaded && !blockedTagsLoading) {
       handleLoadBlockedTags()
     }
-    if ((activeSection === 'security' || activeSection === 'features') && featuresLoading && Object.keys(features).length === 0) {
+    if ((openSections.has('security') || openSections.has('features')) && featuresLoading && Object.keys(features).length === 0) {
       handleLoadFeatures()
     }
   }, [
-    activeSection,
+    openSections,
     systemLoaded,
     systemLoading,
     handleLoadSystem,
@@ -1099,11 +1212,11 @@ export default function SettingsPage() {
             <SectionHeader
               title={t('settings.system')}
               sectionKey="system"
-              activeSection={activeSection}
+              openSections={openSections}
               onToggle={toggleSection}
             />
 
-            {activeSection === 'system' && (
+            {openSections.has('system') && (
               <div className="px-5 pb-5 border-t border-vault-border">
                 {systemLoading && (
                   <div className="flex justify-center py-8">
@@ -1293,10 +1406,10 @@ export default function SettingsPage() {
             <SectionHeader
               title={t('settings.security')}
               sectionKey="security"
-              activeSection={activeSection}
+              openSections={openSections}
               onToggle={toggleSection}
             />
-            {activeSection === 'security' && (
+            {openSections.has('security') && (
               <div className="px-5 pb-5 space-y-1 divide-y divide-vault-border">
                 <ToggleRow
                   label={t('settings.csrfProtection')}
@@ -1321,10 +1434,10 @@ export default function SettingsPage() {
             <SectionHeader
               title={t('settings.features')}
               sectionKey="features"
-              activeSection={activeSection}
+              openSections={openSections}
               onToggle={toggleSection}
             />
-            {activeSection === 'features' && (
+            {openSections.has('features') && (
               <div className="px-5 pb-5">
                 {/* Service Toggles */}
                 <div className="space-y-1 divide-y divide-vault-border">
@@ -1387,10 +1500,10 @@ export default function SettingsPage() {
             <SectionHeader
               title={t('settings.browse')}
               sectionKey="browse"
-              activeSection={activeSection}
+              openSections={openSections}
               onToggle={toggleSection}
             />
-            {activeSection === 'browse' && (
+            {openSections.has('browse') && (
               <BrowseSettings />
             )}
           </div>
@@ -1402,7 +1515,7 @@ export default function SettingsPage() {
                 <SectionHeader
                   title={t('settings.blockedTags')}
                   sectionKey="blockedTags"
-                  activeSection={activeSection}
+                  openSections={openSections}
                   onToggle={toggleSection}
                 />
               </div>
@@ -1416,7 +1529,7 @@ export default function SettingsPage() {
               )}
             </div>
 
-            {activeSection === 'blockedTags' && (
+            {openSections.has('blockedTags') && (
               <div className="px-5 pb-5 border-t border-vault-border">
                 <p className="text-xs text-vault-text-muted mt-4 mb-3">
                   {t('settings.tagBlockingDesc')}
@@ -1500,10 +1613,10 @@ export default function SettingsPage() {
             <SectionHeader
               title={t('settings.aiTaggingSection')}
               sectionKey="aiTagging"
-              activeSection={activeSection}
+              openSections={openSections}
               onToggle={toggleSection}
             />
-            {activeSection === 'aiTagging' && (
+            {openSections.has('aiTagging') && (
               <AiTaggingSection />
             )}
           </div>
@@ -1514,9 +1627,9 @@ export default function SettingsPage() {
             <div className="flex items-center justify-between">
               <div className="flex-1">
                 <SectionHeader
-                  title={t('settings.schedule')}
+                  title={t('settings.tasks')}
                   sectionKey="schedule"
-                  activeSection={activeSection}
+                  openSections={openSections}
                   onToggle={toggleSection}
                 />
               </div>
@@ -1524,7 +1637,7 @@ export default function SettingsPage() {
                 <CalendarClock size={14} className="text-vault-text-muted" />
               </div>
             </div>
-            {activeSection === 'schedule' && <ScanScheduleSection />}
+            {openSections.has('schedule') && <ScheduledTasksSection />}
           </div>
 
           {/* ── Reader Settings ── */}
@@ -1534,7 +1647,7 @@ export default function SettingsPage() {
                 <SectionHeader
                   title={t('settings.reader')}
                   sectionKey="reader"
-                  activeSection={activeSection}
+                  openSections={openSections}
                   onToggle={toggleSection}
                 />
               </div>
@@ -1542,13 +1655,106 @@ export default function SettingsPage() {
                 <BookOpen size={14} className="text-vault-text-muted" />
               </div>
             </div>
-            {activeSection === 'reader' && (
+            {openSections.has('reader') && (
               <ReaderSettingsSection
                 onForceRerender={() => {
-                  setActiveSection(null)
-                  setTimeout(() => setActiveSection('reader'), 0)
+                  setOpenSections((prev) => {
+                    const next = new Set(prev)
+                    next.delete('reader')
+                    return next
+                  })
+                  setTimeout(() => setOpenSections((prev) => new Set([...prev, 'reader'])), 0)
                 }}
               />
+            )}
+          </div>
+
+          {/* ── Browser Cache ── */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            <SectionHeader
+              title={t('settings.browserCache')}
+              sectionKey="browserCache"
+              openSections={openSections}
+              onToggle={toggleSection}
+            />
+            {openSections.has('browserCache') && (
+              <div className="px-5 pb-5 border-t border-vault-border">
+                <p className="text-xs text-vault-text-muted mt-4 mb-4">
+                  {t('settings.browserCacheDesc')}
+                </p>
+
+                <div className="space-y-4">
+                  {/* Media Cache TTL */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-vault-text">{t('settings.mediaCacheTTL')}</p>
+                      <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.mediaCacheTTLDesc')}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={swCacheConfig.mediaCacheTTLHours}
+                        onChange={(e) => handleSWCacheChange('mediaCacheTTLHours', Number(e.target.value))}
+                        onBlur={handleSWCacheBlur}
+                        className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
+                      />
+                      <span className="text-xs text-vault-text-muted w-8">{t('settings.hours')}</span>
+                    </div>
+                  </div>
+
+                  {/* Media Cache Size */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-vault-text">{t('settings.mediaCacheSizeLimit')}</p>
+                      <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.mediaCacheSizeLimitDesc')}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <input
+                        type="number"
+                        min={0}
+                        step={256}
+                        value={swCacheConfig.mediaCacheSizeMB}
+                        onChange={(e) => handleSWCacheChange('mediaCacheSizeMB', Number(e.target.value))}
+                        onBlur={handleSWCacheBlur}
+                        className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
+                      />
+                      <span className="text-xs text-vault-text-muted w-8">{t('settings.mb')}</span>
+                    </div>
+                  </div>
+
+                  {/* Page Cache TTL */}
+                  <div className="flex items-center justify-between">
+                    <div>
+                      <p className="text-sm text-vault-text">{t('settings.pageCacheTTL')}</p>
+                      <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.pageCacheTTLDesc')}</p>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                      <input
+                        type="number"
+                        min={0}
+                        step={1}
+                        value={swCacheConfig.pageCacheTTLHours}
+                        onChange={(e) => handleSWCacheChange('pageCacheTTLHours', Number(e.target.value))}
+                        onBlur={handleSWCacheBlur}
+                        className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
+                      />
+                      <span className="text-xs text-vault-text-muted w-8">{t('settings.hours')}</span>
+                    </div>
+                  </div>
+
+                  {/* Clear browser cache */}
+                  <div className="pt-3 border-t border-vault-border/50">
+                    <button
+                      onClick={handleClearBrowserCache}
+                      className="px-4 py-2 bg-red-600/20 border border-red-500/30 text-red-400 hover:bg-red-600/30 rounded text-sm font-medium transition-colors"
+                    >
+                      {t('settings.clearBrowserCache')}
+                    </button>
+                  </div>
+                </div>
+              </div>
             )}
           </div>
 
@@ -1559,7 +1765,7 @@ export default function SettingsPage() {
                 <SectionHeader
                   title={t('settings.apiTokensSection')}
                   sectionKey="apiTokens"
-                  activeSection={activeSection}
+                  openSections={openSections}
                   onToggle={toggleSection}
                 />
               </div>
@@ -1573,7 +1779,7 @@ export default function SettingsPage() {
               </div>
             </div>
 
-            {activeSection === 'apiTokens' && (
+            {openSections.has('apiTokens') && (
               <div className="px-5 pb-5 border-t border-vault-border">
                 {/* Create new token */}
                 <div className="mt-4">
@@ -1766,10 +1972,10 @@ export default function SettingsPage() {
             <SectionHeader
               title={t('settings.account')}
               sectionKey="account"
-              activeSection={activeSection}
+              openSections={openSections}
               onToggle={toggleSection}
             />
-            {activeSection === 'account' && (
+            {openSections.has('account') && (
               <div className="px-5 pb-5 border-t border-vault-border">
                 {/* Avatar */}
                 {profileLoaded && (

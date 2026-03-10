@@ -266,24 +266,30 @@ CREATE TABLE IF NOT EXISTS plugin_config (
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
--- ── Followed Artists (Pixiv Phase 2) ─────────────────────────────────
+-- ── Subscriptions (replaces followed_artists) ──────────────────────
 
-CREATE TABLE IF NOT EXISTS followed_artists (
+CREATE TABLE IF NOT EXISTS subscriptions (
     id              BIGSERIAL PRIMARY KEY,
     user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
-    source          TEXT NOT NULL,
-    artist_id       TEXT NOT NULL,
-    artist_name     TEXT,
-    artist_avatar   TEXT,
+    name            TEXT,
+    url             TEXT NOT NULL,
+    source          TEXT,
+    source_id       TEXT,
+    avatar_url      TEXT,
+    enabled         BOOLEAN DEFAULT TRUE,
+    auto_download   BOOLEAN DEFAULT TRUE,
+    cron_expr       TEXT DEFAULT '0 */2 * * *',
     last_checked_at TIMESTAMPTZ,
-    last_illust_id  TEXT,
-    auto_download   BOOLEAN DEFAULT FALSE,
-    added_at        TIMESTAMPTZ DEFAULT now(),
-    UNIQUE (user_id, source, artist_id)
+    last_item_id    TEXT,
+    last_status     TEXT DEFAULT 'pending',
+    last_error      TEXT,
+    next_check_at   TIMESTAMPTZ DEFAULT now(),
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(user_id, url)
 );
-
-CREATE INDEX IF NOT EXISTS idx_followed_artists_user ON followed_artists (user_id);
-CREATE INDEX IF NOT EXISTS idx_followed_artists_source ON followed_artists (source, artist_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_next_check ON subscriptions(next_check_at) WHERE enabled = true;
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_source ON subscriptions(source, source_id);
 
 -- Artist grouping
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS artist_id TEXT;
@@ -304,3 +310,11 @@ CREATE TABLE IF NOT EXISTS audit_logs (
 CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id    ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action     ON audit_logs(action);
+
+-- ── Excluded Blobs ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS excluded_blobs (
+    gallery_id  BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    blob_sha256 TEXT NOT NULL,
+    excluded_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (gallery_id, blob_sha256)
+);
