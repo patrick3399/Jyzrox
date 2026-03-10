@@ -712,10 +712,6 @@ export default function SettingsPage() {
   const [systemLoading, setSystemLoading] = useState(false)
   const [systemLoaded, setSystemLoaded] = useState(false)
 
-  // Rate limiting
-  const [rateLimitEnabled, setRateLimitEnabled] = useState<boolean | null>(null)
-  const [rateLimitToggling, setRateLimitToggling] = useState(false)
-
   // Feature toggles
   const [features, setFeatures] = useState<Record<string, boolean>>({})
   const [featuresLoading, setFeaturesLoading] = useState(true)
@@ -782,15 +778,13 @@ export default function SettingsPage() {
   const handleLoadSystem = useCallback(async () => {
     setSystemLoading(true)
     try {
-      const [h, i, rl, cs] = await Promise.all([
+      const [h, i, cs] = await Promise.all([
         api.system.health(),
         api.system.info(),
-        api.settings.getRateLimit(),
         api.system.getCache(),
       ])
       setHealth(h)
       setSystemInfo(i)
-      setRateLimitEnabled(rl.enabled)
       setCacheStats(cs)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.systemLoadFailed'))
@@ -930,19 +924,6 @@ export default function SettingsPage() {
     },
     [],
   )
-
-  const handleToggleRateLimit = useCallback(async () => {
-    if (rateLimitEnabled === null) return
-    setRateLimitToggling(true)
-    try {
-      const result = await api.settings.setRateLimit(!rateLimitEnabled)
-      setRateLimitEnabled(result.enabled)
-    } catch {
-      toast.error(t('common.failedToLoad'))
-    } finally {
-      setRateLimitToggling(false)
-    }
-  }, [rateLimitEnabled])
 
   const handleLoadProfile = useCallback(async () => {
     try {

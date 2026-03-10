@@ -54,10 +54,6 @@ class PixivOAuthCallbackRequest(BaseModel):
     code_verifier: str
 
 
-class RateLimitPatch(BaseModel):
-    enabled: bool | None = None
-
-
 class FeatureTogglePatch(BaseModel):
     enabled: bool
 
@@ -467,35 +463,6 @@ async def eh_account_info(_: dict = Depends(require_auth)):
         info = await client.get_account_info()
 
     return {"valid": True, **info}
-
-
-# ── Rate Limiting ────────────────────────────────────────────────
-
-
-@router.get("/rate-limit")
-async def get_rate_limit_settings(_: dict = Depends(require_auth)):
-    """Get current rate limiting status."""
-    val = await get_redis().get("setting:rate_limit_enabled")
-    enabled = (val == b"1") if val is not None else app_settings.rate_limit_enabled
-    return {
-        "enabled": enabled,
-        "login_max": app_settings.rate_limit_login,
-        "window": app_settings.rate_limit_window,
-    }
-
-
-@router.patch("/rate-limit")
-async def patch_rate_limit_settings(
-    req: RateLimitPatch,
-    _: dict = Depends(require_auth),
-):
-    """Toggle rate limiting on/off at runtime."""
-    if req.enabled is not None:
-        app_settings.rate_limit_enabled = req.enabled
-        await get_redis().set("setting:rate_limit_enabled", "1" if req.enabled else "0")
-    return {
-        "enabled": app_settings.rate_limit_enabled,
-    }
 
 
 # ── Feature Toggle Helpers ───────────────────────────────────────────

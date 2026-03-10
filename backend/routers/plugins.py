@@ -2,7 +2,7 @@
 
 from __future__ import annotations
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 
 from core.auth import require_auth
 from plugins.registry import plugin_registry
@@ -47,19 +47,3 @@ async def list_plugins(_: dict = Depends(require_auth)):
         )
 
     return {"plugins": plugins}
-
-
-@router.get("/{source_id}/browse")
-async def plugin_browse(
-    source_id: str,
-    _: dict = Depends(require_auth),
-):
-    """Proxy search to a BrowsePlugin (source-specific endpoints are preferred)."""
-    browser = plugin_registry.get_browser(source_id)
-    if not browser:
-        raise HTTPException(status_code=404, detail=f"No browse plugin for {source_id}")
-    # Source-specific routers (e.g. /api/eh/search) handle the actual browsing.
-    raise HTTPException(
-        status_code=501,
-        detail="Use source-specific browse endpoints (e.g. /api/eh/search)",
-    )

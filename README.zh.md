@@ -27,6 +27,8 @@
 | 反向代理 | Nginx |
 | 下載引擎 | Plugin system + gallery-dl fallback |
 
+API 文件由程式碼自動產生，隨時保持最新：Swagger UI 位於 `/api/docs`，ReDoc 位於 `/api/redoc`。
+
 ## 快速開始
 
 ```bash

@@ -478,15 +478,6 @@ const settings = {
 
   getAlerts: () => apiFetch<{ alerts: string[] }>('/api/settings/alerts'),
 
-  getRateLimit: () =>
-    apiFetch<{ enabled: boolean; login_max: number; window: number }>('/api/settings/rate-limit'),
-
-  setRateLimit: (enabled: boolean) =>
-    apiFetch<{ enabled: boolean }>('/api/settings/rate-limit', {
-      method: 'PATCH',
-      body: JSON.stringify({ enabled }),
-    }),
-
   getFeatures: () =>
     apiFetch<{
       csrf_enabled: boolean
