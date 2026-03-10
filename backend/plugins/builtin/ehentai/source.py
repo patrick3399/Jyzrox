@@ -87,7 +87,6 @@ class EhSourcePlugin(SourcePlugin):
 
         gid = int(m.group(1))
         token = m.group(2)
-        use_ex = "exhentai.org" in url
 
         # credentials is a JSON string of EH cookies (or None)
         if not credentials:
@@ -104,6 +103,15 @@ class EhSourcePlugin(SourcePlugin):
         else:
             # credentials passed as dict (e.g. from direct call)
             cookies = credentials
+
+        # Determine use_ex: Redis setting → config → igneous cookie → URL domain
+        from core.database import get_redis
+        redis = get_redis()
+        pref = await redis.get("setting:eh_use_ex")
+        if pref is not None:
+            use_ex = pref == b"1"
+        else:
+            use_ex = settings.eh_use_ex or bool(cookies.get("igneous"))
 
         # Wrap on_progress to match signature expected by download_eh_gallery
         async def _progress(downloaded: int, total_pages: int) -> None:

@@ -171,7 +171,7 @@ class DownloadJob(Base):
 class ReadProgress(Base):
     __tablename__ = "read_progress"
 
-    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
     last_page: Mapped[int] = mapped_column(Integer, default=0)
     last_read_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
