@@ -14,6 +14,7 @@ from core.auth import require_auth
 from core.config import settings as app_settings
 from core.database import get_db
 from core.redis_client import get_redis
+from core.utils import detect_source
 from db.models import DownloadJob
 
 logger = logging.getLogger(__name__)
@@ -33,17 +34,6 @@ class QuickDownloadRequest(BaseModel):
 
 class JobActionRequest(BaseModel):
     action: str  # "pause" or "resume"
-
-
-def _detect_source(url: str) -> str:
-    """Auto-detect source from URL domain."""
-    if "pixiv.net" in url:
-        return "pixiv"
-    if "e-hentai.org" in url or "exhentai.org" in url:
-        return "ehentai"
-    if "twitter.com" in url or "x.com" in url:
-        return "twitter"
-    return "unknown"
 
 
 async def _check_source_enabled(source: str) -> None:
@@ -76,21 +66,31 @@ async def _enqueue(
     options: dict | None = None,
     total: int | None = None,
 ) -> dict:
-    """Shared enqueue logic: ARQ first, then DB.
+    """Shared enqueue logic: DB record first, then ARQ.
 
-    Order: ARQ enqueue first, then DB commit. If ARQ fails we never create the
-    DB record. If DB insert fails after a successful ARQ enqueue we log a
-    warning — the ARQ job will time out naturally without a matching DB record.
+    Order: create DB record first, then enqueue ARQ job.  If the ARQ enqueue
+    fails the DB record is updated to "failed" so the user can see what
+    happened.  This avoids the race where a worker picks up the ARQ job before
+    the DB row exists.
 
     Returns a dict suitable for use as the HTTP response body.
     """
     job_id = uuid.uuid4()
-    source = _detect_source(url)
+    source = detect_source(url)
     initial_progress = {"total": total} if total is not None else {}
 
     await _check_source_enabled(source)
 
-    # 1. Enqueue ARQ job first — if this fails, no DB record is created.
+    # 1. Persist DB record first so the worker always finds a matching row.
+    try:
+        job = DownloadJob(id=job_id, url=url, source=source, status="queued", progress=initial_progress or {})
+        db.add(job)
+        await db.commit()
+    except Exception as exc:
+        logger.error("[enqueue] DB insert failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to persist download job to database")
+
+    # 2. Enqueue ARQ job. If this fails, mark the DB record as failed.
     try:
         await arq.enqueue_job(
             "download_job",
@@ -102,22 +102,14 @@ async def _enqueue(
             _job_id=str(job_id),
         )
     except Exception as exc:
-        logger.error("[enqueue] ARQ enqueue failed: %s", exc)
+        logger.error("[enqueue] ARQ enqueue failed for job %s: %s", job_id, exc)
+        try:
+            job.status = "failed"
+            job.error = f"Failed to enqueue job: {exc}"
+            await db.commit()
+        except Exception as db_exc:
+            logger.warning("[enqueue] could not mark job %s as failed in DB: %s", job_id, db_exc)
         raise HTTPException(status_code=503, detail="Failed to enqueue download job")
-
-    # 2. Persist DB record. If this fails, log a warning; the ARQ job will
-    #    eventually time out without a matching DB row.
-    try:
-        job = DownloadJob(id=job_id, url=url, source=source, status="queued", progress=initial_progress or {})
-        db.add(job)
-        await db.commit()
-    except Exception as exc:
-        logger.warning(
-            "[enqueue] ARQ job %s enqueued but DB insert failed: %s — job will time out naturally",
-            job_id,
-            exc,
-        )
-        raise HTTPException(status_code=500, detail="Job enqueued but failed to persist to database")
 
     return {"job_id": str(job_id), "status": "queued", "source": source}
 

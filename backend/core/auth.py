@@ -1,6 +1,7 @@
 """Session-based authentication (Redis)."""
 
 import base64
+import binascii
 
 import bcrypt
 from fastapi import Cookie, Header, HTTPException, Request, status
@@ -45,14 +46,31 @@ async def require_opds_auth(
         )
 
     try:
-        decoded = base64.b64decode(authorization[6:]).decode("utf-8")
-        username, password = decoded.split(":", 1)
-    except Exception:
+        raw = base64.b64decode(authorization[6:])
+    except binascii.Error:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid Authorization header",
+            detail="Invalid Authorization header: base64 decode failed",
             headers={"WWW-Authenticate": 'Basic realm="Jyzrox OPDS"'},
         )
+
+    try:
+        decoded = raw.decode("utf-8")
+    except UnicodeDecodeError:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Authorization header: credentials must be UTF-8",
+            headers={"WWW-Authenticate": 'Basic realm="Jyzrox OPDS"'},
+        )
+
+    if ":" not in decoded:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Invalid Authorization header: missing username:password separator",
+            headers={"WWW-Authenticate": 'Basic realm="Jyzrox OPDS"'},
+        )
+
+    username, password = decoded.split(":", 1)
 
     async with async_session() as session:
         result = await session.execute(

@@ -52,7 +52,8 @@ async def list_tags(
     """
     filters = []
     if prefix:
-        filters.append(Tag.name.like(f"{prefix}%"))
+        safe_prefix = prefix.replace('%', '\\%').replace('_', '\\_')
+        filters.append(Tag.name.like(f"{safe_prefix}%"))
     if namespace:
         filters.append(Tag.namespace == namespace)
 

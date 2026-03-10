@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 
 from core.auth import require_auth
 from core.errors import api_error, parse_accept_language
+from core.rate_limit import check_rate_limit
 from services import cache
 from services.credential import get_credential
 from services.pixiv_client import PixivClient
@@ -234,13 +235,15 @@ async def get_following_feed(
 @router.get("/image-proxy")
 async def image_proxy(
     url: str = Query(...),
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
 ):
     """
     Proxy pximg.net images through the server (bypasses CORS/hotlink block).
     Domain whitelist: i.pximg.net, i-f.pximg.net, s.pximg.net.
     Cached 24h in Redis.
     """
+    await check_rate_limit(f"img_proxy:pixiv:{auth['user_id']}", max_requests=120, window=60)
+
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(status_code=400, detail="Invalid URL scheme")

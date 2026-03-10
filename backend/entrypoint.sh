@@ -3,6 +3,11 @@
 # PUID/PGID env vars allow dev override (default: 1042:1042 matching appuser in image).
 set -e
 
+# Warn about insecure .env permissions
+if [ -f /app/.env ] && [ "$(stat -c %a /app/.env)" != "600" ]; then
+    echo "WARNING: .env file has permissive permissions ($(stat -c %a /app/.env)). Consider chmod 600."
+fi
+
 PUID="${PUID:-1042}"
 PGID="${PGID:-1042}"
 

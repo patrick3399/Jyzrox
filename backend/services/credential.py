@@ -1,6 +1,7 @@
 """AES-256-GCM credential encryption + DB persistence."""
 
 import os
+from datetime import datetime, timezone
 
 from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
@@ -42,12 +43,19 @@ def decrypt(data: bytes) -> str:
 
 
 async def get_credential(source: str) -> str | None:
-    """Load and decrypt a credential by source name. Returns None if not set."""
+    """Load and decrypt a credential by source name. Returns None if not set or expired."""
     async with AsyncSessionLocal() as session:
         result = await session.execute(select(Credential).where(Credential.source == source))
         cred = result.scalar_one_or_none()
         if cred is None or cred.value_encrypted is None:
             return None
+        if cred.expires_at is not None:
+            # Normalise to offset-aware UTC for comparison
+            expires = cred.expires_at
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+            if expires < datetime.now(timezone.utc):
+                return None
         return decrypt(bytes(cred.value_encrypted))
 
 

@@ -1,6 +1,8 @@
 """Local library CRUD — queries galleries/images tables via GIN index."""
 
 import base64
+import hashlib
+import hmac
 import json
 import logging
 from datetime import UTC, datetime
@@ -16,6 +18,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth
+from core.config import settings
 from core.database import get_db
 from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag
 from services.cas import cas_url, decrement_ref_count, library_dir, resolve_blob_path, thumb_dir, thumb_url as cas_thumb_url
@@ -27,20 +30,43 @@ router = APIRouter(tags=["library"])
 # ── Cursor helpers ────────────────────────────────────────────────────
 
 
+def _cursor_secret() -> bytes:
+    """Return the HMAC signing key derived from the app's credential_encrypt_key."""
+    return settings.credential_encrypt_key.encode()
+
+
 def _encode_cursor(gallery: Gallery, sort: str) -> str:
-    """Encode sort key + id into a URL-safe base64 cursor string."""
+    """Encode sort key + id into a signed URL-safe base64 cursor string.
+
+    Format: <base64url(json)>.<hmac-sha256-hex>
+    """
     sort_val = {
         "added_at": gallery.added_at.isoformat() if gallery.added_at else "",
         "rating": gallery.rating,
         "pages": gallery.pages if gallery.pages is not None else 0,
     }[sort]
     payload = {"id": gallery.id, "v": str(sort_val), "s": sort}
-    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    sig = hmac.new(_cursor_secret(), encoded.encode(), hashlib.sha256).hexdigest()
+    return f"{encoded}.{sig}"
 
 
 def _decode_cursor(cursor: str) -> dict:
+    """Decode and verify a signed cursor. Raises HTTP 400 if invalid or tampered."""
+    if "." not in cursor:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    # Split on the last dot so the base64 payload (which may contain dots in edge
+    # cases due to padding) is kept intact; HMAC hex is always 64 hex chars.
+    encoded, _, sig = cursor.rpartition(".")
+    if not encoded or not sig:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    expected_sig = hmac.new(_cursor_secret(), encoded.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_sig, sig):
+        raise HTTPException(status_code=400, detail="Invalid cursor: signature mismatch")
     try:
-        return json.loads(base64.urlsafe_b64decode(cursor + "=="))
+        # Re-add stripped padding before decoding.
+        padded = encoded + "=" * (4 - len(encoded) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid cursor")
 
@@ -468,7 +494,12 @@ async def delete_gallery(
                     logger.warning("[delete_gallery] failed to remove thumb dir %s: %s", td, exc)
         return deleted
 
-    deleted_count = await asyncio.to_thread(_delete_filesystem)
+    try:
+        deleted_count = await asyncio.to_thread(_delete_filesystem)
+    except Exception as exc:
+        logger.warning("[delete_gallery] thumbnail/symlink cleanup failed for gallery %d: %s", gallery_id, exc)
+        deleted_count = 0
+
     return {"status": "ok", "deleted_dirs": deleted_count}
 
 
@@ -610,36 +641,59 @@ async def find_similar_images(
         # Phase 1: generate Hamming neighborhoods for each quarter
         neighbors = _hamming_neighbors_all(quarters, max_quarter_dist)
 
-        # Phase 2: indexed pre-filter — OR across all four quarter columns,
-        # then exact bit_count check on the surviving candidates only.
-        conditions = []
-        params: dict = {
-            "image_id": image_id,
-            "phash_int": phash_int_val,
-            "threshold": threshold,
-            "limit": limit,
-        }
-        for qi, neighbor_set in enumerate(neighbors):
-            param_name = f"q{qi}_neighbors"
-            conditions.append(f"b.phash_q{qi} = ANY(:{param_name})")
-            params[param_name] = list(neighbor_set)
+        # Guard: if the combined neighbor sets are too large the ANY() arrays
+        # become counterproductive — fall back to the full scan path instead.
+        total_neighbors = sum(len(s) for s in neighbors)
+        if total_neighbors > 10000:
+            stmt = sql_text("""
+                SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
+                       b.storage, b.external_path, b.phash,
+                       bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
+                FROM images i
+                JOIN blobs b ON i.blob_sha256 = b.sha256
+                WHERE b.phash_int IS NOT NULL
+                  AND i.id != :image_id
+                  AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
+                ORDER BY distance ASC
+                LIMIT :limit
+            """)
+            results = (await db.execute(stmt, {
+                "phash_int": phash_int_val,
+                "image_id": image_id,
+                "threshold": threshold,
+                "limit": limit,
+            })).all()
+        else:
+            # Phase 2: indexed pre-filter — OR across all four quarter columns,
+            # then exact bit_count check on the surviving candidates only.
+            conditions = []
+            params: dict = {
+                "image_id": image_id,
+                "phash_int": phash_int_val,
+                "threshold": threshold,
+                "limit": limit,
+            }
+            for qi, neighbor_set in enumerate(neighbors):
+                param_name = f"q{qi}_neighbors"
+                conditions.append(f"b.phash_q{qi} = ANY(:{param_name})")
+                params[param_name] = list(neighbor_set)
 
-        where_prefilter = " OR ".join(conditions)
+            where_prefilter = " OR ".join(conditions)
 
-        stmt = sql_text(f"""
-            SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
-                   b.storage, b.external_path, b.phash,
-                   bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
-            FROM images i
-            JOIN blobs b ON i.blob_sha256 = b.sha256
-            WHERE b.phash_int IS NOT NULL
-              AND i.id != :image_id
-              AND ({where_prefilter})
-              AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
-            ORDER BY distance ASC
-            LIMIT :limit
-        """)
-        results = (await db.execute(stmt, params)).all()
+            stmt = sql_text(f"""
+                SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
+                       b.storage, b.external_path, b.phash,
+                       bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
+                FROM images i
+                JOIN blobs b ON i.blob_sha256 = b.sha256
+                WHERE b.phash_int IS NOT NULL
+                  AND i.id != :image_id
+                  AND ({where_prefilter})
+                  AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
+                ORDER BY distance ASC
+                LIMIT :limit
+            """)
+            results = (await db.execute(stmt, params)).all()
 
     def _row_to_url(r) -> str:
         if r.storage == "external" and r.external_path:
@@ -727,4 +781,5 @@ def _i(img: Image) -> dict:
         "file_size": blob.file_size if blob else None,
         "file_hash": blob.sha256 if blob else None,
         "media_type": blob.media_type if blob else "image",
+        "duration": blob.duration if blob else None,
     }

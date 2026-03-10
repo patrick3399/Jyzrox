@@ -953,7 +953,7 @@ export default function SettingsPage() {
   }, [])
 
   const handleRevokeSession = useCallback(async (tokenPrefix: string) => {
-    if (!window.confirm('Are you sure you want to revoke this session?')) return
+    if (!window.confirm(t('settings.confirmRevokeSession'))) return
     setRevokingToken(tokenPrefix)
     try {
       await api.auth.revokeSession(tokenPrefix)
@@ -989,11 +989,11 @@ export default function SettingsPage() {
       const expDays = newTokenExpiry ? Number(newTokenExpiry) : undefined
       const created = await api.tokens.create(newTokenName.trim(), expDays)
       setApiTokens((prev) => [created, ...prev])
-      toast.success('Token created')
+      toast.success(t('settings.tokenCreated'))
       setNewTokenName('')
       setNewTokenExpiry('')
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to create token')
+      toast.error(err instanceof Error ? err.message : t('settings.failedCreateToken'))
     } finally {
       setTokenCreating(false)
     }
@@ -1001,14 +1001,14 @@ export default function SettingsPage() {
 
   // API Tokens: Delete
   const handleDeleteToken = useCallback(async (tokenId: string) => {
-    if (!window.confirm('Are you sure you want to delete this API token?')) return
+    if (!window.confirm(t('settings.confirmDeleteToken'))) return
     setDeletingTokenId(tokenId)
     try {
       await api.tokens.delete(tokenId)
       setApiTokens((prev) => prev.filter((t) => t.id !== tokenId))
-      toast.success('Token revoked')
+      toast.success(t('settings.tokenRevoked'))
     } catch {
-      toast.error('Failed to revoke token')
+      toast.error(t('settings.failedRevokeToken'))
     } finally {
       setDeletingTokenId(null)
     }

@@ -44,6 +44,7 @@ CREATE TABLE IF NOT EXISTS blobs (
     media_type    TEXT NOT NULL DEFAULT 'image',
     width         INT,
     height        INT,
+    duration      FLOAT,
     phash         TEXT,
     phash_int     BIGINT,
     phash_q0      SMALLINT,
@@ -287,3 +288,19 @@ CREATE INDEX IF NOT EXISTS idx_followed_artists_source ON followed_artists (sour
 -- Artist grouping
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS artist_id TEXT;
 CREATE INDEX IF NOT EXISTS idx_galleries_artist_id ON galleries (artist_id) WHERE artist_id IS NOT NULL;
+
+-- ── Audit Logs ────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action          VARCHAR(100) NOT NULL,
+    resource_type   VARCHAR(50),
+    resource_id     VARCHAR(100),
+    details         JSONB,
+    ip_address      INET,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id    ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action     ON audit_logs(action);

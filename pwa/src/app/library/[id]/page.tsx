@@ -77,7 +77,7 @@ export default function GalleryDetailPage() {
   useEffect(() => {
     if (!gallery || historyRecordedRef.current) return
     try {
-      if (localStorage.getItem('history_enabled') !== 'false') {
+      if (typeof window !== 'undefined' && localStorage.getItem('history_enabled') !== 'false') {
         historyRecordedRef.current = true
         api.history
           .record({
@@ -271,7 +271,7 @@ export default function GalleryDetailPage() {
                 <span className="text-sm text-vault-text-muted">{t('library.metaRating')}</span>
                 <RatingStars
                   rating={gallery.rating}
-                  readonly={false}
+                  readonly={isUpdating}
                   onChange={handleRatingChange}
                 />
                 <span className="text-sm text-vault-text-secondary">

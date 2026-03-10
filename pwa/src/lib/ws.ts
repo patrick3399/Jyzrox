@@ -7,6 +7,7 @@ export function useWebSocket() {
   const [connected, setConnected] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout>>()
+  const mountedRef = useRef(true)
 
   const connect = useCallback(() => {
     // Build WS URL: ws://same-host/api/ws
@@ -31,7 +32,9 @@ export function useWebSocket() {
 
     ws.onclose = () => {
       setConnected(false)
-      // Reconnect after 3s
+      // Only schedule reconnect if the hook is still mounted
+      if (!mountedRef.current) return
+      clearTimeout(reconnectTimer.current)
       reconnectTimer.current = setTimeout(connect, 3000)
     }
 
@@ -44,8 +47,10 @@ export function useWebSocket() {
   }, [])
 
   useEffect(() => {
+    mountedRef.current = true
     connect()
     return () => {
+      mountedRef.current = false
       clearTimeout(reconnectTimer.current)
       wsRef.current?.close()
     }

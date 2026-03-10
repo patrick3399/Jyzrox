@@ -11,6 +11,8 @@ import type {
 } from './types'
 import { DEFAULT_READER_SETTINGS } from './types'
 import { api } from '@/lib/api'
+import { t } from '@/lib/i18n'
+import { toast } from 'sonner'
 
 // ── localStorage helpers ───────────────────────────────────────────────
 
@@ -363,6 +365,7 @@ export function useProgressSave(galleryId: number, currentPage: number) {
         retryRef.current = setTimeout(() => {
           api.library.saveProgress(galleryId, currentPage).catch((retryErr) => {
             console.warn('[Reader] Progress save retry also failed:', retryErr)
+            toast.error(t('reader.progressSaveFailed'))
           })
         }, 5000)
       })

@@ -15,6 +15,7 @@ from core.auth import require_auth
 from core.config import settings as app_settings
 from core.errors import api_error, parse_accept_language
 from core.database import async_session
+from core.rate_limit import check_rate_limit
 from core.redis_client import eh_semaphore, get_redis
 from db.models import BlockedTag
 from services import cache
@@ -550,7 +551,7 @@ async def get_gallery_images_paginated(
 async def image_proxy(
     gid: int,
     page: int,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
 ):
     """
     Proxy a gallery image through the server.
@@ -562,6 +563,8 @@ async def image_proxy(
       4. Fetch image page HTML → extract image URL
       5. Fetch image bytes → cache → return
     """
+    await check_rate_limit(f"img_proxy:eh:{auth['user_id']}", max_requests=120, window=60)
+
     # 1. Cache hit
     cached_bytes = await cache.get_proxied_image(gid, page)
     if cached_bytes:
@@ -715,9 +718,11 @@ _ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "ul.ehgt.org
 @router.get("/thumb-proxy")
 async def thumb_proxy(
     url: str,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
 ):
     """Proxy EH thumbnail CDN images so the frontend never calls external URLs."""
+    await check_rate_limit(f"img_proxy:eh_thumb:{auth['user_id']}", max_requests=120, window=60)
+
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):
         raise HTTPException(status_code=400, detail="Invalid URL scheme")

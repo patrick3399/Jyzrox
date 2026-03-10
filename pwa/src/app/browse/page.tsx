@@ -291,7 +291,7 @@ function GalleryModal({
                 {label}
               </span>
               <span className="px-2 py-0.5 rounded bg-vault-input border border-vault-border text-vault-text-secondary">
-                {gallery.pages} pages
+                {gallery.pages} {t('browse.pages')}
               </span>
               <span className="px-2 py-0.5 rounded bg-vault-input border border-vault-border text-vault-text-secondary">
                 {formatDate(gallery.posted_at)}
@@ -796,7 +796,7 @@ function BrowsePage() {
       const res = await api.download.enqueue(url)
       toast.success(t('browse.addedToQueueJob', { jobId: res.job_id }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed')
+      toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
     }
   }, [])
 
@@ -1180,14 +1180,14 @@ function BrowsePage() {
           <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
             <button
               onClick={() => setViewMode('list')}
-              title="List view"
+              title={t('browse.listView')}
               className={`px-3 py-2.5 text-sm transition-colors ${viewMode === 'list' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
             >
               ☰
             </button>
             <button
               onClick={() => setViewMode('grid')}
-              title="Grid view"
+              title={t('browse.gridView')}
               className={`px-3 py-2.5 text-sm transition-colors ${viewMode === 'grid' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
             >
               ⊞
@@ -1212,21 +1212,6 @@ function BrowsePage() {
           >
             {t('browse.searchTab')}
           </button>
-          {ehConfigured && (
-            <button
-              onClick={() => {
-                setActiveTab('favorites')
-                setFavCursor({})
-              }}
-              className={`flex-shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
-                activeTab === 'favorites'
-                  ? 'border-[#e91e63] text-vault-text'
-                  : 'border-transparent text-vault-text-muted hover:text-vault-text'
-              }`}
-            >
-              {t('browse.favoritesTab')}
-            </button>
-          )}
           <button
             onClick={() => setActiveTab('popular')}
             className={`flex-shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
@@ -1250,6 +1235,21 @@ function BrowsePage() {
           >
             {t('browse.toplistTab')}
           </button>
+          {ehConfigured && (
+            <button
+              onClick={() => {
+                setActiveTab('favorites')
+                setFavCursor({})
+              }}
+              className={`flex-shrink-0 ml-3 md:ml-auto px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                activeTab === 'favorites'
+                  ? 'border-[#e91e63] text-vault-text'
+                  : 'border-transparent text-vault-text-muted hover:text-vault-text'
+              }`}
+            >
+              {t('browse.favoritesTab')}
+            </button>
+          )}
         </div>
 
         {/* ════════ SEARCH TAB ════════ */}
@@ -1439,7 +1439,9 @@ function BrowsePage() {
             {data && !isLoading && (
               <div className="flex items-center justify-between text-xs text-vault-text-muted">
                 <span>
-                  {data.total.toLocaleString()} results{searchQuery && ` for "${searchQuery}"`}
+                  {searchQuery
+                    ? t('browse.resultsFor', { query: searchQuery })
+                    : t('browse.resultsCount', { count: data.total.toLocaleString() })}
                 </span>
                 <div className="flex items-center gap-2">
                   {searchQuery && (
@@ -1476,7 +1478,7 @@ function BrowsePage() {
                     {t('browse.credentialsMissingDetail')}
                   </p>
                 ) : (
-                  <p className="text-red-400">{error.message || 'Failed to load results'}</p>
+                  <p className="text-red-400">{error.message || t('browse.failedLoadResults')}</p>
                 )}
               </div>
             )}
@@ -1727,7 +1729,7 @@ function BrowsePage() {
               </button>
               {Array.from({ length: 10 }, (_, i) => {
                 const catData = favData?.categories?.find((c) => c.index === i)
-                const name = catData?.name || `Favorites ${i}`
+                const name = catData?.name || t('browse.favoritesN', { n: String(i) })
                 const count = catData?.count
                 const color = FAV_COLORS[i]
                 const isActive = favCat === String(i)
@@ -1771,8 +1773,8 @@ function BrowsePage() {
             {favData && !favLoading && (
               <div className="flex items-center justify-between text-xs text-vault-text-muted">
                 <span>
-                  {favData.total.toLocaleString()} favorited
-                  {favSearch && ` matching "${favSearch}"`}
+                  {favData.total.toLocaleString()} {t('browse.favorited')}
+                  {favSearch && ` ${t('browse.matchingQuery', { query: favSearch })}`}
                 </span>
               </div>
             )}
@@ -1787,7 +1789,7 @@ function BrowsePage() {
             {/* Favorites error */}
             {favError && !favLoading && (
               <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
-                <p className="text-red-400">{favError.message || 'Failed to load favorites'}</p>
+                <p className="text-red-400">{favError.message || t('browse.failedLoadFavorites')}</p>
               </div>
             )}
 
@@ -1907,7 +1909,7 @@ function BrowsePage() {
 
             {popularError && !popularLoading && (
               <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
-                <p className="text-red-400">{popularError.message || 'Failed to load popular'}</p>
+                <p className="text-red-400">{popularError.message || t('browse.failedLoadPopular')}</p>
               </div>
             )}
 
@@ -1982,7 +1984,7 @@ function BrowsePage() {
 
             {toplistError && !toplistLoading && (
               <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
-                <p className="text-red-400">{toplistError.message || 'Failed to load top lists'}</p>
+                <p className="text-red-400">{toplistError.message || t('browse.failedLoadTopLists')}</p>
               </div>
             )}
 

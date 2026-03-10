@@ -385,7 +385,7 @@ async def upload_avatar(
         img = Image.open(io.BytesIO(data))
         img = ImageOps.fit(img, (160, 160))
         img = img.convert("RGB")
-    except (OSError, ValueError) as exc:
+    except Exception as exc:
         logger.warning("Avatar upload failed: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid image file")
 
@@ -434,8 +434,12 @@ async def delete_avatar(auth: dict = Depends(require_auth)):
 
 
 @router.post("/change-password")
-async def change_password(req: ChangePasswordRequest, auth: dict = Depends(require_auth)):
-    """Change the current user's password."""
+async def change_password(
+    req: ChangePasswordRequest,
+    auth: dict = Depends(require_auth),
+    vault_session: str | None = Cookie(default=None),
+):
+    """Change the current user's password and invalidate all other sessions."""
     if len(req.new_password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
@@ -457,5 +461,27 @@ async def change_password(req: ChangePasswordRequest, auth: dict = Depends(requi
             {"phash": new_hash, "uid": auth["user_id"]},
         )
         await session.commit()
+
+    # Invalidate all other sessions for this user (keep only the current one).
+    current_token = ""
+    if vault_session:
+        try:
+            _, current_token = vault_session.split(":", 1)
+        except ValueError:
+            pass
+
+    redis = get_redis()
+    user_id = auth["user_id"]
+    prefix = f"session:{user_id}:"
+    cursor = 0
+    while True:
+        cursor, keys = await redis.scan(cursor, match=f"{prefix}*", count=100)
+        for key in keys:
+            key_str = key if isinstance(key, str) else key.decode()
+            token = key_str[len(prefix):]
+            if token != current_token:
+                await redis.delete(key_str)
+        if cursor == 0:
+            break
 
     return {"status": "ok"}

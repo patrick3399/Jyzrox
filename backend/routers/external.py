@@ -14,6 +14,7 @@ from sqlalchemy import func, select, text, update
 from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
+from core.utils import detect_source
 from db.models import ApiToken, Blob, DownloadJob, Gallery, Image, Tag
 from services.cas import cas_url, thumb_url as cas_thumb_url, resolve_blob_path
 from sqlalchemy.orm import selectinload
@@ -288,6 +289,7 @@ async def get_gallery_images(
                 "height": blob.height if blob else None,
                 "file_size": blob.file_size if blob else None,
                 "media_type": blob.media_type if blob else None,
+                "duration": blob.duration if blob else None,
                 "file_url": cas_url(blob.sha256, blob.extension) if blob else None,
                 "thumb_url": cas_thumb_url(blob.sha256) if blob else None,
             }
@@ -372,15 +374,6 @@ class ExternalDownloadRequest(BaseModel):
     url: str
 
 
-def _detect_source(url: str) -> str:
-    """Auto-detect source from URL domain."""
-    if "pixiv.net" in url:
-        return "pixiv"
-    if "e-hentai.org" in url or "exhentai.org" in url:
-        return "ehentai"
-    return "unknown"
-
-
 @router.post("/download")
 async def enqueue_download(
     request: Request,
@@ -404,7 +397,7 @@ async def enqueue_download(
 
     await _check_rate_limit(token_data["token_id"])
     job_id = _uuid.uuid4()
-    source = _detect_source(resolved_url)
+    source = detect_source(resolved_url)
 
     # 1. Enqueue ARQ job first — if this fails, no DB record is created.
     arq = request.app.state.arq

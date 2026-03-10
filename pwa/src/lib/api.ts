@@ -64,6 +64,9 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
   })
 
   if (!res.ok) {
+    if (res.status === 429) {
+      throw new Error(t('common.rateLimited'))
+    }
     // Stale session → redirect to login (skip if already on /login or /setup)
     if (res.status === 401 && typeof window !== 'undefined') {
       const p = window.location.pathname

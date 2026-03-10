@@ -4,12 +4,14 @@ import { useMemo, useState, useEffect, Suspense, useCallback } from 'react'
 import { useParams, useSearchParams, useRouter } from 'next/navigation'
 import { useEhGallery, useEhGalleryImagesPaginated } from '@/hooks/useGalleries'
 import Reader from '@/components/Reader'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { t } from '@/lib/i18n'
 import type { GalleryImage } from '@/lib/types'
 
 export default function EhProxyReaderPageWrapper() {
   return (
-    <Suspense>
+    <Suspense fallback={<div className="flex items-center justify-center h-screen"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white" /></div>}>
       <EhProxyReaderPage />
     </Suspense>
   )
@@ -61,6 +63,7 @@ function EhProxyReaderPage() {
       file_size: null,
       file_hash: null,
       media_type: 'image' as const,
+      duration: null,
     }))
   }, [gallery, totalPages, gid])
 
@@ -76,17 +79,28 @@ function EhProxyReaderPage() {
   const error = galleryError || tokensError
   const hasInitialTokens = Object.keys(tokenMap).length > 0
 
+  if (isNaN(gid)) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+        <div className="text-center">
+          <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
+          <p className="mt-1 text-sm opacity-70">{t('common.invalidId')}</p>
+        </div>
+      </div>
+    )
+  }
+
   if (error) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-black text-white">
         <div className="text-center">
-          <p className="text-lg font-semibold text-red-400">Error</p>
+          <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error.message}</p>
           <button
             onClick={() => router.back()}
             className="mt-4 px-4 py-2 bg-neutral-800 rounded text-sm hover:bg-neutral-700 transition-colors"
           >
-            Go back
+            {t('common.goBack')}
           </button>
         </div>
       </div>
@@ -101,20 +115,20 @@ function EhProxyReaderPage() {
           <LoadingSpinner />
           <p className="mt-3 text-sm opacity-50">
             {!gallery && galleryLoading
-              ? 'Loading metadata...'
+              ? t('reader.loadingMetadata')
               : tokensLoading
-                ? 'Loading image tokens...'
-                : 'Preparing reader...'}
+                ? t('reader.loadingTokens')
+                : t('reader.preparingReader')}
           </p>
-          {gallery && <p className="mt-1 text-xs opacity-30">{gallery.pages} pages</p>}
+          {gallery && <p className="mt-1 text-xs opacity-30">{gallery.pages} {t('browse.pages')}</p>}
           {loadingTooLong && (
             <div className="mt-4 space-y-2">
-              <p className="text-xs text-yellow-500">Loading is taking longer than expected...</p>
+              <p className="text-xs text-yellow-500">{t('reader.loadingTooLong')}</p>
               <button
                 onClick={() => router.back()}
                 className="px-4 py-2 bg-neutral-800 rounded text-xs hover:bg-neutral-700 transition-colors"
               >
-                Go back
+                {t('common.goBack')}
               </button>
             </div>
           )}
@@ -124,16 +138,18 @@ function EhProxyReaderPage() {
   }
 
   return (
-    <Reader
-      galleryId={0}
-      sourceId={String(gid)}
-      downloadStatus="proxy_only"
-      images={images}
-      totalPages={gallery.pages}
-      initialPage={Math.min(startPage, gallery.pages)}
-      previews={previewMap}
-      onPageChange={handlePageChange}
-      onSeekToPage={fetchUpTo}
-    />
+    <ErrorBoundary>
+      <Reader
+        galleryId={0}
+        sourceId={String(gid)}
+        downloadStatus="proxy_only"
+        images={images}
+        totalPages={gallery.pages}
+        initialPage={Math.min(startPage, gallery.pages)}
+        previews={previewMap}
+        onPageChange={handlePageChange}
+        onSeekToPage={fetchUpTo}
+      />
+    </ErrorBoundary>
   )
 }

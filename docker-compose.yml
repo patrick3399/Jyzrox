@@ -98,7 +98,7 @@ services:
       - backend
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import redis,os; r=redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379')); r.ping()"]
+      test: ["CMD-SHELL", "python -c \"import redis,os; r=redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379')); r.ping()\" && pgrep -f 'arq worker.WorkerSettings' > /dev/null"]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -152,7 +152,7 @@ services:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vault} -d ${POSTGRES_DB:-vault}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-vault} -d $${POSTGRES_DB:-vault} && psql -U $${POSTGRES_USER:-vault} -d $${POSTGRES_DB:-vault} -c 'SELECT 1' -q -t"]
       interval: 5s
       timeout: 5s
       retries: 10

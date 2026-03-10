@@ -60,7 +60,7 @@ async def check_rate_limit(
 
     count = await redis.incr(redis_key)
     if count == 1:
-        await redis.expire(redis_key, window)
+        await redis.expire(redis_key, window + 1)
 
     if count > max_requests:
         ttl = await redis.ttl(redis_key)

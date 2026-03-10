@@ -60,6 +60,12 @@ async def start_import(
     ):
         raise HTTPException(status_code=400, detail="source_dir must be within a configured library path")
 
+    # Validate the resolved path is an accessible directory before creating any DB records.
+    if not os.path.isdir(real_source):
+        raise HTTPException(status_code=400, detail="Path does not exist or is not a directory")
+    if not os.access(real_source, os.R_OK):
+        raise HTTPException(status_code=400, detail="Path is not readable")
+
     # Create DB entry (raw SQL to avoid PostgreSQL-specific ORM types like ARRAY)
     from sqlalchemy import text
 
