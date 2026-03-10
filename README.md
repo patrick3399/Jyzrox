@@ -48,7 +48,7 @@ docker compose up -d
 - [x] Pixiv source integration
 - [x] Subscription system (artist following)
 - [x] Plugin-driven credential management
-- [ ] AI-based auto-tagging (WD14)
+- [x] AI-based auto-tagging (WD14)
 - [ ] Duplicate detection and management
 - [ ] Multi-user support
 
