@@ -2,7 +2,7 @@
 
 import { useState, useEffect, useRef, Suspense } from 'react'
 import Link from 'next/link'
-import { useSearchParams } from 'next/navigation'
+import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import useSWRInfinite from 'swr/infinite'
 import { api } from '@/lib/api'
@@ -271,7 +271,7 @@ function FeedTab({ credentialsMissing }: { credentialsMissing: boolean }) {
     <div className="space-y-4">
       <VirtualGrid
         items={allIllusts}
-        columns={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
+        columns={{ base: 2, sm: 3, md: 4, lg: 6, xl: 8 }}
         gap={12}
         estimateHeight={200}
         renderItem={(illust) => (
@@ -494,7 +494,7 @@ function BookmarksTab({ credentialsMissing }: { credentialsMissing: boolean }) {
 
       <VirtualGrid
         items={allIllusts}
-        columns={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
+        columns={{ base: 2, sm: 3, md: 4, lg: 6, xl: 8 }}
         gap={12}
         estimateHeight={200}
         renderItem={(illust) => (
@@ -646,11 +646,17 @@ type Tab = 'feed' | 'following' | 'ranking' | 'bookmarks'
 
 function PixivPageInner() {
   useLocale()
+  const router = useRouter()
   const searchParams = useSearchParams()
   const rawTab = searchParams.get('tab') as Tab | null
   const initialTab: Tab =
     rawTab === 'feed' || rawTab === 'following' || rawTab === 'bookmarks' ? rawTab : 'ranking'
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
+
+  const handleTabChange = (tab: Tab) => {
+    setActiveTab(tab)
+    router.replace(`/pixiv?tab=${tab}`, { scroll: false })
+  }
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
@@ -725,7 +731,7 @@ function PixivPageInner() {
           {/* Tab bar — Feed & Following only shown when credentials available */}
           <div className="flex gap-1 border-b border-vault-border overflow-x-auto scrollbar-hide">
             <button
-              onClick={() => setActiveTab('ranking')}
+              onClick={() => handleTabChange('ranking')}
               className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === 'ranking'
                   ? 'border-vault-accent text-vault-text'
@@ -737,7 +743,7 @@ function PixivPageInner() {
             {!credentialsMissing && (
               <>
                 <button
-                  onClick={() => setActiveTab('feed')}
+                  onClick={() => handleTabChange('feed')}
                   className={`shrink-0 ml-3 md:ml-auto px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                     activeTab === 'feed'
                       ? 'border-blue-400 text-vault-text'
@@ -747,7 +753,7 @@ function PixivPageInner() {
                   {t('pixiv.feedTab')}
                 </button>
                 <button
-                  onClick={() => setActiveTab('following')}
+                  onClick={() => handleTabChange('following')}
                   className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                     activeTab === 'following'
                       ? 'border-[#e91e63] text-vault-text'
@@ -757,7 +763,7 @@ function PixivPageInner() {
                   {t('pixiv.followingTab')}
                 </button>
                 <button
-                  onClick={() => setActiveTab('bookmarks')}
+                  onClick={() => handleTabChange('bookmarks')}
                   className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                     activeTab === 'bookmarks'
                       ? 'border-[#ff9800] text-vault-text'
