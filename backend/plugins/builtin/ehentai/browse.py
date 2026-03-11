@@ -22,7 +22,7 @@ from core.auth import require_auth
 from core.config import settings as app_settings
 from core.errors import api_error, parse_accept_language
 from core.database import async_session
-from core.rate_limit import check_rate_limit
+from core.rate_limit import check_rate_limit, get_client_ip, _is_private
 from core.redis_client import eh_semaphore, get_redis
 from db.models import BlockedTag
 from plugins.base import BrowsePlugin
@@ -749,6 +749,7 @@ async def get_gallery_images_paginated(
 
 @_browse_router.get("/image-proxy/{gid}/{page}")
 async def image_proxy(
+    request: Request,
     gid: int,
     page: int,
     auth: dict = Depends(require_auth),
@@ -763,7 +764,8 @@ async def image_proxy(
       4. Fetch image page HTML → extract image URL
       5. Fetch image bytes → cache → return
     """
-    await check_rate_limit(f"img_proxy:eh:{auth['user_id']}", max_requests=120, window=60)
+    if not _is_private(get_client_ip(request)):
+        await check_rate_limit(f"img_proxy:eh:{auth['user_id']}", max_requests=120, window=60)
 
     # 1. Cache hit
     cached_bytes = await cache.get_proxied_image(gid, page)
@@ -922,11 +924,13 @@ _ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "ul.ehgt.org
 
 @_browse_router.get("/thumb-proxy")
 async def thumb_proxy(
+    request: Request,
     url: str,
     auth: dict = Depends(require_auth),
 ):
     """Proxy EH thumbnail CDN images so the frontend never calls external URLs."""
-    await check_rate_limit(f"img_proxy:eh_thumb:{auth['user_id']}", max_requests=120, window=60)
+    if not _is_private(get_client_ip(request)):
+        await check_rate_limit(f"img_proxy:eh_thumb:{auth['user_id']}", max_requests=120, window=60)
 
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):

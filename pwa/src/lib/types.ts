@@ -406,12 +406,23 @@ export interface PixivUserDetail {
   total_illusts: number
   total_manga: number
   total_novels: number
+  is_followed: boolean
 }
 
 export interface PixivUserResult {
   user: PixivUserDetail
   recent_illusts: PixivIllust[]
   next_offset: number | null
+}
+
+export interface PixivUserPreview {
+  user: {
+    id: number
+    name: string
+    account: string
+    profile_image: string
+  }
+  illusts: PixivIllust[]
 }
 
 export interface FollowedArtist {

@@ -147,21 +147,21 @@ class PixivClient:
     @staticmethod
     def _normalize_illust(illust) -> dict:
         """Normalise a pixivpy3 illust object/dict to our internal format."""
-        if hasattr(illust, "__dict__"):
+        if not isinstance(illust, dict) and hasattr(illust, "__dict__"):
             illust = illust.__dict__
 
         user = illust.get("user") or {}
-        if hasattr(user, "__dict__"):
+        if not isinstance(user, dict) and hasattr(user, "__dict__"):
             user = user.__dict__
 
         user_image_urls = user.get("profile_image_urls") or {}
-        if hasattr(user_image_urls, "__dict__"):
+        if not isinstance(user_image_urls, dict) and hasattr(user_image_urls, "__dict__"):
             user_image_urls = user_image_urls.__dict__
 
         tags_raw = illust.get("tags") or []
         tags = []
         for t in tags_raw:
-            if hasattr(t, "__dict__"):
+            if not isinstance(t, dict) and hasattr(t, "__dict__"):
                 t = t.__dict__
             tags.append({
                 "name": t.get("name", ""),
@@ -169,20 +169,20 @@ class PixivClient:
             })
 
         image_urls_raw = illust.get("image_urls") or {}
-        if hasattr(image_urls_raw, "__dict__"):
+        if not isinstance(image_urls_raw, dict) and hasattr(image_urls_raw, "__dict__"):
             image_urls_raw = image_urls_raw.__dict__
 
         meta_single = illust.get("meta_single_page") or {}
-        if hasattr(meta_single, "__dict__"):
+        if not isinstance(meta_single, dict) and hasattr(meta_single, "__dict__"):
             meta_single = meta_single.__dict__
 
         meta_pages_raw = illust.get("meta_pages") or []
         meta_pages = []
         for mp in meta_pages_raw:
-            if hasattr(mp, "__dict__"):
+            if not isinstance(mp, dict) and hasattr(mp, "__dict__"):
                 mp = mp.__dict__
             mp_urls = mp.get("image_urls") or {}
-            if hasattr(mp_urls, "__dict__"):
+            if not isinstance(mp_urls, dict) and hasattr(mp_urls, "__dict__"):
                 mp_urls = mp_urls.__dict__
             meta_pages.append({"image_urls": mp_urls})
 
@@ -218,24 +218,25 @@ class PixivClient:
             "total_view": illust.get("total_view", 0),
             "total_bookmarks": illust.get("total_bookmarks", 0),
             "is_bookmarked": illust.get("is_bookmarked", False),
+            "meta_pages": meta_pages,
         }
 
     @staticmethod
     def _normalize_user(user_detail_response) -> dict:
         """Normalise a pixivpy3 user_detail response to our internal format."""
-        if hasattr(user_detail_response, "__dict__"):
+        if not isinstance(user_detail_response, dict) and hasattr(user_detail_response, "__dict__"):
             user_detail_response = user_detail_response.__dict__
 
         user = user_detail_response.get("user") or {}
-        if hasattr(user, "__dict__"):
+        if not isinstance(user, dict) and hasattr(user, "__dict__"):
             user = user.__dict__
 
         profile = user_detail_response.get("profile") or {}
-        if hasattr(profile, "__dict__"):
+        if not isinstance(profile, dict) and hasattr(profile, "__dict__"):
             profile = profile.__dict__
 
         profile_image_urls = user.get("profile_image_urls") or {}
-        if hasattr(profile_image_urls, "__dict__"):
+        if not isinstance(profile_image_urls, dict) and hasattr(profile_image_urls, "__dict__"):
             profile_image_urls = profile_image_urls.__dict__
 
         return {
@@ -247,12 +248,13 @@ class PixivClient:
             "total_illusts": profile.get("total_illusts", 0),
             "total_manga": profile.get("total_manga", 0),
             "total_novels": profile.get("total_novels", 0),
+            "is_followed": bool(user.get("is_followed", False)),
         }
 
     @staticmethod
     def _next_offset(response) -> int | None:
         """Extract offset from next_url in a pixivpy3 paginated response."""
-        if hasattr(response, "__dict__"):
+        if not isinstance(response, dict) and hasattr(response, "__dict__"):
             response = response.__dict__
         next_url = response.get("next_url")
         if not next_url:
@@ -260,15 +262,18 @@ class PixivClient:
         try:
             qs = parse_qs(urlparse(next_url).query)
             offset_vals = qs.get("offset", [])
+            max_bookmark_id_vals = qs.get("max_bookmark_id", [])
             if offset_vals:
                 return int(offset_vals[0])
+            if max_bookmark_id_vals:
+                return int(max_bookmark_id_vals[0])
         except (ValueError, KeyError):
             pass
         return None
 
     def _normalize_illust_list(self, response) -> dict:
         """Normalise a paginated illust list response."""
-        if hasattr(response, "__dict__"):
+        if not isinstance(response, dict) and hasattr(response, "__dict__"):
             response = response.__dict__
         illusts_raw = response.get("illusts") or []
         return {
@@ -302,7 +307,7 @@ class PixivClient:
     async def illust_detail(self, illust_id: int) -> dict:
         """Get illustration detail. Returns normalized illust dict."""
         result = await self._call(self._api.illust_detail, illust_id)
-        if hasattr(result, "__dict__"):
+        if not isinstance(result, dict) and hasattr(result, "__dict__"):
             result = result.__dict__
         illust = result.get("illust")
         if not illust:
@@ -331,8 +336,11 @@ class PixivClient:
         offset: int = 0,
     ) -> dict:
         """Get user bookmarks. Returns {illusts, next_offset}."""
+        kwargs = {"restrict": restrict}
+        if offset > 0:
+            kwargs["max_bookmark_id"] = offset
         result = await self._call(
-            self._api.user_bookmarks_illust, user_id, restrict=restrict, offset=offset
+            self._api.user_bookmarks_illust, user_id, **kwargs
         )
         return self._normalize_illust_list(result)
 
@@ -355,19 +363,19 @@ class PixivClient:
         result = await self._call(
             self._api.user_following, user_id, restrict=restrict, offset=offset
         )
-        if hasattr(result, "__dict__"):
+        if not isinstance(result, dict) and hasattr(result, "__dict__"):
             result = result.__dict__
 
         user_previews_raw = result.get("user_previews") or []
         user_previews = []
         for up in user_previews_raw:
-            if hasattr(up, "__dict__"):
+            if not isinstance(up, dict) and hasattr(up, "__dict__"):
                 up = up.__dict__
             user = up.get("user") or {}
-            if hasattr(user, "__dict__"):
+            if not isinstance(user, dict) and hasattr(user, "__dict__"):
                 user = user.__dict__
             profile_image_urls = user.get("profile_image_urls") or {}
-            if hasattr(profile_image_urls, "__dict__"):
+            if not isinstance(profile_image_urls, dict) and hasattr(profile_image_urls, "__dict__"):
                 profile_image_urls = profile_image_urls.__dict__
             illusts_raw = up.get("illusts") or []
             user_previews.append({
@@ -384,6 +392,48 @@ class PixivClient:
             "user_previews": user_previews,
             "next_offset": self._next_offset(result),
         }
+
+    async def illust_bookmark_detail(self, illust_id: int) -> dict:
+        """Get bookmark detail for an illust. Returns {is_bookmarked, restrict}."""
+        result = await self._call(self._api.illust_bookmark_detail, illust_id=illust_id)
+        if not isinstance(result, dict) and hasattr(result, "__dict__"):
+            result = result.__dict__
+        detail = result.get("bookmark_detail") or {}
+        if not isinstance(detail, dict) and hasattr(detail, "__dict__"):
+            detail = detail.__dict__
+        return {
+            "is_bookmarked": bool(detail.get("is_bookmarked", False)),
+            "restrict": detail.get("restrict", "public"),
+        }
+
+    async def illust_bookmark_add(self, illust_id: int, restrict: str = "public") -> None:
+        """Add bookmark for an illust."""
+        await self._call(self._api.illust_bookmark_add, illust_id=illust_id, restrict=restrict)
+
+    async def illust_ranking(
+        self,
+        mode: str = "day",
+        date: str | None = None,
+        offset: int = 0,
+    ) -> dict:
+        """Get ranking illusts via App API. Returns {illusts, next_offset}."""
+        kwargs: dict = {"mode": mode, "offset": offset}
+        if date:
+            kwargs["date"] = date
+        result = await self._call(self._api.illust_ranking, **kwargs)
+        return self._normalize_illust_list(result)
+
+    async def illust_bookmark_delete(self, illust_id: int) -> None:
+        """Delete bookmark for an illust."""
+        await self._call(self._api.illust_bookmark_delete, illust_id=illust_id)
+
+    async def user_follow_add(self, user_id: int, restrict: str = "public") -> None:
+        """Follow a user on Pixiv."""
+        await self._call(self._api.user_follow_add, user_id=user_id, restrict=restrict)
+
+    async def user_follow_delete(self, user_id: int) -> None:
+        """Unfollow a user on Pixiv."""
+        await self._call(self._api.user_follow_delete, user_id=user_id)
 
     async def download_image(self, url: str) -> tuple[bytes, str]:
         """

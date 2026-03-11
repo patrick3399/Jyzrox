@@ -9,10 +9,13 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth
+from core.database import AsyncSessionLocal
 from core.errors import api_error, parse_accept_language
-from core.rate_limit import check_rate_limit
+from core.rate_limit import check_rate_limit, get_client_ip, _is_private
+from db.models import Subscription
 from plugins.base import BrowsePlugin
 from plugins.models import (
     BrowseSchema,
@@ -172,16 +175,69 @@ def _detect_media_type(data: bytes) -> str:
 
 # ── Ranking ───────────────────────────────────────────────────────────
 
+_R18_MODE_MAP = {
+    "daily_r18": "day_r18",
+    "weekly_r18": "week_r18",
+}
+
 
 @_browse_router.get("/ranking")
 async def get_ranking(
+    request: Request,
     mode: str = Query(default="daily"),
     content: str = Query(default="all"),
     date: str | None = Query(default=None, description="YYYYMMDD"),
     page: int = Query(default=1, ge=1),
     _: dict = Depends(require_auth),
 ):
-    """Get Pixiv public ranking (no Pixiv credentials required, cached 5min)."""
+    """Get Pixiv ranking. Public modes cached 5min (no credentials). R18 modes require Pixiv credentials."""
+    if mode in _R18_MODE_MAP:
+        # R18 path: requires Pixiv credentials, uses App API
+        cache_key = f"pixiv:ranking:{mode}:{date}:{page}"
+        cached = await cache.get_json(cache_key)
+        if cached is not None:
+            return cached
+
+        locale = parse_accept_language(request.headers.get("Accept-Language", "en"))
+        client = await _make_client(locale)
+        offset = (page - 1) * 30
+        async with client:
+            try:
+                result = await client.illust_ranking(
+                    mode=_R18_MODE_MAP[mode],
+                    date=date,
+                    offset=offset,
+                )
+            except PermissionError:
+                raise api_error(401, "pixiv_token_invalid", locale)
+            except httpx.HTTPError as e:
+                raise HTTPException(status_code=502, detail=f"Pixiv ranking request failed: {e}")
+
+        illusts = result.get("illusts", [])
+        response = {
+            "contents": [
+                {
+                    "illust_id": illust["id"],
+                    "title": illust["title"],
+                    "user_name": illust["user"]["name"],
+                    "url": illust["image_urls"]["square_medium"],
+                    "rank": offset + idx + 1,
+                }
+                for idx, illust in enumerate(illusts)
+            ],
+            "mode": mode,
+            "content": "all",
+            "date": date or "",
+            "page": page,
+            "prev_date": None,
+            "next_date": None,
+            "rank_total": 500,
+            "has_next": result.get("next_offset") is not None,
+        }
+        await cache.set_json(cache_key, response, 300)
+        return response
+
+    # Public path: ranking.php (no credentials required)
     cache_key = f"pixiv:ranking:{mode}:{content}:{date}:{page}"
     cached = await cache.get_json(cache_key)
     if cached is not None:
@@ -212,6 +268,7 @@ async def get_ranking(
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=f"Pixiv ranking request failed: {e}")
 
+    result["has_next"] = len(result.get("contents", [])) >= 50
     await cache.set_json(cache_key, result, 300)  # 5min
     return result
 
@@ -529,6 +586,62 @@ async def get_illust(
     )
 
 
+@_browse_router.get("/illust/{illust_id}/pages")
+async def get_illust_pages(
+    illust_id: int,
+    _: dict = Depends(require_auth),
+):
+    """Get all page original URLs for a multi-page illust (cached 1h)."""
+    # Try to reuse existing illust cache first
+    cached = await cache.get_pixiv_illust_cache(illust_id)
+
+    meta_pages = None
+    page_count = 1
+    image_urls: dict = {}
+    if cached is not None:
+        meta_pages = cached.get("meta_pages")
+        page_count = cached.get("page_count", 1)
+        image_urls = cached.get("image_urls") or {}
+
+    # If no meta_pages in cache, try auth client first (avoids race with /illust/{id})
+    if meta_pages is None:
+        refresh_token = await get_credential("pixiv")
+        if refresh_token:
+            client = PixivClient(refresh_token=refresh_token)
+            async with client:
+                try:
+                    result = await client.illust_detail(illust_id)
+                    await cache.set_pixiv_illust_cache(illust_id, result)
+                    meta_pages = result.get("meta_pages") or []
+                    page_count = result.get("page_count", 1)
+                    image_urls = result.get("image_urls") or {}
+                except (PermissionError, ValueError, httpx.HTTPError):
+                    pass
+
+    # Final fallback to public API (no credentials / auth failed)
+    if meta_pages is None:
+        public_data = await _fetch_illust_public(illust_id)
+        meta_pages = public_data.get("meta_pages") or []
+        page_count = public_data.get("page_count", 1)
+        image_urls = public_data.get("image_urls") or {}
+
+    if meta_pages:
+        pages = [
+            {
+                "page_num": i + 1,
+                "url": mp["image_urls"].get("original") or mp["image_urls"].get("large", ""),
+            }
+            for i, mp in enumerate(meta_pages)
+        ]
+    else:
+        # Single-page illust
+        url = image_urls.get("original") or image_urls.get("large", "")
+        pages = [{"page_num": 1, "url": url}]
+        page_count = 1
+
+    return {"pages": pages, "page_count": page_count}
+
+
 # ── User detail ───────────────────────────────────────────────────────
 
 
@@ -621,6 +734,209 @@ async def get_user_bookmarks(
     return result
 
 
+@_browse_router.get("/bookmarks")
+async def get_my_bookmarks(
+    restrict: str = Query(default="public"),
+    offset: int = Query(default=0, ge=0),
+    _: dict = Depends(require_auth),
+):
+    """Get the currently authenticated user's bookmarks (cached 5min)."""
+    cache_key = f"my_bookmarks:{restrict}:{offset}"
+    cached = await cache.get_pixiv_search_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    client = await _make_client()
+    async with client:
+        try:
+            from core.redis_client import get_redis
+            r = get_redis()
+            rt_tail = client.refresh_token[-10:] if client.refresh_token else "none"
+            uid_key = f"pixiv:uid:{rt_tail}"
+            uid = await r.get(uid_key)
+            
+            if uid:
+                user_id = int(uid.decode() if isinstance(uid, bytes) else uid)
+            else:
+                await client._refresh_token()
+                user_id = client._api.user_id
+                if user_id:
+                    await r.setex(uid_key, 86400 * 30, str(user_id))
+                else:
+                    raise PermissionError("Could not determine Pixiv user_id")
+
+            result = await client.user_bookmarks(user_id, restrict=restrict, offset=offset)
+        except PermissionError as e:
+            raise HTTPException(status_code=401, detail=str(e))
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"Pixiv request failed: {e}")
+
+    await cache.set_pixiv_search_cache(cache_key, result)
+    return result
+
+
+# ── Illust bookmark operations ────────────────────────────────────────
+
+
+@_browse_router.get("/illust/{illust_id}/bookmark")
+async def get_illust_bookmark(
+    illust_id: int,
+    _: dict = Depends(require_auth),
+):
+    """Get bookmark status for an illust."""
+    # Check cached illust data first (has is_bookmarked)
+    cached = await cache.get_pixiv_illust_cache(illust_id)
+    if cached is not None:
+        return {"is_bookmarked": bool(cached.get("is_bookmarked", False))}
+
+    # Fall back to Pixiv API
+    try:
+        client = await _make_client()
+    except HTTPException:
+        raise
+    async with client:
+        try:
+            return await client.illust_bookmark_detail(illust_id)
+        except PermissionError as e:
+            raise api_error(401, "pixiv_token_invalid")
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+
+
+@_browse_router.post("/illust/{illust_id}/bookmark")
+async def add_illust_bookmark(
+    illust_id: int,
+    restrict: str = Query(default="public"),
+    _: dict = Depends(require_auth),
+):
+    """Add bookmark for an illust."""
+    client = await _make_client()
+    async with client:
+        try:
+            await client.illust_bookmark_add(illust_id, restrict=restrict)
+        except PermissionError as e:
+            raise api_error(401, "pixiv_token_invalid")
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+    # Invalidate illust cache + all my_bookmarks pages
+    from core.redis_client import get_redis
+    redis = get_redis()
+    await redis.delete(f"pixiv:illust:{illust_id}")
+    async for key in redis.scan_iter("my_bookmarks:*"):
+        await redis.delete(key)
+    return {"ok": True}
+
+
+@_browse_router.delete("/illust/{illust_id}/bookmark")
+async def delete_illust_bookmark(
+    illust_id: int,
+    _: dict = Depends(require_auth),
+):
+    """Delete bookmark for an illust."""
+    client = await _make_client()
+    async with client:
+        try:
+            await client.illust_bookmark_delete(illust_id)
+        except PermissionError as e:
+            raise api_error(401, "pixiv_token_invalid")
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+    # Invalidate illust cache + all my_bookmarks pages
+    from core.redis_client import get_redis
+    redis = get_redis()
+    await redis.delete(f"pixiv:illust:{illust_id}")
+    async for key in redis.scan_iter("my_bookmarks:*"):
+        await redis.delete(key)
+    return {"ok": True}
+
+
+# ── User follow operations ────────────────────────────────────────────
+
+
+@_browse_router.post("/user/{user_id}/follow")
+async def follow_user(
+    user_id: int,
+    restrict: str = Query(default="public"),
+    _: dict = Depends(require_auth),
+):
+    """Follow a Pixiv user."""
+    client = await _make_client()
+    async with client:
+        try:
+            await client.user_follow_add(user_id, restrict=restrict)
+        except PermissionError:
+            raise api_error(401, "pixiv_token_invalid")
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+    # Invalidate user cache so is_followed refreshes
+    from core.redis_client import get_redis
+    await get_redis().delete(f"pixiv:user:{user_id}")
+    return {"ok": True}
+
+
+@_browse_router.delete("/user/{user_id}/follow")
+async def unfollow_user(
+    user_id: int,
+    _: dict = Depends(require_auth),
+):
+    """Unfollow a Pixiv user."""
+    client = await _make_client()
+    async with client:
+        try:
+            await client.user_follow_delete(user_id)
+        except PermissionError:
+            raise api_error(401, "pixiv_token_invalid")
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=str(e))
+    from core.redis_client import get_redis
+    await get_redis().delete(f"pixiv:user:{user_id}")
+    return {"ok": True}
+
+
+# ── My following list ────────────────────────────────────────────────
+
+
+@_browse_router.get("/following")
+async def get_my_following(
+    restrict: str = Query(default="public"),
+    offset: int = Query(default=0, ge=0),
+    _: dict = Depends(require_auth),
+):
+    """Get the currently authenticated user's Pixiv following list (cached 5min)."""
+    cache_key = f"my_following:{restrict}:{offset}"
+    cached = await cache.get_pixiv_search_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    client = await _make_client()
+    async with client:
+        try:
+            from core.redis_client import get_redis
+            r = get_redis()
+            rt_tail = client.refresh_token[-10:] if client.refresh_token else "none"
+            uid_key = f"pixiv:uid:{rt_tail}"
+            uid = await r.get(uid_key)
+
+            if uid:
+                user_id = int(uid.decode() if isinstance(uid, bytes) else uid)
+            else:
+                await client._refresh_token()
+                user_id = client._api.user_id
+                if user_id:
+                    await r.setex(uid_key, 86400 * 30, str(user_id))
+                else:
+                    raise PermissionError("Could not determine Pixiv user_id")
+
+            result = await client.user_following(user_id, restrict=restrict, offset=offset)
+        except PermissionError as e:
+            raise HTTPException(status_code=401, detail=str(e))
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"Pixiv request failed: {e}")
+
+    await cache.set_pixiv_search_cache(cache_key, result)
+    return result
+
+
 # ── Following feed ───────────────────────────────────────────────────
 
 
@@ -654,6 +970,7 @@ async def get_following_feed(
 
 @_browse_router.get("/image-proxy")
 async def image_proxy(
+    request: Request,
     url: str = Query(...),
     auth: dict = Depends(require_auth),
 ):
@@ -662,7 +979,8 @@ async def image_proxy(
     Domain whitelist: i.pximg.net, i-f.pximg.net, s.pximg.net.
     Cached 24h in Redis.
     """
-    await check_rate_limit(f"img_proxy:pixiv:{auth['user_id']}", max_requests=120, window=60)
+    if not _is_private(get_client_ip(request)):
+        await check_rate_limit(f"img_proxy:pixiv:{auth['user_id']}", max_requests=120, window=60)
 
     parsed = urlparse(url)
     if parsed.scheme not in ("http", "https"):

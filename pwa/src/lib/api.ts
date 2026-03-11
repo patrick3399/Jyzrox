@@ -32,6 +32,7 @@ import type {
   PixivIllust,
   PixivSearchResult,
   PixivUserResult,
+  PixivUserPreview,
   FollowedArtist,
   ArtistSummary,
   ArtistImageItem,
@@ -802,6 +803,11 @@ const pixiv = {
   getIllust: (id: number) =>
     apiFetch<PixivIllust>(`/api/pixiv/illust/${id}`),
 
+  getIllustPages: (id: number) =>
+    apiFetch<{ pages: Array<{ page_num: number; url: string }>; page_count: number }>(
+      `/api/pixiv/illust/${id}/pages`,
+    ),
+
   getUser: (id: number) =>
     apiFetch<PixivUserResult>(`/api/pixiv/user/${id}`),
 
@@ -811,11 +817,34 @@ const pixiv = {
   getUserBookmarks: (id: number, offset = 0) =>
     apiFetch<PixivSearchResult>(`/api/pixiv/user/${id}/bookmarks?offset=${offset}`),
 
+  getMyBookmarks: (restrict = 'public', offset = 0) =>
+    apiFetch<PixivSearchResult>(`/api/pixiv/bookmarks?restrict=${restrict}&offset=${offset}`),
+
   getFollowingFeed: (offset = 0) =>
     apiFetch<PixivSearchResult>(`/api/pixiv/following/feed?offset=${offset}`),
 
+  getFollowing: (restrict = 'public', offset = 0) =>
+    apiFetch<{ user_previews: PixivUserPreview[]; next_offset: number | null }>(
+      `/api/pixiv/following?restrict=${restrict}&offset=${offset}`,
+    ),
+
   imageProxyUrl: (url: string) =>
     `/api/pixiv/image-proxy?url=${encodeURIComponent(url)}`,
+
+  addBookmark: (id: number, restrict: 'public' | 'private' = 'public') =>
+    apiFetch<{ ok: boolean }>(`/api/pixiv/illust/${id}/bookmark?restrict=${restrict}`, { method: 'POST' }),
+
+  deleteBookmark: (id: number) =>
+    apiFetch<{ ok: boolean }>(`/api/pixiv/illust/${id}/bookmark`, { method: 'DELETE' }),
+
+  getBookmarkStatus: (id: number) =>
+    apiFetch<{ is_bookmarked: boolean }>(`/api/pixiv/illust/${id}/bookmark`),
+
+  followUser: (id: number) =>
+    apiFetch<{ ok: boolean }>(`/api/pixiv/user/${id}/follow`, { method: 'POST' }),
+
+  unfollowUser: (id: number) =>
+    apiFetch<{ ok: boolean }>(`/api/pixiv/user/${id}/follow`, { method: 'DELETE' }),
 
   ranking: (params: { mode?: string; content?: string; date?: string; page?: number } = {}) => {
     const p = new URLSearchParams()

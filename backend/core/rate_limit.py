@@ -85,11 +85,11 @@ def get_client_ip(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 # Global per-IP limits (all methods)
-_GLOBAL_RATE_LIMIT = 120
+_GLOBAL_RATE_LIMIT = 600
 _GLOBAL_RATE_WINDOW = 60  # seconds
 
 # Stricter limit for mutating methods
-_WRITE_RATE_LIMIT = 30
+_WRITE_RATE_LIMIT = 120
 _WRITE_RATE_WINDOW = 60  # seconds
 
 # Paths that carry their own stricter per-endpoint limits — skip global check
@@ -101,6 +101,23 @@ _SKIP_GLOBAL: frozenset[str] = frozenset({
 _SKIP_GLOBAL_PREFIXES: tuple[str, ...] = (
     "/api/external/v1/",  # has its own per-token limiter
 )
+
+
+_PRIVATE_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("172.16.0.0/12"),   # covers 172.16–172.31
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("::1/128"),
+)
+
+
+def _is_private(ip_str: str) -> bool:
+    try:
+        addr = ipaddress.ip_address(ip_str)
+    except ValueError:
+        return False
+    return any(addr in net for net in _PRIVATE_NETWORKS)
 
 
 class RateLimitMiddleware(BaseHTTPMiddleware):
@@ -119,6 +136,10 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
             return await call_next(request)
 
         client_ip = get_client_ip(request)
+
+        # Bypass rate limiting for private/LAN clients
+        if _is_private(client_ip):
+            return await call_next(request)
         redis = get_redis()
 
         # 1. Global per-IP limit (all methods)
