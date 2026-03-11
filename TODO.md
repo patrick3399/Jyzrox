@@ -1,6 +1,6 @@
 # Jyzrox TODO
 
-> 最後更新：2026-03-11
+> 最後更新：2026-03-11（重構）
 
 ---
 
@@ -29,6 +29,24 @@
 
 > 需多階段實施或依賴較多。
 
+### 即時狀態推送（WebSocket）
+
+> **現狀**：下載佇列等核心狀態靠 SWR polling（每 3 秒一次）。WebSocket 基礎設施已存在（`/api/ws`），目前只用於系統警告推送。
+>
+> **目標**：Worker 完成/進度事件 → Redis pub/sub → WS handler 轉發前端，消除 polling。
+
+#### 後端
+- [ ] `worker/` 各 job function 完成/進度時發布 Redis 事件（`job:{id}:status`、`job:{id}:progress`）
+- [ ] `routers/ws.py` 訂閱 Redis channel，將事件轉發至 WebSocket 連線
+- [ ] 定義標準化 WebSocket 事件格式（`{ type: 'job_update', job_id, status, progress }`）
+
+#### 前端
+- [ ] `useDownloadQueue` 改為訂閱 WebSocket 事件，移除 3s polling
+- [ ] 下載進度條改為即時更新（毫秒級）
+- [ ] WS 斷線時自動 fallback 到 polling（`lib/ws.ts` 已有重連邏輯）
+
+---
+
 ### 多人權限管理
 
 #### 資料庫
@@ -48,6 +66,12 @@
 - [ ] Gallery 分享 UI：設定可見性、邀請使用者
 - [ ] 角色不足時的 403 提示頁面
 - [ ] 側邊欄根據角色隱藏管理入口
+
+#### 分享與內容控制
+- [ ] 分享連結：Gallery 產生公開短連結（token-based，可設過期時間）
+- [ ] Gallery 可見性設定（私有 / 公開 / 指定使用者）
+- [ ] 內容過濾：依 tag namespace 隱藏 gallery（家長控制 / R18 過濾）
+- [ ] 過濾規則存入 `user_preferences` 或擴充 `blocked_tags` 表
 
 ---
 
@@ -73,6 +97,34 @@
 - [ ] 移除 arq 依賴 + `core/compat.py` monkey-patch
 - [ ] 驗證：Python 3.14 環境下完整 worker pipeline 正常運行
 - [ ] 可選：啟用 SAQ Web UI dashboard
+
+### S3 儲存抽象層
+
+> **現狀**：CAS 層直接使用本機檔案系統（`os.link`、`Path`，綁定 `/data/cas/`）。
+>
+> **目標**：抽象 `StorageBackend` interface（local / S3-compatible），支援 MinIO、Cloudflare R2、AWS S3。個人用途目前不需要，NAS 搬遷或多節點部署時啟動。
+
+- [ ] 定義 `StorageBackend` ABC：`put(sha256, data)`, `get(sha256)`, `exists(sha256)`, `delete(sha256)`, `link(sha256, dest)`
+- [ ] `LocalStorageBackend`：封裝現有 `os.link` / Path 邏輯（zero-regression 重構）
+- [ ] `S3StorageBackend`：boto3/aiobotocore，支援任意 S3-compatible endpoint
+- [ ] CAS 層（`worker/importer.py`, `worker/reconciliation.py`）改為注入 `StorageBackend`
+- [ ] Nginx `/media/` 靜態服務配合：local 繼續直接 serve，S3 改為簽名 URL redirect
+- [ ] 設定欄位：`storage_backend`（`local` / `s3`）、`s3_endpoint`、`s3_bucket`、`s3_access_key`、`s3_secret_key`
+
+### 語意搜尋（pgvector）
+
+> **前提**：WD14 Tagger 微服務（`tagger/`）已建立，特徵提取基礎設施就位。
+>
+> **目標**：CLIP / WD14 特徵向量存入 `pgvector`，實現「以圖搜圖」與「文字語意搜 gallery」。
+
+- [ ] PostgreSQL 啟用 `pgvector` extension（`db/init.sql` 或新 migration）
+- [ ] `blobs` 表新增 `embedding vector(512)` 欄位
+- [ ] `tagger/app.py` 新增 `/embed` 端點：回傳 CLIP/WD14 特徵向量（不只是 tag 列表）
+- [ ] `worker/tagging.py` `tag_job` 完成後寫入 embedding 到 `blobs.embedding`
+- [ ] 後端搜尋端點新增 `semantic_query` 參數（`GET /api/library/galleries?semantic=...`）
+- [ ] 搜尋邏輯：文字 query → embedding → `<=>` cosine distance 排序
+- [ ] 前端 Library 搜尋列新增「語意搜尋」模式切換
+- [ ] 以圖搜圖：上傳圖片 → 提取 embedding → 找最相似 gallery
 
 ### Plugin 系統完善
 

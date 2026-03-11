@@ -1,6 +1,6 @@
-# Jyzrox Architecture (v0.1)
+# Jyzrox Architecture (v0.3)
 
-> Codebase audit, 2026-03-10. Read from source files — do not update manually; regenerate from source.
+> Codebase audit, 2026-03-11. Read from source files — do not update manually; regenerate from source.
 
 ---
 
@@ -16,6 +16,9 @@
 | `pwa` | `./pwa` (Next.js, port 3000) | internal | frontend | 1 CPU / 512 MB |
 | `postgres` | `postgres:18-alpine` | internal | backend | 2 CPU / 2 GB |
 | `redis` | `redis:8-alpine` | internal | backend | 1 CPU / 1 GB |
+| `tagger` | `./tagger` (FastAPI :8100, ONNX inference) | internal | backend | — |
+
+> `tagger` service is optional — started only with `--profile tagging`. Worker calls it via HTTP (`POST /predict`) and gracefully skips if offline.
 
 ### Networks
 
@@ -31,6 +34,7 @@
 | `app_data` | Shared `/data` mount (gallery files, thumbs, CAS, avatars) |
 | `postgres_data` | PostgreSQL data directory |
 | `redis_data` | Redis AOF persistence |
+| `tagger_models` | HuggingFace model cache for WD14 tagger |
 
 ### Container UID
 
@@ -114,11 +118,13 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `blocked_tags` | Per-user tag blocklist | `id`, `(user_id, namespace, name)` UNIQUE |
 | `library_paths` | User-configured scan paths | `id`, `path` UNIQUE, `label`, `enabled`, `monitor` |
 | `plugin_config` | Plugin enable/config | `source_id` PK, `enabled`, `config_json` JSONB |
-| `audit_logs` | Security audit trail | `id`, `user_id` FK, `action`, `resource_type`, `resource_id`, `details` JSONB, `ip_address`, `created_at` |
+| `audit_logs` | Security audit trail (schema-only; no ORM model or application code yet) | `id`, `user_id` FK, `action`, `resource_type`, `resource_id`, `details` JSONB, `ip_address`, `created_at` |
 | `subscriptions` | Artist/source subscriptions | `id`, `(user_id, url)` UNIQUE, `name`, `url`, `source`, `source_id`, `avatar_url`, `enabled`, `auto_download`, `cron_expr`, `last_checked_at`, `last_item_id`, `last_status`, `last_error`, `next_check_at`, `created_at` |
 | `collections` | Gallery collections | `id`, `user_id` FK, `name`, `description`, `cover_gallery_id` |
 | `collection_galleries` | Collection↔Gallery join | `(collection_id, gallery_id)` PK, `position` |
 | `excluded_blobs` | Per-gallery blob exclusions | `(gallery_id, blob_sha256)` PK, `excluded_at` |
+
+> **Note:** Tables `collections`, `collection_galleries`, and `excluded_blobs` are created via Alembic migrations (`0005b`, `0007`), not in `db/init.sql`. The `audit_logs` table is also migration-only (`0005`).
 
 #### Key Indexes
 
@@ -169,7 +175,7 @@ All models are in `backend/db/models.py`.
 
 ### Worker Pipeline (ARQ)
 
-Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `download.py`, `importer.py`, `subscription.py`)
+Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`)
 
 #### Job Functions
 
@@ -321,6 +327,8 @@ All fields read from `.env` via Pydantic `BaseSettings`.
 | `tag_model_name` | `SmilingWolf/wd-swinv2-tagger-v3` | HuggingFace model ID |
 | `tag_general_threshold` | `0.35` | General tag confidence threshold |
 | `tag_character_threshold` | `0.85` | Character tag confidence threshold |
+| `tagger_url` | `http://tagger:8100` | WD14 tagger microservice URL |
+| `tagger_timeout` | `30` | Tagger HTTP request timeout (seconds) |
 
 #### Storage Paths
 
@@ -395,9 +403,9 @@ Source root: `pwa/src/`
 | `/` | `app/page.tsx` | Dashboard — recent galleries + active downloads |
 | `/login` | `app/login/page.tsx` | Username + password login form |
 | `/setup` | `app/setup/page.tsx` | First-run admin account creation |
-| `/browse` | `app/browse/page.tsx` | E-Hentai search + quick download |
-| `/browse/[gid]/[token]` | `app/browse/[gid]/[token]/page.tsx` | EH gallery detail page |
-| `/browse/read/[gid]/[token]` | `app/browse/read/[gid]/[token]/page.tsx` | EH online reader (proxy mode) |
+| `/e-hentai` | `app/e-hentai/page.tsx` | E-Hentai search + quick download |
+| `/e-hentai/[gid]/[token]` | `app/e-hentai/[gid]/[token]/page.tsx` | EH gallery detail page |
+| `/e-hentai/[gid]/[token]/read` | `app/e-hentai/[gid]/[token]/read/page.tsx` | EH online reader (proxy mode) |
 | `/library` | `app/library/page.tsx` | Local gallery grid with tag/rating/source filters |
 | `/library/[id]` | `app/library/[id]/page.tsx` | Gallery detail — tags, thumbnails, read/favorite |
 | `/reader/[galleryId]` | `app/reader/[galleryId]/page.tsx` | Full local reader (single/webtoon/double-page) |
@@ -414,6 +422,8 @@ Source root: `pwa/src/`
 | `/pixiv/following` | `app/pixiv/following/page.tsx` | Pixiv following feed |
 | `/pixiv/user/[id]` | `app/pixiv/user/[id]/page.tsx` | Pixiv user profile |
 | `/pixiv/illust/[id]` | `app/pixiv/illust/[id]/page.tsx` | Pixiv illust detail |
+| `/subscriptions` | `app/subscriptions/page.tsx` | Subscription management (followed artists/sources) |
+| `/explorer` | `app/explorer/page.tsx` | File explorer for local library paths |
 | `/share-target` | `app/share-target/page.tsx` | PWA Web Share Target handler |
 
 ---
@@ -431,6 +441,7 @@ Source root: `pwa/src/`
 | `TagAutocomplete` | `components/TagAutocomplete.tsx` | Autocomplete dropdown for tag search |
 | `ErrorBoundary` | `components/ErrorBoundary.tsx` | React error boundary wrapper |
 | `LayoutShell` | `components/LayoutShell.tsx` | App shell with sidebar + mobile nav |
+| `CredentialBanner` | `components/CredentialBanner.tsx` | Banner alert when source credentials are missing or invalid |
 | `Sidebar` | `components/Sidebar.tsx` | Desktop navigation sidebar |
 | `MobileNav` | `components/MobileNav.tsx` | Bottom navigation for mobile |
 | `NavBar` | `components/NavBar.tsx` | Top navigation bar |
@@ -459,6 +470,9 @@ All hooks in `pwa/src/hooks/`.
 | `useImport` | `useImport.ts` | Import flow state and progress |
 | `useArtists` | `useArtists.ts` | Followed artists listing and actions |
 | `useTagTranslations` | `useTagTranslations.ts` | Tag translation lookup (SWR) |
+| `useCollections` | `useCollections.ts` | Collection CRUD and gallery management (SWR) |
+| `useScheduledTasks` | `useScheduledTasks.ts` | Scheduled task listing, enable/disable, manual run |
+| `useSubscriptions` | `useSubscriptions.ts` | Subscription CRUD and manual check trigger |
 
 ---
 
@@ -483,6 +497,9 @@ Single `apiFetch` base function with automatic 401 redirect and CSRF header inje
 | `plugins` | list plugins |
 | `pixiv` | search, illust, user, following |
 | `artists` | followed artists |
+| `collections` | collection CRUD, add/remove galleries |
+| `scheduledTasks` | task listing, enable/disable, manual run |
+| `subscriptions` | subscription CRUD, manual check trigger |
 
 ---
 
