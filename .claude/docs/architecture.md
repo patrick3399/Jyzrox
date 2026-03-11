@@ -1,6 +1,6 @@
 # Jyzrox Architecture (v0.3)
 
-> Codebase audit, 2026-03-11. Read from source files — do not update manually; regenerate from source.
+> Codebase audit, 2026-03-12. Read from source files — do not update manually; regenerate from source.
 
 ---
 
@@ -87,6 +87,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `/api/artists` | `routers/artists.py` | Session | Followed artists (Pixiv/EH) |
 | `/api/collections` | `routers/collections.py` | Session | Collection CRUD, add/remove galleries |
 | `/api/scheduled-tasks` | `routers/scheduled_tasks.py` | Session | Scheduled task listing, enable/disable, manual run |
+| `/api/dedup` | `routers/dedup.py` | Session | Dedup stats, review list, keep/whitelist/skip actions, scan start/stop/progress |
 | `/api/subscriptions` | `routers/subscriptions.py` | Session | Subscription CRUD, manual check trigger |
 | `/opds` | `routers/opds.py` | HTTP Basic Auth | OPDS catalog for e-readers |
 | `/api/health` | `main.py` inline | Public | Liveness probe |
@@ -123,8 +124,9 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `collections` | Gallery collections | `id`, `user_id` FK, `name`, `description`, `cover_gallery_id` |
 | `collection_galleries` | Collection↔Gallery join | `(collection_id, gallery_id)` PK, `position` |
 | `excluded_blobs` | Per-gallery blob exclusions | `(gallery_id, blob_sha256)` PK, `excluded_at` |
+| `blob_relationships` | Dedup pair store | `id` UUID PK, `sha_a / sha_b` FK → `blobs` (`CHECK sha_a < sha_b`, `UNIQUE` pair), `hamming_dist SMALLINT`, `relationship TEXT` (`quality_conflict`/`variant`/`whitelisted`/`needs_t3`/`resolved`), `suggested_keep TEXT`, `diff_type TEXT`, `diff_score FLOAT`, `size_ratio FLOAT`, `tier SMALLINT`, `reviewed BOOLEAN`, `created_at` |
 
-> **Note:** Tables `collections`, `collection_galleries`, and `excluded_blobs` are created via Alembic migrations (`0005b`, `0007`), not in `db/init.sql`. The `audit_logs` table is also migration-only (`0005`).
+> **Note:** Tables `collections`, `collection_galleries`, and `excluded_blobs` are created via Alembic migrations (`0005b`, `0007`), not in `db/init.sql`. The `audit_logs` table is also migration-only (`0005`). `blob_relationships` is created in `db/init.sql`.
 
 #### Key Indexes
 
@@ -170,12 +172,13 @@ All models are in `backend/db/models.py`.
 | `Collection` | `collections` |
 | `CollectionGallery` | `collection_galleries` |
 | `ExcludedBlob` | `excluded_blobs` |
+| `BlobRelationship` | `blob_relationships` |
 
 ---
 
 ### Worker Pipeline (ARQ)
 
-Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`)
+Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`)
 
 #### Job Functions
 
@@ -197,6 +200,10 @@ Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py
 | `check_followed_artists` | ARQ cron / `/api/subscriptions/` POST | Check all subscribable sources for new works; enqueues `download_job` per work when `auto_download=true`; cron default `30 */2 * * *` |
 | `check_single_subscription` | `/api/subscriptions/{id}/check` | Check a single subscription for new works |
 | `batch_import_job` | `/api/import/batch/start` | Batch import multiple local directories |
+| `dedup_scan_job` | Manual (`POST /api/dedup/scan/start`) / scheduled | Orchestrates full dedup pipeline: runs Tier 1 → Tier 2 → optionally Tier 3; tracks progress in Redis |
+| `dedup_tier1_job` | Via `dedup_scan_job` | pHash pigeonhole scan → Hamming distance → writes `blob_relationships` |
+| `dedup_tier2_job` | Via `dedup_scan_job` | Heuristic classification: fills `relationship` (`quality_conflict`/`variant`) + `suggested_keep` |
+| `dedup_tier3_job` | Via `dedup_scan_job` (when `dedup_opencv_enabled`) | OpenCV pixel-diff validates `needs_t3` pairs → confirms or resolves as false positive |
 
 #### Standard Pipeline
 
@@ -307,6 +314,18 @@ All fields read from `.env` via Pydantic `BaseSettings`.
 | `download_eh_enabled` | `true` | EH download feature |
 | `download_pixiv_enabled` | `true` | Pixiv download feature |
 | `download_gallery_dl_enabled` | `true` | gallery-dl fallback feature |
+
+#### Dedup Settings (Redis-backed)
+
+> Dedup 設定不在 `core/config.py`，而是存於 Redis（`setting:dedup_*`），可在 `/api/settings` 動態修改。
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `setting:dedup_phash_enabled` | `false` | Enable Tier 1 pHash scan |
+| `setting:dedup_phash_threshold` | `10` | Hamming distance threshold (0–64) |
+| `setting:dedup_heuristic_enabled` | `false` | Enable Tier 2 heuristic classification |
+| `setting:dedup_opencv_enabled` | `false` | Enable Tier 3 OpenCV pixel-diff |
+| `setting:dedup_opencv_threshold` | `0.85` | OpenCV similarity threshold |
 
 #### E-Hentai Limits
 
@@ -425,6 +444,8 @@ Source root: `pwa/src/`
 | `/subscriptions` | `app/subscriptions/page.tsx` | Subscription management (followed artists/sources) |
 | `/explorer` | `app/explorer/page.tsx` | File explorer for local library paths |
 | `/share-target` | `app/share-target/page.tsx` | PWA Web Share Target handler |
+| `/scheduled-tasks` | `app/scheduled-tasks/page.tsx` | Scheduled task management — list, enable/disable, cron edit, manual run |
+| `/dedup` | `app/dedup/page.tsx` | Dedup dashboard — tier settings, scan trigger, review list with keep/whitelist/skip actions |
 
 ---
 
@@ -454,6 +475,14 @@ Source root: `pwa/src/`
 | `SWUpdatePrompt` | `components/SWUpdatePrompt.tsx` | PWA service worker update prompt |
 | `LocaleProvider` | `components/LocaleProvider.tsx` | i18n locale context provider |
 | `ThemeProvider` | `components/ThemeProvider.tsx` | Dark/light theme context |
+| `TaskList` | `components/ScheduledTasks/TaskList.tsx` | Scheduled task list container |
+| `TaskCard` | `components/ScheduledTasks/TaskCard.tsx` | Individual task card — cron inline edit, enable toggle, run button |
+| `StatusBadge` | `components/ScheduledTasks/StatusBadge.tsx` | Task status badge (running/success/failed) |
+| `ReviewList` | `components/Dedup/ReviewList.tsx` | Dedup review list with filtering and pagination |
+| `RelationshipCard` | `components/Dedup/RelationshipCard.tsx` | Side-by-side pair display with keep/whitelist/skip actions |
+| `DedupSettingsCard` | `components/Dedup/DedupSettingsCard.tsx` | Tier enable toggles + threshold sliders |
+| `DedupTierCard` | `components/Dedup/DedupTierCard.tsx` | Per-tier status and config |
+| `ImageModal` | `components/Dedup/ImageModal.tsx` | Full-size image preview modal for dedup review |
 
 ---
 
@@ -473,6 +502,7 @@ All hooks in `pwa/src/hooks/`.
 | `useCollections` | `useCollections.ts` | Collection CRUD and gallery management (SWR) |
 | `useScheduledTasks` | `useScheduledTasks.ts` | Scheduled task listing, enable/disable, manual run |
 | `useSubscriptions` | `useSubscriptions.ts` | Subscription CRUD and manual check trigger |
+| `useDedup` | `useDedup.ts` | Dedup stats, review list, keep/whitelist/skip actions, scan control |
 
 ---
 
@@ -500,6 +530,7 @@ Single `apiFetch` base function with automatic 401 redirect and CSRF header inje
 | `collections` | collection CRUD, add/remove galleries |
 | `scheduledTasks` | task listing, enable/disable, manual run |
 | `subscriptions` | subscription CRUD, manual check trigger |
+| `dedup` | dedup stats, review list, keep/whitelist/skip/delete, scan start/stop/progress |
 
 ---
 
@@ -624,6 +655,12 @@ Credentials are read from `.env` at project root. DB user/name default to `vault
 | `rescan:progress` | — | Rescan job progress |
 | `rescan:cancel` | — | Rescan cancellation flag |
 | `system:alerts` | — | System alert messages |
+| `dedup:progress:status` | — | Dedup scan status (`idle`/`running`/`done`/`error`) |
+| `dedup:progress:signal` | — | Scan control signal (`stop`) |
+| `dedup:progress:current` | — | Processed pairs count |
+| `dedup:progress:total` | — | Total pairs to process |
+| `dedup:progress:tier` | — | Currently active tier |
+| `dedup:progress:mode` | — | Scan mode |
 
 ---
 
