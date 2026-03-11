@@ -1,6 +1,6 @@
 # Jyzrox TODO
 
-> 最後更新：2026-03-11
+> 最後更新：2026-03-12
 
 ---
 
@@ -8,107 +8,15 @@
 
 > 獨立功能，少依賴，能快速上線。
 
-### 排程任務管理頁面（/scheduled-tasks）
+### ~~排程任務管理頁面（/scheduled-tasks）~~ ✅ 已完成
 
-> **現狀**：後端 `GET/PATCH/POST /api/scheduled-tasks` 已全部實作，
-> 支援 library_scan / reconciliation / check_subscriptions 三個 cron job，
-> 狀態存 Redis，可手動觸發。前端頁面與側邊欄入口尚未建立。
-
-#### 前端
-- [ ] `/scheduled-tasks` 頁面：列出所有排程任務卡片
-  - 顯示：任務名稱、描述、cron 表達式、上次執行時間、上次狀態（成功/失敗/執行中）
-  - 開關：啟用/停用（`PATCH /{id}` enabled）
-  - cron 表達式內聯編輯（驗證格式後 PATCH）
-  - 「立即執行」按鈕（`POST /{id}/run`）+ 執行中 loading 狀態
-  - 失敗時顯示 last_error 展開區塊
-- [ ] 側邊欄新增入口（`/scheduled-tasks`，圖示 `CalendarClock`）
-- [ ] i18n keys（`scheduledTasks.*`）
+> 後端 API + 前端頁面全部實作。`/scheduled-tasks` 頁面支援任務卡片、cron 內聯編輯、啟用/停用、立即執行、失敗 last_error 展開。側邊欄入口、i18n 已整合。
 
 ---
 
-### 去重系統（Tiered Dedup）
+### ~~去重系統（Tiered Dedup）~~ ✅ 已完成
 
-> **現狀**：Tier 0（SHA256 exact dedup）完整實作，CAS ref_count 管理正常。
-> `blobs` 表已有 `width/height/file_size/phash_int/phash_q0~q3`，掃描基礎設施就位。
->
-> **目標**：分層漸進式去重，預設只有 Tier 0 啟用，其餘需手動開啟。
-> 低效能裝置不受影響；高效能裝置可逐層啟用。
-
-#### 分層說明
-
-| Tier | 名稱 | 預設 | 資源消耗 |
-|------|------|------|---------|
-| 0 | SHA256 精確去重 | 永遠開啟 | 零（匯入時同步） |
-| 1 | pHash 相似掃描 | **關閉** | 輕量（純 DB） |
-| 2 | Heuristic 分類 | **關閉** | 極輕量（純 metadata） |
-| 3 | Deep Pixel Diff (OpenCV) | **關閉** | CPU 密集（P3 再做） |
-
-#### 資料庫
-- [ ] 新增 `blob_relationships` 表
-  - `sha256_a / sha256_b`（`CHECK sha256_a < sha256_b`，`UNIQUE` pair，正規化排序）
-  - `hamming_dist SMALLINT`（pHash 漢明距離 0–64）
-  - `relationship TEXT`（`quality_conflict` / `variant` / `whitelisted`）
-  - `suggested_keep TEXT`（heuristic 建議保留的 sha256）
-  - `diff_type TEXT`（null / `compression_noise` / `localized_diff`，Tier 3 填寫）
-  - `diff_score FLOAT`（OpenCV 分析分數，Tier 3 填寫）
-  - `size_ratio FLOAT`（`file_size_a / file_size_b`）
-  - `tier SMALLINT`（由哪層產生）
-  - `reviewed BOOLEAN DEFAULT FALSE`
-  - `created_at TIMESTAMPTZ DEFAULT now()`
-- [ ] 遷移腳本
-
-#### Config
-- [ ] `core/config.py` 新增 dedup 設定欄位
-  - `dedup_phash_enabled: bool = False`（Tier 1，預設關閉）
-  - `dedup_phash_threshold: int = 10`（漢明距離閾值，0–64）
-  - `dedup_heuristic_enabled: bool = False`（Tier 2，預設關閉）
-  - `dedup_batch_size: int = 500`（每批掃描筆數）
-  - `dedup_schedule: str = "0 3 * * *"`（排程，預設凌晨 3 點）
-
-#### 後端 — Tier 1 pHash 掃描
-- [ ] `services/dedup.py`：`scan_phash_pairs(batch_size, threshold)`
-  - 四象限 pre-filter → Hamming distance 計算 → 寫入 `blob_relationships`
-  - 已有 `whitelisted` pair 跳過，不重複插入
-- [ ] `scheduled_tasks.py` 新增 `dedup_scan` task（`dedup_phash_enabled` 為 false 時自動 skip）
-- [ ] `GET /api/dedup/stats`：總 pairs 數、待審查數、已白名單數
-
-#### 後端 — Tier 2 Heuristic 分類
-- [ ] `services/dedup.py`：`classify_relationships()`
-  - 品質衝突：`width*height` 差 > 20% 或 `size_ratio > 2.0` → `quality_conflict`，填 `suggested_keep`（尺寸大/檔案大者）
-  - 差分疑似：尺寸相同 且 `0.8 ≤ size_ratio ≤ 1.25` → `variant`，`suggested_keep = null`
-- [ ] 作為 `dedup_scan_job` 後處理步驟（同一 job，受 `dedup_heuristic_enabled` 控制）
-
-#### 後端 — 審查 API
-- [ ] `routers/dedup.py`（新建，prefix `/api/dedup`）
-  - `GET /review`：列出待審關係（可篩 relationship / reviewed，cursor 分頁）
-  - `POST /review/{id}/keep`：Replace & Delete 低畫質副本
-    1. `UPDATE images SET blob_sha256=suggested_keep WHERE blob_sha256=other`
-    2. `decrement_ref_count(other_sha256)`
-    3. `ref_count ≤ 0` → `os.unlink` CAS 實體檔 + `DELETE FROM blobs`
-    4. rebuild affected gallery symlinks
-  - `POST /review/{id}/whitelist`：標記白名單，掃描永久跳過此 pair
-  - `DELETE /review/{id}`：略過（不白名單，只標 reviewed=true）
-- [ ] `main.py` 註冊 router（`prefix="/api/dedup"`）
-- [ ] Auth 保護所有端點
-
-#### 前端
-- [ ] `/dedup` 頁面（側邊欄入口，圖示 `ScanSearch`）
-  - **設定區塊**（頁面頂部卡片）：
-    - Tier 1 pHash 掃描：開關 + 漢明距離滑桿（0–20）
-    - Tier 2 Heuristic 分類：開關（依賴 Tier 1，Tier 1 關閉時 disabled）
-    - 排程 cron 表達式顯示（連結到 `/scheduled-tasks` 頁修改）
-    - 「立即掃描」按鈕（觸發 `/scheduled-tasks` dedup_scan run）
-    - 統計：已掃 X pairs，待審 Y 組，已解決 Z 組
-  - **審查列表**（主區塊）：
-    - 依 relationship 分類顯示（品質衝突 / 差分疑似）
-    - 每組並排顯示兩張圖：解析度、檔案大小、pHash 距離
-    - 品質衝突：高亮建議保留版（綠框），另一張預設標記刪除（紅框）
-    - 差分疑似：中性呈現，兩張並排無建議
-    - 操作按鈕：「刪除低畫質」（Replace & Delete）/ 「標為差分」（Whitelist）/ 「略過」
-  - 空狀態：未啟用時顯示「開啟 Tier 1 開始掃描」引導提示
-- [ ] 側邊欄新增入口（`/dedup`，圖示 `ScanSearch`）
-- [ ] i18n keys（`dedup.*`）
-- [ ] `api.ts` 新增 dedup 端點型別
+> 3-tier pipeline 全部實作。`blob_relationships` 表已建立，Tier 1（pHash）、Tier 2（Heuristic）、Tier 3（OpenCV）全部完成。審查 API（`/api/dedup`）含 stats、review、keep、whitelist、scan/start/stop/progress。前端 `/dedup` 頁面、設定卡片、審查列表、側邊欄入口、i18n、`api.ts` 型別全部整合。
 
 ---
 
@@ -395,5 +303,21 @@
 - [x] Frontend 242 tests
 - [x] WebSocket 斷線重連（3 秒自動重連，`lib/ws.ts`）
 - [x] Redis 快取統計端點（`GET /api/system/cache`）
+
+### 排程任務管理（v0.3）
+- [x] `/scheduled-tasks` 頁面（任務卡片、cron 內聯編輯、啟用/停用、立即執行、last_error 展開）
+- [x] 側邊欄 `CalendarClock` 入口
+- [x] i18n `scheduledTasks.*` keys
+
+### 去重系統 Tiered Dedup（v0.3）
+- [x] `blob_relationships` 表（hamming_dist / relationship / suggested_keep / diff_score / tier / reviewed）
+- [x] Tier 1 pHash 掃描（四象限 pre-filter → Hamming distance → `blob_relationships`）
+- [x] Tier 2 Heuristic 分類（quality_conflict / variant，自動填 suggested_keep）
+- [x] Tier 3 OpenCV pixel-diff 驗證（needs_t3 → quality_conflict / resolved）
+- [x] `GET /api/dedup/stats`、`GET /api/dedup/review`、`POST /keep`、`POST /whitelist`、`DELETE /{id}`
+- [x] scan/start、scan/stop、scan/progress 端點
+- [x] Dedup config 欄位（phash_enabled / threshold / heuristic_enabled / opencv_enabled / batch_size / schedule）
+- [x] `/dedup` 前端頁面（設定卡片、審查列表、並排圖片、操作按鈕、空狀態引導）
+- [x] 側邊欄 `ScanSearch` 入口，i18n `dedup.*` keys，`api.ts` 型別
 
 </details>
