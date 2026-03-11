@@ -260,8 +260,11 @@ class PixivClient:
         try:
             qs = parse_qs(urlparse(next_url).query)
             offset_vals = qs.get("offset", [])
+            max_bookmark_id_vals = qs.get("max_bookmark_id", [])
             if offset_vals:
                 return int(offset_vals[0])
+            if max_bookmark_id_vals:
+                return int(max_bookmark_id_vals[0])
         except (ValueError, KeyError):
             pass
         return None
@@ -331,8 +334,11 @@ class PixivClient:
         offset: int = 0,
     ) -> dict:
         """Get user bookmarks. Returns {illusts, next_offset}."""
+        kwargs = {"restrict": restrict}
+        if offset > 0:
+            kwargs["max_bookmark_id"] = offset
         result = await self._call(
-            self._api.user_bookmarks_illust, user_id, restrict=restrict, offset=offset
+            self._api.user_bookmarks_illust, user_id, **kwargs
         )
         return self._normalize_illust_list(result)
 

@@ -431,6 +431,83 @@ function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
   )
 }
 
+// ── Bookmarks Tab ────────────────────────────────────────────────────────
+
+function BookmarksTab({ credentialsMissing }: { credentialsMissing: boolean }) {
+  const [restrict, setRestrict] = useState('public')
+  const getKey = (pageIndex: number, previous: PixivSearchResult | null) => {
+    if (credentialsMissing) return null
+    if (pageIndex > 0 && previous?.next_offset === null) return null
+    const offset = pageIndex === 0 ? 0 : (previous?.next_offset ?? 0)
+    return ['/pixiv/bookmarks', restrict, offset]
+  }
+
+  const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
+    getKey,
+    ([, r, offset]) => api.pixiv.getMyBookmarks(r as string, offset as number),
+    { revalidateFirstPage: false },
+  )
+
+  const allIllusts = data?.flatMap((page) => page.illusts) ?? []
+  const hasMore = data ? data[data.length - 1]?.next_offset !== null : false
+  const isLoading = !data && isValidating
+
+  if (credentialsMissing) {
+    return (
+      <div className="text-center py-16 text-vault-text-secondary">
+        <p>{t('pixiv.noCredentials')}</p>
+        <Link href="/credentials" className="text-vault-accent underline mt-2 inline-block">
+          {t('nav.credentials')}
+        </Link>
+      </div>
+    )
+  }
+
+  return (
+    <div className="space-y-4">
+      <div className="flex justify-end gap-2">
+        <select
+          value={restrict}
+          onChange={(e) => setRestrict(e.target.value)}
+          className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
+        >
+          <option value="public">{t('browse.rankingAll') || 'Public'}</option>
+          <option value="private">Private</option>
+        </select>
+      </div>
+
+      {isLoading && (
+        <div className="flex justify-center py-12">
+          <LoadingSpinner />
+        </div>
+      )}
+
+      {error && (
+        <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
+          <p className="text-red-400">{t('common.failedToLoad')}</p>
+        </div>
+      )}
+
+      {!isLoading && !error && allIllusts.length === 0 && (
+        <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
+      )}
+
+      <VirtualGrid
+        items={allIllusts}
+        columns={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
+        gap={12}
+        estimateHeight={200}
+        renderItem={(illust) => (
+          <IllustCard key={illust.id} illust={illust} />
+        )}
+        onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
+        hasMore={hasMore}
+        isLoading={isValidating}
+      />
+    </div>
+  )
+}
+
 // ── Ranking Tab ───────────────────────────────────────────────────────────
 
 const RANKING_MODES = [
@@ -565,14 +642,14 @@ function RankingTab() {
 
 // ── Main Page ────────────────────────────────────────────────────────────
 
-type Tab = 'feed' | 'following' | 'ranking'
+type Tab = 'feed' | 'following' | 'ranking' | 'bookmarks'
 
 function PixivPageInner() {
   useLocale()
   const searchParams = useSearchParams()
   const rawTab = searchParams.get('tab') as Tab | null
   const initialTab: Tab =
-    rawTab === 'feed' || rawTab === 'following' ? rawTab : 'ranking'
+    rawTab === 'feed' || rawTab === 'following' || rawTab === 'bookmarks' ? rawTab : 'ranking'
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
 
   // Search state
@@ -679,6 +756,16 @@ function PixivPageInner() {
                 >
                   {t('pixiv.followingTab')}
                 </button>
+                <button
+                  onClick={() => setActiveTab('bookmarks')}
+                  className={`shrink-0 px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
+                    activeTab === 'bookmarks'
+                      ? 'border-[#ff9800] text-vault-text'
+                      : 'border-transparent text-vault-text-muted hover:text-vault-text'
+                  }`}
+                >
+                  {t('pixiv.bookmarks') || 'Bookmarks'}
+                </button>
               </>
             )}
           </div>
@@ -687,6 +774,7 @@ function PixivPageInner() {
           {activeTab === 'ranking' && <RankingTab />}
           {activeTab === 'feed' && !credentialsMissing && <FeedTab credentialsMissing={false} />}
           {activeTab === 'following' && !credentialsMissing && <FollowingTab credentialsMissing={false} />}
+          {activeTab === 'bookmarks' && !credentialsMissing && <BookmarksTab credentialsMissing={false} />}
         </>
       )}
     </div>

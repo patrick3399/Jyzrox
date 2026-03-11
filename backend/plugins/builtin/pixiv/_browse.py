@@ -621,6 +621,47 @@ async def get_user_bookmarks(
     return result
 
 
+@_browse_router.get("/bookmarks")
+async def get_my_bookmarks(
+    restrict: str = Query(default="public"),
+    offset: int = Query(default=0, ge=0),
+    _: dict = Depends(require_auth),
+):
+    """Get the currently authenticated user's bookmarks (cached 5min)."""
+    cache_key = f"my_bookmarks:{restrict}:{offset}"
+    cached = await cache.get_pixiv_search_cache(cache_key)
+    if cached is not None:
+        return cached
+
+    client = await _make_client()
+    async with client:
+        try:
+            from core.redis_client import get_redis
+            r = get_redis()
+            rt_tail = client.refresh_token[-10:] if client.refresh_token else "none"
+            uid_key = f"pixiv:uid:{rt_tail}"
+            uid = await r.get(uid_key)
+            
+            if uid:
+                user_id = int(uid.decode() if isinstance(uid, bytes) else uid)
+            else:
+                await client._refresh_token()
+                user_id = client._api.user_id
+                if user_id:
+                    await r.setex(uid_key, 86400 * 30, str(user_id))
+                else:
+                    raise PermissionError("Could not determine Pixiv user_id")
+
+            result = await client.user_bookmarks(user_id, restrict=restrict, offset=offset)
+        except PermissionError as e:
+            raise HTTPException(status_code=401, detail=str(e))
+        except httpx.HTTPError as e:
+            raise HTTPException(status_code=502, detail=f"Pixiv request failed: {e}")
+
+    await cache.set_pixiv_search_cache(cache_key, result)
+    return result
+
+
 # ── Following feed ───────────────────────────────────────────────────
 
 

@@ -811,6 +811,9 @@ const pixiv = {
   getUserBookmarks: (id: number, offset = 0) =>
     apiFetch<PixivSearchResult>(`/api/pixiv/user/${id}/bookmarks?offset=${offset}`),
 
+  getMyBookmarks: (restrict = 'public', offset = 0) =>
+    apiFetch<PixivSearchResult>(`/api/pixiv/bookmarks?restrict=${restrict}&offset=${offset}`),
+
   getFollowingFeed: (offset = 0) =>
     apiFetch<PixivSearchResult>(`/api/pixiv/following/feed?offset=${offset}`),
 
