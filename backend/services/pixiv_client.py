@@ -147,21 +147,21 @@ class PixivClient:
     @staticmethod
     def _normalize_illust(illust) -> dict:
         """Normalise a pixivpy3 illust object/dict to our internal format."""
-        if hasattr(illust, "__dict__"):
+        if not isinstance(illust, dict) and hasattr(illust, "__dict__"):
             illust = illust.__dict__
 
         user = illust.get("user") or {}
-        if hasattr(user, "__dict__"):
+        if not isinstance(user, dict) and hasattr(user, "__dict__"):
             user = user.__dict__
 
         user_image_urls = user.get("profile_image_urls") or {}
-        if hasattr(user_image_urls, "__dict__"):
+        if not isinstance(user_image_urls, dict) and hasattr(user_image_urls, "__dict__"):
             user_image_urls = user_image_urls.__dict__
 
         tags_raw = illust.get("tags") or []
         tags = []
         for t in tags_raw:
-            if hasattr(t, "__dict__"):
+            if not isinstance(t, dict) and hasattr(t, "__dict__"):
                 t = t.__dict__
             tags.append({
                 "name": t.get("name", ""),
@@ -169,20 +169,20 @@ class PixivClient:
             })
 
         image_urls_raw = illust.get("image_urls") or {}
-        if hasattr(image_urls_raw, "__dict__"):
+        if not isinstance(image_urls_raw, dict) and hasattr(image_urls_raw, "__dict__"):
             image_urls_raw = image_urls_raw.__dict__
 
         meta_single = illust.get("meta_single_page") or {}
-        if hasattr(meta_single, "__dict__"):
+        if not isinstance(meta_single, dict) and hasattr(meta_single, "__dict__"):
             meta_single = meta_single.__dict__
 
         meta_pages_raw = illust.get("meta_pages") or []
         meta_pages = []
         for mp in meta_pages_raw:
-            if hasattr(mp, "__dict__"):
+            if not isinstance(mp, dict) and hasattr(mp, "__dict__"):
                 mp = mp.__dict__
             mp_urls = mp.get("image_urls") or {}
-            if hasattr(mp_urls, "__dict__"):
+            if not isinstance(mp_urls, dict) and hasattr(mp_urls, "__dict__"):
                 mp_urls = mp_urls.__dict__
             meta_pages.append({"image_urls": mp_urls})
 
@@ -223,19 +223,19 @@ class PixivClient:
     @staticmethod
     def _normalize_user(user_detail_response) -> dict:
         """Normalise a pixivpy3 user_detail response to our internal format."""
-        if hasattr(user_detail_response, "__dict__"):
+        if not isinstance(user_detail_response, dict) and hasattr(user_detail_response, "__dict__"):
             user_detail_response = user_detail_response.__dict__
 
         user = user_detail_response.get("user") or {}
-        if hasattr(user, "__dict__"):
+        if not isinstance(user, dict) and hasattr(user, "__dict__"):
             user = user.__dict__
 
         profile = user_detail_response.get("profile") or {}
-        if hasattr(profile, "__dict__"):
+        if not isinstance(profile, dict) and hasattr(profile, "__dict__"):
             profile = profile.__dict__
 
         profile_image_urls = user.get("profile_image_urls") or {}
-        if hasattr(profile_image_urls, "__dict__"):
+        if not isinstance(profile_image_urls, dict) and hasattr(profile_image_urls, "__dict__"):
             profile_image_urls = profile_image_urls.__dict__
 
         return {
@@ -252,7 +252,7 @@ class PixivClient:
     @staticmethod
     def _next_offset(response) -> int | None:
         """Extract offset from next_url in a pixivpy3 paginated response."""
-        if hasattr(response, "__dict__"):
+        if not isinstance(response, dict) and hasattr(response, "__dict__"):
             response = response.__dict__
         next_url = response.get("next_url")
         if not next_url:
@@ -271,7 +271,7 @@ class PixivClient:
 
     def _normalize_illust_list(self, response) -> dict:
         """Normalise a paginated illust list response."""
-        if hasattr(response, "__dict__"):
+        if not isinstance(response, dict) and hasattr(response, "__dict__"):
             response = response.__dict__
         illusts_raw = response.get("illusts") or []
         return {
@@ -305,7 +305,7 @@ class PixivClient:
     async def illust_detail(self, illust_id: int) -> dict:
         """Get illustration detail. Returns normalized illust dict."""
         result = await self._call(self._api.illust_detail, illust_id)
-        if hasattr(result, "__dict__"):
+        if not isinstance(result, dict) and hasattr(result, "__dict__"):
             result = result.__dict__
         illust = result.get("illust")
         if not illust:
@@ -361,19 +361,19 @@ class PixivClient:
         result = await self._call(
             self._api.user_following, user_id, restrict=restrict, offset=offset
         )
-        if hasattr(result, "__dict__"):
+        if not isinstance(result, dict) and hasattr(result, "__dict__"):
             result = result.__dict__
 
         user_previews_raw = result.get("user_previews") or []
         user_previews = []
         for up in user_previews_raw:
-            if hasattr(up, "__dict__"):
+            if not isinstance(up, dict) and hasattr(up, "__dict__"):
                 up = up.__dict__
             user = up.get("user") or {}
-            if hasattr(user, "__dict__"):
+            if not isinstance(user, dict) and hasattr(user, "__dict__"):
                 user = user.__dict__
             profile_image_urls = user.get("profile_image_urls") or {}
-            if hasattr(profile_image_urls, "__dict__"):
+            if not isinstance(profile_image_urls, dict) and hasattr(profile_image_urls, "__dict__"):
                 profile_image_urls = profile_image_urls.__dict__
             illusts_raw = up.get("illusts") or []
             user_previews.append({
