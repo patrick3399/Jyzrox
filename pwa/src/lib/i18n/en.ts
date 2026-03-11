@@ -966,6 +966,9 @@ const en: Record<string, string> = {
   'browse.rankingIllust': 'Illustrations',
   'browse.rankingManga': 'Manga',
   'browse.rankingUgoira': 'Ugoira',
+  'browse.r18': 'R18',
+  'browse.allAges': 'All Ages',
+  'browse.r18RequiresCredentials': 'Pixiv credentials required',
 
   // ── Pixiv ──
   'nav.pixiv': 'Pixiv',
@@ -973,6 +976,7 @@ const en: Record<string, string> = {
   'pixiv.searchPlaceholder': 'Search Pixiv...',
   'pixiv.search': 'Search',
   'pixiv.noResults': 'No results found.',
+  'pixiv.noWorks': 'No works',
   'pixiv.views': 'views',
   'pixiv.bookmarks': 'Bookmarks',
   'pixiv.pages': 'pages',
@@ -1009,6 +1013,7 @@ const en: Record<string, string> = {
   'pixiv.loading': 'Loading...',
   'pixiv.viewAllPages': 'to view all pages.',
   'pixiv.caption': 'Caption',
+  'pixiv.read': 'Read',
 
   // ── Common ──
   'common.updateAvailable': 'App updated',

@@ -406,6 +406,7 @@ export interface PixivUserDetail {
   total_illusts: number
   total_manga: number
   total_novels: number
+  is_followed: boolean
 }
 
 export interface PixivUserResult {

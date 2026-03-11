@@ -218,6 +218,7 @@ class PixivClient:
             "total_view": illust.get("total_view", 0),
             "total_bookmarks": illust.get("total_bookmarks", 0),
             "is_bookmarked": illust.get("is_bookmarked", False),
+            "meta_pages": meta_pages,
         }
 
     @staticmethod
@@ -247,6 +248,7 @@ class PixivClient:
             "total_illusts": profile.get("total_illusts", 0),
             "total_manga": profile.get("total_manga", 0),
             "total_novels": profile.get("total_novels", 0),
+            "is_followed": bool(user.get("is_followed", False)),
         }
 
     @staticmethod
@@ -390,6 +392,48 @@ class PixivClient:
             "user_previews": user_previews,
             "next_offset": self._next_offset(result),
         }
+
+    async def illust_bookmark_detail(self, illust_id: int) -> dict:
+        """Get bookmark detail for an illust. Returns {is_bookmarked, restrict}."""
+        result = await self._call(self._api.illust_bookmark_detail, illust_id=illust_id)
+        if not isinstance(result, dict) and hasattr(result, "__dict__"):
+            result = result.__dict__
+        detail = result.get("bookmark_detail") or {}
+        if not isinstance(detail, dict) and hasattr(detail, "__dict__"):
+            detail = detail.__dict__
+        return {
+            "is_bookmarked": bool(detail.get("is_bookmarked", False)),
+            "restrict": detail.get("restrict", "public"),
+        }
+
+    async def illust_bookmark_add(self, illust_id: int, restrict: str = "public") -> None:
+        """Add bookmark for an illust."""
+        await self._call(self._api.illust_bookmark_add, illust_id=illust_id, restrict=restrict)
+
+    async def illust_ranking(
+        self,
+        mode: str = "day",
+        date: str | None = None,
+        offset: int = 0,
+    ) -> dict:
+        """Get ranking illusts via App API. Returns {illusts, next_offset}."""
+        kwargs: dict = {"mode": mode, "offset": offset}
+        if date:
+            kwargs["date"] = date
+        result = await self._call(self._api.illust_ranking, **kwargs)
+        return self._normalize_illust_list(result)
+
+    async def illust_bookmark_delete(self, illust_id: int) -> None:
+        """Delete bookmark for an illust."""
+        await self._call(self._api.illust_bookmark_delete, illust_id=illust_id)
+
+    async def user_follow_add(self, user_id: int, restrict: str = "public") -> None:
+        """Follow a user on Pixiv."""
+        await self._call(self._api.user_follow_add, user_id=user_id, restrict=restrict)
+
+    async def user_follow_delete(self, user_id: int) -> None:
+        """Unfollow a user on Pixiv."""
+        await self._call(self._api.user_follow_delete, user_id=user_id)
 
     async def download_image(self, url: str) -> tuple[bytes, str]:
         """

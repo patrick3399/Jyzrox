@@ -1,8 +1,9 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { use } from 'react'
 import Link from 'next/link'
+import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import useSWRInfinite from 'swr/infinite'
 import { api } from '@/lib/api'
@@ -65,6 +66,7 @@ function IllustCard({ illust }: { illust: PixivIllust }) {
 
 export default function UserProfilePage({ params }: { params: Promise<{ id: string }> }) {
   useLocale()
+  const router = useRouter()
   const { id } = use(params)
   const userId = parseInt(id, 10)
 
@@ -76,19 +78,32 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
     () => api.pixiv.getUser(userId),
   )
 
-  // Check if already following
-  const { data: followedData, mutate: mutateFollowed } = useSWR(
-    validId ? `/artists/followed/pixiv/check/${userId}` : null,
-    () => api.artists.listFollowed({ source: 'pixiv', limit: 200 }),
-  )
-
-  const isFollowing = followedData?.artists.some(
-    (a) => a.artist_id === String(userId),
-  ) ?? false
-
-  const followedArtist = followedData?.artists.find((a) => a.artist_id === String(userId))
-
+  const [isFollowing, setIsFollowing] = useState(false)
   const [followLoading, setFollowLoading] = useState(false)
+
+  useEffect(() => {
+    if (userResult?.user.is_followed !== undefined) {
+      setIsFollowing(userResult.user.is_followed)
+    }
+  }, [userResult?.user.is_followed])
+
+  const handleToggleFollow = async () => {
+    if (followLoading) return
+    setFollowLoading(true)
+    try {
+      if (isFollowing) {
+        await api.pixiv.unfollowUser(userId)
+        setIsFollowing(false)
+      } else {
+        await api.pixiv.followUser(userId)
+        setIsFollowing(true)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
+    } finally {
+      setFollowLoading(false)
+    }
+  }
 
   // Paginated all works
   const getKey = (pageIndex: number, previous: PixivSearchResult | null) => {
@@ -114,41 +129,6 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
 
   if (!validId) return <div className="p-8 text-center text-vault-text-secondary">{t('common.invalidId')}</div>
 
-  const handleFollow = async () => {
-    if (!userResult || followLoading) return
-    setFollowLoading(true)
-    try {
-      const user = userResult.user
-      await api.artists.follow({
-        source: 'pixiv',
-        artist_id: String(user.id),
-        artist_name: user.name,
-        artist_avatar: user.profile_image,
-        auto_download: false,
-      })
-      toast.success(t('pixiv.follow'))
-      mutateFollowed()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
-    } finally {
-      setFollowLoading(false)
-    }
-  }
-
-  const handleUnfollow = async () => {
-    if (followLoading) return
-    setFollowLoading(true)
-    try {
-      await api.artists.unfollow(String(userId), 'pixiv')
-      toast.success(t('pixiv.unfollow'))
-      mutateFollowed()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
-    } finally {
-      setFollowLoading(false)
-    }
-  }
-
   if (isLoading) {
     return (
       <div className="flex items-center justify-center min-h-[60vh]">
@@ -161,10 +141,10 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
     return (
       <div className="p-6 text-center text-vault-text-secondary">
         <p>{t('common.failedToLoad')}</p>
-        <Link href="/pixiv" className="text-vault-accent underline mt-2 inline-block">
+        <button onClick={() => router.back()} className="text-vault-accent underline mt-2 inline-block">
           <ArrowLeft size={14} className="inline mr-1" />
           {t('pixiv.title')}
-        </Link>
+        </button>
       </div>
     )
   }
@@ -174,13 +154,13 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
   return (
     <div className="space-y-6">
       {/* Back link */}
-      <Link
-        href="/pixiv"
+      <button
+        onClick={() => router.back()}
         className="inline-flex items-center gap-1.5 text-sm text-vault-text-secondary hover:text-vault-text transition-colors"
       >
         <ArrowLeft size={14} />
         {t('pixiv.title')}
-      </Link>
+      </button>
 
       {/* Profile header */}
       <div className="bg-vault-card border border-vault-border rounded-xl p-6">
@@ -201,7 +181,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
               </div>
               <div className="flex items-center gap-2 ml-auto shrink-0">
                 <button
-                  onClick={isFollowing ? handleUnfollow : handleFollow}
+                  onClick={handleToggleFollow}
                   disabled={followLoading}
                   className={`px-4 py-1.5 rounded-lg text-sm font-medium transition-colors disabled:opacity-50 ${
                     isFollowing
@@ -209,11 +189,7 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
                       : 'bg-vault-accent text-white hover:bg-vault-accent/80'
                   }`}
                 >
-                  {followLoading
-                    ? t('pixiv.loading')
-                    : isFollowing
-                    ? t('pixiv.unfollow')
-                    : t('pixiv.follow')}
+                  {followLoading ? t('pixiv.loading') : isFollowing ? t('pixiv.unfollow') : t('pixiv.follow')}
                 </button>
                 <a
                   href={`https://www.pixiv.net/users/${user.id}`}
@@ -242,30 +218,6 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
                 <span className="ml-1 text-vault-text-secondary">{t('pixiv.novels')}</span>
               </div>
             </div>
-
-            {/* Auto-download toggle if following */}
-            {isFollowing && followedArtist && (
-              <label className="inline-flex items-center gap-2 text-sm text-vault-text-secondary cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={followedArtist.auto_download}
-                  onChange={async () => {
-                    try {
-                      await api.artists.patchFollow(
-                        String(userId),
-                        { auto_download: !followedArtist.auto_download },
-                        'pixiv',
-                      )
-                      mutateFollowed()
-                    } catch {
-                      toast.error(t('common.failedToSave'))
-                    }
-                  }}
-                  className="w-4 h-4 accent-vault-accent"
-                />
-                {t('pixiv.autoDownload')}
-              </label>
-            )}
 
             {/* Bio */}
             {user.comment && (

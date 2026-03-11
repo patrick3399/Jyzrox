@@ -18,6 +18,8 @@ import type { PixivIllust, PixivSearchResult, PixivUserPreview } from '@/lib/typ
 
 function IllustCard({ illust }: { illust: PixivIllust }) {
   const [downloading, setDownloading] = useState(false)
+  const [bookmarked, setBookmarked] = useState(illust.is_bookmarked)
+  const [bookmarking, setBookmarking] = useState(false)
   const thumbUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
 
   const handleDownload = async (e: React.MouseEvent) => {
@@ -32,6 +34,26 @@ function IllustCard({ illust }: { illust: PixivIllust }) {
       toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
     } finally {
       setDownloading(false)
+    }
+  }
+
+  const handleBookmark = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (bookmarking) return
+    setBookmarking(true)
+    try {
+      if (bookmarked) {
+        await api.pixiv.deleteBookmark(illust.id)
+        setBookmarked(false)
+      } else {
+        await api.pixiv.addBookmark(illust.id)
+        setBookmarked(true)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
+    } finally {
+      setBookmarking(false)
     }
   }
 
@@ -52,6 +74,13 @@ function IllustCard({ illust }: { illust: PixivIllust }) {
             {illust.page_count} {t('pixiv.pages')}
           </span>
         )}
+        <button
+          onClick={handleBookmark}
+          disabled={bookmarking}
+          className={`absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 text-white text-xs px-1.5 py-0.5 rounded disabled:opacity-50 ${bookmarked ? 'text-yellow-400' : ''}`}
+        >
+          {bookmarked ? '★' : '☆'}
+        </button>
         <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
         <button
           onClick={handleDownload}
@@ -285,6 +314,87 @@ function FeedTab({ credentialsMissing }: { credentialsMissing: boolean }) {
   )
 }
 
+// ── UserPreviewCard ───────────────────────────────────────────────────────
+
+function UserPreviewCard({ preview }: { preview: PixivUserPreview }) {
+  const [followed, setFollowed] = useState(true) // all users in following list are followed
+  const [toggling, setToggling] = useState(false)
+
+  const handleToggleFollow = async (e: React.MouseEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    if (toggling) return
+    setToggling(true)
+    try {
+      if (followed) {
+        await api.pixiv.unfollowUser(preview.user.id)
+        setFollowed(false)
+      } else {
+        await api.pixiv.followUser(preview.user.id)
+        setFollowed(true)
+      }
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
+    } finally {
+      setToggling(false)
+    }
+  }
+
+  return (
+    <Link
+      href={`/pixiv/user/${preview.user.id}`}
+      className="group block rounded-lg bg-vault-card border border-vault-border overflow-hidden hover:border-vault-accent transition-colors"
+    >
+      {/* Recent works grid */}
+      {preview.illusts.length > 0 ? (
+        <div className="grid grid-cols-3 gap-0.5">
+          {preview.illusts.slice(0, 3).map((illust) => (
+            <div key={illust.id} className="relative aspect-square w-full bg-vault-input">
+              <img
+                src={api.pixiv.imageProxyUrl(illust.image_urls.square_medium)}
+                alt=""
+                className="absolute inset-0 w-full h-full object-cover"
+                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+              />
+            </div>
+          ))}
+        </div>
+      ) : (
+        <div className="flex items-center justify-center bg-vault-input" style={{ aspectRatio: '3/1' }}>
+          <span className="text-[10px] text-vault-text-muted uppercase tracking-widest">{t('pixiv.noWorks')}</span>
+        </div>
+      )}
+      {/* Artist info row */}
+      <div className="flex items-center gap-2 p-2">
+        {preview.user.profile_image ? (
+          <img
+            src={api.pixiv.imageProxyUrl(preview.user.profile_image)}
+            alt={preview.user.name}
+            className="w-7 h-7 rounded-full object-cover bg-vault-input shrink-0"
+            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+          />
+        ) : (
+          <div className="w-7 h-7 rounded-full bg-vault-input shrink-0" />
+        )}
+        <p className="text-xs font-medium text-vault-text truncate flex-1">
+          {preview.user.name}
+        </p>
+        <button
+          onClick={handleToggleFollow}
+          disabled={toggling}
+          className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded transition-colors disabled:opacity-50 ${
+            followed
+              ? 'text-vault-text-secondary hover:text-red-400'
+              : 'text-vault-accent'
+          }`}
+        >
+          {toggling ? '...' : followed ? t('pixiv.unfollow') : t('pixiv.follow')}
+        </button>
+      </div>
+    </Link>
+  )
+}
+
 // ── Following Tab ────────────────────────────────────────────────────────
 
 function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
@@ -338,60 +448,18 @@ function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
         <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
-        {allPreviews.map((preview: PixivUserPreview) => (
-          <Link
-            key={preview.user.id}
-            href={`/pixiv/user/${preview.user.id}`}
-            className="group block rounded-lg bg-vault-card border border-vault-border overflow-hidden hover:border-vault-accent transition-colors"
-          >
-            {/* Recent works grid */}
-            {preview.illusts.length > 0 ? (
-              <div className="grid grid-cols-3 gap-0.5">
-                {preview.illusts.slice(0, 3).map((illust) => (
-                  <img
-                    key={illust.id}
-                    src={api.pixiv.imageProxyUrl(illust.image_urls.square_medium)}
-                    alt=""
-                    className="aspect-square w-full object-cover"
-                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                  />
-                ))}
-              </div>
-            ) : (
-              <div className="aspect-video bg-vault-input" />
-            )}
-            {/* Artist info row */}
-            <div className="flex items-center gap-2 p-2">
-              {preview.user.profile_image ? (
-                <img
-                  src={api.pixiv.imageProxyUrl(preview.user.profile_image)}
-                  alt={preview.user.name}
-                  className="w-7 h-7 rounded-full object-cover bg-vault-input shrink-0"
-                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                />
-              ) : (
-                <div className="w-7 h-7 rounded-full bg-vault-input shrink-0" />
-              )}
-              <p className="text-xs font-medium text-vault-text truncate">
-                {preview.user.name}
-              </p>
-            </div>
-          </Link>
-        ))}
-      </div>
-
-      {hasMore && (
-        <div className="flex justify-center pt-2">
-          <button
-            onClick={() => setSize(size + 1)}
-            disabled={isValidating}
-            className="px-6 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors disabled:opacity-50"
-          >
-            {isValidating ? <LoadingSpinner size="sm" /> : t('common.loadMore')}
-          </button>
-        </div>
-      )}
+      <VirtualGrid
+        items={allPreviews}
+        columns={{ base: 2, sm: 3, md: 4, lg: 5 }}
+        gap={12}
+        estimateHeight={180}
+        renderItem={(preview: PixivUserPreview) => (
+          <UserPreviewCard key={preview.user.id} preview={preview} />
+        )}
+        onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
+        hasMore={hasMore}
+        isLoading={isValidating}
+      />
     </div>
   )
 }
@@ -489,17 +557,54 @@ const RANKING_CONTENT = [
   { value: 'ugoira', label: () => t('browse.rankingUgoira') },
 ]
 
-function RankingTab() {
+function RankingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
   const [mode, setMode] = useState('daily')
   const [content, setContent] = useState('all')
-  const [page, setPage] = useState(1)
+  const [r18, setR18] = useState(false)
 
-  const { data, error, isLoading } = useSWR(
-    ['/pixiv/ranking', mode, content, page],
-    () => api.pixiv.ranking({ mode, content, page }),
+  // R18 only supports daily/weekly; reset mode if incompatible
+  const handleR18Toggle = () => {
+    setR18((prev) => {
+      const next = !prev
+      if (next && mode !== 'daily' && mode !== 'weekly') {
+        setMode('daily')
+      }
+      return next
+    })
+  }
+
+  type RankingPage = {
+    contents: Array<Record<string, unknown>>
+    rank_total: number
+    mode: string
+    content: string
+    date: string
+    page: number
+    prev_date: string | null
+    next_date: string | null
+    has_next?: boolean
+  }
+
+  const getKey = (pageIndex: number, previous: RankingPage | null) => {
+    if (pageIndex > 0 && previous && previous.contents.length < 50) return null
+    const effectiveMode = r18 ? `${mode}_r18` : mode
+    return ['/pixiv/ranking', effectiveMode, r18 ? 'all' : content, pageIndex + 1]
+  }
+
+  const { data, size, setSize, isValidating, error } = useSWRInfinite<RankingPage>(
+    getKey,
+    ([, m, c, p]) => api.pixiv.ranking({ mode: m as string, content: c as string, page: p as number }),
+    { revalidateFirstPage: false },
   )
 
-  const contents = data?.contents ?? []
+  const allContents = data?.flatMap((page) => page.contents) ?? []
+  const lastPage = data?.[data.length - 1]
+  const hasMore = lastPage
+    ? (lastPage as Record<string, unknown>).has_next !== undefined
+      ? Boolean((lastPage as Record<string, unknown>).has_next)
+      : (lastPage.contents.length ?? 0) >= 50
+    : false
+  const isLoading = !data && isValidating
 
   return (
     <div className="space-y-4">
@@ -507,26 +612,43 @@ function RankingTab() {
       <div className="flex gap-2 flex-wrap">
         <select
           value={mode}
-          onChange={(e) => { setMode(e.target.value); setPage(1) }}
+          onChange={(e) => setMode(e.target.value)}
           className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
         >
-          {RANKING_MODES.map((o) => (
+          {RANKING_MODES.filter((o) => !r18 || o.value === 'daily' || o.value === 'weekly').map((o) => (
             <option key={o.value} value={o.value}>
               {o.label()}
             </option>
           ))}
         </select>
-        <select
-          value={content}
-          onChange={(e) => { setContent(e.target.value); setPage(1) }}
-          className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
+        <button
+          type="button"
+          onClick={handleR18Toggle}
+          disabled={credentialsMissing}
+          title={credentialsMissing ? t('browse.r18RequiresCredentials') : undefined}
+          className={[
+            'px-3 py-1.5 rounded-lg text-sm font-medium border transition-colors',
+            r18
+              ? 'bg-pink-600 border-pink-500 text-white'
+              : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text',
+            credentialsMissing ? 'opacity-40 cursor-not-allowed' : 'cursor-pointer',
+          ].join(' ')}
         >
-          {RANKING_CONTENT.map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label()}
-            </option>
-          ))}
-        </select>
+          {t('browse.r18')}
+        </button>
+        {!r18 && (
+          <select
+            value={content}
+            onChange={(e) => setContent(e.target.value)}
+            className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
+          >
+            {RANKING_CONTENT.map((o) => (
+              <option key={o.value} value={o.value}>
+                {o.label()}
+              </option>
+            ))}
+          </select>
+        )}
       </div>
 
       {isLoading && (
@@ -540,67 +662,47 @@ function RankingTab() {
         </div>
       )}
 
-      {!isLoading && !error && contents.length === 0 && (
+      {!isLoading && !error && allContents.length === 0 && (
         <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
       )}
 
-      {contents.length > 0 && (
-        <>
-          <VirtualGrid
-            items={contents}
-            columns={{ base: 3, sm: 4, md: 5, lg: 7, xl: 8, xxl: 10 }}
-            gap={8}
-            estimateHeight={180}
-            renderItem={(item: Record<string, unknown>) => {
-              const illustId = item.illust_id as number
-              const title = item.title as string
-              const userName = item.user_name as string
-              const thumbUrl = api.pixiv.imageProxyUrl(item.url as string)
-              return (
-                <Link key={illustId} href={`/pixiv/illust/${illustId}`} className="group block">
-                  <div className="relative aspect-square overflow-hidden rounded-lg bg-vault-input">
-                    <img
-                      src={thumbUrl}
-                      alt={title}
-                      className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
-                      loading="lazy"
-                      onError={(e) => {
-                        ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                      }}
-                    />
-                    <div className="absolute top-1.5 left-1.5 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">
-                      #{item.rank as number}
-                    </div>
-                  </div>
-                  <div className="mt-1.5 px-0.5">
-                    <p className="text-sm text-vault-text truncate font-medium">{title}</p>
-                    <p className="text-xs text-vault-text-secondary truncate">{userName}</p>
-                  </div>
-                </Link>
-              )
-            }}
-          />
-
-          {/* Pagination */}
-          <div className="flex justify-center gap-2 pt-4">
-            <button
-              onClick={() => setPage(Math.max(1, page - 1))}
-              disabled={page <= 1}
-              className="px-4 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover disabled:opacity-50"
-            >
-              {t('common.prev')}
-            </button>
-            <span className="px-4 py-2 text-sm text-vault-text-secondary">{page}</span>
-            <button
-              onClick={() => setPage(page + 1)}
-              disabled={contents.length < 50}
-              className="px-4 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover disabled:opacity-50"
-            >
-              {t('common.next')}
-            </button>
-          </div>
-        </>
-      )}
+      <VirtualGrid
+        items={allContents}
+        columns={{ base: 3, sm: 4, md: 5, lg: 7, xl: 8, xxl: 10 }}
+        gap={8}
+        estimateHeight={180}
+        renderItem={(item: Record<string, unknown>) => {
+          const illustId = item.illust_id as number
+          const title = item.title as string
+          const userName = item.user_name as string
+          const thumbUrl = api.pixiv.imageProxyUrl(item.url as string)
+          return (
+            <Link key={illustId} href={`/pixiv/illust/${illustId}`} className="group block">
+              <div className="relative aspect-square overflow-hidden rounded-lg bg-vault-input">
+                <img
+                  src={thumbUrl}
+                  alt={title}
+                  className="w-full h-full object-cover transition-transform duration-200 group-hover:scale-105"
+                  loading="lazy"
+                  onError={(e) => {
+                    ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                  }}
+                />
+                <div className="absolute top-1.5 left-1.5 bg-black/70 text-white text-[10px] px-1.5 py-0.5 rounded font-bold">
+                  #{item.rank as number}
+                </div>
+              </div>
+              <div className="mt-1.5 px-0.5">
+                <p className="text-sm text-vault-text truncate font-medium">{title}</p>
+                <p className="text-xs text-vault-text-secondary truncate">{userName}</p>
+              </div>
+            </Link>
+          )
+        }}
+        onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
+        hasMore={hasMore}
+        isLoading={isValidating}
+      />
     </div>
   )
 }
@@ -742,7 +844,7 @@ function PixivPageInner() {
           </div>
 
           {/* Tab content */}
-          {activeTab === 'ranking' && <RankingTab />}
+          {activeTab === 'ranking' && <RankingTab credentialsMissing={credentialsMissing} />}
           {activeTab === 'feed' && !credentialsMissing && <FeedTab credentialsMissing={false} />}
           {activeTab === 'following' && !credentialsMissing && <FollowingTab credentialsMissing={false} />}
           {activeTab === 'bookmarks' && !credentialsMissing && <BookmarksTab credentialsMissing={false} />}
