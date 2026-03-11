@@ -512,6 +512,7 @@ export interface DedupStats {
 export interface RelationshipBlob {
   sha256: string
   thumb_url: string | null
+  image_url: string | null
   width: number | null
   height: number | null
   file_size: number | null
@@ -524,6 +525,9 @@ export interface RelationshipItem {
   blob_a: RelationshipBlob
   blob_b: RelationshipBlob
   suggested_keep: string | null
+  reason: string | null
+  diff_score: number | null
+  diff_type: string | null
 }
 
 export interface DedupReviewResponse {

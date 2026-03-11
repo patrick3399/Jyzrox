@@ -69,17 +69,10 @@ async def download_pixiv_illust(
                 "error": "Illustration not found",
             }
 
-        # Collect image URLs (PixivClient._normalize_illust already flattened
-        # meta_single_page / meta_pages into image_urls.original for single-page;
-        # for multi-page we re-read the raw meta_pages from the normalised dict
-        # — but the normalised form only stores the *first* page's original).
-        # We therefore use the raw pixivpy3 response via illust_detail which
-        # calls _normalize_illust; multi-page originals live in the
-        # client._api.illust_detail result's meta_pages list.
-        #
-        # Strategy: call user_illusts is not useful here. Instead we re-call
-        # _api.illust_detail via _call to get the raw response and extract all
-        # meta_pages URLs ourselves.
+        # Collect image URLs.
+        # For single-page illusts, image_urls.original is set by _normalize_illust.
+        # For multi-page illusts, meta_pages is a list of
+        # {"image_urls": {"original": ..., ...}} dicts, also set by _normalize_illust.
         page_count = detail.get("page_count", 1)
         image_urls: list[str] = []
 
@@ -88,24 +81,13 @@ async def download_pixiv_illust(
             if original:
                 image_urls.append(original)
         else:
-            # Re-fetch raw response to access all meta_pages entries
-            raw_resp = await client._call(client._api.illust_detail, illust_id)
-            if hasattr(raw_resp, "__dict__"):
-                raw_resp = raw_resp.__dict__
-            raw_illust = raw_resp.get("illust")
-            if raw_illust is not None:
-                if hasattr(raw_illust, "__dict__"):
-                    raw_illust = raw_illust.__dict__
-                meta_pages_raw = raw_illust.get("meta_pages") or []
-                for mp in meta_pages_raw:
-                    if hasattr(mp, "__dict__"):
-                        mp = mp.__dict__
-                    mp_urls = mp.get("image_urls") or {}
-                    if hasattr(mp_urls, "__dict__"):
-                        mp_urls = mp_urls.__dict__
-                    original = mp_urls.get("original", "")
-                    if original:
-                        image_urls.append(original)
+            # meta_pages is already normalized by PixivClient._normalize_illust
+            # Each entry: {"image_urls": {"square_medium": ..., "medium": ..., "large": ..., "original": ...}}
+            meta_pages = detail.get("meta_pages") or []
+            for mp in meta_pages:
+                original = mp.get("image_urls", {}).get("original", "")
+                if original:
+                    image_urls.append(original)
 
             # Fallback: use the single normalised original if meta_pages empty
             if not image_urls:

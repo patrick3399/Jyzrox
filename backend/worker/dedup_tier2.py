@@ -6,7 +6,7 @@ from sqlalchemy import select, update
 
 from core.database import async_session
 from core.redis_client import get_redis
-from db.models import Blob, BlobRelationship
+from db.models import Blob, BlobRelationship, Image
 from worker.dedup_helpers import _classify_pair, _now_iso
 
 logger = logging.getLogger("worker.dedup_tier2")
@@ -61,6 +61,32 @@ async def dedup_tier2_job(ctx: dict) -> dict:
                         .values(relationship="resolved", tier=2)
                     )
                     await session.commit()
+                    continue
+
+                # Cross-gallery check: blobs appearing in the same gallery are
+                # intentional variants (差分) and should be auto-whitelisted.
+                same_gal_subq = (
+                    select(Image.gallery_id)
+                    .where(Image.blob_sha256 == pair.sha_a)
+                    .where(
+                        Image.gallery_id.in_(
+                            select(Image.gallery_id).where(Image.blob_sha256 == pair.sha_b)
+                        )
+                    )
+                    .limit(1)
+                    .exists()
+                )
+                same_gal = (await session.execute(select(same_gal_subq))).scalar()
+
+                if same_gal:
+                    logger.info("same_gallery_variant: pair %d", pair.id)
+                    await session.execute(
+                        update(BlobRelationship)
+                        .where(BlobRelationship.id == pair.id)
+                        .values(relationship="whitelisted", reason="same_gallery_variant", tier=2)
+                    )
+                    await session.commit()
+                    total_processed += 1
                     continue
 
                 rel, keep, reason = _classify_pair(blob_a, blob_b, heuristic_enabled)

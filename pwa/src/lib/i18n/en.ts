@@ -1177,6 +1177,13 @@ const en: Record<string, string> = {
   'dedup.pending': 'Pending',
   'dedup.tierComplete': 'Complete',
   'dedup.tierWaiting': 'Waiting',
+  'dedup.keepThis': 'Keep This',
+  'dedup.selectToKeep': 'Select which to keep',
+  'dedup.similarity': 'Similarity: {pct}%',
+  'dedup.diffTypeCompression': 'Compression Variant',
+  'dedup.diffTypeLocalized': 'Has Local Changes',
+  'dedup.reasonHigherRes': 'Different Resolution',
+  'dedup.reasonLargerFile': 'Different File Size',
 }
 
 export default en

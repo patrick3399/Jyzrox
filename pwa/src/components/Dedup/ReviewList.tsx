@@ -18,13 +18,13 @@ const FILTERS = [
 export function ReviewList() {
   const [filter, setFilter] = useState('')
   const [modalUrl, setModalUrl] = useState<string | null>(null)
-  const { data: features } = useDedupSettings()
+  const { data: features, isLoading: settingsLoading } = useDedupSettings()
   const phashEnabled = features?.dedup_phash_enabled ?? false
   const { items, hasMore, loadMore, isLoading, mutate } = useDedupReview(filter || undefined)
 
   useEffect(() => {
-    void mutate()
-  }, [filter, mutate])
+    if (!settingsLoading) void mutate()
+  }, [filter, mutate, settingsLoading])
 
   const handleKeep = async (id: number, keepSha: string) => {
     try {
@@ -54,6 +54,10 @@ export function ReviewList() {
     } catch {
       toast.error(t('dedup.dismissFailed'))
     }
+  }
+
+  if (settingsLoading) {
+    return <div className="flex justify-center py-8"><LoadingSpinner /></div>
   }
 
   if (!phashEnabled) {
