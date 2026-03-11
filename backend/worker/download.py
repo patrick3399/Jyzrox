@@ -114,27 +114,33 @@ async def download_job(
             except Exception as exc:
                 logger.warning("[download] failed to store PID in Redis: %s", exc)
 
-    async with sem.acquire():
-        try:
-            result = await plugin.download(
-                url=url,
-                dest_dir=target_dir,
-                credentials=credentials,
-                on_progress=on_progress,
-                cancel_check=cancel_check,
-                pid_callback=pid_callback,
-            )
-        except Exception as exc:
-            err = f"Download failed: {exc}"
-            logger.error("[download] %s", err, exc_info=True)
-            await _set_job_status(db_job_id, "failed", err)
-            return {"status": "failed", "error": err}
-        finally:
-            if pid_key:
-                try:
-                    await redis.delete(pid_key)
-                except Exception:
-                    pass
+    try:
+        async with sem.acquire():
+            try:
+                result = await plugin.download(
+                    url=url,
+                    dest_dir=target_dir,
+                    credentials=credentials,
+                    on_progress=on_progress,
+                    cancel_check=cancel_check,
+                    pid_callback=pid_callback,
+                )
+            except Exception as exc:
+                err = f"Download failed: {exc}"
+                logger.error("[download] %s", err, exc_info=True)
+                await _set_job_status(db_job_id, "failed", err)
+                return {"status": "failed", "error": err}
+            finally:
+                if pid_key:
+                    try:
+                        await redis.delete(pid_key)
+                    except Exception:
+                        pass
+    except TimeoutError:
+        err = "No download slot available — timed out waiting. Please try again later."
+        logger.error("[download] %s", err)
+        await _set_job_status(db_job_id, "failed", err)
+        return {"status": "failed", "error": err}
 
     if result.status == "cancelled":
         await _set_job_status(db_job_id, "cancelled")
