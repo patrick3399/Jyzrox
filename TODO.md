@@ -1,6 +1,6 @@
 # Jyzrox TODO
 
-> 最後更新：2026-03-10
+> 最後更新：2026-03-11
 
 ---
 
@@ -55,6 +55,25 @@
 
 > 非核心功能、大型重構、按需啟動。
 
+### arq → SAQ 遷移
+
+> **背景**：arq 0.27.0 使用已移除的 `asyncio.get_event_loop()`，Python 3.14+ crash。上游 PR #509 長期未合併，專案已停滯。目前靠 `core/compat.py` monkey-patch 撐住，但非長久之計。
+>
+> **選定方案**：[SAQ](https://github.com/tobymao/saq)（Simple Async Queue）
+> - 同為 asyncio-native + Redis backend，API 風格接近 arq
+> - 內建 Web UI dashboard、cron scheduling、heartbeat
+> - 活躍維護（2024–2025 持續發版）、Python 3.14 相容
+> - 遷移成本最低：概念對應（Worker → Worker, job function → job function, cron → cron）
+
+- [ ] 安裝 SAQ，建立基礎 worker 設定（`worker/saq_worker.py`）
+- [ ] 遷移 job functions（`download_job`, `import_job`, `tag_job`, `subscription_check`）
+- [ ] 遷移 cron scheduling（subscription 定時檢查）
+- [ ] 替換 `arq.create_pool` → SAQ queue（`core/redis_client.py`, enqueue 呼叫點）
+- [ ] 更新 Docker entrypoint（`saq worker.saq_worker:settings`）
+- [ ] 移除 arq 依賴 + `core/compat.py` monkey-patch
+- [ ] 驗證：Python 3.14 環境下完整 worker pipeline 正常運行
+- [ ] 可選：啟用 SAQ Web UI dashboard
+
 ### Plugin 系統完善
 
 #### 核心架構
@@ -72,29 +91,26 @@
 - [ ] Plugin 啟用/停用開關
 - [ ] Plugin 設定表單（動態生成）
 
-### DevOps
-- [ ] 資料庫自動遷移機制（Alembic 或類似工具）
-- [ ] 自動化 CI：push 時跑 backend pytest + frontend vitest
+### DevOps / 基礎設施
 - [ ] 集中式日誌（Loki + Grafana 或類似方案）
-- [ ] 容器資源限制（`deploy.resources` in docker-compose）
 - [ ] Docker image 瘦身：檢查 layer 大小，移除不必要依賴
 - [ ] 生產環境 HTTPS 配置指南（Let's Encrypt + Nginx）
 
-### i18n 擴展
-- [ ] 社群貢獻翻譯指南文件
-
-### 測試補強
+### 測試 / 品質
 - [ ] AI tagging 端對端測試（mock ONNX model）
 - [ ] CAS 儲存壓力測試（大量重複檔案去重驗證）
 - [ ] Import 大量檔案效能測試（1000+ 圖片單次匯入）
-- [ ] WebSocket 斷線重連測試
-- [ ] Redis 快取命中率監控端點
+- [ ] 社群貢獻翻譯指南文件
 
-### 目前先擱置
-- [ ] nginx `auth_request` 用 Basic Auth 存取 `/media/cas/` 和 `/media/thumbs/` → 200 ⚠️ 需要 running nginx 容器
-- [ ] OPDS 實際 client 測試（Panels iOS / KOReader / Chunky）⚠️ 需要實體裝置
-- [ ] AI Tagging 測試 `TAG_MODEL_ENABLED=true` 完整流程（模型下載→推理→DB 寫入）⚠️ 需要 ONNX runtime + 模型
-- [ ] Mihon Extension 編譯 + 實機測試（gallery 列表、搜尋、篩選、閱讀）⚠️ 需要 Android 裝置
+---
+
+## 擱置中
+
+> 需要特定環境或硬體才能進行，暫不排入。
+
+- [ ] OPDS 實際 client 測試（Panels iOS / KOReader / Chunky）— 需要實體裝置
+- [ ] AI Tagging 測試 `TAG_MODEL_ENABLED=true` 完整流程（模型下載→推理→DB 寫入）— 需要 ONNX runtime + 模型
+- [ ] Mihon Extension 編譯 + 實機測試（gallery 列表、搜尋、篩選、閱讀）— 需要 Android 裝置
 
 ---
 
@@ -171,9 +187,15 @@
 - [x] Multi-stage Dockerfile
 - [x] backup/restore 腳本
 - [x] Worker max_jobs + LOG_LEVEL 環境變數
+- [x] 資料庫自動遷移機制（Alembic，8 個版本遷移）
+- [x] 自動化 CI（GitHub Actions：lint + test + build）
+- [x] 容器資源限制（全服務 `deploy.resources` 配置）
+- [x] nginx `auth_request` 保護 `/media/` 路徑（subrequest auth + 快取）
 
 ### 測試
 - [x] Backend 221 tests
 - [x] Frontend 242 tests
+- [x] WebSocket 斷線重連（3 秒自動重連，`lib/ws.ts`）
+- [x] Redis 快取統計端點（`GET /api/system/cache`）
 
 </details>
