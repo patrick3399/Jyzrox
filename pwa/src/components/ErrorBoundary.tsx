@@ -1,6 +1,7 @@
 'use client'
 
 import React from 'react'
+import { t } from '@/lib/i18n'
 
 interface Props {
   children: React.ReactNode
@@ -31,15 +32,15 @@ export class ErrorBoundary extends React.Component<Props, State> {
       if (this.props.fallback) return this.props.fallback
       return (
         <div className="flex flex-col items-center justify-center min-h-[50vh] gap-4 p-8">
-          <div className="text-red-500 text-lg font-semibold">Something went wrong</div>
-          <p className="text-sm text-gray-500 dark:text-gray-400 max-w-md text-center">
+          <div className="text-red-500 text-lg font-semibold">{t('common.errorOccurred')}</div>
+          <p className="text-sm text-vault-text-secondary max-w-md text-center">
             {this.state.error?.message || 'An unexpected error occurred'}
           </p>
           <button
             onClick={() => this.setState({ hasError: false, error: null })}
             className="px-4 py-2 bg-vault-accent text-white rounded-lg hover:opacity-90 transition-opacity"
           >
-            Try again
+            {t('common.retry')}
           </button>
         </div>
       )

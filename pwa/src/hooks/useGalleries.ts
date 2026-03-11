@@ -1,8 +1,9 @@
 import useSWR from 'swr'
+import useSWRInfinite from 'swr/infinite'
 import useSWRMutation from 'swr/mutation'
 import { useCallback, useEffect, useRef, useState } from 'react'
 import { api } from '@/lib/api'
-import type { GallerySearchParams, EhSearchParams } from '@/lib/types'
+import type { GalleryListResponse, GallerySearchParams, EhSearchParams } from '@/lib/types'
 
 // ── Library ───────────────────────────────────────────────────────────
 
@@ -12,6 +13,48 @@ export function useLibraryGalleries(params: GallerySearchParams = {}) {
   return useSWR(['library/galleries', params.cursor ?? params.page ?? 0, params], () =>
     api.library.getGalleries(params),
   )
+}
+
+export function useInfiniteLibraryGalleries(
+  params: Omit<GallerySearchParams, 'page' | 'cursor'> = {},
+) {
+  const getKey = (pageIndex: number, previousPageData: GalleryListResponse | null) => {
+    // First page
+    if (pageIndex === 0) return ['library/galleries/infinite', { ...params, page: 0 }]
+    // No more data — stop fetching
+    if (previousPageData && previousPageData.galleries.length === 0) return null
+    // Prefer cursor-based pagination when the backend provides it
+    if (previousPageData?.next_cursor) {
+      return ['library/galleries/infinite', { ...params, cursor: previousPageData.next_cursor }]
+    }
+    return ['library/galleries/infinite', { ...params, page: pageIndex }]
+  }
+
+  const { data, error, size, setSize, isValidating, isLoading } = useSWRInfinite<GalleryListResponse>(
+    getKey,
+    ([, fetchParams]: [string, GallerySearchParams]) => api.library.getGalleries(fetchParams),
+    { revalidateOnFocus: false },
+  )
+
+  const galleries = data ? data.flatMap((page) => page.galleries) : []
+  const total = data?.[0]?.total
+  const isLoadingMore = isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
+  const isEmpty = data?.[0]?.galleries.length === 0
+  const lastPage = data?.[data.length - 1]
+  const isReachingEnd =
+    isEmpty || (lastPage !== undefined && lastPage.galleries.length < (params.limit ?? 24))
+
+  return {
+    galleries,
+    total,
+    error,
+    isLoading,
+    isLoadingMore,
+    isReachingEnd,
+    size,
+    setSize,
+    loadMore: () => setSize(size + 1),
+  }
 }
 
 export function useLibraryGallery(id: number | null) {
@@ -29,16 +72,19 @@ export function useGalleryProgress(id: number | null) {
 export function useUpdateGallery(id: number) {
   return useSWRMutation(
     ['library/gallery', id],
-    (_key: unknown, { arg }: { arg: { favorited?: boolean; rating?: number } }) =>
+    (_key: unknown, { arg }: { arg: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string } }) =>
       api.library.updateGallery(id, arg),
   )
 }
 
 // ── E-Hentai ──────────────────────────────────────────────────────────
 
-export function useEhSearch(params: EhSearchParams) {
-  // Always fire — empty params = EH homepage (like EhViewer default behaviour)
-  return useSWR(['eh/search', params], () => api.eh.search(params), { revalidateOnFocus: false })
+export function useEhSearch(params: EhSearchParams, enabled = true) {
+  return useSWR(enabled ? ['eh/search', params] : null, () => api.eh.search(params), {
+    revalidateOnFocus: false,
+    revalidateOnReconnect: false,
+    dedupingInterval: 60000,
+  })
 }
 
 export function useEhGallery(gid: number | null, token: string | null) {
@@ -223,12 +269,12 @@ export function useEhGalleryImagesPaginated(
   return { tokenMap, previewMap, isLoading, error, onPageChange, fetchUpTo, isDone: doneRef.current }
 }
 
-export function useEhPopular() {
-  return useSWR('eh/popular', () => api.eh.getPopular(), { revalidateOnFocus: false })
+export function useEhPopular(enabled = true) {
+  return useSWR(enabled ? 'eh/popular' : null, () => api.eh.getPopular(), { revalidateOnFocus: false })
 }
 
-export function useEhToplist(tl: number, page = 0) {
-  return useSWR(['eh/toplist', tl, page], () => api.eh.getToplist({ tl, page }), {
+export function useEhToplist(tl: number, page = 0, enabled = true) {
+  return useSWR(enabled ? ['eh/toplist', tl, page] : null, () => api.eh.getToplist({ tl, page }), {
     revalidateOnFocus: false,
   })
 }

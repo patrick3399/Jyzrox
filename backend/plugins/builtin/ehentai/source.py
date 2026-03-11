@@ -14,7 +14,16 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from plugins.base import SourcePlugin
-from plugins.models import DownloadResult, FieldDef, GalleryMetadata, PluginMeta
+from plugins.models import (
+    CredentialFlow,
+    CredentialStatus,
+    DownloadResult,
+    FieldDef,
+    GalleryImportData,
+    GalleryMetadata,
+    PluginMeta,
+    SiteInfo,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -28,6 +37,7 @@ class EhSourcePlugin(SourcePlugin):
         name="E-Hentai",
         source_id="ehentai",
         version="1.0.0",
+        description="E-Hentai / ExHentai gallery downloader",
         url_patterns=["e-hentai.org", "exhentai.org"],
         credential_schema=[
             FieldDef(
@@ -59,7 +69,12 @@ class EhSourcePlugin(SourcePlugin):
                 placeholder="",
             ),
         ],
+        supported_sites=[
+            SiteInfo(domain="e-hentai.org", name="E-Hentai", source_id="ehentai", category="gallery", has_tags=True),
+            SiteInfo(domain="exhentai.org", name="ExHentai", source_id="ehentai", category="gallery", has_tags=True),
+        ],
         concurrency=3,
+        semaphore_key="ehentai",
     )
 
     async def can_handle(self, url: str) -> bool:
@@ -87,15 +102,12 @@ class EhSourcePlugin(SourcePlugin):
 
         gid = int(m.group(1))
         token = m.group(2)
-        use_ex = "exhentai.org" in url
 
-        # credentials is a JSON string of EH cookies (or None)
+        # Accept both a JSON-string credential (from worker) and a pre-parsed dict.
+        # When no credentials are provided, fall back to anonymous (empty cookies).
         if not credentials:
-            err = "E-Hentai credentials not configured"
-            return DownloadResult(status="failed", downloaded=0, total=0, error=err)
-
-        # Accept both a JSON-string credential (from worker) and a pre-parsed dict
-        if isinstance(credentials, str):
+            cookies: dict = {}
+        elif isinstance(credentials, str):
             try:
                 cookies = json.loads(credentials)
             except (json.JSONDecodeError, TypeError):
@@ -104,6 +116,19 @@ class EhSourcePlugin(SourcePlugin):
         else:
             # credentials passed as dict (e.g. from direct call)
             cookies = credentials
+
+        # Determine use_ex: Redis setting → config → igneous cookie → URL domain.
+        # Anonymous downloads must use e-hentai.org, not exhentai.
+        from core.redis_client import get_redis
+        redis = get_redis()
+        pref = await redis.get("setting:eh_use_ex")
+        if pref is not None:
+            use_ex = pref == b"1"
+        else:
+            use_ex = settings.eh_use_ex or bool(cookies.get("igneous"))
+
+        if not cookies:
+            use_ex = False  # anonymous access only works on e-hentai.org
 
         # Wrap on_progress to match signature expected by download_eh_gallery
         async def _progress(downloaded: int, total_pages: int) -> None:
@@ -175,3 +200,41 @@ class EhSourcePlugin(SourcePlugin):
                 "token": raw.get("token", ""),
             },
         )
+
+    # ------------------------------------------------------------------
+    # Downloadable protocol methods
+    # ------------------------------------------------------------------
+
+    def resolve_output_dir(self, url: str, base_path: Path) -> Path:
+        """Determine output directory for an EH gallery download."""
+        m = _EH_URL_RE.search(url)
+        if m:
+            return base_path / "ehentai" / m.group(1)
+        return base_path / "ehentai" / "unknown"
+
+    def requires_credentials(self) -> bool:
+        """E-Hentai supports anonymous downloads (with limited bandwidth)."""
+        return False
+
+    # ------------------------------------------------------------------
+    # Parseable protocol method
+    # ------------------------------------------------------------------
+
+    def parse_import(self, dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
+        """Parse a downloaded EH gallery directory into GalleryImportData."""
+        from plugins.builtin.ehentai._metadata import parse_eh_import
+        return parse_eh_import(dest_dir, raw_meta)
+
+    # ------------------------------------------------------------------
+    # CredentialProvider protocol methods
+    # ------------------------------------------------------------------
+
+    def credential_flows(self) -> list[CredentialFlow]:
+        """Declare EH credential flows: cookie fields + login."""
+        from plugins.builtin.ehentai._credentials import eh_credential_flows
+        return eh_credential_flows()
+
+    async def verify_credential(self, credentials: dict) -> CredentialStatus:
+        """Verify EH cookies by testing access against the EhClient."""
+        from plugins.builtin.ehentai._credentials import verify_eh_credential
+        return await verify_eh_credential(credentials)

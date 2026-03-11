@@ -21,6 +21,14 @@ class Settings(BaseSettings):
     rate_limit_login: int = 5  # max attempts per window
     rate_limit_window: int = 300  # window in seconds (5 min)
 
+    # Feature toggles (defaults, overridable at runtime via Redis)
+    csrf_enabled: bool = True
+    opds_enabled: bool = True
+    external_api_enabled: bool = True
+    download_eh_enabled: bool = True
+    download_pixiv_enabled: bool = True
+    download_gallery_dl_enabled: bool = True
+
     # E-Hentai limits
     eh_max_concurrency: int = 2
     eh_request_timeout: int = 30
@@ -34,6 +42,8 @@ class Settings(BaseSettings):
     tag_model_name: str = "SmilingWolf/wd-swinv2-tagger-v3"
     tag_general_threshold: float = 0.35
     tag_character_threshold: float = 0.85
+    tagger_url: str = "http://tagger:8100"
+    tagger_timeout: int = 30
 
     # Storage paths (inside container)
     data_gallery_path: str = "/data/gallery"
@@ -50,6 +60,11 @@ class Settings(BaseSettings):
     pixiv_client_id: str = "MOBrBDS8blbauoSck0ZfDbtuzpyT"
     pixiv_client_secret: str = "lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj"
     # To override: set PIXIV_CLIENT_ID and PIXIV_CLIENT_SECRET in .env
+
+    # Pixiv API limits
+    pixiv_max_concurrency: int = 4       # max concurrent API requests
+    pixiv_image_concurrency: int = 6     # max concurrent image proxy downloads
+    pixiv_request_timeout: int = 30
 
     # Library management
     library_monitor_enabled: bool = True

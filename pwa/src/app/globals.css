@@ -1,32 +1,44 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
 
-@layer base {
-  :root {
-    --color-bg: 255 255 255;
-    --color-card: 245 245 245;
-    --color-card-hover: 235 235 235;
-    --color-border: 229 229 229;
-    --color-border-hover: 200 200 200;
-    --color-text: 23 23 23;
-    --color-text-secondary: 115 115 115;
-    --color-text-muted: 163 163 163;
-    --color-accent: 99 102 241;
-    --color-input: 245 245 245;
-  }
-  .dark {
-    --color-bg: 10 10 10;
-    --color-card: 17 17 17;
-    --color-card-hover: 22 22 22;
-    --color-border: 42 42 42;
-    --color-border-hover: 68 68 68;
-    --color-text: 229 229 229;
-    --color-text-secondary: 163 163 163;
-    --color-text-muted: 115 115 115;
-    --color-accent: 99 102 241;
-    --color-input: 26 26 26;
-  }
+@custom-variant dark (&:where(.dark, .dark *));
+
+@theme inline {
+  --color-vault-bg: var(--color-bg);
+  --color-vault-card: var(--color-card);
+  --color-vault-card-hover: var(--color-card-hover);
+  --color-vault-border: var(--color-border);
+  --color-vault-border-hover: var(--color-border-hover);
+  --color-vault-text: var(--color-text);
+  --color-vault-text-secondary: var(--color-text-secondary);
+  --color-vault-text-muted: var(--color-text-muted);
+  --color-vault-accent: var(--color-accent);
+  --color-vault-input: var(--color-input);
+}
+
+:root {
+  --color-bg: #ffffff;
+  --color-card: #f5f5f5;
+  --color-card-hover: #ebebeb;
+  --color-border: #e5e5e5;
+  --color-border-hover: #c8c8c8;
+  --color-text: #171717;
+  --color-text-secondary: #737373;
+  --color-text-muted: #a3a3a3;
+  --color-accent: #6366f1;
+  --color-input: #f5f5f5;
+}
+
+.dark {
+  --color-bg: #0a0a0a;
+  --color-card: #111111;
+  --color-card-hover: #161616;
+  --color-border: #2a2a2a;
+  --color-border-hover: #444444;
+  --color-text: #e5e5e5;
+  --color-text-secondary: #a3a3a3;
+  --color-text-muted: #737373;
+  --color-accent: #6366f1;
+  --color-input: #1a1a1a;
 }
 
 html,
@@ -36,8 +48,6 @@ body {
 }
 
 /* ── iOS PWA safe area ─────────────────────────────────────────────── */
-/* env(safe-area-inset-*) is set when viewport-fit=cover on notched devices */
-
 :root {
   --sat: env(safe-area-inset-top, 0px);
   --sab: env(safe-area-inset-bottom, 0px);
@@ -45,13 +55,11 @@ body {
   --sar: env(safe-area-inset-right, 0px);
 }
 
-/* Prevent iOS Safari bounce/overscroll */
 html {
   overscroll-behavior: none;
   -webkit-text-size-adjust: 100%;
 }
 
-/* Mobile main content offset: nav height + safe area top */
 .safe-main-pt {
   padding-top: calc(3.5rem + var(--sat));
 }
@@ -62,38 +70,36 @@ html {
 }
 
 /* ── Reader ─────────────────────────────────────────────────────────── */
-
-/* Reader container — fixed fullscreen, covers NavBar */
 .reader-container {
   position: fixed;
-  inset: 0;
-  z-index: 100; /* above NavBar (z-50) */
+  top: 0;
+  left: 0;
+  right: 0;
+  height: 100svh; /* small viewport height — safe fallback before JS runs */
+  z-index: 100;
   overflow: hidden;
   overscroll-behavior: none;
-  -webkit-touch-callout: none; /* prevent iOS long-press popup on images */
+  -webkit-touch-callout: none;
   -webkit-user-select: none;
   user-select: none;
 }
 
-/* Single / double page tap zones — block touch scroll so taps work cleanly */
 .reader-tap-zone {
   touch-action: none;
 }
 
-/* Webtoon scroll area — only vertical scroll, hide scrollbar */
 .reader-webtoon-scroll {
   overflow-y: auto;
   overflow-x: hidden;
   overscroll-behavior-y: contain;
   -webkit-overflow-scrolling: touch;
-  touch-action: pan-y; /* allow vertical scroll only */
-  scrollbar-width: none; /* Firefox */
+  touch-action: pan-y;
+  scrollbar-width: none;
 }
 .reader-webtoon-scroll::-webkit-scrollbar {
-  display: none; /* Chrome / Safari */
+  display: none;
 }
 
-/* Thumbnail strip — horizontal scroll, hide scrollbar */
 .reader-thumb-strip {
   overflow-x: auto;
   overflow-y: hidden;

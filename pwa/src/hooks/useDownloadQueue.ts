@@ -41,3 +41,22 @@ export function usePauseJob() {
       arg.action === 'pause' ? api.download.pauseJob(arg.id) : api.download.resumeJob(arg.id),
   )
 }
+
+export function useCheckUrl(url: string) {
+  const trimmed = url.trim()
+  return useSWR(
+    trimmed.length > 5 ? ['download/check-url', trimmed] : null,
+    () => api.download.checkUrl(trimmed),
+    {
+      dedupingInterval: 5000,
+      keepPreviousData: true,
+    },
+  )
+}
+
+export function useSupportedSites() {
+  return useSWR('download/supported-sites', () => api.download.supportedSites(), {
+    dedupingInterval: 60000,
+    revalidateOnFocus: false,
+  })
+}

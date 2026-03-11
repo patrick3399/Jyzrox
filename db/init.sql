@@ -11,7 +11,8 @@ CREATE TABLE IF NOT EXISTS users (
     role            TEXT DEFAULT 'admin',
     created_at      TIMESTAMPTZ DEFAULT now(),
     last_login_at   TIMESTAMPTZ,
-    avatar_style    TEXT DEFAULT 'gravatar'
+    avatar_style    TEXT DEFAULT 'gravatar',
+    locale          TEXT DEFAULT 'en'
 );
 
 -- No default user: first-run setup is done via POST /api/auth/setup
@@ -43,6 +44,7 @@ CREATE TABLE IF NOT EXISTS blobs (
     media_type    TEXT NOT NULL DEFAULT 'image',
     width         INT,
     height        INT,
+    duration      FLOAT,
     phash         TEXT,
     phash_int     BIGINT,
     phash_q0      SMALLINT,
@@ -263,3 +265,77 @@ CREATE TABLE IF NOT EXISTS plugin_config (
     config_json JSONB DEFAULT '{}',
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
+
+-- ── Subscriptions (replaces followed_artists) ──────────────────────
+
+CREATE TABLE IF NOT EXISTS subscriptions (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    name            TEXT,
+    url             TEXT NOT NULL,
+    source          TEXT,
+    source_id       TEXT,
+    avatar_url      TEXT,
+    enabled         BOOLEAN DEFAULT TRUE,
+    auto_download   BOOLEAN DEFAULT TRUE,
+    cron_expr       TEXT DEFAULT '0 */2 * * *',
+    last_checked_at TIMESTAMPTZ,
+    last_item_id    TEXT,
+    last_status     TEXT DEFAULT 'pending',
+    last_error      TEXT,
+    next_check_at   TIMESTAMPTZ DEFAULT now(),
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    UNIQUE(user_id, url)
+);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_next_check ON subscriptions(next_check_at) WHERE enabled = true;
+CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
+CREATE INDEX IF NOT EXISTS idx_subscriptions_source ON subscriptions(source, source_id);
+
+-- Artist grouping
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS artist_id TEXT;
+CREATE INDEX IF NOT EXISTS idx_galleries_artist_id ON galleries (artist_id) WHERE artist_id IS NOT NULL;
+
+-- ── Audit Logs ────────────────────────────────────────────────────────
+
+CREATE TABLE IF NOT EXISTS audit_logs (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         INTEGER REFERENCES users(id) ON DELETE SET NULL,
+    action          VARCHAR(100) NOT NULL,
+    resource_type   VARCHAR(50),
+    resource_id     VARCHAR(100),
+    details         JSONB,
+    ip_address      INET,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id    ON audit_logs(user_id);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
+CREATE INDEX IF NOT EXISTS idx_audit_logs_action     ON audit_logs(action);
+
+-- ── Excluded Blobs ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS excluded_blobs (
+    gallery_id  BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    blob_sha256 TEXT NOT NULL,
+    excluded_at TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (gallery_id, blob_sha256)
+);
+
+-- ── Blob Relationships (dedup pipeline) ──────────────────────────────
+CREATE TABLE IF NOT EXISTS blob_relationships (
+    id              BIGSERIAL PRIMARY KEY,
+    sha_a           TEXT NOT NULL REFERENCES blobs(sha256) ON DELETE CASCADE,
+    sha_b           TEXT NOT NULL REFERENCES blobs(sha256) ON DELETE CASCADE,
+    hamming_dist    SMALLINT NOT NULL,
+    relationship    TEXT NOT NULL DEFAULT 'needs_t2',
+    suggested_keep  TEXT,
+    reason          TEXT,
+    diff_score      FLOAT,
+    diff_type       TEXT,
+    tier            SMALLINT NOT NULL DEFAULT 1,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_blob_pair UNIQUE (sha_a, sha_b),
+    CONSTRAINT chk_canonical_order CHECK (sha_a < sha_b)
+);
+CREATE INDEX IF NOT EXISTS idx_blob_rel_relationship ON blob_relationships (relationship, id);
+CREATE INDEX IF NOT EXISTS idx_blob_rel_sha_a ON blob_relationships (sha_a);
+CREATE INDEX IF NOT EXISTS idx_blob_rel_sha_b ON blob_relationships (sha_b);

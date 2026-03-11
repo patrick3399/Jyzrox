@@ -79,6 +79,46 @@ async def set_proxied_image(gid: int, page: int, data: bytes) -> None:
     await set_bytes(f"thumb:proxied:{gid}:{page}", data, _TTL_PROXY_IMAGE)
 
 
+# ── Pixiv cache operations ───────────────────────────────────────────
+
+_TTL_PIXIV_SEARCH = 300      # 5min
+_TTL_PIXIV_ILLUST = 3600     # 1h
+_TTL_PIXIV_USER = 1800       # 30min
+_TTL_PIXIV_IMAGE = 86400     # 24h
+
+
+async def get_pixiv_search_cache(key: str) -> dict | None:
+    return await get_json(f"pixiv:search:{key}")
+
+
+async def set_pixiv_search_cache(key: str, data: dict) -> None:
+    await set_json(f"pixiv:search:{key}", data, _TTL_PIXIV_SEARCH)
+
+
+async def get_pixiv_illust_cache(illust_id: int) -> dict | None:
+    return await get_json(f"pixiv:illust:{illust_id}")
+
+
+async def set_pixiv_illust_cache(illust_id: int, data: dict) -> None:
+    await set_json(f"pixiv:illust:{illust_id}", data, _TTL_PIXIV_ILLUST)
+
+
+async def get_pixiv_user_cache(user_id: int) -> dict | None:
+    return await get_json(f"pixiv:user:{user_id}")
+
+
+async def set_pixiv_user_cache(user_id: int, data: dict) -> None:
+    await set_json(f"pixiv:user:{user_id}", data, _TTL_PIXIV_USER)
+
+
+async def get_pixiv_image_cache(url_hash: str) -> bytes | None:
+    return await get_bytes(f"pixiv:img:{url_hash}")
+
+
+async def set_pixiv_image_cache(url_hash: str, data: bytes) -> None:
+    await set_bytes(f"pixiv:img:{url_hash}", data, _TTL_PIXIV_IMAGE)
+
+
 async def push_system_alert(message: str) -> None:
     r = get_redis()
     await r.lpush("system:alerts", message)

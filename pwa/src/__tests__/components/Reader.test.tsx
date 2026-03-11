@@ -113,6 +113,7 @@ function makeImage(pageNum: number): GalleryImage {
     media_type: 'image',
     file_size: 100000,
     file_hash: null,
+    duration: null,
   }
 }
 
@@ -250,6 +251,7 @@ describe('Reader — proxy mode', () => {
           media_type: 'image' as const,
           file_size: null,
           file_hash: null,
+          duration: null,
         },
       ],
     }

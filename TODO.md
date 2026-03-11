@@ -1,148 +1,24 @@
 # Jyzrox TODO
 
-> 最後更新：2026-03-10
-
----
-
-## P0 — 安全 + 已完成功能驗證
-
-> 立即處理：安全漏洞與已實作功能的測試驗證。
-
-### 安全
-- [ ] CSRF protection（目前 cookie-based auth 無 CSRF token）
-- [ ] Rate limiting 全端點覆蓋（目前僅 external API 有）
-
-### Service Worker 版本管理
-- [ ] 自動版本管理 — build 時注入 hash 或時間戳到 `CACHE_NAME`
-- [ ] SW 更新提示 UI（偵測到新版本時提示使用者重整）
-
-### OPDS 端點測試（HTTP Basic Auth）
-- [ ] `GET /opds/` — Root navigation feed 回傳有效 Atom XML，包含 all/recent/favorites/search 四個 entry
-- [ ] `GET /opds/all` — 回傳所有 gallery，驗證分頁（`?page=0&limit=5`），確認 `<link rel="next">` 存在
-- [ ] `GET /opds/all?page=1` — 第二頁回傳不同 gallery，確認 `<link rel="previous">` 存在
-- [ ] `GET /opds/recent` — 回傳最近 50 個 gallery，無分頁連結
-- [ ] `GET /opds/favorites` — 僅回傳 `favorited=true` 的 gallery
-- [ ] `GET /opds/search?q=關鍵字` — title ILIKE 搜尋結果正確
-- [ ] `GET /opds/opensearch.xml` — 回傳有效 OpenSearch descriptor，template URL 正確
-- [ ] `GET /opds/gallery/{id}` — 回傳 OPDS-PSE 頁面列表，每頁有 `pse:index`、image link、thumbnail link
-- [ ] 無 Authorization header → 401 + `WWW-Authenticate: Basic realm="Jyzrox OPDS"` header
-- [ ] 錯誤密碼 → 401
-- [ ] nginx `auth_request` 用 Basic Auth 存取 `/media/cas/` 和 `/media/thumbs/` → 200
-- [ ] 實際 OPDS client 測試（Panels iOS / KOReader / Chunky）連線瀏覽 + 圖片載入
-
-### External API 增強測試（X-API-Token Auth）
-- [ ] `GET /api/external/v1/galleries/{id}/images` — 回傳含 `file_url` 和 `thumb_url` 欄位
-- [ ] `GET /api/external/v1/galleries/{id}/images/{page}/file` — 回傳正確圖片二進位（Content-Type 正確）
-- [ ] 圖片不存在 → 404
-- [ ] `GET /api/external/v1/galleries?q=test` — title 搜尋過濾正確
-- [ ] `GET /api/external/v1/galleries?favorited=true` — 僅回傳收藏 gallery
-- [ ] `GET /api/external/v1/galleries?min_rating=3` — 僅回傳 rating ≥ 3 的 gallery
-- [ ] 多參數組合：`?q=test&favorited=true&min_rating=3&source=ehentai` — 正確 AND 過濾
-
-### Mihon Extension 測試
-- [ ] `./gradlew assembleDebug` 編譯通過
-- [ ] 安裝到 Android 裝置/模擬器，Mihon 偵測到 Jyzrox 擴充
-- [ ] 設定 Server URL + API Token 後，Popular 頁面載入 gallery 列表
-- [ ] 搜尋功能：輸入關鍵字回傳正確結果
-- [ ] Filter 測試：Source / Rating / Favorites 各篩選功能正常
-- [ ] Gallery detail 顯示正確 metadata（title、author、tags、頁數）
-- [ ] Chapter list 回傳 1 個 chapter
-- [ ] Page list 載入完整圖片列表，圖片正常顯示
-- [ ] 無 Token / 錯誤 Token → 適當錯誤提示
+> 最後更新：2026-03-12
 
 ---
 
 ## P1 — 短期高價值
 
-> 獨立功能，少依賴，能快速上線帶來明顯效果。
+> 獨立功能，少依賴，能快速上線。
 
-### AI Tagging 上線
-- [ ] 測試 `TAG_MODEL_ENABLED=true` 完整流程（模型下載→推理→DB 寫入）
-- [ ] 前端：Gallery detail 頁顯示 AI 標籤（含信心度）
-- [ ] 前端：「重新標記」按鈕整合到 Gallery detail
-- [ ] 標籤信心度篩選 UI（滑桿或閾值設定）
+### ~~排程任務管理頁面（/scheduled-tasks）~~ ✅ 已完成
 
-### Pixiv 瀏覽器 Phase 1（Client + Router）
-
-> 依賴：已有 pixivpy3 OAuth refresh_token 機制（settings.py）
-
-#### 服務層
-- [ ] 新建 `services/pixiv_client.py` — async context manager（仿 EhClient）
-  - pixivpy3 同步 → `asyncio.to_thread()` 包裝
-  - Token 管理：Redis 快取 access_token（TTL 3500s）+ Redis lock 防競爭刷新
-  - httpx client（`Referer: https://www.pixiv.net/`）用於圖片下載
-  - 方法：search_illust / illust_detail / user_detail / user_illusts / user_bookmarks / illust_follow / user_following / download_image
-
-#### Router
-- [ ] 新建 `routers/pixiv.py` — 所有端點 `Depends(require_auth)`
-  - `GET /search` — 搜尋插畫（word, sort, search_target, duration, offset）
-  - `GET /illust/{id}` — 插畫詳情
-  - `GET /user/{id}` — 使用者資訊 + 近期作品
-  - `GET /user/{id}/illusts` — 分頁使用者作品
-  - `GET /user/{id}/bookmarks` — 使用者公開收藏
-  - `GET /following/feed` — 已追蹤作者的新作品
-  - `GET /image-proxy` — 代理 pximg.net 圖片（domain 白名單 + Redis 24h 快取）
-- [ ] `main.py` 註冊 `/api/pixiv` router
-
-#### 基礎設施
-- [ ] `services/cache.py` 新增 Pixiv 快取 helpers（search 5min / illust 1h / user 30min / image 24h）
-- [ ] `core/config.py` 新增 `pixiv_max_concurrency` / `pixiv_image_concurrency`
-
-### i18n 補完
-- [ ] 韓文翻譯補齊缺失的 28 keys（ko.ts 511 → 539）
-- [ ] 使用者 locale 偏好存入 DB（目前僅 localStorage，換裝置需重選）
-
-### 效能
-- [ ] Gallery 列表頁大量資料效能優化（虛擬滾動 / infinite scroll）
-- [ ] 縮圖懶載入（Intersection Observer，目前是否已實作待確認）
+> 後端 API + 前端頁面全部實作。`/scheduled-tasks` 頁面支援任務卡片、cron 內聯編輯、啟用/停用、立即執行、失敗 last_error 展開。側邊欄入口、i18n 已整合。
 
 ---
 
-## P2 — 中期功能（有依賴鏈）
+### ~~去重系統（Tiered Dedup）~~ ✅ 已完成
 
-> 依賴 P1 完成或需多階段實施。
+> 3-tier pipeline 全部實作。`blob_relationships` 表已建立，Tier 1（pHash）、Tier 2（Heuristic）、Tier 3（OpenCV）全部完成。審查 API（`/api/dedup`）含 stats、review、keep、whitelist、scan/start/stop/progress。前端 `/dedup` 頁面、設定卡片、審查列表、側邊欄入口、i18n、`api.ts` 型別全部整合。
 
-### Pixiv Phase 2: 作者追蹤（依賴 Phase 1）
-
-#### 資料庫
-- [ ] `db/models.py` + `db/init.sql` 新增 `followed_artists` 表
-  - 欄位：user_id, source, artist_id, artist_name, artist_avatar, last_checked_at, last_illust_id, auto_download, added_at
-  - UNIQUE(user_id, source, artist_id)
-
-#### API 端點
-- [ ] `GET /artists/followed` — 列出已追蹤作者
-- [ ] `POST /artists/follow` — 追蹤作者
-- [ ] `DELETE /artists/follow/{artist_id}` — 取消追蹤
-- [ ] `PATCH /artists/follow/{artist_id}` — 切換 auto_download
-- [ ] `POST /artists/check-updates` — 手動觸發更新檢查
-
-#### Worker 定時任務
-- [ ] `worker.py` 新增 `check_pixiv_artists` cron（每 2 小時）
-  - 遍歷 followed_artists → user_illusts → 比對 last_illust_id → 新作品時更新 DB + 可選自動下載
-  - 請求間隔 ≥ 2s（Pixiv 限速較嚴）
-
-### Pixiv Phase 3: 原生下載器（依賴 Phase 1）
-- [ ] 新建 `services/pixiv_downloader.py`（仿 eh_downloader.py）
-  - `download_pixiv_illust()` — 下載單一插畫（含多頁漫畫）
-  - `download_pixiv_user_works()` — 下載作者全部作品
-  - 輸出 `metadata.json` 相容現有 `import_job`
-- [ ] `worker.py` download_job 新增 Pixiv 分支（URL 偵測 → 原生下載器，取代 gallery-dl subprocess）
-
-### Pixiv Phase 4: 前端頁面（依賴 Phase 1-3）
-
-#### Types / API / i18n
-- [ ] `types.ts` 新增 PixivIllust / PixivUser / PixivSearchResult 型別
-- [ ] `api.ts` 新增 pixiv namespace（search, illust, user, imageProxy, follow）
-- [ ] `i18n/en.ts` 新增 `pixiv.*` keys
-
-#### 頁面
-- [ ] `/pixiv` 搜尋頁 — 關鍵字搜尋 + 排序/時間篩選 + 結果 grid（仿 `/browse`）
-- [ ] `/pixiv/illust/[id]` 插畫詳情 — 大圖、tags、stats、下載按鈕
-- [ ] `/pixiv/user/[id]` 作者頁 — 作品 grid、追蹤按鈕
-- [ ] `/pixiv/following` 追蹤管理 — 已追蹤作者列表 + 新作品 feed
-
-#### 導航
-- [ ] Sidebar + MobileNav 新增 Pixiv 入口
+---
 
 ### 大量下載
 
@@ -159,23 +35,29 @@
 - [ ] 批次任務儀表板（總進度、成功/失敗統計）
 - [ ] 批次下載確認 dialog（預覽數量、預估大小）
 
-### 安全補強
-- [ ] 檔案上傳 MIME 驗證（import 時驗證實際檔案類型）
-
-### 後端 i18n
-- [ ] 後端 API 錯誤訊息 i18n（目前後端回傳硬編碼中/英文）
-- [ ] API 錯誤回應根據 `Accept-Language` header 回傳對應語言
-- [ ] Tag 翻譯系統已有 — 確認前端有顯示翻譯後的 tag 名稱
-
-### 前端 i18n 補完
-- [ ] 日期/數字格式化根據 locale（`Intl.DateTimeFormat` / `Intl.NumberFormat`）
-- [ ] 複數形式支援（1 file vs 2 files）
-
 ---
 
-## P3 — 長期 / 按需
+## P2 — 中期功能（有依賴鏈）
 
-> 非核心功能、大型重構、按需啟動。
+> 需多階段實施或依賴較多。
+
+### 即時狀態推送（WebSocket）
+
+> **現狀**：下載佇列等核心狀態靠 SWR polling（每 3 秒一次）。WebSocket 基礎設施已存在（`/api/ws`），目前只用於系統警告推送。
+>
+> **目標**：Worker 完成/進度事件 → Redis pub/sub → WS handler 轉發前端，消除 polling。
+
+#### 後端
+- [ ] `worker/` 各 job function 完成/進度時發布 Redis 事件（`job:{id}:status`、`job:{id}:progress`）
+- [ ] `routers/ws.py` 訂閱 Redis channel，將事件轉發至 WebSocket 連線
+- [ ] 定義標準化 WebSocket 事件格式（`{ type: 'job_update', job_id, status, progress }`）
+
+#### 前端
+- [ ] `useDownloadQueue` 改為訂閱 WebSocket 事件，移除 3s polling
+- [ ] 下載進度條改為即時更新（毫秒級）
+- [ ] WS 斷線時自動 fallback 到 polling（`lib/ws.ts` 已有重連邏輯）
+
+---
 
 ### 多人權限管理
 
@@ -197,6 +79,107 @@
 - [ ] 角色不足時的 403 提示頁面
 - [ ] 側邊欄根據角色隱藏管理入口
 
+#### 分享與內容控制
+- [ ] 分享連結：Gallery 產生公開短連結（token-based，可設過期時間）
+- [ ] Gallery 可見性設定（私有 / 公開 / 指定使用者）
+- [ ] 內容過濾：依 tag namespace 隱藏 gallery（家長控制 / R18 過濾）
+- [ ] 過濾規則存入 `user_preferences` 或擴充 `blocked_tags` 表
+
+---
+
+## P3 — 長期 / 按需
+
+> 非核心功能、大型重構、按需啟動。
+
+### arq → SAQ 遷移
+
+> **背景**：arq 0.27.0 使用已移除的 `asyncio.get_event_loop()`，Python 3.14+ crash。上游 PR #509 長期未合併，專案已停滯。目前靠 `core/compat.py` monkey-patch 撐住，但非長久之計。
+>
+> **選定方案**：[SAQ](https://github.com/tobymao/saq)（Simple Async Queue）
+> - 同為 asyncio-native + Redis backend，API 風格接近 arq
+> - 內建 Web UI dashboard、cron scheduling、heartbeat
+> - 活躍維護（2024–2025 持續發版）、Python 3.14 相容
+> - 遷移成本最低：概念對應（Worker → Worker, job function → job function, cron → cron）
+> - 備用方案：AsyncTasQ
+
+- [ ] 安裝 SAQ，建立基礎 worker 設定（`worker/saq_worker.py`）
+- [ ] 遷移 job functions（`download_job`, `import_job`, `tag_job`, `subscription_check`）
+- [ ] 遷移 cron scheduling（subscription 定時檢查）
+- [ ] 替換 `arq.create_pool` → SAQ queue（`core/redis_client.py`, enqueue 呼叫點）
+- [ ] 更新 Docker entrypoint（`saq worker.saq_worker:settings`）
+- [ ] 移除 arq 依賴 + `core/compat.py` monkey-patch
+- [ ] 驗證：Python 3.14 環境下完整 worker pipeline 正常運行
+- [ ] 可選：啟用 SAQ Web UI dashboard
+
+### S3 儲存抽象層
+
+> **現狀**：CAS 層直接使用本機檔案系統（`os.link`、`Path`，綁定 `/data/cas/`）。
+>
+> **目標**：抽象 `StorageBackend` interface（local / S3-compatible），支援 MinIO、Cloudflare R2、AWS S3。個人用途目前不需要，NAS 搬遷或多節點部署時啟動。
+
+- [ ] 定義 `StorageBackend` ABC：`put(sha256, data)`, `get(sha256)`, `exists(sha256)`, `delete(sha256)`, `link(sha256, dest)`
+- [ ] `LocalStorageBackend`：封裝現有 `os.link` / Path 邏輯（zero-regression 重構）
+- [ ] `S3StorageBackend`：boto3/aiobotocore，支援任意 S3-compatible endpoint
+- [ ] CAS 層（`worker/importer.py`, `worker/reconciliation.py`）改為注入 `StorageBackend`
+- [ ] Nginx `/media/` 靜態服務配合：local 繼續直接 serve，S3 改為簽名 URL redirect
+- [ ] 設定欄位：`storage_backend`（`local` / `s3`）、`s3_endpoint`、`s3_bucket`、`s3_access_key`、`s3_secret_key`
+
+### 語意搜尋（pgvector）
+
+> **前提**：WD14 Tagger 微服務（`tagger/`）已建立，特徵提取基礎設施就位。
+>
+> **目標**：CLIP / WD14 特徵向量存入 `pgvector`，實現「以圖搜圖」與「文字語意搜 gallery」。
+
+- [ ] PostgreSQL 啟用 `pgvector` extension（`db/init.sql` 或新 migration）
+- [ ] `blobs` 表新增 `embedding vector(512)` 欄位
+- [ ] `tagger/app.py` 新增 `/embed` 端點：回傳 CLIP/WD14 特徵向量（不只是 tag 列表）
+- [ ] `worker/tagging.py` `tag_job` 完成後寫入 embedding 到 `blobs.embedding`
+- [ ] 後端搜尋端點新增 `semantic_query` 參數（`GET /api/library/galleries?semantic=...`）
+- [ ] 搜尋邏輯：文字 query → embedding → `<=>` cosine distance 排序
+- [ ] 前端 Library 搜尋列新增「語意搜尋」模式切換
+- [ ] 以圖搜圖：上傳圖片 → 提取 embedding → 找最相似 gallery
+
+### 封存格式支援（ZIP / CBZ / EPUB / PDF）
+
+> **現狀**：Jyzrox 的 import pipeline 只處理解壓後的平面檔案目錄，無法直接讀取封存格式。LANraragi、Kavita、Suwayomi 均以封存檔為一等公民。
+>
+> **目標**：支援 ZIP/CBZ 直接匯入並在線上閱讀；PDF/EPUB 作為延伸目標。
+
+#### 後端
+- [ ] `worker/importer.py`：偵測輸入為封存檔時自動解壓（`zipfile`/`rarfile`），後續流程不變
+- [ ] 支援格式：`.zip`、`.cbz`（Phase 1）；`.cbr`（`.rar`，需 `rarfile` 或 `patool`）（Phase 2）
+- [ ] PDF 支援：`pypdf` 或 `pdf2image` 逐頁提取為圖片，匯入 CAS（Phase 3）
+- [ ] EPUB 支援：提取圖片頁面，忽略文字內容（Phase 3）
+- [ ] `GET /api/import/browse` 檔案瀏覽器：顯示封存檔並允許直接匯入
+- [ ] Download pipeline：`download_job` 完成後若產物為封存檔，自動觸發解壓流程
+
+#### 前端
+- [ ] Import Center：封存檔拖曳上傳入口（`POST /api/import/upload`）
+- [ ] 匯入預覽：顯示封存內頁數與封面縮圖
+
+### 漫畫系列結構（Series / Volume / Chapter）
+
+> **現狀**：Gallery 為扁平結構，無父子關係。Kavita 與 Suwayomi 以 Series → Volume → Chapter 三層結構組織內容，支援連續閱讀與進度追蹤。
+>
+> **目標**：在現有 Gallery 模型上疊加可選的系列層，不破壞現有扁平使用模式。
+
+#### 資料庫
+- [ ] 新增 `series` 表：`id`, `title`, `title_jpn`, `cover_gallery_id`, `tags_array`, `created_at`
+- [ ] `galleries` 表新增 `series_id FK`、`volume_num`、`chapter_num`、`chapter_title` 欄位（全部 nullable，保持向後相容）
+- [ ] 遷移腳本
+
+#### 後端
+- [ ] `GET /api/library/series`：系列列表（含封面、章節數、總頁數）
+- [ ] `GET /api/library/series/{id}`：系列詳情 + 章節列表（依 volume/chapter 排序）
+- [ ] Gallery 編輯 API：支援指定 `series_id`、`volume_num`、`chapter_num`
+- [ ] Reader API：`next_chapter` / `prev_chapter` 跨 gallery 連續閱讀端點
+
+#### 前端
+- [ ] `/series` 頁面：系列列表（封面格狀顯示）
+- [ ] `/series/[id]` 頁面：系列詳情，章節列表，「從頭閱讀」按鈕
+- [ ] Gallery detail 頁：可選指定所屬系列與章節號
+- [ ] Reader：章節末尾「下一章」跳轉（呼叫 `next_chapter` 端點）
+
 ### Plugin 系統完善
 
 #### 核心架構
@@ -214,24 +197,26 @@
 - [ ] Plugin 啟用/停用開關
 - [ ] Plugin 設定表單（動態生成）
 
-### DevOps
-- [ ] 資料庫自動遷移機制（Alembic 或類似工具）
-- [ ] 自動化 CI：push 時跑 backend pytest + frontend vitest
+### DevOps / 基礎設施
 - [ ] 集中式日誌（Loki + Grafana 或類似方案）
-- [ ] 容器資源限制（`deploy.resources` in docker-compose）
 - [ ] Docker image 瘦身：檢查 layer 大小，移除不必要依賴
 - [ ] 生產環境 HTTPS 配置指南（Let's Encrypt + Nginx）
 
-### i18n 擴展
-- [ ] 簡體中文（zh-CN）翻譯檔
-- [ ] 社群貢獻翻譯指南文件
-
-### 測試補強
+### 測試 / 品質
 - [ ] AI tagging 端對端測試（mock ONNX model）
 - [ ] CAS 儲存壓力測試（大量重複檔案去重驗證）
 - [ ] Import 大量檔案效能測試（1000+ 圖片單次匯入）
-- [ ] WebSocket 斷線重連測試
-- [ ] Redis 快取命中率監控端點
+- [ ] 社群貢獻翻譯指南文件
+
+---
+
+## 擱置中
+
+> 需要特定環境或硬體才能進行，暫不排入。
+
+- [ ] OPDS 實際 client 測試（Panels iOS / KOReader / Chunky）— 需要實體裝置
+- [ ] AI Tagging 測試 `TAG_MODEL_ENABLED=true` 完整流程（模型下載→推理→DB 寫入）— 需要 ONNX runtime + 模型
+- [ ] Mihon Extension 編譯 + 實機測試（gallery 列表、搜尋、篩選、閱讀）— 需要 Android 裝置
 
 ---
 
@@ -240,9 +225,15 @@
 <details>
 <summary>展開已完成項目</summary>
 
+### 安全
+- [x] CSRF protection（double-submit cookie pattern）
+- [x] Rate limiting 全端點覆蓋
+- [x] 檔案上傳 MIME magic byte 驗證
+
 ### 功能
 - [x] E-Hentai 瀏覽器（搜尋、排行榜、收藏夾、圖片代理）
 - [x] 下載引擎（gallery-dl + EH 自有引擎，download→import→thumbnail pipeline）
+- [x] 下載來源自動偵測（移除手動 source 選擇）
 - [x] 本地圖庫瀏覽（GIN 索引、cursor 分頁、封面縮圖）
 - [x] Reader（單頁/瀑布/雙頁模式，進度同步）
 - [x] CAS 儲存（SHA256 去重、hardlink、ref count）
@@ -253,18 +244,48 @@
 - [x] pHash 相似圖搜尋
 - [x] 搜尋排序（前後端）
 - [x] Saved Searches（桌面+手機）
-- [x] i18n 四語系（en/zh-TW/ja/ko）
-- [x] 下載來源自動偵測（移除手動 source 選擇）
 - [x] Stale session 修復
 
+### Pixiv 全功能
+- [x] Phase 1：Client + Router（pixivpy3 async 包裝、搜尋/詳情/代理端點、Redis 快取）
+- [x] Phase 2：作者追蹤系統（followed_artists 表、追蹤 API、Worker cron 定時檢查）
+- [x] Phase 3：原生下載器（pixiv_downloader.py、worker 整合、取代 gallery-dl）
+- [x] Phase 4：前端頁面（搜尋/詳情/作者/追蹤管理頁面、導航整合）
+
+### 效能
+- [x] Virtual Scrolling（Library / Browse / History 頁面）
+
+### Settings UI
+- [x] 功能開關統一管理（CSRF / Rate Limiting / OPDS / External API / AI Tagging / 下載來源）
+- [x] Security / Features 分區
+
+### 後端 i18n
+- [x] API 錯誤訊息 i18n + Accept-Language 自動偵測
+- [x] Tag 名稱翻譯
+
+### AI Tagging 前端
+- [x] Gallery detail 頁顯示 AI 標籤（含信心度）
+- [x] 「重新標記」按鈕整合到 Gallery detail
+- [x] 標籤信心度篩選 UI（滑桿或閾值設定）
+
+### i18n
+- [x] 四語系（en/zh-TW/ja/ko）+ 簡體中文（zh-CN）
+- [x] 韓文翻譯補齊缺失 keys
+- [x] 使用者 locale 偏好存入 DB
+- [x] 日期/數字格式化根據 locale
+- [x] 複數形式支援
+
 ### PWA
-- [x] `manifest.json` 加入 `share_target` 宣告（接收 URL text）
-- [x] Share Target 落地頁（`/share-target`）：接收分享的 URL
-- [x] 落地頁自動呼叫 `_detect_source` → 顯示預覽 → 一鍵下載
-- [x] 確認現有 `/api/download/enqueue` 支援從手機端呼叫（CORS/cookie）
-- [x] 新增簡化端點 `POST /api/download/quick`（只需 URL，其餘自動）
-- [x] 分享成功 toast 通知
+- [x] Service Worker 自動版本管理 + 更新提示 UI
+- [x] `manifest.json` share_target 宣告
+- [x] Share Target 落地頁 + 一鍵下載
+- [x] `POST /api/download/quick` 簡化端點
 - [x] 離線時排隊（SW 快取分享請求，上線後補發）
+- [x] Gallery 列表 infinite scroll + 縮圖懶載入
+
+### External API / OPDS
+- [x] OPDS 全端點（root/all/recent/favorites/search/gallery + OpenSearch + Basic Auth）
+- [x] External API galleries/images/tags + download trigger + rate limiting
 
 ### DevOps
 - [x] Docker 雙網路隔離
@@ -272,10 +293,31 @@
 - [x] Multi-stage Dockerfile
 - [x] backup/restore 腳本
 - [x] Worker max_jobs + LOG_LEVEL 環境變數
-- [x] .dockerignore
+- [x] 資料庫自動遷移機制（Alembic，8 個版本遷移）
+- [x] 自動化 CI（GitHub Actions：lint + test + build）
+- [x] 容器資源限制（全服務 `deploy.resources` 配置）
+- [x] nginx `auth_request` 保護 `/media/` 路徑（subrequest auth + 快取）
 
 ### 測試
 - [x] Backend 221 tests
 - [x] Frontend 242 tests
+- [x] WebSocket 斷線重連（3 秒自動重連，`lib/ws.ts`）
+- [x] Redis 快取統計端點（`GET /api/system/cache`）
+
+### 排程任務管理（v0.3）
+- [x] `/scheduled-tasks` 頁面（任務卡片、cron 內聯編輯、啟用/停用、立即執行、last_error 展開）
+- [x] 側邊欄 `CalendarClock` 入口
+- [x] i18n `scheduledTasks.*` keys
+
+### 去重系統 Tiered Dedup（v0.3）
+- [x] `blob_relationships` 表（hamming_dist / relationship / suggested_keep / diff_score / tier / reviewed）
+- [x] Tier 1 pHash 掃描（四象限 pre-filter → Hamming distance → `blob_relationships`）
+- [x] Tier 2 Heuristic 分類（quality_conflict / variant，自動填 suggested_keep）
+- [x] Tier 3 OpenCV pixel-diff 驗證（needs_t3 → quality_conflict / resolved）
+- [x] `GET /api/dedup/stats`、`GET /api/dedup/review`、`POST /keep`、`POST /whitelist`、`DELETE /{id}`
+- [x] scan/start、scan/stop、scan/progress 端點
+- [x] Dedup config 欄位（phash_enabled / threshold / heuristic_enabled / opencv_enabled / batch_size / schedule）
+- [x] `/dedup` 前端頁面（設定卡片、審查列表、並排圖片、操作按鈕、空狀態引導）
+- [x] 側邊欄 `ScanSearch` 入口，i18n `dedup.*` keys，`api.ts` 型別
 
 </details>

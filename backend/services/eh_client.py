@@ -39,6 +39,9 @@ ALL_CATS = sum(CATEGORY_MASK.values())  # 1023
 
 _GALLERY_URL_RE = re.compile(r"e[x\-]hentai\.org/g/(\d+)/([a-f0-9]{10})/")
 _TOTAL_COUNT_RE = re.compile(r"Showing .+? of ([\d,]+)")
+# Cursor-based pagination: extract next/prev gid from searchnav links
+_NEXT_RE = re.compile(r'id="unext"[^>]*href="[^"]*[?&](?:amp;)?next=(\d+)')
+_PREV_RE = re.compile(r'id="uprev"[^>]*href="[^"]*[?&](?:amp;)?prev=(\d+)')
 # Matches preview page links: /s/{ptoken}/{gid}-{page}
 _PTOKEN_RE = re.compile(r"/s/([0-9a-f]{10})/(\d+)-(\d+)")
 # Matches showkey in page HTML: var showkey="...";
@@ -188,6 +191,8 @@ class EhClient:
         self,
         query: str = "",
         page: int = 0,
+        next_gid: int | None = None,  # cursor for next page
+        prev: bool = False,           # go to previous page
         category: str | None = None,
         f_cats: int | None = None,
         advance: bool = False,
@@ -199,8 +204,13 @@ class EhClient:
         """
         Scrape E-H search results.
         Strategy: extract gallery IDs from HTML, then batch via gdata API.
+        EH uses cursor-based pagination (?next=GID / ?prev=1); ?page=N is ignored by the server.
         """
-        params: dict[str, Any] = {"page": page}
+        params: dict[str, Any] = {}
+        if next_gid is not None:
+            params["next"] = next_gid
+        elif prev:
+            params["prev"] = "1"
         if query:
             params["f_search"] = query
 
@@ -259,12 +269,18 @@ class EhClient:
             alt_match = re.search(r"([\d,]+)\s+result", resp.text)
             total = int(alt_match.group(1).replace(",", "")) if alt_match else len(matches)
 
+        # Extract cursor info from searchnav pagination links (#unext / #uprev)
+        next_match = _NEXT_RE.search(resp.text)
+        prev_match = _PREV_RE.search(resp.text)
+        next_cursor = int(next_match.group(1)) if next_match else None
+        has_prev = prev_match is not None
+
         if not matches:
-            return {"galleries": [], "total": total, "page": page}
+            return {"galleries": [], "total": total, "page": page, "next_gid": next_cursor, "has_prev": has_prev}
 
         gid_list = [[gid, tok] for gid, tok in matches]
         galleries = await self._gdata(gid_list)
-        return {"galleries": galleries, "total": total, "page": page}
+        return {"galleries": galleries, "total": total, "page": page, "next_gid": next_cursor, "has_prev": has_prev}
 
     async def _gdata(self, gid_list: list[list]) -> list[dict]:
         """Batch-fetch gallery metadata via gdata API (max 25 per call)."""

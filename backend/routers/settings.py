@@ -54,8 +54,9 @@ class PixivOAuthCallbackRequest(BaseModel):
     code_verifier: str
 
 
-class RateLimitPatch(BaseModel):
+class FeatureTogglePatch(BaseModel):
     enabled: bool | None = None
+    value: int | float | None = None
 
 
 class EhSitePreference(BaseModel):
@@ -197,11 +198,13 @@ async def set_pixiv_credentials(
 ):
     """Save Pixiv refresh_token after verifying it via pixivpy3."""
     try:
+        import asyncio as _asyncio
+
         import pixivpy3
 
         api = pixivpy3.AppPixivAPI()
-        api.auth(refresh_token=req.refresh_token)
-        detail = api.user_detail(api.user_id)
+        await _asyncio.to_thread(api.auth, refresh_token=req.refresh_token)
+        detail = await _asyncio.to_thread(api.user_detail, api.user_id)
         username = detail.user.name
     except (ImportError, AttributeError, ValueError, OSError) as exc:
         logger.error("Pixiv auth failed: %s", exc)
@@ -463,30 +466,117 @@ async def eh_account_info(_: dict = Depends(require_auth)):
     return {"valid": True, **info}
 
 
-# ── Rate Limiting ────────────────────────────────────────────────
+# ── Feature Toggle Helpers ───────────────────────────────────────────
 
 
-@router.get("/rate-limit")
-async def get_rate_limit_settings(_: dict = Depends(require_auth)):
-    """Get current rate limiting status."""
+async def _get_toggle(redis_key: str, default: bool) -> bool:
+    """Read a boolean toggle from Redis, falling back to config default."""
+    val = await get_redis().get(redis_key)
+    if val is not None:
+        return val == b"1"
+    return default
+
+
+async def _set_toggle(redis_key: str, enabled: bool) -> bool:
+    """Set a boolean toggle in Redis."""
+    await get_redis().set(redis_key, "1" if enabled else "0")
+    return enabled
+
+
+async def _get_int_setting(redis_key: str, default: int) -> int:
+    """Read an integer setting from Redis, falling back to default."""
+    val = await get_redis().get(redis_key)
+    if val is not None:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
+    return default
+
+
+async def _get_float_setting(redis_key: str, default: float) -> float:
+    """Read a float setting from Redis, falling back to default."""
+    val = await get_redis().get(redis_key)
+    if val is not None:
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+    return default
+
+
+# ── Feature Toggles ──────────────────────────────────────────────────
+
+
+@router.get("/features")
+async def get_feature_toggles(_: dict = Depends(require_auth)):
+    """Get all feature toggle states."""
     return {
-        "enabled": app_settings.rate_limit_enabled,
-        "login_max": app_settings.rate_limit_login,
-        "window": app_settings.rate_limit_window,
+        "csrf_enabled": await _get_toggle("setting:csrf_enabled", app_settings.csrf_enabled),
+        "rate_limit_enabled": await _get_toggle("setting:rate_limit_enabled", app_settings.rate_limit_enabled),
+        "opds_enabled": await _get_toggle("setting:opds_enabled", app_settings.opds_enabled),
+        "external_api_enabled": await _get_toggle("setting:external_api_enabled", app_settings.external_api_enabled),
+        "ai_tagging_enabled": await _get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled),
+        "download_eh_enabled": await _get_toggle("setting:download_eh_enabled", app_settings.download_eh_enabled),
+        "download_pixiv_enabled": await _get_toggle("setting:download_pixiv_enabled", app_settings.download_pixiv_enabled),
+        "download_gallery_dl_enabled": await _get_toggle("setting:download_gallery_dl_enabled", app_settings.download_gallery_dl_enabled),
+        "dedup_phash_enabled": await _get_toggle("setting:dedup_phash_enabled", False),
+        "dedup_heuristic_enabled": await _get_toggle("setting:dedup_heuristic_enabled", False),
+        "dedup_phash_threshold": await _get_int_setting("setting:dedup_phash_threshold", 10),
+        "dedup_opencv_enabled": await _get_toggle("setting:dedup_opencv_enabled", False),
+        "dedup_opencv_threshold": await _get_float_setting("setting:dedup_opencv_threshold", 0.85),
     }
 
 
-@router.patch("/rate-limit")
-async def patch_rate_limit_settings(
-    req: RateLimitPatch,
+@router.patch("/features/{feature}")
+async def patch_feature_toggle(
+    feature: str,
+    req: FeatureTogglePatch,
     _: dict = Depends(require_auth),
 ):
-    """Toggle rate limiting on/off at runtime."""
-    if req.enabled is not None:
-        app_settings.rate_limit_enabled = req.enabled
-    return {
-        "enabled": app_settings.rate_limit_enabled,
+    """Toggle a feature on/off."""
+    ALLOWED = {
+        "csrf_enabled": "setting:csrf_enabled",
+        "rate_limit_enabled": None,  # special case: modifies app_settings directly
+        "opds_enabled": "setting:opds_enabled",
+        "external_api_enabled": "setting:external_api_enabled",
+        "ai_tagging_enabled": "setting:ai_tagging_enabled",
+        "download_eh_enabled": "setting:download_eh_enabled",
+        "download_pixiv_enabled": "setting:download_pixiv_enabled",
+        "download_gallery_dl_enabled": "setting:download_gallery_dl_enabled",
+        "dedup_phash_enabled": "setting:dedup_phash_enabled",
+        "dedup_heuristic_enabled": "setting:dedup_heuristic_enabled",
+        "dedup_phash_threshold": "setting:dedup_phash_threshold",
+        "dedup_opencv_enabled": "setting:dedup_opencv_enabled",
+        "dedup_opencv_threshold": "setting:dedup_opencv_threshold",
     }
+    if feature not in ALLOWED:
+        raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
+
+    redis_key = ALLOWED.get(feature)
+
+    if feature == "dedup_phash_threshold":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for dedup_phash_threshold")
+        await get_redis().set("setting:dedup_phash_threshold", str(req.value))
+        return {"feature": feature, "value": req.value}
+
+    if feature == "dedup_opencv_threshold":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for dedup_opencv_threshold")
+        await get_redis().set("setting:dedup_opencv_threshold", str(req.value))
+        return {"feature": feature, "value": req.value}
+
+    if req.enabled is None:
+        raise HTTPException(status_code=400, detail="enabled required for boolean features")
+
+    if feature == "rate_limit_enabled":
+        app_settings.rate_limit_enabled = req.enabled
+        await get_redis().set("setting:rate_limit_enabled", "1" if req.enabled else "0")
+        return {"feature": feature, "enabled": req.enabled}
+
+    await _set_toggle(redis_key, req.enabled)
+    return {"feature": feature, "enabled": req.enabled}
 
 
 # ── EH Site Preference ───────────────────────────────────────────────

@@ -1,5 +1,6 @@
 """Authentication endpoints (session-based, rev 2.0)."""
 
+import asyncio
 import hashlib
 import io
 import json
@@ -9,7 +10,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 import bcrypt
-from fastapi import APIRouter, Cookie, Depends, File, HTTPException, Request, Response, UploadFile
+from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Request, Response, UploadFile
 from PIL import Image, ImageOps
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -17,6 +18,7 @@ from sqlalchemy import text
 from core.auth import require_auth
 from core.config import settings
 from core.database import async_session
+from core.errors import api_error, parse_accept_language
 from core.rate_limit import check_rate_limit, get_client_ip
 from core.redis_client import get_redis
 
@@ -45,6 +47,7 @@ class ChangePasswordRequest(BaseModel):
 class UpdateProfileRequest(BaseModel):
     email: str | None = None
     avatar_style: str | None = None
+    locale: str | None = None
 
 
 def _avatar_url(user_id: int, username: str, email: str | None, avatar_style: str) -> str:
@@ -71,7 +74,8 @@ async def setup(req: LoginRequest, request: Request):
     async with async_session() as session:
         result = await session.execute(text("SELECT COUNT(*) FROM users"))
         if result.scalar() > 0:
-            raise HTTPException(status_code=403, detail="Setup already completed")
+            locale = parse_accept_language(request.headers.get("accept-language"))
+            raise api_error(403, "setup_completed", locale)
 
         password_hash = bcrypt.hashpw(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
         await session.execute(
@@ -101,7 +105,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
         user = result.fetchone()
 
     if not user or not bcrypt.checkpw(req.password.encode("utf-8"), user.password_hash.encode("utf-8")):
-        raise HTTPException(status_code=401, detail="Invalid credentials")
+        raise api_error(401, "invalid_credentials", parse_accept_language(request.headers.get("accept-language")))
 
     token = secrets.token_urlsafe(32)
     ua = request.headers.get("user-agent", "")
@@ -116,12 +120,24 @@ async def login(req: LoginRequest, request: Request, response: Response):
     )
     await get_redis().setex(f"session:{user.id}:{token}", _SESSION_TTL, session_meta)
 
+    is_https = _is_https(request)
     response.set_cookie(
         key="vault_session",
         value=f"{user.id}:{token}",
         httponly=True,
-        secure=settings.cookie_secure and _is_https(request),
-        samesite="strict" if _is_https(request) else "lax",
+        secure=settings.cookie_secure and is_https,
+        samesite="strict" if is_https else "lax",
+        path="/",
+        max_age=_SESSION_TTL,
+    )
+
+    csrf_token = secrets.token_urlsafe(32)
+    response.set_cookie(
+        key="csrf_token",
+        value=csrf_token,
+        httponly=False,
+        secure=settings.cookie_secure and is_https,
+        samesite="strict" if is_https else "lax",
         path="/",
         max_age=_SESSION_TTL,
     )
@@ -134,18 +150,39 @@ async def login(req: LoginRequest, request: Request, response: Response):
 
 
 @router.get("/check")
-async def check_auth(vault_session: str | None = Cookie(default=None)):
+async def check_auth(
+    vault_session: str | None = Cookie(default=None),
+    authorization: str | None = Header(default=None),
+):
     """Lightweight session validation for nginx auth_request subrequest."""
-    if not vault_session:
-        raise HTTPException(status_code=401, detail="No session")
-    try:
-        user_id_str, token = vault_session.split(":", 1)
-        session_data = await get_redis().get(f"session:{user_id_str}:{token}")
-        if not session_data:
-            raise HTTPException(status_code=401, detail="Invalid session")
-    except ValueError:
-        raise HTTPException(status_code=401, detail="Invalid session")
-    return {"status": "ok"}
+    # Try cookie first (existing logic)
+    if vault_session:
+        try:
+            user_id_str, token = vault_session.split(":", 1)
+            session_data = await get_redis().get(f"session:{user_id_str}:{token}")
+            if session_data:
+                return {"status": "ok"}
+        except ValueError:
+            pass
+
+    # Fallback to Basic Auth (for OPDS clients)
+    if authorization and authorization.lower().startswith("basic "):
+        import base64
+        try:
+            decoded = base64.b64decode(authorization[6:]).decode("utf-8")
+            username, password = decoded.split(":", 1)
+            async with async_session() as session:
+                result = await session.execute(
+                    text("SELECT id, password_hash FROM users WHERE username = :uname"),
+                    {"uname": username},
+                )
+                user = result.fetchone()
+            if user and bcrypt.checkpw(password.encode("utf-8"), user.password_hash.encode("utf-8")):
+                return {"status": "ok"}
+        except Exception:
+            pass
+
+    raise HTTPException(status_code=401, detail="Not authenticated")
 
 
 @router.get("/sessions")
@@ -258,6 +295,7 @@ async def logout(
             pass
 
     response.delete_cookie("vault_session", path="/")
+    response.delete_cookie("csrf_token", path="/")
     return {"status": "ok"}
 
 
@@ -266,7 +304,7 @@ async def get_profile(auth: dict = Depends(require_auth)):
     """Return current user's profile info."""
     async with async_session() as session:
         result = await session.execute(
-            text("SELECT username, email, role, created_at, avatar_style FROM users WHERE id = :uid"),
+            text("SELECT username, email, role, created_at, avatar_style, locale FROM users WHERE id = :uid"),
             {"uid": auth["user_id"]},
         )
         user = result.fetchone()
@@ -280,6 +318,7 @@ async def get_profile(auth: dict = Depends(require_auth)):
         "created_at": user.created_at.isoformat() if user.created_at else None,
         "avatar_style": avatar_style,
         "avatar_url": _avatar_url(auth["user_id"], user.username, user.email, avatar_style),
+        "locale": user.locale,
     }
 
 
@@ -304,6 +343,12 @@ async def update_profile(req: UpdateProfileRequest, auth: dict = Depends(require
         if req.avatar_style not in ("gravatar", "manual"):
             raise HTTPException(status_code=400, detail="avatar_style must be 'gravatar' or 'manual'")
         update_values["avatar_style"] = req.avatar_style
+
+    if req.locale is not None:
+        valid_locales = ("en", "zh-TW", "zh-CN", "ja", "ko")
+        if req.locale not in valid_locales:
+            raise HTTPException(status_code=400, detail=f"locale must be one of: {', '.join(valid_locales)}")
+        update_values["locale"] = req.locale
 
     if not update_values:
         return {"status": "ok"}
@@ -340,7 +385,7 @@ async def upload_avatar(
         img = Image.open(io.BytesIO(data))
         img = ImageOps.fit(img, (160, 160))
         img = img.convert("RGB")
-    except (OSError, ValueError) as exc:
+    except Exception as exc:
         logger.warning("Avatar upload failed: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid image file")
 
@@ -348,8 +393,8 @@ async def upload_avatar(
     avatars_dir.mkdir(parents=True, exist_ok=True)
     out_path = avatars_dir / f"{auth['user_id']}.webp"
     tmp_path = out_path.with_suffix(".webp.tmp")
-    img.save(str(tmp_path), "WEBP", quality=85)
-    tmp_path.replace(out_path)
+    await asyncio.to_thread(img.save, str(tmp_path), "WEBP", quality=85)
+    await asyncio.to_thread(tmp_path.replace, out_path)
 
     async with async_session() as session:
         await session.execute(
@@ -389,8 +434,12 @@ async def delete_avatar(auth: dict = Depends(require_auth)):
 
 
 @router.post("/change-password")
-async def change_password(req: ChangePasswordRequest, auth: dict = Depends(require_auth)):
-    """Change the current user's password."""
+async def change_password(
+    req: ChangePasswordRequest,
+    auth: dict = Depends(require_auth),
+    vault_session: str | None = Cookie(default=None),
+):
+    """Change the current user's password and invalidate all other sessions."""
     if len(req.new_password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
@@ -412,5 +461,27 @@ async def change_password(req: ChangePasswordRequest, auth: dict = Depends(requi
             {"phash": new_hash, "uid": auth["user_id"]},
         )
         await session.commit()
+
+    # Invalidate all other sessions for this user (keep only the current one).
+    current_token = ""
+    if vault_session:
+        try:
+            _, current_token = vault_session.split(":", 1)
+        except ValueError:
+            pass
+
+    redis = get_redis()
+    user_id = auth["user_id"]
+    prefix = f"session:{user_id}:"
+    cursor = 0
+    while True:
+        cursor, keys = await redis.scan(cursor, match=f"{prefix}*", count=100)
+        for key in keys:
+            key_str = key if isinstance(key, str) else key.decode()
+            token = key_str[len(prefix):]
+            if token != current_token:
+                await redis.delete(key_str)
+        if cursor == 0:
+            break
 
     return {"status": "ok"}

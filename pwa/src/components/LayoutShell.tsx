@@ -4,6 +4,7 @@ import { usePathname } from 'next/navigation'
 import { Sidebar } from './Sidebar'
 import { MobileNav } from './MobileNav'
 import { Toaster } from 'sonner'
+import { SWUpdatePrompt } from './SWUpdatePrompt'
 
 const AUTH_PATHS = ['/login', '/setup']
 
@@ -16,6 +17,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       <>
         {children}
         <Toaster position="bottom-right" theme="dark" richColors />
+        <SWUpdatePrompt />
       </>
     )
   }
@@ -30,10 +32,13 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
 
       {/* Main content — safe-main-pt handles iOS safe area on mobile, reset on desktop */}
       <main className="safe-main-pt lg:pl-56 min-h-screen bg-vault-bg text-vault-text">
-        {children}
+        <div className="px-4 lg:px-6 xl:px-8 py-6">
+          {children}
+        </div>
       </main>
 
       <Toaster position="bottom-right" richColors />
+      <SWUpdatePrompt />
     </>
   )
 }

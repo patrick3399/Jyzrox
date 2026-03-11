@@ -1,5 +1,5 @@
 # ── Stage 1: builder ──────────────────────────────────────────────────────────
-FROM python:3.12-slim AS builder
+FROM python:3.13-slim AS builder
 
 # Install wheels for packages with C extensions (pillow, lxml, onnxruntime, etc.)
 RUN pip install --no-cache-dir --upgrade pip
@@ -11,12 +11,13 @@ RUN pip install --no-cache-dir --prefix=/install/pkgs -r requirements.txt && \
     pip install --no-cache-dir --prefix=/install/pkgs gallery-dl
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM python:3.12-slim AS runtime
+FROM python:3.13-slim AS runtime
 
 # gosu: privilege-drop in entrypoint; wget: healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gosu \
         wget \
+        ffmpeg \
     && rm -rf /var/lib/apt/lists/*
 
 # Create service account matching ZFS dataset owner (UID/GID 1042)

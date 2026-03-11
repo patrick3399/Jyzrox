@@ -3,6 +3,7 @@ import { useEffect, useRef, useState } from 'react'
 import { useParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
+import { ErrorBoundary } from '@/components/ErrorBoundary'
 import type { Gallery, GalleryImage, ReadProgress } from '@/lib/types'
 
 interface LoadedData {
@@ -105,13 +106,15 @@ export default function ReaderPage() {
     progress?.last_page && progress.last_page > 0 ? Math.min(progress.last_page, gallery.pages) : 1
 
   return (
-    <Reader
-      galleryId={gallery.id}
-      sourceId={sourceId}
-      downloadStatus={gallery.download_status}
-      images={images}
-      totalPages={gallery.pages}
-      initialPage={initialPage}
-    />
+    <ErrorBoundary>
+      <Reader
+        galleryId={gallery.id}
+        sourceId={sourceId}
+        downloadStatus={gallery.download_status}
+        images={images}
+        totalPages={gallery.pages}
+        initialPage={initialPage}
+      />
+    </ErrorBoundary>
   )
 }

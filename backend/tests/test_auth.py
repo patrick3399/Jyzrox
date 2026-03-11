@@ -67,7 +67,7 @@ class TestSetup:
             },
         )
         assert resp.status_code == 403
-        assert "already completed" in resp.json()["detail"].lower()
+        assert "already completed" in resp.json()["detail"]["message"].lower()
 
 
 # ---------------------------------------------------------------------------
@@ -112,7 +112,7 @@ class TestLogin:
             },
         )
         assert resp.status_code == 401
-        assert "invalid" in resp.json()["detail"].lower()
+        assert "invalid" in resp.json()["detail"]["message"].lower()
 
     async def test_login_nonexistent_user(self, unauthed_client, db_session):
         """Login with a username that doesn't exist should return 401."""

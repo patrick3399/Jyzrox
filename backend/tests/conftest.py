@@ -88,10 +88,25 @@ sys.modules["core.database"] = _fake_db_mod
 # ---------------------------------------------------------------------------
 
 
+_plugins_initialized = False
+
+
 @asynccontextmanager
 async def _noop_lifespan(app):
+    global _plugins_initialized
     app.state.arq = AsyncMock()
     app.state.arq.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job"))
+    # Initialize plugins so detect_source() works and browse routers are available.
+    # Guard against repeated registration across multiple test fixtures.
+    if not _plugins_initialized:
+        _plugins_initialized = True
+        from plugins import init_plugins
+        await init_plugins()
+        from plugins.registry import plugin_registry
+        _BROWSE_PREFIX_MAP = {"ehentai": "/api/eh", "pixiv": "/api/pixiv"}
+        for sid, router in plugin_registry.get_browse_routers():
+            prefix = _BROWSE_PREFIX_MAP.get(sid, f"/api/browse/{sid}")
+            app.include_router(router, prefix=prefix)
     yield
 
 
@@ -123,7 +138,8 @@ _SQLITE_SCHEMA = [
         role TEXT DEFAULT 'admin',
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_login_at TIMESTAMP,
-        avatar_style TEXT DEFAULT 'gravatar'
+        avatar_style TEXT DEFAULT 'gravatar',
+        locale TEXT DEFAULT 'en'
     )
     """,
     """
@@ -146,7 +162,28 @@ _SQLITE_SCHEMA = [
         import_mode TEXT,
         tags_array TEXT DEFAULT '[]',
         last_scanned_at TIMESTAMP,
-        library_path TEXT
+        library_path TEXT,
+        artist_id TEXT
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS blobs (
+        sha256 TEXT PRIMARY KEY,
+        file_size INTEGER NOT NULL,
+        media_type TEXT DEFAULT 'image',
+        width INTEGER,
+        height INTEGER,
+        phash TEXT,
+        phash_int INTEGER,
+        phash_q0 INTEGER,
+        phash_q1 INTEGER,
+        phash_q2 INTEGER,
+        phash_q3 INTEGER,
+        extension TEXT NOT NULL,
+        storage TEXT DEFAULT 'cas',
+        external_path TEXT,
+        ref_count INTEGER DEFAULT 0,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """,
     """
@@ -155,16 +192,7 @@ _SQLITE_SCHEMA = [
         gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
         page_num INTEGER NOT NULL,
         filename TEXT,
-        width INTEGER,
-        height INTEGER,
-        file_path TEXT,
-        thumb_path TEXT,
-        file_size INTEGER,
-        file_hash TEXT,
-        phash TEXT,
-        media_type TEXT DEFAULT 'image',
-        duration REAL,
-        duplicate_of INTEGER REFERENCES images(id),
+        blob_sha256 TEXT REFERENCES blobs(sha256),
         tags_array TEXT DEFAULT '[]'
     )
     """,
@@ -291,6 +319,72 @@ _SQLITE_SCHEMA = [
         PRIMARY KEY (namespace, name, language)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS library_paths (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        path TEXT NOT NULL UNIQUE,
+        label TEXT,
+        enabled BOOLEAN DEFAULT 1 NOT NULL,
+        monitor BOOLEAN DEFAULT 1 NOT NULL,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS plugin_config (
+        source_id TEXT PRIMARY KEY,
+        enabled BOOLEAN DEFAULT 1,
+        config_json TEXT DEFAULT '{}',
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS subscriptions (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT,
+        url TEXT NOT NULL,
+        source TEXT,
+        source_id TEXT,
+        avatar_url TEXT,
+        enabled BOOLEAN DEFAULT 1,
+        auto_download BOOLEAN DEFAULT 1,
+        cron_expr TEXT DEFAULT '0 */2 * * *',
+        last_checked_at TIMESTAMP,
+        last_item_id TEXT,
+        last_status TEXT DEFAULT 'pending',
+        last_error TEXT,
+        next_check_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (user_id, url)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS collections (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        description TEXT,
+        cover_gallery_id INTEGER REFERENCES galleries(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS collection_galleries (
+        collection_id INTEGER NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        position INTEGER DEFAULT 0,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (collection_id, gallery_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS excluded_blobs (
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        blob_sha256 TEXT NOT NULL,
+        excluded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (gallery_id, blob_sha256)
+    )
+    """,
 ]
 
 # ---------------------------------------------------------------------------
@@ -400,10 +494,25 @@ async def client(db_session, db_session_factory, mock_redis):
         patch("routers.auth.async_session", db_session_factory),
         patch("routers.search.async_session", db_session_factory),
         patch("routers.tag.async_session", db_session_factory),
-        patch("routers.eh.async_session", db_session_factory),
+        patch("routers.opds.async_session", db_session_factory),
+        patch("routers.history.async_session", db_session_factory),
+        patch("routers.external.async_session", db_session_factory),
+        patch("routers.export.async_session", db_session_factory),
+        patch("routers.settings.async_session", db_session_factory),
+        patch("routers.import_router.async_session", db_session_factory),
+        patch("routers.artists.async_session", db_session_factory),
+        patch("routers.subscriptions.async_session", db_session_factory),
+        patch("plugins.builtin.ehentai.browse.async_session", db_session_factory),
+        patch("plugins.builtin.ehentai.browse.get_redis", return_value=mock_redis),
+        patch("routers.settings.get_redis", return_value=mock_redis),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
             yield ac
 
     _app.dependency_overrides.clear()
@@ -433,7 +542,93 @@ async def unauthed_client(db_session, db_session_factory, mock_redis):
         patch("routers.auth.async_session", db_session_factory),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
+            yield ac
+
+    _app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def opds_client(db_session, db_session_factory, mock_redis):
+    """
+    Authenticated httpx.AsyncClient for OPDS tests.
+
+    Overrides require_opds_auth so every request is treated as user_id=1.
+    Patches routers.opds.async_session to use the SQLite test engine.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    from core.auth import require_opds_auth
+
+    async def _override_get_db():
+        yield db_session
+
+    async def _override_opds_auth():
+        return {"user_id": 1}
+
+    _app.dependency_overrides[_fake_get_db] = _override_get_db
+    _app.dependency_overrides[require_opds_auth] = _override_opds_auth
+
+    with (
+        patch("core.redis_client.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.get_redis", return_value=mock_redis),
+        patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.async_session", db_session_factory),
+        patch("routers.opds.async_session", db_session_factory),
+        patch("routers.opds.get_redis", return_value=mock_redis),
+    ):
+        transport = ASGITransport(app=_app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
+            yield ac
+
+    _app.dependency_overrides.clear()
+
+
+@pytest.fixture
+async def unauthed_opds_client(db_session, db_session_factory, mock_redis):
+    """
+    Unauthenticated httpx.AsyncClient for OPDS auth tests.
+
+    Does NOT override require_opds_auth — callers control auth headers directly.
+    Patches routers.opds.async_session to use the SQLite test engine.
+    """
+    from httpx import ASGITransport, AsyncClient
+
+    async def _override_get_db():
+        yield db_session
+
+    _app.dependency_overrides[_fake_get_db] = _override_get_db
+
+    with (
+        patch("core.redis_client.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.get_redis", return_value=mock_redis),
+        patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.get_redis", return_value=mock_redis),
+        patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
+        patch("routers.auth.async_session", db_session_factory),
+        patch("routers.opds.async_session", db_session_factory),
+        patch("routers.opds.get_redis", return_value=mock_redis),
+        patch("core.auth.async_session", db_session_factory),
+    ):
+        transport = ASGITransport(app=_app, raise_app_exceptions=False)
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
             yield ac
 
     _app.dependency_overrides.clear()
@@ -463,9 +658,15 @@ async def ext_client(db_session, db_session_factory, mock_redis):
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.async_session", db_session_factory),
         patch("routers.external.async_session", db_session_factory),
+        patch("routers.external.get_redis", return_value=mock_redis),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
             yield ac
 
     _app.dependency_overrides.clear()
@@ -502,7 +703,12 @@ async def hist_client(db_session, db_session_factory, mock_redis):
         patch("routers.history.async_session", db_session_factory),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
-        async with AsyncClient(transport=transport, base_url="http://test") as ac:
+        async with AsyncClient(
+            transport=transport,
+            base_url="http://test",
+            cookies={"csrf_token": "test-csrf"},
+            headers={"X-CSRF-Token": "test-csrf"},
+        ) as ac:
             yield ac
 
     _app.dependency_overrides.clear()

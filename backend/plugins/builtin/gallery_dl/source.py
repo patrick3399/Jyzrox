@@ -17,12 +17,21 @@ from pathlib import Path
 
 from core.config import settings
 from plugins.base import SourcePlugin
-from plugins.models import DownloadResult, FieldDef, GalleryMetadata, PluginMeta
+from plugins.models import (
+    CredentialFlow,
+    CredentialStatus,
+    DownloadResult,
+    FieldDef,
+    GalleryImportData,
+    GalleryMetadata,
+    PluginMeta,
+    SiteInfo,
+)
 
 logger = logging.getLogger(__name__)
 
 _FILE_PATH_RE = re.compile(r"/data/")
-_IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|gif|webp|avif|heic)$", re.IGNORECASE)
+_IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|gif|webp|avif|heic|mp4|webm)$", re.IGNORECASE)
 _PROGRESS_EVERY_N = 5
 _PROGRESS_EVERY_S = 10.0
 
@@ -93,8 +102,40 @@ class GalleryDlPlugin(SourcePlugin):
         name="gallery-dl (Fallback)",
         source_id="gallery_dl",
         version="1.0.0",
+        description="Universal gallery-dl fallback downloader",
         url_patterns=[],  # handles everything — it is the fallback
         credential_schema=[],
+        supported_sites=[
+            SiteInfo(domain="twitter.com", source_id="twitter", name="Twitter/X", category="social", has_tags=True),
+            SiteInfo(domain="x.com", source_id="twitter", name="Twitter/X", category="social", has_tags=True),
+            SiteInfo(domain="danbooru.donmai.us", source_id="danbooru", name="Danbooru", category="booru", has_tags=True),
+            SiteInfo(domain="gelbooru.com", source_id="gelbooru", name="Gelbooru", category="booru", has_tags=True),
+            SiteInfo(domain="e621.net", source_id="e621", name="e621", category="booru", has_tags=True),
+            SiteInfo(domain="yande.re", source_id="yandere", name="Yande.re", category="booru", has_tags=True),
+            SiteInfo(domain="konachan.com", source_id="konachan", name="Konachan", category="booru", has_tags=True),
+            SiteInfo(domain="rule34.xxx", source_id="rule34", name="Rule34", category="booru", has_tags=True),
+            SiteInfo(domain="safebooru.org", source_id="safebooru", name="Safebooru", category="booru", has_tags=True),
+            SiteInfo(domain="sankakucomplex.com", source_id="sankaku", name="Sankaku", category="booru", has_tags=True),
+            SiteInfo(domain="deviantart.com", source_id="deviantart", name="DeviantArt", category="art", has_tags=True),
+            SiteInfo(domain="artstation.com", source_id="artstation", name="ArtStation", category="art", has_tags=True),
+            SiteInfo(domain="newgrounds.com", source_id="newgrounds", name="Newgrounds", category="art", has_tags=True),
+            SiteInfo(domain="inkbunny.net", source_id="inkbunny", name="Inkbunny", category="art", has_tags=True),
+            SiteInfo(domain="furaffinity.net", source_id="furaffinity", name="Fur Affinity", category="art", has_tags=True),
+            SiteInfo(domain="nhentai.net", source_id="nhentai", name="nhentai", category="gallery", has_tags=True),
+            SiteInfo(domain="hitomi.la", source_id="hitomi", name="Hitomi.la", category="gallery", has_tags=True),
+            SiteInfo(domain="kemono.su", source_id="kemono", name="Kemono", category="gallery", has_tags=True),
+            SiteInfo(domain="mangadex.org", source_id="mangadex", name="MangaDex", category="manga", has_tags=True),
+            SiteInfo(domain="instagram.com", source_id="instagram", name="Instagram", category="social", has_tags=True),
+            SiteInfo(domain="bsky.app", source_id="bluesky", name="Bluesky", category="social", has_tags=True),
+            SiteInfo(domain="tumblr.com", source_id="tumblr", name="Tumblr", category="social", has_tags=True),
+            SiteInfo(domain="reddit.com", source_id="reddit", name="Reddit", category="social", has_tags=True),
+            SiteInfo(domain="facebook.com", source_id="facebook", name="Facebook", category="social", has_tags=False),
+            SiteInfo(domain="civitai.com", source_id="civitai", name="Civitai", category="art", has_tags=True),
+            SiteInfo(domain="imgur.com", source_id="imgur", name="Imgur", category="filehost", has_tags=False),
+            SiteInfo(domain="bunkr.si", source_id="bunkr", name="Bunkr", category="filehost", has_tags=False),
+            SiteInfo(domain="cyberdrop.me", source_id="cyberdrop", name="Cyberdrop", category="filehost", has_tags=False),
+            SiteInfo(domain="catbox.moe", source_id="catbox", name="Catbox", category="filehost", has_tags=False),
+        ],
         concurrency=1,
     )
 
@@ -208,18 +249,49 @@ class GalleryDlPlugin(SourcePlugin):
             total=downloaded,
         )
 
+    def resolve_output_dir(self, url: str, base_path: Path) -> Path:
+        """gallery-dl uses a generic directory — no URL-specific routing."""
+        return base_path
+
+    def requires_credentials(self) -> bool:
+        """gallery-dl doesn't strictly require credentials (works without them for many sites)."""
+        return False
+
+    def parse_import(self, dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
+        """Parse a gallery-dl download into structured import data."""
+        from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
+
+        return parse_gallery_dl_import(dest_dir, raw_meta)
+
+    def credential_flows(self) -> list[CredentialFlow]:
+        """Declare generic cookie credential flow."""
+        from plugins.builtin.gallery_dl._credentials import gallery_dl_credential_flows
+
+        return gallery_dl_credential_flows()
+
+    async def verify_credential(self, credentials: dict) -> CredentialStatus:
+        """Generic cookie credentials can't be verified — always return valid."""
+        from plugins.builtin.gallery_dl._credentials import verify_gallery_dl_credential
+
+        return await verify_gallery_dl_credential(credentials)
+
     def parse_metadata(self, dest_dir: Path) -> GalleryMetadata | None:
         """Read the first *.json file gallery-dl wrote and return GalleryMetadata."""
         for meta_file in sorted(dest_dir.rglob("*.json")):
             try:
                 raw = json.loads(meta_file.read_text(encoding="utf-8"))
+                tags = raw.get("tags", [])
+                rating = raw.get("rating")
+                if rating and isinstance(tags, list):
+                    tags = list(tags)  # don't mutate original
+                    tags.append(f"rating:{rating}")
                 return GalleryMetadata(
                     source=raw.get("category", "gallery_dl"),
                     source_id=str(
                         raw.get("gallery_id") or raw.get("tweet_id") or raw.get("id") or dest_dir.name
                     ),
                     title=raw.get("title") or raw.get("description") or dest_dir.name,
-                    tags=raw.get("tags", []),
+                    tags=tags,
                     pages=raw.get("count", 0),
                     uploader=raw.get("uploader") or raw.get("artist") or "",
                 )

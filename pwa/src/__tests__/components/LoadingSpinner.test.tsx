@@ -18,7 +18,7 @@ describe('LoadingSpinner', () => {
 
   it('test_loadingspinner_has_loading_aria_label', () => {
     render(<LoadingSpinner />)
-    expect(screen.getByLabelText('Loading')).toBeInTheDocument()
+    expect(screen.getByLabelText('Loading...')).toBeInTheDocument()
   })
 
   // ── Default size (md) ─────────────────────────────────────────────

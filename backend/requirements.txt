@@ -11,14 +11,11 @@ cryptography==46.0.5
 pixivpy3==3.7.5
 pydantic-settings==2.7.0
 python-multipart==0.0.22
-websockets==16.0
-aiofiles==24.1.0
 beautifulsoup4==4.12.3
-lxml==5.3.0
+lxml==6.0.1
 bcrypt==4.2.1
 psutil==6.1.1
-onnxruntime==1.20.1
-huggingface-hub==0.27.1
-numpy==2.2.2
 imagehash==4.3.1
 watchdog==6.0.0
+croniter==3.0.3
+opencv-python-headless==4.11.0.86

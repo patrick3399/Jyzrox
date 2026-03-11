@@ -8,16 +8,32 @@ import uuid as _uuid
 
 import psutil
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
+from pydantic import BaseModel
 from sqlalchemy import func, select, text, update
 
 from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
+from core.utils import detect_source
 from db.models import ApiToken, Blob, DownloadJob, Gallery, Image, Tag
+from services.cas import cas_url, thumb_url as cas_thumb_url, resolve_blob_path
 from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
-router = APIRouter(tags=["external"])
+
+
+async def _require_external_api_enabled():
+    """Raise 404 if External API feature is disabled."""
+    val = await get_redis().get("setting:external_api_enabled")
+    if val is not None:
+        enabled = val == b"1"
+    else:
+        enabled = settings.external_api_enabled
+    if not enabled:
+        raise HTTPException(status_code=404, detail="External API is disabled")
+
+
+router = APIRouter(tags=["external"], dependencies=[Depends(_require_external_api_enabled)])
 
 
 async def verify_api_token(x_api_token: str = Header(...)):
@@ -100,12 +116,15 @@ async def system_status(token_data: dict = Depends(verify_api_token)):
         disk_free = 0
 
     try:
+        import asyncio as _asyncio
         import subprocess
-        result = subprocess.run(
-            ["df", "-i", "--output=itotal,iused,iavail,ipcent", settings.data_cas_path],
-            capture_output=True, text=True, timeout=5,
+        proc = await _asyncio.create_subprocess_exec(
+            "df", "-i", "--output=itotal,iused,iavail,ipcent", settings.data_cas_path,
+            stdout=_asyncio.subprocess.PIPE,
+            stderr=_asyncio.subprocess.PIPE,
         )
-        lines = result.stdout.strip().split("\n")
+        stdout, _ = await _asyncio.wait_for(proc.communicate(), timeout=5)
+        lines = stdout.decode().strip().split("\n")
         if len(lines) >= 2:
             parts = lines[1].split()
             inode_total = int(parts[0])
@@ -151,12 +170,21 @@ async def list_galleries(
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=25, ge=1, le=100),
     source: str | None = Query(default=None),
+    q: str | None = Query(default=None),
+    favorited: bool | None = Query(default=None),
+    min_rating: int | None = Query(default=None, ge=0, le=5),
     token_data: dict = Depends(verify_api_token),
 ):
     """List local library galleries (paginated)."""
     filters = []
     if source:
         filters.append(Gallery.source == source)
+    if q:
+        filters.append(Gallery.title.ilike(f"%{q}%"))
+    if favorited is not None:
+        filters.append(Gallery.favorited == favorited)
+    if min_rating is not None:
+        filters.append(Gallery.rating >= min_rating)
 
     async with async_session() as session:
         count_result = await session.execute(select(func.count()).select_from(Gallery).where(*filters))
@@ -261,10 +289,50 @@ async def get_gallery_images(
                 "height": blob.height if blob else None,
                 "file_size": blob.file_size if blob else None,
                 "media_type": blob.media_type if blob else None,
+                "duration": blob.duration if blob else None,
+                "file_url": cas_url(blob.sha256, blob.extension) if blob else None,
+                "thumb_url": cas_thumb_url(blob.sha256) if blob else None,
             }
         )
 
     return {"gallery_id": gallery_id, "images": images}
+
+
+@router.get("/galleries/{gallery_id}/images/{page_num}/file")
+async def get_image_file(
+    gallery_id: int,
+    page_num: int,
+    token_data: dict = Depends(verify_api_token),
+):
+    """Stream an image file for external readers (Mihon)."""
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                select(Image)
+                .where(Image.gallery_id == gallery_id, Image.page_num == page_num)
+                .options(selectinload(Image.blob))
+            )
+        ).scalar_one_or_none()
+
+    if not row or not row.blob:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    file_path = resolve_blob_path(row.blob)
+    if not file_path.exists():
+        raise HTTPException(status_code=404, detail="File not found on disk")
+
+    ext_map = {
+        ".jpg": "image/jpeg",
+        ".jpeg": "image/jpeg",
+        ".png": "image/png",
+        ".gif": "image/gif",
+        ".webp": "image/webp",
+        ".avif": "image/avif",
+    }
+    content_type = ext_map.get(row.blob.extension.lower(), "application/octet-stream")
+
+    from fastapi.responses import FileResponse
+    return FileResponse(str(file_path), media_type=content_type)
 
 
 # ── Tags ──────────────────────────────────────────────────────────────
@@ -302,37 +370,41 @@ async def list_tags(
 # ── Download trigger ──────────────────────────────────────────────────
 
 
-def _detect_source(url: str) -> str:
-    """Auto-detect source from URL domain."""
-    if "pixiv.net" in url:
-        return "pixiv"
-    if "e-hentai.org" in url or "exhentai.org" in url:
-        return "ehentai"
-    return "unknown"
+class ExternalDownloadRequest(BaseModel):
+    url: str
 
 
 @router.post("/download")
 async def enqueue_download(
     request: Request,
-    url: str = Query(...),
+    body: ExternalDownloadRequest | None = None,
+    url: str | None = Query(default=None),
     token_data: dict = Depends(verify_api_token),
 ):
     """Enqueue a download job via external API.
+
+    Accepts the target URL either as a JSON body field ``url`` or as a query
+    parameter ``url``.  JSON body takes priority; if both are absent a 422 is
+    returned.
 
     Order: ARQ enqueue first, then DB commit. If ARQ fails we never create the
     DB record. If DB insert fails after a successful ARQ enqueue we log a
     warning — the ARQ job will time out naturally without a matching DB record.
     """
+    resolved_url = (body.url if body else None) or url
+    if not resolved_url:
+        raise HTTPException(status_code=422, detail="Missing 'url' in body or query parameter")
+
     await _check_rate_limit(token_data["token_id"])
     job_id = _uuid.uuid4()
-    source = _detect_source(url)
+    source = detect_source(resolved_url)
 
     # 1. Enqueue ARQ job first — if this fails, no DB record is created.
     arq = request.app.state.arq
     try:
         await arq.enqueue_job(
             "download_job",
-            url,
+            resolved_url,
             source,
             None,   # options
             str(job_id),
@@ -347,7 +419,7 @@ async def enqueue_download(
     #    eventually time out without a matching DB row.
     try:
         async with async_session() as session:
-            session.add(DownloadJob(id=job_id, url=url, source=source, status="queued"))
+            session.add(DownloadJob(id=job_id, url=resolved_url, source=source, status="queued"))
             await session.commit()
     except Exception as exc:
         logger.warning(

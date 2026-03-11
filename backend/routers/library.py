@@ -1,6 +1,8 @@
 """Local library CRUD — queries galleries/images tables via GIN index."""
 
 import base64
+import hashlib
+import hmac
 import json
 import logging
 from datetime import UTC, datetime
@@ -9,15 +11,16 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import ARRAY, Text, and_, cast, desc, func, not_, or_, select
+from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, func, not_, or_, select
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth
+from core.config import settings
 from core.database import get_db
-from db.models import Blob, BlockedTag, Gallery, Image, ReadProgress
+from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag
 from services.cas import cas_url, decrement_ref_count, library_dir, resolve_blob_path, thumb_dir, thumb_url as cas_thumb_url
 
 logger = logging.getLogger(__name__)
@@ -27,20 +30,43 @@ router = APIRouter(tags=["library"])
 # ── Cursor helpers ────────────────────────────────────────────────────
 
 
+def _cursor_secret() -> bytes:
+    """Return the HMAC signing key derived from the app's credential_encrypt_key."""
+    return settings.credential_encrypt_key.encode()
+
+
 def _encode_cursor(gallery: Gallery, sort: str) -> str:
-    """Encode sort key + id into a URL-safe base64 cursor string."""
+    """Encode sort key + id into a signed URL-safe base64 cursor string.
+
+    Format: <base64url(json)>.<hmac-sha256-hex>
+    """
     sort_val = {
         "added_at": gallery.added_at.isoformat() if gallery.added_at else "",
         "rating": gallery.rating,
         "pages": gallery.pages if gallery.pages is not None else 0,
     }[sort]
     payload = {"id": gallery.id, "v": str(sort_val), "s": sort}
-    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    sig = hmac.new(_cursor_secret(), encoded.encode(), hashlib.sha256).hexdigest()
+    return f"{encoded}.{sig}"
 
 
 def _decode_cursor(cursor: str) -> dict:
+    """Decode and verify a signed cursor. Raises HTTP 400 if invalid or tampered."""
+    if "." not in cursor:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    # Split on the last dot so the base64 payload (which may contain dots in edge
+    # cases due to padding) is kept intact; HMAC hex is always 64 hex chars.
+    encoded, _, sig = cursor.rpartition(".")
+    if not encoded or not sig:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+    expected_sig = hmac.new(_cursor_secret(), encoded.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_sig, sig):
+        raise HTTPException(status_code=400, detail="Invalid cursor: signature mismatch")
     try:
-        return json.loads(base64.urlsafe_b64decode(cursor + "=="))
+        # Re-add stripped padding before decoding.
+        padded = encoded + "=" * (4 - len(encoded) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid cursor")
 
@@ -66,11 +92,13 @@ async def list_galleries(
     favorited: bool | None = Query(default=None),
     min_rating: int | None = Query(default=None, ge=0, le=5),
     source: str | None = Query(default=None),
+    artist: str | None = Query(default=None),
     import_mode: str | None = Query(default=None),
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     sort: Literal["added_at", "rating", "pages"] = Query(default="added_at"),
     cursor: str | None = Query(default=None),
+    collection: int | None = Query(default=None),
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -98,8 +126,19 @@ async def list_galleries(
         stmt = stmt.where(Gallery.rating >= min_rating)
     if source:
         stmt = stmt.where(Gallery.source == source)
+    if artist:
+        stmt = stmt.where(Gallery.artist_id == artist)
+    if import_mode:
+        stmt = stmt.where(Gallery.import_mode == import_mode)
     if q:
         stmt = stmt.where(Gallery.title.ilike(f"%{q}%"))
+    if collection is not None:
+        from db.models import CollectionGallery
+        stmt = stmt.where(
+            Gallery.id.in_(
+                select(CollectionGallery.gallery_id).where(CollectionGallery.collection_id == collection)
+            )
+        )
 
     # Filter out galleries containing blocked tags
     user_id = auth["user_id"]
@@ -208,6 +247,545 @@ async def list_galleries(
         return {"total": total, "page": page, "galleries": [_g(g, cover_thumb=cover_map.get(g.id)) for g in galleries]}
 
 
+@router.get("/artists")
+async def list_artists(
+    q: str = Query(default=""),
+    source: str | None = Query(default=None),
+    sort: Literal["gallery_count", "total_pages", "latest"] = Query(default="latest"),
+    page: int = Query(default=0, ge=0),
+    limit: int = Query(default=30, ge=1, le=100),
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List artists grouped from gallery artist_id field."""
+    # Base query: group galleries by artist_id
+    base = select(
+        Gallery.artist_id,
+        func.max(Gallery.uploader).label("artist_name"),
+        func.count().label("gallery_count"),
+        func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
+        func.max(Gallery.added_at).label("latest_added_at"),
+    ).where(Gallery.artist_id.is_not(None)).group_by(Gallery.artist_id)
+
+    if q:
+        base = base.having(func.max(Gallery.uploader).ilike(f"%{q}%"))
+    if source:
+        base = base.where(Gallery.artist_id.startswith(f"{source}:"))
+
+    # Count total
+    count_q = select(func.count()).select_from(base.subquery())
+    total = (await db.execute(count_q)).scalar_one()
+
+    # Sort
+    sort_col = {
+        "gallery_count": desc(func.count()),
+        "total_pages": desc(func.coalesce(func.sum(Gallery.pages), 0)),
+        "latest": desc(func.max(Gallery.added_at)),
+    }[sort]
+    base = base.order_by(sort_col).offset(page * limit).limit(limit)
+
+    rows = (await db.execute(base)).all()
+
+    # Fetch cover thumbs for each artist (most recent gallery's first image)
+    artist_ids = [r.artist_id for r in rows]
+    cover_map: dict[str, str | None] = {}
+    if artist_ids:
+        # Subquery: for each artist_id, get the gallery with the latest added_at
+        latest_gallery_sub = (
+            select(Gallery.id, Gallery.artist_id)
+            .where(Gallery.artist_id.in_(artist_ids))
+            .order_by(Gallery.artist_id, desc(Gallery.added_at))
+            .distinct(Gallery.artist_id)
+        ).subquery()
+
+        cover_stmt = (
+            select(latest_gallery_sub.c.artist_id, Blob.sha256)
+            .join(Image, Image.gallery_id == latest_gallery_sub.c.id)
+            .join(Blob, Image.blob_sha256 == Blob.sha256)
+            .where(Image.page_num == 1)
+        )
+        cover_rows = (await db.execute(cover_stmt)).all()
+        cover_map = {r.artist_id: cas_thumb_url(r.sha256) for r in cover_rows}
+
+    result = []
+    for r in rows:
+        aid = r.artist_id
+        src = aid.split(":", 1)[0] if ":" in aid else ""
+        result.append({
+            "artist_id": aid,
+            "artist_name": r.artist_name or "",
+            "source": src,
+            "gallery_count": r.gallery_count,
+            "total_pages": r.total_pages,
+            "cover_thumb": cover_map.get(aid),
+            "latest_added_at": r.latest_added_at.isoformat() if r.latest_added_at else None,
+        })
+
+    return {"artists": result, "total": total}
+
+
+@router.get("/artists/{artist_id:path}/summary")
+async def get_artist_summary(
+    artist_id: str,
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get summary info for a specific artist."""
+    # Aggregate gallery-level fields
+    agg_stmt = (
+        select(
+            func.max(Gallery.uploader).label("artist_name"),
+            func.count().label("gallery_count"),
+            func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
+            func.max(Gallery.added_at).label("latest_added_at"),
+        )
+        .where(Gallery.artist_id == artist_id)
+    )
+    agg_row = (await db.execute(agg_stmt)).one_or_none()
+    if not agg_row or agg_row.gallery_count == 0:
+        raise HTTPException(status_code=404, detail="Artist not found")
+
+    # Count total images across all galleries for this artist
+    total_images_stmt = (
+        select(func.count(Image.id))
+        .join(Gallery, Image.gallery_id == Gallery.id)
+        .where(Gallery.artist_id == artist_id)
+    )
+    total_images = (await db.execute(total_images_stmt)).scalar_one()
+
+    # Cover thumb: most recent gallery's first image
+    latest_gallery_sub = (
+        select(Gallery.id)
+        .where(Gallery.artist_id == artist_id)
+        .order_by(desc(Gallery.added_at))
+        .limit(1)
+    ).scalar_subquery()
+
+    cover_stmt = (
+        select(Blob.sha256)
+        .join(Image, Image.blob_sha256 == Blob.sha256)
+        .where(Image.gallery_id == latest_gallery_sub, Image.page_num == 1)
+        .limit(1)
+    )
+    cover_sha256 = (await db.execute(cover_stmt)).scalar_one_or_none()
+    cover_thumb = cas_thumb_url(cover_sha256) if cover_sha256 else None
+
+    source = artist_id.split(":", 1)[0] if ":" in artist_id else ""
+
+    return {
+        "artist_id": artist_id,
+        "artist_name": agg_row.artist_name or "",
+        "source": source,
+        "gallery_count": agg_row.gallery_count,
+        "total_pages": agg_row.total_pages,
+        "total_images": total_images,
+        "latest_added_at": agg_row.latest_added_at.isoformat() if agg_row.latest_added_at else None,
+        "cover_thumb": cover_thumb,
+    }
+
+
+@router.get("/artists/{artist_id:path}/images")
+async def list_artist_images(
+    artist_id: str,
+    page: int = Query(default=0, ge=0),
+    limit: int = Query(default=40, ge=1, le=200),
+    sort: Literal["newest", "oldest"] = Query(default="newest"),
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all images across all galleries for a given artist, paginated."""
+    # Verify the artist exists (at least one gallery with this artist_id)
+    exists_stmt = select(func.count(Gallery.id)).where(Gallery.artist_id == artist_id)
+    artist_gallery_count = (await db.execute(exists_stmt)).scalar_one()
+    if artist_gallery_count == 0:
+        raise HTTPException(status_code=404, detail="Artist not found")
+
+    # Count total images for this artist
+    total_stmt = (
+        select(func.count(Image.id))
+        .join(Gallery, Image.gallery_id == Gallery.id)
+        .where(Gallery.artist_id == artist_id)
+    )
+    total_count = (await db.execute(total_stmt)).scalar_one()
+
+    # Main query: Image + Blob + Gallery for the given artist
+    gallery_order = (
+        desc(Gallery.added_at) if sort == "newest" else asc(Gallery.added_at)
+    )
+    stmt = (
+        select(Image, Gallery.title.label("gallery_title"))
+        .join(Gallery, Image.gallery_id == Gallery.id)
+        .where(Gallery.artist_id == artist_id)
+        .order_by(gallery_order, asc(Image.page_num))
+        .offset(page * limit)
+        .limit(limit)
+        .options(selectinload(Image.blob))
+    )
+    rows = (await db.execute(stmt)).all()
+
+    images = []
+    for row in rows:
+        img: Image = row[0]
+        gallery_title: str = row[1]
+        blob = img.blob
+        images.append({
+            "id": img.id,
+            "gallery_id": img.gallery_id,
+            "page_num": img.page_num,
+            "filename": img.filename,
+            "width": blob.width if blob else None,
+            "height": blob.height if blob else None,
+            "file_path": _to_url(blob),
+            "thumb_path": _thumb_url(blob),
+            "file_size": blob.file_size if blob else None,
+            "file_hash": blob.sha256 if blob else None,
+            "media_type": blob.media_type if blob else "image",
+            "duration": blob.duration if blob else None,
+            "gallery_title": gallery_title,
+        })
+
+    return {
+        "artist_id": artist_id,
+        "images": images,
+        "total": total_count,
+        "page": page,
+        "has_next": (page + 1) * limit < total_count,
+    }
+
+
+@router.get("/files")
+async def list_files(
+    q: str = Query(default=""),
+    page: int = Query(default=0, ge=0),
+    limit: int = Query(default=50, ge=1, le=200),
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List gallery directories under data_library_path with DB metadata."""
+    import asyncio
+    import os
+    from pathlib import Path
+
+    base = Path(settings.data_library_path)
+
+    def _scan_dirs() -> list[tuple[int, int, int]]:
+        """Return list of (gallery_id, file_count, disk_size) for numeric subdirectories."""
+        entries = []
+        try:
+            for entry in os.scandir(base):
+                if not entry.is_dir():
+                    continue
+                try:
+                    gid = int(entry.name)
+                except ValueError:
+                    continue
+                file_count = 0
+                disk_size = 0
+                try:
+                    for f in os.scandir(entry.path):
+                        if f.is_file(follow_symlinks=True):
+                            file_count += 1
+                            try:
+                                disk_size += f.stat(follow_symlinks=True).st_size
+                            except OSError:
+                                pass
+                except OSError:
+                    pass
+                entries.append((gid, file_count, disk_size))
+        except OSError:
+            pass
+        return entries
+
+    raw_entries = await asyncio.to_thread(_scan_dirs)
+
+    if not raw_entries:
+        return {"directories": [], "total": 0, "page": page}
+
+    gallery_ids = [e[0] for e in raw_entries]
+    size_map = {e[0]: (e[1], e[2]) for e in raw_entries}
+
+    stmt = select(Gallery).where(Gallery.id.in_(gallery_ids))
+    if q:
+        stmt = stmt.where(Gallery.title.ilike(f"%{q}%"))
+
+    galleries = (await db.execute(stmt)).scalars().all()
+    total = len(galleries)
+
+    # Sort by gallery id descending (most recently added first)
+    galleries = sorted(galleries, key=lambda g: g.id, reverse=True)
+    paged = galleries[page * limit : (page + 1) * limit]
+
+    result = []
+    for g in paged:
+        file_count, disk_size = size_map.get(g.id, (0, 0))
+        result.append({
+            "gallery_id": g.id,
+            "title": g.title,
+            "category": g.category,
+            "file_count": file_count,
+            "rating": g.rating,
+            "favorited": g.favorited,
+            "source": g.source,
+            "disk_size": disk_size,
+        })
+
+    return {"directories": result, "total": total, "page": page}
+
+
+@router.get("/files/{gallery_id}")
+async def list_gallery_files(
+    gallery_id: int,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List all files inside a gallery's library directory with DB metadata."""
+    import asyncio
+    import os
+    from pathlib import Path
+
+    g = await _get_or_404(db, gallery_id)
+    gdir = library_dir(gallery_id)
+
+    def _scan_files() -> list[dict]:
+        """Scan the gallery directory and return raw file info."""
+        entries = []
+        try:
+            for entry in os.scandir(gdir):
+                if not entry.is_file(follow_symlinks=False) and not entry.is_symlink():
+                    continue
+                path = Path(entry.path)
+                is_symlink = path.is_symlink()
+                is_broken = is_symlink and not path.exists()
+                symlink_target: str | None = None
+                if is_symlink:
+                    try:
+                        symlink_target = os.readlink(path)
+                    except OSError:
+                        pass
+                file_size: int | None = None
+                if not is_broken:
+                    try:
+                        file_size = entry.stat(follow_symlinks=True).st_size
+                    except OSError:
+                        pass
+                entries.append({
+                    "filename": entry.name,
+                    "file_size": file_size,
+                    "is_symlink": is_symlink,
+                    "is_broken": is_broken,
+                    "symlink_target": symlink_target,
+                })
+        except OSError:
+            pass
+        return entries
+
+    raw_files = await asyncio.to_thread(_scan_files)
+
+    # Cross-reference with DB Image records by filename
+    filenames = [f["filename"] for f in raw_files]
+    img_map: dict[str, Image] = {}
+    if filenames:
+        img_stmt = (
+            select(Image)
+            .where(Image.gallery_id == gallery_id, Image.filename.in_(filenames))
+            .options(selectinload(Image.blob))
+        )
+        db_images = (await db.execute(img_stmt)).scalars().all()
+        img_map = {img.filename: img for img in db_images}
+
+    files = []
+    for f in sorted(raw_files, key=lambda x: x["filename"]):
+        img = img_map.get(f["filename"])
+        blob = img.blob if img else None
+        files.append({
+            "filename": f["filename"],
+            "page_num": img.page_num if img else None,
+            "width": blob.width if blob else None,
+            "height": blob.height if blob else None,
+            "file_size": f["file_size"],
+            "media_type": blob.media_type if blob else "image",
+            "thumb_path": _thumb_url(blob),
+            "file_path": _to_url(blob),
+            "is_symlink": f["is_symlink"],
+            "is_broken": f["is_broken"],
+            "symlink_target": f["symlink_target"],
+        })
+
+    return {
+        "gallery_id": gallery_id,
+        "title": g.title,
+        "category": g.category,
+        "files": files,
+        "total_files": len(files),
+    }
+
+
+class BatchAction(BaseModel):
+    action: Literal["delete", "favorite", "unfavorite", "rate", "add_to_collection"]
+    gallery_ids: list[int]  # max 100
+    rating: int | None = None  # required when action=rate
+    collection_id: int | None = None  # required when action=add_to_collection
+
+
+@router.post("/galleries/batch")
+async def batch_galleries(
+    body: BatchAction,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Batch operations on multiple galleries."""
+    if len(body.gallery_ids) > 100:
+        raise HTTPException(status_code=400, detail="Maximum 100 galleries per batch")
+    if not body.gallery_ids:
+        raise HTTPException(status_code=400, detail="No gallery IDs provided")
+    if body.action == "rate" and (body.rating is None or body.rating < 0 or body.rating > 5):
+        raise HTTPException(status_code=400, detail="Rating must be 0-5 for rate action")
+
+    if body.action == "favorite":
+        stmt = (
+            select(Gallery)
+            .where(Gallery.id.in_(body.gallery_ids))
+        )
+        galleries = (await db.execute(stmt)).scalars().all()
+        for g in galleries:
+            g.favorited = True
+        await db.commit()
+        return {"status": "ok", "affected": len(galleries)}
+
+    elif body.action == "unfavorite":
+        stmt = (
+            select(Gallery)
+            .where(Gallery.id.in_(body.gallery_ids))
+        )
+        galleries = (await db.execute(stmt)).scalars().all()
+        for g in galleries:
+            g.favorited = False
+        await db.commit()
+        return {"status": "ok", "affected": len(galleries)}
+
+    elif body.action == "rate":
+        stmt = (
+            select(Gallery)
+            .where(Gallery.id.in_(body.gallery_ids))
+        )
+        galleries = (await db.execute(stmt)).scalars().all()
+        for g in galleries:
+            g.rating = body.rating
+        await db.commit()
+        return {"status": "ok", "affected": len(galleries)}
+
+    elif body.action == "add_to_collection":
+        if body.collection_id is None:
+            raise HTTPException(status_code=400, detail="collection_id required for add_to_collection")
+        from db.models import Collection, CollectionGallery
+        collection = await db.get(Collection, body.collection_id)
+        if not collection:
+            raise HTTPException(status_code=404, detail="Collection not found")
+
+        max_pos_result = (
+            await db.execute(
+                select(func.coalesce(func.max(CollectionGallery.position), -1))
+                .where(CollectionGallery.collection_id == body.collection_id)
+            )
+        ).scalar_one()
+
+        added = 0
+        for i, gid in enumerate(body.gallery_ids):
+            existing = (
+                await db.execute(
+                    select(CollectionGallery)
+                    .where(
+                        CollectionGallery.collection_id == body.collection_id,
+                        CollectionGallery.gallery_id == gid,
+                    )
+                )
+            ).scalar_one_or_none()
+            if existing:
+                continue
+            cg = CollectionGallery(
+                collection_id=body.collection_id,
+                gallery_id=gid,
+                position=max_pos_result + 1 + i,
+            )
+            db.add(cg)
+            added += 1
+
+        collection.updated_at = datetime.now(UTC)
+        await db.commit()
+        return {"status": "ok", "affected": added}
+
+    elif body.action == "delete":
+        return await _batch_delete_galleries(db, body.gallery_ids)
+
+
+async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int]) -> dict:
+    """Delete multiple galleries, decrement blob ref counts, cleanup filesystem."""
+    import asyncio
+    import shutil
+
+    # Load all galleries
+    stmt = select(Gallery).where(Gallery.id.in_(gallery_ids))
+    galleries = (await db.execute(stmt)).scalars().all()
+    if not galleries:
+        return {"status": "ok", "affected": 0, "deleted_dirs": 0}
+
+    # Load all images with blobs for these galleries
+    img_stmt = (
+        select(Image)
+        .where(Image.gallery_id.in_([g.id for g in galleries]))
+        .options(selectinload(Image.blob))
+    )
+    images = (await db.execute(img_stmt)).scalars().all()
+
+    # Collect sha256 values
+    blob_sha256s = [img.blob_sha256 for img in images]
+
+    # Decrement ref counts
+    for sha256 in blob_sha256s:
+        await decrement_ref_count(sha256, db)
+
+    # Delete galleries (CASCADE removes images, gallery_tags, read_progress)
+    for g in galleries:
+        await db.delete(g)
+    await db.commit()
+
+    # Find zero-ref blobs for thumbnail cleanup
+    zero_ref_sha256s: set[str] = set()
+    if blob_sha256s:
+        zero_ref_result = await db.execute(
+            select(Blob.sha256).where(Blob.sha256.in_(blob_sha256s), Blob.ref_count <= 0)
+        )
+        zero_ref_sha256s = set(zero_ref_result.scalars().all())
+
+    def _delete_filesystem() -> int:
+        deleted = 0
+        for g in galleries:
+            lib_dir = library_dir(g.id)
+            if lib_dir.exists():
+                try:
+                    shutil.rmtree(str(lib_dir), ignore_errors=True)
+                    deleted += 1
+                except OSError as exc:
+                    logger.warning("[batch_delete] failed to remove library dir %s: %s", lib_dir, exc)
+        for sha256 in zero_ref_sha256s:
+            td = thumb_dir(sha256)
+            if td.exists():
+                try:
+                    shutil.rmtree(str(td), ignore_errors=True)
+                    deleted += 1
+                except OSError as exc:
+                    logger.warning("[batch_delete] failed to remove thumb dir %s: %s", td, exc)
+        return deleted
+
+    try:
+        deleted_count = await asyncio.to_thread(_delete_filesystem)
+    except Exception as exc:
+        logger.warning("[batch_delete] cleanup failed: %s", exc)
+        deleted_count = 0
+
+    return {"status": "ok", "affected": len(galleries), "deleted_dirs": deleted_count}
+
+
 @router.get("/galleries/{gallery_id}")
 async def get_gallery(
     gallery_id: int,
@@ -266,12 +844,44 @@ async def get_gallery_images(
     return {"gallery_id": gallery_id, "images": [_i(img) for img in images]}
 
 
+@router.get("/galleries/{gallery_id}/tags")
+async def get_gallery_tags(
+    gallery_id: int,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Get gallery tags with confidence scores and source info."""
+    await _get_or_404(db, gallery_id)
+    rows = (
+        await db.execute(
+            select(GalleryTag)
+            .where(GalleryTag.gallery_id == gallery_id)
+            .options(selectinload(GalleryTag.tag))
+            .order_by(GalleryTag.confidence.desc())
+        )
+    ).scalars().all()
+
+    tags = []
+    for gt in rows:
+        tag = gt.tag
+        tags.append({
+            "namespace": tag.namespace,
+            "name": tag.name,
+            "confidence": gt.confidence,
+            "source": gt.source,
+        })
+    return {"gallery_id": gallery_id, "tags": tags}
+
+
 # ── Gallery update ───────────────────────────────────────────────────
 
 
 class GalleryPatch(BaseModel):
     favorited: bool | None = None
     rating: int | None = None
+    title: str | None = None
+    title_jpn: str | None = None
+    category: str | None = None
 
 
 @router.patch("/galleries/{gallery_id}")
@@ -286,6 +896,12 @@ async def update_gallery(
         g.favorited = patch.favorited
     if patch.rating is not None:
         g.rating = patch.rating
+    if patch.title is not None:
+        g.title = patch.title
+    if patch.title_jpn is not None:
+        g.title_jpn = patch.title_jpn
+    if patch.category is not None:
+        g.category = patch.category
     await db.commit()
     return _g(g)
 
@@ -357,8 +973,96 @@ async def delete_gallery(
                     logger.warning("[delete_gallery] failed to remove thumb dir %s: %s", td, exc)
         return deleted
 
-    deleted_count = await asyncio.to_thread(_delete_filesystem)
+    try:
+        deleted_count = await asyncio.to_thread(_delete_filesystem)
+    except Exception as exc:
+        logger.warning("[delete_gallery] thumbnail/symlink cleanup failed for gallery %d: %s", gallery_id, exc)
+        deleted_count = 0
+
     return {"status": "ok", "deleted_dirs": deleted_count}
+
+
+class DeleteImageBody(BaseModel):
+    page_num: int
+
+
+@router.post("/galleries/{gallery_id}/delete-image")
+async def delete_gallery_image(
+    gallery_id: int,
+    body: DeleteImageBody,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Delete a single image from a gallery by page number.
+
+    Removes the library symlink, decrements the blob ref count, deletes the
+    Image record, re-numbers remaining pages sequentially, and cleans up
+    thumbnail directories for any now-unreferenced blobs.
+    """
+    import asyncio
+    import shutil
+
+    gallery = await _get_or_404(db, gallery_id)
+
+    img_stmt = (
+        select(Image)
+        .where(Image.gallery_id == gallery_id, Image.page_num == body.page_num)
+        .options(selectinload(Image.blob))
+    )
+    img = (await db.execute(img_stmt)).scalar_one_or_none()
+    if not img:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    blob_sha256 = img.blob_sha256
+    filename = img.filename
+
+    # Record blob as excluded so re-imports skip it
+    from db.models import ExcludedBlob
+    excl_stmt = pg_insert(ExcludedBlob).values(
+        gallery_id=gallery_id, blob_sha256=blob_sha256,
+    ).on_conflict_do_nothing()
+    await db.execute(excl_stmt)
+
+    # Remove the symlink from the library directory
+    symlink_path = library_dir(gallery_id) / filename
+    await asyncio.to_thread(symlink_path.unlink, True)
+
+    # Decrement blob ref count and delete image record
+    await decrement_ref_count(blob_sha256, db)
+    await db.delete(img)
+    gallery.pages = max(0, (gallery.pages or 1) - 1)
+
+    # Re-number remaining images sequentially starting at 1
+    remaining_stmt = (
+        select(Image)
+        .where(Image.gallery_id == gallery_id)
+        .order_by(Image.page_num)
+    )
+    remaining = (await db.execute(remaining_stmt)).scalars().all()
+    for new_num, remaining_img in enumerate(remaining, start=1):
+        remaining_img.page_num = new_num
+
+    await db.commit()
+
+    # Check if the blob is now unreferenced; if so, clean up its thumbnail directory
+    zero_ref_result = await db.execute(
+        select(Blob.sha256).where(Blob.sha256 == blob_sha256, Blob.ref_count <= 0)
+    )
+    zero_ref_sha256 = zero_ref_result.scalar_one_or_none()
+
+    if zero_ref_sha256:
+        td = thumb_dir(zero_ref_sha256)
+
+        def _remove_thumbs() -> None:
+            if td.exists():
+                try:
+                    shutil.rmtree(str(td), ignore_errors=True)
+                except OSError as exc:
+                    logger.warning("[delete_gallery_image] failed to remove thumb dir %s: %s", td, exc)
+
+        await asyncio.to_thread(_remove_thumbs)
+
+    return {"status": "ok", "remaining_pages": gallery.pages}
 
 
 # ── Read progress ────────────────────────────────────────────────────
@@ -499,36 +1203,59 @@ async def find_similar_images(
         # Phase 1: generate Hamming neighborhoods for each quarter
         neighbors = _hamming_neighbors_all(quarters, max_quarter_dist)
 
-        # Phase 2: indexed pre-filter — OR across all four quarter columns,
-        # then exact bit_count check on the surviving candidates only.
-        conditions = []
-        params: dict = {
-            "image_id": image_id,
-            "phash_int": phash_int_val,
-            "threshold": threshold,
-            "limit": limit,
-        }
-        for qi, neighbor_set in enumerate(neighbors):
-            param_name = f"q{qi}_neighbors"
-            conditions.append(f"b.phash_q{qi} = ANY(:{param_name})")
-            params[param_name] = list(neighbor_set)
+        # Guard: if the combined neighbor sets are too large the ANY() arrays
+        # become counterproductive — fall back to the full scan path instead.
+        total_neighbors = sum(len(s) for s in neighbors)
+        if total_neighbors > 10000:
+            stmt = sql_text("""
+                SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
+                       b.storage, b.external_path, b.phash,
+                       bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
+                FROM images i
+                JOIN blobs b ON i.blob_sha256 = b.sha256
+                WHERE b.phash_int IS NOT NULL
+                  AND i.id != :image_id
+                  AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
+                ORDER BY distance ASC
+                LIMIT :limit
+            """)
+            results = (await db.execute(stmt, {
+                "phash_int": phash_int_val,
+                "image_id": image_id,
+                "threshold": threshold,
+                "limit": limit,
+            })).all()
+        else:
+            # Phase 2: indexed pre-filter — OR across all four quarter columns,
+            # then exact bit_count check on the surviving candidates only.
+            conditions = []
+            params: dict = {
+                "image_id": image_id,
+                "phash_int": phash_int_val,
+                "threshold": threshold,
+                "limit": limit,
+            }
+            for qi, neighbor_set in enumerate(neighbors):
+                param_name = f"q{qi}_neighbors"
+                conditions.append(f"b.phash_q{qi} = ANY(:{param_name})")
+                params[param_name] = list(neighbor_set)
 
-        where_prefilter = " OR ".join(conditions)
+            where_prefilter = " OR ".join(conditions)
 
-        stmt = sql_text(f"""
-            SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
-                   b.storage, b.external_path, b.phash,
-                   bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
-            FROM images i
-            JOIN blobs b ON i.blob_sha256 = b.sha256
-            WHERE b.phash_int IS NOT NULL
-              AND i.id != :image_id
-              AND ({where_prefilter})
-              AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
-            ORDER BY distance ASC
-            LIMIT :limit
-        """)
-        results = (await db.execute(stmt, params)).all()
+            stmt = sql_text(f"""
+                SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
+                       b.storage, b.external_path, b.phash,
+                       bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
+                FROM images i
+                JOIN blobs b ON i.blob_sha256 = b.sha256
+                WHERE b.phash_int IS NOT NULL
+                  AND i.id != :image_id
+                  AND ({where_prefilter})
+                  AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
+                ORDER BY distance ASC
+                LIMIT :limit
+            """)
+            results = (await db.execute(stmt, params)).all()
 
     def _row_to_url(r) -> str:
         if r.storage == "external" and r.external_path:
@@ -551,6 +1278,55 @@ async def find_similar_images(
             for r in results
         ],
     }
+
+
+# ── Excluded Blobs ───────────────────────────────────────────────────
+
+
+@router.get("/galleries/{gallery_id}/excluded")
+async def list_excluded_blobs(
+    gallery_id: int,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List excluded blob hashes for a gallery."""
+    from db.models import ExcludedBlob
+    result = await db.execute(
+        select(ExcludedBlob)
+        .where(ExcludedBlob.gallery_id == gallery_id)
+        .order_by(ExcludedBlob.excluded_at.desc())
+    )
+    blobs = result.scalars().all()
+    return {
+        "gallery_id": gallery_id,
+        "excluded": [
+            {"blob_sha256": b.blob_sha256, "excluded_at": b.excluded_at.isoformat() if b.excluded_at else None}
+            for b in blobs
+        ],
+    }
+
+
+@router.delete("/galleries/{gallery_id}/excluded/{sha256}")
+async def restore_excluded_blob(
+    gallery_id: int,
+    sha256: str,
+    _: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove a blob from the exclusion list (un-exclude)."""
+    from db.models import ExcludedBlob
+    result = await db.execute(
+        select(ExcludedBlob).where(
+            ExcludedBlob.gallery_id == gallery_id,
+            ExcludedBlob.blob_sha256 == sha256,
+        )
+    )
+    blob = result.scalar_one_or_none()
+    if not blob:
+        raise HTTPException(status_code=404, detail="Excluded blob not found")
+    await db.delete(blob)
+    await db.commit()
+    return {"status": "ok"}
 
 
 # ── Helpers ──────────────────────────────────────────────────────────
@@ -594,6 +1370,7 @@ def _g(g: Gallery, cover_thumb: str | None = None) -> dict:
         "rating": g.rating,
         "favorited": g.favorited,
         "uploader": g.uploader,
+        "artist_id": g.artist_id,
         "download_status": g.download_status,
         "import_mode": g.import_mode,
         "tags_array": g.tags_array or [],
@@ -615,4 +1392,5 @@ def _i(img: Image) -> dict:
         "file_size": blob.file_size if blob else None,
         "file_hash": blob.sha256 if blob else None,
         "media_type": blob.media_type if blob else "image",
+        "duration": blob.duration if blob else None,
     }

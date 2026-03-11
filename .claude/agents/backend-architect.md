@@ -12,11 +12,12 @@ maxTurns: 30
 
 只修改 `backend/` 目錄下的檔案，包含：
 - `backend/main.py` — FastAPI app + router 註冊
-- `backend/worker.py` — ARQ workers
-- `backend/core/` — config, auth, database, redis
+- `backend/worker/` — ARQ workers package (download, importer, subscription)
+- `backend/core/` — config, auth, database, redis, utils
 - `backend/db/models.py` — ORM models
 - `backend/routers/` — API 路由
 - `backend/services/` — 業務邏輯
+- `backend/plugins/` — Plugin system (registry, base, models, builtin/)
 
 ## 審查重點
 
