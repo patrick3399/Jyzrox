@@ -974,7 +974,7 @@ const en: Record<string, string> = {
   'pixiv.search': 'Search',
   'pixiv.noResults': 'No results found.',
   'pixiv.views': 'views',
-  'pixiv.bookmarks': 'bookmarks',
+  'pixiv.bookmarks': 'Bookmarks',
   'pixiv.pages': 'pages',
   'pixiv.download': 'Download',
   'pixiv.downloading': 'Downloading...',
