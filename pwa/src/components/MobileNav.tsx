@@ -48,7 +48,6 @@ const navLinks = [
   { href: '/import', label: () => t('nav.import'), icon: FolderInput },
   { href: '/credentials', label: () => t('nav.credentials'), icon: Key },
   { href: '/plugins', label: () => t('nav.plugins'), icon: Puzzle },
-  { href: '/settings', label: () => t('nav.settings'), icon: Settings },
 ]
 
 const themeCycle = ['light', 'dark', 'system'] as const
@@ -186,6 +185,18 @@ export function MobileNav() {
 
         {/* Bottom section */}
         <div className="px-3 py-3 border-t border-vault-border space-y-1">
+          {/* Settings link */}
+          <Link
+            href="/settings"
+            className={`flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm transition-colors ${
+              pathname === '/settings' || pathname.startsWith('/settings')
+                ? 'bg-vault-accent/10 text-vault-accent font-medium'
+                : 'text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover'
+            }`}
+          >
+            <Settings size={18} />
+            <span>{t('nav.settings')}</span>
+          </Link>
           <button
             onClick={cycleTheme}
             className="flex items-center gap-3 w-full px-3 py-2.5 rounded-lg text-sm text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"

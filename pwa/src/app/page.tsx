@@ -20,6 +20,7 @@ import {
   FolderInput,
   Key,
   Puzzle,
+  Rss,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
@@ -57,6 +58,12 @@ const QUICK_LINKS = [
     label: () => t('dashboard.quickLinks.artists'),
     desc: () => t('dashboard.quickLinks.artistsDesc'),
     icon: Users,
+  },
+  {
+    href: '/subscriptions',
+    label: () => t('dashboard.quickLinks.subscriptions'),
+    desc: () => t('dashboard.quickLinks.subscriptionsDesc'),
+    icon: Rss,
   },
   {
     href: '/history',
