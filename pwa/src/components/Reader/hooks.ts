@@ -643,8 +643,9 @@ export function usePinchZoom(elementRef: React.RefObject<HTMLElement | null>) {
  * Pin a container's height to the visual viewport on iOS.
  * Falls back to CSS 100dvh when visualViewport API is unavailable.
  *
- * NOTE: Currently unused. The reader-container now uses `position: fixed;
- * inset: 0` in CSS which handles viewport sizing natively without JS.
+ * NOTE: Currently unused. The reader-container height is locked to
+ * window.innerHeight at mount time (in the Reader component) to prevent
+ * iOS 15+ layout viewport shrink when the browser toolbar appears.
  * Kept here in case dynamic height adjustment is needed in future.
  */
 export function useViewportHeight(ref: React.RefObject<HTMLElement | null>) {
