@@ -602,7 +602,10 @@ function ReaderOverlay({
 
   useEffect(() => {
     if (showJump) {
-      // Focus input after render
+      // Only auto-focus on non-touch devices; on mobile, focusing triggers
+      // the soft keyboard which shifts the iOS visual viewport.
+      const isTouch = window.matchMedia('(pointer: coarse)').matches
+      if (isTouch) return
       const t = setTimeout(() => jumpInputRef.current?.select(), 50)
       return () => clearTimeout(t)
     }
@@ -830,9 +833,18 @@ function ThumbnailStrip({
   }, [])
 
   useEffect(() => {
-    if (!userScrollingRef.current && isVisible) {
-      activeRef.current?.scrollIntoView({ behavior: 'instant', inline: 'center', block: 'nearest' })
-    }
+    // NOTE: Do NOT use scrollIntoView() here. On iOS Safari (PWA and browser),
+    // scrollIntoView() can scroll the entire viewport — not just the strip —
+    // even with block: 'nearest'. This causes the reader UI to shift when the
+    // thumbnail strip becomes visible (e.g. on Toggle Control). Instead, we
+    // manually compute the target scrollLeft and assign it directly to the
+    // strip container, which only scrolls the strip's own overflow, never the viewport.
+    if (userScrollingRef.current || !isVisible) return
+    const strip = stripRef.current
+    const active = activeRef.current
+    if (!strip || !active) return
+    const targetScrollLeft = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2
+    strip.scrollLeft = Math.max(0, Math.min(targetScrollLeft, strip.scrollWidth - strip.clientWidth))
   }, [currentPage, isVisible])
 
   return (
@@ -1286,6 +1298,26 @@ export default function Reader({
     html.style.overflow = 'hidden'
     body.style.overflow = 'hidden'
 
+    // iOS 15+: toolbar show/hide changes layout viewport height.
+    // Lock height to the LARGEST observed value so toolbar appearing never collapses the reader.
+    // On toolbar hide (viewport expands), we update to the new larger height.
+    const el = containerRef.current
+    if (el) {
+      el.style.height = `${window.innerHeight}px`
+      const onResize = () => {
+        const h = window.innerHeight
+        const current = parseInt(el.style.height || '0', 10)
+        if (h > current) el.style.height = `${h}px`
+      }
+      window.addEventListener('resize', onResize)
+      return () => {
+        html.style.overflow = ''
+        body.style.overflow = ''
+        el.style.height = ''
+        window.removeEventListener('resize', onResize)
+      }
+    }
+
     return () => {
       html.style.overflow = ''
       body.style.overflow = ''
@@ -1435,8 +1467,9 @@ export default function Reader({
         />
       </div>
 
-      {/* Main content */}
-      <div className="flex-1 overflow-hidden">
+      {/* Main content — absolute inset-0 gives children a definite height so h-full resolves
+          correctly on iOS Safari even during CSS transitions on sibling overlay elements. */}
+      <div className="absolute inset-0 overflow-hidden">
         {state.viewMode === 'single' && currentImage && (
           <SinglePageView
             image={currentImage}

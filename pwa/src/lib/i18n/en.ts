@@ -50,6 +50,8 @@ const en: Record<string, string> = {
   'dashboard.quickLinks.importDesc': 'Import local files',
   'dashboard.quickLinks.credentials': 'Credentials',
   'dashboard.quickLinks.credentialsDesc': 'Manage site credentials',
+  'dashboard.quickLinks.subscriptions': 'Subscriptions',
+  'dashboard.quickLinks.subscriptionsDesc': 'Manage auto-download subscriptions',
   'dashboard.quickLinks.plugins': 'Plugins',
   'dashboard.quickLinks.pluginsDesc': 'View installed plugins',
   'dashboard.quickLinks.settings': 'Settings',
