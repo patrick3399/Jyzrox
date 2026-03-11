@@ -34,6 +34,27 @@ TASK_DEFS = {
         "default_enabled": True,
         "job": "check_followed_artists",
     },
+    "dedup_tier1": {
+        "name": "Dedup — pHash Scan",
+        "description": "Scan all images for similar pairs using perceptual hashing",
+        "default_cron": "0 8 * * *",
+        "default_enabled": False,
+        "job": "dedup_tier1_job",
+    },
+    "dedup_tier2": {
+        "name": "Dedup — Heuristic Classify",
+        "description": "Classify similar pairs by resolution and file size",
+        "default_cron": "0 9 * * *",
+        "default_enabled": False,
+        "job": "dedup_tier2_job",
+    },
+    "dedup_tier3": {
+        "name": "Dedup — OpenCV Verify",
+        "description": "Pixel-level validation of similar pairs (CPU intensive, runs nightly)",
+        "default_cron": "0 2 * * *",
+        "default_enabled": False,
+        "job": "dedup_tier3_job",
+    },
 }
 
 
@@ -112,7 +133,7 @@ async def run_scheduled_task(
 
     try:
         arq: ArqRedis = request.app.state.arq
-        await arq.enqueue_job(job_name)
+        await arq.enqueue_job(job_name, _job_id=f"manual:{task_id}")
     except Exception as exc:
         logger.error("Failed to enqueue %s: %s", job_name, exc)
         raise HTTPException(status_code=500, detail=str(exc))

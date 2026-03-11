@@ -318,3 +318,24 @@ CREATE TABLE IF NOT EXISTS excluded_blobs (
     excluded_at TIMESTAMPTZ DEFAULT now(),
     PRIMARY KEY (gallery_id, blob_sha256)
 );
+
+-- ── Blob Relationships (dedup pipeline) ──────────────────────────────
+CREATE TABLE IF NOT EXISTS blob_relationships (
+    id              BIGSERIAL PRIMARY KEY,
+    sha_a           TEXT NOT NULL REFERENCES blobs(sha256) ON DELETE CASCADE,
+    sha_b           TEXT NOT NULL REFERENCES blobs(sha256) ON DELETE CASCADE,
+    hamming_dist    SMALLINT NOT NULL,
+    relationship    TEXT NOT NULL DEFAULT 'needs_t2',
+    suggested_keep  TEXT,
+    reason          TEXT,
+    diff_score      FLOAT,
+    diff_type       TEXT,
+    tier            SMALLINT NOT NULL DEFAULT 1,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    CONSTRAINT uq_blob_pair UNIQUE (sha_a, sha_b),
+    CONSTRAINT chk_canonical_order CHECK (sha_a < sha_b)
+);
+CREATE INDEX IF NOT EXISTS idx_blob_rel_relationship ON blob_relationships (relationship, id);
+CREATE INDEX IF NOT EXISTS idx_blob_rel_sha_a ON blob_relationships (sha_a);
+CREATE INDEX IF NOT EXISTS idx_blob_rel_sha_b ON blob_relationships (sha_b);

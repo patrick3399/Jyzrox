@@ -19,6 +19,7 @@ from routers import (
     artists,
     auth,
     collections,
+    dedup as dedup_router,
     download,
     export,
     external,
@@ -108,6 +109,7 @@ app.include_router(collections.router, prefix="/api/collections")
 app.include_router(opds.router, prefix="/opds")
 app.include_router(scheduled_tasks.router, prefix="/api/scheduled-tasks")
 app.include_router(subscriptions.router, prefix="/api/subscriptions")
+app.include_router(dedup_router.router, prefix="/api/dedup")
 
 
 @app.get("/api/health")

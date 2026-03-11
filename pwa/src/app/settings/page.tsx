@@ -12,7 +12,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
 import { Copy, BookOpen, X, Plus, Tag, ScanLine } from 'lucide-react'
 import { useRescanLibrary, useRescanStatus, useCancelRescan } from '@/hooks/useImport'
-import { useScheduledTasks, useUpdateTask, useRunTask } from '@/hooks/useScheduledTasks'
+import { TaskList } from '@/components/ScheduledTasks/TaskList'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
 import { loadSWCacheConfig, saveSWCacheConfig, type SWCacheConfig, DEFAULT_SW_CACHE_CONFIG } from '@/lib/swCacheConfig'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
@@ -166,48 +166,9 @@ function AiTaggingSection() {
 // ── Scheduled Tasks sub-component ────────────────────────────────────
 
 function ScheduledTasksSection() {
-  const { data: tasksData, mutate: mutateTasks } = useScheduledTasks()
-  const { trigger: updateTask } = useUpdateTask()
-  const { trigger: runTask } = useRunTask()
   const { trigger: rescan, isMutating: rescanning } = useRescanLibrary()
   const { data: rescanStatus } = useRescanStatus()
   const { trigger: cancelRescan, isMutating: cancelling } = useCancelRescan()
-  const [editingCron, setEditingCron] = useState<Record<string, string>>({})
-
-  const handleToggle = async (taskId: string, currentEnabled: boolean) => {
-    try {
-      await updateTask({ taskId, data: { enabled: !currentEnabled } })
-      mutateTasks()
-      toast.success(t('settings.tasks.updated'))
-    } catch {
-      toast.error(t('settings.tasks.updateFailed'))
-    }
-  }
-
-  const handleCronUpdate = async (taskId: string, cronExpr: string) => {
-    try {
-      await updateTask({ taskId, data: { cron_expr: cronExpr } })
-      mutateTasks()
-      setEditingCron((prev) => {
-        const next = { ...prev }
-        delete next[taskId]
-        return next
-      })
-      toast.success(t('settings.tasks.updated'))
-    } catch {
-      toast.error(t('settings.tasks.updateFailed'))
-    }
-  }
-
-  const handleRunNow = async (taskId: string) => {
-    try {
-      await runTask(taskId)
-      mutateTasks()
-      toast.success(t('settings.tasks.queued'))
-    } catch {
-      toast.error(t('settings.tasks.queueFailed'))
-    }
-  }
 
   const handleRescan = async () => {
     try {
@@ -221,35 +182,6 @@ function ScheduledTasksSection() {
   const isRunning = rescanStatus?.running ?? false
   const processed = rescanStatus?.processed
   const total = rescanStatus?.total
-
-  const CRON_PRESETS = [
-    { label: () => t('settings.tasks.presetEveryHour'), value: '0 * * * *' },
-    { label: () => t('settings.tasks.presetEvery2Hours'), value: '0 */2 * * *' },
-    { label: () => t('settings.tasks.presetDaily2am'), value: '0 2 * * *' },
-    { label: () => t('settings.tasks.presetWeeklyMon3am'), value: '0 3 * * 1' },
-  ]
-
-  const statusColor = (status: string | null) => {
-    if (!status) return 'text-vault-text-muted'
-    switch (status) {
-      case 'ok': return 'text-green-400'
-      case 'failed': return 'text-red-400'
-      case 'running': return 'text-blue-400'
-      case 'skipped': return 'text-yellow-400'
-      default: return 'text-vault-text-muted'
-    }
-  }
-
-  const statusLabel = (status: string | null) => {
-    if (!status) return t('settings.tasks.never')
-    switch (status) {
-      case 'ok': return t('settings.tasks.statusOk')
-      case 'failed': return t('settings.tasks.statusFailed')
-      case 'running': return t('settings.tasks.statusRunning')
-      case 'skipped': return t('settings.tasks.statusSkipped')
-      default: return status
-    }
-  }
 
   return (
     <div className="px-5 pb-5 border-t border-vault-border">
@@ -305,98 +237,8 @@ function ScheduledTasksSection() {
         )}
       </div>
 
-      {/* Scheduled Tasks list */}
-      <div className="space-y-3">
-        {tasksData?.tasks.map((task) => {
-          const cronValue = editingCron[task.id] ?? task.cron_expr
-          return (
-            <div key={task.id} className="bg-vault-input border border-vault-border rounded-lg p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-medium text-vault-text">{task.name}</span>
-                    <span className={`text-[10px] font-medium ${statusColor(task.last_status)}`}>
-                      {statusLabel(task.last_status)}
-                    </span>
-                  </div>
-                  <p className="text-xs text-vault-text-muted mb-2">{task.description}</p>
-
-                  {/* Cron expression */}
-                  <div className="flex flex-wrap items-center gap-1.5 mb-2">
-                    <input
-                      type="text"
-                      value={cronValue}
-                      onChange={(e) => setEditingCron((prev) => ({ ...prev, [task.id]: e.target.value }))}
-                      onBlur={() => {
-                        if (editingCron[task.id] && editingCron[task.id] !== task.cron_expr) {
-                          handleCronUpdate(task.id, editingCron[task.id])
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' && editingCron[task.id]) {
-                          handleCronUpdate(task.id, editingCron[task.id])
-                        }
-                      }}
-                      className="w-32 px-2 py-1 bg-vault-bg border border-vault-border rounded text-xs text-vault-text font-mono"
-                      disabled={!task.enabled}
-                    />
-                    {CRON_PRESETS.map((p) => (
-                      <button
-                        key={p.value}
-                        onClick={() => handleCronUpdate(task.id, p.value)}
-                        disabled={!task.enabled}
-                        className={`px-2 py-1 rounded text-[10px] transition-colors ${
-                          task.cron_expr === p.value
-                            ? 'bg-vault-accent/20 text-vault-accent'
-                            : 'bg-vault-bg border border-vault-border text-vault-text-muted hover:text-vault-text disabled:opacity-40'
-                        }`}
-                      >
-                        {p.label()}
-                      </button>
-                    ))}
-                  </div>
-
-                  {/* Last run info */}
-                  {task.last_run && (
-                    <p className="text-[10px] text-vault-text-muted">
-                      {t('settings.tasks.lastRun')}: {new Date(task.last_run).toLocaleString()}
-                    </p>
-                  )}
-                  {task.last_error && (
-                    <p className="text-[10px] text-red-400 mt-0.5 truncate" title={task.last_error}>
-                      {task.last_error}
-                    </p>
-                  )}
-                </div>
-
-                <div className="flex flex-col items-end gap-2 shrink-0">
-                  {/* Enable toggle */}
-                  <button
-                    onClick={() => handleToggle(task.id, task.enabled)}
-                    className={`relative w-9 h-5 rounded-full transition-colors ${
-                      task.enabled ? 'bg-vault-accent' : 'bg-vault-border'
-                    }`}
-                  >
-                    <span
-                      className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${
-                        task.enabled ? 'translate-x-4' : ''
-                      }`}
-                    />
-                  </button>
-
-                  {/* Run Now button */}
-                  <button
-                    onClick={() => handleRunNow(task.id)}
-                    className="px-2 py-1 rounded text-[10px] font-medium bg-vault-accent/10 text-vault-accent hover:bg-vault-accent/20 transition-colors"
-                  >
-                    {t('settings.tasks.runNow')}
-                  </button>
-                </div>
-              </div>
-            </div>
-          )
-        })}
-      </div>
+      {/* Scheduled Tasks list — delegated to shared TaskList component */}
+      <TaskList pollWhileRunning={false} />
     </div>
   )
 }
@@ -799,7 +641,7 @@ export default function SettingsPage() {
     setFeaturesLoading(true)
     try {
       const data = await api.settings.getFeatures()
-      setFeatures(data)
+      setFeatures(data as unknown as Record<string, boolean>)
     } catch {
       // silently fail — toggles will use defaults
     } finally {

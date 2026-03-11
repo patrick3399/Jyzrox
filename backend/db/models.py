@@ -15,6 +15,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+_rel = relationship  # alias to avoid shadowing by BlobRelationship.relationship column
 from sqlalchemy.sql import func
 from sqlalchemy.types import DateTime
 
@@ -324,3 +325,24 @@ class ExcludedBlob(Base):
     gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
     blob_sha256: Mapped[str] = mapped_column(Text, primary_key=True)
     excluded_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class BlobRelationship(Base):
+    __tablename__ = "blob_relationships"
+    __table_args__ = (UniqueConstraint("sha_a", "sha_b", name="uq_blob_pair"),)
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    sha_a: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256", ondelete="CASCADE"))
+    sha_b: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256", ondelete="CASCADE"))
+    hamming_dist: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    relationship: Mapped[str] = mapped_column(Text, nullable=False, default="needs_t2")
+    suggested_keep: Mapped[str | None] = mapped_column(Text)
+    reason: Mapped[str | None] = mapped_column(Text)
+    diff_score: Mapped[float | None] = mapped_column(Float)
+    diff_type: Mapped[str | None] = mapped_column(Text)
+    tier: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    blob_a: Mapped["Blob"] = _rel(foreign_keys="[BlobRelationship.sha_a]")
+    blob_b: Mapped["Blob"] = _rel(foreign_keys="[BlobRelationship.sha_b]")

@@ -44,6 +44,10 @@ from worker.subscription import (
     check_followed_artists,
     check_single_subscription,
 )
+from worker.dedup_tier1 import dedup_tier1_job
+from worker.dedup_tier2 import dedup_tier2_job
+from worker.dedup_tier3 import dedup_tier3_job
+from worker.dedup_scan import dedup_scan_job
 from worker.helpers import _sha256
 
 logging.basicConfig(
@@ -67,7 +71,12 @@ async def startup(ctx: dict) -> None:
     for key in ("download:sem:ehentai", "download:sem:pixiv", "download:sem:other"):
         await r.delete(key)
     # Clean up stale scan progress from previous runs
-    await r.delete("rescan:progress", "rescan:cancel")
+    await r.delete(
+        "rescan:progress", "rescan:cancel",
+        "dedup:progress:status", "dedup:progress:signal",
+        "dedup:progress:current", "dedup:progress:total",
+        "dedup:progress:tier", "dedup:progress:mode",
+    )
 
     # Start file system watcher.
     # Honour the runtime override stored by toggle_monitor; fall back to the
@@ -177,6 +186,10 @@ class WorkerSettings:
         toggle_watcher_job,
         check_followed_artists,
         check_single_subscription,
+        dedup_tier1_job,
+        dedup_tier2_job,
+        dedup_tier3_job,
+        dedup_scan_job,
     ]
     cron_jobs = [
         cron(
@@ -226,6 +239,10 @@ __all__ = [
     "tag_job",
     "check_followed_artists",
     "check_single_subscription",
+    "dedup_tier1_job",
+    "dedup_tier2_job",
+    "dedup_tier3_job",
+    "dedup_scan_job",
     "toggle_watcher_job",
     "startup",
     "shutdown",

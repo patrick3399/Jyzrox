@@ -1,9 +1,12 @@
+'use client'
 import useSWR from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { api } from '@/lib/api'
 
-export function useScheduledTasks() {
-  return useSWR('scheduled-tasks', () => api.scheduledTasks.list())
+export function useScheduledTasks(refreshInterval?: number) {
+  return useSWR('scheduled-tasks', () => api.scheduledTasks.list(), {
+    refreshInterval,
+  })
 }
 
 export function useUpdateTask() {

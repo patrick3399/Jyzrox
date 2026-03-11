@@ -42,6 +42,9 @@ import type {
   LibraryFile,
   ScheduledTask,
   Subscription,
+  DedupStats,
+  DedupReviewResponse,
+  DedupScanProgress,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -489,12 +492,23 @@ const settings = {
       download_eh_enabled: boolean
       download_pixiv_enabled: boolean
       download_gallery_dl_enabled: boolean
+      dedup_phash_enabled: boolean
+      dedup_phash_threshold: number
+      dedup_heuristic_enabled: boolean
+      dedup_opencv_enabled: boolean
+      dedup_opencv_threshold: number
     }>('/api/settings/features'),
 
   setFeature: (feature: string, enabled: boolean) =>
     apiFetch<{ feature: string; enabled: boolean }>(`/api/settings/features/${feature}`, {
       method: 'PATCH',
       body: JSON.stringify({ enabled }),
+    }),
+
+  setFeatureValue: (feature: string, value: number) =>
+    apiFetch<{ feature: string; value: number }>(`/api/settings/features/${feature}`, {
+      method: 'PATCH',
+      body: JSON.stringify({ value }),
     }),
 }
 
@@ -998,6 +1012,42 @@ const subscriptions = {
     }),
 }
 
+// ── Dedup ────────────────────────────────────────────────────────────
+
+const dedup = {
+  getStats: () =>
+    apiFetch<DedupStats>('/api/dedup/stats'),
+
+  getReview: (params: { relationship?: string; cursor?: string } = {}) =>
+    apiFetch<DedupReviewResponse>(`/api/dedup/review${qs(params as Record<string, unknown>)}`),
+
+  keep: (id: number, keepSha: string) =>
+    apiFetch<{ status: string }>(`/api/dedup/review/${id}/keep`, {
+      method: 'POST',
+      body: JSON.stringify({ keep_sha: keepSha }),
+    }),
+
+  whitelist: (id: number) =>
+    apiFetch<{ status: string }>(`/api/dedup/review/${id}/whitelist`, { method: 'POST' }),
+
+  dismiss: (id: number) =>
+    apiFetch<{ status: string }>(`/api/dedup/review/${id}`, { method: 'DELETE' }),
+
+  getScanProgress: () => apiFetch<DedupScanProgress>('/api/dedup/scan/progress'),
+
+  startScan: (mode: 'reset' | 'pending') =>
+    apiFetch<{ status: string }>('/api/dedup/scan/start', {
+      method: 'POST',
+      body: JSON.stringify({ mode }),
+    }),
+
+  sendSignal: (signal: 'pause' | 'resume' | 'stop') =>
+    apiFetch<{ status: string }>('/api/dedup/scan/signal', {
+      method: 'POST',
+      body: JSON.stringify({ signal }),
+    }),
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
 export const api = {
@@ -1019,4 +1069,5 @@ export const api = {
   collections,
   scheduledTasks,
   subscriptions,
+  dedup,
 }

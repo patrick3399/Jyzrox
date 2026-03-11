@@ -498,6 +498,48 @@ export interface LibraryFile {
   symlink_target: string | null
 }
 
+// ── Dedup ────────────────────────────────────────────────────────────
+
+export interface DedupStats {
+  total_blobs: number     // blobs with phash
+  needs_t2: number
+  needs_t3: number
+  pending_review: number
+  whitelisted: number
+  resolved: number
+}
+
+export interface RelationshipBlob {
+  sha256: string
+  thumb_url: string | null
+  width: number | null
+  height: number | null
+  file_size: number | null
+}
+
+export interface RelationshipItem {
+  id: number
+  relationship: 'quality_conflict' | 'variant'
+  hamming_dist: number | null
+  blob_a: RelationshipBlob
+  blob_b: RelationshipBlob
+  suggested_keep: string | null
+}
+
+export interface DedupReviewResponse {
+  items: RelationshipItem[]
+  next_cursor: string | null
+}
+
+export interface DedupScanProgress {
+  status: 'idle' | 'running' | 'paused'
+  current?: number
+  total?: number
+  tier?: 1 | 2 | 3
+  mode?: 'reset' | 'pending'
+  percent?: number
+}
+
 // ── API Params ────────────────────────────────────────────────────────
 
 export interface GallerySearchParams {

@@ -55,7 +55,8 @@ class PixivOAuthCallbackRequest(BaseModel):
 
 
 class FeatureTogglePatch(BaseModel):
-    enabled: bool
+    enabled: bool | None = None
+    value: int | float | None = None
 
 
 class EhSitePreference(BaseModel):
@@ -482,6 +483,28 @@ async def _set_toggle(redis_key: str, enabled: bool) -> bool:
     return enabled
 
 
+async def _get_int_setting(redis_key: str, default: int) -> int:
+    """Read an integer setting from Redis, falling back to default."""
+    val = await get_redis().get(redis_key)
+    if val is not None:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
+    return default
+
+
+async def _get_float_setting(redis_key: str, default: float) -> float:
+    """Read a float setting from Redis, falling back to default."""
+    val = await get_redis().get(redis_key)
+    if val is not None:
+        try:
+            return float(val)
+        except (ValueError, TypeError):
+            pass
+    return default
+
+
 # ── Feature Toggles ──────────────────────────────────────────────────
 
 
@@ -497,6 +520,11 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "download_eh_enabled": await _get_toggle("setting:download_eh_enabled", app_settings.download_eh_enabled),
         "download_pixiv_enabled": await _get_toggle("setting:download_pixiv_enabled", app_settings.download_pixiv_enabled),
         "download_gallery_dl_enabled": await _get_toggle("setting:download_gallery_dl_enabled", app_settings.download_gallery_dl_enabled),
+        "dedup_phash_enabled": await _get_toggle("setting:dedup_phash_enabled", False),
+        "dedup_heuristic_enabled": await _get_toggle("setting:dedup_heuristic_enabled", False),
+        "dedup_phash_threshold": await _get_int_setting("setting:dedup_phash_threshold", 10),
+        "dedup_opencv_enabled": await _get_toggle("setting:dedup_opencv_enabled", False),
+        "dedup_opencv_threshold": await _get_float_setting("setting:dedup_opencv_threshold", 0.85),
     }
 
 
@@ -516,11 +544,31 @@ async def patch_feature_toggle(
         "download_eh_enabled": "setting:download_eh_enabled",
         "download_pixiv_enabled": "setting:download_pixiv_enabled",
         "download_gallery_dl_enabled": "setting:download_gallery_dl_enabled",
+        "dedup_phash_enabled": "setting:dedup_phash_enabled",
+        "dedup_heuristic_enabled": "setting:dedup_heuristic_enabled",
+        "dedup_phash_threshold": "setting:dedup_phash_threshold",
+        "dedup_opencv_enabled": "setting:dedup_opencv_enabled",
+        "dedup_opencv_threshold": "setting:dedup_opencv_threshold",
     }
     if feature not in ALLOWED:
         raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
 
     redis_key = ALLOWED.get(feature)
+
+    if feature == "dedup_phash_threshold":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for dedup_phash_threshold")
+        await get_redis().set("setting:dedup_phash_threshold", str(req.value))
+        return {"feature": feature, "value": req.value}
+
+    if feature == "dedup_opencv_threshold":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for dedup_opencv_threshold")
+        await get_redis().set("setting:dedup_opencv_threshold", str(req.value))
+        return {"feature": feature, "value": req.value}
+
+    if req.enabled is None:
+        raise HTTPException(status_code=400, detail="enabled required for boolean features")
 
     if feature == "rate_limit_enabled":
         app_settings.rate_limit_enabled = req.enabled
