@@ -338,30 +338,16 @@ function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
         <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
       )}
 
-      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-3">
         {allPreviews.map((preview: PixivUserPreview) => (
           <Link
             key={preview.user.id}
             href={`/pixiv/user/${preview.user.id}`}
-            className="group block rounded-lg bg-vault-card border border-vault-border p-3 hover:border-vault-accent transition-colors"
+            className="group block rounded-lg bg-vault-card border border-vault-border overflow-hidden hover:border-vault-accent transition-colors"
           >
-            <div className="flex flex-col items-center gap-2">
-              {preview.user.profile_image ? (
-                <img
-                  src={api.pixiv.imageProxyUrl(preview.user.profile_image)}
-                  alt={preview.user.name}
-                  className="w-14 h-14 rounded-full object-cover bg-vault-input"
-                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
-                />
-              ) : (
-                <div className="w-14 h-14 rounded-full bg-vault-input" />
-              )}
-              <p className="text-xs font-medium text-vault-text text-center truncate w-full">
-                {preview.user.name}
-              </p>
-            </div>
-            {preview.illusts.length > 0 && (
-              <div className="grid grid-cols-3 gap-0.5 mt-2 rounded overflow-hidden">
+            {/* Recent works grid */}
+            {preview.illusts.length > 0 ? (
+              <div className="grid grid-cols-3 gap-0.5">
                 {preview.illusts.slice(0, 3).map((illust) => (
                   <img
                     key={illust.id}
@@ -372,7 +358,25 @@ function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
                   />
                 ))}
               </div>
+            ) : (
+              <div className="aspect-video bg-vault-input" />
             )}
+            {/* Artist info row */}
+            <div className="flex items-center gap-2 p-2">
+              {preview.user.profile_image ? (
+                <img
+                  src={api.pixiv.imageProxyUrl(preview.user.profile_image)}
+                  alt={preview.user.name}
+                  className="w-7 h-7 rounded-full object-cover bg-vault-input shrink-0"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                />
+              ) : (
+                <div className="w-7 h-7 rounded-full bg-vault-input shrink-0" />
+              )}
+              <p className="text-xs font-medium text-vault-text truncate">
+                {preview.user.name}
+              </p>
+            </div>
           </Link>
         ))}
       </div>
