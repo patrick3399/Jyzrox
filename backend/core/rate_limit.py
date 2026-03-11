@@ -85,11 +85,11 @@ def get_client_ip(request: Request) -> str:
 # ---------------------------------------------------------------------------
 
 # Global per-IP limits (all methods)
-_GLOBAL_RATE_LIMIT = 120
+_GLOBAL_RATE_LIMIT = 600
 _GLOBAL_RATE_WINDOW = 60  # seconds
 
 # Stricter limit for mutating methods
-_WRITE_RATE_LIMIT = 30
+_WRITE_RATE_LIMIT = 120
 _WRITE_RATE_WINDOW = 60  # seconds
 
 # Paths that carry their own stricter per-endpoint limits — skip global check
