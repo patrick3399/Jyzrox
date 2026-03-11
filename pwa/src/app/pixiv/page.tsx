@@ -12,7 +12,7 @@ import { CredentialBanner } from '@/components/CredentialBanner'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
-import type { PixivIllust, PixivSearchResult, FollowedArtist } from '@/lib/types'
+import type { PixivIllust, PixivSearchResult, PixivUserPreview } from '@/lib/types'
 
 // ── Illust card ──────────────────────────────────────────────────────────
 
@@ -288,43 +288,22 @@ function FeedTab({ credentialsMissing }: { credentialsMissing: boolean }) {
 // ── Following Tab ────────────────────────────────────────────────────────
 
 function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
-  const { data, error, isLoading, mutate } = useSWR(
-    credentialsMissing ? null : '/artists/followed/pixiv',
-    () => api.artists.listFollowed({ source: 'pixiv', limit: 100 }),
+  const getKey = (pageIndex: number, previous: { user_previews: PixivUserPreview[]; next_offset: number | null } | null) => {
+    if (credentialsMissing) return null
+    if (pageIndex > 0 && previous?.next_offset === null) return null
+    const offset = pageIndex === 0 ? 0 : (previous?.next_offset ?? 0)
+    return ['/pixiv/following', offset]
+  }
+
+  const { data, size, setSize, isValidating, error } = useSWRInfinite(
+    getKey,
+    ([, offset]) => api.pixiv.getFollowing('public', offset as number),
+    { revalidateFirstPage: false },
   )
 
-  const [checkingUpdates, setCheckingUpdates] = useState(false)
-
-  const handleUnfollow = async (artistId: string) => {
-    try {
-      await api.artists.unfollow(artistId, 'pixiv')
-      toast.success(t('pixiv.unfollow'))
-      mutate()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
-    }
-  }
-
-  const handleToggleAutoDownload = async (artistId: string, current: boolean) => {
-    try {
-      await api.artists.patchFollow(artistId, { auto_download: !current }, 'pixiv')
-      mutate()
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
-    }
-  }
-
-  const handleCheckUpdates = async () => {
-    setCheckingUpdates(true)
-    try {
-      await api.artists.checkUpdates()
-      toast.success(t('pixiv.checkUpdates'))
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
-    } finally {
-      setCheckingUpdates(false)
-    }
-  }
+  const allPreviews = data?.flatMap((page) => page.user_previews) ?? []
+  const hasMore = data ? data[data.length - 1]?.next_offset !== null : false
+  const isLoading = !data && isValidating
 
   if (credentialsMissing) {
     return (
@@ -353,80 +332,62 @@ function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
     )
   }
 
-  const artists = data?.artists ?? []
-
   return (
     <div className="space-y-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm text-vault-text-secondary">
-          {artists.length} {t('pixiv.following')}
-        </p>
-        <button
-          onClick={handleCheckUpdates}
-          disabled={checkingUpdates}
-          className="px-4 py-1.5 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors disabled:opacity-50"
-        >
-          {checkingUpdates ? t('pixiv.loading') : t('pixiv.checkUpdates')}
-        </button>
-      </div>
-
-      {artists.length === 0 && (
+      {allPreviews.length === 0 && !isValidating && (
         <p className="text-center py-8 text-vault-text-secondary">{t('pixiv.noResults')}</p>
       )}
 
-      <div className="space-y-2">
-        {artists.map((artist: FollowedArtist) => (
-          <div
-            key={artist.id}
-            className="flex items-center gap-3 p-3 rounded-lg bg-vault-card border border-vault-border"
+      <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+        {allPreviews.map((preview: PixivUserPreview) => (
+          <Link
+            key={preview.user.id}
+            href={`/pixiv/user/${preview.user.id}`}
+            className="group block rounded-lg bg-vault-card border border-vault-border p-3 hover:border-vault-accent transition-colors"
           >
-            {artist.artist_avatar ? (
-              <img
-                src={api.pixiv.imageProxyUrl(artist.artist_avatar)}
-                alt={artist.artist_name ?? ''}
-                className="w-10 h-10 rounded-full object-cover bg-vault-input shrink-0"
-                onError={(e) => {
-                  ;(e.currentTarget as HTMLImageElement).style.display = 'none'
-                }}
-              />
-            ) : (
-              <div className="w-10 h-10 rounded-full bg-vault-input shrink-0" />
-            )}
-
-            <div className="flex-1 min-w-0">
-              <Link
-                href={`/pixiv/user/${artist.artist_id}`}
-                className="text-sm font-medium text-vault-text hover:text-vault-accent truncate block"
-              >
-                {artist.artist_name ?? artist.artist_id}
-              </Link>
-              {artist.last_checked_at && (
-                <p className="text-[11px] text-vault-text-secondary">
-                  {new Date(artist.last_checked_at).toLocaleDateString()}
-                </p>
-              )}
-            </div>
-
-            <div className="flex items-center gap-2 shrink-0">
-              <label className="flex items-center gap-1.5 text-xs text-vault-text-secondary cursor-pointer">
-                <input
-                  type="checkbox"
-                  checked={artist.auto_download}
-                  onChange={() => handleToggleAutoDownload(artist.artist_id, artist.auto_download)}
-                  className="w-3.5 h-3.5 accent-vault-accent"
+            <div className="flex flex-col items-center gap-2">
+              {preview.user.profile_image ? (
+                <img
+                  src={api.pixiv.imageProxyUrl(preview.user.profile_image)}
+                  alt={preview.user.name}
+                  className="w-14 h-14 rounded-full object-cover bg-vault-input"
+                  onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
                 />
-                {t('pixiv.autoDownload')}
-              </label>
-              <button
-                onClick={() => handleUnfollow(artist.artist_id)}
-                className="px-2.5 py-1 rounded text-xs bg-red-500/10 text-red-400 hover:bg-red-500/20 transition-colors"
-              >
-                {t('pixiv.unfollow')}
-              </button>
+              ) : (
+                <div className="w-14 h-14 rounded-full bg-vault-input" />
+              )}
+              <p className="text-xs font-medium text-vault-text text-center truncate w-full">
+                {preview.user.name}
+              </p>
             </div>
-          </div>
+            {preview.illusts.length > 0 && (
+              <div className="grid grid-cols-3 gap-0.5 mt-2 rounded overflow-hidden">
+                {preview.illusts.slice(0, 3).map((illust) => (
+                  <img
+                    key={illust.id}
+                    src={api.pixiv.imageProxyUrl(illust.image_urls.square_medium)}
+                    alt=""
+                    className="aspect-square w-full object-cover"
+                    onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                  />
+                ))}
+              </div>
+            )}
+          </Link>
         ))}
       </div>
+
+      {hasMore && (
+        <div className="flex justify-center pt-2">
+          <button
+            onClick={() => setSize(size + 1)}
+            disabled={isValidating}
+            className="px-6 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors disabled:opacity-50"
+          >
+            {isValidating ? <LoadingSpinner size="sm" /> : t('common.loadMore')}
+          </button>
+        </div>
+      )}
     </div>
   )
 }

@@ -414,6 +414,16 @@ export interface PixivUserResult {
   next_offset: number | null
 }
 
+export interface PixivUserPreview {
+  user: {
+    id: number
+    name: string
+    account: string
+    profile_image: string
+  }
+  illusts: PixivIllust[]
+}
+
 export interface FollowedArtist {
   id: number
   source: string

@@ -32,6 +32,7 @@ import type {
   PixivIllust,
   PixivSearchResult,
   PixivUserResult,
+  PixivUserPreview,
   FollowedArtist,
   ArtistSummary,
   ArtistImageItem,
@@ -816,6 +817,11 @@ const pixiv = {
 
   getFollowingFeed: (offset = 0) =>
     apiFetch<PixivSearchResult>(`/api/pixiv/following/feed?offset=${offset}`),
+
+  getFollowing: (restrict = 'public', offset = 0) =>
+    apiFetch<{ user_previews: PixivUserPreview[]; next_offset: number | null }>(
+      `/api/pixiv/following?restrict=${restrict}&offset=${offset}`,
+    ),
 
   imageProxyUrl: (url: string) =>
     `/api/pixiv/image-proxy?url=${encodeURIComponent(url)}`,
