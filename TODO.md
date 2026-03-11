@@ -1,6 +1,6 @@
 # Jyzrox TODO
 
-> 最後更新：2026-03-11（重構）
+> 最後更新：2026-03-11
 
 ---
 
@@ -125,6 +125,47 @@
 - [ ] 搜尋邏輯：文字 query → embedding → `<=>` cosine distance 排序
 - [ ] 前端 Library 搜尋列新增「語意搜尋」模式切換
 - [ ] 以圖搜圖：上傳圖片 → 提取 embedding → 找最相似 gallery
+
+### 封存格式支援（ZIP / CBZ / EPUB / PDF）
+
+> **現狀**：Jyzrox 的 import pipeline 只處理解壓後的平面檔案目錄，無法直接讀取封存格式。LANraragi、Kavita、Suwayomi 均以封存檔為一等公民。
+>
+> **目標**：支援 ZIP/CBZ 直接匯入並在線上閱讀；PDF/EPUB 作為延伸目標。
+
+#### 後端
+- [ ] `worker/importer.py`：偵測輸入為封存檔時自動解壓（`zipfile`/`rarfile`），後續流程不變
+- [ ] 支援格式：`.zip`、`.cbz`（Phase 1）；`.cbr`（`.rar`，需 `rarfile` 或 `patool`）（Phase 2）
+- [ ] PDF 支援：`pypdf` 或 `pdf2image` 逐頁提取為圖片，匯入 CAS（Phase 3）
+- [ ] EPUB 支援：提取圖片頁面，忽略文字內容（Phase 3）
+- [ ] `GET /api/import/browse` 檔案瀏覽器：顯示封存檔並允許直接匯入
+- [ ] Download pipeline：`download_job` 完成後若產物為封存檔，自動觸發解壓流程
+
+#### 前端
+- [ ] Import Center：封存檔拖曳上傳入口（`POST /api/import/upload`）
+- [ ] 匯入預覽：顯示封存內頁數與封面縮圖
+
+### 漫畫系列結構（Series / Volume / Chapter）
+
+> **現狀**：Gallery 為扁平結構，無父子關係。Kavita 與 Suwayomi 以 Series → Volume → Chapter 三層結構組織內容，支援連續閱讀與進度追蹤。
+>
+> **目標**：在現有 Gallery 模型上疊加可選的系列層，不破壞現有扁平使用模式。
+
+#### 資料庫
+- [ ] 新增 `series` 表：`id`, `title`, `title_jpn`, `cover_gallery_id`, `tags_array`, `created_at`
+- [ ] `galleries` 表新增 `series_id FK`、`volume_num`、`chapter_num`、`chapter_title` 欄位（全部 nullable，保持向後相容）
+- [ ] 遷移腳本
+
+#### 後端
+- [ ] `GET /api/library/series`：系列列表（含封面、章節數、總頁數）
+- [ ] `GET /api/library/series/{id}`：系列詳情 + 章節列表（依 volume/chapter 排序）
+- [ ] Gallery 編輯 API：支援指定 `series_id`、`volume_num`、`chapter_num`
+- [ ] Reader API：`next_chapter` / `prev_chapter` 跨 gallery 連續閱讀端點
+
+#### 前端
+- [ ] `/series` 頁面：系列列表（封面格狀顯示）
+- [ ] `/series/[id]` 頁面：系列詳情，章節列表，「從頭閱讀」按鈕
+- [ ] Gallery detail 頁：可選指定所屬系列與章節號
+- [ ] Reader：章節末尾「下一章」跳轉（呼叫 `next_chapter` 端點）
 
 ### Plugin 系統完善
 
