@@ -15,8 +15,8 @@ build/
 config/gallery-dl/config.json
 
 # Node / PWA
-pwa/node_modules/
-pwa/.next/
+node_modules/
+.next/
 pwa/tsconfig.tsbuildinfo
 
 # OS

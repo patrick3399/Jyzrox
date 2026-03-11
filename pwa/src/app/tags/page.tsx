@@ -126,8 +126,7 @@ export default function TagsPage() {
   const totalPages = tagData?.total !== undefined ? Math.ceil(tagData.total / limit) : 0
 
   return (
-    <div className="min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 py-6">
+    <>
         <h1 className="text-2xl font-bold mb-6">{t('tags.title')}</h1>
 
         {/* Filters */}
@@ -378,7 +377,6 @@ export default function TagsPage() {
             </div>
           )}
         </div>
-      </div>
-    </div>
+    </>
   )
 }

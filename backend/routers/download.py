@@ -3,6 +3,7 @@
 import logging
 import os
 import signal
+import urllib.parse
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -11,9 +12,12 @@ from sqlalchemy import delete, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth
+from core.config import settings as app_settings
 from core.database import get_db
 from core.redis_client import get_redis
+from core.utils import detect_source, detect_source_info, get_supported_sites
 from db.models import DownloadJob
+from services.credential import get_credential
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["download"])
@@ -34,13 +38,45 @@ class JobActionRequest(BaseModel):
     action: str  # "pause" or "resume"
 
 
-def _detect_source(url: str) -> str:
-    """Auto-detect source from URL domain."""
-    if "pixiv.net" in url:
-        return "pixiv"
-    if "e-hentai.org" in url or "exhentai.org" in url:
-        return "ehentai"
-    return "unknown"
+async def _credential_warning(source: str) -> str | None:
+    """Return a warning code if the source has no credentials configured.
+
+    Raises HTTPException for sources that strictly require credentials (e.g. Pixiv).
+    """
+    if source in ("ehentai", "exhentai"):
+        cred = await get_credential("ehentai")
+        if not cred:
+            return "eh_credentials_recommended"
+    elif source == "pixiv":
+        cred = await get_credential("pixiv")
+        if not cred:
+            raise HTTPException(
+                status_code=400,
+                detail="Pixiv credentials not configured. Go to Settings → Credentials to set up.",
+            )
+    return None
+
+
+async def _check_source_enabled(source: str) -> None:
+    """Raise 400 if the download source is disabled."""
+    mapping = {
+        "ehentai": ("setting:download_eh_enabled", app_settings.download_eh_enabled),
+        "exhentai": ("setting:download_eh_enabled", app_settings.download_eh_enabled),
+        "pixiv": ("setting:download_pixiv_enabled", app_settings.download_pixiv_enabled),
+    }
+
+    if source in mapping:
+        key, default = mapping[source]
+        val = await get_redis().get(key)
+        enabled = val == b"1" if val is not None else default
+        if not enabled:
+            raise HTTPException(status_code=400, detail=f"Download source '{source}' is disabled")
+    else:
+        # gallery-dl fallback
+        val = await get_redis().get("setting:download_gallery_dl_enabled")
+        enabled = val == b"1" if val is not None else app_settings.download_gallery_dl_enabled
+        if not enabled:
+            raise HTTPException(status_code=400, detail="gallery-dl downloads are disabled")
 
 
 async def _enqueue(
@@ -51,19 +87,32 @@ async def _enqueue(
     options: dict | None = None,
     total: int | None = None,
 ) -> dict:
-    """Shared enqueue logic: ARQ first, then DB.
+    """Shared enqueue logic: DB record first, then ARQ.
 
-    Order: ARQ enqueue first, then DB commit. If ARQ fails we never create the
-    DB record. If DB insert fails after a successful ARQ enqueue we log a
-    warning — the ARQ job will time out naturally without a matching DB record.
+    Order: create DB record first, then enqueue ARQ job.  If the ARQ enqueue
+    fails the DB record is updated to "failed" so the user can see what
+    happened.  This avoids the race where a worker picks up the ARQ job before
+    the DB row exists.
 
     Returns a dict suitable for use as the HTTP response body.
     """
     job_id = uuid.uuid4()
-    source = _detect_source(url)
-    initial_progress = {"total": total} if total is not None else None
+    source = detect_source(url)
+    initial_progress = {"total": total} if total is not None else {}
 
-    # 1. Enqueue ARQ job first — if this fails, no DB record is created.
+    await _check_source_enabled(source)
+    warning = await _credential_warning(source)
+
+    # 1. Persist DB record first so the worker always finds a matching row.
+    try:
+        job = DownloadJob(id=job_id, url=url, source=source, status="queued", progress=initial_progress or {})
+        db.add(job)
+        await db.commit()
+    except Exception as exc:
+        logger.error("[enqueue] DB insert failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to persist download job to database")
+
+    # 2. Enqueue ARQ job. If this fails, mark the DB record as failed.
     try:
         await arq.enqueue_job(
             "download_job",
@@ -75,24 +124,16 @@ async def _enqueue(
             _job_id=str(job_id),
         )
     except Exception as exc:
-        logger.error("[enqueue] ARQ enqueue failed: %s", exc)
+        logger.error("[enqueue] ARQ enqueue failed for job %s: %s", job_id, exc)
+        try:
+            job.status = "failed"
+            job.error = f"Failed to enqueue job: {exc}"
+            await db.commit()
+        except Exception as db_exc:
+            logger.warning("[enqueue] could not mark job %s as failed in DB: %s", job_id, db_exc)
         raise HTTPException(status_code=503, detail="Failed to enqueue download job")
 
-    # 2. Persist DB record. If this fails, log a warning; the ARQ job will
-    #    eventually time out without a matching DB row.
-    try:
-        job = DownloadJob(id=job_id, url=url, source=source, status="queued", progress=initial_progress)
-        db.add(job)
-        await db.commit()
-    except Exception as exc:
-        logger.warning(
-            "[enqueue] ARQ job %s enqueued but DB insert failed: %s — job will time out naturally",
-            job_id,
-            exc,
-        )
-        raise HTTPException(status_code=500, detail="Job enqueued but failed to persist to database")
-
-    return {"job_id": str(job_id), "status": "queued", "source": source}
+    return {"job_id": str(job_id), "status": "queued", "source": source, "warning": warning}
 
 
 @router.post("/")
@@ -174,6 +215,45 @@ async def get_stats(
         )
     ).scalar_one()
     return {"running": running_count, "finished": finished_count}
+
+
+@router.get("/check-url")
+async def check_url(
+    url: str = Query(...),
+    _: dict = Depends(require_auth),
+):
+    """Check whether a URL is from a known supported site."""
+    entry = detect_source_info(url)
+    if entry is not None:
+        return {
+            "supported": True,
+            "source_id": entry["source_id"],
+            "name": entry["name"],
+            "category": entry["category"],
+        }
+
+    # Not in registry — treat as supported if it looks like a valid URL (gallery-dl fallback)
+    try:
+        parsed = urllib.parse.urlparse(url)
+        if parsed.scheme and parsed.netloc:
+            return {
+                "supported": True,
+                "source_id": "gallery_dl",
+                "name": "gallery-dl",
+                "category": "other",
+            }
+    except Exception:
+        pass
+
+    return {"supported": False}
+
+
+@router.get("/supported-sites")
+async def supported_sites(
+    _: dict = Depends(require_auth),
+):
+    """Return all supported download sites grouped by category."""
+    return {"categories": get_supported_sites()}
 
 
 @router.get("/jobs/{job_id}")

@@ -11,6 +11,8 @@ import type {
 } from './types'
 import { DEFAULT_READER_SETTINGS } from './types'
 import { api } from '@/lib/api'
+import { t } from '@/lib/i18n'
+import { toast } from 'sonner'
 
 // ── localStorage helpers ───────────────────────────────────────────────
 
@@ -348,8 +350,8 @@ export function useKeyboardNav(
 // ── useProgressSave ───────────────────────────────────────────────────
 
 export function useProgressSave(galleryId: number, currentPage: number) {
-  const timerRef = useRef<ReturnType<typeof setTimeout>>()
-  const retryRef = useRef<ReturnType<typeof setTimeout>>()
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const retryRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     // Skip progress save for proxy-only browsing (galleryId === 0)
@@ -363,6 +365,7 @@ export function useProgressSave(galleryId: number, currentPage: number) {
         retryRef.current = setTimeout(() => {
           api.library.saveProgress(galleryId, currentPage).catch((retryErr) => {
             console.warn('[Reader] Progress save retry also failed:', retryErr)
+            toast.error(t('reader.progressSaveFailed'))
           })
         }, 5000)
       })
@@ -382,48 +385,59 @@ export function useAutoAdvance(
   intervalSeconds: number,
   nextPage: () => void,
   isLastPage: boolean,
-  overlayVisible: boolean,
 ) {
-  const timerRef = useRef<ReturnType<typeof setInterval> | null>(null)
+  const timerRef = useRef<ReturnType<typeof setInterval> | undefined>(undefined)
   const [countdown, setCountdown] = useState<number>(intervalSeconds)
+  const nextPageRef = useRef(nextPage)
+  const countdownRef = useRef(intervalSeconds)
+
+  // Always keep ref up to date without affecting the interval effect
+  useEffect(() => {
+    nextPageRef.current = nextPage
+  }, [nextPage])
 
   const clearTimer = useCallback(() => {
-    if (timerRef.current !== null) {
+    if (timerRef.current !== undefined) {
       clearInterval(timerRef.current)
-      timerRef.current = null
+      timerRef.current = undefined
     }
   }, [])
 
-  // Reset countdown when page changes or interval changes
+  // Reset countdown when interval changes
   useEffect(() => {
     setCountdown(intervalSeconds)
   }, [intervalSeconds])
 
   useEffect(() => {
-    if (!enabled || isLastPage || overlayVisible) {
+    if (!enabled || isLastPage) {
       clearTimer()
       setCountdown(intervalSeconds)
+      countdownRef.current = intervalSeconds
       return
     }
 
     setCountdown(intervalSeconds)
+    countdownRef.current = intervalSeconds
 
     timerRef.current = setInterval(() => {
       setCountdown((prev) => {
-        if (prev <= 1) {
-          nextPage()
-          return intervalSeconds
-        }
-        return prev - 1
+        const next = prev <= 1 ? intervalSeconds : prev - 1
+        return next
       })
+      countdownRef.current -= 1
+      if (countdownRef.current <= 0) {
+        countdownRef.current = intervalSeconds
+        nextPageRef.current()
+      }
     }, 1000)
 
     return clearTimer
-  }, [enabled, intervalSeconds, isLastPage, overlayVisible, nextPage, clearTimer])
+  }, [enabled, intervalSeconds, isLastPage, clearTimer])
 
   // Reset countdown on manual page change (called externally)
   const resetCountdown = useCallback(() => {
     setCountdown(intervalSeconds)
+    countdownRef.current = intervalSeconds
   }, [intervalSeconds])
 
   return { countdown, resetCountdown }
@@ -621,4 +635,38 @@ export function usePinchZoom(elementRef: React.RefObject<HTMLElement | null>) {
   const transform = `scale(${zoomState.scale}) translate(${zoomState.translateX / zoomState.scale}px, ${zoomState.translateY / zoomState.scale}px)`
 
   return { ...zoomState, transform, resetZoom }
+}
+
+// ── useViewportHeight ─────────────────────────────────────────────────
+
+/**
+ * Pin a container's height to the visual viewport on iOS.
+ * Falls back to CSS 100dvh when visualViewport API is unavailable.
+ *
+ * NOTE: Currently unused. The reader-container now uses `position: fixed;
+ * inset: 0` in CSS which handles viewport sizing natively without JS.
+ * Kept here in case dynamic height adjustment is needed in future.
+ */
+export function useViewportHeight(ref: React.RefObject<HTMLElement | null>) {
+  useEffect(() => {
+    const el = ref.current
+    if (!el) return
+
+    const vv = window.visualViewport
+    if (!vv) return // CSS dvh handles it on non-supporting browsers
+
+    const update = () => {
+      el.style.height = `${vv.height}px`
+      // On iOS Safari, ensure the window isn't scrolled behind the fixed reader
+      if (window.scrollY !== 0) {
+        window.scrollTo(0, 0)
+      }
+    }
+
+    update()
+    vv.addEventListener('resize', update)
+    return () => {
+      vv.removeEventListener('resize', update)
+    }
+  }, [ref])
 }

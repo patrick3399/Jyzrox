@@ -17,6 +17,7 @@ import {
   loadReaderSettings,
   saveReaderSettings,
 } from './hooks'
+import VideoPlayer from './VideoPlayer'
 
 // ── URL resolver ──────────────────────────────────────────────────────
 
@@ -88,6 +89,8 @@ function MediaElement({
   dataPage,
   innerRef,
   onLoad,
+  onToggleOverlay,
+  overlayVisible,
 }: {
   image: ReaderImage
   className?: string
@@ -97,21 +100,23 @@ function MediaElement({
   dataPage?: number
   innerRef?: React.Ref<HTMLImageElement | HTMLVideoElement>
   onLoad?: () => void
+  onToggleOverlay?: () => void
+  overlayVisible?: boolean
 }) {
   if (image.mediaType === 'video') {
+    // VideoPlayer must fill its parent entirely so that the controls overlay anchors
+    // to the viewport bottom, not to the middle of a shrink-wrapped box.
+    // The image scale class (pointer-events-none, max-h-full, …) is designed for
+    // <img> elements and must NOT be forwarded to VideoPlayer.
     return (
-      <video
-        ref={innerRef as React.Ref<HTMLVideoElement>}
-        src={image.url}
-        className={className}
+      <VideoPlayer
+        image={image}
+        className="w-full h-full"
         style={style}
-        data-page={dataPage}
-        autoPlay
-        loop
-        muted
-        playsInline
-        controls
-        onLoadedData={onLoad}
+        innerRef={innerRef as React.Ref<HTMLVideoElement>}
+        onLoad={onLoad}
+        onToggleOverlay={onToggleOverlay}
+        overlayVisible={overlayVisible}
       />
     )
   }
@@ -159,6 +164,7 @@ interface SinglePageViewProps {
   onImageLoaded: () => void
   scaleMode: ScaleMode
   readingDirection: ReadingDirection
+  showOverlay: boolean
 }
 
 function SinglePageView({
@@ -170,12 +176,14 @@ function SinglePageView({
   onImageLoaded,
   scaleMode,
   readingDirection,
+  showOverlay,
 }: SinglePageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const { isZoomed, transform } = usePinchZoom(containerRef as React.RefObject<HTMLElement | null>)
 
   const leftAction = readingDirection === 'rtl' ? onNext : onPrev
   const rightAction = readingDirection === 'rtl' ? onPrev : onNext
+  const isVideo = image.mediaType === 'video'
 
   return (
     <div ref={containerRef} className={`${getScaleContainerClass(scaleMode)} h-full w-full`}>
@@ -192,6 +200,8 @@ function SinglePageView({
           className={getScaleImageClass(scaleMode)}
           draggable={false}
           onLoad={onImageLoaded}
+          onToggleOverlay={onToggleOverlay}
+          overlayVisible={showOverlay}
         />
       </div>
       {isLoading && (
@@ -199,7 +209,7 @@ function SinglePageView({
           <Spinner />
         </div>
       )}
-      {!isZoomed && readingDirection === 'vertical' ? (
+      {!isZoomed && !isVideo && readingDirection === 'vertical' ? (
         <>
           <div
             className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -217,7 +227,7 @@ function SinglePageView({
             aria-label="Next page"
           />
         </>
-      ) : !isZoomed ? (
+      ) : !isZoomed && !isVideo ? (
         <>
           <div
             className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -260,7 +270,7 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
   // Suppresses IntersectionObserver callbacks during programmatic scrolls to
   // prevent the observer from triggering onPageChange → fetchUpTo re-entry.
   const isProgrammaticScrollRef = useRef(false)
-  const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout>>()
+  const programmaticScrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     if (typeof IntersectionObserver === 'undefined') return
@@ -376,6 +386,7 @@ interface DoublePageViewProps {
   onImageLoaded: () => void
   scaleMode: ScaleMode
   readingDirection: ReadingDirection
+  showOverlay: boolean
 }
 
 function DoublePageView({
@@ -388,6 +399,7 @@ function DoublePageView({
   onImageLoaded,
   scaleMode,
   readingDirection,
+  showOverlay,
 }: DoublePageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const { isZoomed, transform } = usePinchZoom(containerRef as React.RefObject<HTMLElement | null>)
@@ -400,6 +412,7 @@ function DoublePageView({
   const secondImage = readingDirection === 'rtl' ? leftImage : rightImage
 
   const imgClass = getScaleImageClass(scaleMode === 'fit-both' ? 'fit-both' : scaleMode)
+  const hasVideo = leftImage?.mediaType === 'video' || rightImage?.mediaType === 'video'
 
   return (
     <div
@@ -421,6 +434,8 @@ function DoublePageView({
               className={imgClass}
               draggable={false}
               onLoad={onImageLoaded}
+              onToggleOverlay={onToggleOverlay}
+              overlayVisible={showOverlay}
             />
           ) : (
             <div className="h-full w-full" />
@@ -433,6 +448,8 @@ function DoublePageView({
               className={imgClass}
               draggable={false}
               onLoad={onImageLoaded}
+              onToggleOverlay={onToggleOverlay}
+              overlayVisible={showOverlay}
             />
           ) : (
             <div className="h-full w-full" />
@@ -444,7 +461,7 @@ function DoublePageView({
           <Spinner />
         </div>
       )}
-      {!isZoomed && readingDirection === 'vertical' ? (
+      {!isZoomed && !hasVideo && readingDirection === 'vertical' ? (
         <>
           <div
             className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -462,7 +479,7 @@ function DoublePageView({
             aria-label="Next page"
           />
         </>
-      ) : !isZoomed ? (
+      ) : !isZoomed && !hasVideo ? (
         <>
           <div
             className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -657,7 +674,7 @@ function ReaderOverlay({
           </button>
           <button
             onClick={onBack}
-            className="rounded bg-white/10 hover:bg-white/20 border border-white/20 px-3 py-1.5 text-sm text-red-300 hover:text-red-200 transition-colors"
+            className="rounded bg-red-600 hover:bg-red-500 px-6 py-1.5 text-base text-black font-bold transition-colors"
             title={t('reader.goBack')}
           >
             ✕
@@ -665,7 +682,7 @@ function ReaderOverlay({
         </div>
       </div>
 
-      {/* Row 2: cycle buttons — view / scale / direction */}
+      {/* Row 2: cycle buttons — view / scale / direction — plus auto advance on the right */}
       <div className="flex items-center gap-2 px-4 pb-2 border-t border-white/10 pt-2">
         <button onClick={cycleViewMode} className={cycleBtnClass} title={currentView.label}>
           <span>{currentView.icon}</span>
@@ -676,10 +693,9 @@ function ReaderOverlay({
         <button onClick={cycleDirection} className={cycleBtnClass} title={currentDir.label}>
           <span>{currentDir.icon}</span>
         </button>
-      </div>
 
-      {/* Row 3: Auto advance controls */}
-      <div className="flex items-center gap-3 px-4 pb-2 border-t border-white/10 pt-2">
+        <div className="flex-1" />
+
         <span className="text-[11px] text-white/60 shrink-0">{t('reader.autoAdvance')}</span>
         <button
           onClick={onAutoAdvanceToggle}
@@ -750,8 +766,8 @@ function ThumbnailStrip({
     }
     return [...urls]
   }, [previews])
-  const scrollTimerRef = useRef<ReturnType<typeof setTimeout>>()
-  const scrollNotifyThrottleRef = useRef<ReturnType<typeof setTimeout>>()
+  const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const scrollNotifyThrottleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const lastScrollNotifyPageRef = useRef(0)
   const onScrollToPageRef = useRef(onScrollToPage)
   useEffect(() => {
@@ -841,6 +857,7 @@ function ThumbnailStrip({
       <div
         ref={stripRef}
         className="reader-thumb-strip flex gap-1 bg-black/70 px-2 py-2 backdrop-blur-sm overflow-x-auto"
+        style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))' }}
       >
         {images.map((img) => {
           const isActive = img.pageNum === currentPage
@@ -851,8 +868,8 @@ function ThumbnailStrip({
 
           // Thumb container dimensions — portrait default; landscape cells get
           // a wider button so the image is never cropped or squashed.
-          let thumbW = 48
-          let thumbH = 64
+          let thumbW = 60
+          let thumbH = 80
 
           if (previewRaw) {
             if (previewRaw.includes('|')) {
@@ -861,11 +878,11 @@ function ThumbnailStrip({
               const ox = Number(parts[1])
               const cellW = Number(parts[2]) || 200
               const cellH = Number(parts[3]) || 300
-              // Scale to fit within a fixed 64px tall strip. Width adapts to
+              // Scale to fit within a fixed 80px tall strip. Width adapts to
               // the cell's aspect ratio: portrait gets narrower, landscape gets wider.
-              // Cap at 80px wide so extremely wide cells don't overflow the strip.
-              const maxH = 64
-              const maxW = 80
+              // Cap at 100px wide so extremely wide cells don't overflow the strip.
+              const maxH = 80
+              const maxW = 100
               const scaleByH = maxH / cellH
               const scaleByW = maxW / cellW
               const scale = Math.min(scaleByH, scaleByW)
@@ -902,7 +919,7 @@ function ThumbnailStrip({
               key={img.pageNum}
               ref={isActive ? activeRef : null}
               onClick={() => onPageSelect(img.pageNum)}
-              className={`relative flex-shrink-0 overflow-hidden rounded transition-all ${
+              className={`relative shrink-0 overflow-hidden rounded transition-all ${
                 isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
               }`}
               style={{ width: thumbW, height: thumbH }}
@@ -1197,6 +1214,7 @@ export default function Reader({
     width: img.width ?? undefined,
     height: img.height ?? undefined,
     mediaType: img.media_type,
+    duration: img.duration ?? undefined,
   }))
 
   const {
@@ -1250,7 +1268,6 @@ export default function Reader({
     autoAdvanceSeconds,
     rawNextPage,
     isLastPage,
-    state.showOverlay,
   )
 
   // Reset countdown on manual page change
@@ -1260,16 +1277,50 @@ export default function Reader({
 
   const containerRef = useRef<HTMLDivElement>(null)
 
+  // Prevent background scroll while Reader is mounted.
+  // IMPORTANT: Do NOT set body.position=fixed — on iOS Safari, that makes
+  // child position:fixed elements behave as position:absolute relative to body.
+  useEffect(() => {
+    const html = document.documentElement
+    const body = document.body
+    html.style.overflow = 'hidden'
+    body.style.overflow = 'hidden'
+
+    return () => {
+      html.style.overflow = ''
+      body.style.overflow = ''
+    }
+  }, [])
+
   // Track image loading state for single/double page views
   const [pageLoading, setPageLoading] = useState(false)
   const loadingPageRef = useRef(state.currentPage)
-  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const loadedPagesRef = useRef<Set<number>>(new Set())
+  const loadingTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const handleImageLoaded = useCallback(() => {
+    loadedPagesRef.current.add(state.currentPage)
+    if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current)
+      loadingTimerRef.current = undefined
+    }
+    setPageLoading(false)
+  }, [state.currentPage])
 
   // When page changes, start a short timer before showing the spinner.
-  // If the image loads before the timer fires, the spinner never appears.
+  // If the image loads before the timer fires (onLoad clears the timer), the spinner never appears.
+  // Key fix: check if the page was already loaded (onLoad fired before this effect ran).
   useEffect(() => {
     if (state.viewMode !== 'webtoon' && state.currentPage !== loadingPageRef.current) {
       loadingPageRef.current = state.currentPage
+
+      // If onLoad already fired for this page before this effect ran, skip the spinner
+      if (loadedPagesRef.current.has(state.currentPage)) {
+        loadedPagesRef.current.delete(state.currentPage)
+        setPageLoading(false)
+        return
+      }
+
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
       loadingTimerRef.current = setTimeout(() => {
         setPageLoading(true)
@@ -1282,14 +1333,6 @@ export default function Reader({
     return () => {
       if (loadingTimerRef.current) clearTimeout(loadingTimerRef.current)
     }
-  }, [])
-
-  const handleImageLoaded = useCallback(() => {
-    if (loadingTimerRef.current) {
-      clearTimeout(loadingTimerRef.current)
-      loadingTimerRef.current = null
-    }
-    setPageLoading(false)
   }, [])
 
   // Notify parent of page changes (used for paginated token loading in EH proxy mode)
@@ -1366,7 +1409,7 @@ export default function Reader({
   const nextImage = images.find((i) => i.pageNum === state.currentPage + 1) ?? null
 
   return (
-    <div ref={containerRef} className="reader-container relative flex flex-col bg-black">
+    <div ref={containerRef} className="reader-container flex flex-col bg-black">
       {/* Top overlay — always rendered, slides in/out */}
       <div
         className={`absolute top-0 left-0 right-0 z-20 transition-transform duration-300 ${
@@ -1404,6 +1447,7 @@ export default function Reader({
             onImageLoaded={handleImageLoaded}
             scaleMode={state.scaleMode}
             readingDirection={state.readingDirection}
+            showOverlay={state.showOverlay}
           />
         )}
 
@@ -1427,6 +1471,7 @@ export default function Reader({
             onImageLoaded={handleImageLoaded}
             scaleMode={state.scaleMode}
             readingDirection={state.readingDirection}
+            showOverlay={state.showOverlay}
           />
         )}
       </div>
@@ -1447,8 +1492,12 @@ export default function Reader({
         />
       </div>
 
-      {/* Status bar — always visible (thumbnail strip at z-20 covers it when overlay is shown) */}
-      <div className="absolute left-0 right-0 bottom-0 z-10" onClick={(e) => e.stopPropagation()}>
+      {/* Status bar — hidden via opacity when overlay is shown to avoid bleed-through the thumbnail strip */}
+      <div
+        className={`absolute left-0 right-0 bottom-0 z-10 transition-opacity duration-300 ${state.showOverlay ? 'opacity-0' : 'opacity-100'}`}
+        style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
+        onClick={(e) => e.stopPropagation()}
+      >
         <StatusBar
           currentPage={state.currentPage}
           totalPages={totalPages}

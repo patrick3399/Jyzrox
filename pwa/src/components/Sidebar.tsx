@@ -5,7 +5,7 @@ import { usePathname } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import {
   LayoutDashboard,
-  Search,
+  Compass,
   BookOpen,
   Clock,
   Download,
@@ -19,6 +19,10 @@ import {
   FolderInput,
   Key,
   Puzzle,
+  Palette,
+  Users,
+  FolderTree,
+  Rss,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
@@ -28,8 +32,12 @@ import { useLocale } from '@/components/LocaleProvider'
 
 const navLinks = [
   { href: '/', label: () => t('nav.dashboard'), icon: LayoutDashboard },
-  { href: '/browse', label: () => t('nav.browse'), icon: Search },
+  { href: '/e-hentai', label: () => t('nav.ehentai'), icon: Compass },
+  { href: '/pixiv', label: () => t('nav.pixiv'), icon: Palette },
   { href: '/library', label: () => t('nav.library'), icon: BookOpen },
+  { href: '/explorer', label: () => t('nav.explorer'), icon: FolderTree },
+  { href: '/artists', label: () => t('nav.artists'), icon: Users },
+  { href: '/subscriptions', label: () => t('nav.subscriptions'), icon: Rss },
   { href: '/history', label: () => t('nav.history'), icon: Clock },
   { href: '/queue', label: () => t('nav.queue'), icon: Download },
   { href: '/tags', label: () => t('nav.tags'), icon: Tags },
@@ -37,7 +45,6 @@ const navLinks = [
   { href: '/import', label: () => t('nav.import'), icon: FolderInput },
   { href: '/credentials', label: () => t('nav.credentials'), icon: Key },
   { href: '/plugins', label: () => t('nav.plugins'), icon: Puzzle },
-  { href: '/settings', label: () => t('nav.settings'), icon: Settings },
 ]
 
 const themeCycle = ['light', 'dark', 'system'] as const
@@ -119,6 +126,19 @@ export function Sidebar() {
             <span className="text-sm text-vault-text truncate">{profile.username}</span>
           </div>
         )}
+
+        {/* Settings link */}
+        <Link
+          href="/settings"
+          className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+            pathname === '/settings' || pathname.startsWith('/settings')
+              ? 'bg-vault-accent/10 text-vault-accent font-medium'
+              : 'text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover'
+          }`}
+        >
+          <Settings size={18} />
+          <span>{t('nav.settings')}</span>
+        </Link>
 
         {/* Theme toggle */}
         {(() => {

@@ -5,6 +5,8 @@ import logging
 from functools import lru_cache
 
 from fastapi import HTTPException, Request, status
+from starlette.middleware.base import BaseHTTPMiddleware
+from starlette.responses import JSONResponse
 
 from core.config import settings
 from core.redis_client import get_redis
@@ -58,7 +60,7 @@ async def check_rate_limit(
 
     count = await redis.incr(redis_key)
     if count == 1:
-        await redis.expire(redis_key, window)
+        await redis.expire(redis_key, window + 1)
 
     if count > max_requests:
         ttl = await redis.ttl(redis_key)
@@ -76,3 +78,74 @@ def get_client_ip(request: Request) -> str:
     if forwarded and _is_trusted(peer_ip):
         return forwarded.split(",")[0].strip()
     return peer_ip
+
+
+# ---------------------------------------------------------------------------
+# Global rate-limiting middleware
+# ---------------------------------------------------------------------------
+
+# Global per-IP limits (all methods)
+_GLOBAL_RATE_LIMIT = 120
+_GLOBAL_RATE_WINDOW = 60  # seconds
+
+# Stricter limit for mutating methods
+_WRITE_RATE_LIMIT = 30
+_WRITE_RATE_WINDOW = 60  # seconds
+
+# Paths that carry their own stricter per-endpoint limits — skip global check
+_SKIP_GLOBAL: frozenset[str] = frozenset({
+    "/api/auth/login",
+    "/api/auth/setup",
+    "/api/auth/check",
+})
+_SKIP_GLOBAL_PREFIXES: tuple[str, ...] = (
+    "/api/external/v1/",  # has its own per-token limiter
+)
+
+
+class RateLimitMiddleware(BaseHTTPMiddleware):
+    async def dispatch(self, request: Request, call_next):
+        if not settings.rate_limit_enabled:
+            return await call_next(request)
+
+        path = request.url.path
+
+        # Skip health check — no need to count liveness probes
+        if path == "/api/health":
+            return await call_next(request)
+
+        # Skip paths that have their own rate limiting
+        if path in _SKIP_GLOBAL or path.startswith(_SKIP_GLOBAL_PREFIXES):
+            return await call_next(request)
+
+        client_ip = get_client_ip(request)
+        redis = get_redis()
+
+        # 1. Global per-IP limit (all methods)
+        global_key = f"ratelimit:global:{client_ip}"
+        count = await redis.incr(global_key)
+        if count == 1:
+            await redis.expire(global_key, _GLOBAL_RATE_WINDOW)
+        if count > _GLOBAL_RATE_LIMIT:
+            ttl = await redis.ttl(global_key)
+            return JSONResponse(
+                status_code=429,
+                content={"detail": f"Too many requests. Try again in {ttl}s."},
+                headers={"Retry-After": str(ttl)},
+            )
+
+        # 2. Stricter limit for mutating methods
+        if request.method in ("POST", "PUT", "PATCH", "DELETE"):
+            write_key = f"ratelimit:write:{client_ip}"
+            wcount = await redis.incr(write_key)
+            if wcount == 1:
+                await redis.expire(write_key, _WRITE_RATE_WINDOW)
+            if wcount > _WRITE_RATE_LIMIT:
+                ttl = await redis.ttl(write_key)
+                return JSONResponse(
+                    status_code=429,
+                    content={"detail": f"Too many requests. Try again in {ttl}s."},
+                    headers={"Retry-After": str(ttl)},
+                )
+
+        return await call_next(request)

@@ -1,0 +1,273 @@
+'use client'
+
+import { useState } from 'react'
+import { useParams, useRouter } from 'next/navigation'
+import { ArrowLeft, Grid, Image as ImageIcon, BookOpen, Users } from 'lucide-react'
+import { useArtistSummary, useArtistImages } from '@/hooks/useArtists'
+import { useLibraryGalleries } from '@/hooks/useGalleries'
+import { Pagination } from '@/components/Pagination'
+import { t } from '@/lib/i18n'
+import { useLocale } from '@/components/LocaleProvider'
+
+type ViewTab = 'galleries' | 'images'
+
+const SOURCE_COLORS: Record<string, string> = {
+  pixiv: 'bg-blue-500/20 text-blue-400',
+  ehentai: 'bg-orange-500/20 text-orange-400',
+  twitter: 'bg-sky-500/20 text-sky-400',
+}
+
+const GALLERY_PAGE_SIZE = 24
+const IMAGE_PAGE_SIZE = 40
+
+export default function ArtistDetailPage() {
+  useLocale()
+  const router = useRouter()
+  const params = useParams()
+  const rawArtistId = Array.isArray(params.artistId) ? params.artistId[0] : params.artistId
+  const artistId = decodeURIComponent(rawArtistId ?? '')
+
+  const [activeTab, setActiveTab] = useState<ViewTab>('galleries')
+  const [galleryPage, setGalleryPage] = useState(0)
+  const [imagePage, setImagePage] = useState(0)
+  const [imageSort, setImageSort] = useState<'newest' | 'oldest'>('newest')
+
+  const { data: summary, isLoading: summaryLoading } = useArtistSummary(artistId)
+
+  const {
+    data: galleriesData,
+    isLoading: galleriesLoading,
+    isValidating: galleriesValidating,
+  } = useLibraryGalleries({
+    artist: artistId,
+    page: galleryPage,
+    limit: GALLERY_PAGE_SIZE,
+  })
+
+  const {
+    data: imagesData,
+    isLoading: imagesLoading,
+    isValidating: imagesValidating,
+  } = useArtistImages(artistId, {
+    page: imagePage,
+    limit: IMAGE_PAGE_SIZE,
+    sort: imageSort,
+  })
+
+  const handleReadAll = () => {
+    router.push(`/reader/artist/${encodeURIComponent(artistId)}`)
+  }
+
+  return (
+    <div className="space-y-6">
+      {/* Header */}
+      <div className="flex items-start gap-4">
+        <button
+          onClick={() => router.back()}
+          className="mt-1 p-2 rounded-lg bg-vault-card border border-vault-border hover:border-vault-accent/50 text-vault-text-secondary hover:text-vault-text transition-colors"
+          aria-label={t('common.goBack')}
+        >
+          <ArrowLeft size={18} />
+        </button>
+
+        <div className="flex-1 min-w-0">
+          {summaryLoading ? (
+            <div className="h-8 w-48 bg-vault-card rounded animate-pulse" />
+          ) : (
+            <div className="flex flex-wrap items-center gap-2">
+              <h1 className="text-2xl font-bold text-vault-text truncate">
+                {summary?.artist_name || artistId}
+              </h1>
+              {summary?.source && (
+                <span
+                  className={`px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${SOURCE_COLORS[summary.source] ?? 'bg-vault-text-secondary/20 text-vault-text-secondary'}`}
+                >
+                  {summary.source}
+                </span>
+              )}
+            </div>
+          )}
+
+          {summary && (
+            <p className="text-sm text-vault-text-secondary mt-1">
+              {t('artists.galleryCount', { count: String(summary.gallery_count) })}
+              {' · '}
+              {t('artists.totalPages', { count: String(summary.total_pages) })}
+              {' · '}
+              {t('artists.totalImages', { count: String(summary.total_images) })}
+            </p>
+          )}
+        </div>
+
+        <button
+          onClick={handleReadAll}
+          className="flex items-center gap-2 px-4 py-2 bg-vault-accent hover:bg-vault-accent/80 text-white rounded-lg text-sm font-medium transition-colors shrink-0"
+        >
+          <BookOpen size={16} />
+          {t('artists.readAll')}
+        </button>
+      </div>
+
+      {/* Tab Switcher */}
+      <div className="flex gap-1 bg-vault-card border border-vault-border rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setActiveTab('galleries')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'galleries'
+              ? 'bg-vault-accent text-white'
+              : 'text-vault-text-secondary hover:text-vault-text'
+          }`}
+        >
+          <Grid size={15} />
+          {t('artists.viewGalleries')}
+        </button>
+        <button
+          onClick={() => setActiveTab('images')}
+          className={`flex items-center gap-2 px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'images'
+              ? 'bg-vault-accent text-white'
+              : 'text-vault-text-secondary hover:text-vault-text'
+          }`}
+        >
+          <ImageIcon size={15} />
+          {t('artists.viewImages')}
+        </button>
+      </div>
+
+      {/* Galleries Tab */}
+      {activeTab === 'galleries' && (
+        <div className="space-y-4">
+          {galleriesLoading ? (
+            <div className="text-center py-12 text-vault-text-secondary">{t('common.loading')}</div>
+          ) : !galleriesData?.galleries?.length ? (
+            <div className="flex flex-col items-center py-16 gap-3 text-vault-text-secondary">
+              <Users size={48} className="opacity-30" />
+              <p>{t('library.noGalleries')}</p>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                {galleriesData.galleries.map((gallery) => (
+                  <button
+                    key={gallery.id}
+                    onClick={() => router.push(`/library/${gallery.id}`)}
+                    className="bg-vault-card border border-vault-border rounded-xl overflow-hidden hover:border-vault-accent/50 hover:shadow-lg transition-all text-left group"
+                  >
+                    <div className="aspect-[3/4] bg-vault-bg relative overflow-hidden">
+                      {gallery.cover_thumb ? (
+                        <img
+                          src={gallery.cover_thumb}
+                          alt={gallery.title}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <BookOpen size={32} className="text-vault-text-secondary/30" />
+                        </div>
+                      )}
+                    </div>
+                    <div className="p-2.5 space-y-1">
+                      <p className="font-medium text-xs text-vault-text line-clamp-2 leading-snug">
+                        {gallery.title || gallery.title_jpn}
+                      </p>
+                      <p className="text-xs text-vault-text-secondary">{gallery.pages}p</p>
+                    </div>
+                  </button>
+                ))}
+              </div>
+
+              {galleriesData.total !== undefined && (
+                <Pagination
+                  page={galleryPage}
+                  total={galleriesData.total}
+                  pageSize={GALLERY_PAGE_SIZE}
+                  onChange={(p) => setGalleryPage(p)}
+                  isLoading={galleriesValidating}
+                />
+              )}
+            </>
+          )}
+        </div>
+      )}
+
+      {/* Images Tab */}
+      {activeTab === 'images' && (
+        <div className="space-y-4">
+          {/* Sort controls */}
+          <div className="flex justify-end">
+            <select
+              value={imageSort}
+              onChange={(e) => {
+                setImageSort(e.target.value as 'newest' | 'oldest')
+                setImagePage(0)
+              }}
+              className="px-3 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text focus:outline-none focus:ring-1 focus:ring-vault-accent"
+            >
+              <option value="newest">{t('artists.sortNewest')}</option>
+              <option value="oldest">{t('artists.sortOldest')}</option>
+            </select>
+          </div>
+
+          {imagesLoading ? (
+            <div className="text-center py-12 text-vault-text-secondary">{t('common.loading')}</div>
+          ) : !imagesData?.images?.length ? (
+            <div className="flex flex-col items-center py-16 gap-3 text-vault-text-secondary">
+              <ImageIcon size={48} className="opacity-30" />
+              <p>{t('artists.noImages')}</p>
+            </div>
+          ) : (
+            <>
+              <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-8 gap-1.5">
+                {imagesData.images.map((image, idx) => {
+                  const globalIndex = imagePage * IMAGE_PAGE_SIZE + idx
+                  return (
+                    <button
+                      key={image.id}
+                      onClick={() =>
+                        router.push(
+                          `/reader/artist/${encodeURIComponent(artistId)}?start=${globalIndex}`,
+                        )
+                      }
+                      className="aspect-square bg-vault-card border border-vault-border rounded-lg overflow-hidden hover:border-vault-accent/50 hover:shadow-md transition-all group relative"
+                      title={t('artists.fromGallery', { title: image.gallery_title })}
+                    >
+                      {image.thumb_path ? (
+                        <img
+                          src={image.thumb_path}
+                          alt={image.filename ?? ''}
+                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                          loading="lazy"
+                        />
+                      ) : (
+                        <div className="w-full h-full flex items-center justify-center">
+                          <ImageIcon size={20} className="text-vault-text-secondary/30" />
+                        </div>
+                      )}
+                      {/* Hover overlay with gallery title */}
+                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-1.5">
+                        <p className="text-white text-[10px] line-clamp-2 leading-tight">
+                          {image.gallery_title}
+                        </p>
+                      </div>
+                    </button>
+                  )
+                })}
+              </div>
+
+              {imagesData.total !== undefined && (
+                <Pagination
+                  page={imagePage}
+                  total={imagesData.total}
+                  pageSize={IMAGE_PAGE_SIZE}
+                  onChange={(p) => setImagePage(p)}
+                  isLoading={imagesValidating}
+                />
+              )}
+            </>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}

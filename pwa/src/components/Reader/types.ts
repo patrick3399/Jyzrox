@@ -11,6 +11,7 @@ export interface ReaderImage {
   width?: number
   height?: number
   mediaType: 'image' | 'video' | 'gif'
+  duration?: number
 }
 
 export interface ReaderState {

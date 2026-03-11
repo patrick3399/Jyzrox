@@ -3,6 +3,11 @@
 # PUID/PGID env vars allow dev override (default: 1042:1042 matching appuser in image).
 set -e
 
+# Warn about insecure .env permissions
+if [ -f /app/.env ] && [ "$(stat -c %a /app/.env)" != "600" ]; then
+    echo "WARNING: .env file has permissive permissions ($(stat -c %a /app/.env)). Consider chmod 600."
+fi
+
 PUID="${PUID:-1042}"
 PGID="${PGID:-1042}"
 
@@ -13,7 +18,7 @@ if [ "$(id -u appuser)" != "$PUID" ] || [ "$(id -g appgroup)" != "$PGID" ]; then
 fi
 
 # Create and fix ownership of bind-mounted data directories.
-for dir in /data/gallery /data/thumbs /data/training /data/avatars; do
+for dir in /data/gallery /data/thumbs /data/training /data/avatars /data/cas /data/library /app/config; do
     mkdir -p "$dir"
     chown "$PUID:$PGID" "$dir"
 done

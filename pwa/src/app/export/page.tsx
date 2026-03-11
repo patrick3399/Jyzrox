@@ -3,6 +3,7 @@ import { useState, useCallback } from 'react'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { Pagination } from '@/components/Pagination'
 import { t } from '@/lib/i18n'
 
 export default function ExportPage() {
@@ -10,7 +11,7 @@ export default function ExportPage() {
   const [page, setPage] = useState(0)
   const limit = 20
 
-  const { data } = useSWR(['export-galleries', search, page], () =>
+  const { data, isValidating } = useSWR(['export-galleries', search, page], () =>
     api.library.getGalleries({ q: search || undefined, page, limit, sort: 'added_at' }),
   )
 
@@ -29,10 +30,8 @@ export default function ExportPage() {
     setTimeout(() => setExporting(null), 2000)
   }, [])
 
-  const totalPages = data?.total ? Math.ceil(data.total / limit) : 0
-
   return (
-    <div className="p-8 text-vault-text min-h-screen bg-vault-bg">
+    <div>
       <h1 className="text-3xl font-bold mb-2">{t('export.title')}</h1>
       <p className="text-vault-text-secondary mb-6">{t('export.subtitle')}</p>
 
@@ -115,25 +114,15 @@ export default function ExportPage() {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
-        <div className="flex gap-2 mt-4 items-center max-w-4xl">
-          <button
-            onClick={() => setPage(Math.max(0, page - 1))}
-            disabled={page === 0}
-            className="px-3 py-1 rounded bg-vault-card-hover hover:bg-vault-card-hover disabled:opacity-30"
-          >
-            {t('common.prev')}
-          </button>
-          <span className="text-sm text-vault-text-secondary">
-            {page + 1} / {totalPages} ({data?.total} {t('common.galleries')})
-          </span>
-          <button
-            onClick={() => setPage(Math.min(totalPages - 1, page + 1))}
-            disabled={page >= totalPages - 1}
-            className="px-3 py-1 rounded bg-vault-card-hover hover:bg-vault-card-hover disabled:opacity-30"
-          >
-            {t('common.next')}
-          </button>
+      {data?.total !== undefined && (
+        <div className="max-w-4xl">
+          <Pagination
+            page={page}
+            total={data.total}
+            pageSize={limit}
+            onChange={setPage}
+            isLoading={isValidating}
+          />
         </div>
       )}
 

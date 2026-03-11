@@ -11,10 +11,10 @@
 | 層級 | 技術 |
 |------|------|
 | Backend API | FastAPI + SQLAlchemy (asyncpg) + ARQ |
-| Frontend | Next.js 15 App Router (PWA) |
-| DB | PostgreSQL 15 + Redis 7 |
+| Frontend | Next.js 16 App Router (PWA) |
+| DB | PostgreSQL 18 + Redis 8 |
 | 反向代理 | Nginx |
-| 下載引擎 | gallery-dl (subprocess) |
+| 下載引擎 | Plugin system + gallery-dl fallback |
 
 ---
 
@@ -26,7 +26,7 @@
 - **所有需要保護的端點都必須加 `_: dict = Depends(require_auth)`**
 - 登入流程：`/login` → POST `/api/auth/login` (`{username, password}`) → 設定 cookie
 - 初次設定：`/setup` → POST `/api/auth/setup`（僅在無用戶時可用）
-- 前端 middleware (`middleware.ts`) 自動將未登入請求導向 `/login`
+- 前端 proxy (`proxy.ts`) 自動將未登入請求導向 `/login`
 
 ---
 
@@ -40,6 +40,10 @@ docker compose build api worker pwa
 docker compose up -d api worker pwa
 # ⚠️ 重要：容器重建後 nginx 需 reload，否則 502（IP 變更）
 docker compose exec nginx nginx -s reload
+
+# 若需 AI tagging 功能：
+docker compose --profile tagging build
+docker compose --profile tagging up -d
 ```
 
 ### 查看日誌
@@ -84,6 +88,44 @@ from core.auth import require_auth
 @router.get("/")
 async def endpoint(_: dict = Depends(require_auth)):
     ...
+```
+
+### Python 版本限制：目前鎖定 3.13
+arq==0.27.0 使用已移除的 `asyncio.get_event_loop()`，Python 3.14+ 會 crash。待 arq 上游修復後才能升級。
+
+### WD14 Tagger 獨立容器
+AI tagging 已拆為獨立微服務（`tagger/`），透過 `--profile tagging` 按需啟動：
+```bash
+# 啟動 tagger
+docker compose --profile tagging up -d
+
+# 檢查狀態
+curl http://localhost:8100/health
+```
+Worker 透過 HTTP 呼叫 tagger，tagger 離線時 tag_job 自動 skip。
+設定：`TAGGER_URL`（default `http://tagger:8100`）、`TAGGER_TIMEOUT`（default 30s）。
+
+### Tailwind 4 CSS-first 配置
+- 無 `tailwind.config.ts`，所有配置在 `globals.css`
+- 顏色註冊用 `@theme inline`，暗色模式用 `@custom-variant dark`
+- CSS 變數使用 hex 格式（非 space-separated RGB）
+
+### React 19 useRef 必須傳初始值
+```tsx
+// ✅ 正確
+const ref = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+// ❌ React 19 會報錯
+const ref = useRef<ReturnType<typeof setTimeout>>()
+```
+
+### Next.js 16 測試須 mock next/navigation
+測試中使用 `useRouter()` / `useSearchParams()` 須加 mock，否則 throw `invariant expected app router to be mounted`：
+```ts
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+}))
 ```
 
 ### 前端 UI 文字必須使用 i18n 抽象層

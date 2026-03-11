@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime
 
 from sqlalchemy import (
     ARRAY,
@@ -31,6 +32,7 @@ class User(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     avatar_style: Mapped[str] = mapped_column(Text, default="gravatar")
+    locale: Mapped[str] = mapped_column(Text, default="en")
 
 
 class Gallery(Base):
@@ -55,6 +57,7 @@ class Gallery(Base):
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     last_scanned_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     library_path: Mapped[str | None] = mapped_column(Text, nullable=True)
+    artist_id: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
 
     images: Mapped[list["Image"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
     gallery_tags: Mapped[list["GalleryTag"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
@@ -69,6 +72,7 @@ class Blob(Base):
     media_type: Mapped[str] = mapped_column(Text, default="image")
     width: Mapped[int | None] = mapped_column(Integer)
     height: Mapped[int | None] = mapped_column(Integer)
+    duration: Mapped[float | None] = mapped_column(Float)
     phash: Mapped[str | None] = mapped_column(Text)
     phash_int: Mapped[int | None] = mapped_column(BigInteger)
     phash_q0: Mapped[int | None] = mapped_column(SmallInteger)
@@ -167,7 +171,7 @@ class DownloadJob(Base):
 class ReadProgress(Base):
     __tablename__ = "read_progress"
 
-    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
     last_page: Mapped[int] = mapped_column(Integer, default=0)
     last_read_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -191,6 +195,7 @@ class ApiToken(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str | None] = mapped_column(Text)
     token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    token_plain: Mapped[str | None] = mapped_column(Text, nullable=True, default=None)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_used_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
@@ -260,3 +265,62 @@ class PluginConfig(Base):
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     config_json: Mapped[dict] = mapped_column(JSONB, default=dict)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class Subscription(Base):
+    __tablename__ = "subscriptions"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str | None] = mapped_column(Text)
+    url: Mapped[str] = mapped_column(Text, nullable=False)
+    source: Mapped[str | None] = mapped_column(Text)
+    source_id: Mapped[str | None] = mapped_column(Text)
+    avatar_url: Mapped[str | None] = mapped_column(Text)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    auto_download: Mapped[bool] = mapped_column(Boolean, default=True)
+    cron_expr: Mapped[str | None] = mapped_column(Text, default="0 */2 * * *")
+    last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_item_id: Mapped[str | None] = mapped_column(Text)
+    last_status: Mapped[str] = mapped_column(Text, default="pending")
+    last_error: Mapped[str | None] = mapped_column(Text)
+    next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    __table_args__ = (
+        UniqueConstraint("user_id", "url", name="uq_subscription_user_url"),
+    )
+
+
+class Collection(Base):
+    __tablename__ = "collections"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text)
+    cover_gallery_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"))
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    cover_gallery: Mapped["Gallery | None"] = relationship()
+    collection_galleries: Mapped[list["CollectionGallery"]] = relationship(back_populates="collection", cascade="all, delete-orphan")
+
+
+class CollectionGallery(Base):
+    __tablename__ = "collection_galleries"
+
+    collection_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("collections.id", ondelete="CASCADE"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    position: Mapped[int] = mapped_column(Integer, default=0)
+    added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+    collection: Mapped["Collection"] = relationship(back_populates="collection_galleries")
+    gallery: Mapped["Gallery"] = relationship()
+
+
+class ExcludedBlob(Base):
+    __tablename__ = "excluded_blobs"
+
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    blob_sha256: Mapped[str] = mapped_column(Text, primary_key=True)
+    excluded_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { VirtualGrid } from '@/components/VirtualGrid'
 import { toast } from 'sonner'
 import { X, Trash2, Clock } from 'lucide-react'
 import type { BrowseHistoryItem } from '@/lib/types'
@@ -14,12 +15,12 @@ const PAGE_SIZE = 24
 function formatRelativeTime(iso: string): string {
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60_000)
-  if (mins < 1) return 'just now'
-  if (mins < 60) return `${mins}m ago`
+  if (mins < 1) return t('history.justNow')
+  if (mins < 60) return t('history.minutesAgo', { n: String(mins) })
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return t('history.hoursAgo', { n: String(hours) })
   const days = Math.floor(hours / 24)
-  if (days < 30) return `${days}d ago`
+  if (days < 30) return t('history.daysAgo', { n: String(days) })
   return new Date(iso).toLocaleDateString()
 }
 
@@ -90,7 +91,7 @@ function HistoryCard({
         className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/60 text-white/70
                    hover:text-white hover:bg-black/80 opacity-0 group-hover:opacity-100
                    transition-opacity"
-        title="Remove"
+        title={t('history.remove')}
       >
         <X size={12} />
       </button>
@@ -134,7 +135,7 @@ export default function HistoryPage() {
       await api.history.delete(id)
       toast.success(t('history.deleted'))
       setItems((prev) => prev.filter((i) => i.id !== id))
-      setTotal((t) => t - 1)
+      setTotal((prev) => prev - 1)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('history.deleteFailed'))
     }
@@ -158,7 +159,7 @@ export default function HistoryPage() {
   const handleClick = useCallback(
     (item: BrowseHistoryItem) => {
       if (item.gid != null && item.token) {
-        router.push(`/browse/${item.gid}/${item.token}`)
+        router.push(`/e-hentai/${item.gid}/${item.token}`)
       } else if (item.source === 'local') {
         router.push(`/library/${item.source_id}`)
       }
@@ -169,8 +170,7 @@ export default function HistoryPage() {
   const hasMore = items.length < total
 
   return (
-    <div className="min-h-screen bg-vault-bg">
-      <div className="max-w-6xl mx-auto px-4 py-6">
+    <>
         {/* Header */}
         <div className="flex items-center justify-between mb-6">
           <div>
@@ -209,35 +209,24 @@ export default function HistoryPage() {
             <p className="text-vault-text-muted text-sm mt-1">{t('history.noHistoryHint')}</p>
           </div>
         ) : (
-          <>
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-3">
-              {items.map((item) => (
-                <HistoryCard
-                  key={item.id}
-                  item={item}
-                  onDelete={handleDelete}
-                  onClick={() => handleClick(item)}
-                />
-              ))}
-            </div>
-
-            {/* Load More */}
-            {hasMore && (
-              <div className="flex justify-center mt-8">
-                <button
-                  onClick={() => loadPage(items.length, false)}
-                  disabled={loadingMore}
-                  className="px-6 py-2.5 rounded-lg bg-vault-card border border-vault-border
-                             text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text
-                             transition-colors text-sm"
-                >
-                  {loadingMore ? <LoadingSpinner /> : t('history.loadMore')}
-                </button>
-              </div>
+          <VirtualGrid
+            items={items}
+            columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 12, xxl: 15 }}
+            gap={12}
+            estimateHeight={250}
+            renderItem={(item) => (
+              <HistoryCard
+                key={item.id}
+                item={item}
+                onDelete={handleDelete}
+                onClick={() => handleClick(item)}
+              />
             )}
-          </>
+            onLoadMore={() => loadPage(items.length, false)}
+            hasMore={hasMore}
+            isLoading={loadingMore}
+          />
         )}
-      </div>
-    </div>
+    </>
   )
 }

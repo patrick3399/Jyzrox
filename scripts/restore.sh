@@ -6,9 +6,9 @@ set -euo pipefail
 trap 'echo "[restore] Error occurred, restarting services..."; docker compose up -d api worker pwa nginx; exit 1' ERR
 
 if [ $# -lt 1 ]; then
-  echo "Usage: $0 <backup_file.sql.gz>"
+  echo "Usage: $0 <backup_file.sql.gz|backup_file.sql.gz.gpg>"
   echo "Available backups:"
-  ls -lh backups/vault_*.sql.gz 2>/dev/null || echo "  (none found)"
+  ls -lh backups/vault_*.sql.gz backups/vault_*.sql.gz.gpg 2>/dev/null || echo "  (none found)"
   exit 1
 fi
 
@@ -81,8 +81,20 @@ docker compose exec -T postgres \
   -c "DROP SCHEMA public CASCADE; CREATE SCHEMA public;"
 
 echo "[restore] Loading backup data..."
-gunzip -c "$BACKUP_FILE" | docker compose exec -T postgres \
-  psql -U "$DB_USER" -d "$DB_NAME" --single-transaction
+if [[ "$BACKUP_FILE" == *.gpg ]]; then
+  if [ -z "${BACKUP_ENCRYPT_KEY:-}" ]; then
+    echo "Error: Backup file is GPG-encrypted but BACKUP_ENCRYPT_KEY is not set."
+    exit 1
+  fi
+  echo "[restore] Decrypting backup (AES256)..."
+  gpg --decrypt --batch --passphrase "$BACKUP_ENCRYPT_KEY" "$BACKUP_FILE" \
+    | gunzip \
+    | docker compose exec -T postgres \
+      psql -U "$DB_USER" -d "$DB_NAME" --single-transaction
+else
+  gunzip -c "$BACKUP_FILE" | docker compose exec -T postgres \
+    psql -U "$DB_USER" -d "$DB_NAME" --single-transaction
+fi
 
 echo "[restore] Restarting all services..."
 docker compose up -d api worker pwa nginx

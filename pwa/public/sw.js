@@ -1,5 +1,14 @@
-const CACHE_NAME = 'jyzrox-static-v1';
+const CACHE_NAME = 'jyzrox-static-8d97c30f';
 const OFFLINE_URL = '/offline.html';
+const MEDIA_CACHE_NAME = 'jyzrox-media';
+const PAGE_CACHE_NAME = 'jyzrox-pages';
+
+// ── Cache Config (overridable via postMessage) ──
+let cacheConfig = {
+  mediaCacheTTLHours: 72,
+  mediaCacheSizeMB: 8192,
+  pageCacheTTLHours: 24,
+};
 
 // ── Offline Share Queue ──
 const SHARE_QUEUE_DB = 'jyzrox-share-queue';
@@ -54,6 +63,65 @@ self.addEventListener('online', () => {
   replayShareQueue();
 });
 
+self.addEventListener('message', (event) => {
+  if (event.data?.type === 'SW_CACHE_CONFIG') {
+    cacheConfig = { ...cacheConfig, ...event.data.config };
+  }
+});
+
+function wrapResponseWithTimestamp(response) {
+  const headers = new Headers(response.headers);
+  headers.set('X-Cache-Time', String(Date.now()));
+  return new Response(response.body, {
+    status: response.status,
+    statusText: response.statusText,
+    headers,
+  });
+}
+
+function isExpired(cachedResponse, ttlHours) {
+  if (!ttlHours || ttlHours <= 0) return false;
+  const cacheTime = cachedResponse.headers.get('X-Cache-Time');
+  if (!cacheTime) return false;
+  const age = Date.now() - Number(cacheTime);
+  return age > ttlHours * 3600 * 1000;
+}
+
+async function enforceMediaCacheLimit() {
+  if (!cacheConfig.mediaCacheSizeMB || cacheConfig.mediaCacheSizeMB <= 0) return;
+  try {
+    const cache = await caches.open(MEDIA_CACHE_NAME);
+    const keys = await cache.keys();
+
+    // Collect entries with their timestamps and sizes
+    const entries = [];
+    for (const request of keys) {
+      const response = await cache.match(request);
+      if (!response) continue;
+      const cacheTime = Number(response.headers.get('X-Cache-Time') || '0');
+      const size = Number(response.headers.get('Content-Length') || '0');
+      entries.push({ request, cacheTime, size });
+    }
+
+    const totalSize = entries.reduce((sum, e) => sum + e.size, 0);
+    const limitBytes = cacheConfig.mediaCacheSizeMB * 1024 * 1024;
+
+    if (totalSize <= limitBytes) return;
+
+    // Sort oldest first
+    entries.sort((a, b) => a.cacheTime - b.cacheTime);
+
+    let currentSize = totalSize;
+    for (const entry of entries) {
+      if (currentSize <= limitBytes) break;
+      await cache.delete(entry.request);
+      currentSize -= entry.size;
+    }
+  } catch (e) {
+    // Non-critical, silently ignore
+  }
+}
+
 self.addEventListener('install', (event) => {
   event.waitUntil(
     caches.open(CACHE_NAME).then((cache) => {
@@ -68,14 +136,19 @@ self.addEventListener('activate', (event) => {
   event.waitUntil(
     caches.keys().then((keys) => {
       return Promise.all(
-        keys.filter((key) => key !== CACHE_NAME).map((key) => caches.delete(key))
+        keys.filter((key) => key !== CACHE_NAME && key !== MEDIA_CACHE_NAME && key !== PAGE_CACHE_NAME).map((key) => caches.delete(key))
       );
     }).then(() => {
       // Try to replay any queued share requests that were stored while offline
       return replayShareQueue();
+    }).then(() => {
+      return self.clients.claim();
+    }).then(() => {
+      return self.clients.matchAll({ type: 'window' });
+    }).then((clients) => {
+      clients.forEach((client) => client.postMessage({ type: 'SW_UPDATED' }));
     })
   );
-  self.clients.claim();
 });
 
 self.addEventListener('fetch', (event) => {
@@ -108,41 +181,47 @@ self.addEventListener('fetch', (event) => {
   // Cache-first for images/media if possible, otherwise network-first
   if (event.request.url.includes('/media/') || event.request.url.includes('/thumbs/')) {
     event.respondWith(
-      caches.match(event.request).then((cached) => {
-        // Only return cached response if it was a successful 2xx response
-        if (cached && cached.status >= 200 && cached.status < 300) return cached;
-        return fetch(event.request).then((response) => {
-          // Only cache successful 2xx responses
-          if (response.status >= 200 && response.status < 300) {
-            const resClone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resClone));
+      caches.open(MEDIA_CACHE_NAME).then((cache) => {
+        return cache.match(event.request).then((cached) => {
+          if (cached && cached.status >= 200 && cached.status < 300) {
+            if (!isExpired(cached, cacheConfig.mediaCacheTTLHours)) return cached;
+            cache.delete(event.request);
           }
-          return response;
+          return fetch(event.request).then((response) => {
+            if (response.status >= 200 && response.status < 300) {
+              const stamped = wrapResponseWithTimestamp(response.clone());
+              cache.put(event.request, stamped);
+              enforceMediaCacheLimit();
+            }
+            return response;
+          });
         });
       })
     );
   } else {
     // Network first for other requests; fall back to cache or offline page
     event.respondWith(
-      fetch(event.request)
-        .then((response) => {
-          // Don't cache error responses from network
-          if (response.status >= 200 && response.status < 300) {
-            const resClone = response.clone();
-            caches.open(CACHE_NAME).then((cache) => cache.put(event.request, resClone));
-          }
-          return response;
-        })
-        .catch(async () => {
-          const cached = await caches.match(event.request);
-          // Only use cache if it contains a valid 2xx response
-          if (cached && cached.status >= 200 && cached.status < 300) return cached;
-          // For navigate requests show the offline fallback page
-          if (event.request.mode === 'navigate') {
-            return caches.match(OFFLINE_URL);
-          }
-          return new Response('', { status: 503 });
-        })
+      caches.open(PAGE_CACHE_NAME).then((cache) => {
+        return fetch(event.request)
+          .then((response) => {
+            if (response.status >= 200 && response.status < 300) {
+              const stamped = wrapResponseWithTimestamp(response.clone());
+              cache.put(event.request, stamped);
+            }
+            return response;
+          })
+          .catch(async () => {
+            const cached = await cache.match(event.request);
+            if (cached && cached.status >= 200 && cached.status < 300) {
+              if (!isExpired(cached, cacheConfig.pageCacheTTLHours)) return cached;
+              cache.delete(event.request);
+            }
+            if (event.request.mode === 'navigate') {
+              return caches.match(OFFLINE_URL);
+            }
+            return new Response('', { status: 503 });
+          });
+      })
     );
   }
 });

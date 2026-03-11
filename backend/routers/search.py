@@ -61,7 +61,7 @@ async def search_galleries(
     Supports cursor-based pagination (cursor=) for deep pages without COUNT(*)/OFFSET cost.
     When cursor is absent, falls back to OFFSET-based pagination (page-based, max page 500).
     """
-    tokens = q.split()
+    tokens = q.split()[:20]
     include_tags: list[str] = []
     exclude_tags: list[str] = []
     text_queries: list[str] = []

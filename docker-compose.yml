@@ -7,7 +7,10 @@ services:
       - app_data:/data:ro
       - ./mnt:/mnt:ro
     depends_on:
-      - api
+      api:
+        condition: service_healthy
+      pwa:
+        condition: service_healthy
     networks:
       - frontend
     restart: unless-stopped
@@ -95,7 +98,7 @@ services:
       - backend
     restart: unless-stopped
     healthcheck:
-      test: ["CMD", "python", "-c", "import redis,os; r=redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379')); r.ping()"]
+      test: ["CMD-SHELL", "python -c \"import redis,os; r=redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379')); r.ping()\""]
       interval: 15s
       timeout: 5s
       retries: 3
@@ -142,14 +145,47 @@ services:
         max-size: "50m"
         max-file: "5"
 
+  tagger:
+    build: ./tagger
+    environment:
+      - TAG_MODEL_NAME=SmilingWolf/wd-swinv2-tagger-v3
+      - ONNX_PROVIDERS=CPUExecutionProvider
+    volumes:
+      - app_data:/data:ro
+      - ./mnt:/mnt:ro
+      - tagger_models:/app/models
+    networks:
+      - backend
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8100/health || exit 1"]
+      interval: 15s
+      timeout: 5s
+      retries: 3
+      start_period: 60s
+    deploy:
+      resources:
+        limits:
+          cpus: '2'
+          memory: 3G
+        reservations:
+          memory: 1G
+    profiles:
+      - tagging
+    logging:
+      driver: "json-file"
+      options:
+        max-size: "50m"
+        max-file: "5"
+
   postgres:
-    image: postgres:15-alpine
+    image: postgres:18-alpine
     env_file: .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-vault} -d ${POSTGRES_DB:-vault}"]
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-vault} -d $${POSTGRES_DB:-vault} && psql -U $${POSTGRES_USER:-vault} -d $${POSTGRES_DB:-vault} -c 'SELECT 1' -q -t"]
       interval: 5s
       timeout: 5s
       retries: 10
@@ -170,7 +206,7 @@ services:
         max-file: "5"
 
   redis:
-    image: redis:7-alpine
+    image: redis:8-alpine
     command: redis-server --appendonly yes --maxmemory 768mb --maxmemory-policy allkeys-lru
     volumes:
       - redis_data:/data
@@ -199,6 +235,7 @@ volumes:
   app_data:
   postgres_data:
   redis_data:
+  tagger_models:
 
 networks:
   frontend:

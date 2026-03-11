@@ -1,327 +1,655 @@
-# Jyzrox — Architecture Reference
+# Jyzrox Architecture (v0.1)
 
-詳細架構參考文件。Agent 工作時可按需讀取。
-
----
-
-## 目錄結構
-
-```
-Jyzrox/
-├── backend/
-│   ├── main.py              # FastAPI app + router 註冊
-│   ├── worker.py            # ARQ workers (download/import/thumbnail/tag)
-│   ├── requirements.txt
-│   ├── core/
-│   │   ├── config.py        # Pydantic Settings（從 .env 讀取）
-│   │   ├── auth.py          # require_auth FastAPI dependency
-│   │   ├── database.py      # AsyncSessionLocal, async_session, get_db
-│   │   └── redis_client.py
-│   ├── db/
-│   │   └── models.py        # SQLAlchemy ORM models
-│   ├── routers/             # 各功能路由
-│   └── services/
-│       ├── cache.py         # Redis cache helpers
-│       ├── credential.py    # AES-256-GCM 加密存取
-│       └── eh_client.py     # E-Hentai HTTP client
-├── pwa/
-│   └── src/
-│       ├── app/             # Next.js App Router 頁面
-│       ├── components/      # 共用元件（含 Reader/）
-│       ├── hooks/           # SWR hooks
-│       ├── lib/
-│       │   ├── api.ts       # 所有 API 呼叫（唯一出口）
-│       │   └── types.ts     # TypeScript 型別定義
-│       └── middleware.ts    # 未登入導向 /login
-├── db/
-│   └── init.sql             # PostgreSQL schema + GIN index
-├── nginx/
-│   └── nginx.conf
-├── docker-compose.yml
-├── docker-compose.override.yml  # dev: user=1000:1000
-└── .env                         # 機密設定（不進 git）
-```
+> Codebase audit, 2026-03-10. Read from source files — do not update manually; regenerate from source.
 
 ---
 
-## API Router 對照表
+## Service Topology
 
-```
-/api/auth        → routers/auth.py
-/api/system      → routers/system.py
-/api/eh          → routers/eh.py
-/api/library     → routers/library.py
-/api/download    → routers/download.py
-/api/settings    → routers/settings.py
-/api/ws          → routers/ws.py        (WebSocket: /api/ws/ws)
-/api/search      → routers/search.py
-/api/tags        → routers/tag.py
-/api/import      → routers/import_router.py
-/api/export      → routers/export.py   (Kohya zip)
-/api/external/v1 → routers/external.py (X-API-Token 認證)
-```
+### Docker Compose Services
 
----
+| Service | Image / Build | Port | Networks | Resource Limits |
+|---------|--------------|------|----------|-----------------|
+| `nginx` | `./nginx` | `${HTTP_PORT:-35689}:80` | frontend | 1 CPU / 256 MB |
+| `api` | `./backend` (uvicorn, port 8000) | internal | frontend + backend | 2 CPU / 2 GB |
+| `worker` | `./backend` (arq worker.WorkerSettings) | — | frontend + backend | 2 CPU / 2 GB |
+| `pwa` | `./pwa` (Next.js, port 3000) | internal | frontend | 1 CPU / 512 MB |
+| `postgres` | `postgres:18-alpine` | internal | backend | 2 CPU / 2 GB |
+| `redis` | `redis:8-alpine` | internal | backend | 1 CPU / 1 GB |
 
-## 核心設定（core/config.py）
+### Networks
 
-重要欄位：
-- `data_gallery_path` = `/data/gallery`（圖片儲存根目錄）
-- `data_thumbs_path` = `/data/thumbs`
-- `data_training_path` = `/data/training`
-- `redis_url`, `database_url`, `credential_encrypt_key`
-- `eh_max_concurrency` = 2（EH 圖片代理並發限制）
-- `tag_model_enabled` = false（AI 標籤功能，預設關閉）
+| Network | Name | Internal |
+|---------|------|----------|
+| `frontend` | `vault_frontend` | No |
+| `backend` | `vault_backend` | Yes (no external access) |
 
-> ❌ 不存在 `settings.storage_dir`，用 `settings.data_gallery_path`
+### Volumes
 
----
+| Volume | Usage |
+|--------|-------|
+| `app_data` | Shared `/data` mount (gallery files, thumbs, CAS, avatars) |
+| `postgres_data` | PostgreSQL data directory |
+| `redis_data` | Redis AOF persistence |
 
-## 資料庫 Schema 重點
+### Container UID
 
-- `galleries`：`(source, source_id)` UNIQUE，`tags_array TEXT[]` GIN index
-- `images`：`media_type TEXT DEFAULT 'image'`，`duplicate_of BIGINT`（SHA256 去重）
-- `tags`：`(namespace, name)` UNIQUE，`count` 計數
-- `tag_aliases`、`tag_implications`：Tag 別名與蘊含關係
-- `credentials`：AES-256-GCM 加密存儲 EH cookie / Pixiv token
-- `api_tokens`：外部 API token（X-API-Token header）
-- `read_progress`：閱讀進度（per gallery）
+| Environment | UID:GID | Mechanism |
+|-------------|---------|-----------|
+| Production | `1042:1042` (appuser) | `entrypoint.sh` via gosu |
+| Dev override | `1000:1000` | `docker-compose.override.yml` |
 
-ORM model 在 `backend/db/models.py`，需與 `db/init.sql` 保持一致。
-
----
-
-## Worker Pipeline（ARQ）
-
-```
-download_job → import_job → thumbnail_job
-```
-
-- **download_job**：呼叫 gallery-dl subprocess，完成後 enqueue import
-- **import_job**：掃描目錄、upsert gallery/images/tags 到 DB，enqueue thumbnail
-- **thumbnail_job**：Pillow 生成 160/360/720px WebP，更新 `thumb_path` 和尺寸
-- **tag_job**：WD14 AI 標籤（stub，`TAG_MODEL_ENABLED=false` 時跳過）
-
-本地匯入路徑：`data_gallery_path / "local" / {gallery_id}/`
-
----
-
-## 前端規範
-
-### API 呼叫
-- **所有 API 呼叫統一走 `pwa/src/lib/api.ts`**，不直接 `fetch`
-- `apiFetch` 自動帶 `credentials: 'include'`（cookie）
-- `auth.login(username, password)` 送 `{username, password}`
-
-### SWR Hooks
-- `hooks/useGalleries.ts`：library、EH search
-- `hooks/useDownloadQueue.ts`：jobs（3s refresh interval）
-- `hooks/useAuth.ts`：`login(username, password)`、`logout()`
-
-### Reader 元件
-- `components/Reader/index.tsx`：主元件（single/webtoon/double 三種模式）
-- `components/Reader/hooks.ts`：所有 hooks（prefetch、touch、keyboard、progress）
-- Proxy 模式下序列預載（1次1張），本地模式並行預載 3 張
-- 閱讀進度 2 秒 debounce 後存入 DB
-
-### 頁面列表
-```
-/           Dashboard（最近入庫 + 下載狀態）
-/browse     E-Hentai 瀏覽 + 快速下載
-/library    本地圖庫（tag/rating/source 篩選）
-/library/[id]  圖庫詳情（tag 分組、縮圖預覽）
-/reader/[galleryId]  閱讀器
-/queue      下載佇列管理
-/tags       Tag 列表 + alias/implication 編輯
-/settings   憑證設定（EH cookie, Pixiv token）+ 系統資訊
-/login      登入（username + password）
-/setup      首次設定（建立 admin 帳號）
-```
-
----
-
-## 網路架構
-
-- Nginx 容器僅監聽 HTTP（port 80），**設計上透過外部反向代理（如 Caddy / Traefik / cloud LB）終止 TLS**
-- 外部代理負責 HTTPS 憑證、HTTP→HTTPS 重導向
-- `cookie_secure` 預設 `True`，在外部代理提供 HTTPS 時正常運作；純 HTTP 開發時需設 `COOKIE_SECURE=false`
-
----
-
-## Tag 系統
-
-Tag 格式：`{namespace}:{name}`
-
-命名空間（固定）：`artist` / `character` / `copyright` / `general` / `meta` / `language`
-
-### Tag Alias（別名合併）
-
-`tag_aliases` 表：將多個名稱指向同一個 canonical tag。
-
-| 欄位 | 說明 |
-|------|------|
-| `alias_namespace` | 別名的 namespace |
-| `alias_name` | 別名（如 `blue hair`、`藍髮`） |
-| `canonical_id` | 指向 `tags.id`（canonical tag） |
-
-行為：導入/搜尋時 alias 自動解析為 canonical；`/tags` 頁面可管理。
-
-### Tag Implication（含義推導）
-
-`tag_implications` 表：定義 A → B 的推導關係。
-
-| 欄位 | 說明 |
-|------|------|
-| `antecedent_id` | 前提 tag（如 `character:rem`） |
-| `consequent_id` | 推導 tag（如 `copyright:re_zero`） |
-
-行為：遞迴展開（A→B→C），展開在寫入 DB 時發生（`tags_array` 包含完整展開列表）。
-
-### Tag 同步流程
-
-```
-解析 metadata.json / tags.txt
-→ 每個 tag 查 alias → 替換為 canonical
-→ 每個 canonical tag 展開 implication
-→ 去重後寫入 gallery_tags + 更新 tags_array
-→ 更新 tags.count 統計
-```
-
----
-
-## 搜尋系統
-
-統一端點：`GET /api/search?q=...&sort=...&page=...`
-
-### 搜尋語法
-
-| 語法 | 說明 |
-|------|------|
-| `character:rem` | Tag 精確搜尋（GIN 索引） |
-| `-general:sketch` | 排除 tag |
-| `character:rem general:blue_hair` | AND（空格分隔） |
-| `title:"re zero"` | 標題模糊搜尋（pg_trgm） |
-| `source:ehentai` | 來源篩選（ehentai / pixiv / import） |
-| `rating:>=4` | 評分篩選 |
-| `pages:>=20` | 頁數篩選 |
-| `favorited:true` | 已收藏 |
-| `language:japanese` | 語言篩選 |
-
-### 排序選項
-
-`sort:added_at`（預設）、`sort:rating`、`sort:posted_at`、`sort:pages`、`sort:title`
-
-### 實作細節
-
-- Tag 搜尋：`tags_array @> ARRAY[...]`（GIN 索引），排除用 `&&`
-- 標題模糊搜尋：`pg_trgm` 擴充 + GIN index（`gin_trgm_ops`）
-- Tag Autocomplete：`tags` 表前綴匹配 + alias 查找，依 `count DESC` 排序
-
----
-
-## SHA256 去重機制
-
-去重時機：`import_job` 導入每個檔案時。
-
-| 情境 | 行為 |
-|------|------|
-| 同 gallery 內重複 | 跳過，記 log |
-| 跨 gallery 重複 | 仍匯入，`images.duplicate_of` 設為原始 image.id |
-| 不存在 | 正常匯入 |
-
-- 僅用 SHA256（完全相同），**不做感知雜湊**（perceptual hash）
-- Copy Mode 跨 gallery 重複時建立硬連結節省空間
-
----
-
-## 影片 / GIF 支援
-
-`images.media_type` 欄位：`'image'` / `'video'` / `'gif'`
-
-| 類型 | Reader 行為 | 縮圖 |
-|------|------------|------|
-| `image` | `<img>` | Pillow WebP |
-| `video` | `<video controls autoplay loop>` | ffmpeg 擷取首幀 |
-| `gif` | `<img>` | 取第一幀靜態縮圖 |
-
-支援格式：`.mp4`、`.webm`、`.gif`（不做伺服器端轉碼）
-Nginx 對影片檔提供 HTTP Range Request 支援（可拖曳時間軸）。
-
----
-
-## 匯入模式
-
-兩種模式均執行 SHA256 去重 + Tag 同步流程。
-
-| 模式 | 端點 | 行為 |
-|------|------|------|
-| Link Mode | `POST /api/import/link { path, recursive }` | 唯讀；`file_path` 指向外部絕對路徑；不複製檔案；縮圖仍寫入 `/data/thumbs/` |
-| Copy Mode | `POST /api/import/copy { path }` | 檔案從 `/data/imports/` 複製至 `/data/gallery/imports/{id}/`；原始檔移至 `/data/imports/_done/` |
-
----
-
-## Redis Key 模式
-
-```
-session:{user_id}:{token}      → session 資料（TTL 30 天）
-job:{job_id}                   → 下載任務狀態
-eh:gallery:{gid}               → EH gallery 快取（TTL 1h）
-eh:imagelist:{gid}             → 圖片列表快取（TTL 1h）
-thumb:proxied:{gid}:{page}     → 代理圖片快取（TTL 24h）
-eh:semaphore                   → 全域併發計數
-system:alerts                  → 系統警告列表
-```
-
----
-
-## 檔案系統佈局
+### Filesystem Layout
 
 ```
 /data/
 ├── gallery/
-│   ├── ehentai/{gid}/          # 下載的 EH 圖庫
-│   ├── pixiv/{artist_id}/{work_id}/
-│   └── imports/{id}/           # Copy Mode 匯入
-├── imports/                    # Copy Mode 來源（使用者放入）
-│   └── _done/                  # 已處理的原始檔
-├── thumbs/
-│   └── {hash[:2]}/{hash}/      # 160/360/720px WebP
-└── training/
-    └── {dataset_name}/         # Kohya 格式匯出
+│   ├── ehentai/{gid}/        # EH native downloads
+│   └── pixiv/{illust_id}/    # Pixiv artwork downloads
+├── cas/                      # Content-Addressable Storage (sha256-keyed blobs)
+├── thumbs/{xx}/{sha256}/     # 160/360/720px WebP thumbnails
+├── avatars/                  # User avatar uploads
+├── library/                  # Symlinks to CAS blobs for library access
+└── training/                 # Kohya export datasets
+/mnt/                         # Host-mounted external library paths (read-only)
 ```
 
-Link Mode 的檔案不在 `/data/` 下，`file_path` 指向外部絕對路徑。
+---
+
+## Backend (FastAPI)
+
+Entry point: `backend/main.py`
+Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
+
+### Router Map
+
+| Prefix | File | Auth | Description |
+|--------|------|------|-------------|
+| `/api/auth` | `routers/auth.py` | Public + session | Login, logout, setup, sessions, profile, avatar, password |
+| `/api/system` | `routers/system.py` | Session | Health, info, cache stats/clear |
+| `/api/eh` | `plugins/builtin/ehentai/browse.py` (dynamic) | Session | EH search, gallery, images, proxy, favorites, popular, toplists |
+| `/api/pixiv` | `plugins/builtin/pixiv/_browse.py` (dynamic) | Session | Pixiv search, illust, user, following, image proxy |
+| `/api/library` | `routers/library.py` | Session | Gallery CRUD, images, tags, progress, artists |
+| `/api/download` | `routers/download.py` | Session | Enqueue, list/cancel jobs, stats |
+| `/api/settings` | `routers/settings.py` | Session | Credentials, API tokens, feature flags, EH site toggle, rate limit |
+| `/api/ws` | `routers/ws.py` | Session | WebSocket at `/api/ws/ws` |
+| `/api/search` | `routers/search.py` | Session | Full-text gallery search, saved searches |
+| `/api/tags` | `routers/tag.py` | Session | Tag listing, aliases, implications, autocomplete, translations, blocked, retag |
+| `/api/import` | `routers/import_router.py` | Session | Local import, library paths, rescan, file browser, monitor, scheduled scan |
+| `/api/export` | `routers/export.py` | Session | Kohya zip export |
+| `/api/external/v1` | `routers/external.py` | `X-API-Token` header | External API for third-party integrations |
+| `/api/history` | `routers/history.py` | Session | Browse history CRUD |
+| `/api/plugins` | `routers/plugins.py` | Session | List plugins with credential_flows, browse schema |
+| `/api/artists` | `routers/artists.py` | Session | Followed artists (Pixiv/EH) |
+| `/api/collections` | `routers/collections.py` | Session | Collection CRUD, add/remove galleries |
+| `/api/scheduled-tasks` | `routers/scheduled_tasks.py` | Session | Scheduled task listing, enable/disable, manual run |
+| `/api/subscriptions` | `routers/subscriptions.py` | Session | Subscription CRUD, manual check trigger |
+| `/opds` | `routers/opds.py` | HTTP Basic Auth | OPDS catalog for e-readers |
+| `/api/health` | `main.py` inline | Public | Liveness probe |
 
 ---
 
-## EH 並發限制器
+### Database Schema
 
-Redis-based Global Semaphore：
+#### Tables
 
-| 設定 | 值 |
-|------|-----|
-| `EH_MAX_CONCURRENCY` | 2 |
-| `EH_REQUEST_TIMEOUT` | 30 秒 |
-| `EH_ACQUIRE_TIMEOUT` | 60 秒 |
+| Table | Description | Key Columns |
+|-------|-------------|-------------|
+| `users` | User accounts | `id`, `username` UNIQUE, `password_hash`, `role`, `locale`, `avatar_style` |
+| `galleries` | Gallery records | `id`, `(source, source_id)` UNIQUE, `title`, `tags_array TEXT[]`, `download_status`, `artist_id`, `library_path` |
+| `blobs` | CAS file store | `sha256` PK, `file_size`, `media_type`, `width`, `height`, `duration`, `phash*`, `extension`, `storage`, `ref_count` |
+| `images` | Gallery pages | `id`, `gallery_id` FK, `page_num`, `blob_sha256` FK, `tags_array TEXT[]` |
+| `tags` | Tag registry | `id`, `(namespace, name)` UNIQUE, `count` |
+| `tag_aliases` | Tag alias map | `(alias_namespace, alias_name)` PK → `canonical_id` FK |
+| `tag_implications` | Tag inference rules | `(antecedent_id, consequent_id)` PK |
+| `gallery_tags` | Gallery↔Tag join | `(gallery_id, tag_id)` PK, `confidence`, `source` |
+| `image_tags` | Image↔Tag join | `(image_id, tag_id)` PK, `confidence` |
+| `download_jobs` | ARQ job tracking | `id` UUID PK, `url`, `source`, `status`, `progress` JSONB, `error` |
+| `read_progress` | Per-gallery read cursor | `gallery_id` PK, `last_page`, `last_read_at` |
+| `credentials` | Source credentials (encrypted) | `source` PK, `credential_type`, `value_encrypted` BYTEA |
+| `api_tokens` | External API tokens | `id` UUID PK, `user_id` FK, `token_hash` UNIQUE, `token_plain`, `expires_at` |
+| `browse_history` | EH browse history | `id`, `(user_id, source, source_id)` UNIQUE, `gid`, `token`, `viewed_at` |
+| `saved_searches` | Persisted search queries | `id`, `user_id` FK, `name`, `query`, `params` JSONB |
+| `tag_translations` | Tag i18n (zh default) | `(namespace, name, language)` PK, `translation` |
+| `blocked_tags` | Per-user tag blocklist | `id`, `(user_id, namespace, name)` UNIQUE |
+| `library_paths` | User-configured scan paths | `id`, `path` UNIQUE, `label`, `enabled`, `monitor` |
+| `plugin_config` | Plugin enable/config | `source_id` PK, `enabled`, `config_json` JSONB |
+| `audit_logs` | Security audit trail | `id`, `user_id` FK, `action`, `resource_type`, `resource_id`, `details` JSONB, `ip_address`, `created_at` |
+| `subscriptions` | Artist/source subscriptions | `id`, `(user_id, url)` UNIQUE, `name`, `url`, `source`, `source_id`, `avatar_url`, `enabled`, `auto_download`, `cron_expr`, `last_checked_at`, `last_item_id`, `last_status`, `last_error`, `next_check_at`, `created_at` |
+| `collections` | Gallery collections | `id`, `user_id` FK, `name`, `description`, `cover_gallery_id` |
+| `collection_galleries` | Collection↔Gallery join | `(collection_id, gallery_id)` PK, `position` |
+| `excluded_blobs` | Per-gallery blob exclusions | `(gallery_id, blob_sha256)` PK, `excluded_at` |
 
-流程：先查 Redis 快取（不佔 semaphore），快取未命中才 acquire semaphore 發外部請求。
+#### Key Indexes
+
+| Index | Table | Type | Purpose |
+|-------|-------|------|---------|
+| `idx_galleries_tags_gin` | `galleries` | GIN | `tags_array @>` tag search |
+| `idx_images_tags_gin` | `images` | GIN | per-image tag search |
+| `idx_galleries_title_trgm` | `galleries` | GIN (trgm) | fuzzy title search |
+| `idx_galleries_title_jpn_trgm` | `galleries` | GIN (trgm) | fuzzy Japanese title search |
+| `idx_blobs_phash_q{0-3}` | `blobs` | BTree | pHash pigeonhole dedup |
+| `idx_galleries_added_at_id` | `galleries` | BTree | keyset pagination |
+| `idx_galleries_rating_id` | `galleries` | BTree | keyset pagination |
+| `idx_galleries_pages_id` | `galleries` | BTree | keyset pagination |
 
 ---
 
-## 測試基礎設施
+### ORM Models
 
-| 層級 | 框架 | 執行命令 |
-|------|------|---------|
-| Backend | pytest + httpx AsyncClient + SQLite (shared cache) | `cd backend && python -m pytest` |
-| Frontend | vitest + @testing-library/react | `cd pwa && npx vitest run` |
+All models are in `backend/db/models.py`.
 
-- Backend 測試設定：`backend/pytest.ini`
-- Frontend 測試設定：`pwa/vitest.config.ts`（如有）
+| Class | Table |
+|-------|-------|
+| `User` | `users` |
+| `Gallery` | `galleries` |
+| `Blob` | `blobs` |
+| `Image` | `images` |
+| `Tag` | `tags` |
+| `TagAlias` | `tag_aliases` |
+| `TagImplication` | `tag_implications` |
+| `GalleryTag` | `gallery_tags` |
+| `ImageTag` | `image_tags` |
+| `DownloadJob` | `download_jobs` |
+| `ReadProgress` | `read_progress` |
+| `Credential` | `credentials` |
+| `ApiToken` | `api_tokens` |
+| `BrowseHistory` | `browse_history` |
+| `SavedSearch` | `saved_searches` |
+| `TagTranslation` | `tag_translations` |
+| `BlockedTag` | `blocked_tags` |
+| `LibraryPath` | `library_paths` |
+| `PluginConfig` | `plugin_config` |
+| `Subscription` | `subscriptions` |
+| `Collection` | `collections` |
+| `CollectionGallery` | `collection_galleries` |
+| `ExcludedBlob` | `excluded_blobs` |
 
 ---
 
-## 備份與 Migration
+### Worker Pipeline (ARQ)
 
-- **Alembic migration**：`backend/alembic.ini` + `backend/migrations/`
-- **備份腳本**：`scripts/backup.sh`（PostgreSQL dump + gallery 檔案）
-- **還原腳本**：`scripts/restore.sh`
+Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `download.py`, `importer.py`, `subscription.py`)
+
+#### Job Functions
+
+| Function | Trigger | Description |
+|----------|---------|-------------|
+| `download_job` | API enqueue | Download gallery via plugin registry; falls back to gallery-dl subprocess |
+| `import_job` | After `download_job` | Scan directory, hash files, upsert gallery/images/tags to DB, enqueue thumbnail |
+| `local_import_job` | `/api/import/` POST | Import a local directory into the library (copy mode) |
+| `rescan_library_job` | Manual / scheduled | Full rescan of all configured library paths |
+| `rescan_gallery_job` | `/api/import/rescan/{id}` | Rescan a single gallery's files |
+| `tag_job` | After import | AI tagging (WD14 stub; disabled when `tag_model_enabled=false`) |
+| `thumbnail_job` | After import | Generate 160/360/720px WebP thumbnails via Pillow; first-frame extract for video |
+| `reconciliation_job` | Manual | Reconcile CAS ref counts and clean orphaned blobs |
+| `auto_discover_job` | `/api/import/discover` | Auto-discover new galleries under all library paths |
+| `rescan_by_path_job` | File watcher event | Rescan a specific directory triggered by inotify/polling |
+| `rescan_library_path_job` | `/api/import/rescan/path/{id}` | Rescan one configured library path |
+| `scheduled_scan_job` | ARQ cron | Periodic full library scan (interval from `library_scan_interval_hours`) |
+| `toggle_watcher_job` | `/api/import/monitor/toggle` | Start/stop the LibraryWatcher file monitor |
+| `check_followed_artists` | ARQ cron / `/api/subscriptions/` POST | Check all subscribable sources for new works; enqueues `download_job` per work when `auto_download=true`; cron default `30 */2 * * *` |
+| `check_single_subscription` | `/api/subscriptions/{id}/check` | Check a single subscription for new works |
+| `batch_import_job` | `/api/import/batch/start` | Batch import multiple local directories |
+
+#### Standard Pipeline
+
+```
+download_job → import_job → thumbnail_job
+                          └→ tag_job (if enabled)
+```
+
+#### Library Watcher
+
+`core/watcher.LibraryWatcher` uses `watchdog` (or polling when `watcher_use_polling=true`). On file events it enqueues `rescan_by_path_job`. Status persisted in Redis key `watcher:status`.
+
+---
+
+### Plugin System
+
+Base module: `backend/plugins/`
+
+#### Abstract Base Classes (`plugins/base.py`)
+
+| ABC | Methods | Purpose |
+|-----|---------|---------|
+| `SourcePlugin` | `can_handle(url)`, `download(...)`, `parse_metadata(dest_dir)` | Downloads galleries |
+| `BrowsePlugin` | `browse_schema()`, `search(params, creds)`, `proxy_image(url, creds)` | Browse/search remote sources |
+| `TaggerPlugin` | `tag_images(image_paths)` | AI/ML image tagging |
+
+#### Protocol Interfaces (`plugins/base.py`)
+
+| Protocol | Methods | Purpose |
+|----------|---------|---------|
+| `HasMeta` | `meta: PluginMeta` | Base protocol — all plugins have metadata |
+| `Downloadable` | `can_handle(url)`, `download(...)`, `resolve_output_dir(...)`, `requires_credentials()` | Downloads galleries |
+| `Browsable` | `get_browse_router()` | Provides a FastAPI router for browse endpoints |
+| `Parseable` | `parse_import(dest_dir, raw_meta)` | Parses downloaded directory into GalleryImportData |
+| `Subscribable` | `check_new_works(artist_id, last_known, creds)` | Checks for new works from a subscribed artist |
+| `CredentialProvider` | `credential_flows()`, `verify_credential(creds)` | Declares credential auth flows and verification |
+| `Taggable` | `tag_images(image_paths)` | AI/ML image tagging |
+
+#### Pydantic Models (`plugins/models.py`)
+
+| Model | Purpose |
+|-------|---------|
+| `PluginMeta` | Plugin identity: `source_id`, `name`, `version`, `url_patterns`, `credential_schema`, `concurrency` |
+| `FieldDef` | Credential form field descriptor |
+| `GalleryMetadata` | Parsed gallery metadata from a download |
+| `DownloadResult` | Result from `SourcePlugin.download()` |
+| `SearchResult` | Paginated browse results |
+| `BrowseSchema` | Describes search fields and capabilities |
+| `TagResult` | Per-image AI tagging output |
+| `CredentialFlow` | Credential auth flow descriptor (fields/oauth/login) |
+| `OAuthConfig` | OAuth endpoint configuration |
+| `CredentialStatus` | Credential verification result |
+| `GalleryImportData` | Structured gallery import data from parser |
+| `NewWork` | New work notification from subscription check |
+| `SiteInfo` | Site domain/name/category info for site index |
+
+#### Registry (`plugins/registry.py`)
+
+Singleton `plugin_registry` (`PluginRegistry`). Maintains a site index (domain→SiteInfo) for URL detection, routes downloads to matching plugins with `gallery_dl` as fallback. Also tracks capability maps: `_browsable`, `_downloadable`, `_parseable`, `_subscribable`, `_credential_providers`, `_taggable`. Browse routers are dynamically mounted at startup via `get_browse_routers()`.
+
+#### Built-in Plugins
+
+| Plugin | source_id | Interfaces | Description |
+|--------|-----------|------------|-------------|
+| `ehentai/source.py` | `ehentai` | Downloadable, Parseable | Native EH download via `EhClient` |
+| `ehentai/browse.py` | `ehentai` | BrowsePlugin, Browsable, CredentialProvider | EH browse endpoints + credential flows |
+| `pixiv/source.py` | `pixiv` | Downloadable, Parseable, Subscribable | Pixiv artwork download + subscription checks |
+| `pixiv/_browse.py` | `pixiv` | BrowsePlugin, Browsable, CredentialProvider | Pixiv browse endpoints + credential flows |
+| `gallery_dl/source.py` | `gallery_dl` | SourcePlugin, CredentialProvider | gallery-dl subprocess fallback (any URL) + generic cookie flows |
+
+---
+
+### Configuration (`core/config.py`)
+
+All fields read from `.env` via Pydantic `BaseSettings`.
+
+#### Database & Cache
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `database_url` | — | PostgreSQL async DSN (required) |
+| `redis_url` | `redis://redis:6379` | Redis connection URL |
+
+#### Security
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `credential_encrypt_key` | — | AES-256-GCM key for credentials table (required) |
+| `cors_origin` | `""` | Allowed CORS origins (comma-separated); empty = same-origin only |
+| `cookie_secure` | `true` | Set `false` for local HTTP dev |
+| `trusted_proxies` | `172.16.0.0/12,10.0.0.0/8,192.168.0.0/16` | CIDRs for real-IP extraction |
+
+#### Rate Limiting
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `rate_limit_enabled` | `true` | Enable FastAPI rate limiter |
+| `rate_limit_login` | `5` | Max login attempts per window |
+| `rate_limit_window` | `300` | Window in seconds (5 min) |
+
+#### Feature Toggles
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `csrf_enabled` | `true` | CSRF token validation |
+| `opds_enabled` | `true` | OPDS catalog endpoint |
+| `external_api_enabled` | `true` | External API (`/api/external/v1`) |
+| `download_eh_enabled` | `true` | EH download feature |
+| `download_pixiv_enabled` | `true` | Pixiv download feature |
+| `download_gallery_dl_enabled` | `true` | gallery-dl fallback feature |
+
+#### E-Hentai Limits
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `eh_max_concurrency` | `2` | EH image proxy semaphore limit |
+| `eh_request_timeout` | `30` | HTTP request timeout (seconds) |
+| `eh_acquire_timeout` | `60` | Semaphore acquire timeout (seconds) |
+| `eh_use_ex` | `false` | Use ExHentai instead of E-Hentai |
+| `eh_download_concurrency` | `3` | Parallel images per gallery download |
+| `eh_download_max_retries` | `3` | NL retries per image |
+
+#### AI Tagging
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `tag_model_enabled` | `false` | Enable WD14 AI tagger |
+| `tag_model_name` | `SmilingWolf/wd-swinv2-tagger-v3` | HuggingFace model ID |
+| `tag_general_threshold` | `0.35` | General tag confidence threshold |
+| `tag_character_threshold` | `0.85` | Character tag confidence threshold |
+
+#### Storage Paths
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `data_gallery_path` | `/data/gallery` | Gallery download root |
+| `data_thumbs_path` | `/data/thumbs` | WebP thumbnail root |
+| `data_training_path` | `/data/training` | Kohya export root |
+| `data_avatars_path` | `/data/avatars` | User avatar upload root |
+| `data_cas_path` | `/data/cas` | Content-Addressable Storage root |
+| `data_library_path` | `/data/library` | Library symlink root |
+| `gallery_dl_config` | `/app/config/gallery-dl.json` | gallery-dl config file path |
+
+#### Pixiv OAuth
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `pixiv_client_id` | `MOBrBDS8blbauoSck0ZfDbtuzpyT` | Android app client ID |
+| `pixiv_client_secret` | `lsACyCD94FhDUtGTXi3QzcFE2uU1hqtDaKeqrdwj` | Android app client secret |
+| `pixiv_max_concurrency` | `4` | Max concurrent Pixiv API requests |
+| `pixiv_image_concurrency` | `6` | Max concurrent Pixiv image downloads |
+| `pixiv_request_timeout` | `30` | Request timeout (seconds) |
+
+#### Library Management
+
+| Field | Default | Description |
+|-------|---------|-------------|
+| `library_monitor_enabled` | `true` | Enable file system watcher on startup |
+| `library_scan_interval_hours` | `24` | Scheduled scan interval |
+| `extra_library_paths` | `""` | Comma-separated extra library paths (env-only) |
+| `library_base_path` | `/mnt` | Default root for user-mounted external media |
+| `watcher_use_polling` | `false` | Use polling instead of inotify |
+| `watcher_polling_interval` | `60` | Polling interval (seconds) |
+
+> `data_gallery_path` is the download engine's internal workspace; it is NOT added to library paths automatically.
+
+---
+
+### Authentication
+
+#### Session Auth (Cookie)
+
+- Cookie name: `vault_session = {user_id}:{token}` (httpOnly, SameSite=Strict)
+- Redis key: `session:{user_id}:{token}` (TTL 30 days)
+- FastAPI dependency: `from core.auth import require_auth` — add `_: dict = Depends(require_auth)` to every protected endpoint
+- CSRF protection: `csrf_token` cookie; all mutating requests must send `X-CSRF-Token` header
+
+#### OPDS Basic Auth
+
+- Endpoint: `/opds/`
+- Dependency: `require_opds_auth` in `routers/opds.py`
+- Validates HTTP Basic Auth credentials directly against the `users` table
+- Nginx does NOT apply `auth_request` to `/opds/` — it would break OPDS clients
+
+#### External API Token Auth
+
+- Endpoint: `/api/external/v1/`
+- Header: `X-API-Token: <token>`
+- Tokens stored (hashed) in `api_tokens` table
+- Managed via `/api/settings/tokens`
+
+---
+
+## Frontend (Next.js 16 PWA)
+
+Source root: `pwa/src/`
+
+### Page Routes
+
+| Route | File | Description |
+|-------|------|-------------|
+| `/` | `app/page.tsx` | Dashboard — recent galleries + active downloads |
+| `/login` | `app/login/page.tsx` | Username + password login form |
+| `/setup` | `app/setup/page.tsx` | First-run admin account creation |
+| `/browse` | `app/browse/page.tsx` | E-Hentai search + quick download |
+| `/browse/[gid]/[token]` | `app/browse/[gid]/[token]/page.tsx` | EH gallery detail page |
+| `/browse/read/[gid]/[token]` | `app/browse/read/[gid]/[token]/page.tsx` | EH online reader (proxy mode) |
+| `/library` | `app/library/page.tsx` | Local gallery grid with tag/rating/source filters |
+| `/library/[id]` | `app/library/[id]/page.tsx` | Gallery detail — tags, thumbnails, read/favorite |
+| `/reader/[galleryId]` | `app/reader/[galleryId]/page.tsx` | Full local reader (single/webtoon/double-page) |
+| `/queue` | `app/queue/page.tsx` | Download queue management |
+| `/tags` | `app/tags/page.tsx` | Tag listing + alias/implication management |
+| `/settings` | `app/settings/page.tsx` | System settings and feature flags |
+| `/credentials` | `app/credentials/page.tsx` | Credential management (EH cookies, Pixiv token) |
+| `/import` | `app/import/page.tsx` | Local import wizard + library path management |
+| `/export` | `app/export/page.tsx` | Kohya export UI |
+| `/history` | `app/history/page.tsx` | Browse history |
+| `/artists` | `app/artists/page.tsx` | Artist listing + follow management |
+| `/plugins` | `app/plugins/page.tsx` | Plugin listing + credential status |
+| `/pixiv` | `app/pixiv/page.tsx` | Pixiv search/browse |
+| `/pixiv/following` | `app/pixiv/following/page.tsx` | Pixiv following feed |
+| `/pixiv/user/[id]` | `app/pixiv/user/[id]/page.tsx` | Pixiv user profile |
+| `/pixiv/illust/[id]` | `app/pixiv/illust/[id]/page.tsx` | Pixiv illust detail |
+| `/share-target` | `app/share-target/page.tsx` | PWA Web Share Target handler |
+
+---
+
+### Key Components
+
+| Component | File | Description |
+|-----------|------|-------------|
+| `Reader` | `components/Reader/index.tsx` | Full reader — single/webtoon/double-page modes, touch + keyboard nav |
+| `VideoPlayer` | `components/Reader/VideoPlayer.tsx` | `<video>` wrapper for `.mp4`/`.webm` pages inside Reader |
+| `VirtualGrid` | `components/VirtualGrid.tsx` | Virtualized gallery grid for large collections |
+| `GalleryCard` | `components/GalleryCard.tsx` | Gallery thumbnail card with rating and status |
+| `TagBadge` | `components/TagBadge.tsx` | Clickable tag pill with namespace colour |
+| `TagInput` | `components/TagInput.tsx` | Multi-tag input with autocomplete |
+| `TagAutocomplete` | `components/TagAutocomplete.tsx` | Autocomplete dropdown for tag search |
+| `ErrorBoundary` | `components/ErrorBoundary.tsx` | React error boundary wrapper |
+| `LayoutShell` | `components/LayoutShell.tsx` | App shell with sidebar + mobile nav |
+| `Sidebar` | `components/Sidebar.tsx` | Desktop navigation sidebar |
+| `MobileNav` | `components/MobileNav.tsx` | Bottom navigation for mobile |
+| `NavBar` | `components/NavBar.tsx` | Top navigation bar |
+| `Pagination` | `components/Pagination.tsx` | Page cursor-based pagination control |
+| `RatingStars` | `components/RatingStars.tsx` | 5-star rating widget |
+| `DownloadStatusBadge` | `components/DownloadStatusBadge.tsx` | Gallery download status indicator |
+| `JobStatusBadge` | `components/JobStatusBadge.tsx` | ARQ job status badge |
+| `EmptyState` | `components/EmptyState.tsx` | Empty list placeholder |
+| `LoadingSpinner` | `components/LoadingSpinner.tsx` | Loading indicator |
+| `SWUpdatePrompt` | `components/SWUpdatePrompt.tsx` | PWA service worker update prompt |
+| `LocaleProvider` | `components/LocaleProvider.tsx` | i18n locale context provider |
+| `ThemeProvider` | `components/ThemeProvider.tsx` | Dark/light theme context |
+
+---
+
+### Hooks
+
+All hooks in `pwa/src/hooks/`.
+
+| Hook | File | Description |
+|------|------|-------------|
+| `useAuth` | `useAuth.ts` | `login(username, password)`, `logout()`, session state |
+| `useProfile` | `useProfile.ts` | User profile data (SWR) |
+| `useGalleries` | `useGalleries.ts` | `useLibraryGalleries`, `useLibraryGallery`, `useGalleryImages` (SWR) |
+| `useDownloadQueue` | `useDownloadQueue.ts` | `useDownloadJobs` (3s refresh), `useEnqueueDownload`, `useCancelJob` |
+| `useImport` | `useImport.ts` | Import flow state and progress |
+| `useArtists` | `useArtists.ts` | Followed artists listing and actions |
+| `useTagTranslations` | `useTagTranslations.ts` | Tag translation lookup (SWR) |
+
+---
+
+### API Client (`lib/api.ts`)
+
+Single `apiFetch` base function with automatic 401 redirect and CSRF header injection. All API calls go through named namespaces:
+
+| Namespace | Covers |
+|-----------|--------|
+| `auth` | login, logout, setup, sessions, profile, avatar, password, check |
+| `eh` | search, gallery, images, proxy, favorites, popular, toplists, comments |
+| `library` | galleries CRUD, images, tags, progress, artists |
+| `download` | enqueue, jobs, cancel, clear, stats, pause, resume |
+| `settings` | credentials, tokens, feature flags, EH site, rate limit, alerts |
+| `history` | browse history list/record/clear/delete |
+| `savedSearches` | saved search CRUD |
+| `system` | health, info, cache |
+| `tags` | list, aliases, implications, autocomplete, translations, blocked, retag |
+| `tokens` | API token CRUD |
+| `import_` | browse, start, rescan, libraries, monitor, scan settings, mount points |
+| `exportApi` | Kohya export URL builder |
+| `plugins` | list plugins |
+| `pixiv` | search, illust, user, following |
+| `artists` | followed artists |
+
+---
+
+### i18n
+
+| Locale | File | Status |
+|--------|------|--------|
+| `en` | `lib/i18n/en.ts` | Primary (authoritative) |
+| `zh-TW` | `lib/i18n/zh-TW.ts` | Traditional Chinese |
+| `zh-CN` | `lib/i18n/zh-CN.ts` | Simplified Chinese |
+| `ja` | `lib/i18n/ja.ts` | Japanese |
+| `ko` | `lib/i18n/ko.ts` | Korean |
+
+- Index: `lib/i18n/index.ts` — exports `t(key, params?)` function
+- Missing keys fall back to `en`
+- Key convention: `{section}.{description}` (e.g. `browse.failedLoadResults`)
+- Parameterised: `t('browse.pageN', { page: '5' })`
+- All visible UI text must use `t()` — see CLAUDE.md for exceptions
+
+---
+
+### WebSocket
+
+- URL: `ws[s]://{host}/api/ws` (protocol matches page protocol)
+- Connection managed by `useWebSocket()` in `lib/ws.ts`
+- Auto-reconnect: 3-second delay after disconnect
+- Message type `{ type: 'alert', message: string }` — appended to alerts queue (max 50)
+- `dismissAlert(index)` removes an alert from the queue
+
+---
+
+## Infrastructure
+
+### Nginx
+
+Config: `nginx/nginx.conf`
+
+#### Location Blocks
+
+| Location | Rate Limit Zone | Auth | Notes |
+|----------|----------------|------|-------|
+| `/media/thumbs/` | — | `auth_request /_auth` | Serves `/data/thumbs/`; 7d cache headers |
+| `/media/cas/` | — | `auth_request /_auth` | Serves `/data/cas/`; 30d immutable cache |
+| `/media/avatars/` | — | `auth_request /_auth` | Serves `/data/avatars/` |
+| `/media/libraries/` | — | `auth_request /_auth` | Serves `/mnt/` (external mounts) |
+| `/api/auth/login` | `auth_zone` (5r/m) | None | Login rate-limiting |
+| `/api/auth/setup` | `auth_zone` (5r/m) | None | Setup rate-limiting |
+| `/api/eh/thumb-proxy` | — | None | Nginx proxy cache (7d) for EH CDN thumbnails |
+| `/api/eh/image-proxy/` | `eh_proxy` (5r/s) | None | EH image proxy rate-limiting |
+| `/api/download/` | `download_zone` (2r/s) | None | Download enqueue rate-limiting |
+| `/api/` | `api_zone` (30r/s) | None | General API; WebSocket upgrade enabled |
+| `/opds/` | — | None | Passes `Authorization` header; no `auth_request` |
+| `/` | — | None | Proxies to `pwa:3000`; WebSocket upgrade enabled |
+| `/health` | — | None | Maps to `/api/health` liveness probe |
+| `/nginx-health` | — | None | Nginx self-health; no upstream |
+
+#### Caches
+
+| Cache Zone | Storage | TTL | Key |
+|------------|---------|-----|-----|
+| `thumb_cache` | `/var/cache/nginx/thumb_cache` (512 MB) | 7 days | `$request_uri` |
+| `auth_cache` | `/var/cache/nginx/auth_cache` (10 MB) | 5 min (200) / 10s (4xx) | `$http_cookie$http_authorization` |
+
+#### Security Headers
+
+Applied globally: `X-Frame-Options: DENY`, `X-Content-Type-Options: nosniff`, `Referrer-Policy: strict-origin-when-cross-origin`, `Permissions-Policy`, `Content-Security-Policy`.
+
+TLS termination is handled by an external reverse proxy (Caddy/Traefik/cloud LB). Nginx listens on HTTP only.
+
+---
+
+### Database
+
+- PostgreSQL 18 (Alpine)
+- Schema initialised from `db/init.sql` via `docker-entrypoint-initdb.d`
+- Extensions: `pg_trgm` (trigram fuzzy search)
+- Migrations: Alembic — `backend/alembic.ini` + `backend/migrations/versions/`
+- Connection: asyncpg via SQLAlchemy async engine (`AsyncSessionLocal`)
+- Healthcheck: `pg_isready` + `SELECT 1`
+
+---
+
+### Backup & Recovery
+
+| Script | Description |
+|--------|-------------|
+| `scripts/backup.sh [backup_dir]` | PostgreSQL `pg_dump` + Redis `BGSAVE`; timestamped output to `./backups/` by default |
+| `scripts/restore.sh` | Restore from a backup archive |
+| `scripts/backup-cron.sh` | Cron wrapper for scheduled backups |
+
+Credentials are read from `.env` at project root. DB user/name default to `vault`.
+
+---
+
+### Monitoring (Healthchecks)
+
+| Service | Check | Interval |
+|---------|-------|----------|
+| `nginx` | `wget -q --spider http://127.0.0.1/nginx-health` | 15s |
+| `api` | `wget -qO /dev/null http://localhost:8000/api/health` | 15s |
+| `worker` | Redis `PING` + `pgrep arq worker.WorkerSettings` | 15s |
+| `pwa` | `wget -q --spider http://127.0.0.1:3000` | 15s |
+| `postgres` | `pg_isready` + `SELECT 1` | 5s |
+| `redis` | `redis-cli ping` | 5s |
+
+---
+
+## Key Redis Keys
+
+| Key Pattern | TTL | Description |
+|-------------|-----|-------------|
+| `session:{user_id}:{token}` | 30 days | Active user session |
+| `eh:gallery:{gid}` | 1h | EH gallery metadata cache |
+| `eh:imagelist:{gid}` | 1h | EH image token list cache |
+| `thumb:proxied:{gid}:{page}` | 24h | EH proxied image cache |
+| `download:sem:ehentai` | — | EH download semaphore counter |
+| `download:sem:pixiv` | — | Pixiv download semaphore counter |
+| `download:sem:other` | — | Other source semaphore counter |
+| `setting:{feature}` | — | Runtime feature flag override |
+| `watcher:enabled` | — | Library watcher enabled flag |
+| `watcher:status` | — | Watcher running status + paths (JSON) |
+| `rescan:progress` | — | Rescan job progress |
+| `rescan:cancel` | — | Rescan cancellation flag |
+| `system:alerts` | — | System alert messages |
+
+---
+
+## Tag System
+
+Tag format: `{namespace}:{name}`
+
+Standard namespaces: `artist`, `character`, `copyright`, `general`, `meta`, `language`
+
+### Sync Flow
+
+```
+parse metadata.json / tags.txt
+  → resolve aliases → canonical tag
+  → expand implications (recursive)
+  → deduplicate
+  → write gallery_tags + update tags_array
+  → update tags.count
+```
+
+### Search Syntax
+
+| Syntax | Description |
+|--------|-------------|
+| `character:rem` | Exact tag match (GIN array index) |
+| `-general:sketch` | Exclude tag |
+| `title:"re zero"` | Fuzzy title search (pg_trgm) |
+| `source:ehentai` | Source filter |
+| `rating:>=4` | Rating filter |
+| `pages:>=20` | Page count filter |
+| `favorited:true` | Favorites only |
+| `language:japanese` | Language filter |
+
+Sort options: `added_at` (default), `rating`, `posted_at`, `pages`, `title`
+
+---
+
+## Upgrade Compatibility Notes
+
+| 項目 | 限制 | 原因 |
+|------|------|------|
+| Python ≤ 3.13 | arq 0.27 不支援 3.14+ | `asyncio.get_event_loop()` 在 3.14 已移除 |
+| numpy ≥ 2.4 | slim 映像無 gcc | 2.3.x 無 cp314 wheel，需 source build |
+| Tailwind 4 | CSS-first，無 JS config | `@theme inline` + `@custom-variant dark` |
+| React 19 | `useRef()` 須傳初始值 | 不再自動推斷 `undefined` |
+| Next.js 16 | 測試須 mock `next/navigation` | App Router context 更嚴格 |

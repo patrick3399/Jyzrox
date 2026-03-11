@@ -1,25 +1,42 @@
-import { ChevronLeft, ChevronRight } from 'lucide-react'
+import { useState, useEffect } from 'react'
+import { ChevronLeft, ChevronRight, Loader2 } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
 interface PaginationProps {
-  page: number // 0-indexed
+  page: number // 0-indexed (confirmed/committed page from data)
   total: number
   pageSize?: number
   onChange: (page: number) => void
+  isLoading?: boolean
 }
 
-export function Pagination({ page, total, pageSize = 20, onChange }: PaginationProps) {
+export function Pagination({
+  page,
+  total,
+  pageSize = 20,
+  onChange,
+  isLoading = false,
+}: PaginationProps) {
   const totalPages = Math.ceil(total / pageSize)
+
+  // Optimistic display page: immediately reflects the clicked page before data arrives
+  const [displayPage, setDisplayPage] = useState(page)
+
+  // Sync displayPage back when confirmed page changes (e.g. external navigation)
+  useEffect(() => {
+    setDisplayPage(page)
+  }, [page])
 
   if (totalPages <= 1) return null
 
+  const activePage = displayPage
   const start = page * pageSize + 1
   const end = Math.min((page + 1) * pageSize, total)
 
   const pageNumbers: (number | 'ellipsis-start' | 'ellipsis-end')[] = []
   const WINDOW = 2
-  const windowStart = Math.max(0, page - WINDOW)
-  const windowEnd = Math.min(totalPages - 1, page + WINDOW)
+  const windowStart = Math.max(0, activePage - WINDOW)
+  const windowEnd = Math.min(totalPages - 1, activePage + WINDOW)
 
   if (windowStart > 0) {
     pageNumbers.push(0)
@@ -43,6 +60,11 @@ export function Pagination({ page, total, pageSize = 20, onChange }: PaginationP
 
   const btnNav = `${btnBase} bg-vault-card text-vault-text-secondary border border-vault-border hover:border-vault-accent hover:text-vault-text`
 
+  const handlePageClick = (p: number) => {
+    setDisplayPage(p)
+    onChange(p)
+  }
+
   return (
     <div className="flex flex-col items-center gap-3 py-4">
       <p className="text-xs text-vault-text-muted">
@@ -56,8 +78,8 @@ export function Pagination({ page, total, pageSize = 20, onChange }: PaginationP
         <button
           type="button"
           className={btnNav}
-          onClick={() => onChange(page - 1)}
-          disabled={page === 0}
+          onClick={() => handlePageClick(activePage - 1)}
+          disabled={isLoading || activePage === 0}
           aria-label="Previous page"
         >
           <ChevronLeft size={16} />
@@ -71,16 +93,24 @@ export function Pagination({ page, total, pageSize = 20, onChange }: PaginationP
               </span>
             )
           }
+          const isActive = item === activePage
+          const isLoadingActive = isActive && isLoading
           return (
             <button
               key={`${item}-${idx}`}
               type="button"
-              className={btnPage(item === page)}
-              onClick={() => onChange(item)}
+              className={`${btnPage(isActive)} ${isLoadingActive ? 'opacity-80' : ''}`}
+              onClick={() => handlePageClick(item)}
+              disabled={isLoading}
               aria-label={`Page ${item + 1}`}
-              aria-current={item === page ? 'page' : undefined}
+              aria-current={isActive ? 'page' : undefined}
+              aria-busy={isLoadingActive}
             >
-              {item + 1}
+              {isLoadingActive ? (
+                <Loader2 size={14} className="animate-spin" />
+              ) : (
+                item + 1
+              )}
             </button>
           )
         })}
@@ -88,8 +118,8 @@ export function Pagination({ page, total, pageSize = 20, onChange }: PaginationP
         <button
           type="button"
           className={btnNav}
-          onClick={() => onChange(page + 1)}
-          disabled={page >= totalPages - 1}
+          onClick={() => handlePageClick(activePage + 1)}
+          disabled={isLoading || activePage >= totalPages - 1}
           aria-label="Next page"
         >
           <ChevronRight size={16} />

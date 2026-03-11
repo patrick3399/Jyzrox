@@ -1,7 +1,8 @@
 'use client'
 
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import { setLocale as setI18nLocale, getLocale, SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
+import { setLocale as setI18nLocale, SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
+import { api } from '@/lib/api'
 
 type LocaleContextType = {
   locale: Locale
@@ -29,7 +30,24 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
   const setLocale = useCallback((newLocale: Locale) => {
     setI18nLocale(newLocale)
     setLocaleState(newLocale)
+    // Save to server (fire-and-forget)
+    api.auth.updateProfile({ locale: newLocale }).catch(() => {})
   }, [])
+
+  // On mount: sync locale from server profile (server wins for cross-device sync)
+  useEffect(() => {
+    api.auth.getProfile()
+      .then((profile) => {
+        if (profile.locale && SUPPORTED_LOCALES.includes(profile.locale as Locale)) {
+          const serverLocale = profile.locale as Locale
+          if (serverLocale !== locale) {
+            setI18nLocale(serverLocale)
+            setLocaleState(serverLocale)
+          }
+        }
+      })
+      .catch(() => {}) // Not logged in or network error — use localStorage fallback
+  }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     document.documentElement.lang = locale

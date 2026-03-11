@@ -9,9 +9,7 @@
  *   Clicking Toplist tab switches to toplist view
  *   Loading state renders a spinner
  *   Gallery titles rendered when search hook returns results
- *   Download button calls api.download.enqueue with the gallery URL
- *   Download success shows toast.success
- *   Download failure shows toast.error
+ *   Clicking a gallery card navigates to /browse/{gid}/{token}
  *
  * Mock strategy:
  *   - next/navigation → stub useRouter and useSearchParams
@@ -37,6 +35,7 @@ const {
   mockUseEhPopular,
   mockUseEhToplist,
   mockUseEhFavorites,
+  mockRouterPush,
 } = vi.hoisted(() => ({
   mockEnqueue: vi.fn(),
   mockToastSuccess: vi.fn(),
@@ -45,12 +44,13 @@ const {
   mockUseEhPopular: vi.fn(),
   mockUseEhToplist: vi.fn(),
   mockUseEhFavorites: vi.fn(),
+  mockRouterPush: vi.fn(),
 }))
 
 // ── Module mocks ───────────────────────────────────────────────────────
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: mockRouterPush, replace: vi.fn() }),
   useSearchParams: () => ({ get: (_key: string) => null }),
 }))
 
@@ -104,9 +104,15 @@ vi.mock('@/components/RatingStars', () => ({
   RatingStars: ({ rating }: { rating: number }) => <span>{rating}</span>,
 }))
 
+vi.mock('@/components/VirtualGrid', () => ({
+  VirtualGrid: ({ items, renderItem }: { items: unknown[]; renderItem: (item: unknown, index: number) => React.ReactNode }) => (
+    <div data-testid="virtual-grid">{items.map((item, i) => renderItem(item, i))}</div>
+  ),
+}))
+
 // ── Import page after mocks ──────────────────────────────────────────
 
-import BrowsePage from '@/app/browse/page'
+import BrowsePage from '@/app/e-hentai/page'
 
 // ── Factories ─────────────────────────────────────────────────────────
 
@@ -232,7 +238,7 @@ describe('Browse page — gallery results', () => {
     await act(async () => {
       render(<BrowsePage />)
     })
-    expect(screen.getByText(/42/)).toBeInTheDocument()
+    expect(screen.getByText(/browse\.resultsCount/)).toBeInTheDocument()
   })
 })
 
@@ -290,10 +296,9 @@ describe('Browse page — tab switching', () => {
   })
 })
 
-describe('Browse page — download', () => {
-  it('test_browse_downloadButton_callsApiEnqueue', async () => {
+describe('Browse page — gallery navigation', () => {
+  it('test_browse_clickGallery_navigatesToDetailPage', async () => {
     const user = userEvent.setup()
-    mockEnqueue.mockResolvedValue({ job_id: 'j1', status: 'queued' })
     mockUseEhSearch.mockReturnValue({
       data: { galleries: [makeEhGallery(1)], total: 1, page: 0 },
       isLoading: false,
@@ -302,63 +307,9 @@ describe('Browse page — download', () => {
     await act(async () => {
       render(<BrowsePage />)
     })
-    // Click on the gallery card to open the detail overlay
     await act(async () => {
       await user.click(screen.getByText('Gallery 1'))
     })
-    // Now click the Download button in the overlay
-    const dlButton = screen.getByText('Download')
-    await act(async () => {
-      await user.click(dlButton)
-    })
-    expect(mockEnqueue).toHaveBeenCalledOnce()
-    expect(mockEnqueue).toHaveBeenCalledWith(
-      'https://e-hentai.org/g/1/tok1/',
-      'ehentai',
-      {},
-      20,
-    )
-  })
-
-  it('test_browse_downloadSuccess_showsToastSuccess', async () => {
-    const user = userEvent.setup()
-    mockEnqueue.mockResolvedValue({ job_id: 'j1', status: 'queued' })
-    mockUseEhSearch.mockReturnValue({
-      data: { galleries: [makeEhGallery(1)], total: 1, page: 0 },
-      isLoading: false,
-      error: null,
-    })
-    await act(async () => {
-      render(<BrowsePage />)
-    })
-    // Open gallery overlay first
-    await act(async () => {
-      await user.click(screen.getByText('Gallery 1'))
-    })
-    await act(async () => {
-      await user.click(screen.getByText('Download'))
-    })
-    expect(mockToastSuccess).toHaveBeenCalledOnce()
-  })
-
-  it('test_browse_downloadFailure_showsToastError', async () => {
-    const user = userEvent.setup()
-    mockEnqueue.mockRejectedValue(new Error('Server error'))
-    mockUseEhSearch.mockReturnValue({
-      data: { galleries: [makeEhGallery(1)], total: 1, page: 0 },
-      isLoading: false,
-      error: null,
-    })
-    await act(async () => {
-      render(<BrowsePage />)
-    })
-    // Open gallery overlay first
-    await act(async () => {
-      await user.click(screen.getByText('Gallery 1'))
-    })
-    await act(async () => {
-      await user.click(screen.getByText('Download'))
-    })
-    expect(mockToastError).toHaveBeenCalledOnce()
+    expect(mockRouterPush).toHaveBeenCalledWith('/e-hentai/1/tok1')
   })
 })

@@ -3,7 +3,24 @@
 import Link from 'next/link'
 import useSWR from 'swr'
 import { useState } from 'react'
-import { Search, BookOpen, Download, Tags, Settings, ArrowRight, BookMarked, X } from 'lucide-react'
+import {
+  Search,
+  BookOpen,
+  Download,
+  Tags,
+  Settings,
+  ArrowRight,
+  BookMarked,
+  X,
+  Palette,
+  FolderTree,
+  Users,
+  Clock,
+  PackageOpen,
+  FolderInput,
+  Key,
+  Puzzle,
+} from 'lucide-react'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -12,16 +29,40 @@ import type { Gallery, DownloadJob } from '@/lib/types'
 
 const QUICK_LINKS = [
   {
-    href: '/browse',
-    label: () => t('dashboard.quickLinks.browse'),
-    desc: () => t('dashboard.quickLinks.browseDesc'),
+    href: '/e-hentai',
+    label: () => t('dashboard.quickLinks.ehentai'),
+    desc: () => t('dashboard.quickLinks.ehentaiDesc'),
     icon: Search,
+  },
+  {
+    href: '/pixiv',
+    label: () => t('dashboard.quickLinks.pixiv'),
+    desc: () => t('dashboard.quickLinks.pixivDesc'),
+    icon: Palette,
   },
   {
     href: '/library',
     label: () => t('dashboard.quickLinks.library'),
     desc: () => t('dashboard.quickLinks.libraryDesc'),
     icon: BookOpen,
+  },
+  {
+    href: '/explorer',
+    label: () => t('dashboard.quickLinks.explorer'),
+    desc: () => t('dashboard.quickLinks.explorerDesc'),
+    icon: FolderTree,
+  },
+  {
+    href: '/artists',
+    label: () => t('dashboard.quickLinks.artists'),
+    desc: () => t('dashboard.quickLinks.artistsDesc'),
+    icon: Users,
+  },
+  {
+    href: '/history',
+    label: () => t('dashboard.quickLinks.history'),
+    desc: () => t('dashboard.quickLinks.historyDesc'),
+    icon: Clock,
   },
   {
     href: '/queue',
@@ -34,6 +75,30 @@ const QUICK_LINKS = [
     label: () => t('dashboard.quickLinks.tags'),
     desc: () => t('dashboard.quickLinks.tagsDesc'),
     icon: Tags,
+  },
+  {
+    href: '/export',
+    label: () => t('dashboard.quickLinks.export'),
+    desc: () => t('dashboard.quickLinks.exportDesc'),
+    icon: PackageOpen,
+  },
+  {
+    href: '/import',
+    label: () => t('dashboard.quickLinks.import'),
+    desc: () => t('dashboard.quickLinks.importDesc'),
+    icon: FolderInput,
+  },
+  {
+    href: '/credentials',
+    label: () => t('dashboard.quickLinks.credentials'),
+    desc: () => t('dashboard.quickLinks.credentialsDesc'),
+    icon: Key,
+  },
+  {
+    href: '/plugins',
+    label: () => t('dashboard.quickLinks.plugins'),
+    desc: () => t('dashboard.quickLinks.pluginsDesc'),
+    icon: Puzzle,
   },
   {
     href: '/settings',
@@ -117,7 +182,7 @@ function SystemAlerts({ alerts }: { alerts: string[] }) {
             <span className="leading-snug">{msg}</span>
             <button
               onClick={() => dismiss(msg)}
-              className={`flex-shrink-0 p-0.5 rounded transition-colors ${styles.btn}`}
+              className={`shrink-0 p-0.5 rounded transition-colors ${styles.btn}`}
               aria-label={t('common.dismissAlert')}
             >
               <X size={14} />
@@ -178,8 +243,7 @@ export default function Dashboard() {
   )
 
   return (
-    <div className="min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 py-6 space-y-8">
+    <div className="space-y-8">
         {/* Header */}
         <div className="flex items-center justify-between">
           <div>
@@ -191,7 +255,7 @@ export default function Dashboard() {
         {alerts.length > 0 && <SystemAlerts alerts={alerts} />}
 
         {/* Quick Links */}
-        <div className="grid grid-cols-2 md:grid-cols-5 gap-3">
+        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
           {QUICK_LINKS.map((link) => {
             const Icon = link.icon
             return (
@@ -235,7 +299,7 @@ export default function Dashboard() {
                 >
                   <p className="text-sm text-vault-text-secondary truncate">{job.url}</p>
                   <span
-                    className={`flex-shrink-0 text-xs font-medium px-2 py-0.5 rounded border ${
+                    className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded border ${
                       job.status === 'running'
                         ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
                         : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
@@ -279,19 +343,18 @@ export default function Dashboard() {
               icon={BookMarked}
               title={t('dashboard.noGalleries')}
               description={t('dashboard.noGalleriesHint')}
-              action={{ label: t('dashboard.quickLinks.browse'), href: '/browse' }}
+              action={{ label: t('dashboard.quickLinks.ehentai'), href: '/e-hentai' }}
             />
           )}
 
           {!libraryLoading && libraryData && libraryData.galleries.length > 0 && (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-12 gap-3">
+            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 gap-3">
               {libraryData.galleries.map((gallery) => (
                 <GalleryThumb key={gallery.id} gallery={gallery} />
               ))}
             </div>
           )}
         </div>
-      </div>
     </div>
   )
 }
