@@ -164,6 +164,51 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
         return {"status": "stopped"}
 
 
+# ── Rate Limit Schedule ───────────────────────────────────────────────
+
+
+async def rate_limit_schedule_job(ctx: dict) -> dict:
+    """Check the rate limit schedule and update the active flag in Redis."""
+    from datetime import datetime, timezone
+
+    r = ctx["redis"]
+
+    enabled_val = await r.get("rate_limit:schedule:enabled")
+    enabled = enabled_val in (b"1", "1")
+
+    if not enabled:
+        await r.delete("rate_limit:schedule:active")
+        return {"status": "disabled"}
+
+    start_val = await r.get("rate_limit:schedule:start_hour")
+    end_val = await r.get("rate_limit:schedule:end_hour")
+
+    try:
+        start_hour = int(start_val) if start_val is not None else 0
+    except (ValueError, TypeError):
+        start_hour = 0
+
+    try:
+        end_hour = int(end_val) if end_val is not None else 6
+    except (ValueError, TypeError):
+        end_hour = 6
+
+    current_hour = datetime.now(timezone.utc).hour
+
+    if start_hour <= end_hour:
+        in_window = start_hour <= current_hour < end_hour
+    else:
+        # Wraps midnight: e.g. 22–06
+        in_window = current_hour >= start_hour or current_hour < end_hour
+
+    if in_window:
+        await r.set("rate_limit:schedule:active", "1")
+        return {"status": "active", "hour": current_hour}
+    else:
+        await r.delete("rate_limit:schedule:active")
+        return {"status": "inactive", "hour": current_hour}
+
+
 # ── ARQ Worker Settings ──────────────────────────────────────────────
 
 
@@ -190,6 +235,7 @@ class WorkerSettings:
         dedup_tier2_job,
         dedup_tier3_job,
         dedup_scan_job,
+        rate_limit_schedule_job,
     ]
     cron_jobs = [
         cron(
@@ -215,6 +261,13 @@ class WorkerSettings:
             run_at_startup=False,
             unique=True,
             timeout=3600,
+        ),
+        cron(
+            rate_limit_schedule_job,
+            minute=None,  # every minute
+            run_at_startup=False,
+            unique=True,
+            timeout=60,
         ),
     ]
     on_startup = startup
@@ -244,6 +297,7 @@ __all__ = [
     "dedup_tier3_job",
     "dedup_scan_job",
     "toggle_watcher_job",
+    "rate_limit_schedule_job",
     "startup",
     "shutdown",
     "WorkerSettings",

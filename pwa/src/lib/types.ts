@@ -563,6 +563,31 @@ export interface DedupScanProgress {
   percent?: number
 }
 
+// ── Rate Limits ───────────────────────────────────────────────────────
+
+export interface SiteRateConfig {
+  concurrency: number
+  delay_ms: number | null
+  image_concurrency: number | null
+  page_delay_ms?: number | null
+  pagination_delay_ms?: number | null
+  illust_delay_ms?: number | null
+}
+
+export interface RateLimitSchedule {
+  enabled: boolean
+  start_hour: number
+  end_hour: number
+  mode: 'full_speed' | 'standard'
+}
+
+export interface RateLimitSettings {
+  sites: Record<string, SiteRateConfig>
+  schedule: RateLimitSchedule
+  override_active: boolean
+  schedule_active: boolean
+}
+
 // ── API Params ────────────────────────────────────────────────────────
 
 export interface GallerySearchParams {

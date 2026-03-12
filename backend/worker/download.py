@@ -70,7 +70,8 @@ async def download_job(
 
     # Semaphore — use source_id as the semaphore key (maps to existing keys)
     sem_key = plugin.meta.semaphore_key or source_id
-    sem = DownloadSemaphore(sem_key)
+    limit = await DownloadSemaphore.get_limit(sem_key)
+    sem = DownloadSemaphore(sem_key, max_count=limit)
     _base_progress: dict = {} if total is None else {"total": total}
     await _set_job_progress(db_job_id, {**_base_progress, "status_text": "Waiting for download slot..."})
 

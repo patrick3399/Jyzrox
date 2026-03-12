@@ -46,6 +46,8 @@ import type {
   DedupReviewResponse,
   DedupScanProgress,
   UserInfo,
+  RateLimitSettings,
+  SiteRateConfig,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -523,6 +525,21 @@ const settings = {
     apiFetch<{ feature: string; value: number }>(`/api/settings/features/${feature}`, {
       method: 'PATCH',
       body: JSON.stringify({ value }),
+    }),
+
+  getRateLimits: () =>
+    apiFetch<RateLimitSettings>('/api/settings/rate-limits'),
+
+  patchRateLimits: (data: Partial<{ sites: Record<string, Partial<SiteRateConfig>>; schedule: Partial<import('./types').RateLimitSchedule> }>) =>
+    apiFetch<RateLimitSettings>('/api/settings/rate-limits', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  setRateLimitOverride: (unlocked: boolean) =>
+    apiFetch<void>('/api/settings/rate-limits/override', {
+      method: 'POST',
+      body: JSON.stringify({ unlocked }),
     }),
 }
 

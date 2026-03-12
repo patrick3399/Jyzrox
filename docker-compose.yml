@@ -39,6 +39,7 @@ services:
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 30s
     environment:
+      - TZ=Asia/Taipei
       - PUID=1042
       - PGID=1042
     env_file: .env
@@ -80,6 +81,7 @@ services:
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 120s
     environment:
+      - TZ=Asia/Taipei
       - PUID=1042
       - PGID=1042
     env_file: .env
@@ -119,6 +121,7 @@ services:
   pwa:
     build: ./pwa
     environment:
+      - TZ=Asia/Taipei
       - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
     depends_on:

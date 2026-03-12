@@ -136,6 +136,9 @@ class EhSourcePlugin(SourcePlugin):
             if on_progress is not None:
                 await on_progress(downloaded, total_pages)
 
+        from core.redis_client import get_image_concurrency
+        image_concurrency = await get_image_concurrency("ehentai", settings.eh_download_concurrency)
+
         try:
             result = await download_eh_gallery(
                 gid=gid,
@@ -143,7 +146,7 @@ class EhSourcePlugin(SourcePlugin):
                 cookies=cookies,
                 use_ex=use_ex,
                 output_dir=dest_dir,
-                concurrency=settings.eh_download_concurrency,
+                concurrency=image_concurrency,
                 on_progress=_progress,
                 cancel_check=cancel_check,
                 pause_check=pause_check,

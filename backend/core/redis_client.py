@@ -29,6 +29,60 @@ def get_redis() -> aioredis.Redis:
     return _redis
 
 
+async def is_rate_limit_boosted() -> bool:
+    """Return True if downloads should run at full speed (no rate limiting delays)."""
+    r = get_redis()
+    override = await r.get("rate_limit:override:unlocked")
+    if override is not None:
+        return True
+    active = await r.get("rate_limit:schedule:active")
+    mode = await r.get("rate_limit:schedule:mode")
+    if active in (b"1", "1") and (mode is None or mode in (b"full_speed", "full_speed")):
+        return True
+    return False
+
+
+async def get_download_delay(source: str, default_ms: int = 0) -> float:
+    """Read per-source delay from Redis, return seconds. Returns 0 if boost mode active."""
+    if await is_rate_limit_boosted():
+        return 0.0
+    r = get_redis()
+    val = await r.get(f"rate_limit:config:{source}:delay_ms")
+    if val is not None:
+        try:
+            return int(val) / 1000.0
+        except (ValueError, TypeError):
+            pass
+    return default_ms / 1000.0
+
+
+async def get_typed_download_delay(source: str, delay_type: str, default_ms: int = 0) -> float:
+    """Read per-source typed delay from Redis (e.g., page_delay_ms, pagination_delay_ms).
+    Returns 0 if boost mode active."""
+    if await is_rate_limit_boosted():
+        return 0.0
+    r = get_redis()
+    val = await r.get(f"rate_limit:config:{source}:{delay_type}_delay_ms")
+    if val is not None:
+        try:
+            return int(val) / 1000.0
+        except (ValueError, TypeError):
+            pass
+    return default_ms / 1000.0
+
+
+async def get_image_concurrency(source: str, default: int = 1) -> int:
+    """Read per-source image concurrency from Redis, falling back to default."""
+    r = get_redis()
+    val = await r.get(f"rate_limit:config:{source}:image_concurrency")
+    if val is not None:
+        try:
+            return int(val)
+        except (ValueError, TypeError):
+            pass
+    return default
+
+
 class EhSemaphore:
     """
     Redis-based global semaphore for E-Hentai concurrent image request limiting.
@@ -41,7 +95,6 @@ class EhSemaphore:
     _COUNTER_KEY = "eh:semaphore:count"
 
     def __init__(self) -> None:
-        self.max_count = settings.eh_max_concurrency
         self.acquire_timeout = settings.eh_acquire_timeout
 
     @asynccontextmanager
@@ -50,9 +103,18 @@ class EhSemaphore:
         loop = asyncio.get_event_loop()
         deadline = loop.time() + self.acquire_timeout
 
+        val = await r.get("rate_limit:config:ehentai:concurrency")
+        if val is not None:
+            try:
+                max_count = int(val)
+            except (ValueError, TypeError):
+                max_count = settings.eh_max_concurrency
+        else:
+            max_count = settings.eh_max_concurrency
+
         while True:
             count = await r.incr(self._COUNTER_KEY)
-            if count <= self.max_count:
+            if count <= max_count:
                 try:
                     yield
                 finally:
@@ -78,13 +140,25 @@ class DownloadSemaphore:
     _LIMITS: dict[str, int] = {
         "ehentai": 2,
         "pixiv": 2,
-        "other": 2,
+        "gallery_dl": 1,
     }
 
-    def __init__(self, source: str, acquire_timeout: int = 300) -> None:
+    def __init__(self, source: str, acquire_timeout: int = 300, max_count: int | None = None) -> None:
         self._key = f"download:sem:{source}"
-        self.max_count = self._LIMITS.get(source, 2)
+        self.max_count = max_count if max_count is not None else self._LIMITS.get(source, 2)
         self.acquire_timeout = acquire_timeout
+
+    @classmethod
+    async def get_limit(cls, source: str, default: int = 2) -> int:
+        """Read concurrency limit from Redis, falling back to _LIMITS dict then default."""
+        r = get_redis()
+        val = await r.get(f"rate_limit:config:{source}:concurrency")
+        if val is not None:
+            try:
+                return int(val)
+            except (ValueError, TypeError):
+                pass
+        return cls._LIMITS.get(source, default)
 
     @asynccontextmanager
     async def acquire(self):

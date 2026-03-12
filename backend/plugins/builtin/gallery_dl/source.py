@@ -137,6 +137,7 @@ class GalleryDlPlugin(SourcePlugin):
             SiteInfo(domain="catbox.moe", source_id="catbox", name="Catbox", category="filehost", has_tags=False),
         ],
         concurrency=1,
+        semaphore_key="gallery_dl",
     )
 
     async def can_handle(self, url: str) -> bool:
@@ -153,6 +154,8 @@ class GalleryDlPlugin(SourcePlugin):
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
     ) -> DownloadResult:
         """Run gallery-dl as a subprocess and stream progress."""
+        from core.redis_client import get_download_delay
+
         if credentials is None:
             credentials = {}
 
@@ -167,8 +170,13 @@ class GalleryDlPlugin(SourcePlugin):
             "--write-tags",
             "--directory",
             str(dest_dir),
-            url,
         ]
+
+        delay_secs = await get_download_delay("gallery_dl", 0)
+        if delay_secs > 0:
+            cmd += ["--sleep-request", str(delay_secs)]
+
+        cmd.append(url)
 
         try:
             proc = await asyncio.create_subprocess_exec(
