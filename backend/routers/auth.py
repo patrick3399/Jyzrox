@@ -16,7 +16,8 @@ from PIL import Image, ImageOps
 from pydantic import BaseModel
 from sqlalchemy import text
 
-from core.auth import require_auth
+from core.audit import log_audit
+from core.auth import _DUMMY_HASH, _sign_session, _verify_session, require_auth
 from core.config import settings
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
@@ -70,7 +71,7 @@ async def needs_setup():
 @router.post("/setup")
 async def setup(req: LoginRequest, request: Request):
     """Create the first admin user. Only works when no users exist."""
-    await check_rate_limit(f"setup:{get_client_ip(request)}", max_requests=3, window=60)
+    await check_rate_limit(f"setup:{get_client_ip(request)}", max_requests=3, window=3600)
 
     async with async_session() as session:
         result = await session.execute(text("SELECT COUNT(*) FROM users"))
@@ -92,6 +93,14 @@ async def setup(req: LoginRequest, request: Request):
             raise api_error(status.HTTP_403_FORBIDDEN, "setup_completed", locale)
         await session.commit()
 
+    # Fetch the new user's id for audit logging
+    async with async_session() as session:
+        result = await session.execute(
+            text("SELECT id FROM users WHERE username = :uname"),
+            {"uname": req.username},
+        )
+        new_user = result.fetchone()
+    await log_audit(new_user.id if new_user else None, "setup", ip=get_client_ip(request))
     return {"status": "ok"}
 
 
@@ -112,12 +121,16 @@ async def login(req: LoginRequest, request: Request, response: Response):
         )
         user = result.fetchone()
 
-    if not user or not bcrypt.checkpw(req.password.encode("utf-8"), user.password_hash.encode("utf-8")):
+    # Always call checkpw to prevent timing-based username enumeration.
+    hash_to_check = user.password_hash if user else _DUMMY_HASH
+    valid = bcrypt.checkpw(req.password.encode("utf-8"), hash_to_check.encode("utf-8"))
+    if not user or not valid:
+        await log_audit(None, "login_failed", detail=f"username={req.username}", ip=client_ip)
         raise api_error(401, "invalid_credentials", parse_accept_language(request.headers.get("accept-language")))
 
     token = secrets.token_urlsafe(32)
     ua = request.headers.get("user-agent", "")
-    session_meta = json.dumps(
+    session_meta = _sign_session(json.dumps(
         {
             "user_id": user.id,
             "role": user.role,
@@ -125,7 +138,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
             "user_agent": ua[:256],
             "created_at": datetime.now(UTC).isoformat(),
         }
-    )
+    ))
     await get_redis().setex(f"session:{user.id}:{token}", _SESSION_TTL, session_meta)
 
     is_https = _is_https(request)
@@ -134,7 +147,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
         value=f"{user.id}:{token}",
         httponly=True,
         secure=settings.cookie_secure and is_https,
-        samesite="strict" if is_https else "lax",
+        samesite="strict",
         path="/",
         max_age=_SESSION_TTL,
     )
@@ -145,7 +158,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
         value=csrf_token,
         httponly=False,
         secure=settings.cookie_secure and is_https,
-        samesite="strict" if is_https else "lax",
+        samesite="strict",
         path="/",
         max_age=_SESSION_TTL,
     )
@@ -154,6 +167,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
         await session.execute(text("UPDATE users SET last_login_at = now() WHERE id = :uid"), {"uid": user.id})
         await session.commit()
 
+    await log_audit(user.id, "login_success", ip=client_ip)
     return {"status": "ok", "role": user.role}
 
 
@@ -185,7 +199,8 @@ async def check_auth(
                     {"uname": username},
                 )
                 user = result.fetchone()
-            if user and bcrypt.checkpw(password.encode("utf-8"), user.password_hash.encode("utf-8")):
+            hash_to_check = user.password_hash if user else _DUMMY_HASH
+            if user and bcrypt.checkpw(password.encode("utf-8"), hash_to_check.encode("utf-8")):
                 return {"status": "ok"}
         except Exception:
             pass
@@ -223,9 +238,11 @@ async def list_sessions(
                 continue
             ttl = await redis.ttl(key_str)
 
-            # Parse session metadata (could be old format dict-string or new JSON)
+            # Parse session metadata — strip HMAC signature before JSON parsing
             try:
-                meta = json.loads(raw if isinstance(raw, str) else raw.decode())
+                raw_str = raw if isinstance(raw, str) else raw.decode()
+                verified = _verify_session(raw_str)
+                meta = json.loads(verified) if verified else {}
             except (json.JSONDecodeError, UnicodeDecodeError):
                 meta = {}
 
@@ -291,19 +308,23 @@ async def revoke_session(
 
 @router.post("/logout")
 async def logout(
+    request: Request,
     vault_session: str | None = Cookie(default=None),
     response: Response = None,
 ):
     """Logout: delete session from Redis and clear cookie."""
+    logged_user_id: int | None = None
     if vault_session:
         try:
             user_id_str, token = vault_session.split(":", 1)
+            logged_user_id = int(user_id_str)
             await get_redis().delete(f"session:{user_id_str}:{token}")
         except ValueError:
             pass
 
     response.delete_cookie("vault_session", path="/")
     response.delete_cookie("csrf_token", path="/")
+    await log_audit(logged_user_id, "logout", ip=get_client_ip(request))
     return {"status": "ok"}
 
 
@@ -444,10 +465,13 @@ async def delete_avatar(auth: dict = Depends(require_auth)):
 @router.post("/change-password")
 async def change_password(
     req: ChangePasswordRequest,
+    request: Request,
     auth: dict = Depends(require_auth),
     vault_session: str | None = Cookie(default=None),
 ):
     """Change the current user's password and invalidate all other sessions."""
+    await check_rate_limit(f"password_change:{auth['user_id']}", max_requests=3, window=300)
+
     if len(req.new_password) < 8:
         raise HTTPException(status_code=400, detail="Password must be at least 8 characters")
 
@@ -458,7 +482,11 @@ async def change_password(
         )
         user = result.fetchone()
 
-    if not user or not bcrypt.checkpw(req.current_password.encode("utf-8"), user.password_hash.encode("utf-8")):
+    # Always call checkpw to prevent timing attacks.
+    hash_to_check = user.password_hash if user else _DUMMY_HASH
+    valid = bcrypt.checkpw(req.current_password.encode("utf-8"), hash_to_check.encode("utf-8"))
+    if not user or not valid:
+        await log_audit(auth["user_id"], "password_change_failed", ip=get_client_ip(request))
         raise HTTPException(status_code=401, detail="Current password is incorrect")
 
     new_hash = bcrypt.hashpw(req.new_password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
@@ -492,4 +520,5 @@ async def change_password(
         if cursor == 0:
             break
 
+    await log_audit(auth["user_id"], "password_changed", ip=get_client_ip(request))
     return {"status": "ok"}

@@ -235,7 +235,7 @@ async def _delete_keys(pattern: str) -> int:
 
 
 @router.get("/cache")
-async def get_cache_stats(_: dict = Depends(require_auth)):
+async def get_cache_stats(_: dict = Depends(_admin)):
     """Return Redis memory usage and key counts by category."""
     r = get_redis()
 

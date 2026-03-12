@@ -653,12 +653,21 @@ async def list_tokens(auth: dict = Depends(_member)):
     return {"tokens": tokens}
 
 
+_MAX_TOKEN_EXPIRY_DAYS = 365
+
+
 @router.post("/tokens")
 async def create_token(
     req: CreateTokenRequest,
     auth: dict = Depends(_member),
 ):
     """Create a new API token."""
+    if req.expires_days is not None and req.expires_days > _MAX_TOKEN_EXPIRY_DAYS:
+        raise HTTPException(
+            status_code=400,
+            detail=f"expires_days must be <= {_MAX_TOKEN_EXPIRY_DAYS}",
+        )
+
     raw_token = secrets.token_urlsafe(32)
     token_hash = hashlib.sha256(raw_token.encode()).hexdigest()
 

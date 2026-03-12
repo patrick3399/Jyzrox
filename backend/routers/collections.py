@@ -246,7 +246,9 @@ async def add_galleries_to_collection(
     ).scalar_one()
 
     added = 0
-    for i, gid in enumerate(body.gallery_ids):
+    denied: list[int] = []
+    position_offset = 0
+    for gid in body.gallery_ids:
         # Check if already in collection
         existing = (
             await db.execute(
@@ -262,23 +264,26 @@ async def add_galleries_to_collection(
         # Verify the gallery is visible to this user
         gallery = await db.get(Gallery, gid)
         if not gallery:
+            denied.append(gid)
             continue
         if auth.get("role") != "admin":
             if (gallery.created_by_user_id is not None
                     and gallery.created_by_user_id != auth["user_id"]
                     and gallery.visibility != "public"):
+                denied.append(gid)
                 continue
         cg = CollectionGallery(
             collection_id=collection_id,
             gallery_id=gid,
-            position=max_pos_result + 1 + i,
+            position=max_pos_result + 1 + position_offset,
         )
         db.add(cg)
         added += 1
+        position_offset += 1
 
     collection.updated_at = datetime.now(UTC)
     await db.commit()
-    return {"status": "ok", "added": added}
+    return {"status": "ok", "added": added, "denied": denied}
 
 
 @router.delete("/{collection_id}/galleries/{gallery_id}")

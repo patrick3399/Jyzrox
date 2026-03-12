@@ -193,12 +193,12 @@ async def batch_progress(
     r = get_redis()
     data = await r.get(f"import:batch:{batch_id}")
     if not data:
-        return {"status": "unknown"}
+        raise HTTPException(status_code=404, detail="Not found")
     # Admin can see all; others only own batches
     if auth["role"] != "admin":
         owner = await r.get(f"import:batch:{batch_id}:owner")
         if not owner or int(owner) != auth["user_id"]:
-            return {"status": "unknown"}
+            raise HTTPException(status_code=404, detail="Not found")
     return json.loads(data)
 
 
@@ -213,7 +213,7 @@ async def get_import_progress(
         async with async_session() as session:
             gallery = await session.get(Gallery, gallery_id)
             if gallery and gallery.created_by_user_id is not None and gallery.created_by_user_id != auth["user_id"]:
-                return {"gallery_id": gallery_id, "status": "unknown"}
+                raise HTTPException(status_code=404, detail="Not found")
     r = get_redis()
     data = await r.get(f"import:progress:{gallery_id}")
     if not data:
