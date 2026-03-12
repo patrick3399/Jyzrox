@@ -135,29 +135,54 @@ async def update_user(
 
     await db.commit()
 
-    # Immediately update role in all active sessions for this user
+    # Immediately update role in all active sessions for this user.
+    # If Redis is unavailable, delete all sessions to force re-login and
+    # prevent the old role from persisting for up to 30 days.
     if req.role is not None:
         redis = get_redis()
         prefix = f"session:{user_id}:"
-        cursor = 0
-        while True:
-            cursor, keys = await redis.scan(cursor, match=f"{prefix}*", count=100)
-            for key in keys:
-                key_str = key if isinstance(key, str) else key.decode()
-                raw = await redis.get(key_str)
-                if not raw:
-                    continue
-                ttl = await redis.ttl(key_str)
-                if ttl < 1:
-                    continue
-                try:
-                    data = json.loads(raw if isinstance(raw, str) else raw.decode())
-                    data["role"] = req.role
-                    await redis.setex(key_str, ttl, json.dumps(data))
-                except (json.JSONDecodeError, TypeError):
-                    pass
-            if cursor == 0:
-                break
+        try:
+            cursor = 0
+            while True:
+                cursor, keys = await redis.scan(cursor, match=f"{prefix}*", count=100)
+                for key in keys:
+                    key_str = key if isinstance(key, str) else key.decode()
+                    raw = await redis.get(key_str)
+                    if not raw:
+                        continue
+                    ttl = await redis.ttl(key_str)
+                    if ttl < 1:
+                        continue
+                    try:
+                        data = json.loads(raw if isinstance(raw, str) else raw.decode())
+                        data["role"] = req.role
+                        await redis.setex(key_str, ttl, json.dumps(data))
+                    except (json.JSONDecodeError, TypeError):
+                        pass
+                if cursor == 0:
+                    break
+        except Exception as exc:
+            logger.warning(
+                "Redis unavailable when updating role for user %d (%s); "
+                "deleting all sessions to force re-login",
+                user_id,
+                exc,
+            )
+            try:
+                cursor = 0
+                while True:
+                    cursor, keys = await redis.scan(cursor, match=f"{prefix}*", count=100)
+                    for key in keys:
+                        key_str = key if isinstance(key, str) else key.decode()
+                        await redis.delete(key_str)
+                    if cursor == 0:
+                        break
+            except Exception as del_exc:
+                logger.error(
+                    "Failed to delete sessions for user %d during role update: %s",
+                    user_id,
+                    del_exc,
+                )
 
     return {"status": "ok"}
 

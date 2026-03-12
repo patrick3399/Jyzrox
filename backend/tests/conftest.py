@@ -282,7 +282,6 @@ _SQLITE_SCHEMA = [
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         name TEXT,
         token_hash TEXT UNIQUE NOT NULL,
-        token_plain TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_used_at TIMESTAMP,
         expires_at TIMESTAMP
