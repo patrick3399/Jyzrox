@@ -115,3 +115,23 @@ async def require_opds_auth(
         )
 
     return {"user_id": user.id, "role": user.role or "viewer"}
+
+
+def gallery_access_filter(auth: dict):
+    """Return SQLAlchemy WHERE clause for gallery visibility based on user role.
+
+    Admin sees everything. Non-admin sees own + system + public galleries.
+    Import: from core.auth import gallery_access_filter
+    Usage: stmt = stmt.where(gallery_access_filter(auth))
+    """
+    from sqlalchemy import or_
+    from db.models import Gallery
+
+    if auth.get("role") == "admin":
+        return Gallery.id.isnot(None)  # always-true condition
+    user_id = auth["user_id"]
+    return or_(
+        Gallery.created_by_user_id == user_id,
+        Gallery.created_by_user_id.is_(None),
+        Gallery.visibility == "public",
+    )

@@ -259,6 +259,15 @@ async def add_galleries_to_collection(
         ).scalar_one_or_none()
         if existing:
             continue
+        # Verify the gallery is visible to this user
+        gallery = await db.get(Gallery, gid)
+        if not gallery:
+            continue
+        if auth.get("role") != "admin":
+            if (gallery.created_by_user_id is not None
+                    and gallery.created_by_user_id != auth["user_id"]
+                    and gallery.visibility != "public"):
+                continue
         cg = CollectionGallery(
             collection_id=collection_id,
             gallery_id=gid,

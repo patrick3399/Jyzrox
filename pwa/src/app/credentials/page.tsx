@@ -1,11 +1,13 @@
 'use client'
 
 import { useState, useEffect, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
 import { ChevronUp, ChevronDown, Eye, EyeOff, RefreshCw, Trash2, Key, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+import { useProfile } from '@/hooks/useProfile'
 import type { Credentials, EhAccount, PluginInfo, CredentialFlow } from '@/lib/types'
 
 // Common site presets with suggested cookie keys
@@ -838,6 +840,16 @@ function GenericCookieSection({
 
 export default function CredentialsPage() {
   useLocale()
+  const router = useRouter()
+  const { data: profile, isLoading: profileLoading } = useProfile()
+
+  const isAdmin = profile?.role === 'admin'
+
+  useEffect(() => {
+    if (!profileLoading && profile && !isAdmin) {
+      router.replace('/forbidden')
+    }
+  }, [profileLoading, profile, isAdmin, router])
 
   const [plugins, setPlugins] = useState<PluginInfo[]>([])
   const [pluginsLoading, setPluginsLoading] = useState(true)
@@ -875,6 +887,14 @@ export default function CredentialsPage() {
   const toggleSection = useCallback((sourceId: string) => {
     setOpenSection((prev) => (prev === sourceId ? null : sourceId))
   }, [])
+
+  if (profileLoading || !profile || !isAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
+      </div>
+    )
+  }
 
   // Exclude gallery_dl from the plugin list (rendered as generic cookie section)
   const pluginSections = plugins.filter((p) => p.source_id !== 'gallery_dl')

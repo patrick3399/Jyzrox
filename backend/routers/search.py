@@ -7,7 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, func, or_, select
 
-from core.auth import require_auth
+from core.auth import gallery_access_filter, require_auth
 from core.database import async_session
 from db.models import Gallery, SavedSearch
 
@@ -46,7 +46,7 @@ async def search_galleries(
     page: int = 1,
     limit: int = 24,
     cursor: str | None = Query(default=None),
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
 ):
     """
     Unified search with full query syntax:
@@ -152,7 +152,7 @@ async def search_galleries(
             cursor_id = c["id"]
             cursor_val = c["v"]
 
-            base_stmt = select(Gallery).where(*filters)
+            base_stmt = select(Gallery).where(*filters, gallery_access_filter(auth))
 
             if effective_sort == "added_at":
                 from datetime import datetime as _dt
@@ -239,10 +239,10 @@ async def search_galleries(
 
             offset = (page - 1) * limit
 
-            count_query = select(func.count()).select_from(Gallery).where(*filters)
+            count_query = select(func.count()).select_from(Gallery).where(*filters, gallery_access_filter(auth))
             total = (await session.execute(count_query)).scalar()
 
-            data_query = select(Gallery).where(*filters).order_by(order).limit(limit).offset(offset)
+            data_query = select(Gallery).where(*filters, gallery_access_filter(auth)).order_by(order).limit(limit).offset(offset)
             rows = (await session.execute(data_query)).scalars().all()
 
     return {

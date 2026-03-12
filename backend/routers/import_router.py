@@ -179,7 +179,7 @@ async def batch_start(
             await session.commit()
 
     arq = request.app.state.arq
-    await arq.enqueue_job("batch_import_job", real_root, req.mode, req.galleries, batch_id)
+    await arq.enqueue_job("batch_import_job", real_root, req.mode, req.galleries, batch_id, auth["user_id"])
 
     return {"batch_id": batch_id, "total": total}
 
@@ -466,9 +466,15 @@ async def rescan_library_path(library_id: int, request: Request, _: dict = Depen
 async def rescan_gallery(
     gallery_id: int,
     request: Request,
-    _: dict = Depends(_member),
+    auth: dict = Depends(_member),
 ):
     """Enqueue a rescan job for a single gallery."""
+    async with async_session() as session:
+        gallery = await session.get(Gallery, gallery_id)
+        if not gallery:
+            raise HTTPException(404, "Gallery not found")
+        if auth["role"] != "admin" and gallery.created_by_user_id is not None and gallery.created_by_user_id != auth["user_id"]:
+            raise HTTPException(403, "Not your gallery")
     arq = request.app.state.arq
     await arq.enqueue_job("rescan_gallery_job", gallery_id)
     return {"status": "enqueued", "gallery_id": gallery_id}

@@ -17,7 +17,7 @@ from sqlalchemy.sql import text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import require_auth, require_role
+from core.auth import gallery_access_filter, require_auth, require_role
 from core.config import settings
 from core.database import get_db
 from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag
@@ -116,6 +116,9 @@ async def list_galleries(
       - page-based (legacy): pass page= integer. Capped at page 500.
     """
     stmt = select(Gallery)
+
+    # Data isolation: non-admin users only see own + system + public galleries
+    stmt = stmt.where(gallery_access_filter(auth))
 
     # GIN array operations
     if tags:
@@ -267,7 +270,7 @@ async def list_artists(
         func.count().label("gallery_count"),
         func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
         func.max(Gallery.added_at).label("latest_added_at"),
-    ).where(Gallery.artist_id.is_not(None)).group_by(Gallery.artist_id)
+    ).where(Gallery.artist_id.is_not(None), gallery_access_filter(auth)).group_by(Gallery.artist_id)
 
     if q:
         base = base.having(func.max(Gallery.uploader).ilike(f"%{q}%"))
@@ -341,7 +344,7 @@ async def get_artist_summary(
             func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
             func.max(Gallery.added_at).label("latest_added_at"),
         )
-        .where(Gallery.artist_id == artist_id)
+        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
     )
     agg_row = (await db.execute(agg_stmt)).one_or_none()
     if not agg_row or agg_row.gallery_count == 0:
@@ -351,14 +354,14 @@ async def get_artist_summary(
     total_images_stmt = (
         select(func.count(Image.id))
         .join(Gallery, Image.gallery_id == Gallery.id)
-        .where(Gallery.artist_id == artist_id)
+        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
     )
     total_images = (await db.execute(total_images_stmt)).scalar_one()
 
     # Cover thumb: most recent gallery's first image
     latest_gallery_sub = (
         select(Gallery.id)
-        .where(Gallery.artist_id == artist_id)
+        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
         .order_by(desc(Gallery.added_at))
         .limit(1)
     ).scalar_subquery()
@@ -396,8 +399,8 @@ async def list_artist_images(
     db: AsyncSession = Depends(get_db),
 ):
     """List all images across all galleries for a given artist, paginated."""
-    # Verify the artist exists (at least one gallery with this artist_id)
-    exists_stmt = select(func.count(Gallery.id)).where(Gallery.artist_id == artist_id)
+    # Verify the artist exists (at least one visible gallery with this artist_id)
+    exists_stmt = select(func.count(Gallery.id)).where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
     artist_gallery_count = (await db.execute(exists_stmt)).scalar_one()
     if artist_gallery_count == 0:
         raise HTTPException(status_code=404, detail="Artist not found")
@@ -406,7 +409,7 @@ async def list_artist_images(
     total_stmt = (
         select(func.count(Image.id))
         .join(Gallery, Image.gallery_id == Gallery.id)
-        .where(Gallery.artist_id == artist_id)
+        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
     )
     total_count = (await db.execute(total_stmt)).scalar_one()
 
@@ -417,7 +420,7 @@ async def list_artist_images(
     stmt = (
         select(Image, Gallery.title.label("gallery_title"))
         .join(Gallery, Image.gallery_id == Gallery.id)
-        .where(Gallery.artist_id == artist_id)
+        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
         .order_by(gallery_order, asc(Image.page_num))
         .offset(page * limit)
         .limit(limit)

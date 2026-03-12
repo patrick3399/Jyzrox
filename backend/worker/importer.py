@@ -443,7 +443,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     return {"status": "done", "processed": processed}
 
 
-async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[dict], batch_id: str) -> dict:
+async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[dict], batch_id: str, user_id: int | None = None) -> dict:
     """Batch import multiple galleries from a root directory."""
     import json as _json
 
@@ -464,8 +464,8 @@ async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[
             async with AsyncSessionLocal() as session:
                 result = await session.execute(
                     text(
-                        "INSERT INTO galleries (source, source_id, title, import_mode, library_path, artist_id)"
-                        " VALUES (:source, :source_id, :title, :mode, :library_path, :artist_id) RETURNING id"
+                        "INSERT INTO galleries (source, source_id, title, import_mode, library_path, artist_id, created_by_user_id)"
+                        " VALUES (:source, :source_id, :title, :mode, :library_path, :artist_id, :user_id) RETURNING id"
                     ),
                     {
                         "source": "local",
@@ -474,6 +474,7 @@ async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[
                         "mode": mode,
                         "library_path": root_dir if mode == "link" else None,
                         "artist_id": f"local:{artist}" if artist else None,
+                        "user_id": user_id,
                     },
                 )
                 gallery_id = result.scalar_one()

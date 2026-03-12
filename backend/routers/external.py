@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select, text, update
 
+from core.auth import gallery_access_filter
 from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
@@ -189,10 +190,10 @@ async def list_galleries(
         filters.append(Gallery.rating >= min_rating)
 
     async with async_session() as session:
-        count_result = await session.execute(select(func.count()).select_from(Gallery).where(*filters))
+        count_result = await session.execute(select(func.count()).select_from(Gallery).where(*filters, gallery_access_filter(token_data)))
         total = count_result.scalar() or 0
 
-        data_query = select(Gallery).where(*filters).order_by(Gallery.added_at.desc()).limit(limit).offset(page * limit)
+        data_query = select(Gallery).where(*filters, gallery_access_filter(token_data)).order_by(Gallery.added_at.desc()).limit(limit).offset(page * limit)
         rows = (await session.execute(data_query)).scalars().all()
 
     galleries = []
@@ -227,7 +228,7 @@ async def get_gallery(
 ):
     """Get a single gallery by ID."""
     async with async_session() as session:
-        r = (await session.execute(select(Gallery).where(Gallery.id == gallery_id))).scalar_one_or_none()
+        r = (await session.execute(select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))).scalar_one_or_none()
 
     if not r:
         raise HTTPException(status_code=404, detail="Gallery not found")
@@ -261,8 +262,8 @@ async def get_gallery_images(
 ):
     """List images for a gallery."""
     async with async_session() as session:
-        # Verify gallery exists
-        gallery = (await session.execute(select(Gallery.id).where(Gallery.id == gallery_id))).fetchone()
+        # Verify gallery exists and is accessible
+        gallery = (await session.execute(select(Gallery.id).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))).fetchone()
         if not gallery:
             raise HTTPException(status_code=404, detail="Gallery not found")
 
@@ -308,6 +309,11 @@ async def get_image_file(
 ):
     """Stream an image file for external readers (Mihon)."""
     async with async_session() as session:
+        # Verify gallery is accessible before serving the image
+        gallery_check = (await session.execute(select(Gallery.id).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))).fetchone()
+        if not gallery_check:
+            raise HTTPException(status_code=404, detail="Gallery not found")
+
         row = (
             await session.execute(
                 select(Image)
