@@ -21,6 +21,7 @@ from plugins.models import (
     FieldDef,
     GalleryImportData,
     GalleryMetadata,
+    NewWork,
     PluginMeta,
     SiteInfo,
 )
@@ -243,3 +244,13 @@ class EhSourcePlugin(SourcePlugin):
         """Verify EH cookies by testing access against the EhClient."""
         from plugins.builtin.ehentai._credentials import verify_eh_credential
         return await verify_eh_credential(credentials)
+
+    # ------------------------------------------------------------------
+    # Subscribable protocol method
+    # ------------------------------------------------------------------
+
+    async def check_new_works(
+        self, artist_id: str, last_known: str | None, credentials: dict | None,
+    ) -> list[NewWork]:
+        from plugins.builtin.ehentai._subscribe import check_eh_new_works
+        return await check_eh_new_works(artist_id, last_known, credentials)

@@ -1,6 +1,6 @@
 # Jyzrox TODO
 
-> 最後更新：2026-03-12
+> 最後更新：2026-03-13
 
 ---
 
@@ -8,43 +8,40 @@
 
 > 獨立功能，少依賴，能快速上線。
 
-### 大量下載
+### Subscription 擴展 — 大量下載
 
-#### 後端
-- [ ] 批次下載 API：接受標籤/作者/搜尋條件，列舉所有符合的 gallery
-- [ ] 批次 enqueue 機制（避免一次灌入數千 job 壓垮 worker）
-- [ ] 批次任務進度追蹤（Redis：總數/已完成/失敗）
-- [ ] E-Hentai 標籤全下載（爬取搜尋結果所有頁 → 逐一 enqueue）
-- [ ] Pixiv 作者全作品下載（取得作品列表 → 逐一 enqueue）
-- [ ] 下載速率限制設定：per-site concurrency / delay_ms（EH、Pixiv 分開設定）
+> **策略**：不另建批次下載系統，擴展現有 Subscription 架構。
+> X/Twitter 已驗證可行（generic fallback → gallery-dl 爬全頁），Pixiv 首次 check 時 `last_item_id=None` 也會回傳全部作品。
+> 核心缺口：EH 沒有 `Subscribable` 實作，且 generic fallback 無增量追蹤。
+
+#### ~~Phase 1：EH Subscribable 實作~~ ✅ Done
+- [x] `plugins/builtin/ehentai/_subscribe.py`：實作 `check_eh_new_works()` — EhClient.search() 逐頁爬取 → gid 邊界比對 → 回傳 `list[NewWork]`
+- [x] EH `EhSourcePlugin` 加入 `Subscribable` protocol 實作（`check_new_works()` 委派）
+- [x] 支援訂閱類型：uploader 頁面（`/uploader/xxx`）、標籤搜尋 URL（`?f_search=tag:xxx`）、tag 頁面（`/tag/xxx`）
+- [x] 增量追蹤：以 gallery gid 作為 `last_item_id`，`gid <= last_known` 邊界停止
+- [x] 處理 EH 分頁：最多 10 頁、3s 間隔，首次 check 只取一頁
+- [x] `_extract_source_id()` 支援 EH/ExH URL 解析（f_search / tag / uploader），`unquote()` 正確解碼
+- [x] `EhClient.search()` 等 4 處 set 去重改為 `dict.fromkeys()` 保序
+- [x] 30 個單元測試覆蓋
+
+#### Phase 2：批次 enqueue 保護
+- [ ] 節流 enqueue：首次全量下載可能產生數百個 job，加入 enqueue 間隔（可設定 delay）
+- [ ] Subscription 新增 `total_enqueued` / `total_completed` 欄位，追蹤批次進度
+- [ ] Redis key `subscription:progress:{sub_id}` — 即時統計（總數/已完成/失敗）
+- [ ] Worker enqueue 時推送 WebSocket 進度事件
+
+#### Phase 3：前端強化
+- [ ] Subscription 建立時偵測 EH URL → 預覽「此訂閱約有 N 本 gallery」（dry-run check）
+- [ ] Subscription 卡片顯示批次進度（進度條：已完成/總數）
+- [ ] 首次全量下載確認 dialog（「將下載約 N 本，是否繼續？」）
+- [ ] 從 EH 瀏覽器搜尋結果頁「一鍵訂閱」按鈕（帶入搜尋 URL）
+
+#### 獨立項目
+- [x] ~~下載速率限制設定：per-site concurrency / delay_ms~~ → 移至「統一限速控制」完成
+- [x] ~~時段排程解鎖~~ → 移至「統一限速控制」完成
 - [ ] Hentai@Home 支援：EH plugin 偵測 H@H 可用時自動解鎖限速（或手動覆蓋）
-- [ ] 時段排程解鎖：設定某時段（例如 00:00–06:00）自動移除限速（ARQ cron 切換 Redis flag）
-
-#### 前端
-- [ ] 批次下載 UI 入口（從搜尋結果頁觸發）
-- [ ] 批次任務儀表板（總進度、成功/失敗統計）
-- [ ] 批次下載確認 dialog（預覽數量、預估大小）
 
 > ✅ 已套用：`enqueue` 端點已加 `require_role("member")`，job 列表依角色篩選
-
----
-
-### 統一限速控制頁面（/settings — 下載限速分區）
-
-> 與「大量下載」限速後端共用設定機制，作為 Settings 新分區實作。Nginx 層（api_zone / download_zone）維持 hardcode，不納入此頁面範疇。
-
-#### 後端
-- [ ] `site_rate_config` 設定結構（DB 或 config JSON）：per-site concurrency、delay_ms、時段排程
-- [ ] `GET/PATCH /api/settings/rate-limits`：讀取與更新限速設定
-- [ ] 時段排程 Redis flag：cron job 定時寫入/移除，worker 下載前讀取
-
-#### 前端
-- [ ] `/settings` 新增「下載限速」分區
-- [ ] Per-site 設定表（EH / Pixiv）：concurrency 滑桿、delay 輸入
-- [ ] 時段排程設定：起止時間選擇 + 目標限速模式（全速 / 標準）
-- [ ] 全域暫時解鎖按鈕（立即套用直到下次 cron 重置）
-
-> ✅ 已套用：設定端點已加 `require_role("admin")`
 
 ---
 
@@ -75,9 +72,12 @@
 ### Gallery 分享與可見性控制
 
 > 依賴：多人權限 ✅ 已完成
+> 基礎設施：`galleries.visibility` 欄位 + `gallery_visibility_filter()` helper 已存在
 
+- [x] Gallery 基礎可見性欄位（`galleries.visibility` default 'public'，`created_by_user_id`，GIN index）
+- [x] 後端可見性過濾 helper（`core/gallery_access.py`，`gallery_visibility_filter()`）
 - [ ] `gallery_permissions` 表（gallery_id, user_id, permission_level）
-- [ ] Gallery 可見性設定（私有 / 公開 / 指定使用者）
+- [ ] Gallery 可見性設定 API（PATCH visibility：私有 / 公開 / 指定使用者）
 - [ ] Gallery 分享 UI：設定可見性、邀請使用者
 - [ ] 分享連結：Gallery 產生公開短連結（token-based，可設過期時間）
 - [ ] 內容過濾：依 tag namespace 隱藏 gallery（R18 過濾），存入 `user_preferences`
@@ -374,5 +374,23 @@
 - [x] 403 Forbidden 頁面（`/forbidden`）
 - [x] 側邊欄/底部導航依角色過濾
 - [x] i18n 五語系支援（en/zh-TW/zh-CN/ja/ko）
+
+### 安全強化（v0.5）
+- [x] HMAC session signing + auth hardening + audit logging scaffold
+
+### 統一限速控制（v0.5）
+- [x] `SiteRateConfig` 設定結構（Redis-backed）：per-site concurrency、delay_ms、時段排程
+- [x] `GET/PATCH /api/settings/rate-limits`：讀取與更新限速設定（admin only）
+- [x] `POST /api/settings/rate-limits/override`：手動全速解鎖
+- [x] 時段排程 cron job（`rate_limit_schedule_job`）：定時評估排程視窗，寫入/移除 Redis flag
+- [x] `/settings` 下載限速分區 UI：per-site concurrency 滑桿、delay 輸入、排程設定、手動解鎖按鈕
+- [x] i18n 五語系支援
+
+### EH Subscribable（v0.6）
+- [x] `check_eh_new_works()` 增量檢查（gid 邊界、分頁、use_ex 決策鏈）
+- [x] `EhSourcePlugin` 實作 Subscribable protocol（自動偵測註冊）
+- [x] `_extract_source_id()` 支援 EH URL（f_search / tag / uploader + percent-decode）
+- [x] `EhClient` 搜尋結果保序修正（`dict.fromkeys`）
+- [x] 30 個單元測試
 
 </details>

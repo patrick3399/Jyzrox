@@ -259,7 +259,7 @@ class EhClient:
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
-        matches = list({(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)})
+        matches = list(dict.fromkeys((int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)))
         total_match = _TOTAL_COUNT_RE.search(resp.text)
         if total_match:
             total = int(total_match.group(1).replace(",", ""))
@@ -620,7 +620,7 @@ class EhClient:
         self._check_auth(resp.text, resp)
 
         # Parse gallery links
-        matches = list({(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)})
+        matches = list(dict.fromkeys((int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)))
 
         soup = BeautifulSoup(resp.text, "lxml")
 
@@ -767,7 +767,7 @@ class EhClient:
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
-        matches = list({(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)})
+        matches = list(dict.fromkeys((int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)))
         if not matches:
             return {"galleries": []}
 
@@ -785,7 +785,7 @@ class EhClient:
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
-        matches = list({(int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)})
+        matches = list(dict.fromkeys((int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)))
         total_match = _TOTAL_COUNT_RE.search(resp.text)
         total = int(total_match.group(1).replace(",", "")) if total_match else len(matches)
 

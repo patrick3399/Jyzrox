@@ -1,4 +1,4 @@
-# Jyzrox Architecture (v0.3)
+# Jyzrox Architecture (v0.6)
 
 > Codebase audit, 2026-03-12 (updated). Read from source files â€” do not update manually; regenerate from source.
 
@@ -287,7 +287,7 @@ Singleton `plugin_registry` (`PluginRegistry`). Maintains a site index (domainâ†
 
 | Plugin | source_id | Interfaces | Description |
 |--------|-----------|------------|-------------|
-| `ehentai/source.py` | `ehentai` | Downloadable, Parseable | Native EH download via `EhClient` |
+| `ehentai/source.py` | `ehentai` | Downloadable, Parseable, Subscribable | Native EH download via `EhClient` + subscription checks |
 | `ehentai/browse.py` | `ehentai` | BrowsePlugin, Browsable, CredentialProvider | EH browse endpoints + credential flows |
 | `pixiv/source.py` | `pixiv` | Downloadable, Parseable, Subscribable | Pixiv artwork download + subscription checks |
 | `pixiv/_browse.py` | `pixiv` | BrowsePlugin, Browsable, CredentialProvider | Pixiv browse endpoints + credential flows |

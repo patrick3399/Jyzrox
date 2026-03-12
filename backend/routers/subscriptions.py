@@ -3,7 +3,7 @@
 import logging
 import re
 from datetime import UTC, datetime
-from urllib.parse import urlparse
+from urllib.parse import parse_qs, unquote, urlparse
 
 from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -32,6 +32,18 @@ def _extract_source_id(url: str, source: str) -> str | None:
     if source == "twitter":
         parts = parsed.path.strip("/").split("/")
         return parts[0] if parts and parts[0] else None
+    if source == "ehentai":
+        qs = parse_qs(parsed.query)
+        f_search = qs.get("f_search", [None])[0]
+        if f_search:
+            return f_search.strip()
+        tag_match = re.match(r"/tag/(.+?)/?$", parsed.path)
+        if tag_match:
+            return unquote(tag_match.group(1))
+        uploader_match = re.match(r"/uploader/(.+?)/?$", parsed.path)
+        if uploader_match:
+            return f"uploader:{unquote(uploader_match.group(1))}"
+        return None
     return None
 
 
