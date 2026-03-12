@@ -1186,6 +1186,12 @@ const en: Record<string, string> = {
   'dedup.diffTypeLocalized': 'Has Local Changes',
   'dedup.reasonHigherRes': 'Different Resolution',
   'dedup.reasonLargerFile': 'Different File Size',
+
+  // ── Bottom Tab Bar ──
+  'nav.more': 'More',
+
+  // ── Back Button ──
+  'common.back': 'Back',
 }
 
 export default en

@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEhSearch, useEhFavorites, useEhPopular, useEhToplist } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
+import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -438,15 +439,27 @@ function BrowsePage() {
 
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [selectedGallery, setSelectedGallery] = useState<EhGallery | null>(null)
+  const [colCount, setColCount] = useState(3)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   // Advanced search state
   const [showAdvanced, setShowAdvanced] = useState(false)
-  const [selectedCats, setSelectedCats] = useState<Set<string>>(new Set(Object.keys(CATEGORY_META)))
-  const [advSearch, setAdvSearch] = useState(0)
-  const [minRating, setMinRating] = useState<number | null>(null)
-  const [pageFrom, setPageFrom] = useState<string>('')
-  const [pageTo, setPageTo] = useState<string>('')
+  const [selectedCats, setSelectedCats] = useState<Set<string>>(() => {
+    const catParam = searchParams.get('cat')
+    if (!catParam) return new Set(Object.keys(CATEGORY_META))
+    const keys = catParam.split(',').filter((k) => k in CATEGORY_META)
+    return keys.length > 0 ? new Set(keys) : new Set(Object.keys(CATEGORY_META))
+  })
+  const [advSearch, setAdvSearch] = useState(() => {
+    const adv = searchParams.get('adv')
+    return adv ? Number(adv) : 0
+  })
+  const [minRating, setMinRating] = useState<number | null>(() => {
+    const mr = searchParams.get('minrating')
+    return mr ? Number(mr) : null
+  })
+  const [pageFrom, setPageFrom] = useState<string>(searchParams.get('pfrom') ?? '')
+  const [pageTo, setPageTo] = useState<string>(searchParams.get('pto') ?? '')
 
   // Favorites state (cursor-based pagination — EH favorites uses next/prev cursors, not page numbers)
   const [favCat, setFavCat] = useState<string>(initialFavCat)
@@ -577,9 +590,16 @@ function BrowsePage() {
     if (activeTab === 'favorites' && favSearch) params.set('favsearch', favSearch)
     if (activeTab === 'toplist' && toplistTl !== 11) params.set('tl', String(toplistTl))
     if (activeTab === 'toplist' && toplistPage > 0) params.set('tlpage', String(toplistPage))
+    if (selectedCats.size < Object.keys(CATEGORY_META).length) {
+      params.set('cat', [...selectedCats].sort().join(','))
+    }
+    if (minRating !== null && minRating !== undefined) params.set('minrating', String(minRating))
+    if (advSearch !== 0) params.set('adv', String(advSearch))
+    if (pageFrom) params.set('pfrom', pageFrom)
+    if (pageTo) params.set('pto', pageTo)
     const qs = params.toString()
     router.replace(qs ? `/e-hentai?${qs}` : '/e-hentai', { scroll: false })
-  }, [searchQuery, activeTab, favCat, favSearch, toplistTl, toplistPage]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [searchQuery, activeTab, favCat, favSearch, toplistTl, toplistPage, selectedCats, minRating, advSearch, pageFrom, pageTo]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // Compute f_cats bitmask from selected categories (multi-select)
   const computedFCats = (() => {
@@ -860,6 +880,26 @@ function BrowsePage() {
     () => (loadMode === 'scroll' ? favScrollGalleries : (favData?.galleries ?? [])),
     [loadMode, favScrollGalleries, favData?.galleries],
   )
+
+  // ── Keyboard grid navigation ────────────────────────────
+  // Active for search/latest and popular tabs (grid mode only)
+  const activeGalleries =
+    activeTab === 'popular' && !searchQuery
+      ? (popularData?.galleries ?? [])
+      : displayGalleries
+
+  const { focusedIndex } = useGridKeyboard({
+    totalItems: activeGalleries.length,
+    colCount,
+    onEnter: (i) => {
+      const g = activeGalleries[i]
+      if (g) {
+        sessionStorage.setItem('browse_scrollY', String(window.scrollY))
+        router.push(`/e-hentai/${g.gid}/${g.token}`)
+      }
+    },
+    enabled: viewMode === 'grid' && (activeTab === 'search' || activeTab === 'popular' || !!searchQuery),
+  })
 
   // ── Render ─────────────────────────────────────────────
 
@@ -1538,6 +1578,8 @@ function BrowsePage() {
                     columns={{ base: 3, sm: 4, md: 5, lg: 6, xl: 7, xxl: 8 }}
                     gap={8}
                     estimateHeight={220}
+                    focusedIndex={focusedIndex}
+                    onColCountChange={setColCount}
                     renderItem={(g) => (
                       <GridCard
                         key={`${g.gid}-${g.token}`}
@@ -1971,6 +2013,8 @@ function BrowsePage() {
                     columns={{ base: 3, sm: 4, md: 5, lg: 6, xl: 7, xxl: 8 }}
                     gap={8}
                     estimateHeight={220}
+                    focusedIndex={focusedIndex}
+                    onColCountChange={setColCount}
                     renderItem={(g) => (
                       <GridCard
                         key={`${g.gid}-${g.token}`}

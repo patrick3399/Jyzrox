@@ -1397,16 +1397,22 @@ export default function Reader({
 
   useTouchGesture(containerRef as React.RefObject<HTMLElement | null>, swipeLeft, swipeRight)
 
-  useKeyboardNav(rawNextPage, rawPrevPage, state.readingDirection)
+  useKeyboardNav(rawNextPage, rawPrevPage, state.readingDirection, state.viewMode)
 
-  // Escape key to go back
+  // Escape key (and ArrowUp in non-webtoon mode) to go back
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') router.back()
+      if (e.key === 'Escape') {
+        router.back()
+      }
+      if (e.key === 'ArrowUp' && state.viewMode !== 'webtoon') {
+        e.preventDefault()
+        router.back()
+      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [router])
+  }, [router, state.viewMode])
 
   const handleToggleOverlay = useCallback(() => toggleOverlay(), [toggleOverlay])
   const handleBack = useCallback(() => router.back(), [router])

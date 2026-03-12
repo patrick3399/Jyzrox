@@ -8,7 +8,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
-import { ArrowLeft, ChevronDown, ChevronUp } from 'lucide-react'
+import { ChevronDown, ChevronUp } from 'lucide-react'
+import { BackButton } from '@/components/BackButton'
 import type { EhComment } from '@/lib/types'
 
 // ── Preview grid with scaled sprite offsets ─────────────────────────────
@@ -373,6 +374,24 @@ export default function EhGalleryDetailPage() {
     [router, gid, token],
   )
 
+  // ── Keyboard navigation ──
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        router.push(`/e-hentai/read/${gid}/${token}?page=1`)
+      }
+      if (e.key === 'ArrowUp' || e.key === 'Escape') {
+        e.preventDefault()
+        history.length > 1 ? router.back() : router.push('/e-hentai')
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [router, gid, token])
+
   // ── Error / Loading ──
 
   if (galleryError) {
@@ -570,16 +589,7 @@ export default function EhGalleryDetailPage() {
         )}
       </div>
 
-      {/* Floating back button — bottom-right for easy thumb reach on mobile */}
-      <button
-        onClick={() => router.back()}
-        className="fixed bottom-6 right-6 z-40 w-12 h-12 rounded-full bg-vault-card border border-vault-border
-                   shadow-lg flex items-center justify-center text-vault-text-secondary hover:text-vault-text
-                   hover:bg-vault-card-hover hover:border-vault-border-hover transition-colors active:scale-95"
-        aria-label={t('browse.backToBrowse')}
-      >
-        <ArrowLeft size={20} />
-      </button>
+      <BackButton fallback="/e-hentai" />
     </>
   )
 }

@@ -12,6 +12,8 @@ import { CredentialBanner } from '@/components/CredentialBanner'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+import { useGridKeyboard } from '@/hooks/useGridKeyboard'
+import { useScrollRestore } from '@/hooks/useScrollRestore'
 import type { PixivIllust, PixivSearchResult, PixivUserPreview } from '@/lib/types'
 
 // ── Illust card ──────────────────────────────────────────────────────────
@@ -125,14 +127,25 @@ function SearchResults({
   query,
   credentialsMissing,
   onClear,
+  sort,
+  onSortChange,
+  duration,
+  onDurationChange,
+  focusedIndex,
+  onColCountChange,
+  saveScroll,
 }: {
   query: string
   credentialsMissing: boolean
   onClear: () => void
+  sort: string
+  onSortChange: (v: string) => void
+  duration: string
+  onDurationChange: (v: string) => void
+  focusedIndex: number | null
+  onColCountChange: (count: number) => void
+  saveScroll: () => void
 }) {
-  const [sort, setSort] = useState('date_desc')
-  const [duration, setDuration] = useState('')
-
   // Map sort values for public API: date_desc→date_d, date_asc→date, popular_desc→popular_d
   const publicOrder = sort === 'date_asc' ? 'date' : sort === 'popular_desc' ? 'popular_d' : 'date_d'
 
@@ -188,7 +201,7 @@ function SearchResults({
       <div className="flex gap-2 flex-wrap">
         <select
           value={sort}
-          onChange={(e) => setSort(e.target.value)}
+          onChange={(e) => onSortChange(e.target.value)}
           className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
         >
           {SORT_OPTIONS.map((o) => (
@@ -200,7 +213,7 @@ function SearchResults({
         {!credentialsMissing && (
           <select
             value={duration}
-            onChange={(e) => setDuration(e.target.value)}
+            onChange={(e) => onDurationChange(e.target.value)}
             className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
           >
             {DURATION_OPTIONS.map((o) => (
@@ -234,6 +247,8 @@ function SearchResults({
         columns={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
         gap={12}
         estimateHeight={200}
+        focusedIndex={focusedIndex}
+        onColCountChange={onColCountChange}
         renderItem={(illust) => (
           <IllustCard key={illust.id} illust={illust} />
         )}
@@ -247,7 +262,18 @@ function SearchResults({
 
 // ── Feed Tab ─────────────────────────────────────────────────────────────
 
-function FeedTab({ credentialsMissing }: { credentialsMissing: boolean }) {
+function FeedTab({
+  credentialsMissing,
+  focusedIndex,
+  onColCountChange,
+  saveScroll,
+}: {
+  credentialsMissing: boolean
+  focusedIndex: number | null
+  onColCountChange: (count: number) => void
+  saveScroll: () => void
+}) {
+  const router = useRouter()
   const getKey = (pageIndex: number, previous: PixivSearchResult | null) => {
     if (credentialsMissing) return null
     if (pageIndex > 0 && previous?.next_offset === null) return null
@@ -264,6 +290,23 @@ function FeedTab({ credentialsMissing }: { credentialsMissing: boolean }) {
   const allIllusts = data?.flatMap((page) => page.illusts) ?? []
   const hasMore = data ? data[data.length - 1]?.next_offset !== null : false
   const isLoading = !data && isValidating
+
+  // Grid keyboard navigation
+  const [colCount, setColCount] = useState(2)
+  useGridKeyboard({
+    totalItems: allIllusts.length,
+    colCount,
+    onEnter: (i) => {
+      saveScroll()
+      router.push(`/pixiv/illust/${allIllusts[i].id}`)
+    },
+    enabled: allIllusts.length > 0,
+  })
+
+  const handleColCountChange = (count: number) => {
+    setColCount(count)
+    onColCountChange(count)
+  }
 
   if (credentialsMissing) {
     return (
@@ -303,6 +346,8 @@ function FeedTab({ credentialsMissing }: { credentialsMissing: boolean }) {
         columns={{ base: 2, sm: 3, md: 4, lg: 6, xl: 8 }}
         gap={12}
         estimateHeight={200}
+        focusedIndex={focusedIndex}
+        onColCountChange={handleColCountChange}
         renderItem={(illust) => (
           <IllustCard key={illust.id} illust={illust} />
         )}
@@ -397,7 +442,15 @@ function UserPreviewCard({ preview }: { preview: PixivUserPreview }) {
 
 // ── Following Tab ────────────────────────────────────────────────────────
 
-function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
+function FollowingTab({
+  credentialsMissing,
+  focusedIndex,
+  onColCountChange,
+}: {
+  credentialsMissing: boolean
+  focusedIndex: number | null
+  onColCountChange: (count: number) => void
+}) {
   const getKey = (pageIndex: number, previous: { user_previews: PixivUserPreview[]; next_offset: number | null } | null) => {
     if (credentialsMissing) return null
     if (pageIndex > 0 && previous?.next_offset === null) return null
@@ -453,6 +506,8 @@ function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
         columns={{ base: 2, sm: 3, md: 4, lg: 5 }}
         gap={12}
         estimateHeight={180}
+        focusedIndex={focusedIndex}
+        onColCountChange={onColCountChange}
         renderItem={(preview: PixivUserPreview) => (
           <UserPreviewCard key={preview.user.id} preview={preview} />
         )}
@@ -466,8 +521,22 @@ function FollowingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
 
 // ── Bookmarks Tab ────────────────────────────────────────────────────────
 
-function BookmarksTab({ credentialsMissing }: { credentialsMissing: boolean }) {
-  const [restrict, setRestrict] = useState('public')
+function BookmarksTab({
+  credentialsMissing,
+  restrict,
+  onRestrictChange,
+  focusedIndex,
+  onColCountChange,
+  saveScroll,
+}: {
+  credentialsMissing: boolean
+  restrict: string
+  onRestrictChange: (v: string) => void
+  focusedIndex: number | null
+  onColCountChange: (count: number) => void
+  saveScroll: () => void
+}) {
+  const router = useRouter()
   const getKey = (pageIndex: number, previous: PixivSearchResult | null) => {
     if (credentialsMissing) return null
     if (pageIndex > 0 && previous?.next_offset === null) return null
@@ -485,6 +554,23 @@ function BookmarksTab({ credentialsMissing }: { credentialsMissing: boolean }) {
   const hasMore = data ? data[data.length - 1]?.next_offset !== null : false
   const isLoading = !data && isValidating
 
+  // Grid keyboard navigation
+  const [colCount, setColCount] = useState(2)
+  useGridKeyboard({
+    totalItems: allIllusts.length,
+    colCount,
+    onEnter: (i) => {
+      saveScroll()
+      router.push(`/pixiv/illust/${allIllusts[i].id}`)
+    },
+    enabled: allIllusts.length > 0,
+  })
+
+  const handleColCountChange = (count: number) => {
+    setColCount(count)
+    onColCountChange(count)
+  }
+
   if (credentialsMissing) {
     return (
       <div className="text-center py-16 text-vault-text-secondary">
@@ -501,7 +587,7 @@ function BookmarksTab({ credentialsMissing }: { credentialsMissing: boolean }) {
       <div className="flex justify-end gap-2">
         <select
           value={restrict}
-          onChange={(e) => setRestrict(e.target.value)}
+          onChange={(e) => onRestrictChange(e.target.value)}
           className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
         >
           <option value="public">{t('browse.rankingAll') || 'Public'}</option>
@@ -530,6 +616,8 @@ function BookmarksTab({ credentialsMissing }: { credentialsMissing: boolean }) {
         columns={{ base: 2, sm: 3, md: 4, lg: 6, xl: 8 }}
         gap={12}
         estimateHeight={200}
+        focusedIndex={focusedIndex}
+        onColCountChange={handleColCountChange}
         renderItem={(illust) => (
           <IllustCard key={illust.id} illust={illust} />
         )}
@@ -557,20 +645,38 @@ const RANKING_CONTENT = [
   { value: 'ugoira', label: () => t('browse.rankingUgoira') },
 ]
 
-function RankingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
-  const [mode, setMode] = useState('daily')
-  const [content, setContent] = useState('all')
-  const [r18, setR18] = useState(false)
+function RankingTab({
+  credentialsMissing,
+  mode,
+  onModeChange,
+  content,
+  onContentChange,
+  r18,
+  onR18Change,
+  focusedIndex,
+  onColCountChange,
+  saveScroll,
+}: {
+  credentialsMissing: boolean
+  mode: string
+  onModeChange: (v: string) => void
+  content: string
+  onContentChange: (v: string) => void
+  r18: boolean
+  onR18Change: (v: boolean) => void
+  focusedIndex: number | null
+  onColCountChange: (count: number) => void
+  saveScroll: () => void
+}) {
+  const router = useRouter()
 
   // R18 only supports daily/weekly; reset mode if incompatible
   const handleR18Toggle = () => {
-    setR18((prev) => {
-      const next = !prev
-      if (next && mode !== 'daily' && mode !== 'weekly') {
-        setMode('daily')
-      }
-      return next
-    })
+    const next = !r18
+    if (next && mode !== 'daily' && mode !== 'weekly') {
+      onModeChange('daily')
+    }
+    onR18Change(next)
   }
 
   type RankingPage = {
@@ -606,13 +712,31 @@ function RankingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
     : false
   const isLoading = !data && isValidating
 
+  // Grid keyboard navigation for ranking items
+  const [colCount, setColCount] = useState(3)
+  useGridKeyboard({
+    totalItems: allContents.length,
+    colCount,
+    onEnter: (i) => {
+      saveScroll()
+      const illustId = allContents[i]?.illust_id as number | undefined
+      if (illustId) router.push(`/pixiv/illust/${illustId}`)
+    },
+    enabled: allContents.length > 0,
+  })
+
+  const handleColCountChange = (count: number) => {
+    setColCount(count)
+    onColCountChange(count)
+  }
+
   return (
     <div className="space-y-4">
       {/* Filters */}
       <div className="flex gap-2 flex-wrap">
         <select
           value={mode}
-          onChange={(e) => setMode(e.target.value)}
+          onChange={(e) => onModeChange(e.target.value)}
           className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
         >
           {RANKING_MODES.filter((o) => !r18 || o.value === 'daily' || o.value === 'weekly').map((o) => (
@@ -639,7 +763,7 @@ function RankingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
         {!r18 && (
           <select
             value={content}
-            onChange={(e) => setContent(e.target.value)}
+            onChange={(e) => onContentChange(e.target.value)}
             className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
           >
             {RANKING_CONTENT.map((o) => (
@@ -671,6 +795,8 @@ function RankingTab({ credentialsMissing }: { credentialsMissing: boolean }) {
         columns={{ base: 3, sm: 4, md: 5, lg: 7, xl: 8, xxl: 10 }}
         gap={8}
         estimateHeight={180}
+        focusedIndex={focusedIndex}
+        onColCountChange={handleColCountChange}
         renderItem={(item: Record<string, unknown>) => {
           const illustId = item.illust_id as number
           const title = item.title as string
@@ -720,10 +846,42 @@ function PixivPageInner() {
     rawTab === 'feed' || rawTab === 'following' || rawTab === 'bookmarks' ? rawTab : 'ranking'
   const [activeTab, setActiveTab] = useState<Tab>(initialTab)
 
+  // ── Ranking sub-filter state (lifted for URL sync) ──
+  const [rankingMode, setRankingMode] = useState(searchParams.get('mode') ?? 'daily')
+  const [rankingContent, setRankingContent] = useState(searchParams.get('content') ?? 'all')
+  const [rankingR18, setRankingR18] = useState(false)
+
+  // ── Search sub-filter state (lifted for URL sync) ──
+  const [searchSort, setSearchSort] = useState(searchParams.get('sort') ?? 'date_desc')
+  const [searchDuration, setSearchDuration] = useState(searchParams.get('duration') ?? '')
+
+  // ── Bookmarks sub-filter state (lifted for URL sync) ──
+  const [bookmarksRestrict, setBookmarksRestrict] = useState(searchParams.get('restrict') ?? 'public')
+
+  // Each tab manages its own colCount internally; this no-op satisfies the prop interface
+  const noop = () => {}
+
   const handleTabChange = (tab: Tab) => {
     setActiveTab(tab)
-    router.replace(`/pixiv?tab=${tab}`, { scroll: false })
+    // URL update is handled by the useEffect below
   }
+
+  // URL sync for active tab + sub-filters
+  useEffect(() => {
+    const params = new URLSearchParams()
+    params.set('tab', activeTab)
+    if (activeTab === 'ranking') {
+      if (rankingMode !== 'daily') params.set('mode', rankingMode)
+      if (rankingContent !== 'all' && !rankingR18) params.set('content', rankingContent)
+    }
+    if (activeTab === 'bookmarks' && bookmarksRestrict !== 'public') {
+      params.set('restrict', bookmarksRestrict)
+    }
+    router.replace(`/pixiv?${params.toString()}`, { scroll: false })
+  }, [activeTab, rankingMode, rankingContent, rankingR18, bookmarksRestrict, router])
+
+  // URL sync for search sub-filters (only when search is active)
+  // search query is transient — not persisted to URL to keep it simple
 
   // Search state
   const [searchQuery, setSearchQuery] = useState('')
@@ -760,6 +918,16 @@ function PixivPageInner() {
     searchInputRef.current?.focus()
   }
 
+  // ── Scroll restoration (per tab) ──
+  // isReady is approximated by active tab match; actual data readiness is inside each tab
+  const { saveScroll: saveRankingScroll } = useScrollRestore('pixiv_ranking_scrollY', activeTab === 'ranking')
+  const { saveScroll: saveFeedScroll } = useScrollRestore('pixiv_feed_scrollY', activeTab === 'feed')
+  const { saveScroll: saveBookmarksScroll } = useScrollRestore('pixiv_bookmarks_scrollY', activeTab === 'bookmarks')
+  const { saveScroll: saveSearchScroll } = useScrollRestore('pixiv_search_scrollY', submittedQuery.length > 0)
+
+  // focusedIndex is managed inside each tab component using useGridKeyboard
+  // we only need to pass down saveScroll and onColCountChange
+
   return (
     <div className="space-y-4">
       {credentialsMissing && <CredentialBanner source="pixiv" />}
@@ -792,6 +960,13 @@ function PixivPageInner() {
           query={submittedQuery}
           credentialsMissing={credentialsMissing}
           onClear={handleClearSearch}
+          sort={searchSort}
+          onSortChange={setSearchSort}
+          duration={searchDuration}
+          onDurationChange={setSearchDuration}
+          focusedIndex={null}
+          onColCountChange={noop}
+          saveScroll={saveSearchScroll}
         />
       ) : (
         <>
@@ -844,10 +1019,45 @@ function PixivPageInner() {
           </div>
 
           {/* Tab content */}
-          {activeTab === 'ranking' && <RankingTab credentialsMissing={credentialsMissing} />}
-          {activeTab === 'feed' && !credentialsMissing && <FeedTab credentialsMissing={false} />}
-          {activeTab === 'following' && !credentialsMissing && <FollowingTab credentialsMissing={false} />}
-          {activeTab === 'bookmarks' && !credentialsMissing && <BookmarksTab credentialsMissing={false} />}
+          {activeTab === 'ranking' && (
+            <RankingTab
+              credentialsMissing={credentialsMissing}
+              mode={rankingMode}
+              onModeChange={setRankingMode}
+              content={rankingContent}
+              onContentChange={setRankingContent}
+              r18={rankingR18}
+              onR18Change={setRankingR18}
+              focusedIndex={null}
+              onColCountChange={noop}
+              saveScroll={saveRankingScroll}
+            />
+          )}
+          {activeTab === 'feed' && !credentialsMissing && (
+            <FeedTab
+              credentialsMissing={false}
+              focusedIndex={null}
+              onColCountChange={noop}
+              saveScroll={saveFeedScroll}
+            />
+          )}
+          {activeTab === 'following' && !credentialsMissing && (
+            <FollowingTab
+              credentialsMissing={false}
+              focusedIndex={null}
+              onColCountChange={noop}
+            />
+          )}
+          {activeTab === 'bookmarks' && !credentialsMissing && (
+            <BookmarksTab
+              credentialsMissing={false}
+              restrict={bookmarksRestrict}
+              onRestrictChange={setBookmarksRestrict}
+              focusedIndex={null}
+              onColCountChange={noop}
+              saveScroll={saveBookmarksScroll}
+            />
+          )}
         </>
       )}
     </div>

@@ -26,6 +26,9 @@ export interface VirtualGridProps<T> {
   loadingElement?: React.ReactNode
   overscan?: number         // extra rows to render (default 3)
   className?: string
+  focusedIndex?: number | null
+  onScrollToIndex?: (index: number) => void
+  onColCountChange?: (count: number) => void
 }
 
 function getColumnCount(width: number, config: ColumnConfig): number {
@@ -49,6 +52,8 @@ export function VirtualGrid<T>({
   loadingElement,
   overscan = 3,
   className,
+  focusedIndex,
+  onColCountChange,
 }: VirtualGridProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollMargin, setScrollMargin] = useState(0)
@@ -60,6 +65,12 @@ export function VirtualGrid<T>({
 
   // Stable key for the columns config (avoids effect re-run on every render when columns is an inline object)
   const columnsKey = JSON.stringify(columns)
+
+  // Keep onColCountChange in a ref so the ResizeObserver effect doesn't need it as a dependency
+  const onColCountChangeRef = useRef(onColCountChange)
+  useEffect(() => {
+    onColCountChangeRef.current = onColCountChange
+  }, [onColCountChange])
 
   // ResizeObserver on the container to detect width changes and keep scrollMargin up to date
   useEffect(() => {
@@ -78,7 +89,13 @@ export function VirtualGrid<T>({
       if (!entry) return
       const width = entry.contentRect.width
       const next = getColumnCount(width, columns)
-      setColCount((prev) => (prev !== next ? next : prev))
+      setColCount((prev) => {
+        if (prev !== next) {
+          onColCountChangeRef.current?.(next)
+          return next
+        }
+        return prev
+      })
       // Update scrollMargin in case content above the grid changed, only when value differs
       const newMargin = el.offsetTop
       if (newMargin !== prevScrollMarginRef.current) {
@@ -112,6 +129,21 @@ export function VirtualGrid<T>({
   })
 
   const virtualItems = virtualizer.getVirtualItems()
+
+  // Keep a stable ref to the virtualizer so the scrollToIndex effect
+  // doesn't need the virtualizer instance (which changes every render) as a dep
+  const virtualizerRef = useRef(virtualizer)
+  useEffect(() => {
+    virtualizerRef.current = virtualizer
+  })
+
+  // Scroll virtualizer to ensure focusedIndex row is visible.
+  // align:'auto' means no-op if the row is already fully visible.
+  useEffect(() => {
+    if (focusedIndex === null || focusedIndex === undefined) return
+    const rowIndex = Math.floor(focusedIndex / colCount)
+    virtualizerRef.current.scrollToIndex(rowIndex, { align: 'auto' })
+  }, [focusedIndex, colCount])
 
   // Keep a ref to onLoadMore so the effect never needs it as a dependency
   const onLoadMoreRef = useRef(onLoadMore)
@@ -185,7 +217,12 @@ export function VirtualGrid<T>({
                 {rowItems.map((item, colIdx) => {
                   const globalIndex = virtualRow.index * colCount + colIdx
                   return (
-                    <div key={globalIndex}>
+                    <div
+                      key={globalIndex}
+                      data-grid-index={globalIndex}
+                      tabIndex={-1}
+                      className="rounded-lg outline-none focus:ring-2 focus:ring-vault-accent focus:ring-offset-1 focus:ring-offset-vault-bg"
+                    >
                       {renderItem(item, globalIndex)}
                     </div>
                   )

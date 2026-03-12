@@ -316,6 +316,7 @@ export function useKeyboardNav(
   onNext: () => void,
   onPrev: () => void,
   readingDirection: ReadingDirection = 'ltr',
+  viewMode?: string,
 ) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -337,14 +338,18 @@ export function useKeyboardNav(
           onNext()
           break
         case 'ArrowUp':
-          e.preventDefault()
-          onPrev()
+          // In webtoon mode (or when viewMode is not specified), ArrowUp scrolls prev
+          // In single/double page mode, ArrowUp is reserved for back navigation
+          if (viewMode === 'webtoon' || viewMode === undefined) {
+            e.preventDefault()
+            onPrev()
+          }
           break
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onNext, onPrev, readingDirection])
+  }, [onNext, onPrev, readingDirection, viewMode])
 }
 
 // ── useProgressSave ───────────────────────────────────────────────────

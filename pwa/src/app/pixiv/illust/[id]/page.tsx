@@ -1,6 +1,6 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { use } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
@@ -11,6 +11,7 @@ import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { ExternalLink, ArrowLeft, BookOpen } from 'lucide-react'
+import { BackButton } from '@/components/BackButton'
 
 function sanitizeHtml(html: string): string {
   return html
@@ -39,6 +40,22 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
 
   const [downloading, setDownloading] = useState(false)
   const [bookmarking, setBookmarking] = useState(false)
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        if (!isNaN(illustId)) router.push(`/reader/pixiv/${illustId}`)
+      }
+      if (e.key === 'ArrowUp' || e.key === 'Escape') {
+        e.preventDefault()
+        history.length > 1 ? router.back() : router.push('/pixiv')
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [illustId, router])
 
   if (isNaN(illustId)) return <div className="p-8 text-center text-vault-text-secondary">{t('common.invalidId')}</div>
 
@@ -98,13 +115,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
   return (
     <div className="space-y-6">
       {/* Back link */}
-      <button
-        onClick={() => router.back()}
-        className="inline-flex items-center gap-1.5 text-sm text-vault-text-secondary hover:text-vault-text transition-colors"
-      >
-        <ArrowLeft size={14} />
-        {t('pixiv.title')}
-      </button>
+      <BackButton fallback="/pixiv" />
 
       <div className="grid md:grid-cols-[1fr_320px] gap-6">
         {/* Main image */}

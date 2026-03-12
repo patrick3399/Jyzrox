@@ -61,12 +61,7 @@ html {
 }
 
 .safe-main-pt {
-  padding-top: calc(3.5rem + var(--sat));
-}
-@media (min-width: 1024px) {
-  .safe-main-pt {
-    padding-top: 0;
-  }
+  padding-top: 0;
 }
 
 /* ── Reader ─────────────────────────────────────────────────────────── */
