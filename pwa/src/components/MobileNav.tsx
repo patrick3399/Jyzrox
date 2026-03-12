@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useCallback } from 'react'
+import { useEffect, useCallback } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTheme } from 'next-themes'
@@ -16,7 +16,6 @@ import {
   Sun,
   Moon,
   Monitor,
-  Menu,
   X,
   PackageOpen,
   FolderInput,
@@ -62,19 +61,23 @@ const themeLabel: Record<string, () => string> = {
   system: () => t('common.system'),
 }
 
-export function MobileNav() {
+interface MobileNavProps {
+  open: boolean
+  onClose: () => void
+}
+
+export function MobileNav({ open, onClose }: MobileNavProps) {
   useLocale()
   const pathname = usePathname()
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()
   const { data: profile } = useProfile()
   const { data: stats } = useDownloadStats()
-  const [open, setOpen] = useState(false)
 
   // Close drawer on route change
   useEffect(() => {
-    setOpen(false)
-  }, [pathname])
+    onClose()
+  }, [pathname, onClose])
 
   // Prevent body scroll when drawer is open
   useEffect(() => {
@@ -96,28 +99,12 @@ export function MobileNav() {
 
   return (
     <>
-      {/* Top bar — pt accounts for iOS safe area (notch / Dynamic Island) */}
-      <nav
-        className="lg:hidden fixed top-0 left-0 right-0 z-50 bg-vault-card border-b border-vault-border h-14 flex items-center px-3 gap-2"
-        style={{ paddingTop: 'var(--sat)', height: 'calc(3.5rem + var(--sat))' }}
-      >
-        <button
-          onClick={() => setOpen(true)}
-          className="p-2 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
-          aria-label={t('nav.openMenu')}
-        >
-          <Menu size={20} />
-        </button>
-
-        <span className="text-vault-accent font-bold text-lg tracking-wide flex-1">Jyzrox</span>
-      </nav>
-
       {/* Backdrop */}
       <div
         className={`lg:hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm transition-opacity duration-200 ${
           open ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
-        onClick={() => setOpen(false)}
+        onClick={onClose}
       />
 
       {/* Drawer */}
@@ -142,7 +129,7 @@ export function MobileNav() {
             <span className="text-vault-accent font-bold text-lg tracking-wide">Jyzrox</span>
           </div>
           <button
-            onClick={() => setOpen(false)}
+            onClick={onClose}
             className="p-1.5 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
             aria-label={t('nav.closeMenu')}
           >

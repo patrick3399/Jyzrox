@@ -46,6 +46,7 @@ class Downloadable(Protocol):
         on_progress: Callable[[int, int], Awaitable[None]] | None = None,
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
+        pause_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> DownloadResult: ...
 
     def resolve_output_dir(self, url: str, base_path: Path) -> Path: ...
@@ -121,6 +122,7 @@ class SourcePlugin(ABC):
         on_progress: Callable[[int, int], Awaitable[None]] | None = None,
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
+        pause_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> DownloadResult:
         """Download a gallery to dest_dir. Returns a DownloadResult."""
         ...

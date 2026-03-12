@@ -1,4 +1,5 @@
 import asyncio
+import json
 from contextlib import asynccontextmanager
 
 import redis.asyncio as aioredis
@@ -104,3 +105,17 @@ class DownloadSemaphore:
             if loop.time() >= deadline:
                 raise TimeoutError(f"Download semaphore [{self._key}]: could not acquire slot within {self.acquire_timeout}s")
             await asyncio.sleep(0.5)
+
+
+async def publish_job_event(event: dict) -> None:
+    """Publish a job event to the download:events channel."""
+    try:
+        await get_redis().publish("download:events", json.dumps(event))
+    except Exception as exc:
+        import logging
+        logging.getLogger(__name__).warning("publish_job_event failed: %s", exc)
+
+
+def get_pubsub():
+    """Return a new PubSub object for subscribing to channels."""
+    return get_redis().pubsub()

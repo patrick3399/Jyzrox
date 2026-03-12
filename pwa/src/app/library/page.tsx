@@ -5,6 +5,8 @@ import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { BookOpen, Plus, Minus, X } from 'lucide-react'
 import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
+import { useGridKeyboard } from '@/hooks/useGridKeyboard'
+import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { useCollections } from '@/hooks/useCollections'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -36,8 +38,12 @@ function LibraryContent() {
 
   const [searchInput, setSearchInput] = useState(searchParams.get('q') ?? '')
   const [searchQuery, setSearchQuery] = useState(searchParams.get('q') ?? '')
-  const [includeTags, setIncludeTags] = useState<string[]>([])
-  const [excludeTags, setExcludeTags] = useState<string[]>([])
+  const [includeTags, setIncludeTags] = useState<string[]>(
+    searchParams.get('tags')?.split(',').filter(Boolean) ?? []
+  )
+  const [excludeTags, setExcludeTags] = useState<string[]>(
+    searchParams.get('notags')?.split(',').filter(Boolean) ?? []
+  )
   const [includeInput, setIncludeInput] = useState('')
   const [excludeInput, setExcludeInput] = useState('')
   const [minRating, setMinRating] = useState<number | undefined>(
@@ -52,6 +58,7 @@ function LibraryContent() {
   const [collectionFilter, setCollectionFilter] = useState<number | undefined>(undefined)
   const [selectMode, setSelectMode] = useState(false)
   const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  const [colCount, setColCount] = useState(4)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { data: collectionsData } = useCollections()
@@ -71,11 +78,13 @@ function LibraryContent() {
     if (minRating !== undefined) params.set('rating', String(minRating))
     if (onlyFavorited) params.set('fav', '1')
     if (artistFilter) params.set('artist', artistFilter)
+    if (includeTags.length > 0) params.set('tags', includeTags.join(','))
+    if (excludeTags.length > 0) params.set('notags', excludeTags.join(','))
 
     const qs = params.toString()
     const newUrl = qs ? `/library?${qs}` : '/library'
     router.replace(newUrl, { scroll: false })
-  }, [searchQuery, sourceFilter, sort, minRating, onlyFavorited, artistFilter, router])
+  }, [searchQuery, sourceFilter, sort, minRating, onlyFavorited, artistFilter, includeTags, excludeTags, router])
 
   // Split compound source filter values like "local:link" → source="local", import_mode="link"
   const [parsedSource, parsedImportMode] = (() => {
@@ -141,6 +150,22 @@ function LibraryContent() {
   const removeExcludeTag = useCallback((tag: string) => {
     setExcludeTags((prev) => prev.filter((t) => t !== tag))
   }, [])
+
+  // ── Scroll restoration ──────────────────────────────────
+  const { saveScroll } = useScrollRestore('library_scrollY', galleries.length > 0)
+
+  // ── Keyboard grid navigation ────────────────────────────
+  const { focusedIndex } = useGridKeyboard({
+    totalItems: galleries.length,
+    colCount,
+    onEnter: (i) => {
+      const g = galleries[i]
+      if (g) {
+        saveScroll()
+        router.push(`/library/${g.id}`)
+      }
+    },
+  })
 
   return (
     <div>
@@ -376,6 +401,8 @@ function LibraryContent() {
             columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }}
             gap={12}
             estimateHeight={300}
+            focusedIndex={focusedIndex}
+            onColCountChange={setColCount}
             renderItem={(gallery) => {
               if (selectMode) {
                 const isSelected = selectedIds.has(gallery.id)
@@ -400,7 +427,7 @@ function LibraryContent() {
                 )
               }
               return (
-                <Link href={`/library/${gallery.id}`}>
+                <Link href={`/library/${gallery.id}`} onClick={() => saveScroll()}>
                   <LibraryGalleryCard
                     gallery={gallery}
                     thumbUrl={gallery.cover_thumb ?? undefined}

@@ -88,6 +88,7 @@ class EhSourcePlugin(SourcePlugin):
         on_progress: Callable[[int, int], Awaitable[None]] | None = None,
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
+        pause_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> DownloadResult:
         """Download an EH gallery using the native EhClient downloader."""
         from core.config import settings
@@ -145,6 +146,7 @@ class EhSourcePlugin(SourcePlugin):
                 concurrency=settings.eh_download_concurrency,
                 on_progress=_progress,
                 cancel_check=cancel_check,
+                pause_check=pause_check,
             )
         except PermissionError as exc:
             err = str(exc)

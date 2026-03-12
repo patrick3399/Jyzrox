@@ -152,6 +152,8 @@ const en: Record<string, string> = {
   'queue.add': 'Add',
   'queue.active': 'Active',
   'queue.autoRefresh': 'Auto-refreshes every 3s',
+  'queue.autoRefreshWs': 'Real-time via WebSocket',
+  'queue.wsFallback': 'Real-time updates unavailable — polling every 3s (WebSocket disconnected)',
   'queue.noActive': 'No active downloads',
   'queue.completedFailed': 'Completed / Failed',
   'queue.collapse': 'Collapse',
@@ -499,6 +501,10 @@ const en: Record<string, string> = {
   'reader.helpTapCenter': 'Toggle Controls',
   'reader.helpTapRight': 'Next Page',
   'reader.helpSwipe': 'Swipe left / right to turn pages',
+  'reader.helpSwipeUp': 'Swipe up to go back',
+  'reader.helpSwipeRight': 'Swipe right to go back',
+  'reader.helpDoubleTap': 'Double-tap to zoom in / out',
+  'reader.helpPinchZoom': 'Pinch to zoom',
   'reader.helpKeyboard': 'Keyboard: \u2190/\u2192 or A/D',
   'reader.helpDismiss': 'Tap, swipe, or press any key to dismiss',
   'reader.helpButton': 'Help',
@@ -1184,6 +1190,12 @@ const en: Record<string, string> = {
   'dedup.diffTypeLocalized': 'Has Local Changes',
   'dedup.reasonHigherRes': 'Different Resolution',
   'dedup.reasonLargerFile': 'Different File Size',
+
+  // ── Bottom Tab Bar ──
+  'nav.more': 'More',
+
+  // ── Back Button ──
+  'common.back': 'Back',
 }
 
 export default en

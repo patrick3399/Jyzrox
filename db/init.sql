@@ -311,6 +311,26 @@ CREATE INDEX IF NOT EXISTS idx_audit_logs_user_id    ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_created_at ON audit_logs(created_at);
 CREATE INDEX IF NOT EXISTS idx_audit_logs_action     ON audit_logs(action);
 
+-- ── Collections ──────────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS collections (
+    id                  BIGSERIAL PRIMARY KEY,
+    user_id             BIGINT REFERENCES users(id) ON DELETE CASCADE,
+    name                TEXT NOT NULL,
+    description         TEXT,
+    cover_gallery_id    BIGINT REFERENCES galleries(id) ON DELETE SET NULL,
+    created_at          TIMESTAMPTZ DEFAULT now(),
+    updated_at          TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS collection_galleries (
+    collection_id   BIGINT NOT NULL REFERENCES collections(id) ON DELETE CASCADE,
+    gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    position        INTEGER DEFAULT 0,
+    added_at        TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (collection_id, gallery_id)
+);
+CREATE INDEX IF NOT EXISTS idx_collection_galleries_gallery ON collection_galleries (gallery_id);
+
 -- ── Excluded Blobs ──────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS excluded_blobs (
     gallery_id  BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,

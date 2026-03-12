@@ -262,9 +262,13 @@ export interface CacheStats {
 // ── WebSocket ────────────────────────────────────────────────────────
 
 export interface WsMessage {
-  type: 'alert' | 'ping'
+  type: 'alert' | 'ping' | 'job_update'
   message?: string
   ts?: string
+  // job_update fields:
+  job_id?: string
+  status?: string
+  progress?: Record<string, unknown>
 }
 
 // ── Pagination responses ──────────────────────────────────────────────

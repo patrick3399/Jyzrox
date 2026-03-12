@@ -1,13 +1,25 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { ArrowLeft, Grid, Image as ImageIcon, BookOpen, Users } from 'lucide-react'
+import { Grid, Image as ImageIcon, BookOpen, Users } from 'lucide-react'
+import { BackButton } from '@/components/BackButton'
 import { useArtistSummary, useArtistImages } from '@/hooks/useArtists'
 import { useLibraryGalleries } from '@/hooks/useGalleries'
+import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { Pagination } from '@/components/Pagination'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+
+function getGalleryColCount() {
+  if (typeof window === 'undefined') return 2
+  const w = window.innerWidth
+  if (w >= 1280) return 6
+  if (w >= 1024) return 5
+  if (w >= 768) return 4
+  if (w >= 640) return 3
+  return 2
+}
 
 type ViewTab = 'galleries' | 'images'
 
@@ -31,6 +43,13 @@ export default function ArtistDetailPage() {
   const [galleryPage, setGalleryPage] = useState(0)
   const [imagePage, setImagePage] = useState(0)
   const [imageSort, setImageSort] = useState<'newest' | 'oldest'>('newest')
+  const [colCount, setColCount] = useState(getGalleryColCount)
+
+  useEffect(() => {
+    const handler = () => setColCount(getGalleryColCount())
+    window.addEventListener('resize', handler)
+    return () => window.removeEventListener('resize', handler)
+  }, [])
 
   const { data: summary, isLoading: summaryLoading } = useArtistSummary(artistId)
 
@@ -42,6 +61,17 @@ export default function ArtistDetailPage() {
     artist: artistId,
     page: galleryPage,
     limit: GALLERY_PAGE_SIZE,
+  })
+
+  const galleries = galleriesData?.galleries ?? []
+  const { focusedIndex } = useGridKeyboard({
+    totalItems: galleries.length,
+    colCount,
+    onEnter: (i) => {
+      const g = galleries[i]
+      if (g) router.push(`/library/${g.id}`)
+    },
+    enabled: activeTab === 'galleries',
   })
 
   const {
@@ -62,13 +92,7 @@ export default function ArtistDetailPage() {
     <div className="space-y-6">
       {/* Header */}
       <div className="flex items-start gap-4">
-        <button
-          onClick={() => router.back()}
-          className="mt-1 p-2 rounded-lg bg-vault-card border border-vault-border hover:border-vault-accent/50 text-vault-text-secondary hover:text-vault-text transition-colors"
-          aria-label={t('common.goBack')}
-        >
-          <ArrowLeft size={18} />
-        </button>
+        <BackButton fallback="/artists" />
 
         <div className="flex-1 min-w-0">
           {summaryLoading ? (
@@ -147,11 +171,12 @@ export default function ArtistDetailPage() {
           ) : (
             <>
               <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                {galleriesData.galleries.map((gallery) => (
+                {galleriesData.galleries.map((gallery, idx) => (
                   <button
                     key={gallery.id}
+                    data-grid-index={idx}
                     onClick={() => router.push(`/library/${gallery.id}`)}
-                    className="bg-vault-card border border-vault-border rounded-xl overflow-hidden hover:border-vault-accent/50 hover:shadow-lg transition-all text-left group"
+                    className="bg-vault-card border border-vault-border rounded-xl overflow-hidden hover:border-vault-accent/50 hover:shadow-lg transition-all text-left group focus:outline-none focus:ring-2 focus:ring-vault-accent"
                   >
                     <div className="aspect-[3/4] bg-vault-bg relative overflow-hidden">
                       {gallery.cover_thumb ? (

@@ -10,6 +10,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { TagBadge } from '@/components/TagBadge'
 import { RatingStars } from '@/components/RatingStars'
 import { t, formatDate } from '@/lib/i18n'
+import { BackButton } from '@/components/BackButton'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
   character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
@@ -103,6 +104,22 @@ export default function GalleryDetailPage() {
     if (!id) return
     api.library.getGalleryTags(id).then((res) => setTagData(res.tags)).catch(() => {})
   }, [id])
+
+  useEffect(() => {
+    const handler = (e: KeyboardEvent) => {
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (e.key === 'Enter' || e.key === ' ') {
+        e.preventDefault()
+        if (gallery?.id) router.push(`/reader/${gallery.id}`)
+      }
+      if (e.key === 'ArrowUp' || e.key === 'Escape') {
+        e.preventDefault()
+        history.length > 1 ? router.back() : router.push('/library')
+      }
+    }
+    window.addEventListener('keydown', handler)
+    return () => window.removeEventListener('keydown', handler)
+  }, [gallery?.id, router])
 
   const getDeleteConfirmKey = () => {
     if (gallery?.import_mode === 'link') return 'library.delete.link.confirm'
@@ -227,12 +244,7 @@ export default function GalleryDetailPage() {
   return (
     <div>
         {/* Back */}
-        <button
-          onClick={() => router.back()}
-          className="text-sm text-vault-text-muted hover:text-vault-text-secondary mb-4 flex items-center gap-1 transition-colors"
-        >
-          {t('library.backToLibrary')}
-        </button>
+        <BackButton fallback="/library" />
 
         {/* Header */}
         <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">

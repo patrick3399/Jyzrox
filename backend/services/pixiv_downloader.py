@@ -22,6 +22,7 @@ async def download_pixiv_illust(
     output_dir: Path,
     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
     cancel_check: Callable[[], Awaitable[bool]] | None = None,
+    pause_check: Callable[[], Awaitable[bool]] | None = None,
 ) -> dict:
     """
     Download a single Pixiv illustration (including multi-page manga).
@@ -120,6 +121,17 @@ async def download_pixiv_illust(
                     "total": total,
                     "failed_pages": failed_pages,
                 }
+
+            # Soft-pause: wait while paused
+            while pause_check and await pause_check():
+                if cancel_check and await cancel_check():
+                    return {
+                        "status": "cancelled",
+                        "downloaded": downloaded,
+                        "total": total,
+                        "failed_pages": failed_pages,
+                    }
+                await asyncio.sleep(0.5)
 
             try:
                 image_bytes, media_type = await client.download_image(url)
@@ -225,6 +237,7 @@ async def download_pixiv_user_works(
     output_dir: Path,
     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
     cancel_check: Callable[[], Awaitable[bool]] | None = None,
+    pause_check: Callable[[], Awaitable[bool]] | None = None,
     max_illusts: int = 0,
 ) -> dict:
     """
@@ -300,6 +313,17 @@ async def download_pixiv_user_works(
                     "failed": failed,
                 }
 
+            # Soft-pause: wait while paused
+            while pause_check and await pause_check():
+                if cancel_check and await cancel_check():
+                    return {
+                        "status": "cancelled",
+                        "downloaded": downloaded,
+                        "total": total,
+                        "failed": failed,
+                    }
+                await asyncio.sleep(0.5)
+
             illust_id = illust.get("id")
             if not illust_id:
                 continue
@@ -311,6 +335,7 @@ async def download_pixiv_user_works(
                     refresh_token=refresh_token,
                     output_dir=illust_dir,
                     cancel_check=cancel_check,
+                    pause_check=pause_check,
                 )
 
                 if result["status"] == "done":

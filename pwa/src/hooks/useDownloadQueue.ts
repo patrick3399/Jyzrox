@@ -1,11 +1,37 @@
-import useSWR from 'swr'
+import useSWR, { useSWRConfig } from 'swr'
 import useSWRMutation from 'swr/mutation'
+import { useEffect, useRef } from 'react'
 import { api } from '@/lib/api'
+import { useWs } from '@/lib/ws'
 import type { JobListParams } from '@/lib/types'
 
+const THROTTLE_MS = 1000
+
 export function useDownloadJobs(params: JobListParams = {}) {
+  const { connected, lastJobUpdate } = useWs()
+  const { mutate } = useSWRConfig()
+  const lastFiredRef = useRef<number>(0)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => {
+    if (!lastJobUpdate) return
+    const now = Date.now()
+    const elapsed = now - lastFiredRef.current
+    if (elapsed >= THROTTLE_MS) {
+      lastFiredRef.current = now
+      mutate(['download/jobs', params])
+    } else {
+      clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(() => {
+        lastFiredRef.current = Date.now()
+        mutate(['download/jobs', params])
+      }, THROTTLE_MS - elapsed)
+    }
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastJobUpdate])
+
   return useSWR(['download/jobs', params], () => api.download.getJobs(params), {
-    refreshInterval: 3000,
+    refreshInterval: connected ? 0 : 3000,
     dedupingInterval: 2000,
     focusThrottleInterval: 5000,
   })
@@ -28,8 +54,29 @@ export function useClearFinishedJobs() {
 }
 
 export function useDownloadStats() {
+  const { connected, lastJobUpdate } = useWs()
+  const { mutate } = useSWRConfig()
+  const lastFiredRef = useRef<number>(0)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  useEffect(() => {
+    if (!lastJobUpdate) return
+    const now = Date.now()
+    const elapsed = now - lastFiredRef.current
+    if (elapsed >= THROTTLE_MS) {
+      lastFiredRef.current = now
+      mutate('download/stats')
+    } else {
+      clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(() => {
+        lastFiredRef.current = Date.now()
+        mutate('download/stats')
+      }, THROTTLE_MS - elapsed)
+    }
+  }, [lastJobUpdate, mutate])
+
   return useSWR('download/stats', () => api.download.getStats(), {
-    refreshInterval: 5000,
+    refreshInterval: connected ? 0 : 5000,
     dedupingInterval: 3000,
   })
 }

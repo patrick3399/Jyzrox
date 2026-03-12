@@ -4,21 +4,29 @@
 
 ---
 
+## ⚠️ 多人權限完成後需補強清單
+
+> 以下功能在多人權限（P2）上線後需回頭修改，**建議在同一 PR 或緊接著做**。
+
+| 影響項目 | 問題 | 修改內容 |
+|---------|------|---------|
+| `read_progress` 表 | **無 `user_id`**，閱讀進度全域共享 | 加欄位 + 遷移腳本，Reader API 改為 per-user 讀寫 |
+| `DownloadJob` 表 | **無 `user_id`**，所有人看到同一下載佇列 | 加欄位，決定 admin 可看全部 / member 只看自己 |
+| `settings.py` 所有端點 | 只需登入即可改全域設定，**缺 admin 保護** | 所有設定端點加 `require_role("admin")` |
+| 下載 / 匯入操作 | 目前無 member 以上限制 | `enqueue`, `import`, `bulk download` 等加 `require_role("member")` |
+| Tag 管理端點 | Tag alias / implication / translation 應限 admin | 加 `require_role("admin")` |
+| Dedup、排程任務 | 應限 admin | 加 `require_role("admin")` |
+| Log Viewer（新） | 應限 admin | 建立時就加 `require_role("admin")` |
+| 限速控制頁面（新） | 應限 admin | 建立時就加 `require_role("admin")` |
+| Plugin 管理 | enable/disable/configure 應限 admin | 建立時就加 `require_role("admin")` |
+
+> ✅ 已確認 **不需要** 改動：`blocked_tags`（已 per-user）、`saved_searches`（已 per-user）、`external.py`（API Token 獨立驗證）、`opds.py`（Basic Auth 獨立驗證）
+
+---
+
 ## P1 — 短期高價值
 
 > 獨立功能，少依賴，能快速上線。
-
-### ~~排程任務管理頁面（/scheduled-tasks）~~ ✅ 已完成
-
-> 後端 API + 前端頁面全部實作。`/scheduled-tasks` 頁面支援任務卡片、cron 內聯編輯、啟用/停用、立即執行、失敗 last_error 展開。側邊欄入口、i18n 已整合。
-
----
-
-### ~~去重系統（Tiered Dedup）~~ ✅ 已完成
-
-> 3-tier pipeline 全部實作。`blob_relationships` 表已建立，Tier 1（pHash）、Tier 2（Heuristic）、Tier 3（OpenCV）全部完成。審查 API（`/api/dedup`）含 stats、review、keep、whitelist、scan/start/stop/progress。前端 `/dedup` 頁面、設定卡片、審查列表、側邊欄入口、i18n、`api.ts` 型別全部整合。
-
----
 
 ### 大量下載
 
@@ -28,12 +36,35 @@
 - [ ] 批次任務進度追蹤（Redis：總數/已完成/失敗）
 - [ ] E-Hentai 標籤全下載（爬取搜尋結果所有頁 → 逐一 enqueue）
 - [ ] Pixiv 作者全作品下載（取得作品列表 → 逐一 enqueue）
-- [ ] 下載速率限制設定（避免被封 IP）
+- [ ] 下載速率限制設定：per-site concurrency / delay_ms（EH、Pixiv 分開設定）
+- [ ] Hentai@Home 支援：EH plugin 偵測 H@H 可用時自動解鎖限速（或手動覆蓋）
+- [ ] 時段排程解鎖：設定某時段（例如 00:00–06:00）自動移除限速（ARQ cron 切換 Redis flag）
 
 #### 前端
 - [ ] 批次下載 UI 入口（從搜尋結果頁觸發）
 - [ ] 批次任務儀表板（總進度、成功/失敗統計）
 - [ ] 批次下載確認 dialog（預覽數量、預估大小）
+
+> ⚠️ 多人權限完成後：`enqueue` 相關端點加 `require_role("member")`，儀表板依角色篩選可見 job
+
+---
+
+### 統一限速控制頁面（/settings — 下載限速分區）
+
+> 與「大量下載」限速後端共用設定機制，作為 Settings 新分區實作。Nginx 層（api_zone / download_zone）維持 hardcode，不納入此頁面範疇。
+
+#### 後端
+- [ ] `site_rate_config` 設定結構（DB 或 config JSON）：per-site concurrency、delay_ms、時段排程
+- [ ] `GET/PATCH /api/settings/rate-limits`：讀取與更新限速設定
+- [ ] 時段排程 Redis flag：cron job 定時寫入/移除，worker 下載前讀取
+
+#### 前端
+- [ ] `/settings` 新增「下載限速」分區
+- [ ] Per-site 設定表（EH / Pixiv）：concurrency 滑桿、delay 輸入
+- [ ] 時段排程設定：起止時間選擇 + 目標限速模式（全速 / 標準）
+- [ ] 全域暫時解鎖按鈕（立即套用直到下次 cron 重置）
+
+> ⚠️ 多人權限完成後：設定端點加 `require_role("admin")`
 
 ---
 
@@ -41,49 +72,53 @@
 
 > 需多階段實施或依賴較多。
 
-### 即時狀態推送（WebSocket）
+### 應用內 Log Viewer
 
-> **現狀**：下載佇列等核心狀態靠 SWR polling（每 3 秒一次）。WebSocket 基礎設施已存在（`/api/ws`），目前只用於系統警告推送。
->
-> **目標**：Worker 完成/進度事件 → Redis pub/sub → WS handler 轉發前端，消除 polling。
+> 輕量級方案：Python logging handler 寫入 DB / Redis List，前端可查詢與篩選。不取代 P3 的 Loki/Grafana，兩者定位不同（應用內快速 debug vs. 長期 infra 監控）。
 
 #### 後端
-- [ ] `worker/` 各 job function 完成/進度時發布 Redis 事件（`job:{id}:status`、`job:{id}:progress`）
-- [ ] `routers/ws.py` 訂閱 Redis channel，將事件轉發至 WebSocket 連線
-- [ ] 定義標準化 WebSocket 事件格式（`{ type: 'job_update', job_id, status, progress }`）
+- [ ] `system_logs` 表或 Redis List（TTL 7 天）：level、source（api/worker/plugin）、message、timestamp
+- [ ] Python logging handler：將 WARNING 以上寫入儲存層，支援 log level 過濾
+- [ ] `GET /api/system/logs`：查詢端點（level filter、source filter、時間範圍、分頁），建立時就加 `require_auth`
+- [ ] 自動清理：cron job 刪除超過設定天數的紀錄（預設 7 天，可設定）
 
 #### 前端
-- [ ] `useDownloadQueue` 改為訂閱 WebSocket 事件，移除 3s polling
-- [ ] 下載進度條改為即時更新（毫秒級）
-- [ ] WS 斷線時自動 fallback 到 polling（`lib/ws.ts` 已有重連邏輯）
+- [ ] `/logs` 頁面（或整合至 `/settings`）：Log 列表（level badge、source、timestamp、message）
+- [ ] 篩選工具列：level 多選、source 多選、時間範圍
+- [ ] 自動捲動到最新 / 暫停捲動切換
+- [ ] Log 保留天數設定
+
+> ⚠️ 多人權限完成後：端點改為 `require_role("admin")`，側邊欄入口對非 admin 隱藏
 
 ---
 
 ### 多人權限管理
 
+> **此功能完成後，見頂部「⚠️ 多人權限完成後需補強清單」進行後續修改。**
+
 #### 資料庫
 - [ ] `users` 表新增 `role` 欄位（`admin` / `member` / `viewer`）
 - [ ] 遷移腳本：現有使用者預設 `admin`
 - [ ] `gallery_permissions` 表（gallery_id, user_id, permission_level）
+- [ ] `read_progress` 表加 `user_id` 欄位 + 遷移腳本（現有紀錄指定給第一個 admin）
+- [ ] `download_jobs` 表加 `user_id` 欄位 + 遷移腳本
 
 #### 後端
 - [ ] `core/auth.py` — `require_role(role)` dependency（檢查角色權限）
 - [ ] 管理端點：列出使用者、修改角色、停用帳號
 - [ ] Gallery 權限控制：私有/公開/指定使用者可見
-- [ ] 下載/匯入操作的權限檢查（member 以上）
-- [ ] 設定頁（credentials、system）限 admin
+- [ ] 依補強清單批量補加 `require_role()` 至各端點（settings、tag 管理、download enqueue、dedup、scheduled tasks、logs）
 
 #### 前端
 - [ ] 使用者管理頁（`/admin/users`）：列表、角色切換、停用
 - [ ] Gallery 分享 UI：設定可見性、邀請使用者
 - [ ] 角色不足時的 403 提示頁面
-- [ ] 側邊欄根據角色隱藏管理入口
+- [ ] 側邊欄根據角色隱藏管理入口（Dedup、排程任務、Settings、Logs）
 
 #### 分享與內容控制
 - [ ] 分享連結：Gallery 產生公開短連結（token-based，可設過期時間）
 - [ ] Gallery 可見性設定（私有 / 公開 / 指定使用者）
-- [ ] 內容過濾：依 tag namespace 隱藏 gallery（家長控制 / R18 過濾）
-- [ ] 過濾規則存入 `user_preferences` 或擴充 `blocked_tags` 表
+- [ ] 內容過濾：依 tag namespace 隱藏 gallery（R18 過濾），存入 `user_preferences`
 
 ---
 
@@ -99,7 +134,6 @@
 > - 同為 asyncio-native + Redis backend，API 風格接近 arq
 > - 內建 Web UI dashboard、cron scheduling、heartbeat
 > - 活躍維護（2024–2025 持續發版）、Python 3.14 相容
-> - 遷移成本最低：概念對應（Worker → Worker, job function → job function, cron → cron）
 > - 備用方案：AsyncTasQ
 
 - [ ] 安裝 SAQ，建立基礎 worker 設定（`worker/saq_worker.py`）
@@ -110,6 +144,28 @@
 - [ ] 移除 arq 依賴 + `core/compat.py` monkey-patch
 - [ ] 驗證：Python 3.14 環境下完整 worker pipeline 正常運行
 - [ ] 可選：啟用 SAQ Web UI dashboard
+
+---
+
+### PWA 離線儲存
+
+> 讓使用者可將指定 gallery 標記為「離線可用」，SW 預先快取圖片，斷網時仍可閱讀。
+>
+> **限制**：Nginx `/media/` 需 auth（subrequest），SW 攔截需帶 httpOnly cookie，iOS Safari PWA Storage 配額約 50MB，需實作配額管理與 LRU 淘汰。
+>
+> **依賴**：建議在多人權限（P2）後實作，`offline_galleries` 表需 `user_id` 支援 per-user 離線清單。
+
+#### 後端
+- [ ] `GET /api/library/galleries/{id}/offline-manifest`：回傳 gallery 所有圖片 URL 清單（供 SW 預快取）
+- [ ] `offline_galleries` 表：`user_id`、`gallery_id`、`cached_at`、`size_bytes`
+
+#### 前端（PWA / Service Worker）
+- [ ] Gallery detail 頁新增「離線儲存」按鈕（觸發 SW 預快取）
+- [ ] SW：攔截 `/media/` 請求，快取策略 Cache-First（離線） / Network-First（在線）
+- [ ] 離線 gallery 列表頁（`/offline`）：顯示已快取 gallery 及佔用空間
+- [ ] 配額管理：顯示已用空間，LRU 淘汰舊快取，支援手動清除
+
+---
 
 ### S3 儲存抽象層
 
@@ -124,9 +180,11 @@
 - [ ] Nginx `/media/` 靜態服務配合：local 繼續直接 serve，S3 改為簽名 URL redirect
 - [ ] 設定欄位：`storage_backend`（`local` / `s3`）、`s3_endpoint`、`s3_bucket`、`s3_access_key`、`s3_secret_key`
 
+---
+
 ### 語意搜尋（pgvector）
 
-> **前提**：WD14 Tagger 微服務（`tagger/`）已建立，特徵提取基礎設施就位。
+> **前提**：WD14 Tagger 微服務（`tagger/`）已建立 ✅，特徵提取基礎設施就位。
 >
 > **目標**：CLIP / WD14 特徵向量存入 `pgvector`，實現「以圖搜圖」與「文字語意搜 gallery」。
 
@@ -139,16 +197,18 @@
 - [ ] 前端 Library 搜尋列新增「語意搜尋」模式切換
 - [ ] 以圖搜圖：上傳圖片 → 提取 embedding → 找最相似 gallery
 
+---
+
 ### 封存格式支援（ZIP / CBZ / EPUB / PDF）
 
-> **現狀**：Jyzrox 的 import pipeline 只處理解壓後的平面檔案目錄，無法直接讀取封存格式。LANraragi、Kavita、Suwayomi 均以封存檔為一等公民。
+> **現狀**：Jyzrox 的 import pipeline 只處理解壓後的平面檔案目錄，無法直接讀取封存格式。
 >
 > **目標**：支援 ZIP/CBZ 直接匯入並在線上閱讀；PDF/EPUB 作為延伸目標。
 
 #### 後端
 - [ ] `worker/importer.py`：偵測輸入為封存檔時自動解壓（`zipfile`/`rarfile`），後續流程不變
-- [ ] 支援格式：`.zip`、`.cbz`（Phase 1）；`.cbr`（`.rar`，需 `rarfile` 或 `patool`）（Phase 2）
-- [ ] PDF 支援：`pypdf` 或 `pdf2image` 逐頁提取為圖片，匯入 CAS（Phase 3）
+- [ ] 支援格式：`.zip`、`.cbz`（Phase 1）；`.cbr`（需 `rarfile` 或 `patool`）（Phase 2）
+- [ ] PDF 支援：`pypdf` 或 `pdf2image` 逐頁提取為圖片（Phase 3）
 - [ ] EPUB 支援：提取圖片頁面，忽略文字內容（Phase 3）
 - [ ] `GET /api/import/browse` 檔案瀏覽器：顯示封存檔並允許直接匯入
 - [ ] Download pipeline：`download_job` 完成後若產物為封存檔，自動觸發解壓流程
@@ -157,15 +217,17 @@
 - [ ] Import Center：封存檔拖曳上傳入口（`POST /api/import/upload`）
 - [ ] 匯入預覽：顯示封存內頁數與封面縮圖
 
+---
+
 ### 漫畫系列結構（Series / Volume / Chapter）
 
-> **現狀**：Gallery 為扁平結構，無父子關係。Kavita 與 Suwayomi 以 Series → Volume → Chapter 三層結構組織內容，支援連續閱讀與進度追蹤。
+> **現狀**：Gallery 為扁平結構，無父子關係。
 >
 > **目標**：在現有 Gallery 模型上疊加可選的系列層，不破壞現有扁平使用模式。
 
 #### 資料庫
 - [ ] 新增 `series` 表：`id`, `title`, `title_jpn`, `cover_gallery_id`, `tags_array`, `created_at`
-- [ ] `galleries` 表新增 `series_id FK`、`volume_num`、`chapter_num`、`chapter_title` 欄位（全部 nullable，保持向後相容）
+- [ ] `galleries` 表新增 `series_id FK`、`volume_num`、`chapter_num`、`chapter_title`（全部 nullable）
 - [ ] 遷移腳本
 
 #### 後端
@@ -180,7 +242,11 @@
 - [ ] Gallery detail 頁：可選指定所屬系列與章節號
 - [ ] Reader：章節末尾「下一章」跳轉（呼叫 `next_chapter` 端點）
 
+---
+
 ### Plugin 系統完善
+
+> **依賴**：多人權限完成後，Plugin enable/disable/configure 端點需加 `require_role("admin")`。
 
 #### 核心架構
 - [ ] Plugin 介面定義（Python ABC）：`on_download`, `on_import`, `on_tag` hooks
@@ -197,12 +263,16 @@
 - [ ] Plugin 啟用/停用開關
 - [ ] Plugin 設定表單（動態生成）
 
+---
+
 ### DevOps / 基礎設施
-- [ ] 集中式日誌（Loki + Grafana 或類似方案）
+
+- [ ] 集中式日誌（Loki + Grafana）— P3 重量級方案，與 P2 應用內 Log Viewer 並行不衝突
 - [ ] Docker image 瘦身：檢查 layer 大小，移除不必要依賴
 - [ ] 生產環境 HTTPS 配置指南（Let's Encrypt + Nginx）
 
 ### 測試 / 品質
+
 - [ ] AI tagging 端對端測試（mock ONNX model）
 - [ ] CAS 儲存壓力測試（大量重複檔案去重驗證）
 - [ ] Import 大量檔案效能測試（1000+ 圖片單次匯入）
@@ -220,7 +290,7 @@
 
 ---
 
-## 已完成（v0.1 歷史記錄）
+## 已完成
 
 <details>
 <summary>展開已完成項目</summary>
@@ -304,6 +374,11 @@
 - [x] WebSocket 斷線重連（3 秒自動重連，`lib/ws.ts`）
 - [x] Redis 快取統計端點（`GET /api/system/cache`）
 
+### 即時狀態推送（WebSocket）
+- [x] Worker 進度/狀態事件 → Redis pub/sub → WS handler → 前端即時更新
+- [x] polling 降為斷線 fallback
+- [x] Nginx 下載端點限流分流（jobs/stats 用 api_zone 30r/s，enqueue 用 download_zone 2r/s）
+
 ### 排程任務管理（v0.3）
 - [x] `/scheduled-tasks` 頁面（任務卡片、cron 內聯編輯、啟用/停用、立即執行、last_error 展開）
 - [x] 側邊欄 `CalendarClock` 入口
@@ -319,5 +394,11 @@
 - [x] Dedup config 欄位（phash_enabled / threshold / heuristic_enabled / opencv_enabled / batch_size / schedule）
 - [x] `/dedup` 前端頁面（設定卡片、審查列表、並排圖片、操作按鈕、空狀態引導）
 - [x] 側邊欄 `ScanSearch` 入口，i18n `dedup.*` keys，`api.ts` 型別
+
+### 下載 Soft-Pause（v0.3）
+- [x] EH / Pixiv plugin 下載支援 soft-pause（`PATCH /api/download/jobs/{id}` action=pause/resume）
+- [x] Pause：Redis `download:pause:{job_id}` key → downloader poll → 正在傳輸的圖完成後才暫停
+- [x] Resume：刪除 Redis key → 繼續下載
+- [x] gallery-dl 繼續使用 SIGSTOP / SIGCONT（雙路徑邏輯）
 
 </details>
