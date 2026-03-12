@@ -30,6 +30,7 @@ async def download_eh_gallery(
     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
     cancel_key: str | None = None,
     cancel_check: Callable[[], Awaitable[bool]] | None = None,
+    pause_check: Callable[[], Awaitable[bool]] | None = None,
 ) -> dict:
     """Download all images of an EH gallery using native EhClient.
 
@@ -122,6 +123,12 @@ async def download_eh_gallery(
                     if on_progress:
                         await on_progress(downloaded, total_pages)
                 return
+
+            # Soft-pause: let in-flight downloads finish, block new ones
+            while pause_check is not None and await pause_check():
+                if await _check_cancel():
+                    raise asyncio.CancelledError()
+                await asyncio.sleep(0.5)
 
             async with sem:
                 # Check cancellation again after acquiring semaphore

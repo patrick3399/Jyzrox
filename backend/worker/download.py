@@ -114,6 +114,18 @@ async def download_job(
             except Exception as exc:
                 logger.warning("[download] failed to store PID in Redis: %s", exc)
 
+    # Pause check — reads the Redis pause key set by the pause endpoint (EH/Pixiv soft-pause)
+    pause_key = f"download:pause:{db_job_id}" if db_job_id else None
+
+    async def pause_check() -> bool:
+        if not pause_key:
+            return False
+        try:
+            val = await redis.get(pause_key)
+            return val is not None
+        except Exception:
+            return False
+
     try:
         async with sem.acquire():
             try:
@@ -124,6 +136,7 @@ async def download_job(
                     on_progress=on_progress,
                     cancel_check=cancel_check,
                     pid_callback=pid_callback,
+                    pause_check=pause_check,
                 )
             except Exception as exc:
                 err = f"Download failed: {exc}"

@@ -71,6 +71,7 @@ class PixivSourcePlugin(SourcePlugin):
         on_progress: Callable[[int, int], Awaitable[None]] | None = None,
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
+        pause_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> DownloadResult:
         """Download a Pixiv artwork or user gallery."""
         from services.pixiv_downloader import download_pixiv_illust, download_pixiv_user_works
@@ -108,6 +109,7 @@ class PixivSourcePlugin(SourcePlugin):
                     output_dir=dest_dir,
                     on_progress=on_progress,
                     cancel_check=cancel_check,
+                    pause_check=pause_check,
                 )
             elif user_match:
                 user_id = int(user_match.group(1))
@@ -117,6 +119,7 @@ class PixivSourcePlugin(SourcePlugin):
                     output_dir=dest_dir,
                     on_progress=on_progress,
                     cancel_check=cancel_check,
+                    pause_check=pause_check,
                 )
             else:
                 return DownloadResult(
