@@ -320,4 +320,10 @@
 - [x] `/dedup` 前端頁面（設定卡片、審查列表、並排圖片、操作按鈕、空狀態引導）
 - [x] 側邊欄 `ScanSearch` 入口，i18n `dedup.*` keys，`api.ts` 型別
 
+### 下載 Soft-Pause（v0.3）
+- [x] EH / Pixiv plugin 下載支援 soft-pause（`PATCH /api/download/jobs/{id}` action=pause/resume）
+- [x] Pause：Redis `download:pause:{job_id}` key → downloader poll → 正在傳輸的圖完成後才暫停
+- [x] Resume：刪除 Redis key → 繼續下載
+- [x] gallery-dl 繼續使用 SIGSTOP / SIGCONT（雙路徑邏輯）
+
 </details>

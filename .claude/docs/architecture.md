@@ -212,6 +212,22 @@ download_job → import_job → thumbnail_job
                           └→ tag_job (if enabled)
 ```
 
+#### Pause / Resume 機制（雙路徑）
+
+`download_job` 支援兩種暫停路徑，依下載引擎而異：
+
+| 引擎 | Pause 方式 | Resume 方式 | 說明 |
+|------|-----------|------------|------|
+| gallery-dl subprocess | `SIGSTOP` 送至 PID | `SIGCONT` 送至 PID | PID 存於 Redis `download:pid:{job_id}` |
+| EH / Pixiv plugin | 寫入 Redis key `download:pause:{job_id}` | 刪除 Redis key | Soft-pause，不中斷正在傳輸的圖 |
+
+**Soft-pause 行為（EH / Pixiv）：**
+- Pause：`PATCH /api/download/jobs/{id}` (`action=pause`) → API 寫入 `download:pause:{job_id}`
+- Downloader 在每張新圖**開始前** poll 該 key；若存在則 `sleep 0.5s` 等待
+- 正在傳輸中的圖**不中斷**，只阻擋尚未開始的新圖
+- Resume：`PATCH /api/download/jobs/{id}` (`action=resume`) → API 刪除 key → downloader 繼續
+- Redis key 設有 **24h TTL** 作為 safety net，防止因 API 異常導致 key 殘留
+
 #### Library Watcher
 
 `core/watcher.LibraryWatcher` uses `watchdog` (or polling when `watcher_use_polling=true`). On file events it enqueues `rescan_by_path_job`. Status persisted in Redis key `watcher:status`.
@@ -661,6 +677,8 @@ Credentials are read from `.env` at project root. DB user/name default to `vault
 | `dedup:progress:total` | — | Total pairs to process |
 | `dedup:progress:tier` | — | Currently active tier |
 | `dedup:progress:mode` | — | Scan mode |
+| `download:pid:{job_id}` | — | gallery-dl subprocess PID（SIGSTOP/SIGCONT 用） |
+| `download:pause:{job_id}` | 24h | EH/Pixiv soft-pause flag（key 存在即暫停） |
 
 ---
 
