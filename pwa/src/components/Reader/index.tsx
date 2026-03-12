@@ -165,6 +165,8 @@ interface SinglePageViewProps {
   scaleMode: ScaleMode
   readingDirection: ReadingDirection
   showOverlay: boolean
+  currentPage: number
+  onZoomChange?: (isZoomed: boolean) => void
 }
 
 function SinglePageView({
@@ -177,9 +179,28 @@ function SinglePageView({
   scaleMode,
   readingDirection,
   showOverlay,
+  currentPage,
+  onZoomChange,
 }: SinglePageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { isZoomed, transform } = usePinchZoom(containerRef as React.RefObject<HTMLElement | null>)
+  // Center tap zone: delay toggle to prevent double-tap from also toggling overlay.
+  // isDoubleTapRef is set by usePinchZoom's native touchstart listener (fires before any click),
+  // covering both modern browsers (click fires immediately) and iOS (300ms click delay).
+  const centerTapTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const isDoubleTapRef = useRef(false)
+  useEffect(() => () => clearTimeout(centerTapTimerRef.current), [])
+  const { isZoomed, transform, isGesturing } = usePinchZoom(
+    containerRef as React.RefObject<HTMLElement | null>,
+    currentPage,
+    () => {
+      // Called synchronously when double-tap detected — before click fires
+      isDoubleTapRef.current = true
+      clearTimeout(centerTapTimerRef.current)
+      centerTapTimerRef.current = undefined
+    },
+  )
+
+  useEffect(() => { onZoomChange?.(isZoomed) }, [isZoomed, onZoomChange])
 
   const leftAction = readingDirection === 'rtl' ? onNext : onPrev
   const rightAction = readingDirection === 'rtl' ? onPrev : onNext
@@ -191,7 +212,8 @@ function SinglePageView({
         style={{
           transform,
           transformOrigin: 'center center',
-          transition: 'transform 0.05s linear',
+          transition: isGesturing ? 'none' : 'transform 0.2s ease-out',
+          willChange: 'transform',
         }}
         className="w-full h-full flex items-center justify-center"
       >
@@ -209,43 +231,66 @@ function SinglePageView({
           <Spinner />
         </div>
       )}
-      {!isZoomed && !isVideo && readingDirection === 'vertical' ? (
+      {!isVideo && (
         <>
+          {/* Center zone — always visible (even when zoomed) for overlay toggle */}
           <div
-            className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); onPrev() }}
-            aria-label="Previous page"
-          />
-          <div
-            className="reader-tap-zone absolute top-[30%] left-0 w-full h-[40%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
+            className={`reader-tap-zone absolute cursor-pointer select-none ${readingDirection === 'vertical' ? 'top-[30%] left-0 w-full h-[40%]' : 'left-[30%] top-0 h-full w-[40%]'}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+              clearTimeout(centerTapTimerRef.current)
+              centerTapTimerRef.current = setTimeout(() => onToggleOverlay(), 250)
+            }}
             aria-label="Toggle controls"
           />
-          <div
-            className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); onNext() }}
-            aria-label="Next page"
-          />
+          {/* Prev / Next zones — hidden when zoomed (user pans instead) */}
+          {!isZoomed && readingDirection === 'vertical' && (
+            <>
+              <div
+                className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  onPrev()
+                }}
+                aria-label="Previous page"
+              />
+              <div
+                className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  onNext()
+                }}
+                aria-label="Next page"
+              />
+            </>
+          )}
+          {!isZoomed && readingDirection !== 'vertical' && (
+            <>
+              <div
+                className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  leftAction()
+                }}
+                aria-label={readingDirection === 'rtl' ? 'Next page' : 'Previous page'}
+              />
+              <div
+                className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  rightAction()
+                }}
+                aria-label={readingDirection === 'rtl' ? 'Previous page' : 'Next page'}
+              />
+            </>
+          )}
         </>
-      ) : !isZoomed && !isVideo ? (
-        <>
-          <div
-            className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); leftAction() }}
-            aria-label={readingDirection === 'rtl' ? 'Next page' : 'Previous page'}
-          />
-          <div
-            className="reader-tap-zone absolute left-[30%] top-0 h-full w-[40%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
-            aria-label="Toggle controls"
-          />
-          <div
-            className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); rightAction() }}
-            aria-label={readingDirection === 'rtl' ? 'Previous page' : 'Next page'}
-          />
-        </>
-      ) : null}
+      )}
     </div>
   )
 }
@@ -343,7 +388,7 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
   const showBottomSpinner = lastPage > 0 && !loadedPages.has(lastPage)
 
   return (
-    <div ref={scrollRef} className="reader-webtoon-scroll flex flex-col items-center w-full h-full">
+    <div ref={scrollRef} className="reader-webtoon-scroll flex flex-col items-center w-full h-full overflow-y-auto">
       {images.map((img) => (
         <MediaElement
           key={img.pageNum}
@@ -387,6 +432,8 @@ interface DoublePageViewProps {
   scaleMode: ScaleMode
   readingDirection: ReadingDirection
   showOverlay: boolean
+  currentPage: number
+  onZoomChange?: (isZoomed: boolean) => void
 }
 
 function DoublePageView({
@@ -400,9 +447,28 @@ function DoublePageView({
   scaleMode,
   readingDirection,
   showOverlay,
+  currentPage,
+  onZoomChange,
 }: DoublePageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
-  const { isZoomed, transform } = usePinchZoom(containerRef as React.RefObject<HTMLElement | null>)
+  // Center tap zone: delay toggle to prevent double-tap from also toggling overlay.
+  // isDoubleTapRef is set by usePinchZoom's native touchstart listener (fires before any click),
+  // covering both modern browsers (click fires immediately) and iOS (300ms click delay).
+  const centerTapTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const isDoubleTapRef = useRef(false)
+  useEffect(() => () => clearTimeout(centerTapTimerRef.current), [])
+  const { isZoomed, transform, isGesturing } = usePinchZoom(
+    containerRef as React.RefObject<HTMLElement | null>,
+    currentPage,
+    () => {
+      // Called synchronously when double-tap detected — before click fires
+      isDoubleTapRef.current = true
+      clearTimeout(centerTapTimerRef.current)
+      centerTapTimerRef.current = undefined
+    },
+  )
+
+  useEffect(() => { onZoomChange?.(isZoomed) }, [isZoomed, onZoomChange])
 
   const leftAction = readingDirection === 'rtl' ? onNext : onPrev
   const rightAction = readingDirection === 'rtl' ? onPrev : onNext
@@ -423,7 +489,8 @@ function DoublePageView({
         style={{
           transform,
           transformOrigin: 'center center',
-          transition: 'transform 0.05s linear',
+          transition: isGesturing ? 'none' : 'transform 0.2s ease-out',
+          willChange: 'transform',
         }}
         className="flex h-full w-full flex-row"
       >
@@ -461,43 +528,66 @@ function DoublePageView({
           <Spinner />
         </div>
       )}
-      {!isZoomed && !hasVideo && readingDirection === 'vertical' ? (
+      {!hasVideo && (
         <>
+          {/* Center zone — always visible (even when zoomed) for overlay toggle */}
           <div
-            className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); onPrev() }}
-            aria-label="Previous page"
-          />
-          <div
-            className="reader-tap-zone absolute top-[30%] left-0 w-full h-[40%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
+            className={`reader-tap-zone absolute cursor-pointer select-none ${readingDirection === 'vertical' ? 'top-[30%] left-0 w-full h-[40%]' : 'left-[30%] top-0 h-full w-[40%]'}`}
+            onClick={(e) => {
+              e.stopPropagation()
+              if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+              clearTimeout(centerTapTimerRef.current)
+              centerTapTimerRef.current = setTimeout(() => onToggleOverlay(), 250)
+            }}
             aria-label="Toggle controls"
           />
-          <div
-            className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); onNext() }}
-            aria-label="Next page"
-          />
+          {/* Prev / Next zones — hidden when zoomed (user pans instead) */}
+          {!isZoomed && readingDirection === 'vertical' && (
+            <>
+              <div
+                className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  onPrev()
+                }}
+                aria-label="Previous page"
+              />
+              <div
+                className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  onNext()
+                }}
+                aria-label="Next page"
+              />
+            </>
+          )}
+          {!isZoomed && readingDirection !== 'vertical' && (
+            <>
+              <div
+                className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  leftAction()
+                }}
+                aria-label={readingDirection === 'rtl' ? 'Next page' : 'Previous page'}
+              />
+              <div
+                className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
+                onClick={(e) => {
+                  e.stopPropagation()
+                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  rightAction()
+                }}
+                aria-label={readingDirection === 'rtl' ? 'Previous page' : 'Next page'}
+              />
+            </>
+          )}
         </>
-      ) : !isZoomed && !hasVideo ? (
-        <>
-          <div
-            className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); leftAction() }}
-            aria-label={readingDirection === 'rtl' ? 'Next page' : 'Previous page'}
-          />
-          <div
-            className="reader-tap-zone absolute left-[30%] top-0 h-full w-[40%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
-            aria-label="Toggle controls"
-          />
-          <div
-            className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
-            onClick={(e) => { e.stopPropagation(); rightAction() }}
-            aria-label={readingDirection === 'rtl' ? 'Previous page' : 'Next page'}
-          />
-        </>
-      ) : null}
+      )}
     </div>
   )
 }
@@ -578,7 +668,7 @@ function ReaderOverlay({
   const currentDir = DIRECTIONS.find((d) => d.dir === readingDirection) ?? DIRECTIONS[0]
 
   const cycleBtnClass =
-    'rounded p-2 text-base font-medium transition-colors bg-white/10 hover:bg-white/20 text-white border border-white/20 flex items-center justify-center'
+    'w-10 h-10 rounded text-lg font-medium transition-colors bg-white/10 hover:bg-white/20 text-white border border-white/20 flex items-center justify-center shrink-0'
 
   // Page jump dialog
   const [showJump, setShowJump] = useState(false)
@@ -623,10 +713,11 @@ function ReaderOverlay({
   return (
     <div
       className="bg-black/70 text-white text-sm backdrop-blur-sm"
-      style={{ paddingTop: 'env(safe-area-inset-top)' }}
+      style={{ paddingTop: 'min(env(safe-area-inset-top), 45px)' }}
     >
-      {/* Row 1: page indicator (left) + help + close (right) */}
+      {/* Row 1: page indicator · cycle buttons (left-aligned) · auto-advance toggle · help · close */}
       <div className="flex items-center gap-2 px-4 py-2">
+        {/* Page indicator */}
         <div className="relative">
           <button
             onClick={openJump}
@@ -637,7 +728,6 @@ function ReaderOverlay({
           </button>
           {showJump && (
             <>
-              {/* Backdrop to close on outside click */}
               <div className="fixed inset-0 z-30" onClick={closeJump} />
               <div className="absolute top-full left-0 mt-1 z-40 bg-black/90 border border-white/20 rounded-lg p-3 flex items-center gap-2 shadow-xl min-w-[140px]">
                 <input
@@ -665,67 +755,68 @@ function ReaderOverlay({
           )}
         </div>
 
-        <div className="flex-1" />
-
-        <div className="flex items-center gap-1.5 shrink-0">
-          <button
-            onClick={onShowHelp}
-            className="rounded bg-white/10 hover:bg-white/20 border border-white/20 px-3 py-1.5 text-sm text-white/80 hover:text-white transition-colors"
-            title={t('reader.helpButton')}
-          >
-            ?
-          </button>
-          <button
-            onClick={onBack}
-            className="rounded bg-red-600 hover:bg-red-500 px-6 py-1.5 text-base text-black font-bold transition-colors"
-            title={t('reader.goBack')}
-          >
-            ✕
-          </button>
-        </div>
-      </div>
-
-      {/* Row 2: cycle buttons — view / scale / direction — plus auto advance on the right */}
-      <div className="flex items-center gap-2 px-4 pb-2 border-t border-white/10 pt-2">
+        {/* Cycle buttons immediately after page indicator */}
         <button onClick={cycleViewMode} className={cycleBtnClass} title={currentView.label}>
           <span>{currentView.icon}</span>
         </button>
         <button onClick={cycleScaleMode} className={cycleBtnClass} title={currentScale.label}>
           <span>{currentScale.icon}</span>
         </button>
-        <button onClick={cycleDirection} className={cycleBtnClass} title={currentDir.label}>
-          <span>{currentDir.icon}</span>
-        </button>
+        {viewMode !== 'webtoon' && (
+          <button onClick={cycleDirection} className={cycleBtnClass} title={currentDir.label}>
+            <span>{currentDir.icon}</span>
+          </button>
+        )}
 
         <div className="flex-1" />
 
-        <span className="text-[11px] text-white/60 shrink-0">{t('reader.autoAdvance')}</span>
+        {/* Auto advance toggle only (slider in Row 2 when enabled) */}
         <button
           onClick={onAutoAdvanceToggle}
           className={`relative w-9 h-5 rounded-full transition-colors shrink-0 ${autoAdvanceEnabled ? 'bg-vault-accent' : 'bg-white/20'}`}
           aria-label={t('reader.autoAdvance')}
+          title={t('reader.autoAdvance')}
         >
           <span
             className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform ${autoAdvanceEnabled ? 'translate-x-4' : ''}`}
           />
         </button>
-        {autoAdvanceEnabled && (
-          <div className="flex items-center gap-2">
-            <input
-              type="range"
-              min={2}
-              max={30}
-              step={1}
-              value={autoAdvanceSeconds}
-              onChange={(e) => onAutoAdvanceIntervalChange(Number(e.target.value))}
-              className="w-24 accent-white"
-            />
-            <span className="text-[11px] tabular-nums whitespace-nowrap">
-              {autoAdvanceSeconds}s
-            </span>
-          </div>
-        )}
+
+        {/* Help + Close */}
+        <button
+          onClick={onShowHelp}
+          className="w-10 h-10 rounded bg-white/10 hover:bg-white/20 border border-white/20 text-white/80 hover:text-white transition-colors flex items-center justify-center shrink-0"
+          title={t('reader.helpButton')}
+        >
+          ?
+        </button>
+        <button
+          onClick={onBack}
+          className="w-10 h-10 rounded bg-red-600 hover:bg-red-500 text-white font-bold transition-colors flex items-center justify-center shrink-0"
+          title={t('reader.goBack')}
+        >
+          ✕
+        </button>
       </div>
+
+      {/* Row 2: auto advance slider — only shown when enabled */}
+      {autoAdvanceEnabled && (
+        <div className="flex items-center gap-2 px-4 pb-2">
+          <span className="text-[11px] text-white/60 shrink-0">{t('reader.autoAdvance')}</span>
+          <input
+            type="range"
+            min={2}
+            max={30}
+            step={1}
+            value={autoAdvanceSeconds}
+            onChange={(e) => onAutoAdvanceIntervalChange(Number(e.target.value))}
+            className="flex-1 accent-white"
+          />
+          <span className="text-[11px] tabular-nums whitespace-nowrap w-6 text-right">
+            {autoAdvanceSeconds}s
+          </span>
+        </div>
+      )}
     </div>
   )
 }
@@ -769,6 +860,7 @@ function ThumbnailStrip({
     }
     return [...urls]
   }, [previews])
+  const programmaticScrollRef = useRef(false)
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scrollNotifyThrottleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const lastScrollNotifyPageRef = useRef(0)
@@ -781,6 +873,7 @@ function ThumbnailStrip({
     const el = stripRef.current
     if (!el) return
     const onScroll = () => {
+      if (programmaticScrollRef.current) return
       userScrollingRef.current = true
       clearTimeout(scrollTimerRef.current)
       scrollTimerRef.current = setTimeout(() => {
@@ -839,13 +932,16 @@ function ThumbnailStrip({
     // thumbnail strip becomes visible (e.g. on Toggle Control). Instead, we
     // manually compute the target scrollLeft and assign it directly to the
     // strip container, which only scrolls the strip's own overflow, never the viewport.
-    if (userScrollingRef.current || !isVisible) return
+    if (userScrollingRef.current) return
     const strip = stripRef.current
     const active = activeRef.current
     if (!strip || !active) return
     const targetScrollLeft = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2
+    programmaticScrollRef.current = true
     strip.scrollLeft = Math.max(0, Math.min(targetScrollLeft, strip.scrollWidth - strip.clientWidth))
-  }, [currentPage, isVisible])
+    // Reset flag after the scroll event has had a chance to fire
+    requestAnimationFrame(() => { programmaticScrollRef.current = false })
+  }, [currentPage])
 
   return (
     <>
@@ -1130,10 +1226,11 @@ function StatusBar({
 
 interface HelpOverlayProps {
   readingDirection: ReadingDirection
+  viewMode: ViewMode
   onDismiss: () => void
 }
 
-function HelpOverlay({ readingDirection, onDismiss }: HelpOverlayProps) {
+function HelpOverlay({ readingDirection, viewMode, onDismiss }: HelpOverlayProps) {
   const isRtl = readingDirection === 'rtl'
   const isVertical = readingDirection === 'vertical'
 
@@ -1151,38 +1248,37 @@ function HelpOverlay({ readingDirection, onDismiss }: HelpOverlayProps) {
 
   return (
     <div className="absolute inset-0 z-50 flex flex-col" onClick={onDismiss}>
-      {isVertical ? (
-        /* Vertical mode: top/middle/bottom zones */
+      {viewMode === 'webtoon' ? (
+        /* Webtoon mode: only center tap zone */
+        <div className="flex flex-1 items-center justify-center bg-white/5">
+          <div className="text-white text-sm font-medium">{t('reader.helpTapCenter')}</div>
+        </div>
+      ) : isVertical ? (
+        /* Vertical direction: top/middle/bottom zones */
         <div className="flex flex-col flex-1">
-          {/* Top zone — previous page */}
           <div className="h-[30%] w-full flex items-center justify-center bg-blue-500/20 border-b border-blue-400/30">
             <div className="text-white text-sm font-medium">{t('reader.helpTapLeft')}</div>
           </div>
-          {/* Middle zone — toggle controls */}
           <div className="flex-1 w-full flex items-center justify-center bg-white/5 border-b border-white/10">
             <div className="text-white text-sm font-medium">{t('reader.helpTapCenter')}</div>
           </div>
-          {/* Bottom zone — next page */}
           <div className="h-[30%] w-full flex items-center justify-center bg-green-500/20">
             <div className="text-white text-sm font-medium">{t('reader.helpTapRight')}</div>
           </div>
         </div>
       ) : (
-        /* Horizontal mode: left/center/right zones */
+        /* Horizontal direction: left/center/right zones */
         <div className="flex flex-1">
-          {/* Left zone */}
           <div className="w-[30%] h-full flex items-center justify-center bg-blue-500/20 border-r border-blue-400/30">
             <div className="text-center">
               <div className="text-white text-sm font-medium">{leftLabel}</div>
             </div>
           </div>
-          {/* Center zone */}
           <div className="flex-1 h-full flex items-center justify-center bg-white/5 border-r border-white/10">
             <div className="text-center">
               <div className="text-white text-sm font-medium">{t('reader.helpTapCenter')}</div>
             </div>
           </div>
-          {/* Right zone */}
           <div className="w-[30%] h-full flex items-center justify-center bg-green-500/20">
             <div className="text-center">
               <div className="text-white text-sm font-medium">{rightLabel}</div>
@@ -1194,7 +1290,16 @@ function HelpOverlay({ readingDirection, onDismiss }: HelpOverlayProps) {
       {/* Bottom info */}
       <div className="absolute bottom-20 left-0 right-0 flex flex-col items-center gap-2 pointer-events-none">
         <div className="bg-black/80 rounded-lg px-4 py-3 text-center space-y-1.5 max-w-sm">
-          <p className="text-white text-sm">{t('reader.helpSwipe')}</p>
+          {viewMode === 'webtoon' ? (
+            <p className="text-white text-sm">{t('reader.helpSwipeRight')}</p>
+          ) : (
+            <>
+              <p className="text-white text-sm">{t('reader.helpSwipe')}</p>
+              <p className="text-white/70 text-xs">{t('reader.helpSwipeUp')}</p>
+            </>
+          )}
+          <p className="text-white/70 text-xs">{t('reader.helpDoubleTap')}</p>
+          <p className="text-white/70 text-xs">{t('reader.helpPinchZoom')}</p>
           <p className="text-white/60 text-xs">{t('reader.helpKeyboard')}</p>
           <p className="text-white/40 text-xs">{t('reader.helpDismiss')}</p>
         </div>
@@ -1384,18 +1489,33 @@ export default function Reader({
   useSequentialPrefetch(images, state.currentPage, isProxyMode)
   useProgressSave(galleryId, state.currentPage)
 
-  // Swipe: respect RTL direction
+  const handleToggleOverlay = useCallback(() => toggleOverlay(), [toggleOverlay])
+  const handleBack = useCallback(() => router.back(), [router])
+
+  // Track viewMode in ref so swipe callbacks stay stable across mode changes
+  const viewModeRef = useRef(state.viewMode)
+  useEffect(() => { viewModeRef.current = state.viewMode }, [state.viewMode])
+
+  // Swipe: respect RTL direction; in webtoon mode, swipeRight = go back
   const swipeLeft = useCallback(() => {
     if (state.readingDirection === 'rtl') rawPrevPage()
     else rawNextPage()
   }, [state.readingDirection, rawNextPage, rawPrevPage])
 
   const swipeRight = useCallback(() => {
+    if (viewModeRef.current === 'webtoon') { handleBack(); return }
     if (state.readingDirection === 'rtl') rawNextPage()
     else rawPrevPage()
-  }, [state.readingDirection, rawNextPage, rawPrevPage])
+  }, [state.readingDirection, rawNextPage, rawPrevPage, handleBack])
 
-  useTouchGesture(containerRef as React.RefObject<HTMLElement | null>, swipeLeft, swipeRight)
+  const handleSwipeUp = useCallback(() => {
+    if (viewModeRef.current !== 'webtoon') handleBack()
+  }, [handleBack])
+
+  const isZoomedRef = useRef(false)
+  const handleZoomChange = useCallback((z: boolean) => { isZoomedRef.current = z }, [])
+
+  useTouchGesture(containerRef as React.RefObject<HTMLElement | null>, swipeLeft, swipeRight, handleSwipeUp, 50, () => isZoomedRef.current)
 
   useKeyboardNav(rawNextPage, rawPrevPage, state.readingDirection, state.viewMode)
 
@@ -1413,9 +1533,6 @@ export default function Reader({
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [router, state.viewMode])
-
-  const handleToggleOverlay = useCallback(() => toggleOverlay(), [toggleOverlay])
-  const handleBack = useCallback(() => router.back(), [router])
 
   // Help overlay
   const [showHelp, setShowHelp] = useState(false)
@@ -1487,6 +1604,8 @@ export default function Reader({
             scaleMode={state.scaleMode}
             readingDirection={state.readingDirection}
             showOverlay={state.showOverlay}
+            currentPage={state.currentPage}
+            onZoomChange={handleZoomChange}
           />
         )}
 
@@ -1511,6 +1630,8 @@ export default function Reader({
             scaleMode={state.scaleMode}
             readingDirection={state.readingDirection}
             showOverlay={state.showOverlay}
+            currentPage={state.currentPage}
+            onZoomChange={handleZoomChange}
           />
         )}
       </div>
@@ -1549,7 +1670,7 @@ export default function Reader({
 
       {/* Help overlay */}
       {showHelp && (
-        <HelpOverlay readingDirection={state.readingDirection} onDismiss={handleDismissHelp} />
+        <HelpOverlay readingDirection={state.readingDirection} viewMode={state.viewMode} onDismiss={handleDismissHelp} />
       )}
     </div>
   )

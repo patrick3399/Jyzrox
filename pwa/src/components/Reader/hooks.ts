@@ -274,6 +274,7 @@ export function useTouchGesture(
   elementRef: React.RefObject<HTMLElement | null>,
   onSwipeLeft: () => void,
   onSwipeRight: () => void,
+  onSwipeUp?: () => void,
   threshold = 50,
   isDisabled?: () => boolean,
 ) {
@@ -294,10 +295,13 @@ export function useTouchGesture(
       if (isDisabled?.()) return
       const dx = e.changedTouches[0].clientX - startX.current
       const dy = e.changedTouches[0].clientY - startY.current
-      // Only trigger if horizontal swipe dominates
       if (Math.abs(dx) > threshold && Math.abs(dx) > Math.abs(dy)) {
+        // Horizontal swipe dominates → page turn
         if (dx < 0) onSwipeLeft()
         else onSwipeRight()
+      } else if (onSwipeUp && dy < -threshold && Math.abs(dy) > Math.abs(dx)) {
+        // Vertical swipe-up dominates → back
+        onSwipeUp()
       }
     }
 
@@ -307,7 +311,7 @@ export function useTouchGesture(
       el.removeEventListener('touchstart', onStart)
       el.removeEventListener('touchend', onEnd)
     }
-  }, [elementRef, onSwipeLeft, onSwipeRight, threshold, isDisabled])
+  }, [elementRef, onSwipeLeft, onSwipeRight, onSwipeUp, threshold, isDisabled])
 }
 
 // ── useKeyboardNav ────────────────────────────────────────────────────
@@ -493,7 +497,11 @@ interface PinchZoomState {
   isZoomed: boolean
 }
 
-export function usePinchZoom(elementRef: React.RefObject<HTMLElement | null>) {
+export function usePinchZoom(
+  elementRef: React.RefObject<HTMLElement | null>,
+  resetTrigger?: number,
+  onDoubleTapDetected?: () => void,
+) {
   const [zoomState, setZoomState] = useState<PinchZoomState>({
     scale: 1,
     translateX: 0,
@@ -506,6 +514,7 @@ export function usePinchZoom(elementRef: React.RefObject<HTMLElement | null>) {
     stateRef.current = zoomState
   })
 
+  const [isGesturing, setIsGesturing] = useState(false)
   const lastTouchDistRef = useRef<number | null>(null)
   const lastTouchCenterRef = useRef<{ x: number; y: number } | null>(null)
   const panStartRef = useRef<{ x: number; y: number; tx: number; ty: number } | null>(null)
@@ -529,6 +538,19 @@ export function usePinchZoom(elementRef: React.RefObject<HTMLElement | null>) {
     setZoomState({ scale: 1, translateX: 0, translateY: 0, isZoomed: false })
   }, [])
 
+  // Keep callback ref stable so the touch effect doesn't re-register on every render
+  const onDoubleTapDetectedRef = useRef(onDoubleTapDetected)
+  useEffect(() => { onDoubleTapDetectedRef.current = onDoubleTapDetected }, [onDoubleTapDetected])
+
+  const resetTriggerInitRef = useRef(true)
+  useEffect(() => {
+    if (resetTriggerInitRef.current) {
+      resetTriggerInitRef.current = false
+      return
+    }
+    resetZoom()
+  }, [resetTrigger, resetZoom])
+
   useEffect(() => {
     const el = elementRef.current
     if (!el) return
@@ -546,11 +568,13 @@ export function usePinchZoom(elementRef: React.RefObject<HTMLElement | null>) {
 
     const onTouchStart = (e: TouchEvent) => {
       if (e.touches.length === 2) {
+        setIsGesturing(true)
         isPinchingRef.current = true
         lastTouchDistRef.current = getTouchDist(e.touches)
         lastTouchCenterRef.current = getTouchCenter(e.touches)
         panStartRef.current = null
       } else if (e.touches.length === 1 && stateRef.current.isZoomed) {
+        setIsGesturing(true)
         panStartRef.current = {
           x: e.touches[0].clientX,
           y: e.touches[0].clientY,
@@ -602,8 +626,9 @@ export function usePinchZoom(elementRef: React.RefObject<HTMLElement | null>) {
         if (isPinchingRef.current) {
           isPinchingRef.current = false
           panStartRef.current = null
+          if (e.touches.length === 0) setIsGesturing(false)
           // If scale settled close to 1, reset
-          if (stateRef.current.scale < 1.05) {
+          if (stateRef.current.scale < 1.02) {
             resetZoom()
           }
           return
@@ -612,14 +637,35 @@ export function usePinchZoom(elementRef: React.RefObject<HTMLElement | null>) {
 
       if (e.touches.length === 0) {
         panStartRef.current = null
+        setIsGesturing(false)
       }
     }
 
     const onDoubleTap = (e: TouchEvent) => {
+      if (e.touches.length !== 1) return
       const now = Date.now()
       if (now - lastTapRef.current < 300) {
         e.preventDefault()
-        resetZoom()
+        onDoubleTapDetectedRef.current?.()
+        if (stateRef.current.isZoomed) {
+          resetZoom()
+        } else {
+          // Zoom to 2× centered on the tapped point
+          const touch = e.touches[0]
+          const rect = el.getBoundingClientRect()
+          const tapX = touch.clientX - rect.left - rect.width / 2
+          const tapY = touch.clientY - rect.top - rect.height / 2
+          const targetScale = 2
+          const rawTx = (1 - targetScale) * tapX
+          const rawTy = (1 - targetScale) * tapY
+          const clamped = clampTranslate(targetScale, rawTx, rawTy, el)
+          setZoomState({
+            scale: targetScale,
+            translateX: clamped.tx,
+            translateY: clamped.ty,
+            isZoomed: true,
+          })
+        }
       }
       lastTapRef.current = now
     }
@@ -639,7 +685,7 @@ export function usePinchZoom(elementRef: React.RefObject<HTMLElement | null>) {
 
   const transform = `scale(${zoomState.scale}) translate(${zoomState.translateX / zoomState.scale}px, ${zoomState.translateY / zoomState.scale}px)`
 
-  return { ...zoomState, transform, resetZoom }
+  return { ...zoomState, transform, resetZoom, isGesturing }
 }
 
 // ── useViewportHeight ─────────────────────────────────────────────────

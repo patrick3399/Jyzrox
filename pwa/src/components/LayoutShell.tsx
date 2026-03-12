@@ -45,7 +45,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
 
       {/* Main content */}
       <main className="lg:pl-56 pb-[calc(4rem+var(--sab))] lg:pb-0 min-h-screen bg-vault-bg text-vault-text">
-        <div className="px-4 lg:px-6 xl:px-8 py-6 pt-[calc(1.5rem+var(--sat))] lg:pt-6">
+        <div className="px-4 lg:px-6 xl:px-8 py-6 pt-[calc(1.5rem+var(--sat)/2)] lg:pt-6">
           {children}
         </div>
       </main>
