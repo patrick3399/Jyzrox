@@ -378,3 +378,13 @@ CREATE TABLE IF NOT EXISTS user_favorites (
     PRIMARY KEY (user_id, gallery_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_favorites_gallery ON user_favorites (gallery_id);
+
+-- ── User Ratings ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_ratings (
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    gallery_id  BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    rating      SMALLINT NOT NULL CHECK (rating >= 0 AND rating <= 5),
+    rated_at    TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, gallery_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_ratings_gallery ON user_ratings (gallery_id);

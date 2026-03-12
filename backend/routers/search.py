@@ -9,7 +9,7 @@ from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, func, or_, select
 
 from core.auth import gallery_access_filter, require_auth
 from core.database import async_session
-from db.models import Gallery, SavedSearch
+from db.models import Gallery, SavedSearch, UserFavorite, UserRating
 
 router = APIRouter(tags=["search"])
 
@@ -106,10 +106,22 @@ async def search_galleries(
         filters.append(Gallery.source == source_filter)
 
     if rating_filter is not None:
-        filters.append(Gallery.rating >= rating_filter)
+        filters.append(
+            Gallery.id.in_(
+                select(UserRating.gallery_id).where(
+                    UserRating.user_id == auth["user_id"],
+                    UserRating.rating >= rating_filter,
+                )
+            )
+        )
 
     if favorited_filter is not None:
-        filters.append(Gallery.favorited == favorited_filter)
+        if favorited_filter:
+            filters.append(
+                Gallery.id.in_(
+                    select(UserFavorite.gallery_id).where(UserFavorite.user_id == auth["user_id"])
+                )
+            )
 
     # Sort — DESC for numeric/date columns, ASC for title
     _desc_sorts = {"added_at", "rating", "pages", "posted_at"}
@@ -134,7 +146,7 @@ async def search_galleries(
             "language": r.language,
             "pages": r.pages,
             "rating": r.rating,
-            "favorited": r.favorited,
+            "favorited": False,
             "uploader": r.uploader,
             "download_status": r.download_status,
             "added_at": r.added_at.isoformat() if r.added_at else None,

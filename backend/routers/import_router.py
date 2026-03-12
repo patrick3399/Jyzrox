@@ -392,12 +392,13 @@ async def browse_filesystem(path: str = "/mnt", _: dict = Depends(_member)):
 
 
 @router.get("/recent")
-async def recent_imports(_: dict = Depends(_member)):
+async def recent_imports(auth: dict = Depends(_member)):
     """Return the 20 most recently added local galleries."""
+    from core.auth import gallery_access_filter
     async with async_session() as session:
         result = await session.execute(
             select(Gallery)
-            .where(Gallery.source == "local")
+            .where(Gallery.source == "local", gallery_access_filter(auth))
             .order_by(desc(Gallery.added_at))
             .limit(20)
         )

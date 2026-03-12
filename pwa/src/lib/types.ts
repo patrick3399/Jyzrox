@@ -22,8 +22,10 @@ export interface Gallery {
   pages: number
   posted_at: string | null
   added_at: string
-  rating: number // 0–5
-  favorited: boolean
+  rating: number // 0–5 (legacy global, kept for backward compat)
+  favorited: boolean // legacy, always false now
+  is_favorited: boolean // per-user favorite status
+  my_rating: number | null // per-user rating, null if not rated
   uploader: string
   artist_id: string | null
   download_status: 'proxy_only' | 'partial' | 'complete'
@@ -493,8 +495,10 @@ export interface LibraryDirectory {
   title: string
   category: string | null
   file_count: number
-  rating: number
-  favorited: boolean
+  rating: number // legacy
+  favorited: boolean // legacy
+  is_favorited: boolean // per-user
+  my_rating: number | null // per-user
   source: string | null
   disk_size: number
 }

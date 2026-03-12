@@ -391,7 +391,7 @@ function RootView({ directories, loading, viewMode, selectedItems, onItemClick }
                   <span>{formatSize(dir.disk_size)}</span>
                 </div>
                 <div className="flex items-center justify-between">
-                  <StarRating rating={dir.rating} />
+                  <StarRating rating={dir.my_rating ?? dir.rating} />
                   {dir.source && (
                     <span className="bg-vault-input px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide">
                       {dir.source}
@@ -434,7 +434,7 @@ function RootView({ directories, loading, viewMode, selectedItems, onItemClick }
             </div>
             <span className="text-xs text-vault-text-secondary text-right">{dir.file_count}</span>
             <span className="text-xs text-vault-text-secondary text-right">{formatSize(dir.disk_size)}</span>
-            <StarRating rating={dir.rating} />
+            <StarRating rating={dir.my_rating ?? dir.rating} />
             <span className="text-xs text-vault-text-secondary truncate">{dir.source ?? '—'}</span>
           </div>
         )

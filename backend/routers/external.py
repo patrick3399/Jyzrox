@@ -185,9 +185,23 @@ async def list_galleries(
     if q:
         filters.append(Gallery.title.ilike(f"%{q}%"))
     if favorited is not None:
-        filters.append(Gallery.favorited == favorited)
+        if favorited:
+            from db.models import UserFavorite
+            filters.append(
+                Gallery.id.in_(
+                    select(UserFavorite.gallery_id).where(UserFavorite.user_id == token_data["user_id"])
+                )
+            )
     if min_rating is not None:
-        filters.append(Gallery.rating >= min_rating)
+        from db.models import UserRating
+        filters.append(
+            Gallery.id.in_(
+                select(UserRating.gallery_id).where(
+                    UserRating.user_id == token_data["user_id"],
+                    UserRating.rating >= min_rating,
+                )
+            )
+        )
 
     async with async_session() as session:
         count_result = await session.execute(select(func.count()).select_from(Gallery).where(*filters, gallery_access_filter(token_data)))
@@ -211,7 +225,7 @@ async def list_galleries(
                 "posted_at": r.posted_at.isoformat() if r.posted_at else None,
                 "added_at": r.added_at.isoformat() if r.added_at else None,
                 "rating": r.rating,
-                "favorited": r.favorited,
+                "favorited": False,
                 "uploader": r.uploader,
                 "download_status": r.download_status,
                 "tags": r.tags_array or [],
@@ -245,7 +259,7 @@ async def get_gallery(
         "posted_at": r.posted_at.isoformat() if r.posted_at else None,
         "added_at": r.added_at.isoformat() if r.added_at else None,
         "rating": r.rating,
-        "favorited": r.favorited,
+        "favorited": False,
         "uploader": r.uploader,
         "download_status": r.download_status,
         "tags": r.tags_array or [],

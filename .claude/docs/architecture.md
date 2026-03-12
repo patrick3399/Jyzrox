@@ -1,6 +1,6 @@
 # Jyzrox Architecture (v0.3)
 
-> Codebase audit, 2026-03-12. Read from source files — do not update manually; regenerate from source.
+> Codebase audit, 2026-03-12 (updated). Read from source files — do not update manually; regenerate from source.
 
 ---
 
@@ -126,6 +126,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `collection_galleries` | Collection↔Gallery join | `(collection_id, gallery_id)` PK, `position` |
 | `excluded_blobs` | Per-gallery blob exclusions | `(gallery_id, blob_sha256)` PK, `excluded_at` |
 | `blob_relationships` | Dedup pair store | `id` UUID PK, `sha_a / sha_b` FK → `blobs` (`CHECK sha_a < sha_b`, `UNIQUE` pair), `hamming_dist SMALLINT`, `relationship TEXT` (`quality_conflict`/`variant`/`whitelisted`/`needs_t3`/`resolved`), `suggested_keep TEXT`, `diff_type TEXT`, `diff_score FLOAT`, `size_ratio FLOAT`, `tier SMALLINT`, `reviewed BOOLEAN`, `created_at` |
+| `user_favorites` | Per-user gallery favorites | `(user_id, gallery_id)` PK, `created_at` |
 
 > **Note:** Tables `collections`, `collection_galleries`, and `excluded_blobs` are created via Alembic migrations (`0005b`, `0007`), not in `db/init.sql`. The `audit_logs` table is also migration-only (`0005`). `blob_relationships` is created in `db/init.sql`.
 
@@ -174,12 +175,13 @@ All models are in `backend/db/models.py`.
 | `CollectionGallery` | `collection_galleries` |
 | `ExcludedBlob` | `excluded_blobs` |
 | `BlobRelationship` | `blob_relationships` |
+| `UserFavorite` | `user_favorites` |
 
 ---
 
 ### Worker Pipeline (ARQ)
 
-Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`)
+Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `dedup.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`)
 
 #### Job Functions
 
@@ -480,6 +482,9 @@ Source root: `pwa/src/`
 | `/dedup` | `app/dedup/page.tsx` | Dedup dashboard — tier settings, scan trigger, review list with keep/whitelist/skip actions |
 | `/forbidden` | `app/forbidden/page.tsx` | 403 access denied page |
 | `/admin/users` | `app/admin/users/page.tsx` | User management (admin only) |
+| `/artists/[artistId]` | `app/artists/[artistId]/page.tsx` | Individual artist detail page |
+| `/reader/artist/[artistId]` | `app/reader/artist/[artistId]/page.tsx` | Artist gallery reader |
+| `/reader/pixiv/[id]` | `app/reader/pixiv/[id]/page.tsx` | Pixiv online reader |
 
 ---
 
@@ -517,6 +522,8 @@ Source root: `pwa/src/`
 | `DedupSettingsCard` | `components/Dedup/DedupSettingsCard.tsx` | Tier enable toggles + threshold sliders |
 | `DedupTierCard` | `components/Dedup/DedupTierCard.tsx` | Per-tier status and config |
 | `ImageModal` | `components/Dedup/ImageModal.tsx` | Full-size image preview modal for dedup review |
+| `BackButton` | `components/BackButton.tsx` | Navigation back button |
+| `BottomTabBar` | `components/BottomTabBar.tsx` | Bottom tab navigation for mobile |
 
 ---
 
@@ -537,6 +544,9 @@ All hooks in `pwa/src/hooks/`.
 | `useScheduledTasks` | `useScheduledTasks.ts` | Scheduled task listing, enable/disable, manual run |
 | `useSubscriptions` | `useSubscriptions.ts` | Subscription CRUD and manual check trigger |
 | `useDedup` | `useDedup.ts` | Dedup stats, review list, keep/whitelist/skip actions, scan control |
+| `useScrollRestore` | `useScrollRestore.ts` | Scroll position restoration |
+| `useGridKeyboard` | `useGridKeyboard.ts` | Keyboard navigation in gallery grids |
+| `useSwipeBack` | `useSwipeBack.ts` | Swipe back gesture detection |
 
 ---
 
