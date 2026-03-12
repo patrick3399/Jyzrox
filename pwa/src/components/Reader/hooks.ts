@@ -319,41 +319,44 @@ export function useTouchGesture(
 export function useKeyboardNav(
   onNext: () => void,
   onPrev: () => void,
+  onToggleOverlay: () => void,
+  onBack: () => void,
   readingDirection: ReadingDirection = 'ltr',
   viewMode?: string,
 ) {
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (['INPUT', 'TEXTAREA', 'SELECT'].includes((e.target as HTMLElement)?.tagName)) return
+      const isWebtoon = viewMode === 'webtoon'
       const isRtl = readingDirection === 'rtl'
       switch (e.key) {
         case 'ArrowRight':
         case 'd':
           e.preventDefault()
-          isRtl ? onPrev() : onNext()
+          if (isWebtoon) { onNext() }
+          else { isRtl ? onPrev() : onNext() }
           break
         case 'ArrowLeft':
         case 'a':
           e.preventDefault()
-          isRtl ? onNext() : onPrev()
+          if (isWebtoon) { onPrev() }
+          else { isRtl ? onNext() : onPrev() }
           break
         case 'ArrowDown':
+        case 's':
           e.preventDefault()
-          onNext()
+          onToggleOverlay()
           break
         case 'ArrowUp':
-          // In webtoon mode (or when viewMode is not specified), ArrowUp scrolls prev
-          // In single/double page mode, ArrowUp is reserved for back navigation
-          if (viewMode === 'webtoon' || viewMode === undefined) {
-            e.preventDefault()
-            onPrev()
-          }
+        case 'w':
+          e.preventDefault()
+          onBack()
           break
       }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [onNext, onPrev, readingDirection, viewMode])
+  }, [onNext, onPrev, onToggleOverlay, onBack, readingDirection, viewMode])
 }
 
 // ── useProgressSave ───────────────────────────────────────────────────
