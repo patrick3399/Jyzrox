@@ -41,21 +41,10 @@
 
 > 需多階段實施或依賴較多。
 
-### 即時狀態推送（WebSocket）
+### ~~即時狀態推送（WebSocket）~~ ✅ 已完成
 
-> **現狀**：下載佇列等核心狀態靠 SWR polling（每 3 秒一次）。WebSocket 基礎設施已存在（`/api/ws`），目前只用於系統警告推送。
->
-> **目標**：Worker 完成/進度事件 → Redis pub/sub → WS handler 轉發前端，消除 polling。
-
-#### 後端
-- [ ] `worker/` 各 job function 完成/進度時發布 Redis 事件（`job:{id}:status`、`job:{id}:progress`）
-- [ ] `routers/ws.py` 訂閱 Redis channel，將事件轉發至 WebSocket 連線
-- [ ] 定義標準化 WebSocket 事件格式（`{ type: 'job_update', job_id, status, progress }`）
-
-#### 前端
-- [ ] `useDownloadQueue` 改為訂閱 WebSocket 事件，移除 3s polling
-- [ ] 下載進度條改為即時更新（毫秒級）
-- [ ] WS 斷線時自動 fallback 到 polling（`lib/ws.ts` 已有重連邏輯）
+> Worker 進度/狀態事件 → Redis pub/sub → WS handler → 前端即時更新，polling 降為斷線 fallback。
+> Nginx 下載端點限流分流（jobs/stats 用 api_zone 30r/s，enqueue 用 download_zone 2r/s）。
 
 ---
 
