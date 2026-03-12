@@ -10,11 +10,13 @@ from sqlalchemy import desc, func, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import require_auth
+from core.auth import require_auth, require_role
 from core.database import async_session, get_db
 from db.models import BlockedTag, Gallery, Tag, TagAlias, TagImplication, TagTranslation
 
 router = APIRouter(tags=["tags"])
+
+_admin = require_role("admin")
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
@@ -152,7 +154,7 @@ async def list_aliases(
 
 
 @router.post("/aliases")
-async def create_alias(req: AliasRequest, _: dict = Depends(require_auth)):
+async def create_alias(req: AliasRequest, _: dict = Depends(_admin)):
     async with async_session() as session:
         tag = (await session.execute(select(Tag.id).where(Tag.id == req.canonical_id))).fetchone()
         if not tag:
@@ -186,7 +188,7 @@ async def create_alias(req: AliasRequest, _: dict = Depends(require_auth)):
 async def delete_alias(
     alias_namespace: str = Query(...),
     alias_name: str = Query(...),
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     async with async_session() as session:
         alias = (
@@ -282,7 +284,7 @@ async def _has_cycle(session, from_id: int, target_id: int, max_depth: int = 50)
 
 
 @router.post("/implications")
-async def create_implication(req: ImplicationRequest, _: dict = Depends(require_auth)):
+async def create_implication(req: ImplicationRequest, _: dict = Depends(_admin)):
     if req.antecedent_id == req.consequent_id:
         raise HTTPException(status_code=400, detail="Cannot imply self")
     async with async_session() as session:
@@ -314,7 +316,7 @@ async def create_implication(req: ImplicationRequest, _: dict = Depends(require_
 async def delete_implication(
     antecedent_id: int = Query(...),
     consequent_id: int = Query(...),
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     async with async_session() as session:
         impl = (
@@ -422,7 +424,7 @@ async def get_translations(
 @router.post("/translations")
 async def upsert_translation(
     body: TranslationUpsert,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Upsert a single tag translation."""
     async with async_session() as session:
@@ -447,7 +449,7 @@ async def upsert_translation(
 @router.post("/translations/batch")
 async def batch_import_translations(
     body: TranslationBatchImport,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Bulk upsert tag translations."""
     if not body.translations:
@@ -553,7 +555,7 @@ async def remove_blocked_tag(
 async def retag_gallery(
     gallery_id: int,
     request: Request,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Enqueue AI tagging job for all images in a gallery."""
@@ -575,7 +577,7 @@ async def retag_gallery(
 @router.post("/retag-all")
 async def retag_all_galleries(
     request: Request,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
     db: AsyncSession = Depends(get_db),
 ):
     """Enqueue AI tagging jobs for ALL galleries (batch re-tag).

@@ -18,6 +18,7 @@ const en: Record<string, string> = {
   'nav.scheduledTasks': 'Scheduled Tasks',
   'nav.dedup': 'Dedup',
   'nav.logout': 'Logout',
+  'nav.users': 'Users',
 
   // ── Dashboard ──
   'dashboard.title': 'Dashboard',
@@ -1050,6 +1051,7 @@ const en: Record<string, string> = {
   'common.all': 'All',
   'common.tags': 'Tags',
   'common.cancel': 'Cancel',
+  'common.optional': 'optional',
   'common.goBack': 'Go back',
   'common.retry': 'Try again',
   'common.goHome': 'Go Home',
@@ -1196,6 +1198,43 @@ const en: Record<string, string> = {
 
   // ── Back Button ──
   'common.back': 'Back',
+
+  // ── Admin Users page ──
+  'admin.users.title': 'User Management',
+  'admin.users.addUser': 'Add User',
+  'admin.users.username': 'Username',
+  'admin.users.password': 'Password',
+  'admin.users.role': 'Role',
+  'admin.users.email': 'Email',
+  'admin.users.lastLogin': 'Last Login',
+  'admin.users.createdAt': 'Created',
+  'admin.users.actions': 'Actions',
+  'admin.users.deleteConfirm': 'Are you sure you want to delete this user?',
+  'admin.users.deleteTitle': 'Delete User',
+  'admin.users.createTitle': 'Create User',
+  'admin.users.create': 'Create',
+  'admin.users.cancel': 'Cancel',
+  'admin.users.delete': 'Delete',
+  'admin.users.created': 'User created',
+  'admin.users.updated': 'User updated',
+  'admin.users.deleted': 'User deleted',
+  'admin.users.noUsers': 'No users found',
+  'admin.users.roleAdmin': 'Admin',
+  'admin.users.roleMember': 'Member',
+  'admin.users.roleViewer': 'Viewer',
+  'admin.users.you': '(you)',
+
+  // ── Forbidden page ──
+  'forbidden.title': 'Access Denied',
+  'forbidden.description': 'You do not have permission to access this page. Contact an administrator if you believe this is an error.',
+  'forbidden.backHome': 'Back to Home',
+
+  // ── Error codes ──
+  'error.forbidden': 'You do not have permission to access this resource',
+  'error.user_not_found': 'User not found',
+  'error.cannot_delete_self': 'Cannot delete your own account',
+  'error.cannot_delete_last_admin': 'Cannot delete the last admin account',
+  'error.username_taken': 'Username is already taken',
 }
 
 export default en

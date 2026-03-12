@@ -27,30 +27,38 @@ import {
   Rss,
   CalendarClock,
   ScanSearch,
+  ShieldCheck,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+import type { UserRole } from '@/lib/types'
+
+function hasRole(userRole: string | undefined, minRole: UserRole): boolean {
+  const ROLE_LEVEL: Record<string, number> = { admin: 3, member: 2, viewer: 1 }
+  return (ROLE_LEVEL[userRole || 'viewer'] ?? 0) >= ROLE_LEVEL[minRole]
+}
 
 const navLinks = [
-  { href: '/', label: () => t('nav.dashboard'), icon: LayoutDashboard },
-  { href: '/e-hentai', label: () => t('nav.ehentai'), icon: Compass },
-  { href: '/pixiv', label: () => t('nav.pixiv'), icon: Palette },
-  { href: '/library', label: () => t('nav.library'), icon: BookOpen },
-  { href: '/explorer', label: () => t('nav.explorer'), icon: FolderTree },
-  { href: '/artists', label: () => t('nav.artists'), icon: Users },
-  { href: '/subscriptions', label: () => t('nav.subscriptions'), icon: Rss },
-  { href: '/history', label: () => t('nav.history'), icon: Clock },
-  { href: '/queue', label: () => t('nav.queue'), icon: Download },
-  { href: '/tags', label: () => t('nav.tags'), icon: Tags },
-  { href: '/export', label: () => t('nav.export'), icon: PackageOpen },
-  { href: '/import', label: () => t('nav.import'), icon: FolderInput },
-  { href: '/scheduled-tasks', label: () => t('nav.scheduledTasks'), icon: CalendarClock },
-  { href: '/dedup', label: () => t('nav.dedup'), icon: ScanSearch },
-  { href: '/credentials', label: () => t('nav.credentials'), icon: Key },
-  { href: '/plugins', label: () => t('nav.plugins'), icon: Puzzle },
+  { href: '/', label: () => t('nav.dashboard'), icon: LayoutDashboard, minRole: 'viewer' as UserRole },
+  { href: '/e-hentai', label: () => t('nav.ehentai'), icon: Compass, minRole: 'viewer' as UserRole },
+  { href: '/pixiv', label: () => t('nav.pixiv'), icon: Palette, minRole: 'viewer' as UserRole },
+  { href: '/library', label: () => t('nav.library'), icon: BookOpen, minRole: 'viewer' as UserRole },
+  { href: '/explorer', label: () => t('nav.explorer'), icon: FolderTree, minRole: 'viewer' as UserRole },
+  { href: '/artists', label: () => t('nav.artists'), icon: Users, minRole: 'viewer' as UserRole },
+  { href: '/subscriptions', label: () => t('nav.subscriptions'), icon: Rss, minRole: 'member' as UserRole },
+  { href: '/history', label: () => t('nav.history'), icon: Clock, minRole: 'viewer' as UserRole },
+  { href: '/queue', label: () => t('nav.queue'), icon: Download, minRole: 'member' as UserRole },
+  { href: '/tags', label: () => t('nav.tags'), icon: Tags, minRole: 'viewer' as UserRole },
+  { href: '/export', label: () => t('nav.export'), icon: PackageOpen, minRole: 'member' as UserRole },
+  { href: '/import', label: () => t('nav.import'), icon: FolderInput, minRole: 'member' as UserRole },
+  { href: '/scheduled-tasks', label: () => t('nav.scheduledTasks'), icon: CalendarClock, minRole: 'admin' as UserRole },
+  { href: '/dedup', label: () => t('nav.dedup'), icon: ScanSearch, minRole: 'admin' as UserRole },
+  { href: '/credentials', label: () => t('nav.credentials'), icon: Key, minRole: 'admin' as UserRole },
+  { href: '/plugins', label: () => t('nav.plugins'), icon: Puzzle, minRole: 'admin' as UserRole },
+  { href: '/admin/users', label: () => t('nav.users'), icon: ShieldCheck, minRole: 'admin' as UserRole },
 ]
 
 const themeCycle = ['light', 'dark', 'system'] as const
@@ -101,7 +109,7 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
     <>
       {/* Backdrop */}
       <div
-        className={`lg:hidden fixed inset-0 z-50 bg-black/50 backdrop-blur-sm transition-opacity duration-200 ${
+        className={`lg:hidden fixed inset-0 z-[60] bg-black/50 backdrop-blur-sm transition-opacity duration-200 ${
           open ? 'opacity-100' : 'opacity-0 pointer-events-none'
         }`}
         onClick={onClose}
@@ -109,7 +117,7 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
 
       {/* Drawer */}
       <aside
-        className={`lg:hidden fixed inset-y-0 left-0 z-50 w-64 max-w-[80vw] bg-vault-card border-r border-vault-border flex flex-col transition-transform duration-200 ${
+        className={`lg:hidden fixed inset-y-0 left-0 z-[60] w-64 max-w-[80vw] bg-vault-card border-r border-vault-border flex flex-col transition-transform duration-200 ${
           open ? 'translate-x-0' : '-translate-x-full'
         }`}
       >
@@ -139,7 +147,7 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
 
         {/* Nav links */}
         <nav className="flex-1 px-3 py-3 space-y-0.5 overflow-y-auto">
-          {navLinks.map((link) => {
+          {navLinks.filter(link => hasRole(profile?.role, link.minRole)).map((link) => {
             const Icon = link.icon
             const isActive =
               pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
@@ -175,7 +183,7 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
         </nav>
 
         {/* Bottom section */}
-        <div className="px-3 py-3 border-t border-vault-border space-y-1">
+        <div className="px-3 pt-3 border-t border-vault-border space-y-1" style={{ paddingBottom: 'calc(0.75rem + var(--sab))' }}>
           {/* Settings link */}
           <Link
             href="/settings"

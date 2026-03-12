@@ -117,13 +117,16 @@ CREATE TABLE IF NOT EXISTS download_jobs (
     progress        JSONB DEFAULT '{}',
     error           TEXT,
     created_at      TIMESTAMPTZ DEFAULT now(),
-    finished_at     TIMESTAMPTZ
+    finished_at     TIMESTAMPTZ,
+    user_id         BIGINT REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS read_progress (
-    gallery_id      BIGINT PRIMARY KEY REFERENCES galleries(id) ON DELETE CASCADE,
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
     last_page       INT DEFAULT 0,
-    last_read_at    TIMESTAMPTZ DEFAULT now()
+    last_read_at    TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, gallery_id)
 );
 
 CREATE TABLE IF NOT EXISTS credentials (
@@ -173,6 +176,7 @@ CREATE INDEX IF NOT EXISTS idx_tags_count ON tags (count DESC);
 CREATE INDEX IF NOT EXISTS idx_gallery_tags_tag ON gallery_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs (status);
+CREATE INDEX IF NOT EXISTS idx_download_jobs_user_id ON download_jobs (user_id);
 
 -- Composite indexes for keyset pagination (sort_col DESC, id DESC)
 CREATE INDEX IF NOT EXISTS idx_galleries_added_at_id ON galleries (added_at DESC, id DESC);

@@ -718,6 +718,7 @@ const zhCN: Record<string, string> = {
   'common.all': '全部',
   'common.tags': '标签',
   'common.cancel': '取消',
+  'common.optional': '选填',
   'common.goBack': '返回',
   'common.retry': '重试',
   'common.goHome': '回首页',
@@ -761,6 +762,46 @@ const zhCN: Record<string, string> = {
   'error.tag_not_found': '找不到标签',
   'error.unknown_feature': '未知的功能',
   'error.server_error': '服务器内部错误',
+
+  // ── Navigation ──
+  'nav.users': '用户管理',
+
+  // ── Admin Users page ──
+  'admin.users.title': '用户管理',
+  'admin.users.addUser': '添加用户',
+  'admin.users.username': '用户名',
+  'admin.users.password': '密码',
+  'admin.users.role': '角色',
+  'admin.users.email': '电子邮件',
+  'admin.users.lastLogin': '最后登录',
+  'admin.users.createdAt': '创建时间',
+  'admin.users.actions': '操作',
+  'admin.users.deleteConfirm': '确定要删除此用户吗？',
+  'admin.users.deleteTitle': '删除用户',
+  'admin.users.createTitle': '创建用户',
+  'admin.users.create': '创建',
+  'admin.users.cancel': '取消',
+  'admin.users.delete': '删除',
+  'admin.users.created': '用户已创建',
+  'admin.users.updated': '用户已更新',
+  'admin.users.deleted': '用户已删除',
+  'admin.users.noUsers': '找不到用户',
+  'admin.users.roleAdmin': '管理员',
+  'admin.users.roleMember': '成员',
+  'admin.users.roleViewer': '查看者',
+  'admin.users.you': '（你）',
+
+  // ── Forbidden page ──
+  'forbidden.title': '访问被拒',
+  'forbidden.description': '您没有权限访问此页面。如果您认为这是错误，请联系管理员。',
+  'forbidden.backHome': '返回首页',
+
+  // ── Error codes ──
+  'error.forbidden': '您没有权限访问此资源',
+  'error.user_not_found': '找不到用户',
+  'error.cannot_delete_self': '无法删除自己的账号',
+  'error.cannot_delete_last_admin': '无法删除最后一个管理员账号',
+  'error.username_taken': '此用户名已被使用',
 }
 
 export default zhCN

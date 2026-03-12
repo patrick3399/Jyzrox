@@ -419,7 +419,7 @@ async def enqueue_download(
     #    eventually time out without a matching DB row.
     try:
         async with async_session() as session:
-            session.add(DownloadJob(id=job_id, url=resolved_url, source=source, status="queued"))
+            session.add(DownloadJob(id=job_id, url=resolved_url, source=source, status="queued", user_id=token_data["user_id"]))
             await session.commit()
     except Exception as exc:
         logger.warning(

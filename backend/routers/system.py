@@ -8,13 +8,15 @@ import fastapi
 from fastapi import APIRouter, Depends, HTTPException, Request
 from sqlalchemy import text
 
-from core.auth import require_auth
+from core.auth import require_auth, require_role
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
+
+_admin = require_role("admin")
 
 
 # ── Static version detection (executed once at import time) ───────────
@@ -258,7 +260,7 @@ async def get_cache_stats(_: dict = Depends(require_auth)):
 
 
 @router.delete("/cache")
-async def clear_cache(_: dict = Depends(require_auth)):
+async def clear_cache(_: dict = Depends(_admin)):
     """Clear all EH cache (search, gallery, images, thumbs). Does not clear sessions."""
     deleted = 0
     for pattern in _CACHE_PATTERNS.values():
@@ -269,7 +271,7 @@ async def clear_cache(_: dict = Depends(require_auth)):
 @router.delete("/cache/{category}")
 async def clear_cache_category(
     category: str,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Clear a specific cache category: eh_search, eh_gallery, eh_image, thumbs."""
     if category not in _CACHE_PATTERNS:
@@ -287,7 +289,7 @@ async def clear_cache_category(
 @router.post("/reconcile")
 async def trigger_reconcile(
     request: Request,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Manually trigger the reconciliation job via ARQ."""
     arq = request.app.state.arq

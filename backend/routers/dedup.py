@@ -12,13 +12,15 @@ from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import joinedload
 
-from core.auth import require_auth
+from core.auth import require_role
 from core.database import async_session
 from db.models import Blob, BlobRelationship, Image
 from services.cas import cas_url, thumb_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["dedup"])
+
+_admin = require_role("admin")
 
 _CURSOR_SECRET = os.environ.get("SECRET_KEY", "dev-secret")
 
@@ -63,7 +65,7 @@ def _blob_detail(blob: Blob) -> dict:
 
 
 @router.get("/stats")
-async def get_dedup_stats(_: dict = Depends(require_auth)):
+async def get_dedup_stats(_: dict = Depends(_admin)):
     """Return counts by relationship state."""
     async with async_session() as session:
         result = await session.execute(
@@ -96,7 +98,7 @@ async def get_dedup_review(
     relationship: str | None = Query(None),
     cursor: str | None = Query(None),
     limit: int = Query(20, ge=1, le=100),
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Return paginated review queue (quality_conflict and variant only)."""
     after_id = _decode_cursor(cursor) if cursor else None
@@ -159,7 +161,7 @@ class ScanSignalRequest(BaseModel):
 async def keep_blob(
     pair_id: int,
     req: KeepRequest,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Mark one blob as the keeper; re-point images and resolve the pair."""
     async with async_session() as session:
@@ -208,7 +210,7 @@ async def keep_blob(
 @router.post("/review/{pair_id}/whitelist")
 async def whitelist_pair(
     pair_id: int,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Mark a pair as whitelisted (not a duplicate)."""
     async with async_session() as session:
@@ -230,7 +232,7 @@ async def whitelist_pair(
 
 
 @router.get("/scan/progress")
-async def get_scan_progress(_: dict = Depends(require_auth)):
+async def get_scan_progress(_: dict = Depends(_admin)):
     """Return current dedup scan progress."""
     from core.redis_client import get_redis
     r = get_redis()
@@ -267,7 +269,7 @@ async def get_scan_progress(_: dict = Depends(require_auth)):
 async def start_scan(
     req: ScanStartRequest,
     request: Request,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Enqueue a dedup scan job. 409 if already running/paused."""
     from core.redis_client import get_redis
@@ -288,7 +290,7 @@ async def start_scan(
 @router.post("/scan/signal")
 async def send_scan_signal(
     req: ScanSignalRequest,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Send a pause/resume/stop signal to the running scan. 409 if idle."""
     from core.redis_client import get_redis
@@ -308,7 +310,7 @@ async def send_scan_signal(
 @router.delete("/review/{pair_id}")
 async def dismiss_pair(
     pair_id: int,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Dismiss a pair (mark as resolved)."""
     async with async_session() as session:

@@ -17,7 +17,7 @@ from sqlalchemy.sql import text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import require_auth
+from core.auth import require_auth, require_role
 from core.config import settings
 from core.database import get_db
 from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag
@@ -25,6 +25,8 @@ from services.cas import cas_url, decrement_ref_count, library_dir, resolve_blob
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["library"])
+
+_member = require_role("member")
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
@@ -630,7 +632,7 @@ class BatchAction(BaseModel):
 @router.post("/galleries/batch")
 async def batch_galleries(
     body: BatchAction,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Batch operations on multiple galleries."""
@@ -888,7 +890,7 @@ class GalleryPatch(BaseModel):
 async def update_gallery(
     gallery_id: int,
     patch: GalleryPatch,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     g = await _get_or_404(db, gallery_id)
@@ -909,7 +911,7 @@ async def update_gallery(
 @router.delete("/galleries/{gallery_id}")
 async def delete_gallery(
     gallery_id: int,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a gallery, decrement blob ref counts, remove library symlinks and thumbnails.
@@ -990,7 +992,7 @@ class DeleteImageBody(BaseModel):
 async def delete_gallery_image(
     gallery_id: int,
     body: DeleteImageBody,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a single image from a gallery by page number.
@@ -1071,10 +1073,10 @@ async def delete_gallery_image(
 @router.get("/galleries/{gallery_id}/progress")
 async def get_progress(
     gallery_id: int,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    prog = await db.get(ReadProgress, gallery_id)
+    prog = await db.get(ReadProgress, (auth["user_id"], gallery_id))
     if not prog:
         return {"gallery_id": gallery_id, "last_page": 0, "last_read_at": None}
     return {
@@ -1092,15 +1094,15 @@ class ProgressBody(BaseModel):
 async def save_progress(
     gallery_id: int,
     body: ProgressBody,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     now = datetime.now(UTC)
     stmt = (
         pg_insert(ReadProgress)
-        .values(gallery_id=gallery_id, last_page=body.last_page, last_read_at=now)
+        .values(user_id=auth["user_id"], gallery_id=gallery_id, last_page=body.last_page, last_read_at=now)
         .on_conflict_do_update(
-            index_elements=["gallery_id"],
+            index_elements=["user_id", "gallery_id"],
             set_={"last_page": body.last_page, "last_read_at": now},
         )
     )
@@ -1310,7 +1312,7 @@ async def list_excluded_blobs(
 async def restore_excluded_blob(
     gallery_id: int,
     sha256: str,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a blob from the exclusion list (un-exclude)."""

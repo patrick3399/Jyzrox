@@ -246,8 +246,8 @@ class TestReadProgress:
         # Save progress — note: this uses pg_insert ON CONFLICT which won't work
         # with SQLite. We test the GET path instead using direct DB insert.
         await db_session.execute(
-            text("INSERT INTO read_progress (gallery_id, last_page) VALUES (:gid, :lp)"),
-            {"gid": gid, "lp": 15},
+            text("INSERT INTO read_progress (user_id, gallery_id, last_page) VALUES (:uid, :gid, :lp)"),
+            {"uid": 1, "gid": gid, "lp": 15},
         )
         await db_session.commit()
 

@@ -5,8 +5,8 @@ Revises:
 Create Date: 2026-03-12
 
 This is the consolidated baseline migration representing the full schema
-as of v0.3 (formerly revisions 0001–0008). The complete schema is managed
-by db/init.sql.
+as of v0.4 (formerly revisions 0001–0008 + 0002_multi_user_permissions).
+The complete schema is managed by db/init.sql.
 
 For a fresh installation:
   docker compose up -d postgres

@@ -11,13 +11,16 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from core.auth import require_auth
+from core.auth import require_auth, require_role
 from core.config import get_all_library_paths, settings
 from core.database import async_session
 from core.redis_client import get_redis
 from db.models import Gallery, LibraryPath
 
 router = APIRouter(tags=["import"])
+
+_member = require_role("member")
+_admin = require_role("admin")
 
 
 class BatchScanRequest(BaseModel):
@@ -85,7 +88,7 @@ def _build_pattern_regex(pattern: str) -> re.Pattern:
 @router.post("/batch/scan")
 async def batch_scan(
     req: BatchScanRequest,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_member),
 ):
     """Scan root_dir using pattern to find importable gallery directories."""
     real_root = await _validate_root_dir(req.root_dir)
@@ -140,7 +143,7 @@ async def batch_scan(
 async def batch_start(
     req: BatchStartRequest,
     request: Request,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_member),
 ):
     """Start a batch import job for multiple galleries."""
     real_root = await _validate_root_dir(req.root_dir)
@@ -183,7 +186,7 @@ async def batch_start(
 @router.get("/batch/progress/{batch_id}")
 async def batch_progress(
     batch_id: str,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_member),
 ):
     """Get progress for an ongoing or completed batch import."""
     r = get_redis()
@@ -196,7 +199,7 @@ async def batch_progress(
 @router.get("/progress/{gallery_id}")
 async def get_import_progress(
     gallery_id: int,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_member),
 ):
     """Poll import progress for a gallery."""
     r = get_redis()
@@ -210,7 +213,7 @@ _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", "
 
 
 @router.get("/browse")
-async def browse_directory(path: str = "", library: str = "", _: dict = Depends(require_auth)):
+async def browse_directory(path: str = "", library: str = "", _: dict = Depends(_member)):
     """List directories and image files within a library path.
 
     The ``library`` param selects which library root to browse (must be one of
@@ -291,7 +294,7 @@ async def browse_directory(path: str = "", library: str = "", _: dict = Depends(
 
 
 @router.get("/mount-points")
-async def list_mount_points(_: dict = Depends(require_auth)):
+async def list_mount_points(_: dict = Depends(_member)):
     """List meaningful mount points in the container (similar to Jellyfin's GetDrives).
 
     Filters out virtual/system filesystems to show only user-relevant mounts
@@ -333,7 +336,7 @@ async def list_mount_points(_: dict = Depends(require_auth)):
 
 
 @router.get("/browse-fs")
-async def browse_filesystem(path: str = "/mnt", _: dict = Depends(require_auth)):
+async def browse_filesystem(path: str = "/mnt", _: dict = Depends(_member)):
     """Browse container filesystem for selecting library paths.
 
     Unlike /browse (which is restricted to configured library paths),
@@ -377,7 +380,7 @@ async def browse_filesystem(path: str = "/mnt", _: dict = Depends(require_auth))
 
 
 @router.get("/recent")
-async def recent_imports(_: dict = Depends(require_auth)):
+async def recent_imports(_: dict = Depends(_member)):
     """Return the 20 most recently added local galleries."""
     async with async_session() as session:
         result = await session.execute(
@@ -402,7 +405,7 @@ async def recent_imports(_: dict = Depends(require_auth)):
 # NOTE: /rescan/status is defined BEFORE /rescan/{gallery_id} so FastAPI does
 # not attempt to coerce the literal string "status" into an integer gallery_id.
 @router.get("/rescan/status")
-async def rescan_status(_: dict = Depends(require_auth)):
+async def rescan_status(_: dict = Depends(_member)):
     """Return current rescan progress stored in Redis."""
     r = get_redis()
     data = await r.get("rescan:progress")
@@ -414,7 +417,7 @@ async def rescan_status(_: dict = Depends(require_auth)):
 
 
 @router.post("/rescan")
-async def rescan_library(request: Request, _: dict = Depends(require_auth)):
+async def rescan_library(request: Request, _: dict = Depends(_admin)):
     """Enqueue a full library rescan job."""
     arq = request.app.state.arq
     await arq.enqueue_job("rescan_library_job")
@@ -424,7 +427,7 @@ async def rescan_library(request: Request, _: dict = Depends(require_auth)):
 # NOTE: /rescan/cancel must be defined BEFORE /rescan/{gallery_id} so FastAPI
 # does not attempt to coerce the literal string "cancel" into an integer gallery_id.
 @router.post("/rescan/cancel")
-async def cancel_rescan(_: dict = Depends(require_auth)):
+async def cancel_rescan(_: dict = Depends(_admin)):
     """Signal the running rescan to stop at the next gallery boundary."""
     r = get_redis()
     await r.set("rescan:cancel", "1", ex=300)  # expires in 5 min as safety net
@@ -432,7 +435,7 @@ async def cancel_rescan(_: dict = Depends(require_auth)):
 
 
 @router.post("/rescan/path/{library_id}")
-async def rescan_library_path(library_id: int, request: Request, _: dict = Depends(require_auth)):
+async def rescan_library_path(library_id: int, request: Request, _: dict = Depends(_admin)):
     """Enqueue rescan for all galleries under a specific library path.
 
     NOTE: defined BEFORE /rescan/{gallery_id} so FastAPI does not attempt to
@@ -451,7 +454,7 @@ async def rescan_library_path(library_id: int, request: Request, _: dict = Depen
 async def rescan_gallery(
     gallery_id: int,
     request: Request,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_member),
 ):
     """Enqueue a rescan job for a single gallery."""
     arq = request.app.state.arq
@@ -468,7 +471,7 @@ class ScanScheduleRequest(BaseModel):
 
 
 @router.get("/scan-settings")
-async def get_scan_settings(_: dict = Depends(require_auth)):
+async def get_scan_settings(_: dict = Depends(_member)):
     """Return current scan schedule settings."""
     r = get_redis()
     enabled = await r.get("scan:schedule:enabled")
@@ -482,7 +485,7 @@ async def get_scan_settings(_: dict = Depends(require_auth)):
 
 
 @router.patch("/scan-settings")
-async def update_scan_settings(req: ScanScheduleRequest, _: dict = Depends(require_auth)):
+async def update_scan_settings(req: ScanScheduleRequest, _: dict = Depends(_admin)):
     """Update scan schedule settings (stored in Redis)."""
     r = get_redis()
     if req.enabled is not None:
@@ -499,7 +502,7 @@ async def update_scan_settings(req: ScanScheduleRequest, _: dict = Depends(requi
 # ── Library Path Management ───────────────────────────────────────────
 
 @router.get("/libraries")
-async def list_libraries(_: dict = Depends(require_auth)):
+async def list_libraries(_: dict = Depends(_member)):
     """List all library paths (primary + extras from env + DB-stored)."""
     all_paths = await get_all_library_paths()
 
@@ -539,7 +542,7 @@ class AddLibraryRequest(BaseModel):
 
 
 @router.post("/libraries")
-async def add_library(req: AddLibraryRequest, _: dict = Depends(require_auth)):
+async def add_library(req: AddLibraryRequest, _: dict = Depends(_admin)):
     """Add a new library path."""
     real_path = os.path.realpath(req.path)
     if not Path(real_path).is_dir():
@@ -557,7 +560,7 @@ async def add_library(req: AddLibraryRequest, _: dict = Depends(require_auth)):
 
 
 @router.delete("/libraries/{library_id}")
-async def remove_library(library_id: int, _: dict = Depends(require_auth)):
+async def remove_library(library_id: int, _: dict = Depends(_admin)):
     """Remove a library path (does not delete files or galleries)."""
     async with async_session() as session:
         lp = await session.get(LibraryPath, library_id)
@@ -571,7 +574,7 @@ async def remove_library(library_id: int, _: dict = Depends(require_auth)):
 # ── Monitor Status ────────────────────────────────────────────────────
 
 @router.get("/monitor/status")
-async def monitor_status(_: dict = Depends(require_auth)):
+async def monitor_status(_: dict = Depends(_member)):
     """Return file watcher status (sourced from Redis, set by the worker process)."""
     r = get_redis()
     data = await r.get("watcher:status")
@@ -597,7 +600,7 @@ class MonitorToggleRequest(BaseModel):
 async def toggle_monitor(
     req: MonitorToggleRequest,
     request: Request,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Toggle the file system watcher on/off.
 

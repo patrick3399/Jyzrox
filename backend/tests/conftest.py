@@ -210,9 +210,11 @@ _SQLITE_SCHEMA = [
     """,
     """
     CREATE TABLE IF NOT EXISTS read_progress (
-        gallery_id INTEGER PRIMARY KEY REFERENCES galleries(id),
+        user_id INTEGER NOT NULL,
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id),
         last_page INTEGER DEFAULT 0,
-        last_read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        last_read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, gallery_id)
     )
     """,
     """
@@ -476,7 +478,7 @@ async def client(db_session, db_session_factory, mock_redis):
         yield db_session
 
     async def _override_require_auth():
-        return {"user_id": 1}
+        return {"user_id": 1, "role": "admin"}
 
     _app.dependency_overrides[_fake_get_db] = _override_get_db
     _app.dependency_overrides[require_auth] = _override_require_auth
@@ -688,7 +690,7 @@ async def hist_client(db_session, db_session_factory, mock_redis):
         yield db_session
 
     async def _override_require_auth():
-        return {"user_id": 1}
+        return {"user_id": 1, "role": "admin"}
 
     _app.dependency_overrides[_fake_get_db] = _override_get_db
     _app.dependency_overrides[require_auth] = _override_require_auth

@@ -1,3 +1,14 @@
+export type UserRole = 'admin' | 'member' | 'viewer'
+
+export interface UserInfo {
+  id: number
+  username: string
+  email: string | null
+  role: UserRole
+  created_at: string | null
+  last_login_at: string | null
+}
+
 // ── Local Library ────────────────────────────────────────────────────
 
 export interface Gallery {

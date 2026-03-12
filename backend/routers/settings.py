@@ -13,7 +13,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, text
 
-from core.auth import require_auth
+from core.auth import require_auth, require_role
 from core.config import settings as app_settings
 from core.database import async_session
 from core.redis_client import get_redis
@@ -24,6 +24,8 @@ from services.eh_client import EhClient
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
+
+_admin = require_role("admin")
 
 
 # ── Models ───────────────────────────────────────────────────────────
@@ -72,7 +74,7 @@ class GenericCookieRequest(BaseModel):
 
 
 @router.get("/credentials")
-async def list_credentials_endpoint(_: dict = Depends(require_auth)):
+async def list_credentials_endpoint(_: dict = Depends(_admin)):
     """Which credential sources are configured (values never exposed)."""
     all_creds = await list_credentials()
     result = {}
@@ -84,7 +86,7 @@ async def list_credentials_endpoint(_: dict = Depends(require_auth)):
 @router.post("/credentials/ehentai/login")
 async def eh_login_with_password(
     req: EhLoginRequest,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Login to E-Hentai with username/password to auto-obtain cookies (EhViewer-style)."""
     async with httpx.AsyncClient(follow_redirects=True, timeout=30) as client:
@@ -165,7 +167,7 @@ async def eh_login_with_password(
 @router.post("/credentials/ehentai")
 async def set_eh_credentials(
     req: EhCookieRequest,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Save E-Hentai cookies (no server-side validation — same as EhViewer)."""
     cookies = {
@@ -194,7 +196,7 @@ async def set_eh_credentials(
 @router.post("/credentials/pixiv")
 async def set_pixiv_credentials(
     req: PixivTokenRequest,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Save Pixiv refresh_token after verifying it via pixivpy3."""
     try:
@@ -215,7 +217,7 @@ async def set_pixiv_credentials(
 
 
 @router.get("/credentials/pixiv/oauth-url")
-async def get_pixiv_oauth_url(_: dict = Depends(require_auth)):
+async def get_pixiv_oauth_url(_: dict = Depends(_admin)):
     """Generate PKCE verifier and authorization URL for Pixiv."""
     code_verifier = secrets.token_urlsafe(32)
     code_challenge_bytes = hashlib.sha256(code_verifier.encode("utf-8")).digest()
@@ -237,7 +239,7 @@ async def get_pixiv_oauth_url(_: dict = Depends(require_auth)):
 @router.post("/credentials/pixiv/oauth-callback")
 async def pixiv_oauth_callback(
     req: PixivOAuthCallbackRequest,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Exchange authorization code for refresh token."""
     client_id = app_settings.pixiv_client_id
@@ -288,7 +290,7 @@ async def pixiv_oauth_callback(
 @router.post("/credentials/pixiv/cookie")
 async def set_pixiv_cookie_credentials(
     req: PixivCookieRequest,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """
     Simulate Pixiv OAuth flow using a session cookie (PHPSESSID).
@@ -379,7 +381,7 @@ async def set_pixiv_cookie_credentials(
 @router.post("/credentials/generic")
 async def set_generic_cookie(
     req: GenericCookieRequest,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Save cookies for any site (twitter, instagram, danbooru, etc.)."""
     if not req.source.strip():
@@ -393,7 +395,7 @@ async def set_generic_cookie(
 @router.delete("/credentials/{source}")
 async def delete_credential_endpoint(
     source: str,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Delete stored credential for a source."""
     async with async_session() as session:
@@ -412,7 +414,7 @@ async def delete_credential_endpoint(
 
 
 @router.post("/credentials/ehentai/cookies-check")
-async def eh_cookies_check(_: dict = Depends(require_auth)):
+async def eh_cookies_check(_: dict = Depends(_admin)):
     """Verify whether stored cookies can access ExHentai."""
     cred_json = await get_credential("ehentai")
     if not cred_json:
@@ -451,7 +453,7 @@ async def eh_cookies_check(_: dict = Depends(require_auth)):
 
 
 @router.get("/eh/account")
-async def eh_account_info(_: dict = Depends(require_auth)):
+async def eh_account_info(_: dict = Depends(_admin)):
     """Get live E-Hentai account status and GP balance."""
     cred_json = await get_credential("ehentai")
     if not cred_json:
@@ -532,7 +534,7 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
 async def patch_feature_toggle(
     feature: str,
     req: FeatureTogglePatch,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Toggle a feature on/off."""
     ALLOWED = {
@@ -597,7 +599,7 @@ async def get_eh_site_preference(_: dict = Depends(require_auth)):
 @router.patch("/eh-site")
 async def set_eh_site_preference(
     req: EhSitePreference,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Toggle between E-Hentai and ExHentai."""
     redis = get_redis()

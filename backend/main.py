@@ -36,6 +36,7 @@ from routers import (
     subscriptions,
     system,
     tag,
+    users as users_router,
     ws,
 )
 from routers import settings as settings_router
@@ -128,6 +129,7 @@ app.include_router(opds.router, prefix="/opds")
 app.include_router(scheduled_tasks.router, prefix="/api/scheduled-tasks")
 app.include_router(subscriptions.router, prefix="/api/subscriptions")
 app.include_router(dedup_router.router, prefix="/api/dedup")
+app.include_router(users_router.router, prefix="/api/users")
 
 
 @app.get("/api/health")
