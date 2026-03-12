@@ -179,7 +179,18 @@ async def download_job(
 
     # Trigger import
     if target_dir.exists():
-        await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id)
+        # Look up user_id from the download job to pass to import_job
+        import_user_id = None
+        if db_job_id:
+            from core.database import AsyncSessionLocal
+            from sqlalchemy.sql import select as sa_select
+            from db.models import DownloadJob
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    sa_select(DownloadJob.user_id).where(DownloadJob.id == db_job_id)
+                )
+                import_user_id = result.scalar_one_or_none()
+        await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id, import_user_id)
 
     await _set_job_status(db_job_id, "done")
 

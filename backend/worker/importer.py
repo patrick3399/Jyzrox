@@ -25,7 +25,7 @@ from worker.constants import (
 from worker.helpers import _sha256, _validate_image_magic
 
 
-async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict:
+async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id: int | None = None) -> dict:
     """
     Ingest a downloaded gallery directory into the database.
     Handles gallery-dl E-Hentai and Pixiv output formats.
@@ -101,11 +101,13 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None) -> dict
                 "download_status": "complete",
                 "tags_array": import_data.tags,
                 "artist_id": import_data.artist_id,
+                "created_by_user_id": user_id,
             }
             tags = import_data.tags
             source_id = import_data.source_id
         else:
             gallery_values = _build_gallery(source, source_id, metadata, tags, len(media_files))
+            gallery_values["created_by_user_id"] = user_id
         stmt = (
             pg_insert(Gallery)
             .values(**gallery_values)

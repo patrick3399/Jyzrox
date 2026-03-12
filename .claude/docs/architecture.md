@@ -89,6 +89,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `/api/scheduled-tasks` | `routers/scheduled_tasks.py` | Session | Scheduled task listing, enable/disable, manual run |
 | `/api/dedup` | `routers/dedup.py` | Session | Dedup stats, review list, keep/whitelist/skip actions, scan start/stop/progress |
 | `/api/subscriptions` | `routers/subscriptions.py` | Session | Subscription CRUD, manual check trigger |
+| `/api/users` | `routers/users.py` | Admin | User management CRUD |
 | `/opds` | `routers/opds.py` | HTTP Basic Auth | OPDS catalog for e-readers |
 | `/api/health` | `main.py` inline | Public | Liveness probe |
 
@@ -109,8 +110,8 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `tag_implications` | Tag inference rules | `(antecedent_id, consequent_id)` PK |
 | `gallery_tags` | Gallery↔Tag join | `(gallery_id, tag_id)` PK, `confidence`, `source` |
 | `image_tags` | Image↔Tag join | `(image_id, tag_id)` PK, `confidence` |
-| `download_jobs` | ARQ job tracking | `id` UUID PK, `url`, `source`, `status`, `progress` JSONB, `error` |
-| `read_progress` | Per-gallery read cursor | `gallery_id` PK, `last_page`, `last_read_at` |
+| `download_jobs` | ARQ job tracking | `id` UUID PK, `user_id` FK, `url`, `source`, `status`, `progress` JSONB, `error` |
+| `read_progress` | Per-gallery read cursor | `(user_id, gallery_id)` PK, `last_page`, `last_read_at` |
 | `credentials` | Source credentials (encrypted) | `source` PK, `credential_type`, `value_encrypted` BYTEA |
 | `api_tokens` | External API tokens | `id` UUID PK, `user_id` FK, `token_hash` UNIQUE, `token_plain`, `expires_at` |
 | `browse_history` | EH browse history | `id`, `(user_id, source, source_id)` UNIQUE, `gid`, `token`, `viewed_at` |
@@ -411,6 +412,21 @@ All fields read from `.env` via Pydantic `BaseSettings`.
 - FastAPI dependency: `from core.auth import require_auth` — add `_: dict = Depends(require_auth)` to every protected endpoint
 - CSRF protection: `csrf_token` cookie; all mutating requests must send `X-CSRF-Token` header
 
+### Role-Based Access Control
+
+三級階層式角色（`core/auth.py`）：
+
+| Role | Level | Scope |
+|------|-------|-------|
+| `admin` | 3 | System config, user management, credentials, scheduled tasks, dedup |
+| `member` | 2 | Download, import/export, subscriptions, gallery edits |
+| `viewer` | 1 | Browse, search, history, collections (read-only) |
+
+- `require_auth()` → `{"user_id": int, "role": str}` — any authenticated user
+- `require_role("admin")` → factory returning dependency that checks `role >= admin`
+- Role stored in Redis session JSON, read on every request (no DB query)
+- User management: `POST/PATCH/DELETE /api/users` (admin only)
+
 #### OPDS Basic Auth
 
 - Endpoint: `/opds/`
@@ -462,6 +478,8 @@ Source root: `pwa/src/`
 | `/share-target` | `app/share-target/page.tsx` | PWA Web Share Target handler |
 | `/scheduled-tasks` | `app/scheduled-tasks/page.tsx` | Scheduled task management — list, enable/disable, cron edit, manual run |
 | `/dedup` | `app/dedup/page.tsx` | Dedup dashboard — tier settings, scan trigger, review list with keep/whitelist/skip actions |
+| `/forbidden` | `app/forbidden/page.tsx` | 403 access denied page |
+| `/admin/users` | `app/admin/users/page.tsx` | User management (admin only) |
 
 ---
 
@@ -547,6 +565,7 @@ Single `apiFetch` base function with automatic 401 redirect and CSRF header inje
 | `scheduledTasks` | task listing, enable/disable, manual run |
 | `subscriptions` | subscription CRUD, manual check trigger |
 | `dedup` | dedup stats, review list, keep/whitelist/skip/delete, scan start/stop/progress |
+| `users` | User list, create, update, delete |
 
 ---
 

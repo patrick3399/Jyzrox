@@ -20,7 +20,7 @@ _member = require_role("member")
 
 
 @router.get("/kohya/{gallery_id}")
-async def export_kohya(gallery_id: int, _: dict = Depends(_member)):
+async def export_kohya(gallery_id: int, auth: dict = Depends(_member)):
     """Generates a zip file containing images and corresponding .txt files with tags."""
 
     async with async_session() as session:
@@ -28,6 +28,11 @@ async def export_kohya(gallery_id: int, _: dict = Depends(_member)):
         gallery = await session.get(Gallery, gallery_id)
         if not gallery:
             raise HTTPException(status_code=404, detail="Gallery not found")
+
+        # Ownership check: admin can export any gallery; members only their own or unowned
+        if auth["role"] != "admin":
+            if gallery.created_by_user_id is not None and gallery.created_by_user_id != auth["user_id"]:
+                raise HTTPException(status_code=403, detail="You do not have permission to export this gallery")
 
         gallery_tags = gallery.tags_array or []
 

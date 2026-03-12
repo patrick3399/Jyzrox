@@ -75,6 +75,7 @@ async def _set_job_status(job_id: str | None, status: str, error: str | None = N
                         "job_id": job_id,
                         "status": status,
                         "progress": job.progress,
+                        "user_id": job.user_id,
                     })
                 except Exception:
                     pass
@@ -98,6 +99,7 @@ async def _set_job_progress(job_id: str | None, progress: dict) -> None:
                         "job_id": job_id,
                         "status": job.status,
                         "progress": progress,
+                        "user_id": job.user_id,
                     })
                 except Exception:
                     pass

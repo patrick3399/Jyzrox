@@ -143,7 +143,7 @@ async def batch_scan(
 async def batch_start(
     req: BatchStartRequest,
     request: Request,
-    _: dict = Depends(_member),
+    auth: dict = Depends(_member),
 ):
     """Start a batch import job for multiple galleries."""
     real_root = await _validate_root_dir(req.root_dir)
@@ -166,6 +166,7 @@ async def batch_start(
             "current_gallery_id": None,
         }),
     )
+    await r.setex(f"import:batch:{batch_id}:owner", 3600, str(auth["user_id"]))
 
     # If link mode, auto-register root_dir as a library path
     if req.mode == "link":
@@ -186,22 +187,33 @@ async def batch_start(
 @router.get("/batch/progress/{batch_id}")
 async def batch_progress(
     batch_id: str,
-    _: dict = Depends(_member),
+    auth: dict = Depends(_member),
 ):
     """Get progress for an ongoing or completed batch import."""
     r = get_redis()
     data = await r.get(f"import:batch:{batch_id}")
     if not data:
         return {"status": "unknown"}
+    # Admin can see all; others only own batches
+    if auth["role"] != "admin":
+        owner = await r.get(f"import:batch:{batch_id}:owner")
+        if not owner or int(owner) != auth["user_id"]:
+            return {"status": "unknown"}
     return json.loads(data)
 
 
 @router.get("/progress/{gallery_id}")
 async def get_import_progress(
     gallery_id: int,
-    _: dict = Depends(_member),
+    auth: dict = Depends(_member),
 ):
     """Poll import progress for a gallery."""
+    # Admin can check any; member only own or unowned galleries
+    if auth["role"] != "admin":
+        async with async_session() as session:
+            gallery = await session.get(Gallery, gallery_id)
+            if gallery and gallery.created_by_user_id is not None and gallery.created_by_user_id != auth["user_id"]:
+                return {"gallery_id": gallery_id, "status": "unknown"}
     r = get_redis()
     data = await r.get(f"import:progress:{gallery_id}")
     if not data:

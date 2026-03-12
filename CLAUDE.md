@@ -28,6 +28,20 @@
 - 初次設定：`/setup` → POST `/api/auth/setup`（僅在無用戶時可用）
 - 前端 proxy (`proxy.ts`) 自動將未登入請求導向 `/login`
 
+### 角色權限
+
+三級階層式角色，高級自動繼承低級權限：
+
+| 角色 | 等級 | 說明 |
+|------|------|------|
+| `admin` | 3 | 系統設定、使用者管理、登入資訊、排程任務、重複偵測 |
+| `member` | 2 | 下載、匯入匯出、訂閱、圖庫編輯 |
+| `viewer` | 1 | 瀏覽、搜尋、歷史紀錄、收藏夾（唯讀） |
+
+- `require_auth()` 回傳 `{"user_id": int, "role": str}`
+- `require_role("admin")` 建立角色檢查 dependency（自動包含更高等級）
+- Role 從 Redis session metadata 讀取，改 role 後需重新登入生效
+
 ---
 
 ## 部署操作
@@ -87,6 +101,22 @@ from core.auth import require_auth
 
 @router.get("/")
 async def endpoint(_: dict = Depends(require_auth)):
+    ...
+```
+
+需要角色限制時使用 `require_role`：
+```python
+from core.auth import require_role
+
+_admin = require_role("admin")
+_member = require_role("member")
+
+@router.post("/admin-action")
+async def admin_only(auth: dict = Depends(_admin)):
+    ...
+
+@router.post("/member-action")
+async def member_up(auth: dict = Depends(_member)):
     ...
 ```
 

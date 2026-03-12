@@ -26,6 +26,7 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
 
 _admin = require_role("admin")
+_member = require_role("member")
 
 
 # ── Models ───────────────────────────────────────────────────────────
@@ -625,7 +626,7 @@ class CreateTokenRequest(BaseModel):
 
 
 @router.get("/tokens")
-async def list_tokens(auth: dict = Depends(require_auth)):
+async def list_tokens(auth: dict = Depends(_member)):
     """List all API tokens for the current user."""
     async with async_session() as session:
         rows = await session.execute(
@@ -655,7 +656,7 @@ async def list_tokens(auth: dict = Depends(require_auth)):
 @router.post("/tokens")
 async def create_token(
     req: CreateTokenRequest,
-    auth: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
 ):
     """Create a new API token."""
     raw_token = secrets.token_urlsafe(32)
@@ -696,7 +697,7 @@ async def create_token(
 @router.delete("/tokens/{token_id}")
 async def delete_token(
     token_id: str,
-    auth: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
 ):
     """Revoke/delete an API token."""
     async with async_session() as session:
@@ -716,7 +717,7 @@ async def delete_token(
 async def update_token(
     token_id: str,
     name: str = Query(default=None),
-    auth: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
 ):
     """Update token name."""
     if not name or not name.strip():

@@ -363,3 +363,18 @@ CREATE TABLE IF NOT EXISTS blob_relationships (
 CREATE INDEX IF NOT EXISTS idx_blob_rel_relationship ON blob_relationships (relationship, id);
 CREATE INDEX IF NOT EXISTS idx_blob_rel_sha_a ON blob_relationships (sha_a);
 CREATE INDEX IF NOT EXISTS idx_blob_rel_sha_b ON blob_relationships (sha_b);
+
+-- ── Gallery Access Control (prep) ──────────────────────────────────
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public';
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_galleries_visibility ON galleries (visibility);
+CREATE INDEX IF NOT EXISTS idx_galleries_created_by ON galleries (created_by_user_id) WHERE created_by_user_id IS NOT NULL;
+
+-- ── User Favorites ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_favorites (
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    gallery_id  BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, gallery_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_favorites_gallery ON user_favorites (gallery_id);

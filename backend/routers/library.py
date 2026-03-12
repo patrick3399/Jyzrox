@@ -632,7 +632,7 @@ class BatchAction(BaseModel):
 @router.post("/galleries/batch")
 async def batch_galleries(
     body: BatchAction,
-    _: dict = Depends(_member),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Batch operations on multiple galleries."""
@@ -650,6 +650,7 @@ async def batch_galleries(
         )
         galleries = (await db.execute(stmt)).scalars().all()
         for g in galleries:
+            _check_write_access(auth, g)
             g.favorited = True
         await db.commit()
         return {"status": "ok", "affected": len(galleries)}
@@ -661,6 +662,7 @@ async def batch_galleries(
         )
         galleries = (await db.execute(stmt)).scalars().all()
         for g in galleries:
+            _check_write_access(auth, g)
             g.favorited = False
         await db.commit()
         return {"status": "ok", "affected": len(galleries)}
@@ -672,6 +674,7 @@ async def batch_galleries(
         )
         galleries = (await db.execute(stmt)).scalars().all()
         for g in galleries:
+            _check_write_access(auth, g)
             g.rating = body.rating
         await db.commit()
         return {"status": "ok", "affected": len(galleries)}
@@ -681,7 +684,7 @@ async def batch_galleries(
             raise HTTPException(status_code=400, detail="collection_id required for add_to_collection")
         from db.models import Collection, CollectionGallery
         collection = await db.get(Collection, body.collection_id)
-        if not collection:
+        if not collection or collection.user_id != auth["user_id"]:
             raise HTTPException(status_code=404, detail="Collection not found")
 
         max_pos_result = (
@@ -717,10 +720,10 @@ async def batch_galleries(
         return {"status": "ok", "affected": added}
 
     elif body.action == "delete":
-        return await _batch_delete_galleries(db, body.gallery_ids)
+        return await _batch_delete_galleries(db, body.gallery_ids, auth)
 
 
-async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int]) -> dict:
+async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth: dict) -> dict:
     """Delete multiple galleries, decrement blob ref counts, cleanup filesystem."""
     import asyncio
     import shutil
@@ -730,6 +733,9 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int]) -> d
     galleries = (await db.execute(stmt)).scalars().all()
     if not galleries:
         return {"status": "ok", "affected": 0, "deleted_dirs": 0}
+
+    for g in galleries:
+        _check_write_access(auth, g)
 
     # Load all images with blobs for these galleries
     img_stmt = (
@@ -890,10 +896,11 @@ class GalleryPatch(BaseModel):
 async def update_gallery(
     gallery_id: int,
     patch: GalleryPatch,
-    _: dict = Depends(_member),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     g = await _get_or_404(db, gallery_id)
+    _check_write_access(auth, g)
     if patch.favorited is not None:
         g.favorited = patch.favorited
     if patch.rating is not None:
@@ -911,7 +918,7 @@ async def update_gallery(
 @router.delete("/galleries/{gallery_id}")
 async def delete_gallery(
     gallery_id: int,
-    _: dict = Depends(_member),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a gallery, decrement blob ref counts, remove library symlinks and thumbnails.
@@ -924,6 +931,7 @@ async def delete_gallery(
     from pathlib import Path
 
     g = await _get_or_404(db, gallery_id)
+    _check_write_access(auth, g)
 
     # Load all images with their blobs before deleting DB records
     stmt = (
@@ -992,7 +1000,7 @@ class DeleteImageBody(BaseModel):
 async def delete_gallery_image(
     gallery_id: int,
     body: DeleteImageBody,
-    _: dict = Depends(_member),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a single image from a gallery by page number.
@@ -1005,6 +1013,7 @@ async def delete_gallery_image(
     import shutil
 
     gallery = await _get_or_404(db, gallery_id)
+    _check_write_access(auth, gallery)
 
     img_stmt = (
         select(Image)
@@ -1312,10 +1321,12 @@ async def list_excluded_blobs(
 async def restore_excluded_blob(
     gallery_id: int,
     sha256: str,
-    _: dict = Depends(_member),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a blob from the exclusion list (un-exclude)."""
+    gallery = await _get_or_404(db, gallery_id)
+    _check_write_access(auth, gallery)
     from db.models import ExcludedBlob
     result = await db.execute(
         select(ExcludedBlob).where(
@@ -1355,6 +1366,19 @@ async def _get_or_404(db: AsyncSession, gallery_id: int) -> Gallery:
     if not g:
         raise HTTPException(status_code=404, detail="Gallery not found")
     return g
+
+
+def _check_write_access(auth: dict, gallery: Gallery) -> None:
+    """Raise 403 if the caller cannot modify this gallery.
+
+    Admins can modify any gallery. Members can modify galleries they created
+    or unowned (legacy) galleries whose created_by_user_id is NULL.
+    """
+    if auth["role"] == "admin":
+        return
+    if gallery.created_by_user_id is None or gallery.created_by_user_id == auth["user_id"]:
+        return
+    raise HTTPException(status_code=403, detail="You do not have permission to modify this gallery")
 
 
 def _g(g: Gallery, cover_thumb: str | None = None) -> dict:

@@ -43,10 +43,12 @@ async def verify_api_token(x_api_token: str = Header(...)):
     token_hash = hashlib.sha256(x_api_token.encode()).hexdigest()
     async with async_session() as session:
         result = await session.execute(
-            select(ApiToken.id, ApiToken.user_id).where(
-                ApiToken.token_hash == token_hash,
-                (ApiToken.expires_at.is_(None)) | (ApiToken.expires_at > func.now()),
-            )
+            text(
+                "SELECT t.id, t.user_id, u.role "
+                "FROM api_tokens t JOIN users u ON t.user_id = u.id "
+                "WHERE t.token_hash = :hash AND (t.expires_at IS NULL OR t.expires_at > now())"
+            ),
+            {"hash": token_hash},
         )
         token = result.fetchone()
 
@@ -58,7 +60,7 @@ async def verify_api_token(x_api_token: str = Header(...)):
         await session.execute(update(ApiToken).where(ApiToken.id == token.id).values(last_used_at=func.now()))
         await session.commit()
 
-    return {"user_id": token.user_id, "token_id": token.id}
+    return {"user_id": token.user_id, "token_id": token.id, "role": token.role or "viewer"}
 
 
 # ── Rate limiter ──────────────────────────────────────────────────────
@@ -394,6 +396,11 @@ async def enqueue_download(
     resolved_url = (body.url if body else None) or url
     if not resolved_url:
         raise HTTPException(status_code=422, detail="Missing 'url' in body or query parameter")
+
+    # Viewers cannot trigger downloads
+    from core.auth import ROLE_HIERARCHY
+    if ROLE_HIERARCHY.get(token_data.get("role", ""), 0) < ROLE_HIERARCHY["member"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions: member role required")
 
     await _check_rate_limit(token_data["token_id"])
     job_id = _uuid.uuid4()

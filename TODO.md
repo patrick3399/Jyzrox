@@ -4,26 +4,6 @@
 
 ---
 
-## ⚠️ 多人權限完成後需補強清單
-
-> 以下功能在多人權限（P2）上線後需回頭修改，**建議在同一 PR 或緊接著做**。
-
-| 影響項目 | 問題 | 修改內容 |
-|---------|------|---------|
-| `read_progress` 表 | **無 `user_id`**，閱讀進度全域共享 | 加欄位 + 遷移腳本，Reader API 改為 per-user 讀寫 |
-| `DownloadJob` 表 | **無 `user_id`**，所有人看到同一下載佇列 | 加欄位，決定 admin 可看全部 / member 只看自己 |
-| `settings.py` 所有端點 | 只需登入即可改全域設定，**缺 admin 保護** | 所有設定端點加 `require_role("admin")` |
-| 下載 / 匯入操作 | 目前無 member 以上限制 | `enqueue`, `import`, `bulk download` 等加 `require_role("member")` |
-| Tag 管理端點 | Tag alias / implication / translation 應限 admin | 加 `require_role("admin")` |
-| Dedup、排程任務 | 應限 admin | 加 `require_role("admin")` |
-| Log Viewer（新） | 應限 admin | 建立時就加 `require_role("admin")` |
-| 限速控制頁面（新） | 應限 admin | 建立時就加 `require_role("admin")` |
-| Plugin 管理 | enable/disable/configure 應限 admin | 建立時就加 `require_role("admin")` |
-
-> ✅ 已確認 **不需要** 改動：`blocked_tags`（已 per-user）、`saved_searches`（已 per-user）、`external.py`（API Token 獨立驗證）、`opds.py`（Basic Auth 獨立驗證）
-
----
-
 ## P1 — 短期高價值
 
 > 獨立功能，少依賴，能快速上線。
@@ -45,7 +25,7 @@
 - [ ] 批次任務儀表板（總進度、成功/失敗統計）
 - [ ] 批次下載確認 dialog（預覽數量、預估大小）
 
-> ⚠️ 多人權限完成後：`enqueue` 相關端點加 `require_role("member")`，儀表板依角色篩選可見 job
+> ✅ 已套用：`enqueue` 端點已加 `require_role("member")`，job 列表依角色篩選
 
 ---
 
@@ -64,7 +44,7 @@
 - [ ] 時段排程設定：起止時間選擇 + 目標限速模式（全速 / 標準）
 - [ ] 全域暫時解鎖按鈕（立即套用直到下次 cron 重置）
 
-> ⚠️ 多人權限完成後：設定端點加 `require_role("admin")`
+> ✅ 已套用：設定端點已加 `require_role("admin")`
 
 ---
 
@@ -88,36 +68,18 @@
 - [ ] 自動捲動到最新 / 暫停捲動切換
 - [ ] Log 保留天數設定
 
-> ⚠️ 多人權限完成後：端點改為 `require_role("admin")`，側邊欄入口對非 admin 隱藏
+> ✅ 已套用：建立時直接使用 `require_role("admin")`
 
 ---
 
-### 多人權限管理
+### Gallery 分享與可見性控制
 
-> **此功能完成後，見頂部「⚠️ 多人權限完成後需補強清單」進行後續修改。**
+> 依賴：多人權限 ✅ 已完成
 
-#### 資料庫
-- [ ] `users` 表新增 `role` 欄位（`admin` / `member` / `viewer`）
-- [ ] 遷移腳本：現有使用者預設 `admin`
 - [ ] `gallery_permissions` 表（gallery_id, user_id, permission_level）
-- [ ] `read_progress` 表加 `user_id` 欄位 + 遷移腳本（現有紀錄指定給第一個 admin）
-- [ ] `download_jobs` 表加 `user_id` 欄位 + 遷移腳本
-
-#### 後端
-- [ ] `core/auth.py` — `require_role(role)` dependency（檢查角色權限）
-- [ ] 管理端點：列出使用者、修改角色、停用帳號
-- [ ] Gallery 權限控制：私有/公開/指定使用者可見
-- [ ] 依補強清單批量補加 `require_role()` 至各端點（settings、tag 管理、download enqueue、dedup、scheduled tasks、logs）
-
-#### 前端
-- [ ] 使用者管理頁（`/admin/users`）：列表、角色切換、停用
-- [ ] Gallery 分享 UI：設定可見性、邀請使用者
-- [ ] 角色不足時的 403 提示頁面
-- [ ] 側邊欄根據角色隱藏管理入口（Dedup、排程任務、Settings、Logs）
-
-#### 分享與內容控制
-- [ ] 分享連結：Gallery 產生公開短連結（token-based，可設過期時間）
 - [ ] Gallery 可見性設定（私有 / 公開 / 指定使用者）
+- [ ] Gallery 分享 UI：設定可見性、邀請使用者
+- [ ] 分享連結：Gallery 產生公開短連結（token-based，可設過期時間）
 - [ ] 內容過濾：依 tag namespace 隱藏 gallery（R18 過濾），存入 `user_preferences`
 
 ---
@@ -153,7 +115,7 @@
 >
 > **限制**：Nginx `/media/` 需 auth（subrequest），SW 攔截需帶 httpOnly cookie，iOS Safari PWA Storage 配額約 50MB，需實作配額管理與 LRU 淘汰。
 >
-> **依賴**：建議在多人權限（P2）後實作，`offline_galleries` 表需 `user_id` 支援 per-user 離線清單。
+> **依賴**：多人權限 ✅ 已完成，`offline_galleries` 表含 `user_id` 支援 per-user 離線清單。
 
 #### 後端
 - [ ] `GET /api/library/galleries/{id}/offline-manifest`：回傳 gallery 所有圖片 URL 清單（供 SW 預快取）
@@ -246,7 +208,7 @@
 
 ### Plugin 系統完善
 
-> **依賴**：多人權限完成後，Plugin enable/disable/configure 端點需加 `require_role("admin")`。
+> ✅ 多人權限已完成。Plugin enable/disable/configure 端點建立時直接使用 `require_role("admin")`。
 
 #### 核心架構
 - [ ] Plugin 介面定義（Python ABC）：`on_download`, `on_import`, `on_tag` hooks
@@ -363,7 +325,7 @@
 - [x] Multi-stage Dockerfile
 - [x] backup/restore 腳本
 - [x] Worker max_jobs + LOG_LEVEL 環境變數
-- [x] 資料庫自動遷移機制（Alembic，8 個版本遷移）
+- [x] 資料庫自動遷移機制（Alembic，baseline 0001 合併單一版本）
 - [x] 自動化 CI（GitHub Actions：lint + test + build）
 - [x] 容器資源限制（全服務 `deploy.resources` 配置）
 - [x] nginx `auth_request` 保護 `/media/` 路徑（subrequest auth + 快取）
@@ -400,5 +362,17 @@
 - [x] Pause：Redis `download:pause:{job_id}` key → downloader poll → 正在傳輸的圖完成後才暫停
 - [x] Resume：刪除 Redis key → 繼續下載
 - [x] gallery-dl 繼續使用 SIGSTOP / SIGCONT（雙路徑邏輯）
+
+### 多人權限 RBAC（v0.4）
+- [x] 三級角色：admin / member / viewer（階層式，高級繼承低級權限）
+- [x] `require_role()` factory dependency（`core/auth.py`）
+- [x] `read_progress` per-user 隔離（composite PK `(user_id, gallery_id)`）
+- [x] `download_jobs` per-user 歸屬（`user_id` FK + 列表篩選）
+- [x] 全端點 RBAC 保護（settings/tag/dedup/scheduled-tasks/download/import/export/subscriptions）
+- [x] 使用者管理 CRUD（`/api/users`，admin only）
+- [x] 使用者管理頁面（`/admin/users`）
+- [x] 403 Forbidden 頁面（`/forbidden`）
+- [x] 側邊欄/底部導航依角色過濾
+- [x] i18n 五語系支援（en/zh-TW/zh-CN/ja/ko）
 
 </details>
