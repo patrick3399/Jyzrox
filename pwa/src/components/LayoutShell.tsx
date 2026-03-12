@@ -5,6 +5,7 @@ import { Sidebar } from './Sidebar'
 import { MobileNav } from './MobileNav'
 import { Toaster } from 'sonner'
 import { SWUpdatePrompt } from './SWUpdatePrompt'
+import { WsProvider } from '@/lib/ws'
 
 const AUTH_PATHS = ['/login', '/setup']
 
@@ -23,7 +24,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   }
 
   return (
-    <>
+    <WsProvider>
       {/* Desktop sidebar — hidden on mobile */}
       <Sidebar />
 
@@ -39,6 +40,6 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
 
       <Toaster position="bottom-right" richColors />
       <SWUpdatePrompt />
-    </>
+    </WsProvider>
   )
 }

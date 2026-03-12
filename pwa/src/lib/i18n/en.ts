@@ -152,6 +152,8 @@ const en: Record<string, string> = {
   'queue.add': 'Add',
   'queue.active': 'Active',
   'queue.autoRefresh': 'Auto-refreshes every 3s',
+  'queue.autoRefreshWs': 'Real-time via WebSocket',
+  'queue.wsFallback': 'Real-time updates unavailable — polling every 3s (WebSocket disconnected)',
   'queue.noActive': 'No active downloads',
   'queue.completedFailed': 'Completed / Failed',
   'queue.collapse': 'Collapse',

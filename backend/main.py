@@ -94,7 +94,7 @@ app.include_router(system.router, prefix="/api/system")
 app.include_router(library.router, prefix="/api/library")
 app.include_router(download.router, prefix="/api/download")
 app.include_router(settings_router.router, prefix="/api/settings")
-app.include_router(ws.router, prefix="/api/ws")
+app.include_router(ws.router, prefix="/api")
 
 # rev 2.0 new routers
 app.include_router(search.router, prefix="/api/search")

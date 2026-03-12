@@ -1,16 +1,36 @@
 'use client'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
 import type { WsMessage } from './types'
 
-export function useWebSocket() {
+export interface JobUpdateEvent {
+  job_id: string
+  status: string
+  progress: Record<string, unknown> | null
+}
+
+interface WsContextValue {
+  alerts: string[]
+  connected: boolean
+  dismissAlert: (index: number) => void
+  lastJobUpdate: JobUpdateEvent | null
+}
+
+const WsContext = createContext<WsContextValue>({
+  alerts: [],
+  connected: false,
+  dismissAlert: () => {},
+  lastJobUpdate: null,
+})
+
+export function WsProvider({ children }: { children: React.ReactNode }) {
   const [alerts, setAlerts] = useState<string[]>([])
   const [connected, setConnected] = useState(false)
+  const [lastJobUpdate, setLastJobUpdate] = useState<JobUpdateEvent | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const mountedRef = useRef(true)
 
   const connect = useCallback(() => {
-    // Build WS URL: ws://same-host/api/ws
     const protocol = window.location.protocol === 'https:' ? 'wss:' : 'ws:'
     const url = `${protocol}//${window.location.host}/api/ws`
 
@@ -24,6 +44,12 @@ export function useWebSocket() {
         const msg: WsMessage = JSON.parse(ev.data)
         if (msg.type === 'alert' && msg.message) {
           setAlerts((prev) => [...prev.slice(-49), msg.message!])
+        } else if (msg.type === 'job_update' && msg.job_id) {
+          setLastJobUpdate({
+            job_id: msg.job_id,
+            status: msg.status ?? '',
+            progress: msg.progress ?? null,
+          })
         }
       } catch {
         /* ignore malformed */
@@ -32,7 +58,6 @@ export function useWebSocket() {
 
     ws.onclose = () => {
       setConnected(false)
-      // Only schedule reconnect if the hook is still mounted
       if (!mountedRef.current) return
       clearTimeout(reconnectTimer.current)
       reconnectTimer.current = setTimeout(connect, 3000)
@@ -60,5 +85,18 @@ export function useWebSocket() {
     setAlerts((prev) => prev.filter((_, i) => i !== index))
   }, [])
 
-  return { alerts, connected, dismissAlert }
+  return (
+    <WsContext.Provider value={{ alerts, connected, dismissAlert, lastJobUpdate }}>
+      {children}
+    </WsContext.Provider>
+  )
+}
+
+export function useWs(): WsContextValue {
+  return useContext(WsContext)
+}
+
+// Backward-compatible alias
+export function useWebSocket(): WsContextValue {
+  return useWs()
 }

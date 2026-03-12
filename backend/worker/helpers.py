@@ -9,6 +9,7 @@ import sqlalchemy.exc
 from croniter import croniter as _croniter_cls
 
 from core.database import AsyncSessionLocal
+from core.redis_client import publish_job_event
 from db.models import DownloadJob
 from worker.constants import _IMAGE_MAGIC, logger
 
@@ -68,6 +69,15 @@ async def _set_job_status(job_id: str | None, status: str, error: str | None = N
                 if status in ("done", "failed", "cancelled"):
                     job.finished_at = datetime.now(UTC)
                 await session.commit()
+                try:
+                    await publish_job_event({
+                        "type": "job_update",
+                        "job_id": job_id,
+                        "status": status,
+                        "progress": job.progress,
+                    })
+                except Exception:
+                    pass
     except (sqlalchemy.exc.SQLAlchemyError, ValueError, OSError) as exc:
         logger.error("[download] failed to update job status: %s", exc)
 
@@ -82,6 +92,15 @@ async def _set_job_progress(job_id: str | None, progress: dict) -> None:
             if job:
                 job.progress = progress
                 await session.commit()
+                try:
+                    await publish_job_event({
+                        "type": "job_update",
+                        "job_id": job_id,
+                        "status": job.status,
+                        "progress": progress,
+                    })
+                except Exception:
+                    pass
     except (sqlalchemy.exc.SQLAlchemyError, ValueError, OSError) as exc:
         logger.warning("[download] failed to update job progress: %s", exc)
 

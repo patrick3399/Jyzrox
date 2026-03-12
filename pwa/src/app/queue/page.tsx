@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { Download, X, Plus, Trash2, Pause, Play, ChevronRight, Globe } from 'lucide-react'
+import { Download, X, Plus, Trash2, Pause, Play, ChevronRight, Globe, WifiOff } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   useDownloadJobs,
@@ -15,6 +15,7 @@ import {
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { t } from '@/lib/i18n'
+import { useWs } from '@/lib/ws'
 import type { DownloadJob } from '@/lib/types'
 
 const STATUS_STYLES: Record<string, string> = {
@@ -206,6 +207,18 @@ export default function QueuePage() {
   const { trigger: clearJobs, isMutating: isClearing } = useClearFinishedJobs()
   const { trigger: pauseJob } = usePauseJob()
 
+  const { connected } = useWs()
+  const [showFallbackWarning, setShowFallbackWarning] = useState(false)
+
+  useEffect(() => {
+    if (connected) {
+      setShowFallbackWarning(false)
+      return
+    }
+    const timer = setTimeout(() => setShowFallbackWarning(true), 6000)
+    return () => clearTimeout(timer)
+  }, [connected])
+
   const handleEnqueue = useCallback(async () => {
     const url = urlInput.trim()
     if (!url) return
@@ -379,6 +392,14 @@ export default function QueuePage() {
           </div>
         )}
 
+        {/* WebSocket Fallback Warning */}
+        {showFallbackWarning && (
+          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4 flex items-center gap-2 text-yellow-400 text-sm">
+            <WifiOff size={15} className="shrink-0" />
+            {t('queue.wsFallback')}
+          </div>
+        )}
+
         {/* Active Jobs */}
         {!isLoading && (
           <div className="mb-6">
@@ -386,7 +407,9 @@ export default function QueuePage() {
               <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
                 {t('queue.active')} ({sortedActive.length})
               </h2>
-              <span className="text-xs text-vault-text-muted">{t('queue.autoRefresh')}</span>
+              <span className="text-xs text-vault-text-muted">
+                {connected ? t('queue.autoRefreshWs') : t('queue.autoRefresh')}
+              </span>
             </div>
 
             {sortedActive.length === 0 ? (
