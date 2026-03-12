@@ -410,7 +410,7 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
       {/* Tap zone for overlay toggle in webtoon mode */}
       <button
         type="button"
-        className="fixed top-1/3 left-1/4 w-1/2 h-1/3 z-10 cursor-pointer bg-transparent border-none p-0"
+        className="fixed top-1/3 left-1/4 w-1/2 h-1/3 z-10 cursor-pointer bg-transparent border-none p-0 touch-pan-y"
         onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
         aria-label="Toggle controls"
         tabIndex={0}
