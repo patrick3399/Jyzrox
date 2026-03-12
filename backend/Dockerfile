@@ -10,6 +10,12 @@ COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install/pkgs -r requirements.txt && \
     pip install --no-cache-dir --prefix=/install/pkgs gallery-dl
 
+# Download swagger-ui-dist static assets for self-hosted docs
+RUN python -c "\
+import urllib.request; \
+urllib.request.urlretrieve('https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui-bundle.js', '/install/swagger-ui-bundle.js'); \
+urllib.request.urlretrieve('https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css', '/install/swagger-ui.css')"
+
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM python:3.13-slim AS runtime
 
@@ -30,6 +36,12 @@ COPY --from=builder /install/pkgs /usr/local
 WORKDIR /app
 
 COPY . .
+
+# Copy swagger-ui static assets
+RUN mkdir -p /app/static/swagger-ui
+COPY --from=builder /install/swagger-ui-bundle.js /app/static/swagger-ui/
+COPY --from=builder /install/swagger-ui.css /app/static/swagger-ui/
+
 RUN chown -R appuser:appgroup /app
 
 # Create gallery-dl config directory under /app (owner: appuser, no world access)
