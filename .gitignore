@@ -27,4 +27,5 @@ Thumbs.db
 data/
 # Claude Code — keep skills/docs/agents, ignore local settings
 .claude/settings.local.json
+.playwright-mcp/
 docker-compose.override.yml
