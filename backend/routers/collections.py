@@ -35,7 +35,7 @@ class AddGalleries(BaseModel):
 
 @router.get("/")
 async def list_collections(
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """List all collections with gallery count and cover thumbnail."""
@@ -44,6 +44,7 @@ async def list_collections(
             Collection,
             func.count(CollectionGallery.gallery_id).label("gallery_count"),
         )
+        .where(Collection.user_id == auth["user_id"])
         .outerjoin(CollectionGallery, Collection.id == CollectionGallery.collection_id)
         .group_by(Collection.id)
         .order_by(Collection.updated_at.desc())
@@ -96,11 +97,11 @@ async def list_collections(
 @router.post("/")
 async def create_collection(
     body: CollectionCreate,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Create a new collection."""
-    collection = Collection(name=body.name, description=body.description)
+    collection = Collection(name=body.name, description=body.description, user_id=auth["user_id"])
     db.add(collection)
     await db.commit()
     await db.refresh(collection)
@@ -117,12 +118,12 @@ async def get_collection(
     collection_id: int,
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Get collection details with paginated gallery list."""
     collection = await db.get(Collection, collection_id)
-    if not collection:
+    if not collection or collection.user_id != auth["user_id"]:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     # Count galleries
@@ -189,12 +190,12 @@ async def get_collection(
 async def update_collection(
     collection_id: int,
     patch: CollectionPatch,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Update collection name/description/cover."""
     collection = await db.get(Collection, collection_id)
-    if not collection:
+    if not collection or collection.user_id != auth["user_id"]:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     if patch.name is not None:
@@ -212,12 +213,12 @@ async def update_collection(
 @router.delete("/{collection_id}")
 async def delete_collection(
     collection_id: int,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a collection (does not delete galleries)."""
     collection = await db.get(Collection, collection_id)
-    if not collection:
+    if not collection or collection.user_id != auth["user_id"]:
         raise HTTPException(status_code=404, detail="Collection not found")
     await db.delete(collection)
     await db.commit()
@@ -228,12 +229,12 @@ async def delete_collection(
 async def add_galleries_to_collection(
     collection_id: int,
     body: AddGalleries,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Add galleries to a collection."""
     collection = await db.get(Collection, collection_id)
-    if not collection:
+    if not collection or collection.user_id != auth["user_id"]:
         raise HTTPException(status_code=404, detail="Collection not found")
 
     # Get current max position
@@ -258,6 +259,15 @@ async def add_galleries_to_collection(
         ).scalar_one_or_none()
         if existing:
             continue
+        # Verify the gallery is visible to this user
+        gallery = await db.get(Gallery, gid)
+        if not gallery:
+            continue
+        if auth.get("role") != "admin":
+            if (gallery.created_by_user_id is not None
+                    and gallery.created_by_user_id != auth["user_id"]
+                    and gallery.visibility != "public"):
+                continue
         cg = CollectionGallery(
             collection_id=collection_id,
             gallery_id=gid,
@@ -275,10 +285,14 @@ async def add_galleries_to_collection(
 async def remove_gallery_from_collection(
     collection_id: int,
     gallery_id: int,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a gallery from a collection."""
+    collection = await db.get(Collection, collection_id)
+    if not collection or collection.user_id != auth["user_id"]:
+        raise HTTPException(status_code=404, detail="Collection not found")
+
     result = await db.execute(
         delete(CollectionGallery).where(
             CollectionGallery.collection_id == collection_id,
@@ -288,9 +302,6 @@ async def remove_gallery_from_collection(
     if result.rowcount == 0:
         raise HTTPException(status_code=404, detail="Gallery not in collection")
 
-    # Update timestamp
-    collection = await db.get(Collection, collection_id)
-    if collection:
-        collection.updated_at = datetime.now(UTC)
+    collection.updated_at = datetime.now(UTC)
     await db.commit()
     return {"status": "ok"}

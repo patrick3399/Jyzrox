@@ -138,7 +138,7 @@ export function LibraryGalleryCard({ gallery, thumbUrl, onClick, selected, selec
       )}
 
       {/* Favourite indicator */}
-      {gallery.favorited && (
+      {gallery.is_favorited && (
         <span
           className="absolute top-1.5 right-1.5 z-10 text-red-400 text-base leading-none drop-shadow"
           aria-label="Favourited"
@@ -181,7 +181,7 @@ export function LibraryGalleryCard({ gallery, thumbUrl, onClick, selected, selec
         </h3>
 
         <div className="flex items-center justify-between mt-auto pt-1">
-          <RatingStars rating={gallery.rating} readonly />
+          <RatingStars rating={gallery.my_rating ?? gallery.rating} readonly />
           <span className="text-xs text-vault-text-muted">{gallery.pages}p</span>
         </div>
       </div>

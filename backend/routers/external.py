@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select, text, update
 
+from core.auth import gallery_access_filter
 from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
@@ -43,10 +44,12 @@ async def verify_api_token(x_api_token: str = Header(...)):
     token_hash = hashlib.sha256(x_api_token.encode()).hexdigest()
     async with async_session() as session:
         result = await session.execute(
-            select(ApiToken.id, ApiToken.user_id).where(
-                ApiToken.token_hash == token_hash,
-                (ApiToken.expires_at.is_(None)) | (ApiToken.expires_at > func.now()),
-            )
+            text(
+                "SELECT t.id, t.user_id, u.role "
+                "FROM api_tokens t JOIN users u ON t.user_id = u.id "
+                "WHERE t.token_hash = :hash AND (t.expires_at IS NULL OR t.expires_at > now())"
+            ),
+            {"hash": token_hash},
         )
         token = result.fetchone()
 
@@ -58,7 +61,7 @@ async def verify_api_token(x_api_token: str = Header(...)):
         await session.execute(update(ApiToken).where(ApiToken.id == token.id).values(last_used_at=func.now()))
         await session.commit()
 
-    return {"user_id": token.user_id, "token_id": token.id}
+    return {"user_id": token.user_id, "token_id": token.id, "role": token.role or "viewer"}
 
 
 # ── Rate limiter ──────────────────────────────────────────────────────
@@ -182,15 +185,29 @@ async def list_galleries(
     if q:
         filters.append(Gallery.title.ilike(f"%{q}%"))
     if favorited is not None:
-        filters.append(Gallery.favorited == favorited)
+        if favorited:
+            from db.models import UserFavorite
+            filters.append(
+                Gallery.id.in_(
+                    select(UserFavorite.gallery_id).where(UserFavorite.user_id == token_data["user_id"])
+                )
+            )
     if min_rating is not None:
-        filters.append(Gallery.rating >= min_rating)
+        from db.models import UserRating
+        filters.append(
+            Gallery.id.in_(
+                select(UserRating.gallery_id).where(
+                    UserRating.user_id == token_data["user_id"],
+                    UserRating.rating >= min_rating,
+                )
+            )
+        )
 
     async with async_session() as session:
-        count_result = await session.execute(select(func.count()).select_from(Gallery).where(*filters))
+        count_result = await session.execute(select(func.count()).select_from(Gallery).where(*filters, gallery_access_filter(token_data)))
         total = count_result.scalar() or 0
 
-        data_query = select(Gallery).where(*filters).order_by(Gallery.added_at.desc()).limit(limit).offset(page * limit)
+        data_query = select(Gallery).where(*filters, gallery_access_filter(token_data)).order_by(Gallery.added_at.desc()).limit(limit).offset(page * limit)
         rows = (await session.execute(data_query)).scalars().all()
 
     galleries = []
@@ -208,7 +225,7 @@ async def list_galleries(
                 "posted_at": r.posted_at.isoformat() if r.posted_at else None,
                 "added_at": r.added_at.isoformat() if r.added_at else None,
                 "rating": r.rating,
-                "favorited": r.favorited,
+                "favorited": False,
                 "uploader": r.uploader,
                 "download_status": r.download_status,
                 "tags": r.tags_array or [],
@@ -225,7 +242,7 @@ async def get_gallery(
 ):
     """Get a single gallery by ID."""
     async with async_session() as session:
-        r = (await session.execute(select(Gallery).where(Gallery.id == gallery_id))).scalar_one_or_none()
+        r = (await session.execute(select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))).scalar_one_or_none()
 
     if not r:
         raise HTTPException(status_code=404, detail="Gallery not found")
@@ -242,7 +259,7 @@ async def get_gallery(
         "posted_at": r.posted_at.isoformat() if r.posted_at else None,
         "added_at": r.added_at.isoformat() if r.added_at else None,
         "rating": r.rating,
-        "favorited": r.favorited,
+        "favorited": False,
         "uploader": r.uploader,
         "download_status": r.download_status,
         "tags": r.tags_array or [],
@@ -259,8 +276,8 @@ async def get_gallery_images(
 ):
     """List images for a gallery."""
     async with async_session() as session:
-        # Verify gallery exists
-        gallery = (await session.execute(select(Gallery.id).where(Gallery.id == gallery_id))).fetchone()
+        # Verify gallery exists and is accessible
+        gallery = (await session.execute(select(Gallery.id).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))).fetchone()
         if not gallery:
             raise HTTPException(status_code=404, detail="Gallery not found")
 
@@ -306,6 +323,11 @@ async def get_image_file(
 ):
     """Stream an image file for external readers (Mihon)."""
     async with async_session() as session:
+        # Verify gallery is accessible before serving the image
+        gallery_check = (await session.execute(select(Gallery.id).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))).fetchone()
+        if not gallery_check:
+            raise HTTPException(status_code=404, detail="Gallery not found")
+
         row = (
             await session.execute(
                 select(Image)
@@ -395,6 +417,11 @@ async def enqueue_download(
     if not resolved_url:
         raise HTTPException(status_code=422, detail="Missing 'url' in body or query parameter")
 
+    # Viewers cannot trigger downloads
+    from core.auth import ROLE_HIERARCHY
+    if ROLE_HIERARCHY.get(token_data.get("role", ""), 0) < ROLE_HIERARCHY["member"]:
+        raise HTTPException(status_code=403, detail="Insufficient permissions: member role required")
+
     await _check_rate_limit(token_data["token_id"])
     job_id = _uuid.uuid4()
     source = detect_source(resolved_url)
@@ -419,7 +446,7 @@ async def enqueue_download(
     #    eventually time out without a matching DB row.
     try:
         async with async_session() as session:
-            session.add(DownloadJob(id=job_id, url=resolved_url, source=source, status="queued"))
+            session.add(DownloadJob(id=job_id, url=resolved_url, source=source, status="queued", user_id=token_data["user_id"]))
             await session.commit()
     except Exception as exc:
         logger.warning(

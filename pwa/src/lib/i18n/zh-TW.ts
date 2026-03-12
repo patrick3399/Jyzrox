@@ -718,6 +718,7 @@ const zhTW: Record<string, string> = {
   'common.all': '全部',
   'common.tags': '標籤',
   'common.cancel': '取消',
+  'common.optional': '選填',
   'common.goBack': '返回',
   'common.retry': '重試',
   'common.goHome': '回首頁',
@@ -761,6 +762,46 @@ const zhTW: Record<string, string> = {
   'error.tag_not_found': '找不到標籤',
   'error.unknown_feature': '未知的功能',
   'error.server_error': '伺服器內部錯誤',
+
+  // ── Navigation ──
+  'nav.users': '使用者管理',
+
+  // ── Admin Users page ──
+  'admin.users.title': '使用者管理',
+  'admin.users.addUser': '新增使用者',
+  'admin.users.username': '使用者名稱',
+  'admin.users.password': '密碼',
+  'admin.users.role': '角色',
+  'admin.users.email': '電子郵件',
+  'admin.users.lastLogin': '最後登入',
+  'admin.users.createdAt': '建立時間',
+  'admin.users.actions': '操作',
+  'admin.users.deleteConfirm': '確定要刪除此使用者嗎？',
+  'admin.users.deleteTitle': '刪除使用者',
+  'admin.users.createTitle': '建立使用者',
+  'admin.users.create': '建立',
+  'admin.users.cancel': '取消',
+  'admin.users.delete': '刪除',
+  'admin.users.created': '使用者已建立',
+  'admin.users.updated': '使用者已更新',
+  'admin.users.deleted': '使用者已刪除',
+  'admin.users.noUsers': '找不到使用者',
+  'admin.users.roleAdmin': '管理員',
+  'admin.users.roleMember': '成員',
+  'admin.users.roleViewer': '檢視者',
+  'admin.users.you': '（你）',
+
+  // ── Forbidden page ──
+  'forbidden.title': '存取被拒',
+  'forbidden.description': '您沒有權限存取此頁面。如果您認為這是錯誤，請聯繫管理員。',
+  'forbidden.backHome': '返回首頁',
+
+  // ── Error codes ──
+  'error.forbidden': '您沒有權限存取此資源',
+  'error.user_not_found': '找不到使用者',
+  'error.cannot_delete_self': '無法刪除自己的帳號',
+  'error.cannot_delete_last_admin': '無法刪除最後一個管理員帳號',
+  'error.username_taken': '此使用者名稱已被使用',
 }
 
 export default zhTW

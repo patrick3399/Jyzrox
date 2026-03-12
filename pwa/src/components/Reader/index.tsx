@@ -1,5 +1,5 @@
 'use client'
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
+import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useRouter } from 'next/navigation'
 import type { GalleryImage } from '@/lib/types'
 import type { ReaderImage, ViewMode, ScaleMode, ReadingDirection, ReaderSettings } from './types'
@@ -303,9 +303,10 @@ interface WebtoonViewProps {
   onToggleOverlay: () => void
   /** When this changes and differs from the last scroll-reported page, scroll to that page. */
   scrollToPage?: number
+  scaleMode: ScaleMode
 }
 
-function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: WebtoonViewProps) {
+function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage, scaleMode }: WebtoonViewProps) {
   const elRefs = useRef<Map<number, HTMLElement>>(new Map())
   const scrollRef = useRef<HTMLDivElement>(null)
   const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set())
@@ -387,8 +388,34 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
   // Show spinner if the last visible image hasn't loaded yet
   const showBottomSpinner = lastPage > 0 && !loadedPages.has(lastPage)
 
+  const scaleClass = (() => {
+    switch (scaleMode) {
+      case 'fit-width':
+        return 'w-full h-auto block'
+      case 'fit-height':
+        return 'h-screen w-auto block mx-auto'
+      case 'original':
+        return 'block mx-auto'
+      case 'fit-both':
+      default:
+        return 'max-w-full max-h-screen object-contain block mx-auto'
+    }
+  })()
+
   return (
-    <div ref={scrollRef} className="reader-webtoon-scroll flex flex-col items-center w-full h-full overflow-y-auto">
+    <div
+      ref={scrollRef}
+      className="reader-webtoon-scroll flex flex-col items-center w-full h-full overflow-y-auto"
+      onClick={(e) => {
+        // Toggle overlay when clicking in the center zone (middle 50% width, middle 33% height)
+        const rect = (e.currentTarget as HTMLElement).getBoundingClientRect()
+        const x = (e.clientX - rect.left) / rect.width
+        const y = (e.clientY - rect.top) / rect.height
+        if (x >= 0.25 && x <= 0.75 && y >= 0.33 && y <= 0.66) {
+          onToggleOverlay()
+        }
+      }}
+    >
       {images.map((img) => (
         <MediaElement
           key={img.pageNum}
@@ -397,7 +424,7 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
             else elRefs.current.delete(img.pageNum)
           }}
           image={img}
-          className="w-full block"
+          className={scaleClass}
           dataPage={img.pageNum}
           onLoad={() => handleImageLoaded(img.pageNum)}
         />
@@ -407,14 +434,6 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage }: We
           <Spinner />
         </div>
       )}
-      {/* Tap zone for overlay toggle in webtoon mode */}
-      <button
-        type="button"
-        className="fixed top-1/3 left-1/4 w-1/2 h-1/3 z-10 cursor-pointer bg-transparent border-none p-0"
-        onClick={(e) => { e.stopPropagation(); onToggleOverlay() }}
-        aria-label="Toggle controls"
-        tabIndex={0}
-      />
     </div>
   )
 }
@@ -833,6 +852,7 @@ interface ThumbnailStripProps {
   onScrollToPage?: (page: number) => void
   /** Whether the strip is currently visible. scrollIntoView is suppressed when false. */
   isVisible?: boolean
+  readingDirection?: 'ltr' | 'rtl' | 'vertical'
 }
 
 function ThumbnailStrip({
@@ -842,6 +862,7 @@ function ThumbnailStrip({
   previews,
   onScrollToPage,
   isVisible,
+  readingDirection,
 }: ThumbnailStripProps) {
   const activeRef = useRef<HTMLButtonElement | null>(null)
   const stripRef = useRef<HTMLDivElement | null>(null)
@@ -860,6 +881,12 @@ function ThumbnailStrip({
     }
     return [...urls]
   }, [previews])
+
+  const displayImages = useMemo(
+    () => readingDirection === 'rtl' ? [...images].reverse() : images,
+    [images, readingDirection],
+  )
+
   const programmaticScrollRef = useRef(false)
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const scrollNotifyThrottleRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -925,17 +952,23 @@ function ThumbnailStrip({
     }
   }, [])
 
-  useEffect(() => {
+  useLayoutEffect(() => {
     // NOTE: Do NOT use scrollIntoView() here. On iOS Safari (PWA and browser),
     // scrollIntoView() can scroll the entire viewport — not just the strip —
     // even with block: 'nearest'. This causes the reader UI to shift when the
     // thumbnail strip becomes visible (e.g. on Toggle Control). Instead, we
     // manually compute the target scrollLeft and assign it directly to the
     // strip container, which only scrolls the strip's own overflow, never the viewport.
+    //
+    // useLayoutEffect (not useEffect) is intentional: scroll must happen synchronously
+    // before paint so the indicator size and the strip scroll land in the same
+    // frame, preventing a visible "indicator jumps ahead of strip" jitter.
     if (userScrollingRef.current) return
     const strip = stripRef.current
     const active = activeRef.current
     if (!strip || !active) return
+
+    // Scroll strip to center active thumbnail
     const targetScrollLeft = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2
     programmaticScrollRef.current = true
     strip.scrollLeft = Math.max(0, Math.min(targetScrollLeft, strip.scrollWidth - strip.clientWidth))
@@ -967,7 +1000,7 @@ function ThumbnailStrip({
         className="reader-thumb-strip flex gap-1 bg-black/70 px-2 py-2 backdrop-blur-sm overflow-x-auto"
         style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))' }}
       >
-        {images.map((img) => {
+        {displayImages.map((img) => {
           const isActive = img.pageNum === currentPage
           const previewRaw = previews?.[String(img.pageNum)]
 
@@ -1027,7 +1060,7 @@ function ThumbnailStrip({
               key={img.pageNum}
               ref={isActive ? activeRef : null}
               onClick={() => onPageSelect(img.pageNum)}
-              className={`relative shrink-0 overflow-hidden rounded transition-all ${
+              className={`relative shrink-0 overflow-hidden rounded ${
                 isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
               }`}
               style={{ width: thumbW, height: thumbH }}
@@ -1063,24 +1096,28 @@ function SeekBar({
   currentPage,
   totalPages,
   onSeek,
+  readingDirection,
 }: {
   currentPage: number
   totalPages: number
   onSeek: (page: number) => void
+  readingDirection?: 'ltr' | 'rtl' | 'vertical'
 }) {
   const barRef = useRef<HTMLDivElement>(null)
   const [dragging, setDragging] = useState(false)
   const [previewPage, setPreviewPage] = useState<number | null>(null)
   const draggingRef = useRef(false)
 
+  const isRtl = readingDirection === 'rtl'
   const getPageFromX = useCallback(
     (clientX: number) => {
       if (!barRef.current) return currentPage
       const rect = barRef.current.getBoundingClientRect()
-      const ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      let ratio = Math.max(0, Math.min(1, (clientX - rect.left) / rect.width))
+      if (isRtl) ratio = 1 - ratio
       return Math.max(1, Math.round(ratio * totalPages))
     },
-    [currentPage, totalPages],
+    [currentPage, totalPages, isRtl],
   )
 
   const handleClick = (e: React.MouseEvent) => {
@@ -1154,17 +1191,23 @@ function SeekBar({
       <div className="h-1.5 rounded-full bg-white/20 relative">
         <div
           className="h-full rounded-full bg-white/70"
-          style={{ width: `${progress}%` }}
+          style={isRtl ? { width: `${progress}%`, marginLeft: 'auto' } : { width: `${progress}%` }}
         />
         <div
           className="absolute w-3 h-3 rounded-full bg-white shadow"
-          style={{ left: `${progress}%`, top: '50%', transform: 'translate(-50%, -50%)' }}
+          style={isRtl
+            ? { right: `${progress}%`, top: '50%', transform: 'translate(50%, -50%)' }
+            : { left: `${progress}%`, top: '50%', transform: 'translate(-50%, -50%)' }
+          }
         />
       </div>
       {previewPage != null && (
         <div
           className="absolute -top-8 bg-black/80 text-white text-xs px-2 py-1 rounded pointer-events-none"
-          style={{ left: `${progress}%`, transform: 'translateX(-50%)' }}
+          style={isRtl
+            ? { right: `${progress}%`, transform: 'translateX(50%)' }
+            : { left: `${progress}%`, transform: 'translateX(-50%)' }
+          }
         >
           {previewPage}
         </div>
@@ -1182,6 +1225,7 @@ interface StatusBarProps {
   countdown: number
   autoAdvanceEnabled: boolean
   onPageSelect: (page: number) => void
+  readingDirection?: 'ltr' | 'rtl' | 'vertical'
 }
 
 function StatusBar({
@@ -1191,6 +1235,7 @@ function StatusBar({
   countdown,
   autoAdvanceEnabled,
   onPageSelect,
+  readingDirection,
 }: StatusBarProps) {
   const clock = useStatusBarClock(settings.statusBarEnabled && settings.statusBarShowClock)
 
@@ -1206,7 +1251,7 @@ function StatusBar({
       )}
 
       {settings.statusBarShowProgress && (
-        <SeekBar currentPage={currentPage} totalPages={totalPages} onSeek={onPageSelect} />
+        <SeekBar currentPage={currentPage} totalPages={totalPages} onSeek={onPageSelect} readingDirection={readingDirection} />
       )}
 
       {settings.statusBarShowPageCount && (
@@ -1517,22 +1562,43 @@ export default function Reader({
 
   useTouchGesture(containerRef as React.RefObject<HTMLElement | null>, swipeLeft, swipeRight, handleSwipeUp, 50, () => isZoomedRef.current)
 
-  useKeyboardNav(rawNextPage, rawPrevPage, state.readingDirection, state.viewMode)
+  useKeyboardNav(rawNextPage, rawPrevPage, handleToggleOverlay, handleBack, state.readingDirection, state.viewMode)
 
-  // Escape key (and ArrowUp in non-webtoon mode) to go back
+  // Mouse wheel: scroll down → next page, scroll up → prev page (single/double only)
+  // Webtoon mode uses native continuous scrolling (like mobile touch)
+  useEffect(() => {
+    const el = containerRef.current
+    if (!el) return
+    if (state.viewMode === 'webtoon') return
+    let cooldown = false
+    const handler = (e: WheelEvent) => {
+      // Don't intercept wheel events on the thumbnail strip (it has its own horizontal scroll)
+      if ((e.target as HTMLElement)?.closest('.reader-thumb-strip')) return
+      // Don't intercept wheel events on the overlay controls
+      if ((e.target as HTMLElement)?.closest('.reader-overlay')) return
+      if (cooldown) return
+      const dy = e.deltaY
+      if (Math.abs(dy) < 10) return
+      e.preventDefault()
+      cooldown = true
+      setTimeout(() => { cooldown = false }, 200)
+      if (dy > 0) rawNextPage()
+      else rawPrevPage()
+    }
+    el.addEventListener('wheel', handler, { passive: false })
+    return () => el.removeEventListener('wheel', handler)
+  }, [rawNextPage, rawPrevPage, state.viewMode])
+
+  // Escape key to go back
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.key === 'Escape') {
         router.back()
       }
-      if (e.key === 'ArrowUp' && state.viewMode !== 'webtoon') {
-        e.preventDefault()
-        router.back()
-      }
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [router, state.viewMode])
+  }, [router])
 
   // Help overlay
   const [showHelp, setShowHelp] = useState(false)
@@ -1615,6 +1681,7 @@ export default function Reader({
             onPageChange={setPageWithPrefetch}
             onToggleOverlay={handleToggleOverlay}
             scrollToPage={state.currentPage}
+            scaleMode={state.scaleMode}
           />
         )}
 
@@ -1649,6 +1716,7 @@ export default function Reader({
           previews={previews}
           onScrollToPage={onSeekToPage}
           isVisible={state.showOverlay}
+          readingDirection={state.readingDirection}
         />
       </div>
 
@@ -1665,6 +1733,7 @@ export default function Reader({
           countdown={countdown}
           autoAdvanceEnabled={autoAdvanceEnabled}
           onPageSelect={setPageWithPrefetch}
+          readingDirection={state.readingDirection}
         />
       </div>
 

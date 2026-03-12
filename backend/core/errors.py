@@ -232,6 +232,41 @@ _TRANSLATIONS: dict[str, dict[str, str]] = {
         "ja": "サーバー内部エラー",
         "ko": "서버 내부 오류",
     },
+    "forbidden": {
+        "en": "You do not have permission to access this resource",
+        "zh-TW": "您沒有權限存取此資源",
+        "zh-CN": "您没有权限访问此资源",
+        "ja": "このリソースへのアクセス権限がありません",
+        "ko": "이 리소스에 접근할 권한이 없습니다",
+    },
+    "user_not_found": {
+        "en": "User not found",
+        "zh-TW": "找不到使用者",
+        "zh-CN": "找不到用户",
+        "ja": "ユーザーが見つかりません",
+        "ko": "사용자를 찾을 수 없습니다",
+    },
+    "cannot_delete_self": {
+        "en": "Cannot delete your own account",
+        "zh-TW": "無法刪除自己的帳號",
+        "zh-CN": "无法删除自己的账号",
+        "ja": "自分のアカウントは削除できません",
+        "ko": "자신의 계정은 삭제할 수 없습니다",
+    },
+    "cannot_delete_last_admin": {
+        "en": "Cannot delete the last admin account",
+        "zh-TW": "無法刪除最後一個管理員帳號",
+        "zh-CN": "无法删除最后一个管理员账号",
+        "ja": "最後の管理者アカウントは削除できません",
+        "ko": "마지막 관리자 계정은 삭제할 수 없습니다",
+    },
+    "username_taken": {
+        "en": "Username is already taken",
+        "zh-TW": "此使用者名稱已被使用",
+        "zh-CN": "此用户名已被使用",
+        "ja": "このユーザー名はすでに使用されています",
+        "ko": "이미 사용 중인 사용자 이름입니다",
+    },
 }
 
 SUPPORTED_LOCALES = {"en", "zh-TW", "zh-CN", "ja", "ko"}

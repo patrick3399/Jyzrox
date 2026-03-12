@@ -6,13 +6,14 @@ import signal
 import urllib.parse
 import uuid
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import require_auth
+from core.auth import require_auth, require_role
 from core.config import settings as app_settings
+from core.errors import api_error, parse_accept_language
 from core.database import get_db
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites
@@ -21,6 +22,8 @@ from services.credential import get_credential
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["download"])
+
+_member = require_role("member")
 
 
 class DownloadRequest(BaseModel):
@@ -86,6 +89,7 @@ async def _enqueue(
     *,
     options: dict | None = None,
     total: int | None = None,
+    user_id: int | None = None,
 ) -> dict:
     """Shared enqueue logic: DB record first, then ARQ.
 
@@ -105,7 +109,7 @@ async def _enqueue(
 
     # 1. Persist DB record first so the worker always finds a matching row.
     try:
-        job = DownloadJob(id=job_id, url=url, source=source, status="queued", progress=initial_progress or {})
+        job = DownloadJob(id=job_id, url=url, source=source, status="queued", progress=initial_progress or {}, user_id=user_id)
         db.add(job)
         await db.commit()
     except Exception as exc:
@@ -140,17 +144,17 @@ async def _enqueue(
 async def enqueue_download(
     req: DownloadRequest,
     request: Request,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _enqueue(req.url, request.app.state.arq, db, options=req.options, total=req.total)
+    return await _enqueue(req.url, request.app.state.arq, db, options=req.options, total=req.total, user_id=auth["user_id"])
 
 
 @router.post("/quick")
 async def quick_download(
     req: QuickDownloadRequest,
     request: Request,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Share-target endpoint: accepts a bare URL and auto-detects the source.
@@ -158,7 +162,7 @@ async def quick_download(
     Designed for the PWA Web Share Target API — mobile users share a URL
     directly to the app and the download is enqueued immediately.
     """
-    return await _enqueue(req.url, request.app.state.arq, db)
+    return await _enqueue(req.url, request.app.state.arq, db, user_id=auth["user_id"])
 
 
 @router.get("/jobs")
@@ -166,19 +170,28 @@ async def list_jobs(
     status: str | None = Query(default=None),
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
+    is_admin = auth["role"] == "admin"
+    base_filter = [] if is_admin else [DownloadJob.user_id == auth["user_id"]]
+
     if status:
-        stmt_filtered = select(DownloadJob).where(DownloadJob.status == status)
+        conditions = [DownloadJob.status == status] + base_filter
+        stmt_filtered = select(DownloadJob).where(*conditions)
         total = (await db.execute(select(func.count()).select_from(stmt_filtered.subquery()))).scalar_one()
         stmt = stmt_filtered.order_by(desc(DownloadJob.created_at)).offset(page * limit).limit(limit)
     else:
-        # Fast estimated count for unfiltered queries
-        total = (await db.execute(
-            text("SELECT n_live_tup::bigint FROM pg_stat_user_tables WHERE relname = 'download_jobs'")
-        )).scalar_one_or_none() or 0
-        stmt = select(DownloadJob).order_by(desc(DownloadJob.created_at)).offset(page * limit).limit(limit)
+        if is_admin:
+            # Fast estimated count for unfiltered admin queries
+            total = (await db.execute(
+                text("SELECT n_live_tup::bigint FROM pg_stat_user_tables WHERE relname = 'download_jobs'")
+            )).scalar_one_or_none() or 0
+            stmt = select(DownloadJob).order_by(desc(DownloadJob.created_at)).offset(page * limit).limit(limit)
+        else:
+            stmt_filtered = select(DownloadJob).where(*base_filter)
+            total = (await db.execute(select(func.count()).select_from(stmt_filtered.subquery()))).scalar_one()
+            stmt = stmt_filtered.order_by(desc(DownloadJob.created_at)).offset(page * limit).limit(limit)
     jobs = (await db.execute(stmt)).scalars().all()
 
     return {"total": total, "jobs": [_j(j) for j in jobs]}
@@ -186,13 +199,14 @@ async def list_jobs(
 
 @router.delete("/jobs")
 async def clear_finished_jobs(
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete all completed, failed, and cancelled jobs."""
-    stmt = delete(DownloadJob).where(
-        DownloadJob.status.in_(["done", "failed", "cancelled"])
-    )
+    conditions = [DownloadJob.status.in_(["done", "failed", "cancelled"])]
+    if auth["role"] != "admin":
+        conditions.append(DownloadJob.user_id == auth["user_id"])
+    stmt = delete(DownloadJob).where(*conditions)
     result = await db.execute(stmt)
     await db.commit()
     return {"deleted": result.rowcount}
@@ -200,18 +214,20 @@ async def clear_finished_jobs(
 
 @router.get("/stats")
 async def get_stats(
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Return counts of running and finished jobs for nav badge polling."""
+    is_admin = auth["role"] == "admin"
+    user_filter = [] if is_admin else [DownloadJob.user_id == auth["user_id"]]
     running_count = (
         await db.execute(
-            select(func.count()).where(DownloadJob.status.in_(["queued", "running", "paused"]))
+            select(func.count()).where(DownloadJob.status.in_(["queued", "running", "paused"]), *user_filter)
         )
     ).scalar_one()
     finished_count = (
         await db.execute(
-            select(func.count()).where(DownloadJob.status.in_(["done", "failed", "cancelled"]))
+            select(func.count()).where(DownloadJob.status.in_(["done", "failed", "cancelled"]), *user_filter)
         )
     ).scalar_one()
     return {"running": running_count, "finished": finished_count}
@@ -259,12 +275,16 @@ async def supported_sites(
 @router.get("/jobs/{job_id}")
 async def get_job(
     job_id: uuid.UUID,
-    _: dict = Depends(require_auth),
+    request: Request,
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     job = await db.get(DownloadJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+    if job.user_id != auth["user_id"] and auth["role"] != "admin":
+        locale = parse_accept_language(request.headers.get("accept-language"))
+        raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
     return _j(job)
 
 
@@ -272,7 +292,8 @@ async def get_job(
 async def pause_resume_job(
     job_id: uuid.UUID,
     body: JobActionRequest,
-    _: dict = Depends(require_auth),
+    request: Request,
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Pause or resume a running download job.
@@ -286,6 +307,10 @@ async def pause_resume_job(
     job = await db.get(DownloadJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.user_id != auth["user_id"] and auth["role"] != "admin":
+        locale = parse_accept_language(request.headers.get("accept-language"))
+        raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
 
     redis = get_redis()
     pid_bytes = await redis.get(f"download:pid:{job_id}")
@@ -346,12 +371,18 @@ async def pause_resume_job(
 @router.delete("/jobs/{job_id}")
 async def cancel_job(
     job_id: uuid.UUID,
-    _: dict = Depends(require_auth),
+    request: Request,
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     job = await db.get(DownloadJob, job_id)
     if not job:
         raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.user_id != auth["user_id"] and auth["role"] != "admin":
+        locale = parse_accept_language(request.headers.get("accept-language"))
+        raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
+
     if job.status not in ("queued", "running", "paused"):
         raise HTTPException(status_code=400, detail=f"Cannot cancel: status={job.status}")
 

@@ -719,6 +719,7 @@ const ko: Record<string, string> = {
   'common.all': '전체',
   'common.tags': '태그',
   'common.cancel': '취소',
+  'common.optional': '선택사항',
   'common.goBack': '뒤로',
   'common.retry': '재시도',
   'common.goHome': '홈으로',
@@ -762,6 +763,44 @@ const ko: Record<string, string> = {
   'error.tag_not_found': '태그를 찾을 수 없습니다',
   'error.unknown_feature': '알 수 없는 기능',
   'error.server_error': '서버 내부 오류',
+
+  // ── User Management ──
+  'nav.users': '사용자 관리',
+  'admin.users.title': '사용자 관리',
+  'admin.users.addUser': '사용자 추가',
+  'admin.users.username': '사용자 이름',
+  'admin.users.password': '비밀번호',
+  'admin.users.role': '역할',
+  'admin.users.email': '이메일',
+  'admin.users.lastLogin': '마지막 로그인',
+  'admin.users.createdAt': '생성일',
+  'admin.users.actions': '작업',
+  'admin.users.deleteConfirm': '이 사용자를 삭제하시겠습니까?',
+  'admin.users.deleteTitle': '사용자 삭제',
+  'admin.users.createTitle': '사용자 생성',
+  'admin.users.create': '생성',
+  'admin.users.cancel': '취소',
+  'admin.users.delete': '삭제',
+  'admin.users.created': '사용자가 생성되었습니다',
+  'admin.users.updated': '사용자가 업데이트되었습니다',
+  'admin.users.deleted': '사용자가 삭제되었습니다',
+  'admin.users.noUsers': '사용자를 찾을 수 없습니다',
+  'admin.users.roleAdmin': '관리자',
+  'admin.users.roleMember': '멤버',
+  'admin.users.roleViewer': '뷰어',
+  'admin.users.you': '(나)',
+
+  // ── Forbidden ──
+  'forbidden.title': '접근 거부',
+  'forbidden.description': '이 페이지에 접근할 권한이 없습니다. 오류라고 생각되면 관리자에게 문의하세요.',
+  'forbidden.backHome': '홈으로 돌아가기',
+
+  // ── Error codes ──
+  'error.forbidden': '이 리소스에 접근할 권한이 없습니다',
+  'error.user_not_found': '사용자를 찾을 수 없습니다',
+  'error.cannot_delete_self': '자신의 계정은 삭제할 수 없습니다',
+  'error.cannot_delete_last_admin': '마지막 관리자 계정은 삭제할 수 없습니다',
+  'error.username_taken': '이미 사용 중인 사용자 이름입니다',
 }
 
 export default ko

@@ -191,7 +191,7 @@ export default function GalleryDetailPage() {
   const handleFavoriteToggle = async () => {
     if (!gallery) return
     try {
-      const updated = await updateGallery({ favorited: !gallery.favorited })
+      const updated = await updateGallery({ favorited: !gallery.is_favorited })
       if (updated) mutateGallery(updated, false)
     } catch {
       toast.error(t('library.favoriteError'))
@@ -376,12 +376,12 @@ export default function GalleryDetailPage() {
               <div className="flex items-center gap-3 mb-4">
                 <span className="text-sm text-vault-text-muted">{t('library.metaRating')}</span>
                 <RatingStars
-                  rating={gallery.rating}
+                  rating={gallery.my_rating ?? 0}
                   readonly={isUpdating}
                   onChange={handleRatingChange}
                 />
                 <span className="text-sm text-vault-text-secondary">
-                  {gallery.rating.toFixed(1)}
+                  {(gallery.my_rating ?? 0).toFixed(1)}
                 </span>
               </div>
 
@@ -405,12 +405,12 @@ export default function GalleryDetailPage() {
                   onClick={handleFavoriteToggle}
                   disabled={isUpdating}
                   className={`px-4 py-2 rounded text-sm font-medium border transition-colors ${
-                    gallery.favorited
+                    gallery.is_favorited
                       ? 'bg-yellow-900/40 border-yellow-600 text-yellow-400 hover:bg-yellow-900/60'
                       : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
                   }`}
                 >
-                  {gallery.favorited ? t('library.favorited') : t('library.unfavorited')}
+                  {gallery.is_favorited ? t('library.favorited') : t('library.unfavorited')}
                 </button>
                 <button
                   onClick={handleDelete}

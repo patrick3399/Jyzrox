@@ -11,6 +11,7 @@ from pathlib import Path
 
 import bcrypt
 from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Request, Response, UploadFile
+from starlette import status
 from PIL import Image, ImageOps
 from pydantic import BaseModel
 from sqlalchemy import text
@@ -78,10 +79,17 @@ async def setup(req: LoginRequest, request: Request):
             raise api_error(403, "setup_completed", locale)
 
         password_hash = bcrypt.hashpw(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
-        await session.execute(
-            text("INSERT INTO users (username, password_hash, role) VALUES (:uname, :phash, 'admin')"),
+        result = await session.execute(
+            text("""
+                INSERT INTO users (username, password_hash, role)
+                SELECT :uname, :phash, 'admin'
+                WHERE NOT EXISTS (SELECT 1 FROM users)
+            """),
             {"uname": req.username, "phash": password_hash},
         )
+        if result.rowcount == 0:
+            locale = parse_accept_language(request.headers.get("accept-language"))
+            raise api_error(status.HTTP_403_FORBIDDEN, "setup_completed", locale)
         await session.commit()
 
     return {"status": "ok"}

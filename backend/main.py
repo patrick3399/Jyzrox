@@ -9,6 +9,9 @@ from arq import create_pool
 from arq.connections import RedisSettings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.openapi.docs import get_swagger_ui_html
+from fastapi.responses import HTMLResponse
+from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
 from core.csrf import CSRFMiddleware
@@ -33,6 +36,7 @@ from routers import (
     subscriptions,
     system,
     tag,
+    users as users_router,
     ws,
 )
 from routers import settings as settings_router
@@ -72,7 +76,22 @@ app = FastAPI(
     title="Jyzrox API",
     version="0.1",
     lifespan=lifespan,
+    docs_url=None,
+    redoc_url=None,
+    openapi_url="/api/openapi.json",
 )
+
+# Mount swagger-ui static assets
+app.mount("/api/docs/static", StaticFiles(directory="/app/static/swagger-ui"), name="swagger-static")
+
+@app.get("/api/docs", include_in_schema=False)
+async def custom_swagger_ui() -> HTMLResponse:
+    return get_swagger_ui_html(
+        openapi_url="/api/openapi.json",
+        title="Jyzrox API",
+        swagger_js_url="/api/docs/static/swagger-ui-bundle.js",
+        swagger_css_url="/api/docs/static/swagger-ui.css",
+    )
 
 # CORS: restrict to configured origin, or same-origin only
 _cors_origins: list[str] = []
@@ -110,6 +129,7 @@ app.include_router(opds.router, prefix="/opds")
 app.include_router(scheduled_tasks.router, prefix="/api/scheduled-tasks")
 app.include_router(subscriptions.router, prefix="/api/subscriptions")
 app.include_router(dedup_router.router, prefix="/api/dedup")
+app.include_router(users_router.router, prefix="/api/users")
 
 
 @app.get("/api/health")

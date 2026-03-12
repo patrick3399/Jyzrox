@@ -45,6 +45,7 @@ import type {
   DedupStats,
   DedupReviewResponse,
   DedupScanProgress,
+  UserInfo,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -56,6 +57,10 @@ function getCookie(name: string): string | undefined {
 }
 
 let isRedirecting = false
+// Reset redirect guard on successful navigation
+if (typeof window !== 'undefined') {
+  window.addEventListener('pageshow', () => { isRedirecting = false })
+}
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
@@ -86,6 +91,15 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
         window.location.href = '/login'
       }
       throw new Error('Unauthorized')
+    }
+    // Forbidden → redirect to /forbidden
+    if (res.status === 403 && typeof window !== 'undefined') {
+      const p = window.location.pathname
+      if (p !== '/forbidden' && !isRedirecting) {
+        isRedirecting = true
+        window.location.href = '/forbidden'
+      }
+      throw new Error('Forbidden')
     }
     const body = await res.json().catch(() => ({}))
     const raw = body?.detail
@@ -1048,6 +1062,24 @@ const dedup = {
     }),
 }
 
+// ── Users ─────────────────────────────────────────────────────────────
+
+const users = {
+  list: () => apiFetch<{ users: UserInfo[] }>('/api/users'),
+  create: (data: { username: string; password: string; role: string; email?: string }) =>
+    apiFetch<{ id: number; username: string; role: string; email: string | null }>('/api/users', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+  update: (id: number, data: { role?: string; email?: string; password?: string }) =>
+    apiFetch<{ status: string }>(`/api/users/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+  delete: (id: number) =>
+    apiFetch<{ status: string }>(`/api/users/${id}`, { method: 'DELETE' }),
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
 export const api = {
@@ -1070,4 +1102,5 @@ export const api = {
   scheduledTasks,
   subscriptions,
   dedup,
+  users,
 }

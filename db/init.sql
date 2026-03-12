@@ -117,13 +117,16 @@ CREATE TABLE IF NOT EXISTS download_jobs (
     progress        JSONB DEFAULT '{}',
     error           TEXT,
     created_at      TIMESTAMPTZ DEFAULT now(),
-    finished_at     TIMESTAMPTZ
+    finished_at     TIMESTAMPTZ,
+    user_id         BIGINT REFERENCES users(id) ON DELETE SET NULL
 );
 
 CREATE TABLE IF NOT EXISTS read_progress (
-    gallery_id      BIGINT PRIMARY KEY REFERENCES galleries(id) ON DELETE CASCADE,
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
     last_page       INT DEFAULT 0,
-    last_read_at    TIMESTAMPTZ DEFAULT now()
+    last_read_at    TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, gallery_id)
 );
 
 CREATE TABLE IF NOT EXISTS credentials (
@@ -173,6 +176,7 @@ CREATE INDEX IF NOT EXISTS idx_tags_count ON tags (count DESC);
 CREATE INDEX IF NOT EXISTS idx_gallery_tags_tag ON gallery_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs (status);
+CREATE INDEX IF NOT EXISTS idx_download_jobs_user_id ON download_jobs (user_id);
 
 -- Composite indexes for keyset pagination (sort_col DESC, id DESC)
 CREATE INDEX IF NOT EXISTS idx_galleries_added_at_id ON galleries (added_at DESC, id DESC);
@@ -359,3 +363,28 @@ CREATE TABLE IF NOT EXISTS blob_relationships (
 CREATE INDEX IF NOT EXISTS idx_blob_rel_relationship ON blob_relationships (relationship, id);
 CREATE INDEX IF NOT EXISTS idx_blob_rel_sha_a ON blob_relationships (sha_a);
 CREATE INDEX IF NOT EXISTS idx_blob_rel_sha_b ON blob_relationships (sha_b);
+
+-- ── Gallery Access Control (prep) ──────────────────────────────────
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS visibility TEXT DEFAULT 'public';
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS created_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_galleries_visibility ON galleries (visibility);
+CREATE INDEX IF NOT EXISTS idx_galleries_created_by ON galleries (created_by_user_id) WHERE created_by_user_id IS NOT NULL;
+
+-- ── User Favorites ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_favorites (
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    gallery_id  BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, gallery_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_favorites_gallery ON user_favorites (gallery_id);
+
+-- ── User Ratings ──────────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_ratings (
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    gallery_id  BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    rating      SMALLINT NOT NULL CHECK (rating >= 0 AND rating <= 5),
+    rated_at    TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, gallery_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_ratings_gallery ON user_ratings (gallery_id);

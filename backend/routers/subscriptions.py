@@ -12,13 +12,15 @@ from sqlalchemy import delete, select, update
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from core.auth import require_auth
+from core.auth import require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source
 from db.models import Subscription
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["subscriptions"])
+
+_member = require_role("member")
 
 
 def _extract_source_id(url: str, source: str) -> str | None:
@@ -103,7 +105,7 @@ async def list_subscriptions(
 @router.post("/")
 async def create_subscription(
     req: CreateSubscriptionRequest,
-    auth: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
 ):
     """Create a new subscription."""
     user_id = auth["user_id"]

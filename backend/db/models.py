@@ -59,10 +59,14 @@ class Gallery(Base):
     last_scanned_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     library_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     artist_id: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
+    visibility: Mapped[str] = mapped_column(Text, default="public", server_default="public")
+    created_by_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
 
     images: Mapped[list["Image"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
     gallery_tags: Mapped[list["GalleryTag"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
-    read_progress: Mapped["ReadProgress | None"] = relationship(back_populates="gallery", cascade="all, delete-orphan")
+    read_progress: Mapped[list["ReadProgress"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
 
 
 class Blob(Base):
@@ -167,11 +171,13 @@ class DownloadJob(Base):
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
 
 
 class ReadProgress(Base):
     __tablename__ = "read_progress"
 
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
     last_page: Mapped[int] = mapped_column(Integer, default=0)
     last_read_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
@@ -297,6 +303,7 @@ class Collection(Base):
     __tablename__ = "collections"
 
     id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"))
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     cover_gallery_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"))
@@ -346,3 +353,18 @@ class BlobRelationship(Base):
 
     blob_a: Mapped["Blob"] = _rel(foreign_keys="[BlobRelationship.sha_a]")
     blob_b: Mapped["Blob"] = _rel(foreign_keys="[BlobRelationship.sha_b]")
+
+
+class UserFavorite(Base):
+    __tablename__ = "user_favorites"
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserRating(Base):
+    __tablename__ = "user_ratings"
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
+    rated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

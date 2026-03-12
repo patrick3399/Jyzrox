@@ -719,6 +719,7 @@ const ja: Record<string, string> = {
   'common.all': 'すべて',
   'common.tags': 'タグ',
   'common.cancel': 'キャンセル',
+  'common.optional': '任意',
   'common.goBack': '戻る',
   'common.retry': 'リトライ',
   'common.goHome': 'ホームへ',
@@ -762,6 +763,46 @@ const ja: Record<string, string> = {
   'error.tag_not_found': 'タグが見つかりません',
   'error.unknown_feature': '不明な機能',
   'error.server_error': 'サーバー内部エラー',
+
+  // ── Navigation ──
+  'nav.users': 'ユーザー管理',
+
+  // ── Admin Users page ──
+  'admin.users.title': 'ユーザー管理',
+  'admin.users.addUser': 'ユーザーを追加',
+  'admin.users.username': 'ユーザー名',
+  'admin.users.password': 'パスワード',
+  'admin.users.role': 'ロール',
+  'admin.users.email': 'メールアドレス',
+  'admin.users.lastLogin': '最終ログイン',
+  'admin.users.createdAt': '作成日',
+  'admin.users.actions': '操作',
+  'admin.users.deleteConfirm': 'このユーザーを削除してもよろしいですか？',
+  'admin.users.deleteTitle': 'ユーザーを削除',
+  'admin.users.createTitle': 'ユーザーを作成',
+  'admin.users.create': '作成',
+  'admin.users.cancel': 'キャンセル',
+  'admin.users.delete': '削除',
+  'admin.users.created': 'ユーザーを作成しました',
+  'admin.users.updated': 'ユーザーを更新しました',
+  'admin.users.deleted': 'ユーザーを削除しました',
+  'admin.users.noUsers': 'ユーザーが見つかりません',
+  'admin.users.roleAdmin': '管理者',
+  'admin.users.roleMember': 'メンバー',
+  'admin.users.roleViewer': '閲覧者',
+  'admin.users.you': '（あなた）',
+
+  // ── Forbidden page ──
+  'forbidden.title': 'アクセスが拒否されました',
+  'forbidden.description': 'このページにアクセスする権限がありません。これが誤りだと思われる場合は、管理者に連絡してください。',
+  'forbidden.backHome': 'ホームに戻る',
+
+  // ── Error codes ──
+  'error.forbidden': 'このリソースへのアクセス権限がありません',
+  'error.user_not_found': 'ユーザーが見つかりません',
+  'error.cannot_delete_self': '自分のアカウントは削除できません',
+  'error.cannot_delete_last_admin': '最後の管理者アカウントは削除できません',
+  'error.username_taken': 'このユーザー名はすでに使用されています',
 }
 
 export default ja

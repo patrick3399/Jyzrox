@@ -1,6 +1,6 @@
 # Jyzrox Architecture (v0.3)
 
-> Codebase audit, 2026-03-12. Read from source files — do not update manually; regenerate from source.
+> Codebase audit, 2026-03-12 (updated). Read from source files — do not update manually; regenerate from source.
 
 ---
 
@@ -89,6 +89,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `/api/scheduled-tasks` | `routers/scheduled_tasks.py` | Session | Scheduled task listing, enable/disable, manual run |
 | `/api/dedup` | `routers/dedup.py` | Session | Dedup stats, review list, keep/whitelist/skip actions, scan start/stop/progress |
 | `/api/subscriptions` | `routers/subscriptions.py` | Session | Subscription CRUD, manual check trigger |
+| `/api/users` | `routers/users.py` | Admin | User management CRUD |
 | `/opds` | `routers/opds.py` | HTTP Basic Auth | OPDS catalog for e-readers |
 | `/api/health` | `main.py` inline | Public | Liveness probe |
 
@@ -109,8 +110,8 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `tag_implications` | Tag inference rules | `(antecedent_id, consequent_id)` PK |
 | `gallery_tags` | Gallery↔Tag join | `(gallery_id, tag_id)` PK, `confidence`, `source` |
 | `image_tags` | Image↔Tag join | `(image_id, tag_id)` PK, `confidence` |
-| `download_jobs` | ARQ job tracking | `id` UUID PK, `url`, `source`, `status`, `progress` JSONB, `error` |
-| `read_progress` | Per-gallery read cursor | `gallery_id` PK, `last_page`, `last_read_at` |
+| `download_jobs` | ARQ job tracking | `id` UUID PK, `user_id` FK, `url`, `source`, `status`, `progress` JSONB, `error` |
+| `read_progress` | Per-gallery read cursor | `(user_id, gallery_id)` PK, `last_page`, `last_read_at` |
 | `credentials` | Source credentials (encrypted) | `source` PK, `credential_type`, `value_encrypted` BYTEA |
 | `api_tokens` | External API tokens | `id` UUID PK, `user_id` FK, `token_hash` UNIQUE, `token_plain`, `expires_at` |
 | `browse_history` | EH browse history | `id`, `(user_id, source, source_id)` UNIQUE, `gid`, `token`, `viewed_at` |
@@ -125,6 +126,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `collection_galleries` | Collection↔Gallery join | `(collection_id, gallery_id)` PK, `position` |
 | `excluded_blobs` | Per-gallery blob exclusions | `(gallery_id, blob_sha256)` PK, `excluded_at` |
 | `blob_relationships` | Dedup pair store | `id` UUID PK, `sha_a / sha_b` FK → `blobs` (`CHECK sha_a < sha_b`, `UNIQUE` pair), `hamming_dist SMALLINT`, `relationship TEXT` (`quality_conflict`/`variant`/`whitelisted`/`needs_t3`/`resolved`), `suggested_keep TEXT`, `diff_type TEXT`, `diff_score FLOAT`, `size_ratio FLOAT`, `tier SMALLINT`, `reviewed BOOLEAN`, `created_at` |
+| `user_favorites` | Per-user gallery favorites | `(user_id, gallery_id)` PK, `created_at` |
 
 > **Note:** Tables `collections`, `collection_galleries`, and `excluded_blobs` are created via Alembic migrations (`0005b`, `0007`), not in `db/init.sql`. The `audit_logs` table is also migration-only (`0005`). `blob_relationships` is created in `db/init.sql`.
 
@@ -173,12 +175,13 @@ All models are in `backend/db/models.py`.
 | `CollectionGallery` | `collection_galleries` |
 | `ExcludedBlob` | `excluded_blobs` |
 | `BlobRelationship` | `blob_relationships` |
+| `UserFavorite` | `user_favorites` |
 
 ---
 
 ### Worker Pipeline (ARQ)
 
-Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`)
+Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `dedup.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`)
 
 #### Job Functions
 
@@ -411,6 +414,21 @@ All fields read from `.env` via Pydantic `BaseSettings`.
 - FastAPI dependency: `from core.auth import require_auth` — add `_: dict = Depends(require_auth)` to every protected endpoint
 - CSRF protection: `csrf_token` cookie; all mutating requests must send `X-CSRF-Token` header
 
+### Role-Based Access Control
+
+三級階層式角色（`core/auth.py`）：
+
+| Role | Level | Scope |
+|------|-------|-------|
+| `admin` | 3 | System config, user management, credentials, scheduled tasks, dedup |
+| `member` | 2 | Download, import/export, subscriptions, gallery edits |
+| `viewer` | 1 | Browse, search, history, collections (read-only) |
+
+- `require_auth()` → `{"user_id": int, "role": str}` — any authenticated user
+- `require_role("admin")` → factory returning dependency that checks `role >= admin`
+- Role stored in Redis session JSON, read on every request (no DB query)
+- User management: `POST/PATCH/DELETE /api/users` (admin only)
+
 #### OPDS Basic Auth
 
 - Endpoint: `/opds/`
@@ -462,6 +480,11 @@ Source root: `pwa/src/`
 | `/share-target` | `app/share-target/page.tsx` | PWA Web Share Target handler |
 | `/scheduled-tasks` | `app/scheduled-tasks/page.tsx` | Scheduled task management — list, enable/disable, cron edit, manual run |
 | `/dedup` | `app/dedup/page.tsx` | Dedup dashboard — tier settings, scan trigger, review list with keep/whitelist/skip actions |
+| `/forbidden` | `app/forbidden/page.tsx` | 403 access denied page |
+| `/admin/users` | `app/admin/users/page.tsx` | User management (admin only) |
+| `/artists/[artistId]` | `app/artists/[artistId]/page.tsx` | Individual artist detail page |
+| `/reader/artist/[artistId]` | `app/reader/artist/[artistId]/page.tsx` | Artist gallery reader |
+| `/reader/pixiv/[id]` | `app/reader/pixiv/[id]/page.tsx` | Pixiv online reader |
 
 ---
 
@@ -499,6 +522,8 @@ Source root: `pwa/src/`
 | `DedupSettingsCard` | `components/Dedup/DedupSettingsCard.tsx` | Tier enable toggles + threshold sliders |
 | `DedupTierCard` | `components/Dedup/DedupTierCard.tsx` | Per-tier status and config |
 | `ImageModal` | `components/Dedup/ImageModal.tsx` | Full-size image preview modal for dedup review |
+| `BackButton` | `components/BackButton.tsx` | Navigation back button |
+| `BottomTabBar` | `components/BottomTabBar.tsx` | Bottom tab navigation for mobile |
 
 ---
 
@@ -519,6 +544,9 @@ All hooks in `pwa/src/hooks/`.
 | `useScheduledTasks` | `useScheduledTasks.ts` | Scheduled task listing, enable/disable, manual run |
 | `useSubscriptions` | `useSubscriptions.ts` | Subscription CRUD and manual check trigger |
 | `useDedup` | `useDedup.ts` | Dedup stats, review list, keep/whitelist/skip actions, scan control |
+| `useScrollRestore` | `useScrollRestore.ts` | Scroll position restoration |
+| `useGridKeyboard` | `useGridKeyboard.ts` | Keyboard navigation in gallery grids |
+| `useSwipeBack` | `useSwipeBack.ts` | Swipe back gesture detection |
 
 ---
 
@@ -547,6 +575,7 @@ Single `apiFetch` base function with automatic 401 redirect and CSRF header inje
 | `scheduledTasks` | task listing, enable/disable, manual run |
 | `subscriptions` | subscription CRUD, manual check trigger |
 | `dedup` | dedup stats, review list, keep/whitelist/skip/delete, scan start/stop/progress |
+| `users` | User list, create, update, delete |
 
 ---
 

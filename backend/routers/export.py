@@ -9,21 +9,25 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy import select, text
 from sqlalchemy.orm import selectinload
 
-from core.auth import require_auth
+from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import async_session
 from db.models import Gallery, Image
 from services.cas import resolve_blob_path
 
 router = APIRouter(tags=["export"])
 
+_member = require_role("member")
+
 
 @router.get("/kohya/{gallery_id}")
-async def export_kohya(gallery_id: int, _: dict = Depends(require_auth)):
+async def export_kohya(gallery_id: int, auth: dict = Depends(_member)):
     """Generates a zip file containing images and corresponding .txt files with tags."""
 
     async with async_session() as session:
-        # Get Gallery
-        gallery = await session.get(Gallery, gallery_id)
+        # Get Gallery with access control
+        gallery = (await session.execute(
+            select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(auth))
+        )).scalar_one_or_none()
         if not gallery:
             raise HTTPException(status_code=404, detail="Gallery not found")
 

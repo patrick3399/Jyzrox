@@ -3,6 +3,7 @@
 import asyncio
 import contextlib
 import datetime
+import json
 import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
@@ -14,21 +15,28 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
 
 
-async def _validate_ws_session(ws: WebSocket) -> str | None:
-    """Validate session cookie from WebSocket handshake. Returns user_id str or None."""
+async def _validate_ws_session(ws: WebSocket) -> tuple[str, str] | None:
+    """Validate session cookie from WebSocket handshake. Returns (user_id, role) or None."""
     vault_session = ws.cookies.get("vault_session")
     if not vault_session:
         return None
     try:
         user_id_str, token = vault_session.split(":", 1)
-        session_data = await get_redis().get(f"session:{user_id_str}:{token}")
-        return user_id_str if session_data is not None else None
+        raw = await get_redis().get(f"session:{user_id_str}:{token}")
+        if not raw:
+            return None
+        try:
+            data = json.loads(raw if isinstance(raw, str) else raw.decode())
+            role = data.get("role", "viewer")
+        except (json.JSONDecodeError, TypeError):
+            role = "viewer"
+        return (user_id_str, role)
     except (ValueError, ConnectionError, OSError) as exc:
         logger.warning("WS session validation failed: %s", exc)
         return None
 
 
-async def _pubsub_listener(ws: WebSocket) -> None:
+async def _pubsub_listener(ws: WebSocket, user_id: str, role: str) -> None:
     """Subscribe to download:events and forward messages to the WebSocket client."""
     pubsub = get_pubsub()
     try:
@@ -38,6 +46,16 @@ async def _pubsub_listener(ws: WebSocket) -> None:
                 data = message["data"]
                 if isinstance(data, bytes):
                     data = data.decode()
+                # Filter: admin sees all, others see only their own jobs.
+                # Events with user_id=None are broadcast to everyone (e.g. subscription-triggered jobs).
+                if role != "admin":
+                    try:
+                        event = json.loads(data)
+                        event_user_id = event.get("user_id")
+                        if event_user_id is not None and str(event_user_id) != user_id:
+                            continue
+                    except (json.JSONDecodeError, TypeError):
+                        pass
                 await ws.send_text(data)
     except (WebSocketDisconnect, asyncio.CancelledError):
         raise
@@ -90,16 +108,18 @@ async def websocket_endpoint(ws: WebSocket):
       {"type": "ping",       "ts": "..."}
       {"type": "job_update", "job_id": "...", "status": "...", "progress": {...}}
     """
-    user_id = await _validate_ws_session(ws)
-    if user_id is None:
+    session_info = await _validate_ws_session(ws)
+    if session_info is None:
         await ws.close(code=4001, reason="Unauthorized")
         return
+
+    user_id, role = session_info
 
     await ws.accept()
     logger.info("WebSocket client connected: %s", ws.client)
 
     tasks = [
-        asyncio.create_task(_pubsub_listener(ws)),
+        asyncio.create_task(_pubsub_listener(ws, user_id, role)),
         asyncio.create_task(_ping_loop(ws)),
         asyncio.create_task(_ws_receiver(ws)),
     ]

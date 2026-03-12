@@ -8,11 +8,11 @@ from fastapi.responses import Response
 from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from core.auth import require_opds_auth
+from core.auth import gallery_access_filter, require_opds_auth
 from core.config import settings as app_settings
 from core.database import async_session
 from core.redis_client import get_redis
-from db.models import Gallery, Image
+from db.models import Gallery, Image, UserFavorite
 from services.cas import cas_url, thumb_url as cas_thumb_url
 
 
@@ -271,13 +271,14 @@ async def opds_all(
     request: Request,
     page: int = 0,
     limit: int = 50,
-    _: dict = Depends(require_opds_auth),
+    auth: dict = Depends(require_opds_auth),
 ):
     """OPDS acquisition feed: all galleries, paginated."""
     async with async_session() as session:
         rows = (
             await session.execute(
                 select(Gallery)
+                .where(gallery_access_filter(auth))
                 .order_by(Gallery.added_at.desc())
                 .limit(limit + 1)
                 .offset(page * limit)
@@ -304,13 +305,14 @@ async def opds_all(
 @router.get("/recent")
 async def opds_recent(
     request: Request,
-    _: dict = Depends(require_opds_auth),
+    auth: dict = Depends(require_opds_auth),
 ):
     """OPDS acquisition feed: last 50 galleries."""
     async with async_session() as session:
         galleries = (
             await session.execute(
                 select(Gallery)
+                .where(gallery_access_filter(auth))
                 .order_by(Gallery.added_at.desc())
                 .limit(50)
             )
@@ -335,14 +337,18 @@ async def opds_favorites(
     request: Request,
     page: int = 0,
     limit: int = 50,
-    _: dict = Depends(require_opds_auth),
+    auth: dict = Depends(require_opds_auth),
 ):
-    """OPDS acquisition feed: favorited galleries."""
+    """OPDS acquisition feed: favorited galleries (per-user favorites)."""
     async with async_session() as session:
         rows = (
             await session.execute(
                 select(Gallery)
-                .where(Gallery.favorited == True)  # noqa: E712
+                .join(UserFavorite, Gallery.id == UserFavorite.gallery_id)
+                .where(
+                    UserFavorite.user_id == auth["user_id"],
+                    gallery_access_filter(auth),
+                )
                 .order_by(Gallery.added_at.desc())
                 .limit(limit + 1)
                 .offset(page * limit)
@@ -372,10 +378,10 @@ async def opds_search(
     q: str = "",
     page: int = 0,
     limit: int = 50,
-    _: dict = Depends(require_opds_auth),
+    auth: dict = Depends(require_opds_auth),
 ):
     """OPDS acquisition feed: search galleries by title."""
-    query = select(Gallery).order_by(Gallery.added_at.desc())
+    query = select(Gallery).where(gallery_access_filter(auth)).order_by(Gallery.added_at.desc())
     if q:
         query = query.where(Gallery.title.ilike(f"%{q}%"))
 
@@ -428,13 +434,13 @@ async def opds_opensearch(
 async def opds_gallery(
     gallery_id: int,
     request: Request,
-    _: dict = Depends(require_opds_auth),
+    auth: dict = Depends(require_opds_auth),
 ):
     """OPDS-PSE page list for a single gallery."""
     async with async_session() as session:
         gallery = (
             await session.execute(
-                select(Gallery).where(Gallery.id == gallery_id)
+                select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(auth))
             )
         ).scalar_one_or_none()
 

@@ -80,6 +80,7 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
                                         source=source_name,
                                         status="queued",
                                         progress={},
+                                        user_id=sub.user_id,
                                     ))
                                     await db_session.commit()
                                 await pool.enqueue_job(
@@ -172,6 +173,7 @@ async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
                                     db_session.add(DownloadJob(
                                         id=job_id, url=work.url,
                                         source=sub.source, status="queued", progress={},
+                                        user_id=sub.user_id,
                                     ))
                                     await db_session.commit()
                                 await pool.enqueue_job(
@@ -218,6 +220,7 @@ async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
                     db_session.add(DownloadJob(
                         id=job_id, url=sub.url,
                         source=sub.source or "gallery_dl", status="queued", progress={},
+                        user_id=sub.user_id,
                     ))
                     await db_session.commit()
                 await pool.enqueue_job(

@@ -6,11 +6,13 @@ from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from core.auth import require_auth
+from core.auth import require_role
 from core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["scheduled-tasks"])
+
+_admin = require_role("admin")
 
 TASK_DEFS = {
     "library_scan": {
@@ -65,7 +67,7 @@ class PatchTaskRequest(BaseModel):
 
 @router.get("/")
 async def list_scheduled_tasks(
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """List all scheduled tasks with their config and status."""
     r = get_redis()
@@ -96,7 +98,7 @@ async def list_scheduled_tasks(
 async def update_scheduled_task(
     task_id: str,
     body: PatchTaskRequest,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Update a scheduled task's config (enabled, cron_expr)."""
     if task_id not in TASK_DEFS:
@@ -122,7 +124,7 @@ async def update_scheduled_task(
 async def run_scheduled_task(
     task_id: str,
     request: Request,
-    _: dict = Depends(require_auth),
+    _: dict = Depends(_admin),
 ):
     """Manually trigger a scheduled task."""
     if task_id not in TASK_DEFS:

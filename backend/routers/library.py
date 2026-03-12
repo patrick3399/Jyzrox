@@ -17,14 +17,16 @@ from sqlalchemy.sql import text as sql_text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import require_auth
+from core.auth import gallery_access_filter, require_auth, require_role
 from core.config import settings
 from core.database import get_db
-from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag
+from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserRating
 from services.cas import cas_url, decrement_ref_count, library_dir, resolve_blob_path, thumb_dir, thumb_url as cas_thumb_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["library"])
+
+_member = require_role("member")
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
@@ -74,6 +76,32 @@ def _decode_cursor(cursor: str) -> dict:
 # ── Gallery list ─────────────────────────────────────────────────────
 
 
+async def _get_favorite_set(db: AsyncSession, user_id: int, gallery_ids: list[int]) -> set[int]:
+    """Return set of gallery_ids that are favorited by this user."""
+    if not gallery_ids:
+        return set()
+    result = await db.execute(
+        select(UserFavorite.gallery_id).where(
+            UserFavorite.user_id == user_id,
+            UserFavorite.gallery_id.in_(gallery_ids),
+        )
+    )
+    return {row[0] for row in result}
+
+
+async def _get_rating_map(db: AsyncSession, user_id: int, gallery_ids: list[int]) -> dict[int, int]:
+    """Return {gallery_id: rating} for this user."""
+    if not gallery_ids:
+        return {}
+    result = await db.execute(
+        select(UserRating.gallery_id, UserRating.rating).where(
+            UserRating.user_id == user_id,
+            UserRating.gallery_id.in_(gallery_ids),
+        )
+    )
+    return {row[0]: row[1] for row in result}
+
+
 async def _get_blocked_tag_strings(db: AsyncSession, user_id: int) -> list[str]:
     """Return list of 'namespace:name' blocked tag strings for the user."""
     rows = (
@@ -115,15 +143,30 @@ async def list_galleries(
     """
     stmt = select(Gallery)
 
+    # Data isolation: non-admin users only see own + system + public galleries
+    stmt = stmt.where(gallery_access_filter(auth))
+
     # GIN array operations
     if tags:
         stmt = stmt.where(Gallery.tags_array.contains(tags))
     if exclude_tags:
         stmt = stmt.where(not_(Gallery.tags_array.overlap(exclude_tags)))
     if favorited is not None:
-        stmt = stmt.where(Gallery.favorited == favorited)
+        if favorited:
+            stmt = stmt.where(
+                Gallery.id.in_(
+                    select(UserFavorite.gallery_id).where(UserFavorite.user_id == auth["user_id"])
+                )
+            )
     if min_rating is not None:
-        stmt = stmt.where(Gallery.rating >= min_rating)
+        stmt = stmt.where(
+            Gallery.id.in_(
+                select(UserRating.gallery_id).where(
+                    UserRating.user_id == auth["user_id"],
+                    UserRating.rating >= min_rating,
+                )
+            )
+        )
     if source:
         stmt = stmt.where(Gallery.source == source)
     if artist:
@@ -216,8 +259,14 @@ async def list_galleries(
         else:
             cover_map = {}
 
+        fav_set = await _get_favorite_set(db, auth["user_id"], gallery_ids)
+        rating_map = await _get_rating_map(db, auth["user_id"], gallery_ids)
+
         return {
-            "galleries": [_g(g, cover_thumb=cover_map.get(g.id)) for g in rows],
+            "galleries": [
+                _g(g, cover_thumb=cover_map.get(g.id), is_favorited=(g.id in fav_set), my_rating=rating_map.get(g.id))
+                for g in rows
+            ],
             "next_cursor": next_cursor,
             "has_next": has_next,
         }
@@ -244,7 +293,17 @@ async def list_galleries(
         else:
             cover_map = {}
 
-        return {"total": total, "page": page, "galleries": [_g(g, cover_thumb=cover_map.get(g.id)) for g in galleries]}
+        fav_set = await _get_favorite_set(db, auth["user_id"], gallery_ids)
+        rating_map = await _get_rating_map(db, auth["user_id"], gallery_ids)
+
+        return {
+            "total": total,
+            "page": page,
+            "galleries": [
+                _g(g, cover_thumb=cover_map.get(g.id), is_favorited=(g.id in fav_set), my_rating=rating_map.get(g.id))
+                for g in galleries
+            ],
+        }
 
 
 @router.get("/artists")
@@ -265,7 +324,7 @@ async def list_artists(
         func.count().label("gallery_count"),
         func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
         func.max(Gallery.added_at).label("latest_added_at"),
-    ).where(Gallery.artist_id.is_not(None)).group_by(Gallery.artist_id)
+    ).where(Gallery.artist_id.is_not(None), gallery_access_filter(auth)).group_by(Gallery.artist_id)
 
     if q:
         base = base.having(func.max(Gallery.uploader).ilike(f"%{q}%"))
@@ -339,7 +398,7 @@ async def get_artist_summary(
             func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
             func.max(Gallery.added_at).label("latest_added_at"),
         )
-        .where(Gallery.artist_id == artist_id)
+        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
     )
     agg_row = (await db.execute(agg_stmt)).one_or_none()
     if not agg_row or agg_row.gallery_count == 0:
@@ -349,14 +408,14 @@ async def get_artist_summary(
     total_images_stmt = (
         select(func.count(Image.id))
         .join(Gallery, Image.gallery_id == Gallery.id)
-        .where(Gallery.artist_id == artist_id)
+        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
     )
     total_images = (await db.execute(total_images_stmt)).scalar_one()
 
     # Cover thumb: most recent gallery's first image
     latest_gallery_sub = (
         select(Gallery.id)
-        .where(Gallery.artist_id == artist_id)
+        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
         .order_by(desc(Gallery.added_at))
         .limit(1)
     ).scalar_subquery()
@@ -394,8 +453,8 @@ async def list_artist_images(
     db: AsyncSession = Depends(get_db),
 ):
     """List all images across all galleries for a given artist, paginated."""
-    # Verify the artist exists (at least one gallery with this artist_id)
-    exists_stmt = select(func.count(Gallery.id)).where(Gallery.artist_id == artist_id)
+    # Verify the artist exists (at least one visible gallery with this artist_id)
+    exists_stmt = select(func.count(Gallery.id)).where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
     artist_gallery_count = (await db.execute(exists_stmt)).scalar_one()
     if artist_gallery_count == 0:
         raise HTTPException(status_code=404, detail="Artist not found")
@@ -404,7 +463,7 @@ async def list_artist_images(
     total_stmt = (
         select(func.count(Image.id))
         .join(Gallery, Image.gallery_id == Gallery.id)
-        .where(Gallery.artist_id == artist_id)
+        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
     )
     total_count = (await db.execute(total_stmt)).scalar_one()
 
@@ -415,7 +474,7 @@ async def list_artist_images(
     stmt = (
         select(Image, Gallery.title.label("gallery_title"))
         .join(Gallery, Image.gallery_id == Gallery.id)
-        .where(Gallery.artist_id == artist_id)
+        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
         .order_by(gallery_order, asc(Image.page_num))
         .offset(page * limit)
         .limit(limit)
@@ -458,7 +517,7 @@ async def list_files(
     q: str = Query(default=""),
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """List gallery directories under data_library_path with DB metadata."""
@@ -515,6 +574,10 @@ async def list_files(
     galleries = sorted(galleries, key=lambda g: g.id, reverse=True)
     paged = galleries[page * limit : (page + 1) * limit]
 
+    paged_ids = [g.id for g in paged]
+    fav_set = await _get_favorite_set(db, auth["user_id"], paged_ids)
+    rating_map = await _get_rating_map(db, auth["user_id"], paged_ids)
+
     result = []
     for g in paged:
         file_count, disk_size = size_map.get(g.id, (0, 0))
@@ -524,7 +587,9 @@ async def list_files(
             "category": g.category,
             "file_count": file_count,
             "rating": g.rating,
-            "favorited": g.favorited,
+            "favorited": False,
+            "is_favorited": g.id in fav_set,
+            "my_rating": rating_map.get(g.id, 0),
             "source": g.source,
             "disk_size": disk_size,
         })
@@ -535,7 +600,7 @@ async def list_files(
 @router.get("/files/{gallery_id}")
 async def list_gallery_files(
     gallery_id: int,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """List all files inside a gallery's library directory with DB metadata."""
@@ -543,7 +608,7 @@ async def list_gallery_files(
     import os
     from pathlib import Path
 
-    g = await _get_or_404(db, gallery_id)
+    g = await _get_or_404(db, gallery_id, auth)
     gdir = library_dir(gallery_id)
 
     def _scan_files() -> list[dict]:
@@ -630,7 +695,7 @@ class BatchAction(BaseModel):
 @router.post("/galleries/batch")
 async def batch_galleries(
     body: BatchAction,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Batch operations on multiple galleries."""
@@ -642,44 +707,53 @@ async def batch_galleries(
         raise HTTPException(status_code=400, detail="Rating must be 0-5 for rate action")
 
     if body.action == "favorite":
-        stmt = (
-            select(Gallery)
-            .where(Gallery.id.in_(body.gallery_ids))
-        )
-        galleries = (await db.execute(stmt)).scalars().all()
-        for g in galleries:
-            g.favorited = True
+        from sqlalchemy import delete as sa_delete
+        for gid in body.gallery_ids:
+            stmt = pg_insert(UserFavorite).values(
+                user_id=auth["user_id"], gallery_id=gid,
+            ).on_conflict_do_nothing()
+            await db.execute(stmt)
         await db.commit()
-        return {"status": "ok", "affected": len(galleries)}
+        return {"status": "ok", "affected": len(body.gallery_ids)}
 
     elif body.action == "unfavorite":
-        stmt = (
-            select(Gallery)
-            .where(Gallery.id.in_(body.gallery_ids))
+        from sqlalchemy import delete as sa_delete
+        result = await db.execute(
+            sa_delete(UserFavorite).where(
+                UserFavorite.user_id == auth["user_id"],
+                UserFavorite.gallery_id.in_(body.gallery_ids),
+            )
         )
-        galleries = (await db.execute(stmt)).scalars().all()
-        for g in galleries:
-            g.favorited = False
         await db.commit()
-        return {"status": "ok", "affected": len(galleries)}
+        return {"status": "ok", "affected": result.rowcount}
 
     elif body.action == "rate":
-        stmt = (
-            select(Gallery)
-            .where(Gallery.id.in_(body.gallery_ids))
-        )
-        galleries = (await db.execute(stmt)).scalars().all()
-        for g in galleries:
-            g.rating = body.rating
+        from sqlalchemy import delete as sa_delete
+        for gid in body.gallery_ids:
+            if body.rating == 0:
+                await db.execute(
+                    sa_delete(UserRating).where(
+                        UserRating.user_id == auth["user_id"],
+                        UserRating.gallery_id == gid,
+                    )
+                )
+            else:
+                stmt = pg_insert(UserRating).values(
+                    user_id=auth["user_id"], gallery_id=gid, rating=body.rating,
+                ).on_conflict_do_update(
+                    index_elements=["user_id", "gallery_id"],
+                    set_={"rating": body.rating, "rated_at": func.now()},
+                )
+                await db.execute(stmt)
         await db.commit()
-        return {"status": "ok", "affected": len(galleries)}
+        return {"status": "ok", "affected": len(body.gallery_ids)}
 
     elif body.action == "add_to_collection":
         if body.collection_id is None:
             raise HTTPException(status_code=400, detail="collection_id required for add_to_collection")
         from db.models import Collection, CollectionGallery
         collection = await db.get(Collection, body.collection_id)
-        if not collection:
+        if not collection or collection.user_id != auth["user_id"]:
             raise HTTPException(status_code=404, detail="Collection not found")
 
         max_pos_result = (
@@ -715,10 +789,10 @@ async def batch_galleries(
         return {"status": "ok", "affected": added}
 
     elif body.action == "delete":
-        return await _batch_delete_galleries(db, body.gallery_ids)
+        return await _batch_delete_galleries(db, body.gallery_ids, auth)
 
 
-async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int]) -> dict:
+async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth: dict) -> dict:
     """Delete multiple galleries, decrement blob ref counts, cleanup filesystem."""
     import asyncio
     import shutil
@@ -728,6 +802,9 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int]) -> d
     galleries = (await db.execute(stmt)).scalars().all()
     if not galleries:
         return {"status": "ok", "affected": 0, "deleted_dirs": 0}
+
+    for g in galleries:
+        _check_write_access(auth, g)
 
     # Load all images with blobs for these galleries
     img_stmt = (
@@ -789,10 +866,10 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int]) -> d
 @router.get("/galleries/{gallery_id}")
 async def get_gallery(
     gallery_id: int,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    g = await _get_or_404(db, gallery_id)
+    g = await _get_or_404(db, gallery_id, auth)
     cover_row = (
         await db.execute(
             select(Blob.sha256)
@@ -801,7 +878,19 @@ async def get_gallery(
         )
     ).scalar_one_or_none()
     cover_thumb = cas_thumb_url(cover_row) if cover_row else None
-    return _g(g, cover_thumb=cover_thumb)
+    fav = (await db.execute(
+        select(UserFavorite).where(
+            UserFavorite.user_id == auth["user_id"],
+            UserFavorite.gallery_id == gallery_id,
+        )
+    )).scalar_one_or_none()
+    user_rating_row = (await db.execute(
+        select(UserRating.rating).where(
+            UserRating.user_id == auth["user_id"],
+            UserRating.gallery_id == gallery_id,
+        )
+    )).scalar_one_or_none()
+    return _g(g, cover_thumb=cover_thumb, is_favorited=(fav is not None), my_rating=user_rating_row)
 
 
 @router.get("/galleries/{gallery_id}/images")
@@ -809,10 +898,10 @@ async def get_gallery_images(
     gallery_id: int,
     page: int | None = Query(default=None, ge=1),
     limit: int | None = Query(default=None, ge=1, le=200),
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_or_404(db, gallery_id)
+    await _get_or_404(db, gallery_id, auth)
     stmt = (
         select(Image)
         .where(Image.gallery_id == gallery_id)
@@ -847,11 +936,11 @@ async def get_gallery_images(
 @router.get("/galleries/{gallery_id}/tags")
 async def get_gallery_tags(
     gallery_id: int,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Get gallery tags with confidence scores and source info."""
-    await _get_or_404(db, gallery_id)
+    await _get_or_404(db, gallery_id, auth)
     rows = (
         await db.execute(
             select(GalleryTag)
@@ -888,14 +977,41 @@ class GalleryPatch(BaseModel):
 async def update_gallery(
     gallery_id: int,
     patch: GalleryPatch,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    g = await _get_or_404(db, gallery_id)
+    from sqlalchemy import delete as sa_delete
+    g = await _get_or_404(db, gallery_id, auth)
+    _check_write_access(auth, g)
     if patch.favorited is not None:
-        g.favorited = patch.favorited
+        if patch.favorited:
+            stmt = pg_insert(UserFavorite).values(
+                user_id=auth["user_id"], gallery_id=gallery_id,
+            ).on_conflict_do_nothing()
+            await db.execute(stmt)
+        else:
+            await db.execute(
+                sa_delete(UserFavorite).where(
+                    UserFavorite.user_id == auth["user_id"],
+                    UserFavorite.gallery_id == gallery_id,
+                )
+            )
     if patch.rating is not None:
-        g.rating = patch.rating
+        if patch.rating == 0:
+            await db.execute(
+                sa_delete(UserRating).where(
+                    UserRating.user_id == auth["user_id"],
+                    UserRating.gallery_id == gallery_id,
+                )
+            )
+        else:
+            stmt = pg_insert(UserRating).values(
+                user_id=auth["user_id"], gallery_id=gallery_id, rating=patch.rating,
+            ).on_conflict_do_update(
+                index_elements=["user_id", "gallery_id"],
+                set_={"rating": patch.rating, "rated_at": func.now()},
+            )
+            await db.execute(stmt)
     if patch.title is not None:
         g.title = patch.title
     if patch.title_jpn is not None:
@@ -903,13 +1019,26 @@ async def update_gallery(
     if patch.category is not None:
         g.category = patch.category
     await db.commit()
-    return _g(g)
+    # Fetch updated per-user state to return accurate response
+    fav = (await db.execute(
+        select(UserFavorite).where(
+            UserFavorite.user_id == auth["user_id"],
+            UserFavorite.gallery_id == gallery_id,
+        )
+    )).scalar_one_or_none()
+    user_rating_row = (await db.execute(
+        select(UserRating.rating).where(
+            UserRating.user_id == auth["user_id"],
+            UserRating.gallery_id == gallery_id,
+        )
+    )).scalar_one_or_none()
+    return _g(g, is_favorited=(fav is not None), my_rating=user_rating_row)
 
 
 @router.delete("/galleries/{gallery_id}")
 async def delete_gallery(
     gallery_id: int,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a gallery, decrement blob ref counts, remove library symlinks and thumbnails.
@@ -921,7 +1050,8 @@ async def delete_gallery(
     import shutil
     from pathlib import Path
 
-    g = await _get_or_404(db, gallery_id)
+    g = await _get_or_404(db, gallery_id, auth)
+    _check_write_access(auth, g)
 
     # Load all images with their blobs before deleting DB records
     stmt = (
@@ -990,7 +1120,7 @@ class DeleteImageBody(BaseModel):
 async def delete_gallery_image(
     gallery_id: int,
     body: DeleteImageBody,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Delete a single image from a gallery by page number.
@@ -1002,7 +1132,8 @@ async def delete_gallery_image(
     import asyncio
     import shutil
 
-    gallery = await _get_or_404(db, gallery_id)
+    gallery = await _get_or_404(db, gallery_id, auth)
+    _check_write_access(auth, gallery)
 
     img_stmt = (
         select(Image)
@@ -1071,10 +1202,10 @@ async def delete_gallery_image(
 @router.get("/galleries/{gallery_id}/progress")
 async def get_progress(
     gallery_id: int,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    prog = await db.get(ReadProgress, gallery_id)
+    prog = await db.get(ReadProgress, (auth["user_id"], gallery_id))
     if not prog:
         return {"gallery_id": gallery_id, "last_page": 0, "last_read_at": None}
     return {
@@ -1092,15 +1223,15 @@ class ProgressBody(BaseModel):
 async def save_progress(
     gallery_id: int,
     body: ProgressBody,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     now = datetime.now(UTC)
     stmt = (
         pg_insert(ReadProgress)
-        .values(gallery_id=gallery_id, last_page=body.last_page, last_read_at=now)
+        .values(user_id=auth["user_id"], gallery_id=gallery_id, last_page=body.last_page, last_read_at=now)
         .on_conflict_do_update(
-            index_elements=["gallery_id"],
+            index_elements=["user_id", "gallery_id"],
             set_={"last_page": body.last_page, "last_read_at": now},
         )
     )
@@ -1310,10 +1441,12 @@ async def list_excluded_blobs(
 async def restore_excluded_blob(
     gallery_id: int,
     sha256: str,
-    _: dict = Depends(require_auth),
+    auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a blob from the exclusion list (un-exclude)."""
+    gallery = await _get_or_404(db, gallery_id, auth)
+    _check_write_access(auth, gallery)
     from db.models import ExcludedBlob
     result = await db.execute(
         select(ExcludedBlob).where(
@@ -1348,14 +1481,31 @@ def _thumb_url(blob) -> str | None:
     return cas_thumb_url(blob.sha256)
 
 
-async def _get_or_404(db: AsyncSession, gallery_id: int) -> Gallery:
-    g = await db.get(Gallery, gallery_id)
+async def _get_or_404(db: AsyncSession, gallery_id: int, auth: dict | None = None) -> Gallery:
+    if auth is not None:
+        stmt = select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(auth))
+        g = (await db.execute(stmt)).scalar_one_or_none()
+    else:
+        g = await db.get(Gallery, gallery_id)
     if not g:
         raise HTTPException(status_code=404, detail="Gallery not found")
     return g
 
 
-def _g(g: Gallery, cover_thumb: str | None = None) -> dict:
+def _check_write_access(auth: dict, gallery: Gallery) -> None:
+    """Raise 403 if the caller cannot modify this gallery.
+
+    Admins can modify any gallery. Members can modify galleries they created
+    or unowned (legacy) galleries whose created_by_user_id is NULL.
+    """
+    if auth["role"] == "admin":
+        return
+    if gallery.created_by_user_id is None or gallery.created_by_user_id == auth["user_id"]:
+        return
+    raise HTTPException(status_code=403, detail="You do not have permission to modify this gallery")
+
+
+def _g(g: Gallery, cover_thumb: str | None = None, is_favorited: bool = False, my_rating: int | None = None) -> dict:
     return {
         "id": g.id,
         "source": g.source,
@@ -1368,7 +1518,9 @@ def _g(g: Gallery, cover_thumb: str | None = None) -> dict:
         "posted_at": g.posted_at.isoformat() if g.posted_at else None,
         "added_at": g.added_at.isoformat() if g.added_at else None,
         "rating": g.rating,
-        "favorited": g.favorited,
+        "favorited": False,
+        "is_favorited": is_favorited,
+        "my_rating": my_rating,
         "uploader": g.uploader,
         "artist_id": g.artist_id,
         "download_status": g.download_status,
