@@ -8,7 +8,8 @@ WORKDIR /install
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir --prefix=/install/pkgs -r requirements.txt && \
-    pip install --no-cache-dir --prefix=/install/pkgs gallery-dl
+    pip install --no-cache-dir --prefix=/install/pkgs gallery-dl && \
+    pip install --no-cache-dir --no-deps --prefix=/install/pkgs thumbhash-python==1.0.1
 
 # Download swagger-ui-dist static assets for self-hosted docs
 RUN python -c "\

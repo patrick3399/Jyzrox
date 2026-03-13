@@ -162,12 +162,14 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
         await session.flush()
 
         # Bulk-insert images
+        now = datetime.now(UTC)
         image_values = [
             {
                 "gallery_id": gallery_id,
                 "page_num": page_num,
                 "filename": img_file.name,
                 "blob_sha256": sha256,
+                "added_at": now,
             }
             for page_num, (img_file, sha256) in enumerate(allowed_pairs, start=1)
         ]
@@ -402,6 +404,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                 page_num=idx + 1,
                 filename=f.name,
                 blob_sha256=sha256,
+                added_at=datetime.now(UTC),
             ).on_conflict_do_nothing()
             await session.execute(stmt)
 

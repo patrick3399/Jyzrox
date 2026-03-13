@@ -369,6 +369,9 @@ const library = {
       `/api/library/galleries/${galleryId}/delete-image`,
       { method: 'POST', body: JSON.stringify({ page_num: pageNum }) }
     ),
+
+  browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number } = {}) =>
+    apiFetch<import('./types').ImageBrowserResponse>(`/api/library/images${qs(params as Record<string, unknown>)}`),
 }
 
 // ── Download ──────────────────────────────────────────────────────────

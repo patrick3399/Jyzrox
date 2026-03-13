@@ -89,6 +89,7 @@ class Blob(Base):
     external_path: Mapped[str | None] = mapped_column(Text)
     ref_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    thumbhash: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Image(Base):
@@ -100,6 +101,7 @@ class Image(Base):
     filename: Mapped[str | None] = mapped_column(Text)
     blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=False)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     gallery: Mapped["Gallery"] = relationship(back_populates="images")
     blob: Mapped["Blob"] = relationship()

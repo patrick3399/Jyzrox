@@ -245,8 +245,8 @@ export default function QueuePage() {
       try {
         await cancelJob(id)
         await mutate()
-      } catch {
-        toast.error(t('queue.cancelError'))
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t('queue.cancelError'))
       }
     },
     [cancelJob, mutate],
@@ -257,8 +257,8 @@ export default function QueuePage() {
       try {
         await pauseJob({ id, action })
         await mutate()
-      } catch {
-        toast.error(t('queue.pauseError'))
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t('queue.pauseError'))
       }
     },
     [pauseJob, mutate],

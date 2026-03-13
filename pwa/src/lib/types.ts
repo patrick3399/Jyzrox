@@ -47,6 +47,26 @@ export interface GalleryImage {
   file_hash: string | null
   media_type: 'image' | 'video' | 'gif'
   duration: number | null
+  thumbhash?: string | null
+}
+
+export interface BrowseImage {
+  id: number
+  gallery_id: number
+  page_num: number
+  width: number | null
+  height: number | null
+  thumb_path: string | null
+  file_path: string | null
+  thumbhash: string | null
+  media_type: 'image' | 'video' | 'gif'
+  added_at: string | null
+}
+
+export interface ImageBrowserResponse {
+  images: BrowseImage[]
+  next_cursor: string | null
+  has_next: boolean
 }
 
 export interface ArtistImageItem extends GalleryImage {

@@ -19,6 +19,7 @@ const en: Record<string, string> = {
   'nav.dedup': 'Dedup',
   'nav.logout': 'Logout',
   'nav.users': 'Users',
+  'nav.images': 'Images',
 
   // ── Dashboard ──
   'dashboard.title': 'Dashboard',
@@ -1131,6 +1132,7 @@ const en: Record<string, string> = {
 
   // ── Common (additions) ──
   'common.close': 'Close',
+  'common.add': 'Add',
 
   // ── Scheduled Tasks page ──
   'scheduledTasks.title': 'Scheduled Tasks',
@@ -1278,6 +1280,11 @@ const en: Record<string, string> = {
   'error.cannot_delete_self': 'Cannot delete your own account',
   'error.cannot_delete_last_admin': 'Cannot delete the last admin account',
   'error.username_taken': 'Username is already taken',
+
+  // ── Image Browser ──
+  'images.title': 'Image Browser',
+  'images.noResults': 'No images found.',
+  'images.filterByTags': 'Filter by tags...',
 }
 
 export default en

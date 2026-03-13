@@ -180,7 +180,7 @@ export function VirtualGrid<T>({
   const totalHeight = virtualizer.getTotalSize()
 
   return (
-    <div ref={containerRef} className={className}>
+    <div ref={containerRef} className={className} style={{ contain: 'layout style' }}>
       {/* Virtual scroll container — height matches total virtual height */}
       <div
         style={{
@@ -204,6 +204,7 @@ export function VirtualGrid<T>({
                 right: 0,
                 transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                 paddingBottom: gap,
+                contain: 'layout style paint',
               }}
             >
               {/* CSS grid row — same column count as the Tailwind equivalent */}

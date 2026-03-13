@@ -317,14 +317,23 @@ async def pause_resume_job(
 
     redis = get_redis()
     pause_key = f"download:pause:{job_id}"
+    terminal_statuses = {"done", "failed", "cancelled"}
     if body.action == "pause":
-        if job.status != "running":
-            raise HTTPException(status_code=400, detail=f"Cannot pause: status={job.status}")
+        if job.status in terminal_statuses:
+            raise HTTPException(status_code=409, detail=f"Job already {job.status}")
+        if job.status == "paused":
+            # Already in the desired state — no-op, return current status
+            return {"status": job.status}
+        # job.status == "running" — valid transition
         await redis.set(pause_key, b"1", ex=86400)  # 24h TTL as safety net
         job.status = "paused"
     else:  # resume
-        if job.status != "paused":
-            raise HTTPException(status_code=400, detail=f"Cannot resume: status={job.status}")
+        if job.status in terminal_statuses:
+            raise HTTPException(status_code=409, detail=f"Job already {job.status}")
+        if job.status == "running":
+            # Already in the desired state — no-op, return current status
+            return {"status": job.status}
+        # job.status == "paused" — valid transition
         await redis.delete(pause_key)
         job.status = "running"
 

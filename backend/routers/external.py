@@ -286,7 +286,7 @@ async def get_gallery_images(
                 await session.execute(
                     select(Image)
                     .where(Image.gallery_id == gallery_id)
-                    .order_by(Image.page_num)
+                    .order_by(Image.page_num.desc())
                     .options(selectinload(Image.blob))
                 )
             )

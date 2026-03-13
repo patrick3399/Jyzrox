@@ -1,7 +1,7 @@
 import useSWR from 'swr'
 import useSWRInfinite from 'swr/infinite'
 import useSWRMutation from 'swr/mutation'
-import { useCallback, useEffect, useRef, useState } from 'react'
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import type { GalleryListResponse, GallerySearchParams, EhSearchParams } from '@/lib/types'
 
@@ -36,7 +36,10 @@ export function useInfiniteLibraryGalleries(
     { revalidateOnFocus: false },
   )
 
-  const galleries = data ? data.flatMap((page) => page.galleries) : []
+  const galleries = useMemo(
+    () => (data ? data.flatMap((page) => page.galleries) : []),
+    [data],
+  )
   const total = data?.[0]?.total
   const isLoadingMore = isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
   const isEmpty = data?.[0]?.galleries.length === 0

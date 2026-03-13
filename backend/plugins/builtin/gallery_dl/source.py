@@ -200,11 +200,27 @@ class GalleryDlPlugin(SourcePlugin):
         downloaded = 0
         last_progress_update = asyncio.get_event_loop().time()
         started_at = asyncio.get_event_loop().time()
+        total_paused = 0.0  # track pause duration to exclude from timeout
 
         async def _read_stdout() -> None:
-            nonlocal downloaded, last_progress_update
+            nonlocal downloaded, last_progress_update, total_paused
             assert proc.stdout is not None
             async for raw_line in proc.stdout:
+                # Soft-pause: stop reading stdout → pipe buffer fills → gallery-dl blocks
+                if pause_check is not None:
+                    pause_start = None
+                    while await pause_check():
+                        if pause_start is None:
+                            pause_start = asyncio.get_event_loop().time()
+                            logger.info("[gallery_dl] paused: %s", url)
+                        if cancel_check is not None and await cancel_check():
+                            break
+                        await asyncio.sleep(0.5)
+                    if pause_start is not None:
+                        paused_duration = asyncio.get_event_loop().time() - pause_start
+                        total_paused += paused_duration
+                        logger.info("[gallery_dl] resumed after %.1fs: %s", paused_duration, url)
+
                 line = raw_line.decode("utf-8", errors="replace").rstrip()
                 if _FILE_PATH_RE.search(line) or _IMAGE_EXT_RE.search(line):
                     downloaded += 1

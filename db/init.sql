@@ -246,6 +246,11 @@ CREATE TABLE IF NOT EXISTS library_paths (
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS last_scanned_at TIMESTAMPTZ;
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS library_path TEXT;
 
+-- Image browser columns
+ALTER TABLE images ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ;
+ALTER TABLE blobs ADD COLUMN IF NOT EXISTS thumbhash TEXT;
+CREATE INDEX IF NOT EXISTS idx_images_added_at_id ON images (added_at DESC, id DESC);
+
 -- pHash quarter columns for pigeonhole pre-filter (scalability)
 ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_int BIGINT;
 ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_q0 SMALLINT;

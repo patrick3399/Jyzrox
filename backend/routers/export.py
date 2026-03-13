@@ -38,7 +38,7 @@ async def export_kohya(gallery_id: int, auth: dict = Depends(_member)):
             await session.execute(
                 select(Image)
                 .where(Image.gallery_id == gallery_id)
-                .order_by(Image.page_num)
+                .order_by(Image.page_num.desc())
                 .options(selectinload(Image.blob))
             )
         ).scalars().all()
