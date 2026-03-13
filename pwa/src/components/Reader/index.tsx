@@ -141,7 +141,7 @@ function MediaElement({
 interface ReaderProps {
   galleryId: number
   sourceId: string
-  downloadStatus: 'proxy_only' | 'partial' | 'complete'
+  downloadStatus: 'proxy_only' | 'partial' | 'complete' | 'downloading'
   images: GalleryImage[]
   totalPages: number
   initialPage?: number
@@ -1396,7 +1396,7 @@ export default function Reader({
   onSeekToPage,
 }: ReaderProps) {
   const router = useRouter()
-  const isProxyMode = downloadStatus !== 'complete'
+  const isProxyMode = downloadStatus === 'proxy_only'
 
   const images: ReaderImage[] = rawImages.map((img) => ({
     pageNum: img.page_num,

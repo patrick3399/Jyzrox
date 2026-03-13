@@ -72,14 +72,37 @@ function JobRow({
   const canCancel = job.status === 'queued' || job.status === 'running' || job.status === 'paused'
   const createdAt = new Date(job.created_at).toLocaleString()
   const finishedAt = job.finished_at ? new Date(job.finished_at).toLocaleString() : null
+  const galleryId = job.gallery_id || job.progress?.gallery_id
+  const galleryTitle = job.progress?.title
 
   return (
     <div className="bg-vault-card border border-vault-border rounded-lg p-4">
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
-          <p className="text-sm truncate mb-1" title={job.url}>
-            {job.url}
-          </p>
+          {galleryTitle ? (
+            <div className="mb-1">
+              <p className="text-sm font-medium truncate" title={galleryTitle}>
+                {galleryId ? (
+                  <a
+                    href={`/library/${galleryId}`}
+                    onClick={(e) => e.stopPropagation()}
+                    className="text-vault-accent hover:underline"
+                  >
+                    {galleryTitle}
+                  </a>
+                ) : (
+                  galleryTitle
+                )}
+              </p>
+              <p className="text-xs text-vault-text-muted truncate" title={job.url}>
+                {job.url}
+              </p>
+            </div>
+          ) : (
+            <p className="text-sm truncate mb-1" title={job.url}>
+              {job.url}
+            </p>
+          )}
           <div className="flex flex-wrap items-center gap-3 text-xs text-vault-text-muted">
             <span>
               {t('queue.source')}:{' '}

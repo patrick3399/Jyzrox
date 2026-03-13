@@ -402,3 +402,6 @@ CREATE INDEX IF NOT EXISTS idx_download_jobs_retry ON download_jobs (status, ret
 -- ── Subscription Batch Tracking ──────────────────────────────────
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS batch_total INT DEFAULT 0;
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS batch_enqueued INT DEFAULT 0;
+
+-- ── Progressive Import: link download_jobs to gallery ────────────
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS gallery_id BIGINT REFERENCES galleries(id) ON DELETE SET NULL;

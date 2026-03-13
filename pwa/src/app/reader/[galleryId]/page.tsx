@@ -77,6 +77,28 @@ export default function ReaderPage() {
     }
   }, [id])
 
+  useEffect(() => {
+    if (data?.gallery.download_status !== 'downloading') return
+    let cancelled = false
+    const interval = setInterval(async () => {
+      try {
+        const [gallery, imagesResp] = await Promise.all([
+          api.library.getGallery(id),
+          api.library.getImages(id),
+        ])
+        if (!cancelled) {
+          setData((prev) => prev ? { ...prev, gallery, images: imagesResp.images } : prev)
+        }
+      } catch {
+        // silently ignore revalidation errors
+      }
+    }, 5000)
+    return () => {
+      cancelled = true
+      clearInterval(interval)
+    }
+  }, [id, data?.gallery.download_status])
+
   if (error) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-black text-white">

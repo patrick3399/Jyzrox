@@ -388,6 +388,8 @@ const en: Record<string, string> = {
   'library.statusComplete': 'Complete',
   'library.statusPartial': 'Partial',
   'library.statusProxyOnly': 'Proxy Only',
+  'library.statusDownloading': 'Downloading',
+  'library.downloadingBanner': 'Download in progress — images appear as they are imported',
   'library.favoriteError': 'Failed to update favorite',
   'library.ratingError': 'Failed to update rating',
   'library.deleteConfirm': 'Delete "{title}"? This action cannot be undone.',
@@ -498,6 +500,8 @@ const en: Record<string, string> = {
   'queue.categoryFilehost': 'File Hosting',
   'queue.categoryOther': 'Other',
   'queue.recognized': 'Recognized',
+  'queue.downloading': 'Downloading...',
+  'queue.viewGallery': 'View Gallery',
 
   // ── Tags (extra) ──
   'tags.selectTag': 'Select a tag to view details',

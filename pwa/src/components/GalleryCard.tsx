@@ -147,6 +147,16 @@ export function LibraryGalleryCard({ gallery, thumbUrl, onClick, selected, selec
         </span>
       )}
 
+      {/* Download-in-progress indicator */}
+      {gallery.download_status === 'downloading' && !selectMode && (
+        <div className="absolute top-1.5 left-1.5 z-10">
+          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600/90 text-white text-[10px] font-medium shadow">
+            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+            {t('queue.downloading')}
+          </span>
+        </div>
+      )}
+
       {/* Thumbnail or gradient placeholder */}
       <div className="relative aspect-[3/4] overflow-hidden">
         {thumbUrl ? (

@@ -140,7 +140,7 @@ class DownloadSemaphore:
     _LIMITS: dict[str, int] = {
         "ehentai": 2,
         "pixiv": 2,
-        "gallery_dl": 1,
+        "gallery_dl": 2,
     }
 
     def __init__(self, source: str, acquire_timeout: int = 300, max_count: int | None = None) -> None:
@@ -158,7 +158,8 @@ class DownloadSemaphore:
                 return int(val)
             except (ValueError, TypeError):
                 pass
-        return cls._LIMITS.get(source, default)
+        base = source.split(":")[0] if ":" in source else source
+        return cls._LIMITS.get(source, cls._LIMITS.get(base, default))
 
     @asynccontextmanager
     async def acquire(self):

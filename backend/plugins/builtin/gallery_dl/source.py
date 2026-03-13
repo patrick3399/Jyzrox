@@ -31,6 +31,7 @@ from plugins.models import (
 logger = logging.getLogger(__name__)
 
 _FILE_PATH_RE = re.compile(r"/data/")
+_FILE_PATH_EXTRACT_RE = re.compile(r"(/data/.+\.\w+)")
 _IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|gif|webp|avif|heic|mp4|webm)$", re.IGNORECASE)
 _PROGRESS_EVERY_N = 5
 _PROGRESS_EVERY_S = 10.0
@@ -97,6 +98,13 @@ async def _build_gallery_dl_config(credentials: dict) -> None:
 
 class GalleryDlPlugin(SourcePlugin):
     """Fallback SourcePlugin that delegates to gallery-dl subprocess."""
+
+    def __init__(self) -> None:
+        self._on_file_callback: Callable[[Path], Awaitable[None]] | None = None
+
+    def set_file_callback(self, cb: Callable[[Path], Awaitable[None]] | None) -> None:
+        """Set a callback invoked for each fully-written file during download."""
+        self._on_file_callback = cb
 
     meta = PluginMeta(
         name="gallery-dl (Fallback)",
@@ -205,6 +213,8 @@ class GalleryDlPlugin(SourcePlugin):
         async def _read_stdout() -> None:
             nonlocal downloaded, last_progress_update, total_paused
             assert proc.stdout is not None
+            pending_file: Path | None = None
+
             async for raw_line in proc.stdout:
                 # Soft-pause: stop reading stdout → pipe buffer fills → gallery-dl blocks
                 if pause_check is not None:
@@ -222,7 +232,23 @@ class GalleryDlPlugin(SourcePlugin):
                         logger.info("[gallery_dl] resumed after %.1fs: %s", paused_duration, url)
 
                 line = raw_line.decode("utf-8", errors="replace").rstrip()
-                if _FILE_PATH_RE.search(line) or _IMAGE_EXT_RE.search(line):
+
+                path_match = _FILE_PATH_EXTRACT_RE.search(line)
+                if path_match or _FILE_PATH_RE.search(line) or _IMAGE_EXT_RE.search(line):
+                    # Process the PREVIOUS pending file (guaranteed complete now that the next
+                    # file line has appeared)
+                    if pending_file is not None and self._on_file_callback:
+                        try:
+                            await self._on_file_callback(pending_file)
+                        except Exception as exc:
+                            logger.warning("[gallery_dl] progressive import error: %s", exc)
+
+                    # Track the new pending file
+                    if path_match:
+                        pending_file = Path(path_match.group(1))
+                    else:
+                        pending_file = None
+
                     downloaded += 1
                     now = asyncio.get_event_loop().time()
                     if (
@@ -235,6 +261,13 @@ class GalleryDlPlugin(SourcePlugin):
                                 await on_progress(downloaded, 0)  # total unknown for gallery-dl
                             except Exception:
                                 pass
+
+            # Process the last pending file after the loop ends
+            if pending_file is not None and self._on_file_callback:
+                try:
+                    await self._on_file_callback(pending_file)
+                except Exception as exc:
+                    logger.warning("[gallery_dl] progressive import error (last file): %s", exc)
 
         try:
             await asyncio.wait_for(

@@ -53,6 +53,10 @@ const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: stri
     labelKey: 'library.statusProxyOnly',
     className: 'bg-gray-800 border-gray-600 text-gray-400',
   },
+  downloading: {
+    labelKey: 'library.statusDownloading',
+    className: 'bg-blue-900/40 border-blue-700/50 text-blue-400',
+  },
 }
 
 export default function GalleryDetailPage() {
@@ -66,7 +70,7 @@ export default function GalleryDetailPage() {
     error: galleryError,
     mutate: mutateGallery,
   } = useLibraryGallery(id)
-  const { data: imagesData, isLoading: imagesLoading } = useGalleryImages(id)
+  const { data: imagesData, isLoading: imagesLoading, mutate: mutateImages } = useGalleryImages(id)
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(id ?? 0)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRetagging, setIsRetagging] = useState(false)
@@ -120,6 +124,16 @@ export default function GalleryDetailPage() {
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
   }, [gallery?.id, router])
+
+  const isDownloading = gallery?.download_status === 'downloading'
+  useEffect(() => {
+    if (!isDownloading) return
+    const interval = setInterval(() => {
+      mutateGallery()
+      mutateImages()
+    }, 5000)
+    return () => clearInterval(interval)
+  }, [isDownloading, mutateGallery, mutateImages])
 
   const getDeleteConfirmKey = () => {
     if (gallery?.import_mode === 'link') return 'library.delete.link.confirm'
@@ -434,6 +448,17 @@ export default function GalleryDetailPage() {
             </div>
           </div>
         </div>
+
+        {gallery.download_status === 'downloading' && (
+          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-5 flex items-center gap-2 text-blue-400 text-sm">
+            <span className="flex gap-0.5">
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0ms]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:150ms]" />
+              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:300ms]" />
+            </span>
+            {t('library.downloadingBanner')}
+          </div>
+        )}
 
         {/* Tags */}
         <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">

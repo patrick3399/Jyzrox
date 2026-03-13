@@ -177,6 +177,7 @@ class DownloadJob(Base):
     retry_count: Mapped[int] = mapped_column(SmallInteger, default=0)
     max_retries: Mapped[int] = mapped_column(SmallInteger, default=3)
     next_retry_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    gallery_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"), nullable=True)
 
 
 class ReadProgress(Base):

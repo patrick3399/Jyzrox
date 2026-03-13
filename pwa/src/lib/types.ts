@@ -28,7 +28,7 @@ export interface Gallery {
   my_rating: number | null // per-user rating, null if not rated
   uploader: string
   artist_id: string | null
-  download_status: 'proxy_only' | 'partial' | 'complete'
+  download_status: 'proxy_only' | 'partial' | 'complete' | 'downloading'
   import_mode: string | null
   tags_array: string[]
   cover_thumb?: string | null
@@ -144,6 +144,7 @@ export interface DownloadJob {
   url: string
   source: string
   status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused' | 'partial'
+  gallery_id?: number | null
   progress: {
     percent?: number
     downloaded?: number
@@ -154,6 +155,8 @@ export interface DownloadJob {
     last_update_at?: string
     failed_pages?: number[]
     permanently_failed?: boolean
+    gallery_id?: number
+    title?: string
     [key: string]: unknown
   }
   error: string | null

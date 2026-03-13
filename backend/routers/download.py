@@ -463,4 +463,5 @@ def _j(j: DownloadJob) -> dict:
         "retry_count": j.retry_count,
         "max_retries": j.max_retries,
         "next_retry_at": j.next_retry_at.isoformat() if j.next_retry_at else None,
+        "gallery_id": j.gallery_id,
     }
