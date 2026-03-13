@@ -244,12 +244,20 @@ function RateLimitsSection() {
   const [overrideLoading, setOverrideLoading] = useState(false)
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const pendingPatchRef = useRef<Record<string, any>>({})
+  const [subDelay, setSubDelay] = useState(500)
+  const [subBatchMax, setSubBatchMax] = useState(0)
 
   useEffect(() => {
     api.settings.getRateLimits()
       .then(setData)
       .catch(() => toast.error(t('common.failedToLoad')))
       .finally(() => setLoading(false))
+    api.settings.getFeatures()
+      .then((f: any) => {
+        setSubDelay(f.subscription_enqueue_delay_ms ?? 500)
+        setSubBatchMax(f.subscription_batch_max ?? 0)
+      })
+      .catch(() => {})
   }, [])
 
   const debouncedPatch = useCallback((patch: Parameters<typeof api.settings.patchRateLimits>[0]) => {
@@ -328,6 +336,31 @@ function RateLimitsSection() {
       setOverrideLoading(false)
     }
   }, [data])
+
+  const subDelayDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const subBatchDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const handleSubDelayChange = useCallback((v: number) => {
+    setSubDelay(v)
+    clearTimeout(subDelayDebounce.current)
+    subDelayDebounce.current = setTimeout(async () => {
+      try {
+        await api.settings.setFeatureValue('subscription_enqueue_delay_ms', Math.max(100, v))
+        toast.success(t('common.saved'))
+      } catch { toast.error(t('common.failedToSave')) }
+    }, 500)
+  }, [])
+
+  const handleSubBatchMaxChange = useCallback((v: number) => {
+    setSubBatchMax(v)
+    clearTimeout(subBatchDebounce.current)
+    subBatchDebounce.current = setTimeout(async () => {
+      try {
+        await api.settings.setFeatureValue('subscription_batch_max', Math.max(0, v))
+        toast.success(t('common.saved'))
+      } catch { toast.error(t('common.failedToSave')) }
+    }, 500)
+  }, [])
 
   if (loading) {
     return (
@@ -549,6 +582,37 @@ function RateLimitsSection() {
               : t('settings.rateLimitsUnlock')}
           </button>
         </div>
+      </div>
+
+      {/* Subscription Enqueue */}
+      <div>
+        <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-1">
+          {t('settings.subscriptionEnqueue')}
+        </p>
+        <div className="bg-vault-input border border-vault-border rounded-lg px-3 py-1 space-y-0 divide-y divide-vault-border/50">
+          <DelayRow
+            label={t('settings.subscriptionEnqueueDelay')}
+            suffix={t('settings.rateLimitsMs')}
+            value={subDelay}
+            onChange={handleSubDelayChange}
+          />
+          <div className="flex items-center justify-between py-2">
+            <span className="text-sm text-vault-text-muted">{t('settings.subscriptionBatchMax')}</span>
+            <div className="flex items-center gap-2 shrink-0">
+              <input
+                type="number"
+                min={0}
+                max={9999}
+                step={10}
+                value={subBatchMax}
+                onChange={(e) => handleSubBatchMaxChange(Number(e.target.value))}
+                className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
+              />
+              <span className="text-xs text-vault-text-muted w-6"></span>
+            </div>
+          </div>
+        </div>
+        <p className="text-[10px] text-vault-text-muted mt-1">{t('settings.subscriptionEnqueueDesc')}</p>
       </div>
     </div>
   )

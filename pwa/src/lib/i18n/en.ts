@@ -823,6 +823,10 @@ const en: Record<string, string> = {
   'subscriptions.batchProgress': '{enqueued} / {total} enqueued',
   'subscriptions.batchDone': 'Batch complete',
   'subscriptions.batchFailed': '{failed} failed',
+  'settings.subscriptionEnqueue': 'Subscription Enqueue',
+  'settings.subscriptionEnqueueDelay': 'Enqueue Delay',
+  'settings.subscriptionBatchMax': 'Batch Max (0 = no limit)',
+  'settings.subscriptionEnqueueDesc': 'Throttle subscription auto-downloads. Delay is the pause between each enqueue; batch max limits items per check.',
 
   // ── Cache Management ──
   'settings.cache': 'Cache',

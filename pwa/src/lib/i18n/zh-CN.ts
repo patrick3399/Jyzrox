@@ -808,6 +808,10 @@ const zhCN: Record<string, string> = {
   'subscriptions.batchProgress': '已排入 {enqueued} / {total}',
   'subscriptions.batchDone': '批次完成',
   'subscriptions.batchFailed': '{failed} 个排入失败',
+  'settings.subscriptionEnqueue': '订阅排入',
+  'settings.subscriptionEnqueueDelay': '排入间隔',
+  'settings.subscriptionBatchMax': '批次上限（0 = 无限）',
+  'settings.subscriptionEnqueueDesc': '节流订阅自动下载。间隔为每次排入的暂停时间；批次上限限制每次检查的项目数。',
 }
 
 export default zhCN

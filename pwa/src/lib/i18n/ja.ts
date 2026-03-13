@@ -809,6 +809,10 @@ const ja: Record<string, string> = {
   'subscriptions.batchProgress': '{enqueued} / {total} 追加済み',
   'subscriptions.batchDone': 'バッチ完了',
   'subscriptions.batchFailed': '{failed} 件の追加に失敗',
+  'settings.subscriptionEnqueue': 'サブスクリプション キュー',
+  'settings.subscriptionEnqueueDelay': 'キュー間隔',
+  'settings.subscriptionBatchMax': 'バッチ上限（0 = 無制限）',
+  'settings.subscriptionEnqueueDesc': 'サブスクリプションの自動ダウンロードを制御します。間隔は各キュー追加の遅延、バッチ上限は1回のチェックあたりの最大数です。',
 }
 
 export default ja
