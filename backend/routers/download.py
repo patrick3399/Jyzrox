@@ -296,10 +296,13 @@ async def pause_resume_job(
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """Pause or resume a running download job.
+    """Pause or resume a running download job via Redis soft-pause key.
 
-    For gallery-dl jobs (process-based): uses SIGSTOP/SIGCONT.
-    For EH/Pixiv plugin jobs (no PID): uses Redis soft-pause key.
+    The worker's pause_check callback reads download:pause:{job_id} from Redis
+    and suspends iteration cooperatively. This works for all job types (gallery-dl
+    subprocess and native plugin downloads) without relying on cross-container
+    PID signalling, which is not possible since the api and worker containers have
+    separate PID namespaces.
     """
     if body.action not in ("pause", "resume"):
         raise HTTPException(status_code=400, detail="action must be 'pause' or 'resume'")
@@ -313,56 +316,17 @@ async def pause_resume_job(
         raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
 
     redis = get_redis()
-    pid_bytes = await redis.get(f"download:pid:{job_id}")
-
-    if pid_bytes:
-        # gallery-dl path: SIGSTOP/SIGCONT
-        try:
-            pid = int(pid_bytes)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=500, detail="Corrupted PID value in Redis")
-
-        # Validate that the PID actually belongs to a gallery-dl process before signalling.
-        try:
-            with open(f"/proc/{pid}/cmdline", "rb") as fh:
-                cmdline = fh.read()
-            if b"gallery-dl" not in cmdline:
-                logger.warning("[pause_resume] pid %d cmdline does not contain gallery-dl; clearing stale PID", pid)
-                await redis.delete(f"download:pid:{job_id}")
-                raise HTTPException(status_code=400, detail="Process is no longer a gallery-dl process")
-        except FileNotFoundError:
-            await redis.delete(f"download:pid:{job_id}")
-            raise HTTPException(status_code=400, detail="Process no longer exists")
-
-        try:
-            if body.action == "pause":
-                if job.status != "running":
-                    raise HTTPException(status_code=400, detail=f"Cannot pause: status={job.status}")
-                os.kill(pid, signal.SIGSTOP)
-                job.status = "paused"
-            else:  # resume
-                if job.status != "paused":
-                    raise HTTPException(status_code=400, detail=f"Cannot resume: status={job.status}")
-                os.kill(pid, signal.SIGCONT)
-                job.status = "running"
-        except ProcessLookupError:
-            await redis.delete(f"download:pid:{job_id}")
-            raise HTTPException(status_code=400, detail="Process no longer exists")
-        except PermissionError:
-            raise HTTPException(status_code=500, detail="Insufficient permission to signal process")
-    else:
-        # Soft-pause path for EH/Pixiv plugin downloads (no subprocess PID)
-        pause_key = f"download:pause:{job_id}"
-        if body.action == "pause":
-            if job.status != "running":
-                raise HTTPException(status_code=400, detail=f"Cannot pause: status={job.status}")
-            await redis.set(pause_key, b"1", ex=86400)  # 24h TTL as safety net
-            job.status = "paused"
-        else:  # resume
-            if job.status != "paused":
-                raise HTTPException(status_code=400, detail=f"Cannot resume: status={job.status}")
-            await redis.delete(pause_key)
-            job.status = "running"
+    pause_key = f"download:pause:{job_id}"
+    if body.action == "pause":
+        if job.status != "running":
+            raise HTTPException(status_code=400, detail=f"Cannot pause: status={job.status}")
+        await redis.set(pause_key, b"1", ex=86400)  # 24h TTL as safety net
+        job.status = "paused"
+    else:  # resume
+        if job.status != "paused":
+            raise HTTPException(status_code=400, detail=f"Cannot resume: status={job.status}")
+        await redis.delete(pause_key)
+        job.status = "running"
 
     await db.commit()
     return {"status": job.status}
