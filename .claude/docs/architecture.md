@@ -20,6 +20,8 @@
 
 > `tagger` service is optional — started only with `--profile tagging`. Worker calls it via HTTP (`POST /predict`) and gracefully skips if offline.
 
+> 所有服務均套用 `security_opt: ["no-new-privileges:true"]`，防止容器內進程提權。
+
 ### Networks
 
 | Network | Name | Internal |
@@ -215,21 +217,16 @@ download_job → import_job → thumbnail_job
                           └→ tag_job (if enabled)
 ```
 
-#### Pause / Resume 機制（雙路徑）
+#### Pause / Resume 機制
 
-`download_job` 支援兩種暫停路徑，依下載引擎而異：
+`download_job` 使用 Redis soft-pause 統一暫停機制（所有下載引擎共用）：
 
-| 引擎 | Pause 方式 | Resume 方式 | 說明 |
-|------|-----------|------------|------|
-| gallery-dl subprocess | `SIGSTOP` 送至 PID | `SIGCONT` 送至 PID | PID 存於 Redis `download:pid:{job_id}` |
-| EH / Pixiv plugin | 寫入 Redis key `download:pause:{job_id}` | 刪除 Redis key | Soft-pause，不中斷正在傳輸的圖 |
-
-**Soft-pause 行為（EH / Pixiv）：**
-- Pause：`PATCH /api/download/jobs/{id}` (`action=pause`) → API 寫入 `download:pause:{job_id}`
-- Downloader 在每張新圖**開始前** poll 該 key；若存在則 `sleep 0.5s` 等待
+- Pause：`PATCH /api/download/jobs/{id}` (`action=pause`) → API 寫入 Redis key `download:pause:{job_id}`（24h TTL）
+- Worker 在每張新圖**開始前** poll 該 key；若存在則 `sleep 0.5s` 等待
 - 正在傳輸中的圖**不中斷**，只阻擋尚未開始的新圖
-- Resume：`PATCH /api/download/jobs/{id}` (`action=resume`) → API 刪除 key → downloader 繼續
-- Redis key 設有 **24h TTL** 作為 safety net，防止因 API 異常導致 key 殘留
+- Resume：`PATCH /api/download/jobs/{id}` (`action=resume`) → API 刪除 key → worker 繼續
+
+> 注意：gallery-dl subprocess 模式的 pause 是「協作式」暫停 — gallery-dl 進程本身不會被暫停，但 worker 不會啟動新的下載任務直到 resume。
 
 #### Library Watcher
 
@@ -655,6 +652,8 @@ TLS termination is handled by an external reverse proxy (Caddy/Traefik/cloud LB)
 - Migrations: Alembic — `backend/alembic.ini` + `backend/migrations/versions/`
 - Connection: asyncpg via SQLAlchemy async engine (`AsyncSessionLocal`)
 - Healthcheck: `pg_isready` + `SELECT 1`
+- 密碼加密：`password_encryption=scram-sha-256`
+- 連線日誌：`log_connections=on`、`log_disconnections=on`
 
 ---
 
@@ -706,8 +705,8 @@ Credentials are read from `.env` at project root. DB user/name default to `vault
 | `dedup:progress:total` | — | Total pairs to process |
 | `dedup:progress:tier` | — | Currently active tier |
 | `dedup:progress:mode` | — | Scan mode |
-| `download:pid:{job_id}` | — | gallery-dl subprocess PID（SIGSTOP/SIGCONT 用） |
-| `download:pause:{job_id}` | 24h | EH/Pixiv soft-pause flag（key 存在即暫停） |
+| `download:pid:{job_id}` | — | gallery-dl subprocess PID（cancel 用，best-effort SIGTERM） |
+| `download:pause:{job_id}` | 24h | 統一 soft-pause flag，所有下載引擎共用（key 存在即暫停） |
 
 ---
 
