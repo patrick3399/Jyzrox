@@ -523,6 +523,14 @@ export interface Subscription {
   batch_enqueued: number
 }
 
+export interface SubscriptionPreview {
+  count: number
+  source: string | null
+  source_id: string | null
+  samples: Array<{ url: string; title: string }>
+  error?: string
+}
+
 // ── File Explorer ────────────────────────────────────────────────────
 
 export interface LibraryDirectory {

@@ -169,6 +169,9 @@ const en: Record<string, string> = {
   'queue.clearing': 'Clearing...',
   'queue.cleared': '{count} jobs cleared',
   'queue.clearError': 'Failed to clear jobs',
+  'queue.preview': 'Preview',
+  'queue.previewPages': '{count} pages',
+  'queue.previewUploader': 'Uploader: {name}',
 
   // ── Tags ──
   'tags.title': 'Tag Management',
@@ -607,6 +610,9 @@ const en: Record<string, string> = {
   'browse.failedLoadGallery': 'Failed to load gallery',
   'browse.favorite': 'Favorite',
   'browse.removeFromFavorites': 'Remove from favorites',
+  'browse.subscribeToSearch': 'Subscribe to this search',
+  'browse.subscribeSuccess': 'Subscribed successfully',
+  'browse.subscribeFailed': 'Failed to subscribe',
 
   // ── Time Utils ──
   'timeUtils.justNow': 'just now',
@@ -823,6 +829,14 @@ const en: Record<string, string> = {
   'subscriptions.batchProgress': '{enqueued} / {total} enqueued',
   'subscriptions.batchDone': 'Batch complete',
   'subscriptions.batchFailed': '{failed} failed',
+  'subscriptions.previewLoading': 'Checking...',
+  'subscriptions.previewCount': '~{count} galleries found',
+  'subscriptions.previewNoResults': 'No results found for this URL',
+  'subscriptions.previewUnsupported': 'URL not supported for subscription',
+  'subscriptions.confirmTitle': 'Confirm bulk download',
+  'subscriptions.confirmMessage': 'This subscription has ~{count} galleries. Downloading all will create {count} download jobs.',
+  'subscriptions.confirmDownloadAll': 'Download All',
+  'subscriptions.confirmMonitorOnly': 'Monitor Only',
   'settings.subscriptionEnqueue': 'Subscription Enqueue',
   'settings.subscriptionEnqueueDelay': 'Enqueue Delay',
   'settings.subscriptionBatchMax': 'Batch Max (0 = no limit)',

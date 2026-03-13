@@ -1,0 +1,6 @@
+# Ensure shell scripts, Dockerfiles, and SQL files always use LF line endings.
+# Prevents CRLF conversion on Windows clone, which breaks container startup.
+
+*.sh        text eol=lf
+Dockerfile* text eol=lf
+*.sql       text eol=lf

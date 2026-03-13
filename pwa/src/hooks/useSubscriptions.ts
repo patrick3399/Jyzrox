@@ -30,3 +30,12 @@ export function useCheckSubscription() {
     api.subscriptions.check(arg)
   )
 }
+
+export function useSubscriptionPreview(url: string) {
+  const trimmed = url.trim()
+  return useSWR(
+    trimmed.length > 10 ? ['subscriptions/preview', trimmed] : null,
+    () => api.subscriptions.preview(trimmed),
+    { dedupingInterval: 10000, keepPreviousData: true },
+  )
+}

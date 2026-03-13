@@ -42,6 +42,7 @@ import type {
   LibraryFile,
   ScheduledTask,
   Subscription,
+  SubscriptionPreview,
   DedupStats,
   DedupReviewResponse,
   DedupScanProgress,
@@ -1049,6 +1050,12 @@ const subscriptions = {
   check: (id: number) =>
     apiFetch<{ status: string }>(`/api/subscriptions/${id}/check`, {
       method: 'POST',
+    }),
+
+  preview: (url: string) =>
+    apiFetch<SubscriptionPreview>('/api/subscriptions/preview', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
     }),
 }
 

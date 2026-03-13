@@ -12,12 +12,14 @@ import {
   useRetryJob,
   useCheckUrl,
   useSupportedSites,
+  useDownloadPreview,
 } from '@/hooks/useDownloadQueue'
+import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { t } from '@/lib/i18n'
 import { useWs } from '@/lib/ws'
-import type { DownloadJob } from '@/lib/types'
+import type { DownloadJob, EhGallery, PixivIllust } from '@/lib/types'
 
 const STATUS_STYLES: Record<string, string> = {
   queued: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400',
@@ -219,6 +221,49 @@ function JobRow({
   )
 }
 
+function DownloadPreviewPanel({ preview }: { preview: EhGallery | PixivIllust }) {
+  const isEh = 'thumb' in preview
+  const ehData = isEh ? (preview as EhGallery) : null
+  const pixivData = !isEh ? (preview as PixivIllust) : null
+
+  return (
+    <div className="mt-3 flex gap-3 p-3 bg-vault-input/50 border border-vault-border rounded-lg">
+      {ehData?.thumb && (
+        <img src={api.eh.thumbProxyUrl(ehData.thumb)} alt="" className="w-16 h-20 object-cover rounded shrink-0" />
+      )}
+      {pixivData?.image_urls && (
+        <img src={api.pixiv.imageProxyUrl(pixivData.image_urls.square_medium)} alt="" className="w-16 h-16 object-cover rounded shrink-0" />
+      )}
+      <div className="flex-1 min-w-0">
+        <p className="text-sm text-vault-text font-medium truncate">{preview.title}</p>
+        <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-vault-text-muted">
+          {ehData && <span>{t('queue.previewPages', { count: String(ehData.pages) })}</span>}
+          {pixivData && <span>{t('queue.previewPages', { count: String(pixivData.page_count) })}</span>}
+          {ehData?.uploader && <span>{t('queue.previewUploader', { name: ehData.uploader })}</span>}
+          {pixivData?.user && <span>{t('queue.previewUploader', { name: pixivData.user.name })}</span>}
+          {ehData && <span>★ {ehData.rating.toFixed(1)}</span>}
+          {ehData?.category && <span className="px-1.5 py-0.5 rounded bg-vault-border text-[10px]">{ehData.category}</span>}
+        </div>
+        {ehData && ehData.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {ehData.tags.slice(0, 10).map((tag) => (
+              <span key={tag} className="px-1.5 py-0.5 rounded bg-vault-border/60 text-[10px] text-vault-text-muted">{tag}</span>
+            ))}
+            {ehData.tags.length > 10 && <span className="text-[10px] text-vault-text-muted">+{ehData.tags.length - 10}</span>}
+          </div>
+        )}
+        {pixivData && pixivData.tags.length > 0 && (
+          <div className="flex flex-wrap gap-1 mt-1.5">
+            {pixivData.tags.slice(0, 10).map((tag) => (
+              <span key={tag.name} className="px-1.5 py-0.5 rounded bg-vault-border/60 text-[10px] text-vault-text-muted">{tag.name}</span>
+            ))}
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
 export default function QueuePage() {
   const [urlInput, setUrlInput] = useState('')
   const [sitesOpen, setSitesOpen] = useState(false)
@@ -231,6 +276,7 @@ export default function QueuePage() {
 
   const { data: checkResult } = useCheckUrl(debouncedUrl)
   const { data: sitesData } = useSupportedSites()
+  const { data: downloadPreview, isLoading: previewLoading } = useDownloadPreview(debouncedUrl)
 
   const { data, isLoading, error, mutate } = useDownloadJobs({})
   const { trigger: enqueue, isMutating: isEnqueuing } = useEnqueueDownload()
@@ -380,6 +426,16 @@ export default function QueuePage() {
                   </span>
                 )
               ) : null}
+            </div>
+          )}
+          {/* Download Preview */}
+          {debouncedUrl.trim() && downloadPreview && !previewLoading && (
+            <DownloadPreviewPanel preview={downloadPreview} />
+          )}
+          {debouncedUrl.trim() && previewLoading && (
+            <div className="mt-3 flex items-center gap-2 text-xs text-vault-text-muted animate-pulse">
+              <LoadingSpinner />
+              <span>{t('queue.preview')}</span>
             </div>
           )}
         </div>

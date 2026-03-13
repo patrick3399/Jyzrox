@@ -6,7 +6,7 @@ import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useWs } from '@/lib/ws'
-import { useSubscriptions, useCreateSubscription, useUpdateSubscription, useDeleteSubscription, useCheckSubscription } from '@/hooks/useSubscriptions'
+import { useSubscriptions, useCreateSubscription, useUpdateSubscription, useDeleteSubscription, useCheckSubscription, useSubscriptionPreview } from '@/hooks/useSubscriptions'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import type { Subscription } from '@/lib/types'
 
@@ -81,17 +81,35 @@ export default function SubscriptionsPage() {
   const [autoDownload, setAutoDownload] = useState(true)
   const [cronExpr, setCronExpr] = useState('0 */2 * * *')
   const [checkingId, setCheckingId] = useState<number | null>(null)
+  const [debouncedUrl, setDebouncedUrl] = useState('')
+  const [showConfirm, setShowConfirm] = useState(false)
 
-  const handleAdd = async () => {
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedUrl(url), 800)
+    return () => clearTimeout(timer)
+  }, [url])
+
+  const { data: preview, isLoading: previewLoading } = useSubscriptionPreview(debouncedUrl)
+
+  const handleAdd = async (forceAutoDownload?: boolean) => {
     if (!url.trim()) return
+
+    // Show confirm dialog for bulk downloads
+    const effectiveAutoDownload = forceAutoDownload !== undefined ? forceAutoDownload : autoDownload
+    if (forceAutoDownload === undefined && autoDownload && preview && preview.count > 10) {
+      setShowConfirm(true)
+      return
+    }
+
     try {
-      await createSub({ url: url.trim(), name: name.trim() || undefined, auto_download: autoDownload, cron_expr: cronExpr })
+      await createSub({ url: url.trim(), name: name.trim() || undefined, auto_download: effectiveAutoDownload, cron_expr: cronExpr })
       toast.success(t('subscriptions.added'))
       setUrl('')
       setName('')
       setAutoDownload(true)
       setCronExpr('0 */2 * * *')
       setShowAdd(false)
+      setShowConfirm(false)
       mutate()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('subscriptions.addFailed'))
@@ -163,6 +181,23 @@ export default function SubscriptionsPage() {
               autoFocus
             />
           </div>
+          {/* Preview */}
+          {debouncedUrl.trim().length > 10 && (
+            <div className="flex items-center gap-2 text-xs">
+              {previewLoading ? (
+                <span className="text-vault-text-muted animate-pulse">{t('subscriptions.previewLoading')}</span>
+              ) : preview?.error === 'unsupported' ? (
+                <span className="text-red-400">{t('subscriptions.previewUnsupported')}</span>
+              ) : preview && preview.count > 0 ? (
+                <span className="text-green-400">
+                  {t('subscriptions.previewCount', { count: String(preview.count) })}
+                  {preview.source && <> · {sourceBadge(preview.source)}</>}
+                </span>
+              ) : preview ? (
+                <span className="text-yellow-400">{t('subscriptions.previewNoResults')}</span>
+              ) : null}
+            </div>
+          )}
           <div>
             <label className="text-xs text-vault-text-muted block mb-1">{t('subscriptions.name')}</label>
             <input
@@ -197,12 +232,46 @@ export default function SubscriptionsPage() {
             </div>
           </div>
           <button
-            onClick={handleAdd}
+            onClick={() => handleAdd()}
             disabled={creating || !url.trim()}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
           >
             {creating ? t('subscriptions.adding') : t('subscriptions.add')}
           </button>
+        </div>
+      )}
+
+      {/* Confirm bulk download dialog */}
+      {showConfirm && (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+          <div className="bg-vault-card border border-vault-border rounded-xl p-6 max-w-sm w-full space-y-4">
+            <h3 className="text-base font-semibold text-vault-text">{t('subscriptions.confirmTitle')}</h3>
+            <p className="text-sm text-vault-text-muted">
+              {t('subscriptions.confirmMessage', { count: String(preview?.count ?? 0) })}
+            </p>
+            <div className="flex gap-2">
+              <button
+                onClick={() => handleAdd(true)}
+                disabled={creating}
+                className="flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
+              >
+                {t('subscriptions.confirmDownloadAll')}
+              </button>
+              <button
+                onClick={() => handleAdd(false)}
+                disabled={creating}
+                className="flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-vault-card border border-vault-border text-vault-text hover:bg-vault-card-hover transition-colors disabled:opacity-50"
+              >
+                {t('subscriptions.confirmMonitorOnly')}
+              </button>
+            </div>
+            <button
+              onClick={() => setShowConfirm(false)}
+              className="w-full px-3 py-1.5 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+            >
+              {t('common.cancel')}
+            </button>
+          </div>
         </div>
       )}
 

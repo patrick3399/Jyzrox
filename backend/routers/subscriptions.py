@@ -1,5 +1,6 @@
 """Subscription management endpoints."""
 
+import json
 import logging
 import re
 from datetime import UTC, datetime
@@ -14,8 +15,11 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth, require_role
 from core.database import async_session
+from core.redis_client import get_redis
 from core.utils import detect_source
 from db.models import Subscription
+from plugins.registry import plugin_registry
+from services.credential import get_credential
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["subscriptions"])
@@ -158,6 +162,60 @@ async def create_subscription(
         await session.commit()
 
     return {"status": "ok", "id": row.id if row else None, "source": source}
+
+
+class PreviewRequest(BaseModel):
+    url: str
+
+
+@router.post("/preview")
+async def preview_subscription(req: PreviewRequest, auth: dict = Depends(_member)):
+    """Dry-run check for a subscription URL — returns work count and samples without saving."""
+    _unsupported = {"count": 0, "source": None, "source_id": None, "samples": [], "error": "unsupported"}
+
+    source: str | None = detect_source(req.url)
+    if not source or source == "unknown":
+        return _unsupported
+
+    source_id = _extract_source_id(req.url, source)
+    if not source_id:
+        return _unsupported
+
+    # Check Redis cache
+    redis = get_redis()
+    cache_key = f"subscription:preview:{source}:{source_id}"
+    cached = await redis.get(cache_key)
+    if cached:
+        return json.loads(cached)
+
+    subscribable = plugin_registry.get_subscribable(source)
+    if not subscribable:
+        return _unsupported
+
+    cred_raw = await get_credential(source)
+    credentials: dict | None = json.loads(cred_raw) if cred_raw is not None else None
+
+    try:
+        works = await subscribable.check_new_works(source_id, None, credentials)
+    except Exception as exc:
+        logger.warning("preview_subscription check_new_works failed for %s/%s: %s", source, source_id, exc)
+        return {
+            "count": 0,
+            "source": source,
+            "source_id": source_id,
+            "samples": [],
+            "error": str(exc),
+        }
+
+    result = {
+        "count": len(works),
+        "source": source,
+        "source_id": source_id,
+        "samples": [{"url": w.url, "title": w.title} for w in works[:5]],
+    }
+
+    await redis.set(cache_key, json.dumps(result), ex=300)
+    return result
 
 
 @router.get("/{sub_id}")

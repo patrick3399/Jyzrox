@@ -116,3 +116,28 @@ export function useSupportedSites() {
     revalidateOnFocus: false,
   })
 }
+
+export function useDownloadPreview(url: string) {
+  const trimmed = url.trim()
+
+  // Parse EH gallery URL
+  const ehMatch = trimmed.match(/e[-x]hentai\.org\/g\/(\d+)\/([a-f0-9]+)/)
+  // Parse Pixiv illust URL
+  const pixivMatch = trimmed.match(/pixiv\.net\/.*artworks\/(\d+)/)
+
+  const key = ehMatch
+    ? ['download/preview/eh', ehMatch[1], ehMatch[2]]
+    : pixivMatch
+    ? ['download/preview/pixiv', pixivMatch[1]]
+    : null
+
+  return useSWR<import('@/lib/types').EhGallery | import('@/lib/types').PixivIllust>(
+    key,
+    () => {
+      if (ehMatch) return api.eh.getGallery(Number(ehMatch[1]), ehMatch[2])
+      if (pixivMatch) return api.pixiv.getIllust(Number(pixivMatch[1]))
+      throw new Error('unreachable')
+    },
+    { dedupingInterval: 30000, keepPreviousData: true },
+  )
+}

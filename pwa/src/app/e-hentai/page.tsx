@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'rea
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEhSearch, useEhFavorites, useEhPopular, useEhToplist } from '@/hooks/useGalleries'
+import { useCreateSubscription } from '@/hooks/useSubscriptions'
 import { api } from '@/lib/api'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 
@@ -13,7 +14,7 @@ import { CredentialBanner } from '@/components/CredentialBanner'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { RatingStars } from '@/components/RatingStars'
-import { Search as SearchIcon, X as XIcon, ChevronDown, ChevronUp, Bookmark, BookmarkCheck } from 'lucide-react'
+import { Search as SearchIcon, X as XIcon, ChevronDown, ChevronUp, Bookmark, BookmarkCheck, Rss } from 'lucide-react'
 import type { EhGallery, Credentials, SavedSearch } from '@/lib/types'
 
 // ── IntersectionObserver-based lazy image ──────────────────────────────
@@ -408,6 +409,13 @@ function getLoadMode(): LoadMode {
   return (localStorage.getItem('browse_load_mode') as LoadMode) || 'pagination'
 }
 
+const CRON_PRESETS = [
+  { label: 'Every hour', value: '0 * * * *' },
+  { label: 'Every 2 hours', value: '0 */2 * * *' },
+  { label: 'Every 6 hours', value: '0 */6 * * *' },
+  { label: 'Daily', value: '0 0 * * *' },
+]
+
 export default function BrowsePageWrapper() {
   return (
     <Suspense>
@@ -492,6 +500,13 @@ function BrowsePage() {
     const p = searchParams.get('tlpage')
     return p ? Number(p) : 0
   })
+
+  // Subscribe to search state
+  const [showSubscribe, setShowSubscribe] = useState(false)
+  const [subName, setSubName] = useState('')
+  const [subAutoDownload, setSubAutoDownload] = useState(true)
+  const [subCron, setSubCron] = useState('0 */2 * * *')
+  const { trigger: createSub, isMutating: subCreating } = useCreateSubscription()
 
   // Saved searches state
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([])
@@ -858,6 +873,23 @@ function BrowsePage() {
     },
     [commitSearch],
   )
+
+  const handleSubscribe = async () => {
+    const subUrl = `https://e-hentai.org/?f_search=${encodeURIComponent(searchQuery)}`
+    try {
+      await createSub({
+        url: subUrl,
+        name: subName.trim() || searchQuery,
+        auto_download: subAutoDownload,
+        cron_expr: subCron,
+      })
+      toast.success(t('browse.subscribeSuccess'))
+      setShowSubscribe(false)
+      setSubName('')
+    } catch {
+      toast.error(t('browse.subscribeFailed'))
+    }
+  }
 
   const clearSearch = useCallback(() => {
     setInputValue('')
@@ -1234,6 +1266,74 @@ function BrowsePage() {
               </div>
             )}
           </div>
+
+          {/* Subscribe to search button (desktop) */}
+          {searchQuery && (
+            <div className="relative hidden sm:block shrink-0">
+              <button
+                onClick={() => setShowSubscribe(!showSubscribe)}
+                title={t('browse.subscribeToSearch')}
+                className="p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-accent transition-colors"
+              >
+                <Rss size={18} />
+              </button>
+              {showSubscribe && (
+                <div className="absolute right-0 top-full mt-1 z-40 w-80 bg-vault-card border border-vault-border rounded-lg shadow-xl p-4 space-y-3">
+                  <h3 className="text-sm font-medium text-vault-text">{t('browse.subscribeToSearch')}</h3>
+                  <div>
+                    <label className="text-xs text-vault-text-muted block mb-1">URL</label>
+                    <input
+                      type="text"
+                      readOnly
+                      value={`https://e-hentai.org/?f_search=${encodeURIComponent(searchQuery)}`}
+                      className="w-full px-2 py-1.5 bg-vault-input border border-vault-border rounded text-xs text-vault-text-muted"
+                    />
+                  </div>
+                  <div>
+                    <label className="text-xs text-vault-text-muted block mb-1">{t('subscriptions.name')}</label>
+                    <input
+                      type="text"
+                      value={subName}
+                      onChange={(e) => setSubName(e.target.value)}
+                      placeholder={searchQuery}
+                      className="w-full px-2 py-1.5 bg-vault-input border border-vault-border rounded text-sm text-vault-text placeholder-vault-text-muted"
+                    />
+                  </div>
+                  <div className="flex items-center gap-4">
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-vault-text-muted">{t('subscriptions.autoDownload')}</label>
+                      <button
+                        onClick={() => setSubAutoDownload(!subAutoDownload)}
+                        className={`relative w-9 h-5 rounded-full transition-colors ${subAutoDownload ? 'bg-vault-accent' : 'bg-vault-border'}`}
+                      >
+                        <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${subAutoDownload ? 'translate-x-4' : ''}`} />
+                      </button>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <label className="text-xs text-vault-text-muted">{t('subscriptions.cronExpr')}</label>
+                      <select
+                        value={subCron}
+                        onChange={(e) => setSubCron(e.target.value)}
+                        className="px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text"
+                      >
+                        {CRON_PRESETS.map((p) => (
+                          <option key={p.value} value={p.value}>{p.label}</option>
+                        ))}
+                      </select>
+                    </div>
+                  </div>
+                  <button
+                    onClick={handleSubscribe}
+                    disabled={subCreating}
+                    className="w-full px-3 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
+                  >
+                    {subCreating ? t('subscriptions.adding') : t('subscriptions.add')}
+                  </button>
+                </div>
+              )}
+            </div>
+          )}
+
           {/* View toggle */}
           <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
             <button
