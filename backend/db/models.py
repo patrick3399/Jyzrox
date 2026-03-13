@@ -174,6 +174,9 @@ class DownloadJob(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
+    retry_count: Mapped[int] = mapped_column(SmallInteger, default=0)
+    max_retries: Mapped[int] = mapped_column(SmallInteger, default=3)
+    next_retry_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ReadProgress(Base):

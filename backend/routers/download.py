@@ -6,6 +6,8 @@ import signal
 import urllib.parse
 import uuid
 
+from arq.connections import ArqRedis
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete, desc, func, select, text
@@ -203,7 +205,7 @@ async def clear_finished_jobs(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete all completed, failed, and cancelled jobs."""
-    conditions = [DownloadJob.status.in_(["done", "failed", "cancelled"])]
+    conditions = [DownloadJob.status.in_(["done", "failed", "cancelled", "partial"])]
     if auth["role"] != "admin":
         conditions.append(DownloadJob.user_id == auth["user_id"])
     stmt = delete(DownloadJob).where(*conditions)
@@ -227,7 +229,7 @@ async def get_stats(
     ).scalar_one()
     finished_count = (
         await db.execute(
-            select(func.count()).where(DownloadJob.status.in_(["done", "failed", "cancelled"]), *user_filter)
+            select(func.count()).where(DownloadJob.status.in_(["done", "failed", "cancelled", "partial"]), *user_filter)
         )
     ).scalar_one()
     return {"running": running_count, "finished": finished_count}
@@ -317,7 +319,7 @@ async def pause_resume_job(
 
     redis = get_redis()
     pause_key = f"download:pause:{job_id}"
-    terminal_statuses = {"done", "failed", "cancelled"}
+    terminal_statuses = {"done", "failed", "cancelled", "partial"}
     if body.action == "pause":
         if job.status in terminal_statuses:
             raise HTTPException(status_code=409, detail=f"Job already {job.status}")
@@ -387,6 +389,67 @@ async def cancel_job(
     return {"status": "cancelled"}
 
 
+@router.post("/jobs/{job_id}/retry")
+async def retry_job(
+    job_id: uuid.UUID,
+    request: Request,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually retry a failed or partial download job."""
+    job = await db.get(DownloadJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.user_id != auth["user_id"] and auth["role"] != "admin":
+        locale = parse_accept_language(request.headers.get("accept-language"))
+        raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
+
+    if job.status not in ("failed", "partial"):
+        raise HTTPException(status_code=400, detail=f"Cannot retry: status={job.status}")
+    if job.retry_count >= job.max_retries:
+        raise HTTPException(status_code=400, detail="Max retries reached")
+
+    from datetime import UTC, datetime, timedelta
+    now = datetime.now(UTC)
+
+    job.retry_count += 1
+    job.status = "queued"
+    job.finished_at = None
+    job.error = None
+
+    # Read base_delay from Redis for backoff calculation
+    redis = get_redis()
+    base_delay_raw = await redis.get("setting:retry_base_delay_minutes")
+    base_delay = int(base_delay_raw) if base_delay_raw else 5
+    backoff_minutes = min(base_delay * (2 ** job.retry_count), 1440)
+    job.next_retry_at = now + timedelta(minutes=backoff_minutes)
+
+    await db.commit()
+
+    arq_job_id = f"retry:{job.id}:{job.retry_count}"
+    try:
+        arq: ArqRedis = request.app.state.arq
+        await arq.enqueue_job(
+            "download_job",
+            job.url,
+            job.source or "",
+            None,
+            str(job.id),
+            job.progress.get("total") if job.progress else None,
+            _job_id=arq_job_id,
+        )
+    except Exception as exc:
+        logger.error("[retry] manual retry enqueue failed for %s: %s", job_id, exc)
+        job.retry_count -= 1
+        job.status = "failed"
+        job.error = f"Retry enqueue failed: {exc}"
+        await db.commit()
+        raise HTTPException(status_code=503, detail="Failed to enqueue retry job")
+
+    return {"status": "queued", "retry_count": job.retry_count, "max_retries": job.max_retries}
+
+
 def _j(j: DownloadJob) -> dict:
     return {
         "id": str(j.id),
@@ -397,4 +460,7 @@ def _j(j: DownloadJob) -> dict:
         "error": j.error,
         "created_at": j.created_at.isoformat() if j.created_at else None,
         "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+        "retry_count": j.retry_count,
+        "max_retries": j.max_retries,
+        "next_retry_at": j.next_retry_at.isoformat() if j.next_retry_at else None,
     }

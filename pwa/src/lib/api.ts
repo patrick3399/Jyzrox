@@ -419,6 +419,12 @@ const download = {
       body: JSON.stringify({ action: 'resume' }),
     }),
 
+  retryJob: (id: string) =>
+    apiFetch<{ status: string; retry_count: number; max_retries: number }>(
+      `/api/download/jobs/${id}/retry`,
+      { method: 'POST' },
+    ),
+
   checkUrl: (url: string) =>
     apiFetch<{ supported: boolean; source_id?: string; name?: string; category?: string }>(
       `/api/download/check-url${qs({ url })}`,

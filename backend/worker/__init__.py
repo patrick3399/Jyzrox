@@ -49,6 +49,7 @@ from worker.dedup_tier2 import dedup_tier2_job
 from worker.dedup_tier3 import dedup_tier3_job
 from worker.dedup_scan import dedup_scan_job
 from worker.thumbhash_backfill import thumbhash_backfill_job
+from worker.retry import retry_failed_downloads_job
 from worker.helpers import _sha256
 
 logging.basicConfig(
@@ -238,6 +239,7 @@ class WorkerSettings:
         dedup_scan_job,
         rate_limit_schedule_job,
         thumbhash_backfill_job,
+        retry_failed_downloads_job,
     ]
     cron_jobs = [
         cron(
@@ -271,6 +273,13 @@ class WorkerSettings:
             unique=True,
             timeout=60,
         ),
+        cron(
+            retry_failed_downloads_job,
+            minute={0, 15, 30, 45},
+            run_at_startup=False,
+            unique=True,
+            timeout=300,
+        ),
     ]
     on_startup = startup
     on_shutdown = shutdown
@@ -301,6 +310,7 @@ __all__ = [
     "toggle_watcher_job",
     "rate_limit_schedule_job",
     "thumbhash_backfill_job",
+    "retry_failed_downloads_job",
     "startup",
     "shutdown",
     "WorkerSettings",

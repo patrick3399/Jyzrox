@@ -165,38 +165,61 @@ async def download_job(
         await _set_job_status(db_job_id, "failed", err)
         return {"status": "failed", "error": err}
 
+    # ── Image validation + partial detection ────────────────────────
+    from worker.helpers import _validate_image_magic
+    from worker.constants import _IMAGE_EXTS
+
+    corrupt_pages: list[int] = []
+    if target_dir.exists():
+        for f in sorted(target_dir.iterdir()):
+            if f.suffix.lower() in _IMAGE_EXTS and f.is_file():
+                if not _validate_image_magic(f):
+                    # Extract page number from filename (e.g. "0001.jpg" → 1)
+                    try:
+                        page_num = int(f.stem.lstrip("0") or "0")
+                    except ValueError:
+                        page_num = 0
+                    corrupt_pages.append(page_num)
+                    logger.warning("[download] corrupt image removed: %s", f.name)
+                    f.unlink(missing_ok=True)
+
+    all_failed = sorted(set(getattr(result, 'failed_pages', []) + corrupt_pages))
+
     # Final progress update
     elapsed = (datetime.now(UTC) - started_at).total_seconds()
     speed = round(result.downloaded / elapsed, 3) if elapsed > 0 else 0
-    await _set_job_progress(db_job_id, {
+    final_progress = {
         **_base_progress,
         "total": result.total or result.downloaded,
         "downloaded": result.downloaded,
         "started_at": started_at.isoformat(),
         "last_update_at": datetime.now(UTC).isoformat(),
         "speed": speed,
-        "status_text": "Complete",
-    })
+        "status_text": "Complete" if not all_failed else f"Partial — {len(all_failed)} pages failed",
+    }
+    if all_failed:
+        final_progress["failed_pages"] = all_failed
+    await _set_job_progress(db_job_id, final_progress)
 
-    # Trigger import
+    # Trigger import regardless (partial pages are still useful)
     if target_dir.exists():
-        # Look up user_id from the download job to pass to import_job
         import_user_id = None
         if db_job_id:
             from core.database import AsyncSessionLocal
             from sqlalchemy.sql import select as sa_select
             from db.models import DownloadJob
             async with AsyncSessionLocal() as session:
-                result = await session.execute(
+                _result = await session.execute(
                     sa_select(DownloadJob.user_id).where(DownloadJob.id == db_job_id)
                 )
-                import_user_id = result.scalar_one_or_none()
+                import_user_id = _result.scalar_one_or_none()
         await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id, import_user_id)
 
+    if all_failed:
+        await _set_job_status(db_job_id, "partial")
+        logger.warning("[download] partial: %d pages failed: %s", len(all_failed), all_failed)
+        return {"status": "partial", "downloaded": result.downloaded, "failed_pages": all_failed}
+
     await _set_job_status(db_job_id, "done")
-
-    if result.failed_pages:
-        logger.warning("[download] %d pages failed: %s", len(result.failed_pages), result.failed_pages)
-
     logger.info("[download] done: %s (downloaded=%d)", url, result.downloaded)
     return {"status": "done", "downloaded": result.downloaded}

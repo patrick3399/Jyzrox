@@ -323,7 +323,10 @@ _SQLITE_SCHEMA = [
         error TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         finished_at TIMESTAMP,
-        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        retry_count INTEGER DEFAULT 0,
+        max_retries INTEGER DEFAULT 3,
+        next_retry_at TIMESTAMP
     )
     """,
     """

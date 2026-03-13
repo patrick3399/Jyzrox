@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { Download, X, Plus, Trash2, Pause, Play, ChevronRight, Globe, WifiOff } from 'lucide-react'
+import { Download, X, Plus, Trash2, Pause, Play, ChevronRight, Globe, WifiOff, RotateCcw } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   useDownloadJobs,
@@ -9,6 +9,7 @@ import {
   useCancelJob,
   useClearFinishedJobs,
   usePauseJob,
+  useRetryJob,
   useCheckUrl,
   useSupportedSites,
 } from '@/hooks/useDownloadQueue'
@@ -25,6 +26,7 @@ const STATUS_STYLES: Record<string, string> = {
   failed: 'bg-red-500/10 border-red-500/30 text-red-400',
   cancelled: 'bg-vault-card border-vault-border text-vault-text-muted',
   paused: 'bg-orange-500/10 border-orange-500/30 text-orange-400',
+  partial: 'bg-amber-500/10 border-amber-500/30 text-amber-400',
 }
 
 function StatusBadge({ status }: { status: string }) {
@@ -56,11 +58,13 @@ function JobRow({
   job,
   onCancel,
   onPause,
+  onRetry,
   isCancelling,
 }: {
   job: DownloadJob
   onCancel: (id: string) => void
   onPause: (id: string, action: 'pause' | 'resume') => void
+  onRetry: (id: string) => void
   isCancelling: boolean
 }) {
   const canCancel = job.status === 'queued' || job.status === 'running' || job.status === 'paused'
@@ -90,6 +94,24 @@ function JobRow({
             )}
           </div>
           {job.error && <p className="mt-1 text-xs text-red-400 break-words">{job.error}</p>}
+          {/* Retry info */}
+          {job.retry_count > 0 && (
+            <p className="mt-1 text-xs text-vault-text-muted">
+              {t('queue.retryCount', { count: String(job.retry_count), max: String(job.max_retries) })}
+            </p>
+          )}
+          {/* Failed pages info */}
+          {job.progress?.failed_pages && job.progress.failed_pages.length > 0 && (
+            <p className="mt-1 text-xs text-amber-400">
+              {t('queue.failedPages', { count: String(job.progress.failed_pages.length) })}
+            </p>
+          )}
+          {/* Permanently failed notice */}
+          {job.retry_count >= job.max_retries && (job.status === 'failed' || job.status === 'partial') && (
+            <p className="mt-1 text-xs text-red-400/70">
+              {t('queue.permanentlyFailed')}
+            </p>
+          )}
           {job.status === 'running' && job.progress && (
             <div className="mt-2">
               {typeof job.progress.downloaded === 'number' && (
@@ -182,6 +204,15 @@ function JobRow({
               <X size={14} />
             </button>
           )}
+          {(job.status === 'failed' || job.status === 'partial') && job.retry_count < job.max_retries && (
+            <button
+              onClick={() => onRetry(job.id)}
+              className="p-1.5 rounded-lg bg-vault-accent/10 border border-vault-accent/30 hover:bg-vault-accent/20 text-vault-accent transition-colors"
+              title={t('queue.retry')}
+            >
+              <RotateCcw size={14} />
+            </button>
+          )}
         </div>
       </div>
     </div>
@@ -206,6 +237,7 @@ export default function QueuePage() {
   const { trigger: cancelJob } = useCancelJob()
   const { trigger: clearJobs, isMutating: isClearing } = useClearFinishedJobs()
   const { trigger: pauseJob } = usePauseJob()
+  const { trigger: retryJob } = useRetryJob()
 
   const { connected } = useWs()
   const [showFallbackWarning, setShowFallbackWarning] = useState(false)
@@ -264,6 +296,19 @@ export default function QueuePage() {
     [pauseJob, mutate],
   )
 
+  const handleRetry = useCallback(
+    async (id: string) => {
+      try {
+        await retryJob(id)
+        toast.success(t('queue.retryQueued'))
+        await mutate()
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t('queue.retryError'))
+      }
+    },
+    [retryJob, mutate],
+  )
+
   const handleClear = useCallback(async () => {
     try {
       const result = await clearJobs()
@@ -279,7 +324,7 @@ export default function QueuePage() {
     (j) => j.status === 'queued' || j.status === 'running' || j.status === 'paused',
   )
   const completedJobs = allJobs.filter(
-    (j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled',
+    (j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled' || j.status === 'partial',
   )
 
   const statusOrder: Record<string, number> = { running: 0, paused: 1, queued: 2 }
@@ -422,6 +467,7 @@ export default function QueuePage() {
                     job={job}
                     onCancel={handleCancel}
                     onPause={handlePause}
+                    onRetry={handleRetry}
                     isCancelling={false}
                   />
                 ))}
@@ -454,6 +500,7 @@ export default function QueuePage() {
                   job={job}
                   onCancel={handleCancel}
                   onPause={handlePause}
+                  onRetry={handleRetry}
                   isCancelling={false}
                 />
               ))}

@@ -89,6 +89,15 @@ export function usePauseJob() {
   )
 }
 
+export function useRetryJob() {
+  const { mutate: globalMutate } = useSWRConfig()
+  return useSWRMutation('download/retry', async (_key: unknown, { arg }: { arg: string }) => {
+    const result = await api.download.retryJob(arg)
+    globalMutate((key: unknown) => typeof key === 'string' && key.startsWith('download/'))
+    return result
+  })
+}
+
 export function useCheckUrl(url: string) {
   const trimmed = url.trim()
   return useSWR(

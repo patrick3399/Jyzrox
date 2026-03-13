@@ -392,3 +392,9 @@ CREATE TABLE IF NOT EXISTS user_ratings (
     PRIMARY KEY (user_id, gallery_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_ratings_gallery ON user_ratings (gallery_id);
+
+-- ── Download Retry ──────────────────────────────────────────────────
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS retry_count SMALLINT DEFAULT 0;
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS max_retries SMALLINT DEFAULT 3;
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_download_jobs_retry ON download_jobs (status, retry_count, next_retry_at) WHERE status IN ('failed', 'partial');

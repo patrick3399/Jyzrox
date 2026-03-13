@@ -528,6 +528,9 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "dedup_phash_threshold": await _get_int_setting("setting:dedup_phash_threshold", 10),
         "dedup_opencv_enabled": await _get_toggle("setting:dedup_opencv_enabled", False),
         "dedup_opencv_threshold": await _get_float_setting("setting:dedup_opencv_threshold", 0.85),
+        "retry_enabled": await _get_toggle("setting:retry_enabled", True),
+        "retry_max_retries": await _get_int_setting("setting:retry_max_retries", 3),
+        "retry_base_delay_minutes": await _get_int_setting("setting:retry_base_delay_minutes", 5),
     }
 
 
@@ -552,6 +555,9 @@ async def patch_feature_toggle(
         "dedup_phash_threshold": "setting:dedup_phash_threshold",
         "dedup_opencv_enabled": "setting:dedup_opencv_enabled",
         "dedup_opencv_threshold": "setting:dedup_opencv_threshold",
+        "retry_enabled": "setting:retry_enabled",
+        "retry_max_retries": "setting:retry_max_retries",
+        "retry_base_delay_minutes": "setting:retry_base_delay_minutes",
     }
     if feature not in ALLOWED:
         raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
@@ -569,6 +575,24 @@ async def patch_feature_toggle(
             raise HTTPException(status_code=400, detail="value required for dedup_opencv_threshold")
         await get_redis().set("setting:dedup_opencv_threshold", str(req.value))
         return {"feature": feature, "value": req.value}
+
+    if feature == "retry_max_retries":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for retry_max_retries")
+        val = int(req.value)
+        if not (1 <= val <= 10):
+            raise HTTPException(status_code=400, detail="retry_max_retries must be between 1 and 10")
+        await get_redis().set("setting:retry_max_retries", str(val))
+        return {"feature": feature, "value": val}
+
+    if feature == "retry_base_delay_minutes":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for retry_base_delay_minutes")
+        val = int(req.value)
+        if not (1 <= val <= 60):
+            raise HTTPException(status_code=400, detail="retry_base_delay_minutes must be between 1 and 60")
+        await get_redis().set("setting:retry_base_delay_minutes", str(val))
+        return {"feature": feature, "value": val}
 
     if req.enabled is None:
         raise HTTPException(status_code=400, detail="enabled required for boolean features")

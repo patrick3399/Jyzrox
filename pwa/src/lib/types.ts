@@ -143,7 +143,7 @@ export interface DownloadJob {
   id: string
   url: string
   source: string
-  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused'
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused' | 'partial'
   progress: {
     percent?: number
     downloaded?: number
@@ -152,11 +152,16 @@ export interface DownloadJob {
     speed?: number
     started_at?: string
     last_update_at?: string
+    failed_pages?: number[]
+    permanently_failed?: boolean
     [key: string]: unknown
   }
   error: string | null
   created_at: string
   finished_at: string | null
+  retry_count: number
+  max_retries: number
+  next_retry_at: string | null
 }
 
 // ── Tags ─────────────────────────────────────────────────────────────

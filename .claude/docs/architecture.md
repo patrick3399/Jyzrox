@@ -76,7 +76,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `/api/eh` | `plugins/builtin/ehentai/browse.py` (dynamic) | Session | EH search, gallery, images, proxy, favorites, popular, toplists |
 | `/api/pixiv` | `plugins/builtin/pixiv/_browse.py` (dynamic) | Session | Pixiv search, illust, user, following, image proxy |
 | `/api/library` | `routers/library.py` | Session | Gallery CRUD, images, tags, progress, artists, image browser |
-| `/api/download` | `routers/download.py` | Session | Enqueue, list/cancel jobs, stats |
+| `/api/download` | `routers/download.py` | Session | Enqueue, list/cancel/retry jobs, stats, pause/resume |
 | `/api/settings` | `routers/settings.py` | Session | Credentials, API tokens, feature flags, EH site toggle, rate limit |
 | `/api/ws` | `routers/ws.py` | Session | WebSocket at `/api/ws/ws` |
 | `/api/search` | `routers/search.py` | Session | Full-text gallery search, saved searches |
@@ -112,7 +112,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `tag_implications` | Tag inference rules | `(antecedent_id, consequent_id)` PK |
 | `gallery_tags` | Gallery↔Tag join | `(gallery_id, tag_id)` PK, `confidence`, `source` |
 | `image_tags` | Image↔Tag join | `(image_id, tag_id)` PK, `confidence` |
-| `download_jobs` | ARQ job tracking | `id` UUID PK, `user_id` FK, `url`, `source`, `status`, `progress` JSONB, `error` |
+| `download_jobs` | ARQ job tracking | `id` UUID PK, `user_id` FK, `url`, `source`, `status` (queued/running/done/failed/cancelled/paused/partial), `progress` JSONB (may contain `failed_pages`, `permanently_failed`), `error`, `retry_count SMALLINT`, `max_retries SMALLINT`, `next_retry_at` |
 | `read_progress` | Per-gallery read cursor | `(user_id, gallery_id)` PK, `last_page`, `last_read_at` |
 | `credentials` | Source credentials (encrypted) | `source` PK, `credential_type`, `value_encrypted` BYTEA |
 | `api_tokens` | External API tokens | `id` UUID PK, `user_id` FK, `token_hash` UNIQUE, `token_plain`, `expires_at` |
@@ -146,6 +146,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `idx_galleries_rating_id` | `galleries` | BTree | keyset pagination |
 | `idx_galleries_pages_id` | `galleries` | BTree | keyset pagination |
 | `idx_images_added_at_id` | `images` | BTree | keyset pagination for image browser |
+| `idx_download_jobs_retry` | `download_jobs` | BTree (partial) | Retry query: `WHERE status IN ('failed', 'partial')` |
 
 ---
 
@@ -186,7 +187,7 @@ All models are in `backend/db/models.py`.
 
 ### Worker Pipeline (ARQ)
 
-Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `dedup.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`, `thumbhash_backfill.py`)
+Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `dedup.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`, `thumbhash_backfill.py`, `retry.py`)
 
 #### Job Functions
 
@@ -213,6 +214,7 @@ Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py
 | `dedup_tier2_job` | Via `dedup_scan_job` | Heuristic classification: fills `relationship` (`quality_conflict`/`variant`) + `suggested_keep` |
 | `dedup_tier3_job` | Via `dedup_scan_job` (when `dedup_opencv_enabled`) | OpenCV pixel-diff validates `needs_t3` pairs → confirms or resolves as false positive |
 | `thumbhash_backfill_job` | Manual | Batch-generates base64 thumbhash for existing blobs missing `thumbhash`; reads `thumb_160.webp` via Pillow + `thumbhash` library; processes in batches of 500 using keyset pagination on `sha256` |
+| `retry_failed_downloads_job` | ARQ cron (*/15) | Scans failed/partial jobs with `retry_count < max_retries`; re-queues with exponential backoff; `LIMIT 10` + `FOR UPDATE SKIP LOCKED` |
 
 #### Standard Pipeline
 
@@ -346,6 +348,16 @@ All fields read from `.env` via Pydantic `BaseSettings`.
 | `setting:dedup_heuristic_enabled` | `false` | Enable Tier 2 heuristic classification |
 | `setting:dedup_opencv_enabled` | `false` | Enable Tier 3 OpenCV pixel-diff |
 | `setting:dedup_opencv_threshold` | `0.85` | OpenCV similarity threshold |
+
+#### Retry Settings (Redis-backed)
+
+> 重試設定存於 Redis（`setting:retry_*`），可在 `/api/settings` 動態修改。
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `setting:retry_enabled` | `true` | Enable automatic retry of failed/partial downloads |
+| `setting:retry_max_retries` | `3` | Maximum retry attempts per job |
+| `setting:retry_base_delay_minutes` | `5` | Base delay for exponential backoff (minutes) |
 
 #### E-Hentai Limits
 
@@ -539,7 +551,7 @@ All hooks in `pwa/src/hooks/`.
 | `useAuth` | `useAuth.ts` | `login(username, password)`, `logout()`, session state |
 | `useProfile` | `useProfile.ts` | User profile data (SWR) |
 | `useGalleries` | `useGalleries.ts` | `useLibraryGalleries`, `useLibraryGallery`, `useGalleryImages` (SWR) |
-| `useDownloadQueue` | `useDownloadQueue.ts` | `useDownloadJobs` (3s refresh), `useEnqueueDownload`, `useCancelJob` |
+| `useDownloadQueue` | `useDownloadQueue.ts` | `useDownloadJobs` (3s refresh / WS real-time), `useEnqueueDownload`, `useCancelJob`, `useRetryJob`, `usePauseJob` |
 | `useImport` | `useImport.ts` | Import flow state and progress |
 | `useArtists` | `useArtists.ts` | Followed artists listing and actions |
 | `useTagTranslations` | `useTagTranslations.ts` | Tag translation lookup (SWR) |
@@ -737,6 +749,11 @@ Credentials are read from `.env` at project root. DB user/name default to `vault
 | `dedup:progress:mode` | — | Scan mode |
 | `download:pid:{job_id}` | — | gallery-dl subprocess PID（cancel 用，best-effort SIGTERM） |
 | `download:pause:{job_id}` | 24h | 統一 soft-pause flag，所有下載引擎共用（key 存在即暫停） |
+| `download:cancel:{job_id}` | 1h | Cancel flag for native downloads |
+| `setting:retry_enabled` | — | Auto-retry feature toggle |
+| `setting:retry_max_retries` | — | Max retry attempts setting |
+| `setting:retry_base_delay_minutes` | — | Retry backoff base delay setting |
+| `cron:retry_downloads:*` | — | Retry cron job state (last_run, last_status, enabled, cron_expr) |
 
 ---
 

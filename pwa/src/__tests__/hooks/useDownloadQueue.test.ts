@@ -29,6 +29,7 @@ const {
   mockGetStats,
   mockPauseJob,
   mockResumeJob,
+  mockRetryJob,
 } = vi.hoisted(() => ({
   mockEnqueue: vi.fn(),
   mockGetJobs: vi.fn(),
@@ -37,6 +38,7 @@ const {
   mockGetStats: vi.fn(),
   mockPauseJob: vi.fn(),
   mockResumeJob: vi.fn(),
+  mockRetryJob: vi.fn(),
 }))
 
 // ── api mock ─────────────────────────────────────────────────────────
@@ -51,6 +53,7 @@ vi.mock('@/lib/api', () => ({
       getStats: mockGetStats,
       pauseJob: mockPauseJob,
       resumeJob: mockResumeJob,
+      retryJob: mockRetryJob,
     },
   },
 }))
@@ -85,6 +88,7 @@ const { mockUseSWR, mockUseSWRMutation } = vi.hoisted(() => ({
 vi.mock('swr', () => ({
   default: mockUseSWR,
   mutate: vi.fn(),
+  useSWRConfig: () => ({ mutate: vi.fn() }),
 }))
 
 vi.mock('swr/mutation', () => ({
@@ -100,6 +104,7 @@ import {
   useClearFinishedJobs,
   useDownloadStats,
   usePauseJob,
+  useRetryJob,
 } from '@/hooks/useDownloadQueue'
 
 // ── Setup ─────────────────────────────────────────────────────────────
@@ -115,6 +120,7 @@ beforeEach(() => {
   mockGetStats.mockResolvedValue({ running: 0, finished: 5 })
   mockPauseJob.mockResolvedValue({ status: 'paused' })
   mockResumeJob.mockResolvedValue({ status: 'running' })
+  mockRetryJob.mockResolvedValue({ status: 'queued', retry_count: 1, max_retries: 3 })
 })
 
 afterEach(() => {
@@ -244,5 +250,20 @@ describe('usePauseJob', () => {
     expect(mockResumeJob).toHaveBeenCalledOnce()
     expect(mockResumeJob).toHaveBeenCalledWith('job-7')
     expect(mockPauseJob).not.toHaveBeenCalled()
+  })
+})
+
+describe('useRetryJob', () => {
+  it('should call useSWRMutation with key "download/retry"', () => {
+    useRetryJob()
+    const [key] = mockUseSWRMutation.mock.calls[0]
+    expect(key).toBe('download/retry')
+  })
+
+  it('should call api.download.retryJob with the job ID when trigger is invoked', async () => {
+    const { trigger } = useRetryJob()
+    await trigger('job-99')
+    expect(mockRetryJob).toHaveBeenCalledOnce()
+    expect(mockRetryJob).toHaveBeenCalledWith('job-99')
   })
 })
