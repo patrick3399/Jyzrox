@@ -151,8 +151,7 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
 
         credentials = await get_credential(source_name)
         if not credentials:
-            logger.info("[check_followed] no %s credentials — skipping", source_name)
-            continue
+            logger.info("[check_followed] no %s credentials — proceeding without auth", source_name)
 
         async with AsyncSessionLocal() as session:
             query = select(Subscription).where(Subscription.source == source_name)
@@ -227,18 +226,10 @@ async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
 
     subscribable = plugin_registry.get_subscribable(sub.source)
     if subscribable and sub.source_id:
-        credentials = await get_credential(sub.source)
+        cred_raw = await get_credential(sub.source)
+        credentials = cred_raw  # may be None — gallery-dl can handle public pages
         if not credentials:
-            async with AsyncSessionLocal() as session:
-                await session.execute(
-                    update(Subscription).where(Subscription.id == sub.id).values(
-                        last_checked_at=datetime.now(UTC),
-                        last_status="failed",
-                        last_error=f"No {sub.source} credentials configured",
-                    )
-                )
-                await session.commit()
-            return {"status": "failed", "error": f"No {sub.source} credentials"}
+            logger.info("[check_sub] no %s credentials — proceeding without auth (results may be limited)", sub.source)
 
         new_count = 0
         try:
