@@ -1,3 +1,5 @@
+import { t } from '@/lib/i18n'
+
 interface TagBadgeProps {
   tag: string
   onClick?: () => void
@@ -68,7 +70,7 @@ export function TagBadge({ tag, onClick, onRemove, variant = 'default' }: TagBad
             onRemove()
           }}
           className="ml-0.5 opacity-60 hover:opacity-100 leading-none"
-          aria-label={`Remove tag ${tag}`}
+          aria-label={t('common.removeTag', { tag })}
         >
           ×
         </button>

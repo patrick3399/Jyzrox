@@ -175,7 +175,7 @@ export function VirtualGrid<T>({
     }
   }, [lastVirtualItem, hasMore, isLoading, rowCount, items.length])
 
-  if (items.length === 0) return null
+  if (items.length === 0) return <div ref={containerRef} className={className} />
 
   const totalHeight = virtualizer.getTotalSize()
 

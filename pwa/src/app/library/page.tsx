@@ -369,7 +369,7 @@ function LibraryContent() {
               <button
                 onClick={() => setArtistFilter('')}
                 className="ml-1 hover:text-red-400 transition-colors"
-                aria-label="Clear artist filter"
+                aria-label={t('library.clearArtistFilter')}
               >
                 <X size={12} />
               </button>

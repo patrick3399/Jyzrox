@@ -152,6 +152,7 @@ class GalleryDlPlugin(SourcePlugin):
         on_progress: Callable[[int, int], Awaitable[None]] | None = None,
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
+        pause_check: Callable[[], Awaitable[bool]] | None = None,
     ) -> DownloadResult:
         """Run gallery-dl as a subprocess and stream progress."""
         from core.redis_client import get_download_delay

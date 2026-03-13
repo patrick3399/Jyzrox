@@ -62,11 +62,10 @@ echo "[backup] Done! Size: $SIZE"
 
 # Cleanup: keep last 30 backups (handles both plain and encrypted)
 KEEP=30
-COUNT=$(ls -1 "$BACKUP_DIR"/vault_*.sql.gz "$BACKUP_DIR"/vault_*.sql.gz.gpg 2>/dev/null | wc -l)
+COUNT=$(ls -1 "$BACKUP_DIR"/vault_*.sql.gz* 2>/dev/null | wc -l)
 if [ "$COUNT" -gt "$KEEP" ]; then
   REMOVE=$((COUNT - KEEP))
-  { ls -1t "$BACKUP_DIR"/vault_*.sql.gz 2>/dev/null; ls -1t "$BACKUP_DIR"/vault_*.sql.gz.gpg 2>/dev/null; } \
-    | sort -r | tail -n "$REMOVE" | xargs rm -f
+  ls -1t "$BACKUP_DIR"/vault_*.sql.gz* 2>/dev/null | tail -n "$REMOVE" | xargs rm -f
   echo "[backup] Cleaned up $REMOVE old backup(s), keeping last $KEEP"
 fi
 
