@@ -26,6 +26,7 @@ import {
   CalendarClock,
   ScanSearch,
   ShieldCheck,
+  Images,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
@@ -44,6 +45,7 @@ const navLinks = [
   { href: '/e-hentai', label: () => t('nav.ehentai'), icon: Compass, minRole: 'viewer' as UserRole },
   { href: '/pixiv', label: () => t('nav.pixiv'), icon: Palette, minRole: 'viewer' as UserRole },
   { href: '/library', label: () => t('nav.library'), icon: BookOpen, minRole: 'viewer' as UserRole },
+  { href: '/images', label: () => t('nav.images'), icon: Images, minRole: 'viewer' as UserRole },
   { href: '/explorer', label: () => t('nav.explorer'), icon: FolderTree, minRole: 'viewer' as UserRole },
   { href: '/artists', label: () => t('nav.artists'), icon: Users, minRole: 'viewer' as UserRole },
   { href: '/subscriptions', label: () => t('nav.subscriptions'), icon: Rss, minRole: 'member' as UserRole },

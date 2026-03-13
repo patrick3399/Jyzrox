@@ -801,6 +801,16 @@ const ko: Record<string, string> = {
   'error.cannot_delete_self': '자신의 계정은 삭제할 수 없습니다',
   'error.cannot_delete_last_admin': '마지막 관리자 계정은 삭제할 수 없습니다',
   'error.username_taken': '이미 사용 중인 사용자 이름입니다',
+
+  // ── Subscriptions (batch) ──
+  'subscriptions.batchEnqueuing': '다운로드 대기열에 추가 중...',
+  'subscriptions.batchProgress': '{enqueued} / {total} 추가됨',
+  'subscriptions.batchDone': '배치 완료',
+  'subscriptions.batchFailed': '{failed}개 추가 실패',
+  'settings.subscriptionEnqueue': '구독 대기열',
+  'settings.subscriptionEnqueueDelay': '대기열 간격',
+  'settings.subscriptionBatchMax': '배치 최대값 (0 = 무제한)',
+  'settings.subscriptionEnqueueDesc': '구독 자동 다운로드를 제한합니다. 간격은 각 대기열 추가 사이의 지연, 배치 최대값은 확인당 항목 수를 제한합니다.',
 }
 
 export default ko

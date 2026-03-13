@@ -48,6 +48,8 @@ from worker.dedup_tier1 import dedup_tier1_job
 from worker.dedup_tier2 import dedup_tier2_job
 from worker.dedup_tier3 import dedup_tier3_job
 from worker.dedup_scan import dedup_scan_job
+from worker.thumbhash_backfill import thumbhash_backfill_job
+from worker.retry import retry_failed_downloads_job
 from worker.helpers import _sha256
 
 logging.basicConfig(
@@ -164,6 +166,51 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
         return {"status": "stopped"}
 
 
+# ── Rate Limit Schedule ───────────────────────────────────────────────
+
+
+async def rate_limit_schedule_job(ctx: dict) -> dict:
+    """Check the rate limit schedule and update the active flag in Redis."""
+    from datetime import datetime, timezone
+
+    r = ctx["redis"]
+
+    enabled_val = await r.get("rate_limit:schedule:enabled")
+    enabled = enabled_val in (b"1", "1")
+
+    if not enabled:
+        await r.delete("rate_limit:schedule:active")
+        return {"status": "disabled"}
+
+    start_val = await r.get("rate_limit:schedule:start_hour")
+    end_val = await r.get("rate_limit:schedule:end_hour")
+
+    try:
+        start_hour = int(start_val) if start_val is not None else 0
+    except (ValueError, TypeError):
+        start_hour = 0
+
+    try:
+        end_hour = int(end_val) if end_val is not None else 6
+    except (ValueError, TypeError):
+        end_hour = 6
+
+    current_hour = datetime.now(timezone.utc).hour
+
+    if start_hour <= end_hour:
+        in_window = start_hour <= current_hour < end_hour
+    else:
+        # Wraps midnight: e.g. 22–06
+        in_window = current_hour >= start_hour or current_hour < end_hour
+
+    if in_window:
+        await r.set("rate_limit:schedule:active", "1")
+        return {"status": "active", "hour": current_hour}
+    else:
+        await r.delete("rate_limit:schedule:active")
+        return {"status": "inactive", "hour": current_hour}
+
+
 # ── ARQ Worker Settings ──────────────────────────────────────────────
 
 
@@ -190,6 +237,9 @@ class WorkerSettings:
         dedup_tier2_job,
         dedup_tier3_job,
         dedup_scan_job,
+        rate_limit_schedule_job,
+        thumbhash_backfill_job,
+        retry_failed_downloads_job,
     ]
     cron_jobs = [
         cron(
@@ -215,6 +265,20 @@ class WorkerSettings:
             run_at_startup=False,
             unique=True,
             timeout=3600,
+        ),
+        cron(
+            rate_limit_schedule_job,
+            minute=None,  # every minute
+            run_at_startup=False,
+            unique=True,
+            timeout=60,
+        ),
+        cron(
+            retry_failed_downloads_job,
+            minute={0, 15, 30, 45},
+            run_at_startup=False,
+            unique=True,
+            timeout=300,
         ),
     ]
     on_startup = startup
@@ -244,6 +308,9 @@ __all__ = [
     "dedup_tier3_job",
     "dedup_scan_job",
     "toggle_watcher_job",
+    "rate_limit_schedule_job",
+    "thumbhash_backfill_job",
+    "retry_failed_downloads_job",
     "startup",
     "shutdown",
     "WorkerSettings",

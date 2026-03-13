@@ -29,6 +29,10 @@ const statusConfig: Record<DownloadJob['status'], { label: string; className: st
     label: 'Paused',
     className: 'bg-orange-900/50 text-orange-300 border-orange-800',
   },
+  partial: {
+    label: 'Partial',
+    className: 'bg-amber-900/50 text-amber-300 border-amber-800',
+  },
 }
 
 export function JobStatusBadge({ status }: JobStatusBadgeProps) {

@@ -47,6 +47,26 @@ export interface GalleryImage {
   file_hash: string | null
   media_type: 'image' | 'video' | 'gif'
   duration: number | null
+  thumbhash?: string | null
+}
+
+export interface BrowseImage {
+  id: number
+  gallery_id: number
+  page_num: number
+  width: number | null
+  height: number | null
+  thumb_path: string | null
+  file_path: string | null
+  thumbhash: string | null
+  media_type: 'image' | 'video' | 'gif'
+  added_at: string | null
+}
+
+export interface ImageBrowserResponse {
+  images: BrowseImage[]
+  next_cursor: string | null
+  has_next: boolean
 }
 
 export interface ArtistImageItem extends GalleryImage {
@@ -123,7 +143,7 @@ export interface DownloadJob {
   id: string
   url: string
   source: string
-  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused'
+  status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused' | 'partial'
   progress: {
     percent?: number
     downloaded?: number
@@ -132,11 +152,16 @@ export interface DownloadJob {
     speed?: number
     started_at?: string
     last_update_at?: string
+    failed_pages?: number[]
+    permanently_failed?: boolean
     [key: string]: unknown
   }
   error: string | null
   created_at: string
   finished_at: string | null
+  retry_count: number
+  max_retries: number
+  next_retry_at: string | null
 }
 
 // ── Tags ─────────────────────────────────────────────────────────────
@@ -275,13 +300,21 @@ export interface CacheStats {
 // ── WebSocket ────────────────────────────────────────────────────────
 
 export interface WsMessage {
-  type: 'alert' | 'ping' | 'job_update'
+  type: 'alert' | 'ping' | 'job_update' | 'subscription_batch'
   message?: string
   ts?: string
   // job_update fields:
   job_id?: string
   status?: string
   progress?: Record<string, unknown>
+  // subscription_batch fields:
+  sub_id?: number
+  sub_name?: string | null
+  total?: number
+  enqueued?: number
+  failed?: number
+  phase?: 'enqueuing' | 'done'
+  user_id?: number
 }
 
 // ── Pagination responses ──────────────────────────────────────────────
@@ -486,6 +519,8 @@ export interface Subscription {
   last_error: string | null
   next_check_at: string | null
   created_at: string | null
+  batch_total: number
+  batch_enqueued: number
 }
 
 // ── File Explorer ────────────────────────────────────────────────────
@@ -561,6 +596,31 @@ export interface DedupScanProgress {
   tier?: 1 | 2 | 3
   mode?: 'reset' | 'pending'
   percent?: number
+}
+
+// ── Rate Limits ───────────────────────────────────────────────────────
+
+export interface SiteRateConfig {
+  concurrency: number
+  delay_ms: number | null
+  image_concurrency: number | null
+  page_delay_ms?: number | null
+  pagination_delay_ms?: number | null
+  illust_delay_ms?: number | null
+}
+
+export interface RateLimitSchedule {
+  enabled: boolean
+  start_hour: number
+  end_hour: number
+  mode: 'full_speed' | 'standard'
+}
+
+export interface RateLimitSettings {
+  sites: Record<string, SiteRateConfig>
+  schedule: RateLimitSchedule
+  override_active: boolean
+  schedule_active: boolean
 }
 
 // ── API Params ────────────────────────────────────────────────────────

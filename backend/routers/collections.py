@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select, delete
+from sqlalchemy import and_, func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -70,11 +70,16 @@ async def list_collections(
                 cover_gid = first_cg
 
         if cover_gid:
+            max_page_sub = (
+                select(func.max(Image.page_num))
+                .where(Image.gallery_id == cover_gid)
+                .scalar_subquery()
+            )
             cover_row = (
                 await db.execute(
                     select(Blob.sha256)
                     .join(Image, Image.blob_sha256 == Blob.sha256)
-                    .where(Image.gallery_id == cover_gid, Image.page_num == 1)
+                    .where(Image.gallery_id == cover_gid, Image.page_num == max_page_sub)
                 )
             ).scalar_one_or_none()
             if cover_row:
@@ -144,10 +149,15 @@ async def get_collection(
     gallery_ids = [cg.gallery_id for cg in cg_rows]
     cover_map: dict[int, str] = {}
     if gallery_ids:
+        max_page_sub = (
+            select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
+            .where(Image.gallery_id.in_(gallery_ids))
+            .group_by(Image.gallery_id)
+        ).subquery()
         cover_stmt = (
             select(Image.gallery_id, Blob.sha256)
             .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .where(Image.gallery_id.in_(gallery_ids), Image.page_num == 1)
+            .join(max_page_sub, and_(Image.gallery_id == max_page_sub.c.gallery_id, Image.page_num == max_page_sub.c.max_page))
         )
         cover_rows = (await db.execute(cover_stmt)).all()
         cover_map = {r.gallery_id: cas_thumb_url(r.sha256) for r in cover_rows}

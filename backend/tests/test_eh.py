@@ -112,7 +112,7 @@ class TestEhSearch:
         eh_mock = _make_eh_client_mock()
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -142,7 +142,7 @@ class TestEhSearch:
         eh_mock = _make_eh_client_mock()
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -159,7 +159,7 @@ class TestEhSearch:
         eh_mock = _make_eh_client_mock()
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -174,9 +174,9 @@ class TestEhSearch:
         eh_mock.search = AsyncMock(side_effect=PermissionError("Sad Panda"))
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
-            patch("routers.eh.push_system_alert", new_callable=AsyncMock),
+            patch("plugins.builtin.ehentai.browse.push_system_alert", new_callable=AsyncMock),
         ):
             resp = await client.get("/api/eh/search")
 
@@ -188,7 +188,7 @@ class TestEhSearch:
         eh_mock.search = AsyncMock(side_effect=ValueError("scrape failed"))
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
         ):
             resp = await client.get("/api/eh/search")
@@ -214,7 +214,7 @@ class TestEhGalleryMetadata:
         eh_mock = _make_eh_client_mock()
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_gallery_cache", new_callable=AsyncMock),
         ):
@@ -242,9 +242,9 @@ class TestEhGalleryMetadata:
         eh_mock.get_gallery_metadata = AsyncMock(side_effect=PermissionError("Sad Panda"))
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
-            patch("routers.eh.push_system_alert", new_callable=AsyncMock),
+            patch("plugins.builtin.ehentai.browse.push_system_alert", new_callable=AsyncMock),
         ):
             resp = await client.get("/api/eh/gallery/99/badtoken")
 
@@ -256,7 +256,7 @@ class TestEhGalleryMetadata:
         eh_mock.get_gallery_metadata = AsyncMock(side_effect=ValueError("parse failed"))
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
         ):
             resp = await client.get("/api/eh/gallery/99/badtoken")
@@ -283,7 +283,7 @@ class TestEhGalleryComments:
         eh_mock = _make_eh_client_mock(comments=fake_comments)
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -325,7 +325,7 @@ class TestEhPopularAndToplist:
         eh_mock.get_popular = AsyncMock(return_value=fake_popular)
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):
@@ -347,7 +347,7 @@ class TestEhPopularAndToplist:
         eh_mock.get_toplist = AsyncMock(return_value={"galleries": [], "total": 0})
 
         with (
-            patch("routers.eh._make_client", return_value=eh_mock),
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
             patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
             patch("services.cache.set_json", new_callable=AsyncMock),
         ):

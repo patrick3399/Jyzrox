@@ -126,7 +126,7 @@ export default function VideoPlayer({ image, className, style, innerRef, onLoad,
           step={0.1}
           value={currentTime}
           onChange={handleSeek}
-          aria-label="Seek"
+          aria-label={t('reader.videoSeek')}
           style={{ width: '100%', height: '4px', cursor: 'pointer', accentColor: '#3b82f6' }}
         />
 

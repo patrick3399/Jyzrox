@@ -258,9 +258,12 @@ export function useSequentialPrefetch(
         prefetchPage(currentPage + 1 + slot)
       }
     } else {
-      // Local: prefetch current+1, current+2, current+3 concurrently
-      for (let i = 1; i <= 3; i++) {
+      // Local: prefetch forward 5 + backward 2 concurrently
+      for (let i = 1; i <= 5; i++) {
         prefetchPage(currentPage + i)
+      }
+      for (let i = 1; i <= 2; i++) {
+        prefetchPage(currentPage - i)
       }
     }
   }, [currentPage, prefetchPage, isProxyMode, cleanupAllImages])

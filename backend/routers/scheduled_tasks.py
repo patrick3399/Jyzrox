@@ -57,6 +57,13 @@ TASK_DEFS = {
         "default_enabled": False,
         "job": "dedup_tier3_job",
     },
+    "retry_downloads": {
+        "name": "Retry Failed Downloads",
+        "description": "Auto-retry failed and partial downloads with exponential backoff",
+        "default_cron": "*/15 * * * *",
+        "default_enabled": True,
+        "job": "retry_failed_downloads_job",
+    },
 }
 
 

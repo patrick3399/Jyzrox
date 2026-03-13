@@ -11,6 +11,7 @@ import logging
 from collections.abc import Awaitable, Callable
 from pathlib import Path
 
+from core.redis_client import get_typed_download_delay
 from services.pixiv_client import PixivClient
 
 logger = logging.getLogger(__name__)
@@ -160,7 +161,7 @@ async def download_pixiv_illust(
 
                 # Small polite delay between pages
                 if i < total - 1:
-                    await asyncio.sleep(0.5)
+                    await asyncio.sleep(await get_typed_download_delay("pixiv", "page", 500))
 
             except Exception as exc:
                 logger.error(
@@ -295,7 +296,7 @@ async def download_pixiv_user_works(
                 break
             offset = next_offset
 
-            await asyncio.sleep(1)  # Rate limit between pages
+            await asyncio.sleep(await get_typed_download_delay("pixiv", "pagination", 1000))  # Rate limit between pages
 
         total = len(all_illusts)
         if total == 0:
@@ -353,7 +354,7 @@ async def download_pixiv_user_works(
                 if on_progress:
                     await on_progress(downloaded, total)
 
-                await asyncio.sleep(2)  # Rate limit between illustrations
+                await asyncio.sleep(await get_typed_download_delay("pixiv", "illust", 2000))  # Rate limit between illustrations
 
             except Exception as exc:
                 logger.error("Failed to download illust %d: %s", illust_id, exc)

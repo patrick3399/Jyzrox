@@ -89,6 +89,7 @@ class Blob(Base):
     external_path: Mapped[str | None] = mapped_column(Text)
     ref_count: Mapped[int] = mapped_column(Integer, default=0)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    thumbhash: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
 class Image(Base):
@@ -100,6 +101,7 @@ class Image(Base):
     filename: Mapped[str | None] = mapped_column(Text)
     blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=False)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
     gallery: Mapped["Gallery"] = relationship(back_populates="images")
     blob: Mapped["Blob"] = relationship()
@@ -172,6 +174,9 @@ class DownloadJob(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
+    retry_count: Mapped[int] = mapped_column(SmallInteger, default=0)
+    max_retries: Mapped[int] = mapped_column(SmallInteger, default=3)
+    next_retry_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ReadProgress(Base):
@@ -292,6 +297,8 @@ class Subscription(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    batch_total: Mapped[int] = mapped_column(Integer, default=0)
+    batch_enqueued: Mapped[int] = mapped_column(Integer, default=0)
 
     __table_args__ = (
         UniqueConstraint("user_id", "url", name="uq_subscription_user_url"),

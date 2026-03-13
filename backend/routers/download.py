@@ -6,6 +6,8 @@ import signal
 import urllib.parse
 import uuid
 
+from arq.connections import ArqRedis
+
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete, desc, func, select, text
@@ -203,7 +205,7 @@ async def clear_finished_jobs(
     db: AsyncSession = Depends(get_db),
 ):
     """Delete all completed, failed, and cancelled jobs."""
-    conditions = [DownloadJob.status.in_(["done", "failed", "cancelled"])]
+    conditions = [DownloadJob.status.in_(["done", "failed", "cancelled", "partial"])]
     if auth["role"] != "admin":
         conditions.append(DownloadJob.user_id == auth["user_id"])
     stmt = delete(DownloadJob).where(*conditions)
@@ -227,7 +229,7 @@ async def get_stats(
     ).scalar_one()
     finished_count = (
         await db.execute(
-            select(func.count()).where(DownloadJob.status.in_(["done", "failed", "cancelled"]), *user_filter)
+            select(func.count()).where(DownloadJob.status.in_(["done", "failed", "cancelled", "partial"]), *user_filter)
         )
     ).scalar_one()
     return {"running": running_count, "finished": finished_count}
@@ -296,10 +298,13 @@ async def pause_resume_job(
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """Pause or resume a running download job.
+    """Pause or resume a running download job via Redis soft-pause key.
 
-    For gallery-dl jobs (process-based): uses SIGSTOP/SIGCONT.
-    For EH/Pixiv plugin jobs (no PID): uses Redis soft-pause key.
+    The worker's pause_check callback reads download:pause:{job_id} from Redis
+    and suspends iteration cooperatively. This works for all job types (gallery-dl
+    subprocess and native plugin downloads) without relying on cross-container
+    PID signalling, which is not possible since the api and worker containers have
+    separate PID namespaces.
     """
     if body.action not in ("pause", "resume"):
         raise HTTPException(status_code=400, detail="action must be 'pause' or 'resume'")
@@ -313,56 +318,26 @@ async def pause_resume_job(
         raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
 
     redis = get_redis()
-    pid_bytes = await redis.get(f"download:pid:{job_id}")
-
-    if pid_bytes:
-        # gallery-dl path: SIGSTOP/SIGCONT
-        try:
-            pid = int(pid_bytes)
-        except (ValueError, TypeError):
-            raise HTTPException(status_code=500, detail="Corrupted PID value in Redis")
-
-        # Validate that the PID actually belongs to a gallery-dl process before signalling.
-        try:
-            with open(f"/proc/{pid}/cmdline", "rb") as fh:
-                cmdline = fh.read()
-            if b"gallery-dl" not in cmdline:
-                logger.warning("[pause_resume] pid %d cmdline does not contain gallery-dl; clearing stale PID", pid)
-                await redis.delete(f"download:pid:{job_id}")
-                raise HTTPException(status_code=400, detail="Process is no longer a gallery-dl process")
-        except FileNotFoundError:
-            await redis.delete(f"download:pid:{job_id}")
-            raise HTTPException(status_code=400, detail="Process no longer exists")
-
-        try:
-            if body.action == "pause":
-                if job.status != "running":
-                    raise HTTPException(status_code=400, detail=f"Cannot pause: status={job.status}")
-                os.kill(pid, signal.SIGSTOP)
-                job.status = "paused"
-            else:  # resume
-                if job.status != "paused":
-                    raise HTTPException(status_code=400, detail=f"Cannot resume: status={job.status}")
-                os.kill(pid, signal.SIGCONT)
-                job.status = "running"
-        except ProcessLookupError:
-            await redis.delete(f"download:pid:{job_id}")
-            raise HTTPException(status_code=400, detail="Process no longer exists")
-        except PermissionError:
-            raise HTTPException(status_code=500, detail="Insufficient permission to signal process")
-    else:
-        # Soft-pause path for EH/Pixiv plugin downloads (no subprocess PID)
-        pause_key = f"download:pause:{job_id}"
-        if body.action == "pause":
-            if job.status != "running":
-                raise HTTPException(status_code=400, detail=f"Cannot pause: status={job.status}")
-            await redis.set(pause_key, b"1", ex=86400)  # 24h TTL as safety net
-            job.status = "paused"
-        else:  # resume
-            if job.status != "paused":
-                raise HTTPException(status_code=400, detail=f"Cannot resume: status={job.status}")
-            await redis.delete(pause_key)
-            job.status = "running"
+    pause_key = f"download:pause:{job_id}"
+    terminal_statuses = {"done", "failed", "cancelled", "partial"}
+    if body.action == "pause":
+        if job.status in terminal_statuses:
+            raise HTTPException(status_code=409, detail=f"Job already {job.status}")
+        if job.status == "paused":
+            # Already in the desired state — no-op, return current status
+            return {"status": job.status}
+        # job.status == "running" — valid transition
+        await redis.set(pause_key, b"1", ex=86400)  # 24h TTL as safety net
+        job.status = "paused"
+    else:  # resume
+        if job.status in terminal_statuses:
+            raise HTTPException(status_code=409, detail=f"Job already {job.status}")
+        if job.status == "running":
+            # Already in the desired state — no-op, return current status
+            return {"status": job.status}
+        # job.status == "paused" — valid transition
+        await redis.delete(pause_key)
+        job.status = "running"
 
     await db.commit()
     return {"status": job.status}
@@ -414,6 +389,67 @@ async def cancel_job(
     return {"status": "cancelled"}
 
 
+@router.post("/jobs/{job_id}/retry")
+async def retry_job(
+    job_id: uuid.UUID,
+    request: Request,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Manually retry a failed or partial download job."""
+    job = await db.get(DownloadJob, job_id)
+    if not job:
+        raise HTTPException(status_code=404, detail="Job not found")
+
+    if job.user_id != auth["user_id"] and auth["role"] != "admin":
+        locale = parse_accept_language(request.headers.get("accept-language"))
+        raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
+
+    if job.status not in ("failed", "partial"):
+        raise HTTPException(status_code=400, detail=f"Cannot retry: status={job.status}")
+    if job.retry_count >= job.max_retries:
+        raise HTTPException(status_code=400, detail="Max retries reached")
+
+    from datetime import UTC, datetime, timedelta
+    now = datetime.now(UTC)
+
+    job.retry_count += 1
+    job.status = "queued"
+    job.finished_at = None
+    job.error = None
+
+    # Read base_delay from Redis for backoff calculation
+    redis = get_redis()
+    base_delay_raw = await redis.get("setting:retry_base_delay_minutes")
+    base_delay = int(base_delay_raw) if base_delay_raw else 5
+    backoff_minutes = min(base_delay * (2 ** job.retry_count), 1440)
+    job.next_retry_at = now + timedelta(minutes=backoff_minutes)
+
+    await db.commit()
+
+    arq_job_id = f"retry:{job.id}:{job.retry_count}"
+    try:
+        arq: ArqRedis = request.app.state.arq
+        await arq.enqueue_job(
+            "download_job",
+            job.url,
+            job.source or "",
+            None,
+            str(job.id),
+            job.progress.get("total") if job.progress else None,
+            _job_id=arq_job_id,
+        )
+    except Exception as exc:
+        logger.error("[retry] manual retry enqueue failed for %s: %s", job_id, exc)
+        job.retry_count -= 1
+        job.status = "failed"
+        job.error = f"Retry enqueue failed: {exc}"
+        await db.commit()
+        raise HTTPException(status_code=503, detail="Failed to enqueue retry job")
+
+    return {"status": "queued", "retry_count": job.retry_count, "max_retries": job.max_retries}
+
+
 def _j(j: DownloadJob) -> dict:
     return {
         "id": str(j.id),
@@ -424,4 +460,7 @@ def _j(j: DownloadJob) -> dict:
         "error": j.error,
         "created_at": j.created_at.isoformat() if j.created_at else None,
         "finished_at": j.finished_at.isoformat() if j.finished_at else None,
+        "retry_count": j.retry_count,
+        "max_retries": j.max_retries,
+        "next_retry_at": j.next_retry_at.isoformat() if j.next_retry_at else None,
     }

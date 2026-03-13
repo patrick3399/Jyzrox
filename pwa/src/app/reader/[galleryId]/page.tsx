@@ -1,6 +1,6 @@
 'use client'
 import { useEffect, useRef, useState } from 'react'
-import { useParams } from 'next/navigation'
+import { useParams, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
@@ -14,7 +14,9 @@ interface LoadedData {
 
 export default function ReaderPage() {
   const { galleryId } = useParams<{ galleryId: string }>()
+  const searchParams = useSearchParams()
   const id = Number(galleryId)
+  const urlPage = parseInt(searchParams.get('page') ?? '', 10) || 0
 
   const [data, setData] = useState<LoadedData | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -102,8 +104,10 @@ export default function ReaderPage() {
   // source_id is the numeric EH gid stored as a string in Gallery
   const sourceId = gallery.source_id
 
-  const initialPage =
-    progress?.last_page && progress.last_page > 0 ? Math.min(progress.last_page, gallery.pages) : 1
+  // URL ?page= takes priority over saved progress
+  const initialPage = urlPage > 0
+    ? Math.min(urlPage, gallery.pages)
+    : progress?.last_page && progress.last_page > 0 ? Math.min(progress.last_page, gallery.pages) : 1
 
   return (
     <ErrorBoundary>

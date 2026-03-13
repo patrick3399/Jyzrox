@@ -80,7 +80,7 @@ export function Pagination({
           className={btnNav}
           onClick={() => handlePageClick(activePage - 1)}
           disabled={isLoading || activePage === 0}
-          aria-label="Previous page"
+          aria-label={t('common.previousPage')}
         >
           <ChevronLeft size={16} />
         </button>
@@ -102,7 +102,7 @@ export function Pagination({
               className={`${btnPage(isActive)} ${isLoadingActive ? 'opacity-80' : ''}`}
               onClick={() => handlePageClick(item)}
               disabled={isLoading}
-              aria-label={`Page ${item + 1}`}
+              aria-label={t('browse.pageN', { page: String(item + 1) })}
               aria-current={isActive ? 'page' : undefined}
               aria-busy={isLoadingActive}
             >
@@ -120,7 +120,7 @@ export function Pagination({
           className={btnNav}
           onClick={() => handlePageClick(activePage + 1)}
           disabled={isLoading || activePage >= totalPages - 1}
-          aria-label="Next page"
+          aria-label={t('common.nextPage')}
         >
           <ChevronRight size={16} />
         </button>

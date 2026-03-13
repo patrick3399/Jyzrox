@@ -246,6 +246,11 @@ CREATE TABLE IF NOT EXISTS library_paths (
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS last_scanned_at TIMESTAMPTZ;
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS library_path TEXT;
 
+-- Image browser columns
+ALTER TABLE images ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ;
+ALTER TABLE blobs ADD COLUMN IF NOT EXISTS thumbhash TEXT;
+CREATE INDEX IF NOT EXISTS idx_images_added_at_id ON images (added_at DESC, id DESC);
+
 -- pHash quarter columns for pigeonhole pre-filter (scalability)
 ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_int BIGINT;
 ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_q0 SMALLINT;
@@ -387,3 +392,13 @@ CREATE TABLE IF NOT EXISTS user_ratings (
     PRIMARY KEY (user_id, gallery_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_ratings_gallery ON user_ratings (gallery_id);
+
+-- ── Download Retry ──────────────────────────────────────────────────
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS retry_count SMALLINT DEFAULT 0;
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS max_retries SMALLINT DEFAULT 3;
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_download_jobs_retry ON download_jobs (status, retry_count, next_retry_at) WHERE status IN ('failed', 'partial');
+
+-- ── Subscription Batch Tracking ──────────────────────────────────
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS batch_total INT DEFAULT 0;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS batch_enqueued INT DEFAULT 0;

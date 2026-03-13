@@ -13,7 +13,7 @@ from collections.abc import Awaitable, Callable
 from pathlib import Path
 
 from core.config import settings
-from core.redis_client import get_redis
+from core.redis_client import get_download_delay, get_redis
 from services import cache
 from services.eh_client import EhClient, _detect_media_type
 
@@ -158,6 +158,10 @@ async def download_eh_gallery(
                     downloaded += 1
                     if on_progress:
                         await on_progress(downloaded, total_pages)
+
+                delay = await get_download_delay("ehentai", 0)
+                if delay > 0:
+                    await asyncio.sleep(delay)
 
         # Launch all download tasks
         tasks = [_download_one(page_num, token_map[page_num]) for page_num in sorted(token_map.keys())]

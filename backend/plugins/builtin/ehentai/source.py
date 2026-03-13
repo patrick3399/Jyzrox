@@ -21,6 +21,7 @@ from plugins.models import (
     FieldDef,
     GalleryImportData,
     GalleryMetadata,
+    NewWork,
     PluginMeta,
     SiteInfo,
 )
@@ -136,6 +137,9 @@ class EhSourcePlugin(SourcePlugin):
             if on_progress is not None:
                 await on_progress(downloaded, total_pages)
 
+        from core.redis_client import get_image_concurrency
+        image_concurrency = await get_image_concurrency("ehentai", settings.eh_download_concurrency)
+
         try:
             result = await download_eh_gallery(
                 gid=gid,
@@ -143,7 +147,7 @@ class EhSourcePlugin(SourcePlugin):
                 cookies=cookies,
                 use_ex=use_ex,
                 output_dir=dest_dir,
-                concurrency=settings.eh_download_concurrency,
+                concurrency=image_concurrency,
                 on_progress=_progress,
                 cancel_check=cancel_check,
                 pause_check=pause_check,
@@ -240,3 +244,13 @@ class EhSourcePlugin(SourcePlugin):
         """Verify EH cookies by testing access against the EhClient."""
         from plugins.builtin.ehentai._credentials import verify_eh_credential
         return await verify_eh_credential(credentials)
+
+    # ------------------------------------------------------------------
+    # Subscribable protocol method
+    # ------------------------------------------------------------------
+
+    async def check_new_works(
+        self, artist_id: str, last_known: str | None, credentials: dict | None,
+    ) -> list[NewWork]:
+        from plugins.builtin.ehentai._subscribe import check_eh_new_works
+        return await check_eh_new_works(artist_id, last_known, credentials)

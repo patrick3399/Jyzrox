@@ -66,7 +66,7 @@ async def _set_job_status(job_id: str | None, status: str, error: str | None = N
                 if error:
                     job.error = error
                 # "paused" is an intermediate state — do not set finished_at
-                if status in ("done", "failed", "cancelled"):
+                if status in ("done", "failed", "cancelled", "partial"):
                     job.finished_at = datetime.now(UTC)
                 await session.commit()
                 try:

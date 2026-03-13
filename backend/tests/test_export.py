@@ -48,17 +48,41 @@ async def _insert_image(
     file_path: str | None = None,
     tags_array: str = "[]",
 ):
-    """Insert an image record. file_path defaults to None (file doesn't exist)."""
+    """Insert a blob + image record.
+
+    If file_path is given the blob is stored as 'external' so that
+    resolve_blob_path() returns a Path pointing to that file.
+    If file_path is None the blob uses 'cas' storage (file will not exist on
+    disk, so the export router will skip it).
+    """
+    sha = f"sha_export_{page_num}_{gallery_id}_{abs(hash(file_path or ''))}"
+    if file_path is not None:
+        storage = "external"
+        ext = os.path.splitext(file_path)[1] or ".jpg"
+        file_size = os.path.getsize(file_path) if os.path.exists(file_path) else 1
+    else:
+        storage = "cas"
+        ext = ".jpg"
+        file_size = 1
+
     await db_session.execute(
         text(
-            "INSERT INTO images (gallery_id, page_num, filename, file_path, tags_array) "
-            "VALUES (:gid, :pn, :fn, :fp, :tags)"
+            "INSERT OR IGNORE INTO blobs "
+            "(sha256, file_size, extension, storage, external_path) "
+            "VALUES (:sha, :fs, :ext, :storage, :ep)"
+        ),
+        {"sha": sha, "fs": file_size, "ext": ext, "storage": storage, "ep": file_path},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, tags_array) "
+            "VALUES (:gid, :pn, :fn, :sha, :tags)"
         ),
         {
             "gid": gallery_id,
             "pn": page_num,
             "fn": filename,
-            "fp": file_path,
+            "sha": sha,
             "tags": tags_array,
         },
     )
@@ -180,28 +204,28 @@ class TestExportKohya:
         """Gallery exceeding 2 GB total file size should return 413."""
         gid = await _insert_gallery(db_session)
 
-        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
-            f.write(b"x")
-            tmp_path = f.name
+        # Insert blob with file_size > 2 GB directly so the router's size check triggers
+        _3gb = 3 * 1024 * 1024 * 1024
+        sha = "sha_huge_blob_export_test"
+        await db_session.execute(
+            text(
+                "INSERT OR IGNORE INTO blobs "
+                "(sha256, file_size, extension, storage) "
+                "VALUES (:sha, :fs, '.jpg', 'cas')"
+            ),
+            {"sha": sha, "fs": _3gb},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
+                "VALUES (:gid, 1, 'huge.jpg', :sha)"
+            ),
+            {"gid": gid, "sha": sha},
+        )
+        await db_session.commit()
 
-        try:
-            await _insert_image(
-                db_session,
-                gid,
-                page_num=1,
-                filename="huge.jpg",
-                file_path=tmp_path,
-            )
-            # Patch os.path.getsize to simulate a 3 GB file
-            _3gb = 3 * 1024 * 1024 * 1024
-            with (
-                patch("routers.export.async_session", db_session_factory),
-                patch("os.path.getsize", return_value=_3gb),
-                patch("os.path.exists", return_value=True),
-            ):
-                resp = await client.get(f"/api/export/kohya/{gid}")
+        with patch("routers.export.async_session", db_session_factory):
+            resp = await client.get(f"/api/export/kohya/{gid}")
 
-            assert resp.status_code == 413
-            assert "too large" in resp.json()["detail"].lower()
-        finally:
-            os.unlink(tmp_path)
+        assert resp.status_code == 413
+        assert "too large" in resp.json()["detail"].lower()

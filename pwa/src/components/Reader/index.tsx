@@ -242,7 +242,7 @@ function SinglePageView({
               clearTimeout(centerTapTimerRef.current)
               centerTapTimerRef.current = setTimeout(() => onToggleOverlay(), 250)
             }}
-            aria-label="Toggle controls"
+            aria-label={t('reader.toggleControls')}
           />
           {/* Prev / Next zones — hidden when zoomed (user pans instead) */}
           {!isZoomed && readingDirection === 'vertical' && (
@@ -254,7 +254,7 @@ function SinglePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   onPrev()
                 }}
-                aria-label="Previous page"
+                aria-label={t('common.previousPage')}
               />
               <div
                 className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -263,7 +263,7 @@ function SinglePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   onNext()
                 }}
-                aria-label="Next page"
+                aria-label={t('common.nextPage')}
               />
             </>
           )}
@@ -276,7 +276,7 @@ function SinglePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   leftAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? 'Next page' : 'Previous page'}
+                aria-label={readingDirection === 'rtl' ? t('common.nextPage') : t('common.previousPage')}
               />
               <div
                 className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -285,7 +285,7 @@ function SinglePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   rightAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? 'Previous page' : 'Next page'}
+                aria-label={readingDirection === 'rtl' ? t('common.previousPage') : t('common.nextPage')}
               />
             </>
           )}
@@ -558,7 +558,7 @@ function DoublePageView({
               clearTimeout(centerTapTimerRef.current)
               centerTapTimerRef.current = setTimeout(() => onToggleOverlay(), 250)
             }}
-            aria-label="Toggle controls"
+            aria-label={t('reader.toggleControls')}
           />
           {/* Prev / Next zones — hidden when zoomed (user pans instead) */}
           {!isZoomed && readingDirection === 'vertical' && (
@@ -570,7 +570,7 @@ function DoublePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   onPrev()
                 }}
-                aria-label="Previous page"
+                aria-label={t('common.previousPage')}
               />
               <div
                 className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -579,7 +579,7 @@ function DoublePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   onNext()
                 }}
-                aria-label="Next page"
+                aria-label={t('common.nextPage')}
               />
             </>
           )}
@@ -592,7 +592,7 @@ function DoublePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   leftAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? 'Next page' : 'Previous page'}
+                aria-label={readingDirection === 'rtl' ? t('common.nextPage') : t('common.previousPage')}
               />
               <div
                 className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -601,7 +601,7 @@ function DoublePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   rightAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? 'Previous page' : 'Next page'}
+                aria-label={readingDirection === 'rtl' ? t('common.previousPage') : t('common.nextPage')}
               />
             </>
           )}
@@ -871,6 +871,10 @@ function ThumbnailStrip({
   const [spriteNaturalSizes, setSpriteNaturalSizes] = useState<
     Record<string, { w: number; h: number }>
   >({})
+  // Virtual scroll: only render thumbnails in the visible range
+  const THUMB_TOTAL_W = 64 // 60px thumb + 4px gap
+  const BUFFER = 10
+  const [visibleRange, setVisibleRange] = useState({ start: 0, end: 50 })
 
   const spriteUrls = useMemo(() => {
     if (!previews) return []
@@ -886,6 +890,10 @@ function ThumbnailStrip({
     () => readingDirection === 'rtl' ? [...images].reverse() : images,
     [images, readingDirection],
   )
+  const displayImagesRef = useRef(displayImages)
+  useEffect(() => {
+    displayImagesRef.current = displayImages
+  }, [displayImages])
 
   const programmaticScrollRef = useRef(false)
   const scrollTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -907,24 +915,18 @@ function ThumbnailStrip({
         userScrollingRef.current = false
       }, 1500)
 
-      // Determine the rightmost thumbnail button that is (at least partially)
-      // within the visible scroll area and notify the parent so it can load
-      // more EH preview pages if needed.
+      // Determine the rightmost visible page from scroll position and thumb width.
+      // Computed arithmetically instead of iterating DOM children so it works
+      // correctly after virtualization (only visible buttons are in the DOM).
       // Throttled to max once per 500 ms to prevent re-render loops triggered
       // by preview images loading and causing DOM mutation → scroll event.
       if (onScrollToPageRef.current) {
-        const visibleRight = el.scrollLeft + el.clientWidth
-        let maxPage = 1
-        for (const child of el.children) {
-          const btn = child as HTMLElement
-          if (btn.offsetLeft < visibleRight) {
-            const pageAttr = btn.getAttribute('title')
-            if (pageAttr) {
-              const page = parseInt(pageAttr.replace('Page ', ''), 10)
-              if (!isNaN(page) && page > maxPage) maxPage = page
-            }
-          }
-        }
+        const imgs = displayImagesRef.current
+        const rightmostVisibleIndex = Math.min(
+          imgs.length - 1,
+          Math.ceil((el.scrollLeft + el.clientWidth) / THUMB_TOTAL_W)
+        )
+        const maxPage = imgs[rightmostVisibleIndex]?.pageNum ?? 1
         if (maxPage > lastScrollNotifyPageRef.current) {
           lastScrollNotifyPageRef.current = maxPage
           clearTimeout(scrollNotifyThrottleRef.current)
@@ -952,6 +954,27 @@ function ThumbnailStrip({
     }
   }, [])
 
+  // Update visible range when the strip is scrolled
+  useEffect(() => {
+    const strip = stripRef.current
+    if (!strip) return
+
+    const updateRange = () => {
+      const scrollLeft = strip.scrollLeft
+      const containerWidth = strip.clientWidth
+      const visibleStart = Math.floor(scrollLeft / THUMB_TOTAL_W)
+      const visibleEnd = Math.ceil((scrollLeft + containerWidth) / THUMB_TOTAL_W)
+      setVisibleRange({
+        start: Math.max(0, visibleStart - BUFFER),
+        end: Math.min(displayImages.length, visibleEnd + BUFFER),
+      })
+    }
+
+    updateRange()
+    strip.addEventListener('scroll', updateRange, { passive: true })
+    return () => strip.removeEventListener('scroll', updateRange)
+  }, [displayImages.length, THUMB_TOTAL_W, BUFFER])
+
   useLayoutEffect(() => {
     // NOTE: Do NOT use scrollIntoView() here. On iOS Safari (PWA and browser),
     // scrollIntoView() can scroll the entire viewport — not just the strip —
@@ -966,11 +989,23 @@ function ThumbnailStrip({
     if (userScrollingRef.current) return
     const strip = stripRef.current
     const active = activeRef.current
-    if (!strip || !active) return
+    if (!strip) return
+
+    programmaticScrollRef.current = true
+
+    if (!active) {
+      // Active thumbnail is outside the virtual render window — compute scroll from index
+      const activeIndex = displayImagesRef.current.findIndex(img => img.pageNum === currentPage)
+      if (activeIndex >= 0) {
+        const targetScrollLeft = activeIndex * THUMB_TOTAL_W - (strip.clientWidth - 60) / 2
+        strip.scrollLeft = Math.max(0, Math.min(targetScrollLeft, strip.scrollWidth - strip.clientWidth))
+      }
+      requestAnimationFrame(() => { programmaticScrollRef.current = false })
+      return
+    }
 
     // Scroll strip to center active thumbnail
     const targetScrollLeft = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2
-    programmaticScrollRef.current = true
     strip.scrollLeft = Math.max(0, Math.min(targetScrollLeft, strip.scrollWidth - strip.clientWidth))
     // Reset flag after the scroll event has had a chance to fire
     requestAnimationFrame(() => { programmaticScrollRef.current = false })
@@ -997,94 +1032,88 @@ function ThumbnailStrip({
       )}
       <div
         ref={stripRef}
-        className="reader-thumb-strip flex gap-1 bg-black/70 px-2 py-2 backdrop-blur-sm overflow-x-auto"
+        className="reader-thumb-strip flex bg-black/70 px-2 py-2 backdrop-blur-sm overflow-x-auto"
         style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))' }}
       >
-        {displayImages.map((img) => {
-          const isActive = img.pageNum === currentPage
-          const previewRaw = previews?.[String(img.pageNum)]
+        <div style={{ width: displayImages.length * THUMB_TOTAL_W, position: 'relative', height: 80, flexShrink: 0 }}>
+          {displayImages.slice(visibleRange.start, visibleRange.end).map((img, i) => {
+            const actualIndex = visibleRange.start + i
+            const isActive = img.pageNum === currentPage
+            const previewRaw = previews?.[String(img.pageNum)]
 
-          let thumbSrc: string | null = null
-          let spriteStyle: React.CSSProperties | null = null
+            let thumbSrc: string | null = null
+            let spriteStyle: React.CSSProperties | null = null
+            let thumbW = 60
+            let thumbH = 80
 
-          // Thumb container dimensions — portrait default; landscape cells get
-          // a wider button so the image is never cropped or squashed.
-          let thumbW = 60
-          let thumbH = 80
-
-          if (previewRaw) {
-            if (previewRaw.includes('|')) {
-              const parts = previewRaw.split('|')
-              const spriteUrl = parts[0]
-              const ox = Number(parts[1])
-              const cellW = Number(parts[2]) || 200
-              const cellH = Number(parts[3]) || 300
-              // Scale to fit within a fixed 80px tall strip. Width adapts to
-              // the cell's aspect ratio: portrait gets narrower, landscape gets wider.
-              // Cap at 100px wide so extremely wide cells don't overflow the strip.
-              const maxH = 80
-              const maxW = 100
-              const scaleByH = maxH / cellH
-              const scaleByW = maxW / cellW
-              const scale = Math.min(scaleByH, scaleByW)
-              // Compute actual rendered cell dimensions after scaling.
-              const renderedW = Math.round(cellW * scale)
-              const renderedH = Math.round(cellH * scale)
-              thumbW = renderedW
-              thumbH = renderedH
-              // Center the sprite cell within its rendered box (ox is already
-              // the left edge of this cell within the sprite sheet).
-              const scaledOx = ox * scale
-              const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
-              const naturalSize = spriteNaturalSizes[proxyUrl]
-              const bgSize = naturalSize
-                ? `${naturalSize.w * scale}px ${naturalSize.h * scale}px`
-                : `auto ${cellH * scale}px`
-              spriteStyle = {
-                backgroundImage: `url(${proxyUrl})`,
-                backgroundPosition: `${scaledOx}px 0px`,
-                backgroundSize: bgSize,
-                backgroundRepeat: 'no-repeat',
-                width: '100%',
-                height: '100%',
+            if (previewRaw) {
+              if (previewRaw.includes('|')) {
+                const parts = previewRaw.split('|')
+                const spriteUrl = parts[0]
+                const ox = Number(parts[1])
+                const cellW = Number(parts[2]) || 200
+                const cellH = Number(parts[3]) || 300
+                const maxH = 80
+                const maxW = 100
+                const scaleByH = maxH / cellH
+                const scaleByW = maxW / cellW
+                const scale = Math.min(scaleByH, scaleByW)
+                const renderedW = Math.round(cellW * scale)
+                const renderedH = Math.round(cellH * scale)
+                thumbW = renderedW
+                thumbH = renderedH
+                const scaledOx = ox * scale
+                const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
+                const naturalSize = spriteNaturalSizes[proxyUrl]
+                const bgSize = naturalSize
+                  ? `${naturalSize.w * scale}px ${naturalSize.h * scale}px`
+                  : `auto ${cellH * scale}px`
+                spriteStyle = {
+                  backgroundImage: `url(${proxyUrl})`,
+                  backgroundPosition: `${scaledOx}px 0px`,
+                  backgroundSize: bgSize,
+                  backgroundRepeat: 'no-repeat',
+                  width: '100%',
+                  height: '100%',
+                }
+              } else {
+                thumbSrc = `/api/eh/thumb-proxy?url=${encodeURIComponent(previewRaw)}`
               }
-            } else {
-              thumbSrc = `/api/eh/thumb-proxy?url=${encodeURIComponent(previewRaw)}`
+            } else if (img.isLocal) {
+              thumbSrc = img.url
             }
-          } else if (img.isLocal) {
-            thumbSrc = img.url
-          }
 
-          return (
-            <button
-              key={img.pageNum}
-              ref={isActive ? activeRef : null}
-              onClick={() => onPageSelect(img.pageNum)}
-              className={`relative shrink-0 overflow-hidden rounded ${
-                isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
-              }`}
-              style={{ width: thumbW, height: thumbH }}
-              title={`Page ${img.pageNum}`}
-            >
-              {spriteStyle ? (
-                <div style={spriteStyle} />
-              ) : thumbSrc ? (
-                <img
-                  src={thumbSrc}
-                  alt={`Thumb ${img.pageNum}`}
-                  className="h-full w-full object-contain"
-                />
-              ) : (
-                <div className="h-full w-full bg-neutral-800 flex items-center justify-center">
-                  <span className="text-[11px] text-gray-500">{img.pageNum}</span>
-                </div>
-              )}
-              <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-center text-[10px] text-white leading-tight py-px">
-                {img.pageNum}
-              </span>
-            </button>
-          )
-        })}
+            return (
+              <button
+                key={img.pageNum}
+                ref={isActive ? activeRef : null}
+                onClick={() => onPageSelect(img.pageNum)}
+                className={`absolute shrink-0 overflow-hidden rounded ${
+                  isActive ? 'ring-2 ring-white opacity-100' : 'opacity-50 hover:opacity-80'
+                }`}
+                style={{ left: actualIndex * THUMB_TOTAL_W, width: thumbW, height: thumbH, top: 0 }}
+                title={`Page ${img.pageNum}`}
+              >
+                {spriteStyle ? (
+                  <div style={spriteStyle} />
+                ) : thumbSrc ? (
+                  <img
+                    src={thumbSrc}
+                    alt={`Thumb ${img.pageNum}`}
+                    className="h-full w-full object-contain"
+                  />
+                ) : (
+                  <div className="h-full w-full bg-neutral-800 flex items-center justify-center">
+                    <span className="text-[11px] text-gray-500">{img.pageNum}</span>
+                  </div>
+                )}
+                <span className="absolute bottom-0 left-0 right-0 bg-black/60 text-center text-[10px] text-white leading-tight py-px">
+                  {img.pageNum}
+                </span>
+              </button>
+            )
+          })}
+        </div>
       </div>
     </>
   )

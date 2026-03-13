@@ -1,5 +1,6 @@
 """Thumbnail generation job for the worker package."""
 
+import base64
 import json
 import os
 import subprocess
@@ -107,6 +108,18 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
                             thumb.save(str(tmp), "WEBP", quality=85)
                             os.rename(tmp, dest)
 
+                        # Generate thumbhash from video frame
+                        try:
+                            import thumbhash as _thumbhash
+                            thumb_for_hash = pil.convert("RGBA")
+                            thumb_for_hash.thumbnail((100, 100))
+                            tw, th = thumb_for_hash.size
+                            rgba_data = thumb_for_hash.tobytes()
+                            hash_bytes = _thumbhash.rgba_to_thumbhash(tw, th, rgba_data)
+                            blob.thumbhash = base64.b64encode(hash_bytes).decode()
+                        except Exception as exc:
+                            logger.warning("[thumbnail] thumbhash video failed %s: %s", src, exc)
+
                     tmp_frame.unlink(missing_ok=True)
                 except (subprocess.SubprocessError, json.JSONDecodeError, OSError, ValueError) as exc:
                     logger.error("[thumbnail] video %s: %s", src, exc)
@@ -134,6 +147,19 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
                     blob.phash_q1 = _to_signed16((phash_int_val >> 32) & 0xFFFF)
                     blob.phash_q2 = _to_signed16((phash_int_val >> 16) & 0xFFFF)
                     blob.phash_q3 = _to_signed16(phash_int_val & 0xFFFF)
+
+                    # Generate thumbhash
+                    try:
+                        import thumbhash as _thumbhash
+                        thumb_for_hash = pil.convert("RGBA")
+                        thumb_for_hash.thumbnail((100, 100))
+                        tw, th = thumb_for_hash.size
+                        rgba_data = thumb_for_hash.tobytes()
+                        hash_bytes = _thumbhash.rgba_to_thumbhash(tw, th, rgba_data)
+                        blob.thumbhash = base64.b64encode(hash_bytes).decode()
+                    except Exception as exc:
+                        logger.warning("[thumbnail] thumbhash failed %s: %s", src, exc)
+
                     rgb = pil.convert("RGB")
                     for size in sizes:
                         dest = td / f"thumb_{size}.webp"

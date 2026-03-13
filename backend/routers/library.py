@@ -249,10 +249,15 @@ async def list_galleries(
 
         gallery_ids = [g.id for g in rows]
         if gallery_ids:
+            max_page_sub = (
+                select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
+                .where(Image.gallery_id.in_(gallery_ids))
+                .group_by(Image.gallery_id)
+            ).subquery()
             cover_stmt = (
                 select(Image.gallery_id, Blob.sha256)
                 .join(Blob, Image.blob_sha256 == Blob.sha256)
-                .where(Image.gallery_id.in_(gallery_ids), Image.page_num == 1)
+                .join(max_page_sub, and_(Image.gallery_id == max_page_sub.c.gallery_id, Image.page_num == max_page_sub.c.max_page))
             )
             cover_rows = (await db.execute(cover_stmt)).all()
             cover_map = {r.gallery_id: cas_thumb_url(r.sha256) for r in cover_rows}
@@ -283,10 +288,15 @@ async def list_galleries(
 
         gallery_ids = [g.id for g in galleries]
         if gallery_ids:
+            max_page_sub = (
+                select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
+                .where(Image.gallery_id.in_(gallery_ids))
+                .group_by(Image.gallery_id)
+            ).subquery()
             cover_stmt = (
                 select(Image.gallery_id, Blob.sha256)
                 .join(Blob, Image.blob_sha256 == Blob.sha256)
-                .where(Image.gallery_id.in_(gallery_ids), Image.page_num == 1)
+                .join(max_page_sub, and_(Image.gallery_id == max_page_sub.c.gallery_id, Image.page_num == max_page_sub.c.max_page))
             )
             cover_rows = (await db.execute(cover_stmt)).all()
             cover_map = {r.gallery_id: cas_thumb_url(r.sha256) for r in cover_rows}
@@ -304,6 +314,138 @@ async def list_galleries(
                 for g in galleries
             ],
         }
+
+
+# ── Image cursor helpers ──────────────────────────────────────────────
+
+
+def _encode_image_cursor(img: Image) -> str:
+    payload = json.dumps({
+        "added_at": img.added_at.isoformat() if img.added_at else "",
+        "id": img.id,
+    })
+    sig = hmac.new(_cursor_secret(), payload.encode(), hashlib.sha256).hexdigest()
+    raw = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
+    return f"{raw}.{sig}"
+
+
+def _decode_image_cursor(cursor: str) -> dict:
+    raw, _, sig = cursor.rpartition(".")
+    if not raw or not sig:
+        raise ValueError("bad cursor")
+    padded = raw + "=" * (-len(raw) % 4)
+    payload = base64.urlsafe_b64decode(padded)
+    expected = hmac.new(_cursor_secret(), payload, hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(sig, expected):
+        raise ValueError("bad sig")
+    return json.loads(payload)
+
+
+def _i_browse(img: Image) -> dict:
+    blob = img.blob
+    return {
+        "id": img.id,
+        "gallery_id": img.gallery_id,
+        "page_num": img.page_num,
+        "width": blob.width if blob else None,
+        "height": blob.height if blob else None,
+        "thumb_path": _thumb_url(blob),
+        "file_path": _to_url(blob),
+        "thumbhash": blob.thumbhash if blob else None,
+        "media_type": blob.media_type if blob else "image",
+        "added_at": img.added_at.isoformat() if img.added_at else None,
+    }
+
+
+# ── Image browser ─────────────────────────────────────────────────────
+
+
+@router.get("/images")
+async def browse_images(
+    tags: list[str] = Query(default=[]),
+    exclude_tags: list[str] = Query(default=[]),
+    cursor: str | None = None,
+    limit: int = Query(default=40, le=100),
+    sort: Literal["newest", "oldest"] = "newest",
+    gallery_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    auth: dict = Depends(require_auth),
+):
+    """Cross-gallery image browser with cursor-based pagination."""
+    stmt = (
+        select(Image)
+        .join(Gallery, Image.gallery_id == Gallery.id)
+        .where(gallery_access_filter(auth))
+        .options(selectinload(Image.blob))
+    )
+
+    if gallery_id is not None:
+        stmt = stmt.where(Image.gallery_id == gallery_id)
+    if tags:
+        stmt = stmt.where(Image.tags_array.contains(cast(tags, ARRAY(Text))))
+    if exclude_tags:
+        stmt = stmt.where(not_(Image.tags_array.overlap(cast(exclude_tags, ARRAY(Text)))))
+
+    # Blocked tags exclusion
+    blocked_rows = (await db.execute(
+        select(BlockedTag.namespace, BlockedTag.name)
+        .where(BlockedTag.user_id == auth["user_id"])
+    )).all()
+    if blocked_rows:
+        blocked_patterns = [f"{ns}:{name}" for ns, name in blocked_rows]
+        stmt = stmt.where(not_(Image.tags_array.overlap(cast(blocked_patterns, ARRAY(Text)))))
+
+    # Sort direction
+    if sort == "newest":
+        order_cols = [desc(Image.added_at), desc(Image.id)]
+    else:
+        order_cols = [asc(Image.added_at), asc(Image.id)]
+
+    # Keyset cursor
+    if cursor:
+        try:
+            cursor_data = _decode_image_cursor(cursor)
+            cursor_at = datetime.fromisoformat(cursor_data["added_at"]) if cursor_data.get("added_at") else None
+            cursor_id = cursor_data["id"]
+            if sort == "newest":
+                if cursor_at:
+                    stmt = stmt.where(
+                        or_(
+                            Image.added_at < cursor_at,
+                            and_(Image.added_at == cursor_at, Image.id < cursor_id),
+                        )
+                    )
+                else:
+                    stmt = stmt.where(Image.id < cursor_id)
+            else:
+                if cursor_at:
+                    stmt = stmt.where(
+                        or_(
+                            Image.added_at > cursor_at,
+                            and_(Image.added_at == cursor_at, Image.id > cursor_id),
+                        )
+                    )
+                else:
+                    stmt = stmt.where(Image.id > cursor_id)
+        except Exception:
+            raise HTTPException(400, "Invalid cursor")
+
+    stmt = stmt.order_by(*order_cols).limit(limit + 1)
+    rows = (await db.execute(stmt)).scalars().all()
+
+    has_next = len(rows) > limit
+    images_out = rows[:limit]
+
+    next_cursor = None
+    if has_next and images_out:
+        last = images_out[-1]
+        next_cursor = _encode_image_cursor(last)
+
+    return {
+        "images": [_i_browse(img) for img in images_out],
+        "next_cursor": next_cursor,
+        "has_next": has_next,
+    }
 
 
 @router.get("/artists")
@@ -357,11 +499,16 @@ async def list_artists(
             .distinct(Gallery.artist_id)
         ).subquery()
 
+        max_page_sub = (
+            select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
+            .where(Image.gallery_id == latest_gallery_sub.c.id)
+            .group_by(Image.gallery_id)
+        ).subquery()
         cover_stmt = (
             select(latest_gallery_sub.c.artist_id, Blob.sha256)
             .join(Image, Image.gallery_id == latest_gallery_sub.c.id)
             .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .where(Image.page_num == 1)
+            .join(max_page_sub, and_(Image.gallery_id == max_page_sub.c.gallery_id, Image.page_num == max_page_sub.c.max_page))
         )
         cover_rows = (await db.execute(cover_stmt)).all()
         cover_map = {r.artist_id: cas_thumb_url(r.sha256) for r in cover_rows}
@@ -420,10 +567,15 @@ async def get_artist_summary(
         .limit(1)
     ).scalar_subquery()
 
+    max_page_for_latest = (
+        select(func.max(Image.page_num))
+        .where(Image.gallery_id == latest_gallery_sub)
+        .scalar_subquery()
+    )
     cover_stmt = (
         select(Blob.sha256)
         .join(Image, Image.blob_sha256 == Blob.sha256)
-        .where(Image.gallery_id == latest_gallery_sub, Image.page_num == 1)
+        .where(Image.gallery_id == latest_gallery_sub, Image.page_num == max_page_for_latest)
         .limit(1)
     )
     cover_sha256 = (await db.execute(cover_stmt)).scalar_one_or_none()
@@ -475,7 +627,7 @@ async def list_artist_images(
         select(Image, Gallery.title.label("gallery_title"))
         .join(Gallery, Image.gallery_id == Gallery.id)
         .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
-        .order_by(gallery_order, asc(Image.page_num))
+        .order_by(gallery_order, desc(Image.page_num))
         .offset(page * limit)
         .limit(limit)
         .options(selectinload(Image.blob))
@@ -870,11 +1022,16 @@ async def get_gallery(
     db: AsyncSession = Depends(get_db),
 ):
     g = await _get_or_404(db, gallery_id, auth)
+    max_page_sub = (
+        select(func.max(Image.page_num))
+        .where(Image.gallery_id == gallery_id)
+        .scalar_subquery()
+    )
     cover_row = (
         await db.execute(
             select(Blob.sha256)
             .join(Image, Image.blob_sha256 == Blob.sha256)
-            .where(Image.gallery_id == gallery_id, Image.page_num == 1)
+            .where(Image.gallery_id == gallery_id, Image.page_num == max_page_sub)
         )
     ).scalar_one_or_none()
     cover_thumb = cas_thumb_url(cover_row) if cover_row else None
@@ -905,7 +1062,7 @@ async def get_gallery_images(
     stmt = (
         select(Image)
         .where(Image.gallery_id == gallery_id)
-        .order_by(Image.page_num)
+        .order_by(Image.page_num.desc())
         .options(selectinload(Image.blob))
     )
 
@@ -1545,4 +1702,5 @@ def _i(img: Image) -> dict:
         "file_hash": blob.sha256 if blob else None,
         "media_type": blob.media_type if blob else "image",
         "duration": blob.duration if blob else None,
+        "thumbhash": blob.thumbhash if blob else None,
     }

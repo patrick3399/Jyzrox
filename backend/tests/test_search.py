@@ -135,9 +135,25 @@ class TestSearchGalleries:
         assert data["items"][0]["source"] == "pixiv"
 
     async def test_search_rating_filter(self, client, db_session):
-        """rating:>=N token should filter galleries with rating >= N."""
-        await _insert_gallery(db_session, source_id="r1", title="High Rated", rating=5)
-        await _insert_gallery(db_session, source_id="r2", title="Low Rated", rating=2)
+        """rating:>=N token should filter galleries with per-user rating >= N.
+
+        The search router filters by the user_ratings table (not gallery.rating column).
+        Insert user row and per-user ratings for user_id=1 (from auth override).
+        """
+        await _insert_user(db_session, user_id=1)
+        hi_gid = await _insert_gallery(db_session, source_id="r1", title="High Rated", rating=5)
+        lo_gid = await _insert_gallery(db_session, source_id="r2", title="Low Rated", rating=2)
+
+        # Insert per-user ratings into user_ratings table
+        await db_session.execute(
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 5)"),
+            {"gid": hi_gid},
+        )
+        await db_session.execute(
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 2)"),
+            {"gid": lo_gid},
+        )
+        await db_session.commit()
 
         resp = await client.get("/api/search/", params={"q": "rating:>=4"})
         assert resp.status_code == 200
@@ -146,9 +162,21 @@ class TestSearchGalleries:
         assert data["items"][0]["title"] == "High Rated"
 
     async def test_search_favorited_filter(self, client, db_session):
-        """favorited:true token should return only favorited galleries."""
-        await _insert_gallery(db_session, source_id="f1", title="Fav", favorited=1)
+        """favorited:true token should return only galleries in user_favorites.
+
+        The search router filters by the user_favorites table (not gallery.favorited column).
+        Insert user row and a user_favorites entry for user_id=1 (from auth override).
+        """
+        await _insert_user(db_session, user_id=1)
+        fav_gid = await _insert_gallery(db_session, source_id="f1", title="Fav", favorited=1)
         await _insert_gallery(db_session, source_id="f2", title="Not Fav", favorited=0)
+
+        # Insert into user_favorites table for user_id=1
+        await db_session.execute(
+            text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"),
+            {"gid": fav_gid},
+        )
+        await db_session.commit()
 
         resp = await client.get("/api/search/", params={"q": "favorited:true"})
         assert resp.status_code == 200

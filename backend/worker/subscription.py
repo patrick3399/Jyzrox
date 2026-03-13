@@ -15,6 +15,120 @@ from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run
 
 
+async def _batch_enqueue(
+    pool,
+    sub_id: int,
+    sub_name: str | None,
+    user_id: int,
+    source: str,
+    works: list,
+) -> dict:
+    """Throttled batch enqueue with Redis progress tracking and WS events."""
+    from core.redis_client import get_redis, publish_job_event
+
+    redis = get_redis()
+
+    # Read settings from Redis
+    delay_raw = await redis.get("setting:subscription_enqueue_delay_ms")
+    delay_ms = int(delay_raw) if delay_raw else 500
+    delay_s = max(delay_ms, 100) / 1000.0
+
+    batch_max_raw = await redis.get("setting:subscription_batch_max")
+    batch_max = int(batch_max_raw) if batch_max_raw else 0
+
+    if batch_max > 0 and len(works) > batch_max:
+        works = works[:batch_max]
+
+    total = len(works)
+    enqueued = 0
+    failed = 0
+    started_at = datetime.now(UTC).isoformat()
+
+    # Redis hash for real-time progress
+    hash_key = f"subscription:batch:{sub_id}"
+    await redis.hset(hash_key, mapping={
+        "total": str(total),
+        "enqueued": "0",
+        "failed": "0",
+        "started_at": started_at,
+    })
+    await redis.expire(hash_key, 86400)  # 24h TTL
+
+    # DB: set batch_total
+    async with AsyncSessionLocal() as session:
+        await session.execute(
+            update(Subscription).where(Subscription.id == sub_id).values(
+                batch_total=total, batch_enqueued=0,
+            )
+        )
+        await session.commit()
+
+    # Initial WS event
+    await publish_job_event({
+        "type": "subscription_batch",
+        "sub_id": sub_id,
+        "sub_name": sub_name,
+        "total": total,
+        "enqueued": 0,
+        "failed": 0,
+        "phase": "enqueuing",
+        "user_id": user_id,
+    })
+
+    for i, work in enumerate(works):
+        try:
+            job_id = uuid.uuid4()
+            async with AsyncSessionLocal() as db_session:
+                db_session.add(DownloadJob(
+                    id=job_id, url=work.url,
+                    source=source, status="queued", progress={},
+                    user_id=user_id,
+                ))
+                await db_session.commit()
+            await pool.enqueue_job(
+                "download_job", work.url, source,
+                None, str(job_id), None,
+                _job_id=str(job_id),
+            )
+            enqueued += 1
+        except Exception as exc:
+            failed += 1
+            logger.warning("[batch_enqueue] sub=%d failed to enqueue %s: %s", sub_id, work.url, exc)
+
+        # Update Redis hash every item
+        await redis.hset(hash_key, mapping={"enqueued": str(enqueued), "failed": str(failed)})
+
+        # Update DB every 10 items or on last item
+        if (i + 1) % 10 == 0 or i == total - 1:
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(Subscription).where(Subscription.id == sub_id).values(
+                        batch_enqueued=enqueued,
+                    )
+                )
+                await session.commit()
+
+        # WS event every 5 items or on last item
+        if (i + 1) % 5 == 0 or i == total - 1:
+            await publish_job_event({
+                "type": "subscription_batch",
+                "sub_id": sub_id,
+                "sub_name": sub_name,
+                "total": total,
+                "enqueued": enqueued,
+                "failed": failed,
+                "phase": "enqueuing" if i < total - 1 else "done",
+                "user_id": user_id,
+            })
+
+        # Throttle — don't sleep after last item
+        if i < total - 1:
+            await asyncio.sleep(delay_s)
+
+    logger.info("[batch_enqueue] sub=%d done: total=%d enqueued=%d failed=%d", sub_id, total, enqueued, failed)
+    return {"enqueued": enqueued, "failed": failed, "total": total}
+
+
 async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
     """Check all subscribable sources for new works and optionally enqueue downloads."""
     from plugins.registry import plugin_registry
@@ -68,35 +182,12 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
                         )
                         await session.commit()
 
-                    # Auto-download new works if enabled
+                    # Auto-download new works if enabled (batch throttled)
                     if sub.auto_download and pool:
-                        for work in new_works:
-                            try:
-                                job_id = uuid.uuid4()
-                                async with AsyncSessionLocal() as db_session:
-                                    db_session.add(DownloadJob(
-                                        id=job_id,
-                                        url=work.url,
-                                        source=source_name,
-                                        status="queued",
-                                        progress={},
-                                        user_id=sub.user_id,
-                                    ))
-                                    await db_session.commit()
-                                await pool.enqueue_job(
-                                    "download_job",
-                                    work.url,
-                                    source_name,
-                                    None,
-                                    str(job_id),
-                                    None,
-                                    _job_id=str(job_id),
-                                )
-                            except Exception as enq_exc:
-                                logger.warning(
-                                    "[check_followed] failed to enqueue auto-download for %s: %s",
-                                    work.url, enq_exc,
-                                )
+                        await _batch_enqueue(
+                            pool, sub.id, sub.name, sub.user_id,
+                            source_name, new_works,
+                        )
 
                     total_new += len(new_works)
                 else:
@@ -166,23 +257,10 @@ async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
                 if sub.auto_download and new_count > 0:
                     pool = ctx.get("redis")
                     if pool:
-                        for work in new_works:
-                            try:
-                                job_id = uuid.uuid4()
-                                async with AsyncSessionLocal() as db_session:
-                                    db_session.add(DownloadJob(
-                                        id=job_id, url=work.url,
-                                        source=sub.source, status="queued", progress={},
-                                        user_id=sub.user_id,
-                                    ))
-                                    await db_session.commit()
-                                await pool.enqueue_job(
-                                    "download_job", work.url, sub.source,
-                                    None, str(job_id), None,
-                                    _job_id=str(job_id),
-                                )
-                            except Exception as enq_exc:
-                                logger.warning("[check_sub] failed to enqueue: %s", enq_exc)
+                        await _batch_enqueue(
+                            pool, sub.id, sub.name, sub.user_id,
+                            sub.source, new_works,
+                        )
             else:
                 async with AsyncSessionLocal() as session:
                     await session.execute(

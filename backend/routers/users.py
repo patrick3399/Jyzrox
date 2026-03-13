@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
-from core.auth import require_role
+from core.auth import _checkpw_async, _hashpw_async, _sign_session, _verify_session, require_role
 from core.database import get_db
 from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
@@ -77,7 +77,7 @@ async def create_user(
     if existing.scalars().first():
         raise api_error(status.HTTP_409_CONFLICT, "username_taken", locale)
 
-    password_hash = bcrypt.hashpw(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+    password_hash = (await _hashpw_async(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12))).decode("utf-8")
 
     user = User(
         username=req.username,
@@ -129,9 +129,9 @@ async def update_user(
     if req.password is not None:
         if len(req.password) < 8:
             raise api_error(status.HTTP_400_BAD_REQUEST, "invalid_request", locale)
-        user.password_hash = bcrypt.hashpw(
+        user.password_hash = (await _hashpw_async(
             req.password.encode("utf-8"), bcrypt.gensalt(rounds=12)
-        ).decode("utf-8")
+        )).decode("utf-8")
 
     await db.commit()
 
@@ -154,9 +154,14 @@ async def update_user(
                     if ttl < 1:
                         continue
                     try:
-                        data = json.loads(raw if isinstance(raw, str) else raw.decode())
+                        raw_str = raw if isinstance(raw, str) else raw.decode()
+                        verified = _verify_session(raw_str)
+                        if verified is None:
+                            await redis.delete(key_str)
+                            continue
+                        data = json.loads(verified)
                         data["role"] = req.role
-                        await redis.setex(key_str, ttl, json.dumps(data))
+                        await redis.setex(key_str, ttl, _sign_session(json.dumps(data)))
                     except (json.JSONDecodeError, TypeError):
                         pass
                 if cursor == 0:

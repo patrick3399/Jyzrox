@@ -19,6 +19,7 @@ const en: Record<string, string> = {
   'nav.dedup': 'Dedup',
   'nav.logout': 'Logout',
   'nav.users': 'Users',
+  'nav.images': 'Images',
 
   // ── Dashboard ──
   'dashboard.title': 'Dashboard',
@@ -301,6 +302,36 @@ const en: Record<string, string> = {
   'settings.avatarRemoved': 'Avatar removed',
   'settings.avatarMaxSize': 'Max 2 MB, will be resized to 160×160',
   'settings.language': 'Language',
+
+  // ── Rate Limits Settings ──
+  'settings.rateLimits': 'Download Rate Limiting',
+  'settings.rateLimitsDesc': 'Configure per-site download concurrency and delays',
+  'settings.rateLimitsJobConcurrency': 'Job Concurrency',
+  'settings.rateLimitsImageConcurrency': 'Image Concurrency',
+  'settings.rateLimitsPageDelay': 'Page Delay',
+  'settings.rateLimitsRequestDelay': 'Request Delay',
+  'settings.rateLimitsMs': 'ms',
+  'settings.rateLimitsSchedule': 'Time Schedule',
+  'settings.rateLimitsScheduleEnable': 'Enable Schedule',
+  'settings.rateLimitsScheduleWindow': 'Window',
+  'settings.rateLimitsScheduleTo': 'to',
+  'settings.rateLimitsScheduleMode': 'Mode',
+  'settings.rateLimitsScheduleFullSpeed': 'Full Speed',
+  'settings.rateLimitsScheduleStandard': 'Standard',
+  'settings.rateLimitsScheduleStatus': 'Status',
+  'settings.rateLimitsScheduleActive': 'Active',
+  'settings.rateLimitsScheduleInactive': 'Inactive',
+  'settings.rateLimitsScheduleOutsideWindow': 'Enabled, outside window',
+  'settings.rateLimitsScheduleDisabled': 'Disabled',
+  'settings.rateLimitsOverride': 'Manual Override',
+  'settings.rateLimitsOverrideCondition': 'Until manually restored',
+  'settings.rateLimitsUnlock': 'Unlock Full Speed',
+  'settings.rateLimitsRestore': 'Restore Limits',
+  'settings.rateLimitsStatusNormal': 'Normal',
+  'settings.rateLimitsStatusFullSpeed': 'Full speed (until next schedule check)',
+  'settings.rateLimitsPaginationDelay': 'Pagination Delay',
+  'settings.rateLimitsIllustDelay': 'Between Illustrations',
+  'settings.rateLimitsManagedInternally': 'Managed internally by gallery-dl',
 
   // ── TagInput ──
   'tagInput.aliasPlaceholder': 'e.g. character:reimu — press Enter',
@@ -788,6 +819,14 @@ const en: Record<string, string> = {
   'subscriptions.sourceOther': 'Other',
   'subscriptions.enabled': 'Enabled',
   'subscriptions.disabled': 'Disabled',
+  'subscriptions.batchEnqueuing': 'Enqueuing downloads...',
+  'subscriptions.batchProgress': '{enqueued} / {total} enqueued',
+  'subscriptions.batchDone': 'Batch complete',
+  'subscriptions.batchFailed': '{failed} failed',
+  'settings.subscriptionEnqueue': 'Subscription Enqueue',
+  'settings.subscriptionEnqueueDelay': 'Enqueue Delay',
+  'settings.subscriptionBatchMax': 'Batch Max (0 = no limit)',
+  'settings.subscriptionEnqueueDesc': 'Throttle subscription auto-downloads. Delay is the pause between each enqueue; batch max limits items per check.',
 
   // ── Cache Management ──
   'settings.cache': 'Cache',
@@ -1101,6 +1140,7 @@ const en: Record<string, string> = {
 
   // ── Common (additions) ──
   'common.close': 'Close',
+  'common.add': 'Add',
 
   // ── Scheduled Tasks page ──
   'scheduledTasks.title': 'Scheduled Tasks',
@@ -1229,12 +1269,30 @@ const en: Record<string, string> = {
   'forbidden.description': 'You do not have permission to access this page. Contact an administrator if you believe this is an error.',
   'forbidden.backHome': 'Back to Home',
 
+  // ── Accessibility / aria-labels ──
+  'common.previousPage': 'Previous page',
+  'common.nextPage': 'Next page',
+  'common.favourited': 'Favourited',
+  'common.ratingOf': 'Rating: {rating} out of 5',
+  'common.setRating': 'Set rating',
+  'common.rateN': 'Rate {n} out of 5',
+  'common.removeTag': 'Remove tag {tag}',
+  'reader.toggleControls': 'Toggle controls',
+  'reader.videoSeek': 'Seek',
+  'library.clearArtistFilter': 'Clear artist filter',
+  'credential.banner.dismiss': 'Dismiss',
+
   // ── Error codes ──
   'error.forbidden': 'You do not have permission to access this resource',
   'error.user_not_found': 'User not found',
   'error.cannot_delete_self': 'Cannot delete your own account',
   'error.cannot_delete_last_admin': 'Cannot delete the last admin account',
   'error.username_taken': 'Username is already taken',
+
+  // ── Image Browser ──
+  'images.title': 'Image Browser',
+  'images.noResults': 'No images found.',
+  'images.filterByTags': 'Filter by tags...',
 }
 
 export default en

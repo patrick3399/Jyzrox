@@ -46,6 +46,8 @@ import type {
   DedupReviewResponse,
   DedupScanProgress,
   UserInfo,
+  RateLimitSettings,
+  SiteRateConfig,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -367,6 +369,9 @@ const library = {
       `/api/library/galleries/${galleryId}/delete-image`,
       { method: 'POST', body: JSON.stringify({ page_num: pageNum }) }
     ),
+
+  browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number } = {}) =>
+    apiFetch<import('./types').ImageBrowserResponse>(`/api/library/images${qs(params as Record<string, unknown>)}`),
 }
 
 // ── Download ──────────────────────────────────────────────────────────
@@ -413,6 +418,12 @@ const download = {
       method: 'PATCH',
       body: JSON.stringify({ action: 'resume' }),
     }),
+
+  retryJob: (id: string) =>
+    apiFetch<{ status: string; retry_count: number; max_retries: number }>(
+      `/api/download/jobs/${id}/retry`,
+      { method: 'POST' },
+    ),
 
   checkUrl: (url: string) =>
     apiFetch<{ supported: boolean; source_id?: string; name?: string; category?: string }>(
@@ -523,6 +534,21 @@ const settings = {
     apiFetch<{ feature: string; value: number }>(`/api/settings/features/${feature}`, {
       method: 'PATCH',
       body: JSON.stringify({ value }),
+    }),
+
+  getRateLimits: () =>
+    apiFetch<RateLimitSettings>('/api/settings/rate-limits'),
+
+  patchRateLimits: (data: Partial<{ sites: Record<string, Partial<SiteRateConfig>>; schedule: Partial<import('./types').RateLimitSchedule> }>) =>
+    apiFetch<RateLimitSettings>('/api/settings/rate-limits', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  setRateLimitOverride: (unlocked: boolean) =>
+    apiFetch<void>('/api/settings/rate-limits/override', {
+      method: 'POST',
+      body: JSON.stringify({ unlocked }),
     }),
 }
 

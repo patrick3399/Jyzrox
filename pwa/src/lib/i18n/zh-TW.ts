@@ -802,6 +802,16 @@ const zhTW: Record<string, string> = {
   'error.cannot_delete_self': '無法刪除自己的帳號',
   'error.cannot_delete_last_admin': '無法刪除最後一個管理員帳號',
   'error.username_taken': '此使用者名稱已被使用',
+
+  // ── Subscriptions (batch) ──
+  'subscriptions.batchEnqueuing': '正在排入下載...',
+  'subscriptions.batchProgress': '已排入 {enqueued} / {total}',
+  'subscriptions.batchDone': '批次完成',
+  'subscriptions.batchFailed': '{failed} 個排入失敗',
+  'settings.subscriptionEnqueue': '訂閱排入',
+  'settings.subscriptionEnqueueDelay': '排入間隔',
+  'settings.subscriptionBatchMax': '批次上限（0 = 無限）',
+  'settings.subscriptionEnqueueDesc': '節流訂閱自動下載。間隔為每次排入的暫停時間；批次上限限制每次檢查的項目數。',
 }
 
 export default zhTW

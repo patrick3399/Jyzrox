@@ -13,6 +13,7 @@ services:
         condition: service_healthy
     networks:
       - frontend
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/nginx-health || exit 1"]
@@ -39,6 +40,7 @@ services:
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 30s
     environment:
+      - TZ=Asia/Taipei
       - PUID=1042
       - PGID=1042
     env_file: .env
@@ -54,6 +56,7 @@ services:
     networks:
       - frontend
       - backend
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8000/api/health || exit 1"]
@@ -80,6 +83,7 @@ services:
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 120s
     environment:
+      - TZ=Asia/Taipei
       - PUID=1042
       - PGID=1042
     env_file: .env
@@ -96,6 +100,7 @@ services:
     networks:
       - frontend
       - backend
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "python -c \"import redis,os; r=redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379')); r.ping()\""]
@@ -119,12 +124,14 @@ services:
   pwa:
     build: ./pwa
     environment:
+      - TZ=Asia/Taipei
       - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
     depends_on:
       - api
     networks:
       - frontend
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000"]
@@ -156,6 +163,7 @@ services:
       - tagger_models:/app/models
     networks:
       - backend
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8100/health || exit 1"]
@@ -180,6 +188,11 @@ services:
 
   postgres:
     image: postgres:18-alpine
+    command: >
+      postgres
+      -c password_encryption=scram-sha-256
+      -c log_connections=on
+      -c log_disconnections=on
     env_file: .env
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -191,6 +204,7 @@ services:
       retries: 10
     networks:
       - backend
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     deploy:
       resources:
@@ -217,6 +231,7 @@ services:
       retries: 5
     networks:
       - backend
+    security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     deploy:
       resources:

@@ -18,50 +18,48 @@ import pytest
 
 
 class TestWorkerDetectSource:
-    """Unit tests for worker._detect_source."""
+    """Unit tests for core.utils.detect_source (plugin-based detection)."""
 
     def test_ehentai_org_url(self):
         """e-hentai.org URLs must return 'ehentai'."""
-        from worker import _detect_source
+        from core.utils import detect_source
 
-        assert _detect_source("https://e-hentai.org/g/123456/abcdef/") == "ehentai"
+        assert detect_source("https://e-hentai.org/g/123456/abcdef/") == "ehentai"
 
     def test_exhentai_org_url(self):
         """exhentai.org URLs must return 'ehentai'."""
-        from worker import _detect_source
+        from core.utils import detect_source
 
-        assert _detect_source("https://exhentai.org/g/654321/fedcba/") == "ehentai"
+        assert detect_source("https://exhentai.org/g/654321/fedcba/") == "ehentai"
 
     def test_pixiv_net_url_returns_hostname(self):
-        """pixiv.net URLs must return the hostname string."""
-        from worker import _detect_source
+        """pixiv.net URLs must return 'pixiv' source_id."""
+        from core.utils import detect_source
 
-        # worker._detect_source does NOT return 'pixiv' — it returns the
-        # parsed hostname. (contrast: routers.download._detect_source which
-        # returns 'pixiv'). Verify correct hostname-based result.
-        result = _detect_source("https://www.pixiv.net/artworks/12345")
-        assert result == "www.pixiv.net"
+        result = detect_source("https://www.pixiv.net/artworks/12345")
+        assert result == "pixiv"
 
     def test_unknown_domain_returns_hostname(self):
-        """Unrecognised URLs should return the hostname."""
-        from worker import _detect_source
+        """Unrecognised URLs should return 'unknown'."""
+        from core.utils import detect_source
 
-        result = _detect_source("https://example.com/gallery/1")
-        assert result == "example.com"
+        result = detect_source("https://example.com/gallery/1")
+        assert result == "unknown"
 
     def test_invalid_url_returns_other(self):
-        """A completely unparseable string must return 'other'."""
-        from worker import _detect_source
+        """A completely unparseable string must return 'unknown'."""
+        from core.utils import detect_source
 
-        result = _detect_source("not-a-url-at-all")
-        assert result == "other"
+        result = detect_source("not-a-url-at-all")
+        assert result == "unknown"
 
     def test_bare_domain_returns_hostname(self):
-        """URL with only scheme + host must return the host."""
-        from worker import _detect_source
+        """URL with a registered plugin domain must return the plugin source id."""
+        from core.utils import detect_source
 
-        result = _detect_source("https://danbooru.donmai.us/posts/1")
-        assert result == "danbooru.donmai.us"
+        # danbooru is a registered plugin source in the test environment
+        result = detect_source("https://danbooru.donmai.us/posts/1")
+        assert result == "danbooru"
 
 
 # ---------------------------------------------------------------------------
