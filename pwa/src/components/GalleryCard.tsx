@@ -141,7 +141,7 @@ export function LibraryGalleryCard({ gallery, thumbUrl, onClick, selected, selec
       {gallery.is_favorited && (
         <span
           className="absolute top-1.5 right-1.5 z-10 text-red-400 text-base leading-none drop-shadow"
-          aria-label="Favourited"
+          aria-label={t('common.favourited')}
         >
           ♥
         </span>

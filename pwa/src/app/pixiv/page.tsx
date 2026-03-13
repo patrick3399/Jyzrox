@@ -692,7 +692,11 @@ function RankingTab({
   }
 
   const getKey = (pageIndex: number, previous: RankingPage | null) => {
-    if (pageIndex > 0 && previous && previous.contents.length < 50) return null
+    if (pageIndex > 0 && previous) {
+      const hasNext = (previous as Record<string, unknown>).has_next
+      const shouldStop = hasNext !== undefined ? !hasNext : previous.contents.length < 50
+      if (shouldStop) return null
+    }
     const effectiveMode = r18 ? `${mode}_r18` : mode
     return ['/pixiv/ranking', effectiveMode, r18 ? 'all' : content, pageIndex + 1]
   }

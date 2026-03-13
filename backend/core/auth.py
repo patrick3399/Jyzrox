@@ -1,5 +1,6 @@
 """Session-based authentication (Redis)."""
 
+import asyncio
 import base64
 import binascii
 import hashlib
@@ -24,6 +25,14 @@ ROLE_HIERARCHY = {"admin": 3, "member": 2, "viewer": 1}
 # Pre-computed dummy hash to prevent timing attacks on username enumeration.
 # bcrypt.checkpw() is always called regardless of whether the user exists.
 _DUMMY_HASH = bcrypt.hashpw(b"dummy-constant-timing", bcrypt.gensalt(rounds=12)).decode()
+
+
+async def _checkpw_async(password: bytes, hashed: bytes) -> bool:
+    return await asyncio.to_thread(bcrypt.checkpw, password, hashed)
+
+
+async def _hashpw_async(password: bytes, salt: bytes) -> bytes:
+    return await asyncio.to_thread(bcrypt.hashpw, password, salt)
 
 
 def _sign_session(data: str) -> str:
@@ -173,7 +182,7 @@ async def require_opds_auth(
 
     # Always call checkpw to prevent timing-based username enumeration.
     hash_to_check = user.password_hash if user else _DUMMY_HASH
-    valid = bcrypt.checkpw(password.encode("utf-8"), hash_to_check.encode("utf-8"))
+    valid = await _checkpw_async(password.encode("utf-8"), hash_to_check.encode("utf-8"))
     if not user or not valid:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,

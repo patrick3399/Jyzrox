@@ -57,11 +57,23 @@ fi
 
 # --- 自動備份當前資料庫（安全網）---
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
-SAFETY_BACKUP="backups/pre_restore_${TIMESTAMP}.sql.gz"
+if [ -n "${BACKUP_ENCRYPT_KEY:-}" ]; then
+  SAFETY_BACKUP="backups/pre_restore_${TIMESTAMP}.sql.gz.gpg"
+else
+  SAFETY_BACKUP="backups/pre_restore_${TIMESTAMP}.sql.gz"
+fi
 mkdir -p backups
 echo "[restore] Creating safety backup of current database → $SAFETY_BACKUP ..."
-docker compose exec -T postgres \
-  pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$SAFETY_BACKUP"
+if [ -n "${BACKUP_ENCRYPT_KEY:-}" ]; then
+  docker compose exec -T postgres \
+    pg_dump -U "$DB_USER" "$DB_NAME" \
+    | gzip \
+    | gpg --symmetric --cipher-algo AES256 --batch --passphrase "$BACKUP_ENCRYPT_KEY" \
+    > "$SAFETY_BACKUP"
+else
+  docker compose exec -T postgres \
+    pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$SAFETY_BACKUP"
+fi
 
 # 驗證 safety backup 非空
 SAFETY_SIZE=$(stat -c%s "$SAFETY_BACKUP" 2>/dev/null || stat -f%z "$SAFETY_BACKUP")

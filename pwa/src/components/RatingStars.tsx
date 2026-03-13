@@ -1,4 +1,5 @@
 import { useState } from 'react'
+import { t } from '@/lib/i18n'
 
 interface RatingStarsProps {
   rating: number
@@ -15,7 +16,7 @@ export function RatingStars({ rating, readonly = false, onChange }: RatingStarsP
     <div
       className="inline-flex items-center gap-0.5"
       role={readonly ? undefined : 'group'}
-      aria-label={readonly ? `Rating: ${rating} out of 5` : 'Set rating'}
+      aria-label={readonly ? t('common.ratingOf', { rating: String(rating) }) : t('common.setRating')}
     >
       {Array.from({ length: 5 }, (_, i) => {
         const starIndex = i + 1
@@ -47,7 +48,7 @@ export function RatingStars({ rating, readonly = false, onChange }: RatingStarsP
                 ? 'text-yellow-400 hover:text-yellow-300'
                 : 'text-vault-text-muted/40 hover:text-yellow-500'
             }`}
-            aria-label={`Rate ${starIndex} out of 5`}
+            aria-label={t('common.rateN', { n: String(starIndex) })}
           >
             {isFilled ? '★' : '☆'}
           </button>

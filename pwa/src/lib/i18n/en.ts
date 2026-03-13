@@ -1259,6 +1259,19 @@ const en: Record<string, string> = {
   'forbidden.description': 'You do not have permission to access this page. Contact an administrator if you believe this is an error.',
   'forbidden.backHome': 'Back to Home',
 
+  // ── Accessibility / aria-labels ──
+  'common.previousPage': 'Previous page',
+  'common.nextPage': 'Next page',
+  'common.favourited': 'Favourited',
+  'common.ratingOf': 'Rating: {rating} out of 5',
+  'common.setRating': 'Set rating',
+  'common.rateN': 'Rate {n} out of 5',
+  'common.removeTag': 'Remove tag {tag}',
+  'reader.toggleControls': 'Toggle controls',
+  'reader.videoSeek': 'Seek',
+  'library.clearArtistFilter': 'Clear artist filter',
+  'credential.banner.dismiss': 'Dismiss',
+
   // ── Error codes ──
   'error.forbidden': 'You do not have permission to access this resource',
   'error.user_not_found': 'User not found',

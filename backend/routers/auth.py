@@ -17,7 +17,7 @@ from pydantic import BaseModel
 from sqlalchemy import text
 
 from core.audit import log_audit
-from core.auth import _DUMMY_HASH, _sign_session, _verify_session, require_auth
+from core.auth import _DUMMY_HASH, _checkpw_async, _hashpw_async, _sign_session, _verify_session, require_auth
 from core.config import settings
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
@@ -79,7 +79,7 @@ async def setup(req: LoginRequest, request: Request):
             locale = parse_accept_language(request.headers.get("accept-language"))
             raise api_error(403, "setup_completed", locale)
 
-        password_hash = bcrypt.hashpw(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+        password_hash = (await _hashpw_async(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12))).decode("utf-8")
         result = await session.execute(
             text("""
                 INSERT INTO users (username, password_hash, role)
@@ -123,7 +123,7 @@ async def login(req: LoginRequest, request: Request, response: Response):
 
     # Always call checkpw to prevent timing-based username enumeration.
     hash_to_check = user.password_hash if user else _DUMMY_HASH
-    valid = bcrypt.checkpw(req.password.encode("utf-8"), hash_to_check.encode("utf-8"))
+    valid = await _checkpw_async(req.password.encode("utf-8"), hash_to_check.encode("utf-8"))
     if not user or not valid:
         await log_audit(None, "login_failed", detail=f"username={req.username}", ip=client_ip)
         raise api_error(401, "invalid_credentials", parse_accept_language(request.headers.get("accept-language")))
@@ -200,7 +200,7 @@ async def check_auth(
                 )
                 user = result.fetchone()
             hash_to_check = user.password_hash if user else _DUMMY_HASH
-            if user and bcrypt.checkpw(password.encode("utf-8"), hash_to_check.encode("utf-8")):
+            if user and await _checkpw_async(password.encode("utf-8"), hash_to_check.encode("utf-8")):
                 return {"status": "ok"}
         except Exception:
             pass
@@ -484,12 +484,12 @@ async def change_password(
 
     # Always call checkpw to prevent timing attacks.
     hash_to_check = user.password_hash if user else _DUMMY_HASH
-    valid = bcrypt.checkpw(req.current_password.encode("utf-8"), hash_to_check.encode("utf-8"))
+    valid = await _checkpw_async(req.current_password.encode("utf-8"), hash_to_check.encode("utf-8"))
     if not user or not valid:
         await log_audit(auth["user_id"], "password_change_failed", ip=get_client_ip(request))
         raise HTTPException(status_code=401, detail="Current password is incorrect")
 
-    new_hash = bcrypt.hashpw(req.new_password.encode("utf-8"), bcrypt.gensalt(rounds=12)).decode("utf-8")
+    new_hash = (await _hashpw_async(req.new_password.encode("utf-8"), bcrypt.gensalt(rounds=12))).decode("utf-8")
 
     async with async_session() as session:
         await session.execute(

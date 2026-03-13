@@ -242,7 +242,7 @@ function SinglePageView({
               clearTimeout(centerTapTimerRef.current)
               centerTapTimerRef.current = setTimeout(() => onToggleOverlay(), 250)
             }}
-            aria-label="Toggle controls"
+            aria-label={t('reader.toggleControls')}
           />
           {/* Prev / Next zones — hidden when zoomed (user pans instead) */}
           {!isZoomed && readingDirection === 'vertical' && (
@@ -254,7 +254,7 @@ function SinglePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   onPrev()
                 }}
-                aria-label="Previous page"
+                aria-label={t('common.previousPage')}
               />
               <div
                 className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -263,7 +263,7 @@ function SinglePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   onNext()
                 }}
-                aria-label="Next page"
+                aria-label={t('common.nextPage')}
               />
             </>
           )}
@@ -276,7 +276,7 @@ function SinglePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   leftAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? 'Next page' : 'Previous page'}
+                aria-label={readingDirection === 'rtl' ? t('common.nextPage') : t('common.previousPage')}
               />
               <div
                 className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -285,7 +285,7 @@ function SinglePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   rightAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? 'Previous page' : 'Next page'}
+                aria-label={readingDirection === 'rtl' ? t('common.previousPage') : t('common.nextPage')}
               />
             </>
           )}
@@ -558,7 +558,7 @@ function DoublePageView({
               clearTimeout(centerTapTimerRef.current)
               centerTapTimerRef.current = setTimeout(() => onToggleOverlay(), 250)
             }}
-            aria-label="Toggle controls"
+            aria-label={t('reader.toggleControls')}
           />
           {/* Prev / Next zones — hidden when zoomed (user pans instead) */}
           {!isZoomed && readingDirection === 'vertical' && (
@@ -570,7 +570,7 @@ function DoublePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   onPrev()
                 }}
-                aria-label="Previous page"
+                aria-label={t('common.previousPage')}
               />
               <div
                 className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
@@ -579,7 +579,7 @@ function DoublePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   onNext()
                 }}
-                aria-label="Next page"
+                aria-label={t('common.nextPage')}
               />
             </>
           )}
@@ -592,7 +592,7 @@ function DoublePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   leftAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? 'Next page' : 'Previous page'}
+                aria-label={readingDirection === 'rtl' ? t('common.nextPage') : t('common.previousPage')}
               />
               <div
                 className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
@@ -601,7 +601,7 @@ function DoublePageView({
                   if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
                   rightAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? 'Previous page' : 'Next page'}
+                aria-label={readingDirection === 'rtl' ? t('common.previousPage') : t('common.nextPage')}
               />
             </>
           )}
