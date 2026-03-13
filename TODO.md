@@ -1,6 +1,6 @@
 # Jyzrox TODO
 
-> 最後更新：2026-03-13
+> 最後更新：2026-03-13（1bimage 功能已標記完成）
 
 ---
 
@@ -392,5 +392,28 @@
 - [x] `_extract_source_id()` 支援 EH URL（f_search / tag / uploader + percent-decode）
 - [x] `EhClient` 搜尋結果保序修正（`dict.fromkeys`）
 - [x] 30 個單元測試
+
+### Image Browser（1bimage）
+- [x] `/images` 頁面：justified grid 版面、tag 篩選、cursor 分頁
+- [x] `JustifiedGrid.tsx` 組件：等高列排版
+- [x] `useImageBrowser.ts` SWR hook
+- [x] `GET /api/library/images` 後端端點（`backend/routers/library.py`）
+- [x] Thumbhash placeholder 整合於圖片瀏覽器
+
+### Thumbhash Pipeline（1bimage）
+- [x] `blobs.thumbhash` 欄位（DB schema）
+- [x] `backend/worker/thumbnail.py`：縮圖生成時一併計算 thumbhash
+- [x] `backend/worker/thumbhash_backfill.py`：補算現有 blob 的 thumbhash backfill job
+- [x] 前端 `thumbHashToDataURL` 工具函式
+
+### Reader 效能優化（1bimage）
+- [x] `ThumbnailStrip` 虛擬捲動（virtual scroll，保持約 50 個 DOM 元素而非全部渲染）
+- [x] 大型圖庫（>500 頁）windowed image loading
+- [x] CSS containment 套用
+
+### Gallery 可見性基礎設施（1bimage）
+- [x] `galleries.visibility` 欄位（default `'public'`）
+- [x] `galleries.created_by_user_id` 欄位
+- [x] `core/gallery_access.py`：`gallery_access_filter()` helper
 
 </details>

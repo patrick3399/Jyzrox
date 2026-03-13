@@ -75,7 +75,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `/api/system` | `routers/system.py` | Session | Health, info, cache stats/clear |
 | `/api/eh` | `plugins/builtin/ehentai/browse.py` (dynamic) | Session | EH search, gallery, images, proxy, favorites, popular, toplists |
 | `/api/pixiv` | `plugins/builtin/pixiv/_browse.py` (dynamic) | Session | Pixiv search, illust, user, following, image proxy |
-| `/api/library` | `routers/library.py` | Session | Gallery CRUD, images, tags, progress, artists |
+| `/api/library` | `routers/library.py` | Session | Gallery CRUD, images, tags, progress, artists, image browser |
 | `/api/download` | `routers/download.py` | Session | Enqueue, list/cancel jobs, stats |
 | `/api/settings` | `routers/settings.py` | Session | Credentials, API tokens, feature flags, EH site toggle, rate limit |
 | `/api/ws` | `routers/ws.py` | Session | WebSocket at `/api/ws/ws` |
@@ -105,8 +105,8 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 |-------|-------------|-------------|
 | `users` | User accounts | `id`, `username` UNIQUE, `password_hash`, `role`, `locale`, `avatar_style` |
 | `galleries` | Gallery records | `id`, `(source, source_id)` UNIQUE, `title`, `tags_array TEXT[]`, `download_status`, `artist_id`, `library_path` |
-| `blobs` | CAS file store | `sha256` PK, `file_size`, `media_type`, `width`, `height`, `duration`, `phash*`, `extension`, `storage`, `ref_count` |
-| `images` | Gallery pages | `id`, `gallery_id` FK, `page_num`, `blob_sha256` FK, `tags_array TEXT[]` |
+| `blobs` | CAS file store | `sha256` PK, `file_size`, `media_type`, `width`, `height`, `duration`, `phash*`, `extension`, `storage`, `ref_count`, `thumbhash TEXT` (base64 thumbhash for image placeholders) |
+| `images` | Gallery pages | `id`, `gallery_id` FK, `page_num`, `blob_sha256` FK, `tags_array TEXT[]`, `added_at TIMESTAMPTZ` (denormalized from gallery) |
 | `tags` | Tag registry | `id`, `(namespace, name)` UNIQUE, `count` |
 | `tag_aliases` | Tag alias map | `(alias_namespace, alias_name)` PK → `canonical_id` FK |
 | `tag_implications` | Tag inference rules | `(antecedent_id, consequent_id)` PK |
@@ -129,8 +129,9 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `excluded_blobs` | Per-gallery blob exclusions | `(gallery_id, blob_sha256)` PK, `excluded_at` |
 | `blob_relationships` | Dedup pair store | `id` UUID PK, `sha_a / sha_b` FK → `blobs` (`CHECK sha_a < sha_b`, `UNIQUE` pair), `hamming_dist SMALLINT`, `relationship TEXT` (`quality_conflict`/`variant`/`whitelisted`/`needs_t3`/`resolved`), `suggested_keep TEXT`, `diff_type TEXT`, `diff_score FLOAT`, `size_ratio FLOAT`, `tier SMALLINT`, `reviewed BOOLEAN`, `created_at` |
 | `user_favorites` | Per-user gallery favorites | `(user_id, gallery_id)` PK, `created_at` |
+| `user_ratings` | Per-user gallery ratings | `(user_id, gallery_id)` PK, `rating SMALLINT CHECK (0–5)`, `rated_at TIMESTAMPTZ` |
 
-> **Note:** Tables `collections`, `collection_galleries`, and `excluded_blobs` are created via Alembic migrations (`0005b`, `0007`), not in `db/init.sql`. The `audit_logs` table is also migration-only (`0005`). `blob_relationships` is created in `db/init.sql`.
+> **Note:** Tables `collections`, `collection_galleries`, and `excluded_blobs` are created via Alembic migrations (`0005b`, `0007`), not in `db/init.sql`. The `audit_logs` table is also migration-only (`0005`). `blob_relationships` is created in `db/init.sql`. `user_ratings`, `blobs.thumbhash`, and `images.added_at` are added via `ALTER TABLE` in `db/init.sql`.
 
 #### Key Indexes
 
@@ -144,6 +145,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `idx_galleries_added_at_id` | `galleries` | BTree | keyset pagination |
 | `idx_galleries_rating_id` | `galleries` | BTree | keyset pagination |
 | `idx_galleries_pages_id` | `galleries` | BTree | keyset pagination |
+| `idx_images_added_at_id` | `images` | BTree | keyset pagination for image browser |
 
 ---
 
@@ -178,12 +180,13 @@ All models are in `backend/db/models.py`.
 | `ExcludedBlob` | `excluded_blobs` |
 | `BlobRelationship` | `blob_relationships` |
 | `UserFavorite` | `user_favorites` |
+| `UserRating` | `user_ratings` |
 
 ---
 
 ### Worker Pipeline (ARQ)
 
-Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `dedup.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`)
+Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `dedup.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`, `thumbhash_backfill.py`)
 
 #### Job Functions
 
@@ -209,6 +212,7 @@ Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py
 | `dedup_tier1_job` | Via `dedup_scan_job` | pHash pigeonhole scan → Hamming distance → writes `blob_relationships` |
 | `dedup_tier2_job` | Via `dedup_scan_job` | Heuristic classification: fills `relationship` (`quality_conflict`/`variant`) + `suggested_keep` |
 | `dedup_tier3_job` | Via `dedup_scan_job` (when `dedup_opencv_enabled`) | OpenCV pixel-diff validates `needs_t3` pairs → confirms or resolves as false positive |
+| `thumbhash_backfill_job` | Manual | Batch-generates base64 thumbhash for existing blobs missing `thumbhash`; reads `thumb_160.webp` via Pillow + `thumbhash` library; processes in batches of 500 using keyset pagination on `sha256` |
 
 #### Standard Pipeline
 
@@ -482,6 +486,7 @@ Source root: `pwa/src/`
 | `/artists/[artistId]` | `app/artists/[artistId]/page.tsx` | Individual artist detail page |
 | `/reader/artist/[artistId]` | `app/reader/artist/[artistId]/page.tsx` | Artist gallery reader |
 | `/reader/pixiv/[id]` | `app/reader/pixiv/[id]/page.tsx` | Pixiv online reader |
+| `/images` | `app/images/page.tsx` | Image Browser — justified grid layout, tag filtering, cursor-based pagination |
 
 ---
 
@@ -521,6 +526,7 @@ Source root: `pwa/src/`
 | `ImageModal` | `components/Dedup/ImageModal.tsx` | Full-size image preview modal for dedup review |
 | `BackButton` | `components/BackButton.tsx` | Navigation back button |
 | `BottomTabBar` | `components/BottomTabBar.tsx` | Bottom tab navigation for mobile |
+| `JustifiedGrid` | `components/JustifiedGrid.tsx` | Generic justified-layout grid with `@tanstack/react-virtual` window virtualisation; accepts `getAspectRatio` + `renderItem` callbacks; fires `onLoadMore` when last row is visible; uses `justified-layout` for geometry calculation |
 
 ---
 
@@ -544,6 +550,7 @@ All hooks in `pwa/src/hooks/`.
 | `useScrollRestore` | `useScrollRestore.ts` | Scroll position restoration |
 | `useGridKeyboard` | `useGridKeyboard.ts` | Keyboard navigation in gallery grids |
 | `useSwipeBack` | `useSwipeBack.ts` | Swipe back gesture detection |
+| `useImageBrowser` | `useImageBrowser.ts` | SWR infinite hook for `GET /api/library/images`; cursor-based; accepts `tags`, `exclude_tags`, `sort`, `gallery_id`, `limit`; exposes `images`, `loadMore`, `isReachingEnd` |
 
 ---
 
@@ -555,7 +562,7 @@ Single `apiFetch` base function with automatic 401 redirect and CSRF header inje
 |-----------|--------|
 | `auth` | login, logout, setup, sessions, profile, avatar, password, check |
 | `eh` | search, gallery, images, proxy, favorites, popular, toplists, comments |
-| `library` | galleries CRUD, images, tags, progress, artists |
+| `library` | galleries CRUD, images, tags, progress, artists, image browser (`browseImages`) |
 | `download` | enqueue, jobs, cancel, clear, stats, pause, resume |
 | `settings` | credentials, tokens, feature flags, EH site, rate limit, alerts |
 | `history` | browse history list/record/clear/delete |
@@ -573,6 +580,29 @@ Single `apiFetch` base function with automatic 401 redirect and CSRF header inje
 | `subscriptions` | subscription CRUD, manual check trigger |
 | `dedup` | dedup stats, review list, keep/whitelist/skip/delete, scan start/stop/progress |
 | `users` | User list, create, update, delete |
+
+#### Image Browser Endpoint
+
+`GET /api/library/images` — cross-gallery image browser with keyset cursor pagination.
+
+| Query Param | Type | Default | Description |
+|-------------|------|---------|-------------|
+| `tags` | `string[]` | `[]` | Include images matching all listed tags (GIN array contains) |
+| `exclude_tags` | `string[]` | `[]` | Exclude images matching any listed tag |
+| `cursor` | `string` | — | Opaque HMAC-signed cursor from previous response |
+| `limit` | `int` | `40` (max 100) | Page size |
+| `sort` | `newest\|oldest` | `newest` | Sort direction on `images.added_at` |
+| `gallery_id` | `int` | — | Restrict to a single gallery |
+
+Returns `ImageBrowserResponse`: `{ images: BrowseImage[], next_cursor: string|null, has_next: bool }`.
+Blocked tags (per-user) are automatically excluded. Access-controlled via `gallery_access_filter`.
+
+#### Key TypeScript Types (`pwa/src/lib/types.ts`)
+
+| Type | Description |
+|------|-------------|
+| `BrowseImage` | `{ id, gallery_id, page_num, width, height, thumb_path, file_path, thumbhash, media_type, added_at }` |
+| `ImageBrowserResponse` | `{ images: BrowseImage[], next_cursor: string\|null, has_next: boolean }` |
 
 ---
 
