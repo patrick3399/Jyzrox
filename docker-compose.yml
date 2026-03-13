@@ -98,6 +98,7 @@ services:
       redis:
         condition: service_healthy
     networks:
+      - frontend
       - backend
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
