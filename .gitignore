@@ -7,9 +7,12 @@ __pycache__/
 *.pyo
 *.pyd
 .venv/
+venv/
 *.egg-info/
 dist/
 build/
+.pytest_cache/
+.ruff_cache/
 
 # gallery-dl live config (contains credentials)
 config/gallery-dl/config.json
@@ -25,7 +28,23 @@ Thumbs.db
 
 # Local Data & Dev
 data/
-# Claude Code — keep skills/docs/agents, ignore local settings
-.claude/settings.local.json
+mnt/
 .playwright-mcp/
 docker-compose.override.yml
+
+# IDE
+.vscode/
+
+# Claude Code
+.claude/
+CLAUDE.md
+
+# Project meta (not needed for build)
+TODO.md
+LICENSE
+.pre-commit-config.yaml
+.github/
+
+# Original icon sources (moved to pwa/public/)
+/icon.png
+/icon_clean.png
