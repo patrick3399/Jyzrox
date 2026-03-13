@@ -229,6 +229,15 @@ async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
     if subscribable and sub.source_id:
         credentials = await get_credential(sub.source)
         if not credentials:
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(Subscription).where(Subscription.id == sub.id).values(
+                        last_checked_at=datetime.now(UTC),
+                        last_status="failed",
+                        last_error=f"No {sub.source} credentials configured",
+                    )
+                )
+                await session.commit()
             return {"status": "failed", "error": f"No {sub.source} credentials"}
 
         new_count = 0
