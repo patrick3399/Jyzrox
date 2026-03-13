@@ -54,7 +54,7 @@ RUN mkdir -p /app/config && \
 
 # Entrypoint runs as root to fix bind-mount ownership, then drops to appuser via gosu
 COPY entrypoint.sh /entrypoint.sh
-RUN chmod +x /entrypoint.sh
+RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 # No USER directive — entrypoint.sh handles privilege drop via gosu
 ENTRYPOINT ["/entrypoint.sh"]
