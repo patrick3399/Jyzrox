@@ -20,6 +20,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth import gallery_access_filter, require_auth, require_role
 from core.config import settings
 from core.database import get_db
+from core.source_display import get_display_config
 from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserRating
 from services.cas import cas_url, decrement_ref_count, library_dir, resolve_blob_path, thumb_dir, thumb_url as cas_thumb_url
 
@@ -110,6 +111,68 @@ async def _get_blocked_tag_strings(db: AsyncSession, user_id: int) -> list[str]:
         )
     ).all()
     return [f"{r.namespace}:{r.name}" for r in rows]
+
+
+async def _build_cover_map(
+    db: AsyncSession,
+    gallery_ids: list[int],
+    source_map: dict[int, str] | None = None,
+) -> dict[int, str]:
+    """Build gallery_id -> cover_thumb_url map, respecting per-source cover_page config.
+
+    Args:
+        db: Database session.
+        gallery_ids: Gallery IDs to fetch covers for.
+        source_map: Optional {gallery_id: source} mapping. If None, all use page_num=1.
+    """
+    if not gallery_ids:
+        return {}
+
+    # Split galleries by cover strategy
+    first_ids: list[int] = []
+    last_ids: list[int] = []
+    for gid in gallery_ids:
+        source = (source_map or {}).get(gid, "")
+        cfg = get_display_config(source)
+        if cfg.cover_page == "last":
+            last_ids.append(gid)
+        else:
+            first_ids.append(gid)
+
+    cover_map: dict[int, str] = {}
+
+    # Batch query: first page covers
+    if first_ids:
+        stmt = (
+            select(Image.gallery_id, Blob.sha256)
+            .join(Blob, Image.blob_sha256 == Blob.sha256)
+            .where(Image.gallery_id.in_(first_ids), Image.page_num == 1)
+        )
+        for r in (await db.execute(stmt)).all():
+            cover_map[r.gallery_id] = cas_thumb_url(r.sha256)
+
+    # Batch query: last page covers
+    if last_ids:
+        max_page_sub = (
+            select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
+            .where(Image.gallery_id.in_(last_ids))
+            .group_by(Image.gallery_id)
+        ).subquery()
+        stmt = (
+            select(Image.gallery_id, Blob.sha256)
+            .join(Blob, Image.blob_sha256 == Blob.sha256)
+            .join(
+                max_page_sub,
+                and_(
+                    Image.gallery_id == max_page_sub.c.gallery_id,
+                    Image.page_num == max_page_sub.c.max_page,
+                ),
+            )
+        )
+        for r in (await db.execute(stmt)).all():
+            cover_map[r.gallery_id] = cas_thumb_url(r.sha256)
+
+    return cover_map
 
 
 @router.get("/galleries")
@@ -248,16 +311,8 @@ async def list_galleries(
         next_cursor = _encode_cursor(rows[-1], sort) if has_next and rows else None
 
         gallery_ids = [g.id for g in rows]
-        if gallery_ids:
-            cover_stmt = (
-                select(Image.gallery_id, Blob.sha256)
-                .join(Blob, Image.blob_sha256 == Blob.sha256)
-                .where(Image.gallery_id.in_(gallery_ids), Image.page_num == 1)
-            )
-            cover_rows = (await db.execute(cover_stmt)).all()
-            cover_map = {r.gallery_id: cas_thumb_url(r.sha256) for r in cover_rows}
-        else:
-            cover_map = {}
+        source_map = {g.id: g.source or "" for g in rows}
+        cover_map = await _build_cover_map(db, gallery_ids, source_map)
 
         fav_set = await _get_favorite_set(db, auth["user_id"], gallery_ids)
         rating_map = await _get_rating_map(db, auth["user_id"], gallery_ids)
@@ -282,16 +337,8 @@ async def list_galleries(
         galleries = (await db.execute(stmt)).scalars().all()
 
         gallery_ids = [g.id for g in galleries]
-        if gallery_ids:
-            cover_stmt = (
-                select(Image.gallery_id, Blob.sha256)
-                .join(Blob, Image.blob_sha256 == Blob.sha256)
-                .where(Image.gallery_id.in_(gallery_ids), Image.page_num == 1)
-            )
-            cover_rows = (await db.execute(cover_stmt)).all()
-            cover_map = {r.gallery_id: cas_thumb_url(r.sha256) for r in cover_rows}
-        else:
-            cover_map = {}
+        source_map = {g.id: g.source or "" for g in galleries}
+        cover_map = await _build_cover_map(db, gallery_ids, source_map)
 
         fav_set = await _get_favorite_set(db, auth["user_id"], gallery_ids)
         rating_map = await _get_rating_map(db, auth["user_id"], gallery_ids)
@@ -483,20 +530,52 @@ async def list_artists(
     if artist_ids:
         # Subquery: for each artist_id, get the gallery with the latest added_at
         latest_gallery_sub = (
-            select(Gallery.id, Gallery.artist_id)
+            select(Gallery.id, Gallery.artist_id, Gallery.source)
             .where(Gallery.artist_id.in_(artist_ids))
             .order_by(Gallery.artist_id, desc(Gallery.added_at))
             .distinct(Gallery.artist_id)
         ).subquery()
 
-        cover_stmt = (
-            select(latest_gallery_sub.c.artist_id, Blob.sha256)
+        # First page covers
+        first_cover_stmt = (
+            select(latest_gallery_sub.c.artist_id, latest_gallery_sub.c.source, Blob.sha256)
             .join(Image, Image.gallery_id == latest_gallery_sub.c.id)
             .join(Blob, Image.blob_sha256 == Blob.sha256)
             .where(Image.page_num == 1)
         )
-        cover_rows = (await db.execute(cover_stmt)).all()
-        cover_map = {r.artist_id: cas_thumb_url(r.sha256) for r in cover_rows}
+        first_covers = {
+            r.artist_id: (r.source, r.sha256)
+            for r in (await db.execute(first_cover_stmt)).all()
+        }
+
+        # Last page covers
+        max_page_sub = (
+            select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
+            .where(Image.gallery_id.in_(select(latest_gallery_sub.c.id)))
+            .group_by(Image.gallery_id)
+        ).subquery()
+        last_cover_stmt = (
+            select(latest_gallery_sub.c.artist_id, latest_gallery_sub.c.source, Blob.sha256)
+            .join(Image, Image.gallery_id == latest_gallery_sub.c.id)
+            .join(Blob, Image.blob_sha256 == Blob.sha256)
+            .join(max_page_sub, and_(
+                Image.gallery_id == max_page_sub.c.gallery_id,
+                Image.page_num == max_page_sub.c.max_page,
+            ))
+        )
+        last_covers = {
+            r.artist_id: (r.source, r.sha256)
+            for r in (await db.execute(last_cover_stmt)).all()
+        }
+
+        cover_map = {}
+        for artist_id_val in first_covers.keys() | last_covers.keys():
+            source_val = (first_covers.get(artist_id_val) or last_covers.get(artist_id_val, ("", "")))[0]
+            cfg = get_display_config(source_val or "")
+            if cfg.cover_page == "last" and artist_id_val in last_covers:
+                cover_map[artist_id_val] = cas_thumb_url(last_covers[artist_id_val][1])
+            elif artist_id_val in first_covers:
+                cover_map[artist_id_val] = cas_thumb_url(first_covers[artist_id_val][1])
 
     result = []
     for r in rows:
@@ -544,22 +623,45 @@ async def get_artist_summary(
     )
     total_images = (await db.execute(total_images_stmt)).scalar_one()
 
-    # Cover thumb: most recent gallery's first image
-    latest_gallery_sub = (
-        select(Gallery.id)
-        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
-        .order_by(desc(Gallery.added_at))
-        .limit(1)
-    ).scalar_subquery()
+    # Cover thumb: most recent gallery's cover image (per-source page selection)
+    latest_gallery_row = (
+        await db.execute(
+            select(Gallery.id, Gallery.source)
+            .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
+            .order_by(desc(Gallery.added_at))
+            .limit(1)
+        )
+    ).one_or_none()
 
-    cover_stmt = (
-        select(Blob.sha256)
-        .join(Image, Image.blob_sha256 == Blob.sha256)
-        .where(Image.gallery_id == latest_gallery_sub, Image.page_num == 1)
-        .limit(1)
-    )
-    cover_sha256 = (await db.execute(cover_stmt)).scalar_one_or_none()
-    cover_thumb = cas_thumb_url(cover_sha256) if cover_sha256 else None
+    cover_thumb: str | None = None
+    if latest_gallery_row:
+        latest_gid = latest_gallery_row.id
+        latest_source = latest_gallery_row.source or ""
+        display_cfg = get_display_config(latest_source)
+        if display_cfg.cover_page == "last":
+            cover_page_sub = (
+                select(func.max(Image.page_num))
+                .where(Image.gallery_id == latest_gid)
+                .scalar_subquery()
+            )
+            cover_sha256 = (
+                await db.execute(
+                    select(Blob.sha256)
+                    .join(Image, Image.blob_sha256 == Blob.sha256)
+                    .where(Image.gallery_id == latest_gid, Image.page_num == cover_page_sub)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        else:
+            cover_sha256 = (
+                await db.execute(
+                    select(Blob.sha256)
+                    .join(Image, Image.blob_sha256 == Blob.sha256)
+                    .where(Image.gallery_id == latest_gid, Image.page_num == 1)
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+        cover_thumb = cas_thumb_url(cover_sha256) if cover_sha256 else None
 
     source = artist_id.split(":", 1)[0] if ":" in artist_id else ""
 
@@ -1002,13 +1104,28 @@ async def get_gallery(
     db: AsyncSession = Depends(get_db),
 ):
     g = await _get_or_404(db, gallery_id, auth)
-    cover_row = (
-        await db.execute(
-            select(Blob.sha256)
-            .join(Image, Image.blob_sha256 == Blob.sha256)
-            .where(Image.gallery_id == gallery_id, Image.page_num == 1)
+    display_cfg = get_display_config(g.source or "")
+    if display_cfg.cover_page == "last":
+        cover_sub = (
+            select(func.max(Image.page_num))
+            .where(Image.gallery_id == gallery_id)
+            .scalar_subquery()
         )
-    ).scalar_one_or_none()
+        cover_row = (
+            await db.execute(
+                select(Blob.sha256)
+                .join(Image, Image.blob_sha256 == Blob.sha256)
+                .where(Image.gallery_id == gallery_id, Image.page_num == cover_sub)
+            )
+        ).scalar_one_or_none()
+    else:
+        cover_row = (
+            await db.execute(
+                select(Blob.sha256)
+                .join(Image, Image.blob_sha256 == Blob.sha256)
+                .where(Image.gallery_id == gallery_id, Image.page_num == 1)
+            )
+        ).scalar_one_or_none()
     cover_thumb = cas_thumb_url(cover_row) if cover_row else None
     fav = (await db.execute(
         select(UserFavorite).where(
@@ -1033,11 +1150,13 @@ async def get_gallery_images(
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    await _get_or_404(db, gallery_id, auth)
+    g = await _get_or_404(db, gallery_id, auth)
+    display_cfg = get_display_config(g.source or "")
+    page_order = desc(Image.page_num) if display_cfg.image_order == "desc" else asc(Image.page_num)
     stmt = (
         select(Image)
         .where(Image.gallery_id == gallery_id)
-        .order_by(Image.page_num)
+        .order_by(page_order)
         .options(selectinload(Image.blob))
     )
 
@@ -1638,6 +1757,7 @@ def _check_write_access(auth: dict, gallery: Gallery) -> None:
 
 
 def _g(g: Gallery, cover_thumb: str | None = None, is_favorited: bool = False, my_rating: int | None = None) -> dict:
+    display_cfg = get_display_config(g.source or "")
     return {
         "id": g.id,
         "source": g.source,
@@ -1659,6 +1779,7 @@ def _g(g: Gallery, cover_thumb: str | None = None, is_favorited: bool = False, m
         "import_mode": g.import_mode,
         "tags_array": g.tags_array or [],
         "cover_thumb": cover_thumb,
+        "display_order": display_cfg.image_order,
     }
 
 

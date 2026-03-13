@@ -248,37 +248,20 @@ def _build_gallery(
         except (ValueError, TypeError, OverflowError) as exc:
             logger.warning("[import] failed to parse date %r: %s", raw_date, exc)
 
-    # Artist ID extraction
-    artist_id = None
-    if source == "ehentai":
-        for tag in tags:
-            if tag.startswith("artist:"):
-                artist_id = f"ehentai:{tag[7:]}"
-                break
-    elif source == "pixiv":
-        uploader = meta.get("uploader", "")
-        if uploader:
-            artist_id = f"pixiv:{uploader}"
-    elif meta.get("category") == "twitter" or source == "twitter":
-        handle = None
-        author = meta.get("author")
-        if isinstance(author, dict):
-            handle = author.get("name")
-        if not handle:
-            handle = meta.get("user") if isinstance(meta.get("user"), str) else None
-        if not handle:
-            handle = meta.get("uploader")
-        if handle:
-            artist_id = f"twitter:{handle}"
-    elif source in _BOORU_SOURCES or source in ("nhentai", "hitomi"):
-        for tag in tags:
-            if tag.startswith("artist:"):
-                artist_id = f"{source}:{tag[7:]}"
-                break
-    else:
-        uploader = meta.get("uploader", "")
-        if uploader:
-            artist_id = f"{source}:{uploader}"
+    # Artist ID extraction — delegate to shared logic
+    from plugins.builtin.gallery_dl._metadata import _extract_artist
+    artist_id = _extract_artist(source, meta, tags)
+    # Fallback for non-gallery-dl sources (ehentai, pixiv) that aren't in _sites.py
+    if artist_id is None:
+        if source == "ehentai":
+            for tag in tags:
+                if tag.startswith("artist:"):
+                    artist_id = f"ehentai:{tag[7:]}"
+                    break
+        elif source == "pixiv":
+            uploader = meta.get("uploader", "")
+            if uploader:
+                artist_id = f"pixiv:{uploader}"
 
     return {
         "source": source,

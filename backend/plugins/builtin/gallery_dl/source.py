@@ -37,17 +37,30 @@ _PROGRESS_EVERY_N = 5
 _PROGRESS_EVERY_S = 10.0
 
 
+def _build_supported_sites() -> list[SiteInfo]:
+    """Generate SiteInfo list from unified site registry."""
+    from plugins.builtin.gallery_dl._sites import GDL_SITES
+
+    return [
+        SiteInfo(
+            domain=s.domain,
+            source_id=s.source_id,
+            name=s.name,
+            category=s.category,
+            has_tags=s.has_tags,
+        )
+        for s in GDL_SITES
+    ]
+
+
 def _source_to_extractor(source: str) -> str:
     """Map our source name to gallery-dl extractor name."""
-    mapping = {
-        "twitter": "twitter",
-        "instagram": "instagram",
-        "danbooru": "danbooru",
-        "kemono": "kemono",
-        "gelbooru": "gelbooru",
-        "sankaku": "sankakucomplex",
-    }
-    return mapping.get(source, source)
+    from plugins.builtin.gallery_dl._sites import get_site_config
+
+    cfg = get_site_config(source)
+    if cfg and cfg.extractor:
+        return cfg.extractor
+    return source
 
 
 async def _build_gallery_dl_config(credentials: dict) -> None:
@@ -113,37 +126,7 @@ class GalleryDlPlugin(SourcePlugin):
         description="Universal gallery-dl fallback downloader",
         url_patterns=[],  # handles everything — it is the fallback
         credential_schema=[],
-        supported_sites=[
-            SiteInfo(domain="twitter.com", source_id="twitter", name="Twitter/X", category="social", has_tags=True),
-            SiteInfo(domain="x.com", source_id="twitter", name="Twitter/X", category="social", has_tags=True),
-            SiteInfo(domain="danbooru.donmai.us", source_id="danbooru", name="Danbooru", category="booru", has_tags=True),
-            SiteInfo(domain="gelbooru.com", source_id="gelbooru", name="Gelbooru", category="booru", has_tags=True),
-            SiteInfo(domain="e621.net", source_id="e621", name="e621", category="booru", has_tags=True),
-            SiteInfo(domain="yande.re", source_id="yandere", name="Yande.re", category="booru", has_tags=True),
-            SiteInfo(domain="konachan.com", source_id="konachan", name="Konachan", category="booru", has_tags=True),
-            SiteInfo(domain="rule34.xxx", source_id="rule34", name="Rule34", category="booru", has_tags=True),
-            SiteInfo(domain="safebooru.org", source_id="safebooru", name="Safebooru", category="booru", has_tags=True),
-            SiteInfo(domain="sankakucomplex.com", source_id="sankaku", name="Sankaku", category="booru", has_tags=True),
-            SiteInfo(domain="deviantart.com", source_id="deviantart", name="DeviantArt", category="art", has_tags=True),
-            SiteInfo(domain="artstation.com", source_id="artstation", name="ArtStation", category="art", has_tags=True),
-            SiteInfo(domain="newgrounds.com", source_id="newgrounds", name="Newgrounds", category="art", has_tags=True),
-            SiteInfo(domain="inkbunny.net", source_id="inkbunny", name="Inkbunny", category="art", has_tags=True),
-            SiteInfo(domain="furaffinity.net", source_id="furaffinity", name="Fur Affinity", category="art", has_tags=True),
-            SiteInfo(domain="nhentai.net", source_id="nhentai", name="nhentai", category="gallery", has_tags=True),
-            SiteInfo(domain="hitomi.la", source_id="hitomi", name="Hitomi.la", category="gallery", has_tags=True),
-            SiteInfo(domain="kemono.su", source_id="kemono", name="Kemono", category="gallery", has_tags=True),
-            SiteInfo(domain="mangadex.org", source_id="mangadex", name="MangaDex", category="manga", has_tags=True),
-            SiteInfo(domain="instagram.com", source_id="instagram", name="Instagram", category="social", has_tags=True),
-            SiteInfo(domain="bsky.app", source_id="bluesky", name="Bluesky", category="social", has_tags=True),
-            SiteInfo(domain="tumblr.com", source_id="tumblr", name="Tumblr", category="social", has_tags=True),
-            SiteInfo(domain="reddit.com", source_id="reddit", name="Reddit", category="social", has_tags=True),
-            SiteInfo(domain="facebook.com", source_id="facebook", name="Facebook", category="social", has_tags=False),
-            SiteInfo(domain="civitai.com", source_id="civitai", name="Civitai", category="art", has_tags=True),
-            SiteInfo(domain="imgur.com", source_id="imgur", name="Imgur", category="filehost", has_tags=False),
-            SiteInfo(domain="bunkr.si", source_id="bunkr", name="Bunkr", category="filehost", has_tags=False),
-            SiteInfo(domain="cyberdrop.me", source_id="cyberdrop", name="Cyberdrop", category="filehost", has_tags=False),
-            SiteInfo(domain="catbox.moe", source_id="catbox", name="Catbox", category="filehost", has_tags=False),
-        ],
+        supported_sites=_build_supported_sites(),
         concurrency=1,
         semaphore_key="gallery_dl",
     )

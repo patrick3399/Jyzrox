@@ -13,18 +13,6 @@ from plugins.models import NewWork, PluginMeta
 
 logger = logging.getLogger(__name__)
 
-# Per-site configuration: which metadata key holds the item ID and how to reconstruct the URL
-SITE_CONFIG: dict[str, dict] = {
-    "twitter":    {"id_key": "tweet_id",     "url_tpl": "https://x.com/{}/media"},
-    "facebook":   {"id_key": "post_id",      "url_tpl": "https://www.facebook.com/{}/photos"},
-    "instagram":  {"id_key": "shortcode",    "url_tpl": "https://www.instagram.com/{}/"},
-    "tumblr":     {"id_key": "id",           "url_tpl": "https://www.tumblr.com/{}/"},
-    "reddit":     {"id_key": "id",           "url_tpl": "https://www.reddit.com/user/{}/submitted/"},
-    "bluesky":    {"id_key": "post_id",      "url_tpl": "https://bsky.app/profile/{}/"},
-    "deviantart": {"id_key": "deviationid",  "url_tpl": "https://www.deviantart.com/{}/gallery/all"},
-    "kemono":     {"id_key": "id",           "url_tpl": "https://kemono.su/{}/"},
-}
-
 _TIMEOUT = 120  # seconds
 
 
@@ -72,13 +60,15 @@ async def check_gdl_new_works(
     Uses `gallery-dl --dump-json --simulate` to enumerate posts without downloading.
     Parses JSON output line by line, extracts item IDs, and stops at the last_known boundary.
     """
-    cfg = SITE_CONFIG.get(source)
-    if not cfg:
+    from plugins.builtin.gallery_dl._sites import get_site_config
+
+    site_cfg = get_site_config(source)
+    if not site_cfg or not site_cfg.subscribe_id_key or not site_cfg.subscribe_url_tpl:
         logger.warning("[gdl_subscribe] unsupported source: %s", source)
         return []
 
-    id_key = cfg["id_key"]
-    url_tpl = cfg["url_tpl"]
+    id_key = site_cfg.subscribe_id_key
+    url_tpl = site_cfg.subscribe_url_tpl
     url = url_tpl.format(source_id)
 
     cmd = ["gallery-dl", "--dump-json", "--simulate"]

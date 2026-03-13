@@ -26,6 +26,28 @@ NAMESPACE_MAP = {
 }
 
 
+def _extract_title(source: str, meta: dict, source_id: str) -> str:
+    """Extract title from metadata using per-source field priority."""
+    from plugins.builtin.gallery_dl._sites import get_site_config
+
+    cfg = get_site_config(source)
+    fields = cfg.title_fields if cfg else ("title", "title_en")
+
+    for field_name in fields:
+        val = meta.get(field_name)
+        if val:
+            return str(val)[:200]
+
+    # Fallback chain
+    return (
+        (meta.get("title") or "")[:200]
+        or (meta.get("title_en") or "")[:200]
+        or (meta.get("description") or "")[:120]
+        or (meta.get("content") or "")[:120]
+        or f"{source}_{source_id}"
+    )
+
+
 def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
     """Parse a gallery-dl download directory into GalleryImportData."""
     meta = raw_meta or {}
@@ -71,13 +93,7 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None) -> Gal
     return GalleryImportData(
         source=source,
         source_id=source_id,
-        title=(
-            meta.get("title")
-            or meta.get("title_en")
-            or (meta.get("description") or "")[:120]
-            or (meta.get("content") or "")[:120]
-            or f"{source}_{source_id}"
-        ),
+        title=_extract_title(source, meta, source_id),
         title_jpn=meta.get("title_jpn") or meta.get("title_original") or "",
         category=meta.get("category") or meta.get("type", ""),
         language=meta.get("lang") or meta.get("language", ""),
@@ -132,9 +148,13 @@ def _normalize_tags(tags: list[str], source: str) -> list[str]:
 
 
 def _extract_artist(source: str, meta: dict, tags: list[str]) -> str | None:
-    """Extract artist_id from metadata based on source type."""
-    # Twitter-specific
-    if meta.get("category") == "twitter" or source == "twitter":
+    """Extract artist_id from metadata based on source type (data-driven)."""
+    from plugins.builtin.gallery_dl._sites import get_site_config
+
+    cfg = get_site_config(source)
+    strategy = cfg.artist_from if cfg else "uploader"
+
+    if strategy == "twitter_author":
         handle = None
         author = meta.get("author")
         if isinstance(author, dict):
@@ -146,16 +166,13 @@ def _extract_artist(source: str, meta: dict, tags: list[str]) -> str | None:
             handle = meta.get("uploader")
         if handle:
             return f"twitter:{handle}"
-
-    # Booru sources — artist from tags
-    if source in _BOORU_SOURCES or source in ("nhentai", "hitomi"):
+    elif strategy == "tag":
         for tag in tags:
             if tag.startswith("artist:"):
                 return f"{source}:{tag[7:]}"
-
-    # Generic fallback — use uploader
-    uploader = meta.get("uploader", "")
-    if uploader:
-        return f"{source}:{uploader}"
-
+    elif strategy == "uploader":
+        uploader = meta.get("uploader", "")
+        if uploader:
+            return f"{source}:{uploader}"
+    # strategy == "none" or no match
     return None

@@ -32,6 +32,7 @@ export interface Gallery {
   import_mode: string | null
   tags_array: string[]
   cover_thumb?: string | null
+  display_order?: 'asc' | 'desc'
 }
 
 export interface GalleryImage {
