@@ -531,6 +531,8 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "retry_enabled": await _get_toggle("setting:retry_enabled", True),
         "retry_max_retries": await _get_int_setting("setting:retry_max_retries", 3),
         "retry_base_delay_minutes": await _get_int_setting("setting:retry_base_delay_minutes", 5),
+        "subscription_enqueue_delay_ms": await _get_int_setting("setting:subscription_enqueue_delay_ms", 500),
+        "subscription_batch_max": await _get_int_setting("setting:subscription_batch_max", 0),
     }
 
 
@@ -558,6 +560,8 @@ async def patch_feature_toggle(
         "retry_enabled": "setting:retry_enabled",
         "retry_max_retries": "setting:retry_max_retries",
         "retry_base_delay_minutes": "setting:retry_base_delay_minutes",
+        "subscription_enqueue_delay_ms": "setting:subscription_enqueue_delay_ms",
+        "subscription_batch_max": "setting:subscription_batch_max",
     }
     if feature not in ALLOWED:
         raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
@@ -592,6 +596,24 @@ async def patch_feature_toggle(
         if not (1 <= val <= 60):
             raise HTTPException(status_code=400, detail="retry_base_delay_minutes must be between 1 and 60")
         await get_redis().set("setting:retry_base_delay_minutes", str(val))
+        return {"feature": feature, "value": val}
+
+    if feature == "subscription_enqueue_delay_ms":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for subscription_enqueue_delay_ms")
+        val = int(req.value)
+        if val < 100:
+            raise HTTPException(status_code=400, detail="subscription_enqueue_delay_ms must be >= 100")
+        await get_redis().set("setting:subscription_enqueue_delay_ms", str(val))
+        return {"feature": feature, "value": val}
+
+    if feature == "subscription_batch_max":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for subscription_batch_max")
+        val = int(req.value)
+        if val < 0:
+            raise HTTPException(status_code=400, detail="subscription_batch_max must be >= 0")
+        await get_redis().set("setting:subscription_batch_max", str(val))
         return {"feature": feature, "value": val}
 
     if req.enabled is None:

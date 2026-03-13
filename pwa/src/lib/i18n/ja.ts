@@ -803,6 +803,12 @@ const ja: Record<string, string> = {
   'error.cannot_delete_self': '自分のアカウントは削除できません',
   'error.cannot_delete_last_admin': '最後の管理者アカウントは削除できません',
   'error.username_taken': 'このユーザー名はすでに使用されています',
+
+  // ── Subscriptions (batch) ──
+  'subscriptions.batchEnqueuing': 'ダウンロードをキューに追加中...',
+  'subscriptions.batchProgress': '{enqueued} / {total} 追加済み',
+  'subscriptions.batchDone': 'バッチ完了',
+  'subscriptions.batchFailed': '{failed} 件の追加に失敗',
 }
 
 export default ja

@@ -297,6 +297,8 @@ class Subscription(Base):
     last_error: Mapped[str | None] = mapped_column(Text)
     next_check_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), server_default=func.now())
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    batch_total: Mapped[int] = mapped_column(Integer, default=0)
+    batch_enqueued: Mapped[int] = mapped_column(Integer, default=0)
 
     __table_args__ = (
         UniqueConstraint("user_id", "url", name="uq_subscription_user_url"),

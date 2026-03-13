@@ -819,6 +819,10 @@ const en: Record<string, string> = {
   'subscriptions.sourceOther': 'Other',
   'subscriptions.enabled': 'Enabled',
   'subscriptions.disabled': 'Disabled',
+  'subscriptions.batchEnqueuing': 'Enqueuing downloads...',
+  'subscriptions.batchProgress': '{enqueued} / {total} enqueued',
+  'subscriptions.batchDone': 'Batch complete',
+  'subscriptions.batchFailed': '{failed} failed',
 
   // ── Cache Management ──
   'settings.cache': 'Cache',

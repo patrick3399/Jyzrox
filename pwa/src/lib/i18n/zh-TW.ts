@@ -802,6 +802,12 @@ const zhTW: Record<string, string> = {
   'error.cannot_delete_self': '無法刪除自己的帳號',
   'error.cannot_delete_last_admin': '無法刪除最後一個管理員帳號',
   'error.username_taken': '此使用者名稱已被使用',
+
+  // ── Subscriptions (batch) ──
+  'subscriptions.batchEnqueuing': '正在排入下載...',
+  'subscriptions.batchProgress': '已排入 {enqueued} / {total}',
+  'subscriptions.batchDone': '批次完成',
+  'subscriptions.batchFailed': '{failed} 個排入失敗',
 }
 
 export default zhTW

@@ -398,3 +398,7 @@ ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS retry_count SMALLINT DEFAULT 
 ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS max_retries SMALLINT DEFAULT 3;
 ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS next_retry_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_download_jobs_retry ON download_jobs (status, retry_count, next_retry_at) WHERE status IN ('failed', 'partial');
+
+-- ── Subscription Batch Tracking ──────────────────────────────────
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS batch_total INT DEFAULT 0;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS batch_enqueued INT DEFAULT 0;

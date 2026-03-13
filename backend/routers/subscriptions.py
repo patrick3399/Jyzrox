@@ -107,6 +107,8 @@ async def list_subscriptions(
                 "last_error": s.last_error,
                 "next_check_at": s.next_check_at.isoformat() if s.next_check_at else None,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
+                "batch_total": s.batch_total,
+                "batch_enqueued": s.batch_enqueued,
             }
             for s in subs
         ],
@@ -189,6 +191,8 @@ async def get_subscription(
         "last_error": sub.last_error,
         "next_check_at": sub.next_check_at.isoformat() if sub.next_check_at else None,
         "created_at": sub.created_at.isoformat() if sub.created_at else None,
+        "batch_total": sub.batch_total,
+        "batch_enqueued": sub.batch_enqueued,
     }
 
 
@@ -253,6 +257,23 @@ async def delete_subscription(
     if not deleted:
         raise HTTPException(status_code=404, detail="Subscription not found")
     return {"status": "ok"}
+
+
+@router.get("/{sub_id}/batch-progress")
+async def get_batch_progress(sub_id: int, auth: dict = Depends(require_auth)):
+    """Get real-time batch enqueue progress from Redis."""
+    from core.redis_client import get_redis
+    redis = get_redis()
+    data = await redis.hgetall(f"subscription:batch:{sub_id}")
+    if not data:
+        return {"active": False}
+    return {
+        "active": True,
+        "total": int(data.get(b"total", 0)),
+        "enqueued": int(data.get(b"enqueued", 0)),
+        "failed": int(data.get(b"failed", 0)),
+        "started_at": (data.get(b"started_at") or b"").decode(),
+    }
 
 
 @router.post("/{sub_id}/check")

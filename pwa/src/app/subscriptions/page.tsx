@@ -1,10 +1,11 @@
 'use client'
 
-import { useState } from 'react'
+import { useState, useEffect } from 'react'
 import { Rss, Plus, X, RefreshCw, Trash2, ExternalLink } from 'lucide-react'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+import { useWs } from '@/lib/ws'
 import { useSubscriptions, useCreateSubscription, useUpdateSubscription, useDeleteSubscription, useCheckSubscription } from '@/hooks/useSubscriptions'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import type { Subscription } from '@/lib/types'
@@ -66,6 +67,13 @@ export default function SubscriptionsPage() {
   const { trigger: updateSub } = useUpdateSubscription()
   const { trigger: deleteSub } = useDeleteSubscription()
   const { trigger: checkSub } = useCheckSubscription()
+  const { lastBatchUpdate } = useWs()
+
+  useEffect(() => {
+    if (lastBatchUpdate?.phase === 'done') {
+      mutate()
+    }
+  }, [lastBatchUpdate, mutate])
 
   const [showAdd, setShowAdd] = useState(false)
   const [url, setUrl] = useState('')
@@ -242,6 +250,37 @@ export default function SubscriptionsPage() {
                       {sub.last_error}
                     </p>
                   )}
+                  {/* Batch progress */}
+                  {(() => {
+                    const batch = lastBatchUpdate?.sub_id === sub.id && lastBatchUpdate?.phase === 'enqueuing'
+                      ? lastBatchUpdate
+                      : sub.batch_total > 0 && sub.batch_enqueued < sub.batch_total
+                      ? { total: sub.batch_total, enqueued: sub.batch_enqueued, failed: 0, phase: 'enqueuing' as const }
+                      : null
+                    if (!batch) return null
+                    const pct = batch.total > 0 ? Math.round((batch.enqueued / batch.total) * 100) : 0
+                    return (
+                      <div className="mt-2">
+                        <div className="flex items-center justify-between text-[10px] text-vault-text-muted mb-1">
+                          <span>{t('subscriptions.batchEnqueuing')}</span>
+                          <span>
+                            {t('subscriptions.batchProgress', { enqueued: String(batch.enqueued), total: String(batch.total) })}
+                            {batch.failed > 0 && (
+                              <span className="text-red-400 ml-1">
+                                ({t('subscriptions.batchFailed', { failed: String(batch.failed) })})
+                              </span>
+                            )}
+                          </span>
+                        </div>
+                        <div className="h-1.5 bg-vault-border rounded-full overflow-hidden">
+                          <div
+                            className="h-full bg-vault-accent rounded-full transition-all duration-300"
+                            style={{ width: `${pct}%` }}
+                          />
+                        </div>
+                      </div>
+                    )
+                  })()}
                 </div>
 
                 <div className="flex items-center gap-1 shrink-0">

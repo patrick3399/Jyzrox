@@ -300,13 +300,21 @@ export interface CacheStats {
 // ── WebSocket ────────────────────────────────────────────────────────
 
 export interface WsMessage {
-  type: 'alert' | 'ping' | 'job_update'
+  type: 'alert' | 'ping' | 'job_update' | 'subscription_batch'
   message?: string
   ts?: string
   // job_update fields:
   job_id?: string
   status?: string
   progress?: Record<string, unknown>
+  // subscription_batch fields:
+  sub_id?: number
+  sub_name?: string | null
+  total?: number
+  enqueued?: number
+  failed?: number
+  phase?: 'enqueuing' | 'done'
+  user_id?: number
 }
 
 // ── Pagination responses ──────────────────────────────────────────────
@@ -511,6 +519,8 @@ export interface Subscription {
   last_error: string | null
   next_check_at: string | null
   created_at: string | null
+  batch_total: number
+  batch_enqueued: number
 }
 
 // ── File Explorer ────────────────────────────────────────────────────

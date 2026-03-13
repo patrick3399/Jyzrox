@@ -801,6 +801,12 @@ const ko: Record<string, string> = {
   'error.cannot_delete_self': '자신의 계정은 삭제할 수 없습니다',
   'error.cannot_delete_last_admin': '마지막 관리자 계정은 삭제할 수 없습니다',
   'error.username_taken': '이미 사용 중인 사용자 이름입니다',
+
+  // ── Subscriptions (batch) ──
+  'subscriptions.batchEnqueuing': '다운로드 대기열에 추가 중...',
+  'subscriptions.batchProgress': '{enqueued} / {total} 추가됨',
+  'subscriptions.batchDone': '배치 완료',
+  'subscriptions.batchFailed': '{failed}개 추가 실패',
 }
 
 export default ko

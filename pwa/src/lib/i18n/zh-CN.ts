@@ -802,6 +802,12 @@ const zhCN: Record<string, string> = {
   'error.cannot_delete_self': '无法删除自己的账号',
   'error.cannot_delete_last_admin': '无法删除最后一个管理员账号',
   'error.username_taken': '此用户名已被使用',
+
+  // ── Subscriptions (batch) ──
+  'subscriptions.batchEnqueuing': '正在排入下载...',
+  'subscriptions.batchProgress': '已排入 {enqueued} / {total}',
+  'subscriptions.batchDone': '批次完成',
+  'subscriptions.batchFailed': '{failed} 个排入失败',
 }
 
 export default zhCN
