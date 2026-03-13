@@ -18,10 +18,10 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -q --spider http://127.0.0.1/nginx-health || exit 1"]
-      interval: 15s
+      interval: 30s
       timeout: 5s
       retries: 3
-      start_period: 5s
+      start_period: 10s
     deploy:
       resources:
         limits:
@@ -61,7 +61,7 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8000/api/health || exit 1"]
-      interval: 15s
+      interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
@@ -104,8 +104,8 @@ services:
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "python -c \"import redis,os; r=redis.from_url(os.environ.get('REDIS_URL','redis://redis:6379')); r.ping()\""]
-      interval: 15s
+      test: ["CMD-SHELL", "pgrep -f 'arq worker' || exit 1"]
+      interval: 30s
       timeout: 5s
       retries: 3
       start_period: 10s
@@ -136,7 +136,7 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD", "wget", "-q", "--spider", "http://127.0.0.1:3000"]
-      interval: 15s
+      interval: 30s
       timeout: 5s
       retries: 3
       start_period: 15s
@@ -168,7 +168,7 @@ services:
     restart: unless-stopped
     healthcheck:
       test: ["CMD-SHELL", "wget -qO /dev/null http://localhost:8100/health || exit 1"]
-      interval: 15s
+      interval: 30s
       timeout: 5s
       retries: 3
       start_period: 60s
@@ -200,7 +200,7 @@ services:
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-vault} -d $${POSTGRES_DB:-vault} && psql -U $${POSTGRES_USER:-vault} -d $${POSTGRES_DB:-vault} -c 'SELECT 1' -q -t"]
-      interval: 5s
+      interval: 30s
       timeout: 5s
       retries: 10
     networks:
@@ -222,12 +222,12 @@ services:
 
   redis:
     image: redis:8-alpine
-    command: redis-server --appendonly yes --maxmemory 768mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory 768mb --maxmemory-policy allkeys-lru --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
     volumes:
       - redis_data:/data
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
-      interval: 5s
+      interval: 30s
       timeout: 3s
       retries: 5
     networks:

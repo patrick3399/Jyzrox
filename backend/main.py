@@ -136,3 +136,12 @@ app.include_router(users_router.router, prefix="/api/users")
 async def health():
     """Lightweight liveness probe."""
     return {"status": "ok"}
+
+
+class _HealthCheckFilter(logging.Filter):
+    def filter(self, record: logging.LogRecord) -> bool:
+        msg = record.getMessage()
+        return '"GET /api/health' not in msg
+
+
+logging.getLogger("uvicorn.access").addFilter(_HealthCheckFilter())

@@ -268,7 +268,7 @@ class WorkerSettings:
         ),
         cron(
             rate_limit_schedule_job,
-            minute=None,  # every minute
+            minute={0, 10, 20, 30, 40, 50},
             run_at_startup=False,
             unique=True,
             timeout=60,
@@ -285,6 +285,7 @@ class WorkerSettings:
     on_shutdown = shutdown
     max_jobs = int(os.environ.get("MAX_WORKER_JOBS", "8"))
     job_timeout = 3600
+    poll_delay = 2
 
 
 __all__ = [
