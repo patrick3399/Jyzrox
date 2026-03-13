@@ -48,6 +48,16 @@ def _extract_source_id(url: str, source: str) -> str | None:
         if uploader_match:
             return f"uploader:{unquote(uploader_match.group(1))}"
         return None
+    if source in ("facebook", "instagram", "deviantart"):
+        parts = parsed.path.strip("/").split("/")
+        return parts[0] if parts and parts[0] else None
+    if source in ("tumblr", "reddit", "bluesky"):
+        parts = parsed.path.strip("/").split("/")
+        return parts[0] if parts and parts[0] else None
+    if source == "kemono":
+        # /patreon/user/12345 → "patreon:12345"
+        m = re.search(r"/(\w+)/user/(\d+)", parsed.path)
+        return f"{m.group(1)}:{m.group(2)}" if m else None
     return None
 
 

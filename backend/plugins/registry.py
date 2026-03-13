@@ -176,6 +176,11 @@ class PluginRegistry:
                 result.append((sid, plugin.credential_flows()))
         return result
 
+    def register_subscribable_proxy(self, source_id: str, subscribable: Any) -> None:
+        """Register a Subscribable proxy for a source that doesn't have a full plugin."""
+        self._subscribable[source_id] = subscribable
+        logger.info("Registered subscribable proxy: %s", source_id)
+
     def get_browse_routers(self) -> list[tuple[str, Any]]:
         result = []
         for sid, plugin in self._browsable.items():

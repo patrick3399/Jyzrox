@@ -14,6 +14,7 @@ import type { Credentials, EhAccount, PluginInfo, CredentialFlow } from '@/lib/t
 const SITE_PRESETS: Record<string, string[]> = {
   twitter: ['auth_token', 'ct0'],
   instagram: ['sessionid', 'csrftoken'],
+  facebook: ['c_user', 'xs'],
   danbooru: ['_danbooru2_session'],
   kemono: ['session'],
   gelbooru: ['user_id', 'pass_hash'],
