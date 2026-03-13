@@ -35,6 +35,7 @@ CREATE TABLE IF NOT EXISTS galleries (
     download_status TEXT DEFAULT 'proxy_only',
     import_mode     TEXT,
     tags_array      TEXT[] DEFAULT '{}',
+    source_url      TEXT,
     UNIQUE (source, source_id)
 );
 
@@ -405,3 +406,6 @@ ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS batch_enqueued INT DEFAULT 0;
 
 -- ── Progressive Import: link download_jobs to gallery ────────────
 ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS gallery_id BIGINT REFERENCES galleries(id) ON DELETE SET NULL;
+
+-- ── Source URL ──────────────────────────────────────────────────────
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_url TEXT;

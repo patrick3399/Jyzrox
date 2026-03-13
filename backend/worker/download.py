@@ -158,6 +158,7 @@ async def download_job(
                 import_user_id = _result.scalar_one_or_none()
 
         importer = ProgressiveImporter(db_job_id, import_user_id)
+        importer.source_url = url
 
         async def on_file(file_path: Path):
             # Skip non-media files (metadata json, tags, etc.)
@@ -298,7 +299,7 @@ async def download_job(
                         sa_select(DownloadJob.user_id).where(DownloadJob.id == db_job_id)
                     )
                     import_user_id = _result.scalar_one_or_none()
-            await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id, import_user_id)
+            await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id, import_user_id, url)
 
     if all_failed:
         await _set_job_status(db_job_id, "partial")

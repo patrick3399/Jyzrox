@@ -415,6 +415,7 @@ const en: Record<string, string> = {
   'library.galleryCount': '{count} gallery|{count} galleries',
   'library.artistFilter': 'Artist',
   'library.viewAllByArtist': 'View all by this artist',
+  'library.viewSource': 'View Source',
   'library.editTitle': 'Edit title',
   'library.titleUpdated': 'Title updated',
   'library.categoryUpdated': 'Category updated',

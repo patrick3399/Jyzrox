@@ -23,6 +23,18 @@ const TAG_NAMESPACE_COLORS: Record<string, string> = {
   general: 'bg-vault-input border-vault-border text-vault-text-secondary',
 }
 
+function getSourceLink(sourceUrl: string, source: string): { href: string; external: boolean } {
+  if (source === 'ehentai') {
+    const match = sourceUrl.match(/\/g\/(\d+)\/([a-f0-9]+)/)
+    if (match) return { href: `/browse/eh/g/${match[1]}/${match[2]}`, external: false }
+  }
+  if (source === 'pixiv') {
+    const match = sourceUrl.match(/artworks\/(\d+)/)
+    if (match) return { href: `/browse/pixiv/artworks/${match[1]}`, external: false }
+  }
+  return { href: sourceUrl, external: true }
+}
+
 function getTagColor(tag: string): string {
   const ns = tag.split(':')[0]
   return TAG_NAMESPACE_COLORS[ns] ?? TAG_NAMESPACE_COLORS.general
@@ -415,6 +427,24 @@ export default function GalleryDetailPage() {
                     {t('library.viewAllByArtist')}
                   </Link>
                 )}
+                {gallery.source_url && (() => {
+                  const { href, external } = getSourceLink(gallery.source_url, gallery.source)
+                  const btnClass = "px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
+                  return external ? (
+                    <a
+                      href={href}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      className={btnClass}
+                    >
+                      {t('library.viewSource')}
+                    </a>
+                  ) : (
+                    <Link href={href} className={btnClass}>
+                      {t('library.viewSource')}
+                    </Link>
+                  )
+                })()}
                 <button
                   onClick={handleFavoriteToggle}
                   disabled={isUpdating}

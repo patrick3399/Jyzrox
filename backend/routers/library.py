@@ -1779,6 +1779,7 @@ def _g(g: Gallery, cover_thumb: str | None = None, is_favorited: bool = False, m
         "import_mode": g.import_mode,
         "tags_array": g.tags_array or [],
         "cover_thumb": cover_thumb,
+        "source_url": g.source_url,
         "display_order": display_cfg.image_order,
     }
 

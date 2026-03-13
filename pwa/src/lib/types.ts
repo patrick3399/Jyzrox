@@ -33,6 +33,7 @@ export interface Gallery {
   tags_array: string[]
   cover_thumb?: string | null
   display_order?: 'asc' | 'desc'
+  source_url?: string | null
 }
 
 export interface GalleryImage {

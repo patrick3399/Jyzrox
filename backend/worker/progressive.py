@@ -28,6 +28,7 @@ class ProgressiveImporter:
         self.source_id: str | None = None
         self._processed: set[str] = set()
         self._page_counter = 0
+        self.source_url: str | None = None
         self._sem = asyncio.Semaphore(2)
         self._tasks: list[asyncio.Task] = []
 
@@ -61,6 +62,7 @@ class ProgressiveImporter:
                     tags_array=import_data.tags,
                     artist_id=import_data.artist_id,
                     created_by_user_id=self.user_id,
+                    source_url=self.source_url,
                 )
                 .on_conflict_do_update(
                     index_elements=["source", "source_id"],
@@ -69,6 +71,7 @@ class ProgressiveImporter:
                         "tags_array": pg_insert(Gallery).excluded.tags_array,
                         "download_status": "downloading",
                         "artist_id": pg_insert(Gallery).excluded.artist_id,
+                        "source_url": pg_insert(Gallery).excluded.source_url,
                     },
                 )
                 .returning(Gallery.id)
@@ -124,11 +127,13 @@ class ProgressiveImporter:
                     pages=0,
                     download_status="downloading",
                     created_by_user_id=self.user_id,
+                    source_url=self.source_url,
                 )
                 .on_conflict_do_update(
                     index_elements=["source", "source_id"],
                     set_={
                         "download_status": "downloading",
+                        "source_url": pg_insert(Gallery).excluded.source_url,
                     },
                 )
                 .returning(Gallery.id)

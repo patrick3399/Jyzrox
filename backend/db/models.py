@@ -63,6 +63,7 @@ class Gallery(Base):
     created_by_user_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
+    source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
 
     images: Mapped[list["Image"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
     gallery_tags: Mapped[list["GalleryTag"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
