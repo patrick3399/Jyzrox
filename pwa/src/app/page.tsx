@@ -350,7 +350,6 @@ export default function Dashboard() {
               icon={BookMarked}
               title={t('dashboard.noGalleries')}
               description={t('dashboard.noGalleriesHint')}
-              action={{ label: t('dashboard.quickLinks.ehentai'), href: '/e-hentai' }}
             />
           )}
 
