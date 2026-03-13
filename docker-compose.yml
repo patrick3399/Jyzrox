@@ -5,6 +5,7 @@ services:
       - "${HTTP_PORT:-35689}:80"
     volumes:
       - app_data:/data:ro
+      # NAS/SMB mount guide: docs/smb-storage.md
       - ./mnt:/mnt:ro
     depends_on:
       api:

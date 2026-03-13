@@ -63,8 +63,7 @@ async def dedup_tier2_job(ctx: dict) -> dict:
                     await session.commit()
                     continue
 
-                # Cross-gallery check: blobs appearing in the same gallery are
-                # intentional variants (差分) and should be auto-whitelisted.
+                # Blobs in the same gallery are intentional variants; auto-whitelist.
                 same_gal_subq = (
                     select(Image.gallery_id)
                     .where(Image.blob_sha256 == pair.sha_a)

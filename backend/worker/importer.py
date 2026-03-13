@@ -286,9 +286,9 @@ def _build_gallery(
         "title": (
             meta.get("title")
             or meta.get("title_en")
-            or (meta.get("description") or "")[:120]  # Twitter text / Pixiv caption 截斷
+            or (meta.get("description") or "")[:120]
             or (meta.get("content") or "")[:120]
-            or f"{source}_{source_id}"  # 最終 fallback：來源+ID
+            or f"{source}_{source_id}"
         ),
         "title_jpn": meta.get("title_jpn") or meta.get("title_original") or "",
         "category": meta.get("category") or meta.get("type", ""),

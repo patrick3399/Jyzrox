@@ -25,7 +25,7 @@ fi
 DB_USER="${DB_USER:-vault}"
 DB_NAME="${DB_NAME:-vault}"
 
-# --- 驗證 backup 檔案 ---
+# --- Validate backup file ---
 if [ ! -f "$BACKUP_FILE" ]; then
   echo "Error: File not found: $BACKUP_FILE"
   exit 1
@@ -55,7 +55,7 @@ if [ "$CONFIRM" != "YES" ]; then
   exit 1
 fi
 
-# --- 自動備份當前資料庫（安全網）---
+# --- Safety backup of current database ---
 TIMESTAMP=$(date +%Y%m%d_%H%M%S)
 if [ -n "${BACKUP_ENCRYPT_KEY:-}" ]; then
   SAFETY_BACKUP="backups/pre_restore_${TIMESTAMP}.sql.gz.gpg"
@@ -75,7 +75,7 @@ else
     pg_dump -U "$DB_USER" "$DB_NAME" | gzip > "$SAFETY_BACKUP"
 fi
 
-# 驗證 safety backup 非空
+# Verify safety backup is non-empty
 SAFETY_SIZE=$(stat -c%s "$SAFETY_BACKUP" 2>/dev/null || stat -f%z "$SAFETY_BACKUP")
 if [ "$SAFETY_SIZE" -eq 0 ]; then
   echo "Error: Safety backup failed (empty file). Aborting restore."
