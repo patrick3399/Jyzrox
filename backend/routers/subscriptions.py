@@ -158,7 +158,7 @@ async def create_subscription(
             auto_download=req.auto_download,
             cron_expr=req.cron_expr or "0 */2 * * *",
         ).on_conflict_do_update(
-            constraint="uq_subscription_user_url",
+            constraint="subscriptions_user_id_url_key",
             set_={
                 "name": req.name,
                 "auto_download": req.auto_download,
