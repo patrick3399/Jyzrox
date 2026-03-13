@@ -341,9 +341,19 @@ class TestOPDSFavorites:
         assert _entries(_parse(resp)) == []
 
     async def test_favorites_returns_only_favorited(self, opds_client, db_session):
-        """Only galleries with favorited=1 should appear in the favorites feed."""
-        await _insert_gallery(db_session, source_id="f1", title="Favorited One", favorited=1)
+        """Only galleries in user_favorites (for user_id=1) should appear in the favorites feed.
+
+        The OPDS favorites endpoint JOINs the user_favorites table; the legacy
+        gallery.favorited column is not used for filtering.
+        """
+        fav_gid = await _insert_gallery(db_session, source_id="f1", title="Favorited One", favorited=1)
         await _insert_gallery(db_session, source_id="f2", title="Not Favorite", favorited=0)
+        # Insert into user_favorites for user_id=1 (opds_client auth override)
+        await db_session.execute(
+            text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"),
+            {"gid": fav_gid},
+        )
+        await db_session.commit()
         resp = await opds_client.get("/opds/favorites")
         entries = _entries(_parse(resp))
         assert len(entries) == 1
@@ -357,9 +367,21 @@ class TestOPDSFavorites:
         assert "Skip Me" not in titles
 
     async def test_favorites_pagination_next_link(self, opds_client, db_session):
-        """When favorited galleries exceed limit, a next link should be present."""
+        """When favorited galleries exceed limit, a next link should be present.
+
+        The OPDS favorites endpoint JOINs user_favorites; must insert rows there.
+        """
+        gids = []
         for i in range(6):
-            await _insert_gallery(db_session, source_id=f"fav{i}", favorited=1)
+            gid = await _insert_gallery(db_session, source_id=f"fav_pg{i}", favorited=1)
+            gids.append(gid)
+        # Insert all 6 into user_favorites for user_id=1
+        for gid in gids:
+            await db_session.execute(
+                text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"),
+                {"gid": gid},
+            )
+        await db_session.commit()
         resp = await opds_client.get("/opds/favorites?page=0&limit=5")
         root = _parse(resp)
         links = root.findall(f"{ATOM}link")
@@ -519,9 +541,13 @@ class TestOPDSGalleryDetail:
         assert entries[0].findtext(f"{ATOM}title") == "Page 1"
 
     async def test_gallery_detail_entries_ordered_by_page_num(self, opds_client, db_session):
-        """Image entries should be ordered by page_num ascending."""
+        """Image entries should be ordered by page_num descending (production uses DESC).
+
+        The OPDS gallery detail endpoint orders images by page_num DESC, so
+        pse:index values come out in descending order: [2, 1, 0].
+        """
         gid = await _insert_gallery(db_session, source_id="gd7", pages=3)
-        # Insert in reverse order to confirm ordering by page_num
+        # Insert in mixed order to confirm ordering is consistent
         await _insert_image(db_session, gid, page_num=3)
         await _insert_image(db_session, gid, page_num=1)
         await _insert_image(db_session, gid, page_num=2)
@@ -529,7 +555,8 @@ class TestOPDSGalleryDetail:
         resp = await opds_client.get(f"/opds/gallery/{gid}")
         entries = _entries(_parse(resp))
         indices = [int(e.get(f"{PSE}index")) for e in entries]
-        assert indices == sorted(indices)
+        # Production orders by page_num DESC: indices are [2, 1, 0]
+        assert indices == sorted(indices, reverse=True)
 
     async def test_gallery_detail_fallback_title_when_no_title(self, opds_client, db_session):
         """When gallery title is null, feed title should fall back to 'Gallery {id}'."""

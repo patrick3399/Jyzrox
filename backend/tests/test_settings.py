@@ -88,40 +88,56 @@ class TestGetAlerts:
 
 
 class TestRateLimit:
-    """GET/PATCH /api/settings/rate-limit — rate limiting config."""
+    """GET/PATCH /api/settings/rate-limits — rate limiting config."""
 
-    async def test_get_rate_limit_returns_config(self, client):
-        """Should return enabled flag and numeric config values."""
-        resp = await client.get("/api/settings/rate-limit")
+    async def test_get_rate_limits_returns_config(self, client):
+        """Should return sites, schedule, override_active and schedule_active."""
+        resp = await client.get("/api/settings/rate-limits")
         assert resp.status_code == 200
         data = resp.json()
-        assert "enabled" in data
-        assert "login_max" in data
-        assert "window" in data
-        assert isinstance(data["login_max"], int)
-        assert isinstance(data["window"], int)
+        assert "sites" in data
+        assert "schedule" in data
+        assert "override_active" in data
+        assert "schedule_active" in data
+        assert "ehentai" in data["sites"]
+        assert "pixiv" in data["sites"]
+        assert "gallery_dl" in data["sites"]
 
-    async def test_patch_rate_limit_toggle_off(self, client):
-        """Patching enabled=false should disable rate limiting."""
-        resp = await client.patch("/api/settings/rate-limit", json={"enabled": False})
+    async def test_patch_rate_limits_updates_site(self, client, mock_redis):
+        """Patching a site setting should return updated config."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/rate-limits",
+                json={"sites": {"ehentai": {"concurrency": 2}}},
+            )
         assert resp.status_code == 200
-        assert resp.json()["enabled"] is False
+        data = resp.json()
+        assert "sites" in data
 
-    async def test_patch_rate_limit_toggle_on(self, client):
-        """Patching enabled=true should enable rate limiting."""
-        resp = await client.patch("/api/settings/rate-limit", json={"enabled": True})
-        assert resp.status_code == 200
-        assert resp.json()["enabled"] is True
-
-    async def test_patch_rate_limit_empty_body_is_noop(self, client):
+    async def test_patch_rate_limits_empty_body_is_noop(self, client, mock_redis):
         """PATCH with no fields should succeed and return current state."""
-        resp = await client.patch("/api/settings/rate-limit", json={})
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch("/api/settings/rate-limits", json={})
         assert resp.status_code == 200
-        assert "enabled" in resp.json()
+        assert "sites" in resp.json()
 
-    async def test_get_rate_limit_requires_auth(self, unauthed_client):
+    async def test_patch_rate_limits_toggle_schedule(self, client, mock_redis):
+        """Patching schedule.enabled should return updated schedule state."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/rate-limits",
+                json={"schedule": {"enabled": True, "start_hour": 2, "end_hour": 6, "mode": "full_speed"}},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "schedule" in data
+
+    async def test_get_rate_limits_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""
-        resp = await unauthed_client.get("/api/settings/rate-limit")
+        resp = await unauthed_client.get("/api/settings/rate-limits")
         assert resp.status_code == 401
 
 

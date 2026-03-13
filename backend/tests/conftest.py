@@ -64,6 +64,93 @@ class _PlaceholderBase(DeclarativeBase):
 _placeholder_engine = create_async_engine("sqlite+aiosqlite:///:memory:", echo=False)
 _placeholder_factory = async_sessionmaker(_placeholder_engine, class_=AsyncSession, expire_on_commit=False)
 
+# Register `now()` for SQLite (PostgreSQL compat) on the placeholder engine.
+# Production code (e.g. verify_api_token) uses raw `now()` in SQL text.
+from sqlalchemy import event as _sa_event
+from datetime import datetime as _dt
+import sqlite3
+import uuid
+
+# SQLAlchemy uses UUID(as_uuid=True) for PG but SQLite has no UUID type.
+# Override UUID bind processing to store as TEXT strings in SQLite.
+sqlite3.register_adapter(uuid.UUID, lambda u: str(u))
+
+from sqlalchemy.dialects.postgresql import UUID as PG_UUID
+
+_original_bind = PG_UUID.bind_processor
+
+
+def _patched_bind_processor(self, dialect):
+    """For non-PG dialects (SQLite), convert UUID to str instead of calling .hex."""
+    if dialect.name != "postgresql":
+        def process(value):
+            if value is not None:
+                return str(value) if isinstance(value, uuid.UUID) else value
+            return value
+        return process
+    return _original_bind(self, dialect)
+
+
+PG_UUID.bind_processor = _patched_bind_processor
+
+_original_result = PG_UUID.result_processor
+
+
+def _patched_result_processor(self, dialect, coltype):
+    """For non-PG dialects (SQLite), convert str back to UUID."""
+    if dialect.name != "postgresql":
+        def process(value):
+            if value is not None and not isinstance(value, uuid.UUID):
+                return uuid.UUID(value)
+            return value
+        return process
+    return _original_result(self, dialect, coltype)
+
+
+PG_UUID.result_processor = _patched_result_processor
+
+# JSONB → store as JSON text in SQLite
+import json as _json
+from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
+
+_original_jsonb_bind = PG_JSONB.bind_processor
+
+
+def _patched_jsonb_bind(self, dialect):
+    if dialect.name != "postgresql":
+        def process(value):
+            if value is not None:
+                return _json.dumps(value) if not isinstance(value, str) else value
+            return value
+        return process
+    return _original_jsonb_bind(self, dialect)
+
+
+PG_JSONB.bind_processor = _patched_jsonb_bind
+
+_original_jsonb_result = PG_JSONB.result_processor
+
+
+def _patched_jsonb_result(self, dialect, coltype):
+    if dialect.name != "postgresql":
+        def process(value):
+            if value is not None and isinstance(value, str):
+                return _json.loads(value)
+            return value
+        return process
+    return _original_jsonb_result(self, dialect, coltype)
+
+
+PG_JSONB.result_processor = _patched_jsonb_result
+
+
+def _register_sqlite_compat(dbapi_conn, _rec):
+    """Register PostgreSQL-compatible functions for SQLite."""
+    dbapi_conn.create_function("now", 0, lambda: _dt.now().isoformat())
+
+
+_sa_event.listen(_placeholder_engine.sync_engine, "connect", _register_sqlite_compat)
+
 
 async def _fake_get_db():
     async with _placeholder_factory() as session:
@@ -88,25 +175,10 @@ sys.modules["core.database"] = _fake_db_mod
 # ---------------------------------------------------------------------------
 
 
-_plugins_initialized = False
-
-
 @asynccontextmanager
 async def _noop_lifespan(app):
-    global _plugins_initialized
     app.state.arq = AsyncMock()
     app.state.arq.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job"))
-    # Initialize plugins so detect_source() works and browse routers are available.
-    # Guard against repeated registration across multiple test fixtures.
-    if not _plugins_initialized:
-        _plugins_initialized = True
-        from plugins import init_plugins
-        await init_plugins()
-        from plugins.registry import plugin_registry
-        _BROWSE_PREFIX_MAP = {"ehentai": "/api/eh", "pixiv": "/api/pixiv"}
-        for sid, router in plugin_registry.get_browse_routers():
-            prefix = _BROWSE_PREFIX_MAP.get(sid, f"/api/browse/{sid}")
-            app.include_router(router, prefix=prefix)
     yield
 
 
@@ -114,6 +186,21 @@ async def _noop_lifespan(app):
 _lifespan_patch = patch("main.lifespan", _noop_lifespan)
 _redis_init_patch = patch("core.redis_client.init_redis", new_callable=AsyncMock)
 _redis_close_patch = patch("core.redis_client.close_redis", new_callable=AsyncMock)
+
+# Patch StaticFiles to skip directory check (swagger-ui dir only exists in Docker)
+import starlette.staticfiles as _sf_mod
+_OrigStaticFiles = _sf_mod.StaticFiles
+
+
+class _NoCheckStaticFiles(_OrigStaticFiles):
+    def __init__(self, **kwargs):
+        kwargs.pop("directory", None)
+        import tempfile
+        kwargs["directory"] = tempfile.mkdtemp()
+        super().__init__(**kwargs)
+
+
+_sf_mod.StaticFiles = _NoCheckStaticFiles
 
 _lifespan_patch.start()
 _redis_init_patch.start()
@@ -123,6 +210,31 @@ _redis_close_patch.start()
 import main as _main_mod  # noqa: E402
 
 _app = _main_mod.app
+
+# ---------------------------------------------------------------------------
+# Initialize plugins and mount browse routers at module level.
+# ASGITransport does NOT trigger lifespan, so we must do this eagerly.
+# ---------------------------------------------------------------------------
+
+
+async def _init_plugins_eager():
+    from plugins import init_plugins
+
+    await init_plugins()
+    from plugins.registry import plugin_registry
+
+    _BROWSE_PREFIX_MAP = {"ehentai": "/api/eh", "pixiv": "/api/pixiv"}
+    for sid, router in plugin_registry.get_browse_routers():
+        prefix = _BROWSE_PREFIX_MAP.get(sid, f"/api/browse/{sid}")
+        _app.include_router(router, prefix=prefix)
+
+
+try:
+    _loop = asyncio.get_event_loop()
+except RuntimeError:
+    _loop = asyncio.new_event_loop()
+
+_loop.run_until_complete(_init_plugins_eager())
 
 # ---------------------------------------------------------------------------
 # SQLite schema (PostgreSQL-compatible subset)
@@ -163,7 +275,9 @@ _SQLITE_SCHEMA = [
         tags_array TEXT DEFAULT '[]',
         last_scanned_at TIMESTAMP,
         library_path TEXT,
-        artist_id TEXT
+        artist_id TEXT,
+        visibility TEXT DEFAULT 'public',
+        created_by_user_id INTEGER REFERENCES users(id)
     )
     """,
     """
@@ -173,6 +287,7 @@ _SQLITE_SCHEMA = [
         media_type TEXT DEFAULT 'image',
         width INTEGER,
         height INTEGER,
+        duration REAL,
         phash TEXT,
         phash_int INTEGER,
         phash_q0 INTEGER,
@@ -183,7 +298,8 @@ _SQLITE_SCHEMA = [
         storage TEXT DEFAULT 'cas',
         external_path TEXT,
         ref_count INTEGER DEFAULT 0,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        thumbhash TEXT
     )
     """,
     """
@@ -193,7 +309,8 @@ _SQLITE_SCHEMA = [
         page_num INTEGER NOT NULL,
         filename TEXT,
         blob_sha256 TEXT REFERENCES blobs(sha256),
-        tags_array TEXT DEFAULT '[]'
+        tags_array TEXT DEFAULT '[]',
+        added_at TIMESTAMP
     )
     """,
     """
@@ -205,7 +322,8 @@ _SQLITE_SCHEMA = [
         progress TEXT DEFAULT '{}',
         error TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
-        finished_at TIMESTAMP
+        finished_at TIMESTAMP,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL
     )
     """,
     """
@@ -362,6 +480,7 @@ _SQLITE_SCHEMA = [
     """
     CREATE TABLE IF NOT EXISTS collections (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER REFERENCES users(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         description TEXT,
         cover_gallery_id INTEGER REFERENCES galleries(id) ON DELETE SET NULL,
@@ -384,6 +503,40 @@ _SQLITE_SCHEMA = [
         blob_sha256 TEXT NOT NULL,
         excluded_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (gallery_id, blob_sha256)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS blob_relationships (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        sha_a TEXT NOT NULL REFERENCES blobs(sha256) ON DELETE CASCADE,
+        sha_b TEXT NOT NULL REFERENCES blobs(sha256) ON DELETE CASCADE,
+        hamming_dist INTEGER NOT NULL,
+        relationship TEXT NOT NULL DEFAULT 'needs_t2',
+        suggested_keep TEXT,
+        reason TEXT,
+        diff_score REAL,
+        diff_type TEXT,
+        tier INTEGER NOT NULL DEFAULT 1,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        UNIQUE (sha_a, sha_b)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_favorites (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, gallery_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_ratings (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        rating INTEGER NOT NULL,
+        rated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, gallery_id)
     )
     """,
 ]
@@ -413,11 +566,7 @@ async def db_engine():
     )
 
     # Register PostgreSQL-compatible functions for SQLite
-    from sqlalchemy import event as sa_event
-
-    @sa_event.listens_for(engine.sync_engine, "connect")
-    def _register_functions(dbapi_conn, _rec):
-        dbapi_conn.create_function("now", 0, lambda: datetime.now().isoformat())
+    _sa_event.listen(engine.sync_engine, "connect", _register_sqlite_compat)
 
     async with engine.begin() as conn:
         for stmt in _SQLITE_SCHEMA:
@@ -541,6 +690,8 @@ async def unauthed_client(db_session, db_session_factory, mock_redis):
         patch("routers.auth.get_redis", return_value=mock_redis),
         patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
         patch("routers.auth.async_session", db_session_factory),
+        patch("plugins.builtin.ehentai.browse.async_session", db_session_factory),
+        patch("plugins.builtin.ehentai.browse.get_redis", return_value=mock_redis),
     ):
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
         async with AsyncClient(

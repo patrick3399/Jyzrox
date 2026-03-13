@@ -29,15 +29,14 @@ import pytest
 @pytest.fixture
 async def viewer_client(db_session, db_session_factory, mock_redis):
     """Authenticated client with viewer role (non-admin)."""
+    import sys
     from httpx import ASGITransport, AsyncClient
 
-    import sys
-    import os
-    _backend_dir = os.path.join(os.path.dirname(__file__), "..")
-    if os.path.abspath(_backend_dir) not in sys.path:
-        sys.path.insert(0, os.path.abspath(_backend_dir))
+    # conftest is registered in sys.modules as the session-level conftest
+    _conftest = sys.modules.get("conftest") or sys.modules.get("tests.conftest")
+    _app = _conftest._app
+    _fake_get_db = _conftest._fake_get_db
 
-    from conftest import _app, _fake_get_db
     from core.auth import require_auth
 
     async def _override_get_db():
@@ -135,8 +134,9 @@ class TestGetRateLimits:
                 "rate_limit:config:ehentai:delay_ms": b"1500",
                 "rate_limit:config:ehentai:image_concurrency": b"4",
                 "rate_limit:config:pixiv:concurrency": b"1",
-                "rate_limit:config:pixiv:delay_ms": b"2000",
-                "rate_limit:config:pixiv:image_concurrency": b"2",
+                "rate_limit:config:pixiv:page_delay_ms": b"2000",
+                "rate_limit:config:pixiv:pagination_delay_ms": b"1500",
+                "rate_limit:config:pixiv:illust_delay_ms": b"3000",
                 "rate_limit:config:gallery_dl:concurrency": b"2",
                 "rate_limit:config:gallery_dl:delay_ms": b"500",
                 "rate_limit:schedule:enabled": b"1",
@@ -160,7 +160,8 @@ class TestGetRateLimits:
         assert data["sites"]["ehentai"]["delay_ms"] == 1500
         assert data["sites"]["ehentai"]["image_concurrency"] == 4
         assert data["sites"]["pixiv"]["concurrency"] == 1
-        assert data["sites"]["pixiv"]["delay_ms"] == 2000
+        # pixiv uses page_delay_ms, not delay_ms (delay_ms is None for pixiv)
+        assert data["sites"]["pixiv"]["page_delay_ms"] == 2000
         assert data["sites"]["gallery_dl"]["concurrency"] == 2
         assert data["schedule"]["enabled"] is True
         assert data["schedule"]["start_hour"] == 2

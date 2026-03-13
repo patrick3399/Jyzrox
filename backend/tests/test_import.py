@@ -182,10 +182,11 @@ class TestBatchStart:
         assert isinstance(data["batch_id"], str)
         assert len(data["batch_id"]) == 36  # UUID format
 
-        mock_redis.setex.assert_called_once()
-        call_args = mock_redis.setex.call_args
-        key = call_args[0][0]
-        assert key.startswith("import:batch:")
+        # setex is called twice: once for batch data, once for batch owner
+        mock_redis.setex.assert_called()
+        # Verify at least one call was for the batch progress key
+        batch_keys = [call[0][0] for call in mock_redis.setex.call_args_list]
+        assert any(k.startswith("import:batch:") for k in batch_keys)
 
         app.state.arq.enqueue_job.assert_called()
         enqueue_call = app.state.arq.enqueue_job.call_args
@@ -264,14 +265,12 @@ class TestBatchProgress:
     """GET /api/import/batch/progress/{batch_id} — batch progress polling."""
 
     async def test_progress_unknown_batch(self, client, mock_redis):
-        """Unknown batch_id should return status=unknown."""
+        """Unknown batch_id should return 404 (not found in Redis)."""
         mock_redis.get = AsyncMock(return_value=None)
         with patch("routers.import_router.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/batch/progress/nonexistent-batch-id")
 
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["status"] == "unknown"
+        assert resp.status_code == 404
 
     async def test_progress_with_redis_data(self, client, mock_redis):
         """Existing batch_id should return parsed progress data from Redis."""
