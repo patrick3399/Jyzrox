@@ -426,43 +426,55 @@ class TestExtractSourceIdNewSites:
 
 
 class TestSiteConfig:
-    """Tests for SITE_CONFIG dict in _subscribe module."""
+    """Tests for GDL_SITES registry in _sites module."""
 
     def test_site_config_contains_twitter(self):
-        from plugins.builtin.gallery_dl._subscribe import SITE_CONFIG
+        from plugins.builtin.gallery_dl._sites import GDL_SITES
 
-        assert "twitter" in SITE_CONFIG
+        source_ids = {s.source_id for s in GDL_SITES}
+        assert "twitter" in source_ids
 
     def test_site_config_contains_instagram(self):
-        from plugins.builtin.gallery_dl._subscribe import SITE_CONFIG
+        from plugins.builtin.gallery_dl._sites import GDL_SITES
 
-        assert "instagram" in SITE_CONFIG
+        source_ids = {s.source_id for s in GDL_SITES}
+        assert "instagram" in source_ids
 
     def test_site_config_entry_has_id_key(self):
-        """Each SITE_CONFIG entry must have an 'id_key' field."""
-        from plugins.builtin.gallery_dl._subscribe import SITE_CONFIG
+        """Each subscribable GDL_SITES entry must have a subscribe_id_key."""
+        from plugins.builtin.gallery_dl._sites import GDL_SITES
 
-        for source, cfg in SITE_CONFIG.items():
-            assert "id_key" in cfg, f"SITE_CONFIG[{source!r}] missing 'id_key'"
+        subscribable = [s for s in GDL_SITES if s.subscribe_id_key is not None]
+        for site in subscribable:
+            assert site.subscribe_id_key, (
+                f"GDL_SITES entry {site.source_id!r} has falsy subscribe_id_key"
+            )
 
     def test_site_config_entry_has_url_tpl(self):
-        """Each SITE_CONFIG entry must have a 'url_tpl' field."""
-        from plugins.builtin.gallery_dl._subscribe import SITE_CONFIG
+        """Each subscribable GDL_SITES entry must have a subscribe_url_tpl."""
+        from plugins.builtin.gallery_dl._sites import GDL_SITES
 
-        for source, cfg in SITE_CONFIG.items():
-            assert "url_tpl" in cfg, f"SITE_CONFIG[{source!r}] missing 'url_tpl'"
+        subscribable = [s for s in GDL_SITES if s.subscribe_id_key is not None]
+        for site in subscribable:
+            assert site.subscribe_url_tpl, (
+                f"GDL_SITES entry {site.source_id!r} has falsy subscribe_url_tpl"
+            )
 
     def test_instagram_uses_shortcode_id_key(self):
-        """Instagram id_key should be 'shortcode'."""
-        from plugins.builtin.gallery_dl._subscribe import SITE_CONFIG
+        """Instagram subscribe_id_key should be 'shortcode'."""
+        from plugins.builtin.gallery_dl._sites import get_site_config
 
-        assert SITE_CONFIG["instagram"]["id_key"] == "shortcode"
+        cfg = get_site_config("instagram")
+        assert cfg is not None
+        assert cfg.subscribe_id_key == "shortcode"
 
     def test_twitter_uses_tweet_id_key(self):
-        """Twitter id_key should be 'tweet_id'."""
-        from plugins.builtin.gallery_dl._subscribe import SITE_CONFIG
+        """Twitter subscribe_id_key should be 'tweet_id'."""
+        from plugins.builtin.gallery_dl._sites import get_site_config
 
-        assert SITE_CONFIG["twitter"]["id_key"] == "tweet_id"
+        cfg = get_site_config("twitter")
+        assert cfg is not None
+        assert cfg.subscribe_id_key == "tweet_id"
 
 
 # ---------------------------------------------------------------------------
@@ -506,9 +518,9 @@ class TestProxyRegistration:
 
     @pytest.mark.asyncio
     async def test_gallery_dl_sources_registered_for_all_site_config(self):
-        """Every source in SITE_CONFIG should appear as a subscribable after init_plugins()."""
+        """Every subscribable source in GDL_SITES should appear as a subscribable after init_plugins()."""
         from plugins import init_plugins
-        from plugins.builtin.gallery_dl._subscribe import SITE_CONFIG
+        from plugins.builtin.gallery_dl._sites import GDL_SITES
         from plugins.registry import PluginRegistry
 
         registry = PluginRegistry()
@@ -518,7 +530,11 @@ class TestProxyRegistration:
             await init_plugins()
 
         subscribables = registry.list_subscribable()
-        for source in SITE_CONFIG:
+        # Only sources with a subscribe_id_key are registered as subscribable
+        subscribable_sources = {
+            s.source_id for s in GDL_SITES if s.subscribe_id_key is not None
+        }
+        for source in subscribable_sources:
             assert source in subscribables, (
                 f"Expected '{source}' in subscribables after init_plugins(), got: {subscribables}"
             )

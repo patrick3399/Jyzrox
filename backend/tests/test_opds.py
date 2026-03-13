@@ -541,10 +541,11 @@ class TestOPDSGalleryDetail:
         assert entries[0].findtext(f"{ATOM}title") == "Page 1"
 
     async def test_gallery_detail_entries_ordered_by_page_num(self, opds_client, db_session):
-        """Image entries should be ordered by page_num descending (production uses DESC).
+        """Image entries should be ordered by page_num ascending (default for unknown sources).
 
-        The OPDS gallery detail endpoint orders images by page_num DESC, so
-        pse:index values come out in descending order: [2, 1, 0].
+        The OPDS gallery detail endpoint orders images according to per-source
+        display config.  For source='test' the default image_order is 'asc',
+        so pse:index values come out in ascending order: [0, 1, 2].
         """
         gid = await _insert_gallery(db_session, source_id="gd7", pages=3)
         # Insert in mixed order to confirm ordering is consistent
@@ -555,8 +556,8 @@ class TestOPDSGalleryDetail:
         resp = await opds_client.get(f"/opds/gallery/{gid}")
         entries = _entries(_parse(resp))
         indices = [int(e.get(f"{PSE}index")) for e in entries]
-        # Production orders by page_num DESC: indices are [2, 1, 0]
-        assert indices == sorted(indices, reverse=True)
+        # Unknown source defaults to image_order="asc": indices are [0, 1, 2]
+        assert indices == sorted(indices)
 
     async def test_gallery_detail_fallback_title_when_no_title(self, opds_client, db_session):
         """When gallery title is null, feed title should fall back to 'Gallery {id}'."""

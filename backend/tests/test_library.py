@@ -181,7 +181,7 @@ class TestGetGalleryImages:
     """GET /api/library/galleries/{id}/images"""
 
     async def test_get_images(self, client, db_session):
-        """Should return images ordered by page_num descending (production uses DESC)."""
+        """Should return images ordered by page_num ascending (default for unknown sources)."""
         gid = await _insert_gallery(db_session)
         await _insert_image(db_session, gid, page_num=1, filename="001.jpg")
         await _insert_image(db_session, gid, page_num=2, filename="002.jpg")
@@ -191,9 +191,9 @@ class TestGetGalleryImages:
         data = resp.json()
         assert data["gallery_id"] == gid
         assert len(data["images"]) == 2
-        # Production orders by page_num DESC
-        assert data["images"][0]["page_num"] == 2
-        assert data["images"][1]["page_num"] == 1
+        # Unknown source defaults to image_order="asc"
+        assert data["images"][0]["page_num"] == 1
+        assert data["images"][1]["page_num"] == 2
 
     async def test_images_gallery_not_found(self, client):
         """Should return 404 when gallery doesn't exist."""

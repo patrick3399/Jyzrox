@@ -277,7 +277,8 @@ _SQLITE_SCHEMA = [
         library_path TEXT,
         artist_id TEXT,
         visibility TEXT DEFAULT 'public',
-        created_by_user_id INTEGER REFERENCES users(id)
+        created_by_user_id INTEGER REFERENCES users(id),
+        source_url TEXT
     )
     """,
     """
@@ -326,7 +327,8 @@ _SQLITE_SCHEMA = [
         user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
         retry_count INTEGER DEFAULT 0,
         max_retries INTEGER DEFAULT 3,
-        next_retry_at TIMESTAMP
+        next_retry_at TIMESTAMP,
+        gallery_id INTEGER REFERENCES galleries(id) ON DELETE SET NULL
     )
     """,
     """
@@ -477,6 +479,8 @@ _SQLITE_SCHEMA = [
         last_error TEXT,
         next_check_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        batch_total INTEGER DEFAULT 0,
+        batch_enqueued INTEGER DEFAULT 0,
         UNIQUE (user_id, url)
     )
     """,
