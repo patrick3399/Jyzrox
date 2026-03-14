@@ -11,11 +11,6 @@ from plugins.models import GalleryImportData
 
 logger = logging.getLogger(__name__)
 
-_BOORU_SOURCES = frozenset({
-    "danbooru", "gelbooru", "e621", "yandere", "konachan",
-    "rule34", "safebooru", "sankaku",
-})
-
 NAMESPACE_MAP = {
     "copyright": "parody",
     "meta": "meta",
@@ -31,7 +26,7 @@ def _extract_title(source: str, meta: dict, source_id: str) -> str:
     from plugins.builtin.gallery_dl._sites import get_site_config
 
     cfg = get_site_config(source)
-    fields = cfg.title_fields if cfg else ("title", "title_en")
+    fields = cfg.title_fields
 
     for field_name in fields:
         val = meta.get(field_name)
@@ -64,12 +59,14 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None) -> Gal
     source = meta.get("category") or "gallery_dl"
 
     # Source ID extraction
-    source_id = str(
-        meta.get("gallery_id")
-        or meta.get("tweet_id")
-        or meta.get("id")
-        or dest_dir.name
-    )
+    from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
+    _cfg = _get_site_config(source)
+    source_id = dest_dir.name
+    for _field in _cfg.source_id_fields:
+        _val = meta.get(_field)
+        if _val:
+            source_id = str(_val)
+            break
 
     # Tag extraction and normalization
     tags = _extract_tags(dest_dir, meta)
@@ -134,7 +131,9 @@ def _extract_tags(gallery_path: Path, metadata: dict) -> list[str]:
 
 def _normalize_tags(tags: list[str], source: str) -> list[str]:
     """Normalize namespace names across booru sources for consistency."""
-    if source not in _BOORU_SOURCES:
+    from plugins.builtin.gallery_dl._sites import get_site_config
+    cfg = get_site_config(source)
+    if not cfg.normalize_namespaces:
         return tags
     normalized = []
     for tag in tags:
@@ -152,7 +151,7 @@ def _extract_artist(source: str, meta: dict, tags: list[str]) -> str | None:
     from plugins.builtin.gallery_dl._sites import get_site_config
 
     cfg = get_site_config(source)
-    strategy = cfg.artist_from if cfg else "uploader"
+    strategy = cfg.artist_from
 
     if strategy == "twitter_author":
         handle = None

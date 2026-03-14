@@ -36,8 +36,69 @@ class GdlSiteConfig:
     # ── gallery-dl extractor name (replaces _source_to_extractor) ──
     extractor: str | None = None  # None = same as source_id
 
+    # ── Credential ──
+    credential_type: Literal["cookies", "refresh_token", "none"] = "cookies"
+    extra_extractors: tuple[str, ...] = ()
+    credential_requirement: Literal["required", "recommended", "none"] = "none"
+    credential_warning_code: str | None = None
+
+    # ── Metadata ──
+    source_id_fields: tuple[str, ...] = ("gallery_id", "id")
+    normalize_namespaces: bool = False
+
+    # ── Subscription source_id extraction ──
+    subscribe_id_pattern: str | None = None
+    subscribe_id_format: str | None = None
+
+    # ── Feature toggle ──
+    feature_toggle_key: str | None = None
+    feature_toggle_attr: str | None = None
+
+    # ── Artist URL ──
+    artist_url_tpl: str | None = None
+
 
 GDL_SITES: tuple[GdlSiteConfig, ...] = (
+    # ── EH / Pixiv (added before social/booru so _BY_SOURCE gets ehentai from e-hentai.org first) ──
+    GdlSiteConfig(
+        domain="e-hentai.org", source_id="ehentai", name="E-Hentai",
+        category="gallery", has_tags=True, artist_from="tag",
+        credential_type="cookies", extra_extractors=("exhentai", "e-hentai"),
+        credential_requirement="recommended",
+        credential_warning_code="eh_credentials_recommended",
+        feature_toggle_key="setting:download_eh_enabled",
+        feature_toggle_attr="download_eh_enabled",
+        source_id_fields=("gallery_id",),
+        normalize_namespaces=True,
+        artist_url_tpl="https://e-hentai.org/tag/artist:{}",
+    ),
+    GdlSiteConfig(
+        domain="exhentai.org", source_id="ehentai", name="ExHentai",
+        category="gallery", has_tags=True, artist_from="tag",
+        credential_type="cookies", extra_extractors=("exhentai", "e-hentai"),
+        credential_requirement="recommended",
+        credential_warning_code="eh_credentials_recommended",
+        feature_toggle_key="setting:download_eh_enabled",
+        feature_toggle_attr="download_eh_enabled",
+        source_id_fields=("gallery_id",),
+        normalize_namespaces=True,
+        artist_url_tpl="https://e-hentai.org/tag/artist:{}",
+    ),
+    GdlSiteConfig(
+        domain="pixiv.net", source_id="pixiv", name="Pixiv",
+        category="art", has_tags=True,
+        subscribe_id_key="id",
+        subscribe_url_tpl="https://www.pixiv.net/users/{}/",
+        credential_type="refresh_token",
+        credential_requirement="required",
+        credential_warning_code="pixiv_credentials_required",
+        feature_toggle_key="setting:download_pixiv_enabled",
+        feature_toggle_attr="download_pixiv_enabled",
+        source_id_fields=("id",),
+        subscribe_id_pattern=r"/users/(\d+)",
+        artist_url_tpl="https://www.pixiv.net/users/{}",
+    ),
+
     # ── Social ──
     GdlSiteConfig(
         domain="twitter.com", source_id="twitter", name="Twitter/X",
@@ -46,6 +107,9 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         artist_from="twitter_author",
         subscribe_id_key="tweet_id",
         subscribe_url_tpl="https://x.com/{}/media",
+        source_id_fields=("tweet_id",),
+        subscribe_id_pattern=r"^/([^/]+)",
+        artist_url_tpl="https://x.com/{}",
     ),
     GdlSiteConfig(
         domain="x.com", source_id="twitter", name="Twitter/X",
@@ -54,71 +118,87 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         artist_from="twitter_author",
         subscribe_id_key="tweet_id",
         subscribe_url_tpl="https://x.com/{}/media",
+        source_id_fields=("tweet_id",),
+        subscribe_id_pattern=r"^/([^/]+)",
+        artist_url_tpl="https://x.com/{}",
     ),
     GdlSiteConfig(
         domain="instagram.com", source_id="instagram", name="Instagram",
         category="social", has_tags=True,
         subscribe_id_key="shortcode",
         subscribe_url_tpl="https://www.instagram.com/{}/",
+        subscribe_id_pattern=r"^/(@?[^/]+)",
     ),
     GdlSiteConfig(
         domain="facebook.com", source_id="facebook", name="Facebook",
         category="social",
         subscribe_id_key="post_id",
         subscribe_url_tpl="https://www.facebook.com/{}/photos",
+        subscribe_id_pattern=r"^/([^/]+)",
     ),
     GdlSiteConfig(
         domain="bsky.app", source_id="bluesky", name="Bluesky",
         category="social", has_tags=True,
         subscribe_id_key="post_id",
         subscribe_url_tpl="https://bsky.app/profile/{}/",
+        subscribe_id_pattern=r"^/([^/]+)",
     ),
     GdlSiteConfig(
         domain="tumblr.com", source_id="tumblr", name="Tumblr",
         category="social", has_tags=True,
         subscribe_id_key="id",
         subscribe_url_tpl="https://www.tumblr.com/{}/",
+        subscribe_id_pattern=r"^/([^/]+)",
     ),
     GdlSiteConfig(
         domain="reddit.com", source_id="reddit", name="Reddit",
         category="social", has_tags=True,
         subscribe_id_key="id",
         subscribe_url_tpl="https://www.reddit.com/user/{}/submitted/",
+        subscribe_id_pattern=r"^/([^/]+)",
     ),
 
     # ── Booru ──
     GdlSiteConfig(
         domain="danbooru.donmai.us", source_id="danbooru", name="Danbooru",
         category="booru", has_tags=True, artist_from="tag",
+        normalize_namespaces=True,
     ),
     GdlSiteConfig(
         domain="gelbooru.com", source_id="gelbooru", name="Gelbooru",
         category="booru", has_tags=True, artist_from="tag",
+        normalize_namespaces=True,
     ),
     GdlSiteConfig(
         domain="e621.net", source_id="e621", name="e621",
         category="booru", has_tags=True, artist_from="tag",
+        normalize_namespaces=True,
     ),
     GdlSiteConfig(
         domain="yande.re", source_id="yandere", name="Yande.re",
         category="booru", has_tags=True, artist_from="tag",
+        normalize_namespaces=True,
     ),
     GdlSiteConfig(
         domain="konachan.com", source_id="konachan", name="Konachan",
         category="booru", has_tags=True, artist_from="tag",
+        normalize_namespaces=True,
     ),
     GdlSiteConfig(
         domain="rule34.xxx", source_id="rule34", name="Rule34",
         category="booru", has_tags=True, artist_from="tag",
+        normalize_namespaces=True,
     ),
     GdlSiteConfig(
         domain="safebooru.org", source_id="safebooru", name="Safebooru",
         category="booru", has_tags=True, artist_from="tag",
+        normalize_namespaces=True,
     ),
     GdlSiteConfig(
         domain="sankakucomplex.com", source_id="sankaku", name="Sankaku",
         category="booru", has_tags=True, artist_from="tag",
         extractor="sankakucomplex",
+        normalize_namespaces=True,
     ),
 
     # ── Art ──
@@ -127,6 +207,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         category="art", has_tags=True,
         subscribe_id_key="deviationid",
         subscribe_url_tpl="https://www.deviantart.com/{}/gallery/all",
+        subscribe_id_pattern=r"^/([^/]+)",
     ),
     GdlSiteConfig(
         domain="artstation.com", source_id="artstation", name="ArtStation",
@@ -163,6 +244,8 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         category="gallery", has_tags=True,
         subscribe_id_key="id",
         subscribe_url_tpl="https://kemono.su/{}/",
+        subscribe_id_pattern=r"/(\w+)/user/(\d+)",
+        subscribe_id_format="{1}:{2}",
     ),
     GdlSiteConfig(
         domain="mangadex.org", source_id="mangadex", name="MangaDex",
@@ -193,15 +276,22 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
 _BY_SOURCE: dict[str, GdlSiteConfig] = {}
 _BY_DOMAIN: dict[str, GdlSiteConfig] = {}
 for _s in GDL_SITES:
-    _BY_SOURCE.setdefault(_s.source_id, _s)  # first entry wins (twitter.com before x.com)
+    _BY_SOURCE.setdefault(_s.source_id, _s)  # first entry wins (e-hentai.org before exhentai.org)
     _BY_DOMAIN[_s.domain] = _s
 
+_DEFAULT_CONFIG = GdlSiteConfig(
+    domain="", source_id="gallery_dl", name="Unknown Site", category="other",
+)
 
-def get_site_config(source: str) -> GdlSiteConfig | None:
-    """Look up site config by source_id."""
-    return _BY_SOURCE.get(source)
+_ALIASES: dict[str, str] = {"exhentai": "ehentai"}
 
 
-def get_site_by_domain(domain: str) -> GdlSiteConfig | None:
-    """Look up site config by domain."""
-    return _BY_DOMAIN.get(domain)
+def get_site_config(source: str) -> GdlSiteConfig:
+    """Look up site config by source_id. Unknown sites → _DEFAULT_CONFIG."""
+    resolved = _ALIASES.get(source, source)
+    return _BY_SOURCE.get(resolved, _DEFAULT_CONFIG)
+
+
+def get_site_by_domain(domain: str) -> GdlSiteConfig:
+    """Look up site config by domain. Unknown domains → _DEFAULT_CONFIG."""
+    return _BY_DOMAIN.get(domain, _DEFAULT_CONFIG)

@@ -15,8 +15,6 @@ from core.database import AsyncSessionLocal
 from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, Tag
 from services.cas import create_library_symlink, store_blob
 from worker.constants import (
-    NAMESPACE_MAP,
-    _BOORU_SOURCES,
     _IMAGE_EXTS,
     _MEDIA_EXTS,
     _VIDEO_EXTS,
@@ -58,8 +56,15 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
         else:
             source = "gallery_dl"
 
-    # Extract source ID
-    source_id = str(metadata.get("gallery_id") or metadata.get("tweet_id") or metadata.get("id") or gallery_path.name)
+    # Extract source ID using data-driven config
+    from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
+    _cfg = _get_site_config(source)
+    source_id = gallery_path.name
+    for _field in _cfg.source_id_fields:
+        _val = metadata.get(_field)
+        if _val:
+            source_id = str(_val)
+            break
 
     tags = _normalize_tags(_extract_tags(gallery_path, metadata), source)
     media_files_raw = [f for f in gallery_path.rglob('*') if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
@@ -220,17 +225,8 @@ def _extract_tags(gallery_path: Path, metadata: dict) -> list[str]:
 
 def _normalize_tags(tags: list[str], source: str) -> list[str]:
     """Normalize namespace names across sources for consistency."""
-    if source not in _BOORU_SOURCES:
-        return tags
-    normalized = []
-    for tag in tags:
-        if ":" in tag:
-            ns, name = tag.split(":", 1)
-            ns = NAMESPACE_MAP.get(ns, ns)
-            normalized.append(f"{ns}:{name}")
-        else:
-            normalized.append(tag)
-    return normalized
+    from plugins.builtin.gallery_dl._metadata import _normalize_tags as _meta_normalize_tags
+    return _meta_normalize_tags(tags, source)
 
 
 def _build_gallery(
@@ -252,19 +248,9 @@ def _build_gallery(
             logger.warning("[import] failed to parse date %r: %s", raw_date, exc)
 
     # Artist ID extraction — delegate to shared logic
+    # ehentai and pixiv are now in _sites.py so _extract_artist handles them correctly
     from plugins.builtin.gallery_dl._metadata import _extract_artist
     artist_id = _extract_artist(source, meta, tags)
-    # Fallback for non-gallery-dl sources (ehentai, pixiv) that aren't in _sites.py
-    if artist_id is None:
-        if source == "ehentai":
-            for tag in tags:
-                if tag.startswith("artist:"):
-                    artist_id = f"ehentai:{tag[7:]}"
-                    break
-        elif source == "pixiv":
-            uploader = meta.get("uploader", "")
-            if uploader:
-                artist_id = f"pixiv:{uploader}"
 
     return {
         "source": source,

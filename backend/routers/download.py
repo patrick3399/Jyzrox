@@ -48,40 +48,34 @@ async def _credential_warning(source: str) -> str | None:
 
     Raises HTTPException for sources that strictly require credentials (e.g. Pixiv).
     """
-    if source in ("ehentai", "exhentai"):
-        cred = await get_credential("ehentai")
-        if not cred:
-            return "eh_credentials_recommended"
-    elif source == "pixiv":
-        cred = await get_credential("pixiv")
-        if not cred:
-            raise HTTPException(
-                status_code=400,
-                detail="Pixiv credentials not configured. Go to Settings → Credentials to set up.",
-            )
+    from plugins.builtin.gallery_dl._sites import get_site_config
+    cfg = get_site_config(source)
+    if cfg.credential_requirement == "none":
+        return None
+    cred = await get_credential(cfg.source_id)
+    if cfg.credential_requirement == "required" and not cred:
+        raise HTTPException(
+            status_code=400,
+            detail=f"{cfg.name} credentials not configured. Go to Settings → Credentials to set up.",
+        )
+    if cfg.credential_requirement == "recommended" and not cred:
+        return cfg.credential_warning_code
     return None
 
 
 async def _check_source_enabled(source: str) -> None:
     """Raise 400 if the download source is disabled."""
-    mapping = {
-        "ehentai": ("setting:download_eh_enabled", app_settings.download_eh_enabled),
-        "exhentai": ("setting:download_eh_enabled", app_settings.download_eh_enabled),
-        "pixiv": ("setting:download_pixiv_enabled", app_settings.download_pixiv_enabled),
-    }
-
-    if source in mapping:
-        key, default = mapping[source]
-        val = await get_redis().get(key)
+    from plugins.builtin.gallery_dl._sites import get_site_config
+    cfg = get_site_config(source)
+    if cfg.feature_toggle_key and cfg.feature_toggle_attr:
+        default = getattr(app_settings, cfg.feature_toggle_attr, True)
+        val = await get_redis().get(cfg.feature_toggle_key)
         enabled = val == b"1" if val is not None else default
-        if not enabled:
-            raise HTTPException(status_code=400, detail=f"Download source '{source}' is disabled")
     else:
-        # gallery-dl fallback
         val = await get_redis().get("setting:download_gallery_dl_enabled")
         enabled = val == b"1" if val is not None else app_settings.download_gallery_dl_enabled
-        if not enabled:
-            raise HTTPException(status_code=400, detail="gallery-dl downloads are disabled")
+    if not enabled:
+        raise HTTPException(status_code=400, detail=f"Download source '{source}' is disabled")
 
 
 async def _enqueue(

@@ -29,13 +29,11 @@ _member = require_role("member")
 
 def _extract_source_id(url: str, source: str) -> str | None:
     """Extract artist/user ID from URL for subscription tracking."""
+    from plugins.builtin.gallery_dl._sites import get_site_config
+
     parsed = urlparse(url)
-    if source == "pixiv":
-        m = re.search(r"/users/(\d+)", parsed.path)
-        return m.group(1) if m else None
-    if source == "twitter":
-        parts = parsed.path.strip("/").split("/")
-        return parts[0] if parts and parts[0] else None
+
+    # EH has complex multi-strategy extraction — keep as special case
     if source == "ehentai":
         qs = parse_qs(parsed.query)
         f_search = qs.get("f_search", [None])[0]
@@ -48,17 +46,17 @@ def _extract_source_id(url: str, source: str) -> str | None:
         if uploader_match:
             return f"uploader:{unquote(uploader_match.group(1))}"
         return None
-    if source in ("facebook", "instagram", "deviantart"):
-        parts = parsed.path.strip("/").split("/")
-        return parts[0] if parts and parts[0] else None
-    if source in ("tumblr", "reddit", "bluesky"):
-        parts = parsed.path.strip("/").split("/")
-        return parts[0] if parts and parts[0] else None
-    if source == "kemono":
-        # /patreon/user/12345 → "patreon:12345"
-        m = re.search(r"/(\w+)/user/(\d+)", parsed.path)
-        return f"{m.group(1)}:{m.group(2)}" if m else None
-    return None
+
+    # Data-driven extraction for all other sites
+    cfg = get_site_config(source)
+    if not cfg.subscribe_id_pattern:
+        return None
+    m = re.search(cfg.subscribe_id_pattern, parsed.path)
+    if not m:
+        return None
+    if cfg.subscribe_id_format:
+        return cfg.subscribe_id_format.format(*([''] + list(m.groups())))
+    return m.group(1)
 
 
 class CreateSubscriptionRequest(BaseModel):

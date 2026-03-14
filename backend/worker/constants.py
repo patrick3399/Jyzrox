@@ -17,13 +17,3 @@ _IMAGE_MAGIC = {
     # AVIF/HEIC: ftyp box at bytes 4-7, handled by the special-case check below
 }
 
-NAMESPACE_MAP = {
-    "copyright": "parody",
-    "meta": "meta",
-    "general": "general",
-    "artist": "artist",
-    "character": "character",
-    "species": "species",
-}
-
-_BOORU_SOURCES = frozenset({"danbooru", "gelbooru", "e621", "yandere", "konachan", "rule34", "safebooru", "sankaku"})

@@ -19,12 +19,12 @@ router = APIRouter(tags=["artists"])
 
 def _artist_url(source: str, artist_id: str) -> str:
     """Generate a canonical URL for an artist."""
-    if source == "pixiv":
-        return f"https://www.pixiv.net/users/{artist_id}"
-    if source == "twitter":
-        return f"https://x.com/{artist_id}"
-    if source == "ehentai":
-        return f"https://e-hentai.org/tag/artist:{artist_id}"
+    from plugins.builtin.gallery_dl._sites import get_site_config
+    cfg = get_site_config(source)
+    if cfg.artist_url_tpl:
+        return cfg.artist_url_tpl.format(artist_id)
+    if cfg.domain:
+        return f"https://{cfg.domain}/{artist_id}"
     return f"https://{source}/{artist_id}"
 
 

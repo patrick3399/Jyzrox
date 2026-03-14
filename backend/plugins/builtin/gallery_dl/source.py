@@ -58,9 +58,7 @@ def _source_to_extractor(source: str) -> str:
     from plugins.builtin.gallery_dl._sites import get_site_config
 
     cfg = get_site_config(source)
-    if cfg and cfg.extractor:
-        return cfg.extractor
-    return source
+    return cfg.extractor or cfg.source_id
 
 
 async def _build_gallery_dl_config(credentials: dict) -> None:
@@ -70,6 +68,8 @@ async def _build_gallery_dl_config(credentials: dict) -> None:
         credentials: Dict mapping source name -> credential value string.
                      e.g. {"ehentai": '{"ipb_member_id": ...}', "pixiv": "token..."}
     """
+    from plugins.builtin.gallery_dl._sites import get_site_config
+
     config: dict = {
         "extractor": {
             "base-directory": settings.data_gallery_path,
@@ -77,31 +77,23 @@ async def _build_gallery_dl_config(credentials: dict) -> None:
         },
     }
 
-    # EH cookies
-    eh_cred = credentials.get("ehentai")
-    if eh_cred:
-        try:
-            cookies = json.loads(eh_cred)
-            config["extractor"]["exhentai"] = {"cookies": cookies}
-            config["extractor"]["e-hentai"] = {"cookies": cookies}
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("[gallery_dl] invalid EH cookie JSON, skipping")
-
-    # Pixiv refresh token
-    pixiv_token = credentials.get("pixiv")
-    if pixiv_token:
-        config["extractor"]["pixiv"] = {"refresh-token": pixiv_token}
-
-    # Generic cookie credentials (twitter, instagram, etc.)
     for src, cred_val in credentials.items():
-        if src in ("ehentai", "pixiv") or not cred_val:
+        if not cred_val:
             continue
-        try:
-            cookie_dict = json.loads(cred_val)
-            extractor_name = _source_to_extractor(src)
-            config["extractor"][extractor_name] = {"cookies": cookie_dict}
-        except (json.JSONDecodeError, TypeError):
-            logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
+        cfg = get_site_config(src)
+        ext = cfg.extractor or cfg.source_id
+
+        if cfg.credential_type == "refresh_token":
+            config["extractor"][ext] = {"refresh-token": cred_val}
+        elif cfg.credential_type == "cookies":
+            try:
+                cookies = json.loads(cred_val)
+                config["extractor"][ext] = {"cookies": cookies}
+                for extra in cfg.extra_extractors:
+                    config["extractor"][extra] = {"cookies": cookies}
+            except (json.JSONDecodeError, TypeError):
+                logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
+        # credential_type == "none" → skip
 
     config_path = Path(settings.gallery_dl_config)
     tmp_path = config_path.with_suffix(".tmp")
@@ -318,19 +310,30 @@ class GalleryDlPlugin(SourcePlugin):
 
     def parse_metadata(self, dest_dir: Path) -> GalleryMetadata | None:
         """Read the first *.json file gallery-dl wrote and return GalleryMetadata."""
+        from plugins.builtin.gallery_dl._sites import get_site_config
+
         for meta_file in sorted(dest_dir.rglob("*.json")):
             try:
                 raw = json.loads(meta_file.read_text(encoding="utf-8"))
+                source = raw.get("category", "gallery_dl")
+                cfg = get_site_config(source)
+
                 tags = raw.get("tags", [])
                 rating = raw.get("rating")
                 if rating and isinstance(tags, list):
                     tags = list(tags)  # don't mutate original
                     tags.append(f"rating:{rating}")
+
+                source_id = dest_dir.name
+                for field in cfg.source_id_fields:
+                    val = raw.get(field)
+                    if val:
+                        source_id = str(val)
+                        break
+
                 return GalleryMetadata(
-                    source=raw.get("category", "gallery_dl"),
-                    source_id=str(
-                        raw.get("gallery_id") or raw.get("tweet_id") or raw.get("id") or dest_dir.name
-                    ),
+                    source=source,
+                    source_id=source_id,
                     title=raw.get("title") or raw.get("description") or dest_dir.name,
                     tags=tags,
                     pages=raw.get("count", 0),
