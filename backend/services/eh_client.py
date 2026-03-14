@@ -296,7 +296,10 @@ class EhClient:
         results = await self._gdata([[gid, token]])
         if not results:
             raise ValueError(f"Gallery {gid}/{token} not found or expunged")
-        return results[0]
+        meta = results[0]
+        if meta.get("expunged"):
+            raise ValueError(f"Gallery {gid}/{token} has been expunged (removed from E-Hentai)")
+        return meta
 
     def _parse_detail_html(self, html: str) -> tuple[dict[int, str], dict[int, str]]:
         """Parse a single gallery detail page HTML for pTokens + preview thumbnails."""
@@ -352,7 +355,14 @@ class EhClient:
         """
         url = f"{self.base_url}/g/{gid}/{token}/?p=0"
         resp = await self._http.get(url)
-        resp.raise_for_status()
+        try:
+            resp.raise_for_status()
+        except httpx.HTTPStatusError as exc:
+            if resp.status_code == 404:
+                raise ValueError(
+                    f"Gallery {gid}/{token} page not found (may be expunged or deleted)"
+                ) from exc
+            raise
         self._check_auth(resp.text, resp)
 
         _, preview_map = self._parse_detail_html(resp.text)
@@ -380,7 +390,14 @@ class EhClient:
 
             url = f"{self.base_url}/g/{gid}/{token}/?p={dp}"
             resp = await self._http.get(url)
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if resp.status_code == 404:
+                    raise ValueError(
+                        f"Gallery {gid}/{token} page not found (may be expunged or deleted)"
+                    ) from exc
+                raise
             self._check_auth(resp.text, resp)
 
             page_tokens, page_previews = self._parse_detail_html(resp.text)
@@ -445,7 +462,14 @@ class EhClient:
 
             url = f"{self.base_url}/g/{gid}/{token}/?p={dp}"
             resp = await self._http.get(url)
-            resp.raise_for_status()
+            try:
+                resp.raise_for_status()
+            except httpx.HTTPStatusError as exc:
+                if resp.status_code == 404:
+                    raise ValueError(
+                        f"Gallery {gid}/{token} page not found (may be expunged or deleted)"
+                    ) from exc
+                raise
             self._check_auth(resp.text, resp)
 
             page_tokens, page_previews = self._parse_detail_html(resp.text)

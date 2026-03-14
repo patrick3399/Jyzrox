@@ -156,6 +156,10 @@ class EhSourcePlugin(SourcePlugin):
             err = str(exc)
             logger.error("[ehentai] permission error: %s", err)
             return DownloadResult(status="failed", downloaded=0, total=0, error=err)
+        except ValueError as exc:
+            err = str(exc)
+            logger.warning("[ehentai] %s", err)
+            return DownloadResult(status="failed", downloaded=0, total=0, error=err)
         except Exception as exc:
             err = f"EH download failed: {exc}"
             logger.error("[ehentai] %s", err, exc_info=True)
