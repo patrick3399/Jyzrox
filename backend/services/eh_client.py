@@ -123,6 +123,10 @@ class EhClient:
         self._http: httpx.AsyncClient | None = None
         self._img_http: httpx.AsyncClient | None = None
 
+    @property
+    def _is_ex(self) -> bool:
+        return self.base_url == EX_BASE_URL
+
     async def __aenter__(self) -> "EhClient":
         # Inject nw=1 cookie to skip Content Warning page
         cookies = {**self.cookies, "nw": "1"}
@@ -295,10 +299,18 @@ class EhClient:
     async def get_gallery_metadata(self, gid: int, token: str) -> dict:
         results = await self._gdata([[gid, token]])
         if not results:
-            raise ValueError(f"Gallery {gid}/{token} not found or expunged")
+            raise ValueError(
+                f"Gallery {gid}/{token} not found or expunged"
+                if self._is_ex
+                else f"Gallery {gid}/{token} not found or expunged; configure ExHentai credentials to access restricted galleries"
+            )
         meta = results[0]
         if meta.get("expunged"):
-            raise ValueError(f"Gallery {gid}/{token} has been expunged (removed from E-Hentai)")
+            raise ValueError(
+                f"Gallery {gid}/{token} has been expunged (removed)"
+                if self._is_ex
+                else f"Gallery {gid}/{token} has been expunged from E-Hentai; it may still be available on ExHentai — configure ExHentai credentials to try"
+            )
         return meta
 
     def _parse_detail_html(self, html: str) -> tuple[dict[int, str], dict[int, str]]:
@@ -361,6 +373,8 @@ class EhClient:
             if resp.status_code == 404:
                 raise ValueError(
                     f"Gallery {gid}/{token} page not found (may be expunged or deleted)"
+                    if self._is_ex
+                    else f"Gallery {gid}/{token} not found on E-Hentai; it may be available on ExHentai — configure ExHentai credentials to try"
                 ) from exc
             raise
         self._check_auth(resp.text, resp)
@@ -396,6 +410,8 @@ class EhClient:
                 if resp.status_code == 404:
                     raise ValueError(
                         f"Gallery {gid}/{token} page not found (may be expunged or deleted)"
+                        if self._is_ex
+                        else f"Gallery {gid}/{token} not found on E-Hentai; it may be available on ExHentai — configure ExHentai credentials to try"
                     ) from exc
                 raise
             self._check_auth(resp.text, resp)
@@ -468,6 +484,8 @@ class EhClient:
                 if resp.status_code == 404:
                     raise ValueError(
                         f"Gallery {gid}/{token} page not found (may be expunged or deleted)"
+                        if self._is_ex
+                        else f"Gallery {gid}/{token} not found on E-Hentai; it may be available on ExHentai — configure ExHentai credentials to try"
                     ) from exc
                 raise
             self._check_auth(resp.text, resp)
