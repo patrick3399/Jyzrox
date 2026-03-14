@@ -55,12 +55,13 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None) -> Gal
                 logger.warning("[gallery_dl_metadata] failed to read %s: %s", meta_file, exc)
                 continue
 
-    # Source detection
-    source = meta.get("category") or "gallery_dl"
-
-    # Source ID extraction
+    # Source detection: gallery-dl uses "category" for the extractor name
+    # (e.g., "exhentai", "pixiv"). Resolve through site config to get the
+    # canonical source_id (e.g., "ehentai").
+    raw_source = meta.get("category") or "gallery_dl"
     from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
-    _cfg = _get_site_config(source)
+    _cfg = _get_site_config(raw_source)
+    source = _cfg.source_id
     source_id = dest_dir.name
     for _field in _cfg.source_id_fields:
         _val = meta.get(_field)
@@ -92,7 +93,7 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None) -> Gal
         source_id=source_id,
         title=_extract_title(source, meta, source_id),
         title_jpn=meta.get("title_jpn") or meta.get("title_original") or "",
-        category=meta.get("category") or meta.get("type", ""),
+        category=meta.get("gallery_category") or meta.get("subcategory") or meta.get("type", ""),
         language=meta.get("lang") or meta.get("language", ""),
         tags=tags,
         artist_id=artist_id,

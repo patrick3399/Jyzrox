@@ -44,21 +44,22 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
             logger.warning("[import] failed to read metadata %s: %s", meta_file, exc)
             continue
 
-    # Extract source from Category (gallery-dl uses this for the extractor name)
-    source = metadata.get("category")
-    if not source:
+    # Extract source from Category (gallery-dl uses "category" for the extractor name)
+    raw_source = metadata.get("category")
+    if not raw_source:
         # Fallback heuristic
         parts = gallery_path.parts
         if "ehentai" in parts:
-            source = "ehentai"
+            raw_source = "ehentai"
         elif "pixiv" in parts:
-            source = "pixiv"
+            raw_source = "pixiv"
         else:
-            source = "gallery_dl"
+            raw_source = "gallery_dl"
 
-    # Extract source ID using data-driven config
+    # Resolve to canonical source_id (e.g., "exhentai" → "ehentai")
     from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
-    _cfg = _get_site_config(source)
+    _cfg = _get_site_config(raw_source)
+    source = _cfg.source_id
     source_id = gallery_path.name
     for _field in _cfg.source_id_fields:
         _val = metadata.get(_field)
