@@ -35,17 +35,26 @@ class ProgressiveImporter:
         self._page_num_from_filename = page_num_from_filename
         self._excluded_set: set[str] = set()
 
-    async def _load_excluded(self) -> None:
-        """Load excluded blob hashes for the current gallery."""
+    async def _load_gallery_state(self) -> None:
+        """Load excluded blobs and current max page_num for the gallery."""
         if not self.gallery_id:
             return
         async with AsyncSessionLocal() as session:
+            from sqlalchemy import func
             rows = (await session.execute(
                 select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == self.gallery_id)
             )).scalars().all()
             self._excluded_set = set(rows)
             if self._excluded_set:
                 logger.info("[progressive] loaded %d excluded blob(s) for gallery %d", len(self._excluded_set), self.gallery_id)
+
+            # Resume page counter from current max page_num so new images don't collide
+            max_page = (await session.execute(
+                select(func.max(Image.page_num)).where(Image.gallery_id == self.gallery_id)
+            )).scalar_one_or_none()
+            if max_page and max_page > self._page_counter:
+                self._page_counter = max_page
+                logger.info("[progressive] resuming page counter at %d for gallery %d", max_page, self.gallery_id)
 
     async def ensure_gallery(self, metadata: dict, dest_dir: Path) -> int:
         """Create or update gallery record with download_status='downloading'.
@@ -103,7 +112,7 @@ class ProgressiveImporter:
             await session.commit()
 
         logger.info("[progressive] gallery created: id=%d title=%s", self.gallery_id, self.title)
-        await self._load_excluded()
+        await self._load_gallery_state()
         return self.gallery_id
 
     async def ensure_gallery_from_url(self, url: str, dest_dir: Path) -> int:
@@ -165,7 +174,7 @@ class ProgressiveImporter:
             await session.commit()
 
         logger.info("[progressive] gallery created from URL: id=%d title=%s", self.gallery_id, self.title)
-        await self._load_excluded()
+        await self._load_gallery_state()
         return self.gallery_id
 
     async def ensure_gallery_from_import_data(self, data: GalleryImportData) -> int:
@@ -219,7 +228,7 @@ class ProgressiveImporter:
             await session.commit()
 
         logger.info("[progressive] gallery created from import data: id=%d title=%s", self.gallery_id, self.title)
-        await self._load_excluded()
+        await self._load_gallery_state()
         return self.gallery_id
 
     async def import_file(self, file_path: Path) -> None:

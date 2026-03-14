@@ -1507,13 +1507,18 @@ async def delete_gallery_image(
     await db.delete(img)
     gallery.pages = max(0, (gallery.pages or 1) - 1)
 
-    # Re-number remaining images sequentially starting at 1
+    # Re-number remaining images sequentially starting at 1.
+    # Two-pass approach to avoid unique constraint violations during renumber:
+    # 1) Set all page_nums to negative temporaries, 2) Set to final positive values.
     remaining_stmt = (
         select(Image)
         .where(Image.gallery_id == gallery_id)
         .order_by(Image.page_num)
     )
     remaining = (await db.execute(remaining_stmt)).scalars().all()
+    for i, remaining_img in enumerate(remaining):
+        remaining_img.page_num = -(i + 1)
+    await db.flush()
     for new_num, remaining_img in enumerate(remaining, start=1):
         remaining_img.page_num = new_num
 
