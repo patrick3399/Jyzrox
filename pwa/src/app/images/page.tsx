@@ -84,9 +84,9 @@ function ImageBrowserInner() {
   }, [tags, searchParams, router])
 
   const handleImageClick = useCallback((img: BrowseImage) => {
-    // TODO: migrate to /reader/{source}/{source_id} once BrowseImage includes source/source_id
-    // (requires backend to add source/source_id to the browse images response)
-    router.push(`/reader/${img.gallery_id}?page=${img.page_num}`)
+    if (img.source && img.source_id) {
+      router.push(`/reader/${encodeURIComponent(img.source)}/${encodeURIComponent(img.source_id)}?page=${img.page_num}`)
+    }
   }, [router])
 
   const renderItem = useCallback((img: BrowseImage, geometry: { width: number; height: number }) => {

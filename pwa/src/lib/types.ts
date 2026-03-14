@@ -63,6 +63,8 @@ export interface BrowseImage {
   thumbhash: string | null
   media_type: 'image' | 'video' | 'gif'
   added_at: string | null
+  source: string | null
+  source_id: string | null
 }
 
 export interface ImageBrowserResponse {

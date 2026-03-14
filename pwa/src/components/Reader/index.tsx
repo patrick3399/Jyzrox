@@ -1677,6 +1677,10 @@ export default function Reader({
   const currentImage = images.find((i) => i.pageNum === state.currentPage)
   const nextImage = images.find((i) => i.pageNum === state.currentPage + 1) ?? null
 
+  // When downloading progressively, the current page may not have been imported yet.
+  const isDownloading = downloadStatus === 'downloading'
+  const pageNotReady = !currentImage && isDownloading && images.length > 0
+
   return (
     <div ref={containerRef} className="reader-container flex flex-col bg-black">
       {/* Top overlay — always rendered, slides in/out */}
@@ -1748,6 +1752,16 @@ export default function Reader({
             currentPage={state.currentPage}
             onZoomChange={handleZoomChange}
           />
+        )}
+
+        {/* Downloading: current page not yet imported — show spinner instead of black screen */}
+        {pageNotReady && (
+          <div className="flex h-full w-full items-center justify-center">
+            <div className="text-center">
+              <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+              <p className="text-sm text-white/50">{t('reader.pageNotReady')}</p>
+            </div>
+          </div>
         )}
       </div>
 

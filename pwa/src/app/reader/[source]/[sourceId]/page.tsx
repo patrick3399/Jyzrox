@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { t } from '@/lib/i18n'
 import type { Gallery, GalleryImage, ReadProgress } from '@/lib/types'
 
 interface LoadedData {
@@ -122,6 +123,19 @@ export default function ReaderPage() {
 
   const { gallery, images, progress } = data
 
+  // Downloading but no images imported yet — show waiting screen.
+  // The 5s polling effect above will keep refreshing until images arrive.
+  if (images.length === 0 && gallery.download_status === 'downloading') {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+        <div className="text-center">
+          <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+          <p className="text-sm opacity-70">{t('reader.downloadingWait')}</p>
+        </div>
+      </div>
+    )
+  }
+
   // URL ?page= takes priority over saved progress
   const initialPage = urlPage > 0
     ? Math.min(urlPage, gallery.pages)
@@ -134,7 +148,7 @@ export default function ReaderPage() {
         sourceId={gallery.source_id}
         downloadStatus={gallery.download_status}
         images={images}
-        totalPages={gallery.pages}
+        totalPages={gallery.download_status === 'downloading' ? Math.max(gallery.pages, images.length) : gallery.pages}
         initialPage={initialPage}
       />
     </ErrorBoundary>

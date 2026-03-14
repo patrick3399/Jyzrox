@@ -395,6 +395,7 @@ def _decode_image_cursor(cursor: str) -> dict:
 
 def _i_browse(img: Image) -> dict:
     blob = img.blob
+    gallery = img.gallery
     return {
         "id": img.id,
         "gallery_id": img.gallery_id,
@@ -406,6 +407,8 @@ def _i_browse(img: Image) -> dict:
         "thumbhash": blob.thumbhash if blob else None,
         "media_type": blob.media_type if blob else "image",
         "added_at": img.added_at.isoformat() if img.added_at else None,
+        "source": gallery.source if gallery else None,
+        "source_id": gallery.source_id if gallery else None,
     }
 
 
@@ -428,7 +431,7 @@ async def browse_images(
         select(Image)
         .join(Gallery, Image.gallery_id == Gallery.id)
         .where(gallery_access_filter(auth))
-        .options(selectinload(Image.blob))
+        .options(selectinload(Image.blob), selectinload(Image.gallery))
     )
 
     if gallery_id is not None:

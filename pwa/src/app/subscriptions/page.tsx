@@ -52,21 +52,38 @@ const CRON_PRESETS = [
 
 function JobStatusBadge({ job }: { job: DownloadJob }) {
   if (job.status === 'running') {
-    const pct = job.progress?.percent ?? 0
+    const downloaded = job.progress?.downloaded ?? 0
+    const total = job.progress?.total
+    const pct = total ? Math.min(100, Math.round((downloaded / total) * 100)) : 0
+    const gallerySource = job.gallery_source
+    const gallerySourceId = job.gallery_source_id
+    const title = job.progress?.title
     return (
       <div className="mt-2">
-        <div className="flex items-center justify-between text-[10px] text-vault-text-muted mb-1">
-          <span className="text-blue-400 flex items-center gap-1">
-            <Download size={10} />
-            {t('subscriptions.downloading')}
+        {title && gallerySource && gallerySourceId && (
+          <Link
+            href={`/library/${encodeURIComponent(gallerySource)}/${encodeURIComponent(gallerySourceId)}`}
+            className="text-[10px] text-vault-accent hover:underline truncate block mb-1"
+          >
+            {title}
+          </Link>
+        )}
+        <div className="flex items-center gap-2">
+          <div className="flex-1 h-1.5 bg-vault-border rounded-full overflow-hidden">
+            {total ? (
+              <div
+                className="h-full bg-blue-500 rounded-full transition-all duration-300"
+                style={{ width: `${pct}%` }}
+              />
+            ) : (
+              <div className="h-full bg-blue-500/30 rounded-full overflow-hidden relative">
+                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/60 to-transparent animate-[shimmer_1.5s_infinite]" />
+              </div>
+            )}
+          </div>
+          <span className="text-[10px] text-vault-text-muted whitespace-nowrap">
+            {downloaded}{total ? ` / ${total}` : ''} {t('queue.files')}
           </span>
-          <span>{pct}%{job.progress?.downloaded != null && job.progress?.total != null ? ` (${job.progress.downloaded}/${job.progress.total})` : ''}</span>
-        </div>
-        <div className="h-1.5 bg-vault-border rounded-full overflow-hidden">
-          <div
-            className="h-full bg-blue-500 rounded-full transition-all duration-300"
-            style={{ width: `${pct}%` }}
-          />
         </div>
       </div>
     )
