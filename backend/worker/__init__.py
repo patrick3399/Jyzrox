@@ -80,6 +80,26 @@ async def startup(ctx: dict) -> None:
         "dedup:progress:tier", "dedup:progress:mode",
     )
 
+    # Clean up stale "running" jobs from previous worker crash
+    from core.database import AsyncSessionLocal
+    from db.models import DownloadJob
+    from sqlalchemy import update
+    from datetime import UTC, datetime
+    async with AsyncSessionLocal() as session:
+        stale_count = (await session.execute(
+            update(DownloadJob)
+            .where(DownloadJob.status == "running")
+            .values(
+                status="failed",
+                error="Worker restarted — job did not complete",
+                finished_at=datetime.now(UTC),
+            )
+            .returning(DownloadJob.id)
+        )).fetchall()
+        if stale_count:
+            await session.commit()
+            logger.info("Cleaned up %d stale running jobs from previous worker session", len(stale_count))
+
     # Start file system watcher.
     # Honour the runtime override stored by toggle_monitor; fall back to the
     # static config flag when no override has been set yet.

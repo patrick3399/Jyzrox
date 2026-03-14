@@ -64,16 +64,17 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
                 await session.commit()
             return {"status": "skipped", "reason": "credentials_required"}
 
-    # Duplicate guard: skip if there's already ANY queued/running job for this URL (cross-entry protection)
+    # Duplicate guard: skip if this user already has a queued/running job for this URL
     async with AsyncSessionLocal() as session:
         existing = (await session.execute(
             select(DownloadJob.id).where(
                 DownloadJob.url == sub.url,
+                DownloadJob.user_id == sub.user_id,
                 DownloadJob.status.in_(["queued", "running"]),
             ).limit(1)
         )).scalar_one_or_none()
         if existing:
-            logger.info("[subscription] sub=%d URL already has active job %s, skipping", sub.id, existing)
+            logger.info("[subscription] sub=%d URL already has active job %s for user %d, skipping", sub.id, existing, sub.user_id)
             return {"status": "skipped", "reason": "active_job_exists"}
 
     # Decide archive behavior: query galleries table (stable, not cleared by clear_finished_jobs).

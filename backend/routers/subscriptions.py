@@ -251,21 +251,40 @@ async def delete_subscription(
     sub_id: int,
     auth: dict = Depends(require_auth),
 ):
-    """Delete a subscription."""
+    """Delete a subscription and cancel any active download jobs."""
     user_id = auth["user_id"]
+    cancelled_jobs: list[str] = []
     async with async_session() as session:
-        result = await session.execute(
-            delete(Subscription).where(
-                Subscription.id == sub_id,
-                Subscription.user_id == user_id,
-            ).returning(Subscription.id)
-        )
-        deleted = result.fetchone()
+        # Verify ownership first — before touching any jobs
+        sub = await session.get(Subscription, sub_id)
+        if not sub or sub.user_id != user_id:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+
+        # Cancel active jobs linked to this subscription before deletion.
+        # Must run before the DELETE because the FK has ondelete="SET NULL",
+        # which would clear subscription_id on the jobs before we can filter by it.
+        from db.models import DownloadJob
+        active_jobs = (await session.execute(
+            select(DownloadJob).where(
+                DownloadJob.subscription_id == sub_id,
+                DownloadJob.status.in_(["queued", "running"]),
+            )
+        )).scalars().all()
+        for job in active_jobs:
+            job.status = "cancelled"
+            cancelled_jobs.append(str(job.id))
+
+        await session.delete(sub)
         await session.commit()
 
-    if not deleted:
-        raise HTTPException(status_code=404, detail="Subscription not found")
-    return {"status": "ok"}
+    # Set Redis cancel flags for running jobs so workers stop promptly
+    if cancelled_jobs:
+        from core.redis_client import get_redis
+        redis = get_redis()
+        for job_id in cancelled_jobs:
+            await redis.setex(f"download:cancel:{job_id}", 3600, "1")
+
+    return {"status": "ok", "cancelled_jobs": len(cancelled_jobs)}
 
 
 @router.post("/{sub_id}/check")
