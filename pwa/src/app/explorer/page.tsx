@@ -31,6 +31,18 @@ function StarRating({ rating }: { rating: number }) {
   )
 }
 
+// Display names for known sources
+const SOURCE_DISPLAY: Record<string, string> = {
+  ehentai: 'E-Hentai',
+  pixiv: 'Pixiv',
+  local: 'Local',
+  gallery_dl: 'gallery-dl',
+}
+
+function sourceDisplayName(source: string): string {
+  return SOURCE_DISPLAY[source] ?? source
+}
+
 // ── Main Component ────────────────────────────────────────────────────
 
 const PAGE_LIMIT = 50
@@ -39,11 +51,17 @@ const PAGE_LIMIT = 50
 interface CurrentGallery {
   source: string
   sourceId: string
+  title?: string
 }
 
 export default function ExplorerPage() {
   const router = useRouter()
 
+  // Navigation levels:
+  //   currentSource=null, currentGallery=null → source folder list (root)
+  //   currentSource set, currentGallery=null  → gallery list for that source
+  //   currentSource set, currentGallery set   → file list for that gallery
+  const [currentSource, setCurrentSource] = useState<string | null>(null)
   const [currentGallery, setCurrentGallery] = useState<CurrentGallery | null>(null)
   const [selectedItems, setSelectedItems] = useState<Set<string | number>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
@@ -59,14 +77,21 @@ export default function ExplorerPage() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  // Root view: list of gallery directories
+  // Always fetch all directories (we group/filter on the frontend).
+  // When at root (source list) we fetch with no source filter.
+  // When inside a source, we pass the search query so pagination makes sense.
   const {
     data: dirData,
     mutate: mutateDirs,
     isLoading: dirsLoading,
   } = useSWR(
-    currentGallery === null ? ['explorer-dirs', debouncedQuery, page] : null,
-    () => api.library.listFiles({ q: debouncedQuery || undefined, page, limit: PAGE_LIMIT }),
+    currentGallery === null ? ['explorer-dirs', debouncedQuery, page, currentSource] : null,
+    () =>
+      api.library.listFiles({
+        q: debouncedQuery || undefined,
+        page,
+        limit: PAGE_LIMIT,
+      }),
   )
 
   // Gallery view: list of files inside a gallery
@@ -81,23 +106,38 @@ export default function ExplorerPage() {
 
   // ── Click / selection logic ────────────────────────────────────────
 
-  function handleDoubleClick(id: string | number) {
-    if (currentGallery === null) {
-      // Navigate into gallery: look up source/source_id from the directory listing
-      const dir = dirData?.directories.find((d) => d.gallery_id === (id as number))
-      if (dir && dir.source) {
-        setCurrentGallery({ source: dir.source, sourceId: dir.source_id })
-        setSelectedItems(new Set())
-      }
-    } else {
-      // Find the file by filename and navigate to reader at that page
-      const file = fileData?.files.find((f) => f.filename === id)
-      if (file?.page_num != null) {
-        router.push(`/reader/${currentGallery.source}/${currentGallery.sourceId}?page=${file.page_num}`)
-      } else {
-        router.push(`/reader/${currentGallery.source}/${currentGallery.sourceId}`)
-      }
+  function handleDoubleClickSource(source: string) {
+    setCurrentSource(source)
+    setSelectedItems(new Set())
+    setPage(0)
+    setSearchQuery('')
+    setDebouncedQuery('')
+  }
+
+  function handleDoubleClickGallery(id: string | number) {
+    const dir = filteredDirectories.find((d) => d.gallery_id === (id as number))
+    if (dir && dir.source) {
+      setCurrentGallery({ source: dir.source, sourceId: dir.source_id, title: dir.title ?? undefined })
+      setSelectedItems(new Set())
     }
+  }
+
+  function handleDoubleClickFile(id: string | number) {
+    const file = fileData?.files.find((f) => f.filename === id)
+    if (file?.page_num != null) {
+      router.push(`/reader/${currentGallery!.source}/${currentGallery!.sourceId}?page=${file.page_num}`)
+    } else {
+      router.push(`/reader/${currentGallery!.source}/${currentGallery!.sourceId}`)
+    }
+  }
+
+  function handleDoubleClick(id: string | number) {
+    if (currentGallery !== null) {
+      handleDoubleClickFile(id)
+    } else if (currentSource !== null) {
+      handleDoubleClickGallery(id)
+    }
+    // Source folders are handled via handleDoubleClickSource (separate handler)
   }
 
   function handleItemClick(id: string | number, e: React.MouseEvent) {
@@ -130,9 +170,9 @@ export default function ExplorerPage() {
     if (selectedItems.size === 0) return
 
     if (currentGallery === null) {
-      // Deleting galleries
+      // Deleting galleries (from source view)
       for (const id of selectedItems) {
-        const dir = dirData?.directories.find((d) => d.gallery_id === (id as number))
+        const dir = filteredDirectories.find((d) => d.gallery_id === (id as number))
         if (!dir || !dir.source) continue
         const title = dir.title ?? String(id)
         const confirmed = window.confirm(
@@ -196,11 +236,41 @@ export default function ExplorerPage() {
 
   // ── Derived state ─────────────────────────────────────────────────
 
-  const galleryTitle = fileData?.title ?? ''
-  const directories: LibraryDirectory[] = dirData?.directories ?? []
+  const allDirectories: LibraryDirectory[] = dirData?.directories ?? []
+
+  // When inside a source, filter directories to that source only.
+  // At root level, all directories are used for grouping.
+  const filteredDirectories: LibraryDirectory[] =
+    currentSource !== null
+      ? allDirectories.filter((d) => d.source === currentSource)
+      : allDirectories
+
+  const galleryTitle = currentGallery?.title ?? fileData?.title ?? ''
   const files: LibraryFile[] = fileData?.files ?? []
-  const totalDirs = dirData?.total ?? 0
-  const totalPages = Math.ceil(totalDirs / PAGE_LIMIT)
+  const totalDirs = currentSource !== null ? filteredDirectories.length : (dirData?.total ?? 0)
+  const totalPages = Math.ceil((dirData?.total ?? 0) / PAGE_LIMIT)
+
+  // Group all directories by source for the root view
+  const sourceGroups = (() => {
+    const groups: Map<string, { galleries: LibraryDirectory[]; totalFiles: number; totalSize: number }> = new Map()
+    for (const dir of allDirectories) {
+      const src = dir.source ?? 'local'
+      if (!groups.has(src)) {
+        groups.set(src, { galleries: [], totalFiles: 0, totalSize: 0 })
+      }
+      const g = groups.get(src)!
+      g.galleries.push(dir)
+      g.totalFiles += dir.file_count ?? 0
+      g.totalSize += dir.disk_size ?? 0
+    }
+    return groups
+  })()
+
+  // ── Breadcrumb segments ────────────────────────────────────────────
+
+  const isRoot = currentSource === null && currentGallery === null
+  const isSourceView = currentSource !== null && currentGallery === null
+  const isGalleryView = currentGallery !== null
 
   // ── Render ────────────────────────────────────────────────────────
 
@@ -208,7 +278,22 @@ export default function ExplorerPage() {
     <div className="flex flex-col min-h-screen pb-24">
       {/* Header row */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        {currentGallery !== null && (
+        {/* Back buttons */}
+        {isSourceView && (
+          <button
+            onClick={() => {
+              setCurrentSource(null)
+              setSelectedItems(new Set())
+              setPage(0)
+              setSearchQuery('')
+              setDebouncedQuery('')
+            }}
+            className="text-sm text-vault-accent hover:underline shrink-0"
+          >
+            {t('explorer.backToRoot')}
+          </button>
+        )}
+        {isGalleryView && (
           <button
             onClick={() => {
               setCurrentGallery(null)
@@ -216,17 +301,22 @@ export default function ExplorerPage() {
             }}
             className="text-sm text-vault-accent hover:underline shrink-0"
           >
-            {t('explorer.backToRoot')}
+            {t('explorer.backToSources')}
           </button>
         )}
 
         <h1 className="text-xl font-bold text-vault-text truncate">
-          {currentGallery !== null ? galleryTitle : t('explorer.title')}
+          {isGalleryView
+            ? galleryTitle
+            : isSourceView
+              ? sourceDisplayName(currentSource)
+              : t('explorer.title')}
         </h1>
 
         <div className="flex-1" />
 
-        {currentGallery === null && (
+        {/* Search: available at source view level (searching galleries within source) */}
+        {isSourceView && (
           <input
             type="text"
             value={searchQuery}
@@ -257,22 +347,42 @@ export default function ExplorerPage() {
         </div>
       </div>
 
-      {/* Breadcrumb for gallery view */}
-      {currentGallery !== null && (
-        <div className="text-xs text-vault-text-secondary mb-3 flex items-center gap-1">
-          <button
-            onClick={() => {
-              setCurrentGallery(null)
-              setSelectedItems(new Set())
-            }}
-            className="text-vault-accent hover:underline"
-          >
-            {t('explorer.title')}
-          </button>
-          <span>/</span>
-          <span className="truncate">{galleryTitle}</span>
-        </div>
-      )}
+      {/* Breadcrumb */}
+      <div className="text-xs text-vault-text-secondary mb-3 flex items-center gap-1 flex-wrap">
+        <button
+          onClick={() => {
+            setCurrentSource(null)
+            setCurrentGallery(null)
+            setSelectedItems(new Set())
+            setPage(0)
+            setSearchQuery('')
+            setDebouncedQuery('')
+          }}
+          className={isRoot ? 'text-vault-text font-medium' : 'text-vault-accent hover:underline'}
+        >
+          {t('explorer.title')}
+        </button>
+        {(isSourceView || isGalleryView) && (
+          <>
+            <span>/</span>
+            <button
+              onClick={() => {
+                setCurrentGallery(null)
+                setSelectedItems(new Set())
+              }}
+              className={isSourceView ? 'text-vault-text font-medium truncate' : 'text-vault-accent hover:underline truncate'}
+            >
+              {sourceDisplayName(currentSource!)}
+            </button>
+          </>
+        )}
+        {isGalleryView && (
+          <>
+            <span>/</span>
+            <span className="text-vault-text font-medium truncate">{galleryTitle}</span>
+          </>
+        )}
+      </div>
 
       {/* Content */}
       <div
@@ -281,15 +391,7 @@ export default function ExplorerPage() {
           if (e.target === e.currentTarget) setSelectedItems(new Set())
         }}
       >
-        {currentGallery === null ? (
-          <RootView
-            directories={directories}
-            loading={dirsLoading}
-            viewMode={viewMode}
-            selectedItems={selectedItems}
-            onItemClick={handleItemClick}
-          />
-        ) : (
+        {isGalleryView ? (
           <GalleryView
             files={files}
             loading={filesLoading}
@@ -297,11 +399,26 @@ export default function ExplorerPage() {
             selectedItems={selectedItems}
             onItemClick={handleItemClick}
           />
+        ) : isSourceView ? (
+          <RootView
+            directories={filteredDirectories}
+            loading={dirsLoading}
+            viewMode={viewMode}
+            selectedItems={selectedItems}
+            onItemClick={handleItemClick}
+          />
+        ) : (
+          <SourceView
+            sourceGroups={sourceGroups}
+            loading={dirsLoading}
+            viewMode={viewMode}
+            onSourceDoubleClick={handleDoubleClickSource}
+          />
         )}
       </div>
 
-      {/* Pagination (root view only) */}
-      {currentGallery === null && totalDirs > PAGE_LIMIT && (
+      {/* Pagination (source view with search, where API paginates) */}
+      {isSourceView && (dirData?.total ?? 0) > PAGE_LIMIT && (
         <div className="flex items-center justify-center gap-3 mt-6">
           <button
             disabled={page === 0}
@@ -323,8 +440,8 @@ export default function ExplorerPage() {
         </div>
       )}
 
-      {/* Bottom action bar */}
-      {selectedItems.size > 0 && (
+      {/* Bottom action bar (only in source/gallery view, not at root source list) */}
+      {selectedItems.size > 0 && !isRoot && (
         <div className="fixed bottom-[calc(4rem+var(--sab))] lg:bottom-0 left-0 right-0 bg-vault-card border-t border-vault-border p-3 flex items-center justify-between z-50 lg:ml-56">
           <span className="text-sm text-vault-text-secondary">
             {t('explorer.selectedCount', { count: String(selectedItems.size) })}
@@ -349,7 +466,104 @@ export default function ExplorerPage() {
   )
 }
 
-// ── Root View (directory listing) ────────────────────────────────────
+// ── Source View (top-level: grouped by source) ────────────────────────
+
+interface SourceViewProps {
+  sourceGroups: Map<string, { galleries: LibraryDirectory[]; totalFiles: number; totalSize: number }>
+  loading: boolean
+  viewMode: 'grid' | 'list'
+  onSourceDoubleClick: (source: string) => void
+}
+
+function SourceView({ sourceGroups, loading, viewMode, onSourceDoubleClick }: SourceViewProps) {
+  const lastClickRef = useRef<{ id: string; time: number } | null>(null)
+
+  function handleClick(source: string) {
+    const now = Date.now()
+    const last = lastClickRef.current
+    if (last && last.id === source && now - last.time < 400) {
+      onSourceDoubleClick(source)
+      lastClickRef.current = null
+      return
+    }
+    lastClickRef.current = { id: source, time: now }
+  }
+
+  if (loading) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <span className="text-vault-text-secondary text-sm">{t('common.loading')}</span>
+      </div>
+    )
+  }
+
+  if (sourceGroups.size === 0) {
+    return (
+      <div className="flex items-center justify-center py-16">
+        <span className="text-vault-text-secondary text-sm">{t('explorer.noSources')}</span>
+      </div>
+    )
+  }
+
+  const entries = Array.from(sourceGroups.entries())
+
+  if (viewMode === 'grid') {
+    return (
+      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+        {entries.map(([source, info]) => (
+          <div
+            key={source}
+            onClick={() => handleClick(source)}
+            onDoubleClick={() => onSourceDoubleClick(source)}
+            className="bg-vault-card rounded-lg p-4 cursor-pointer border border-vault-border hover:border-vault-accent/50 hover:bg-vault-card-hover transition-all select-none"
+          >
+            <div className="flex items-center gap-2 mb-3">
+              <Folder size={24} className="text-vault-accent shrink-0" />
+              <span className="text-sm font-semibold text-vault-text truncate">
+                {sourceDisplayName(source)}
+              </span>
+            </div>
+            <div className="text-xs text-vault-text-secondary space-y-1">
+              <div>{t('explorer.galleryCount', { count: String(info.galleries.length) })}</div>
+              <div>{t('explorer.totalFiles', { count: String(info.totalFiles) })}</div>
+              <div>{formatSize(info.totalSize)}</div>
+            </div>
+          </div>
+        ))}
+      </div>
+    )
+  }
+
+  // List mode
+  return (
+    <div className="flex flex-col gap-0.5">
+      <div className="grid grid-cols-[1fr_100px_80px_100px] gap-2 px-3 py-1.5 text-xs font-medium text-vault-text-secondary border-b border-vault-border">
+        <span>{t('explorer.fileName')}</span>
+        <span className="text-right">{t('explorer.galleryCount', { count: '' }).trim()}</span>
+        <span className="text-right">{t('explorer.totalFiles', { count: '' }).trim()}</span>
+        <span className="text-right">{t('explorer.diskSize')}</span>
+      </div>
+      {entries.map(([source, info]) => (
+        <div
+          key={source}
+          onClick={() => handleClick(source)}
+          onDoubleClick={() => onSourceDoubleClick(source)}
+          className="grid grid-cols-[1fr_100px_80px_100px] gap-2 px-3 min-h-[48px] items-center rounded-lg cursor-pointer select-none transition-colors hover:bg-vault-card-hover"
+        >
+          <div className="flex items-center gap-2 min-w-0">
+            <Folder size={16} className="text-vault-accent shrink-0" />
+            <span className="text-sm text-vault-text truncate">{sourceDisplayName(source)}</span>
+          </div>
+          <span className="text-xs text-vault-text-secondary text-right">{info.galleries.length}</span>
+          <span className="text-xs text-vault-text-secondary text-right">{info.totalFiles}</span>
+          <span className="text-xs text-vault-text-secondary text-right">{formatSize(info.totalSize)}</span>
+        </div>
+      ))}
+    </div>
+  )
+}
+
+// ── Root View (directory listing within a source) ─────────────────────
 
 interface RootViewProps {
   directories: LibraryDirectory[]

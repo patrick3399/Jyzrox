@@ -476,6 +476,10 @@ const en: Record<string, string> = {
   'explorer.dimensions': 'Dimensions',
   'explorer.fileSize': 'Size',
   'explorer.fileType': 'Type',
+  'explorer.galleryCount': '{count} galleries',
+  'explorer.totalFiles': '{count} files',
+  'explorer.noSources': 'No source folders found',
+  'explorer.backToSources': '← Sources',
 
   // ── Queue (extra) ──
   'queue.cancelError': 'Failed to cancel job',
