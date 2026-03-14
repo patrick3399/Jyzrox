@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEhSearch, useEhFavorites, useEhPopular, useEhToplist } from '@/hooks/useGalleries'
 import { useCreateSubscription } from '@/hooks/useSubscriptions'
+import useSWR from 'swr'
 import { api } from '@/lib/api'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 
@@ -15,7 +16,7 @@ import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { RatingStars } from '@/components/RatingStars'
 import { Search as SearchIcon, X as XIcon, ChevronDown, ChevronUp, Bookmark, BookmarkCheck, Rss } from 'lucide-react'
-import type { EhGallery, Credentials, SavedSearch } from '@/lib/types'
+import type { EhGallery, SavedSearch } from '@/lib/types'
 
 // ── IntersectionObserver-based lazy image ──────────────────────────────
 
@@ -526,13 +527,10 @@ function BrowsePage() {
   const mobileSavedSearchesRef = useRef<HTMLDivElement>(null)
 
   // EH credentials (for favorites tab)
-  const [ehConfigured, setEhConfigured] = useState(false)
-  useEffect(() => {
-    api.settings
-      .getCredentials()
-      .then((c: Credentials) => setEhConfigured(c.ehentai.configured))
-      .catch(() => {})
-  }, [])
+  const { data: credData, isLoading: credLoading } = useSWR('settings/credentials/eh', () =>
+    api.settings.getCredentials(),
+  )
+  const ehConfigured = credLoading ? true : !!credData?.ehentai?.configured
 
   // Load saved searches
   const refreshSavedSearches = useCallback(() => {
