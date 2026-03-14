@@ -919,7 +919,7 @@ async def remove_favorite(
 # ── Thumbnail proxy ───────────────────────────────────────────────────
 
 _thumb_semaphore = asyncio.Semaphore(4)
-_ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "ul.ehgt.org", "hath.network"}
+_ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "s.exhentai.org", "ul.ehgt.org", "hath.network"}
 
 
 @_browse_router.get("/thumb-proxy")
@@ -938,6 +938,13 @@ async def thumb_proxy(
     host = parsed.hostname or ""
     if not any(host == h or host.endswith(f".{h}") for h in _ALLOWED_THUMB_HOSTS):
         raise HTTPException(status_code=403, detail="URL domain not allowed")
+
+    # Rewrite slow ExH CDN URLs to faster ehgt.org CDN.
+    # s.exhentai.org and exhentai.org thumbnails are mirrored on ehgt.org.
+    if host and "exhentai" in host:
+        from urllib.parse import urlunparse
+        url = urlunparse(parsed._replace(scheme="https", netloc="ehgt.org"))
+        parsed = urlparse(url)  # re-parse for the referer logic below
 
     cache_key = f"thumb:cdn:{hashlib.md5(url.encode()).hexdigest()}"
     cached_bytes = await get_redis().get(cache_key)
