@@ -761,30 +761,31 @@ async def list_files(
 
     base = Path(settings.data_library_path)
 
-    def _scan_dirs() -> list[tuple[int, int, int]]:
-        """Return list of (gallery_id, file_count, disk_size) for numeric subdirectories."""
+    def _scan_dirs() -> list[tuple[str, str, int, int]]:
+        """Return list of (source, source_id, file_count, disk_size) from two-level library tree."""
         entries = []
         try:
-            for entry in os.scandir(base):
-                if not entry.is_dir():
+            for source_entry in os.scandir(base):
+                if not source_entry.is_dir():
                     continue
-                try:
-                    gid = int(entry.name)
-                except ValueError:
-                    continue
-                file_count = 0
-                disk_size = 0
-                try:
-                    for f in os.scandir(entry.path):
-                        if f.is_file(follow_symlinks=True):
-                            file_count += 1
-                            try:
-                                disk_size += f.stat(follow_symlinks=True).st_size
-                            except OSError:
-                                pass
-                except OSError:
-                    pass
-                entries.append((gid, file_count, disk_size))
+                source = source_entry.name
+                for sid_entry in os.scandir(source_entry.path):
+                    if not sid_entry.is_dir():
+                        continue
+                    sid = sid_entry.name
+                    file_count = 0
+                    disk_size = 0
+                    try:
+                        for f in os.scandir(sid_entry.path):
+                            if f.is_file(follow_symlinks=True):
+                                file_count += 1
+                                try:
+                                    disk_size += f.stat(follow_symlinks=True).st_size
+                                except OSError:
+                                    pass
+                    except OSError:
+                        pass
+                    entries.append((source, sid, file_count, disk_size))
         except OSError:
             pass
         return entries
@@ -794,10 +795,11 @@ async def list_files(
     if not raw_entries:
         return {"directories": [], "total": 0, "page": page}
 
-    gallery_ids = [e[0] for e in raw_entries]
-    size_map = {e[0]: (e[1], e[2]) for e in raw_entries}
+    fs_keys = [(e[0], e[1]) for e in raw_entries]
+    size_map = {(e[0], e[1]): (e[2], e[3]) for e in raw_entries}
 
-    stmt = select(Gallery).where(Gallery.id.in_(gallery_ids))
+    from sqlalchemy import tuple_
+    stmt = select(Gallery).where(tuple_(Gallery.source, Gallery.source_id).in_(fs_keys))
     if q:
         stmt = stmt.where(Gallery.title.ilike(f"%{q}%"))
 
@@ -814,7 +816,7 @@ async def list_files(
 
     result = []
     for g in paged:
-        file_count, disk_size = size_map.get(g.id, (0, 0))
+        file_count, disk_size = size_map.get((g.source, g.source_id), (0, 0))
         result.append({
             "gallery_id": g.id,
             "source_id": g.source_id,
