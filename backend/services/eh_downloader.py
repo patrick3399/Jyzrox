@@ -15,7 +15,7 @@ from pathlib import Path
 from core.config import settings
 from core.redis_client import get_download_delay, get_redis
 from services import cache
-from services.eh_client import EhClient, _detect_media_type
+from services.eh_client import EhClient, Image509Error, _detect_media_type
 
 logger = logging.getLogger(__name__)
 
@@ -146,10 +146,14 @@ async def download_eh_gallery(
                     logger.debug("[eh_download] page %d: from cache (%d bytes)", page_num, len(cached_bytes))
                 else:
                     # Download via showpage API
-                    data, _media_type, ext = await client.download_image_with_retry(
-                        showkey, gid, page_num, ptoken,
-                        max_retries=settings.eh_download_max_retries,
-                    )
+                    try:
+                        data, _media_type, ext = await client.download_image_with_retry(
+                            showkey, gid, page_num, ptoken,
+                            max_retries=settings.eh_download_max_retries,
+                        )
+                    except Image509Error:
+                        logger.error("[eh_download] 509 limit reached at page %d, stopping download", page_num)
+                        raise  # Propagate so gather captures it and we can detect it below
                     filepath = output_dir / f"{page_num:04d}.{ext}"
                     filepath.write_bytes(data)
                     logger.debug("[eh_download] page %d: downloaded (%d bytes)", page_num, len(data))
@@ -177,6 +181,14 @@ async def download_eh_gallery(
             page_num = sorted_pages[i]
             if isinstance(result, asyncio.CancelledError):
                 return {"status": "cancelled", "downloaded": downloaded, "total": total_pages, "failed_pages": []}
+            if isinstance(result, Image509Error):
+                return {
+                    "status": "failed",
+                    "downloaded": downloaded,
+                    "total": total_pages,
+                    "failed_pages": [],
+                    "error": "E-Hentai image viewing limit reached (509). Try again later or use a different IP.",
+                }
             if isinstance(result, Exception):
                 logger.error("[eh_download] page %d failed: %s", page_num, result)
                 failed_pages.append(page_num)

@@ -953,8 +953,9 @@ async def thumb_proxy(
 
     async with _thumb_semaphore:
         try:
-            async with httpx.AsyncClient(cookies=cookies, timeout=15) as client:
-                resp = await client.get(url, headers={"Referer": "https://e-hentai.org/"})
+            referer = "https://exhentai.org/" if "exhentai" in (parsed.hostname or "") else "https://e-hentai.org/"
+            async with httpx.AsyncClient(cookies=cookies, timeout=30) as client:
+                resp = await client.get(url, headers={"Referer": referer})
                 resp.raise_for_status()
                 content = resp.content
                 media_type = resp.headers.get("content-type", "image/jpeg").split(";")[0]

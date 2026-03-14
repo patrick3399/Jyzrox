@@ -6,6 +6,7 @@ References:
   - https://ehwiki.org/wiki/API
 """
 
+import dataclasses
 import logging
 import re
 from collections import defaultdict
@@ -48,6 +49,10 @@ _PTOKEN_RE = re.compile(r"/s/([0-9a-f]{10})/(\d+)-(\d+)")
 _SHOWKEY_RE = re.compile(r'var\s+showkey\s*=\s*"([0-9a-z]+)"')
 # Matches nl() call in image page HTML: return nl('PARAM')
 _NL_RE = re.compile(r"return nl\('([^']+)'\)")
+# Matches origin image URL: <a href="URL_PART1fullimgURL_PART2">
+_ORIGIN_IMAGE_RE = re.compile(r'<a href="([^"]+)fullimg([^"]+)">')
+# Matches skip-server fallback URL from onclick prompt
+_OTHER_IMAGE_RE = re.compile(r"""onclick="prompt\('Copy the URL below\.', '([^']+)'\)""")
 # Large preview: <div class="gdtl"...><a href="..."><img alt="N" src="THUMB_URL"...>
 _LARGE_PREVIEW_RE = re.compile(
     r'<div class="gdtl"[^>]*>.*?<a[^>]*href="[^"]*"[^>]*>'
@@ -72,6 +77,19 @@ _NEW_PREVIEW_RE = re.compile(
     r'url\(([^)]+)\)\s*(-?\d+)px',
     re.DOTALL,
 )
+
+
+class Image509Error(Exception):
+    """E-Hentai 509 error: image viewing limit reached for this IP."""
+    pass
+
+
+@dataclasses.dataclass
+class ShowpageResult:
+    image_url: str
+    nl_param: str | None = None
+    other_url: str | None = None
+    origin_url: str | None = None
 
 
 def _chunks(lst: list, n: int):
@@ -548,13 +566,14 @@ class EhClient:
 
         return showkey, nl_param
 
-    async def get_image_url_via_api(self, showkey: str, gid: int, page: int, imgkey: str, nl: str = "") -> tuple[str, str | None]:
+    async def get_image_url_via_api(self, showkey: str, gid: int, page: int, imgkey: str, nl: str = "") -> ShowpageResult:
         """Use showpage JSON API for fast image URL resolution.
         POST to api.php with method=showpage.
         Response JSON has:
-          - i3: HTML containing <img id="img" src="IMAGE_URL">
-          - i6: HTML containing onclick="return nl('NL_PARAM')"
-        Returns (image_url, nl_param)
+          - i3: HTML containing <img id="img" src="IMAGE_URL"> (primary H@H CDN URL)
+          - i6: HTML containing nl() param, skip-server prompt URL, and origin image link
+          - i7: Optional HTML containing origin image link (preferred over i6 if present)
+        Returns ShowpageResult with image_url, nl_param, other_url, origin_url.
         """
         payload: dict = {
             "method": "showpage",
@@ -574,55 +593,107 @@ class EhClient:
         if data.get("error"):
             raise ValueError(f"showpage API error: {data['error']}")
 
-        # Parse image URL from i3 field (HTML string containing img tag)
+        # Parse primary image URL from i3 field (HTML string containing img tag)
         i3 = data.get("i3", "")
-        img_match = re.search(r'<img[^>]+src="([^"]+)"', i3)
+        img_match = re.search(r'<img[^>]+src="([^"]+)"[^>]*style', i3)
+        if not img_match:
+            # Fallback: any img src
+            img_match = re.search(r'<img[^>]+src="([^"]+)"', i3)
         if not img_match:
             raise ValueError(f"Image URL not found in showpage response for {gid}-{page}")
         image_url = img_match.group(1)
 
-        # Parse nl param from i6 field
+        # Parse nl param and other_url from i6 field
         i6 = data.get("i6", "")
         nl_match = _NL_RE.search(i6)
         nl_param = nl_match.group(1) if nl_match else None
 
-        return image_url, nl_param
+        other_match = _OTHER_IMAGE_RE.search(i6)
+        other_url = other_match.group(1) if other_match else None
+
+        # Parse origin_url: prefer i7 if present, otherwise fall back to i6
+        i7 = data.get("i7", "")
+        origin_source = i7 if i7 else i6
+        origin_match = _ORIGIN_IMAGE_RE.search(origin_source)
+        origin_url = (origin_match.group(1) + "fullimg" + origin_match.group(2)) if origin_match else None
+
+        return ShowpageResult(
+            image_url=image_url,
+            nl_param=nl_param,
+            other_url=other_url,
+            origin_url=origin_url,
+        )
+
+    async def _download_image_bytes(self, url: str, gid: int, page: int, imgkey: str) -> tuple[bytes, str, str]:
+        """Download image from URL, validate, return (bytes, media_type, ext)."""
+        resp = await self._img_http.get(url)
+        resp.raise_for_status()
+        image_data = resp.content
+        if len(image_data) < 100:
+            raise ValueError(f"Image too small ({len(image_data)} bytes), possible error")
+        media_type = _detect_media_type(image_data)
+        ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp"}
+        ext = ext_map.get(media_type, "jpg")
+        return image_data, media_type, ext
 
     async def download_image_with_retry(self, showkey: str, gid: int, page: int, imgkey: str, max_retries: int = 3) -> tuple[bytes, str, str]:
         """Resolve URL via showpage API + download with nl retry on stall/error.
-        Returns (image_bytes, media_type, filename_ext)
+
+        Phase 1: Try primary image URL up to max_retries times, switching H@H
+                 server via nl param on each failure.
+        Phase 2: If all retries fail, try the skip-server fallback URL (other_url).
+        Phase 3: If that also fails, try the original full-resolution URL (origin_url).
+
+        Raises Image509Error immediately (no retry) when the server returns a 509
+        bandwidth-limit page — this is an IP-level limit that retries cannot fix.
+
+        Returns (image_bytes, media_type, filename_ext).
         """
         nl = ""
-        nl_param: str | None = None
         last_error: Exception | None = None
+        last_result: ShowpageResult | None = None
 
+        # Phase 1: Try primary URL with nl-based server switching
         for attempt in range(max_retries):
             try:
-                image_url, nl_param = await self.get_image_url_via_api(showkey, gid, page, imgkey, nl=nl)
+                result = await self.get_image_url_via_api(showkey, gid, page, imgkey, nl=nl)
+                last_result = result
 
-                # Download the image (use _img_http with follow_redirects=True for H@H)
-                resp = await self._img_http.get(image_url)
-                resp.raise_for_status()
-                image_data = resp.content
+                # Check for 509 bandwidth limit — raise immediately, do not retry
+                if result.image_url.endswith(('/509.gif', '/509s.gif')):
+                    raise Image509Error(f"509 limit reached on page {page}")
 
-                if len(image_data) < 100:
-                    # Suspiciously small — might be an error page
-                    raise ValueError(f"Image too small ({len(image_data)} bytes), possible error")
-
-                media_type = _detect_media_type(image_data)
-                ext_map = {"image/jpeg": "jpg", "image/png": "png", "image/gif": "gif", "image/webp": "webp"}
-                ext = ext_map.get(media_type, "jpg")
-
-                return image_data, media_type, ext
-
+                data = await self._download_image_bytes(result.image_url, gid, page, imgkey)
+                return data
+            except Image509Error:
+                raise  # Do not retry 509
             except (httpx.TimeoutException, httpx.HTTPStatusError, ValueError) as exc:
                 last_error = exc
                 logger.warning("[eh_download] page %d attempt %d failed: %s", page, attempt + 1, exc)
-                # Use nl param to try a different H@H server
-                if nl_param:
-                    nl = nl_param
+                if last_result and last_result.nl_param:
+                    nl = last_result.nl_param
 
-        raise RuntimeError(f"Failed to download page {page} after {max_retries} attempts: {last_error}")
+        # Phase 2: Try otherImageUrl fallback (skip-server URL)
+        if last_result and last_result.other_url:
+            try:
+                logger.info("[eh_download] page %d: trying fallback other_url", page)
+                data = await self._download_image_bytes(last_result.other_url, gid, page, imgkey)
+                return data
+            except Exception as exc:
+                logger.warning("[eh_download] page %d other_url failed: %s", page, exc)
+                last_error = exc
+
+        # Phase 3: Try originImageUrl fallback (original full-resolution image)
+        if last_result and last_result.origin_url:
+            try:
+                logger.info("[eh_download] page %d: trying fallback origin_url", page)
+                data = await self._download_image_bytes(last_result.origin_url, gid, page, imgkey)
+                return data
+            except Exception as exc:
+                logger.warning("[eh_download] page %d origin_url failed: %s", page, exc)
+                last_error = exc
+
+        raise RuntimeError(f"Failed to download page {page} after all attempts: {last_error}")
 
     async def fetch_image_bytes(self, image_url: str) -> tuple[bytes, str]:
         """Fetch image bytes. Returns (bytes, media_type)."""
