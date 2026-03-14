@@ -43,8 +43,14 @@ def _extract_title(source: str, meta: dict, source_id: str) -> str:
     )
 
 
-def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
-    """Parse a gallery-dl download directory into GalleryImportData."""
+def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fallback_source: str | None = None) -> GalleryImportData:
+    """Parse a gallery-dl download directory into GalleryImportData.
+
+    Args:
+        fallback_source: canonical source_id to use when metadata has no
+            "category" field (e.g., native plugin downloads without gallery-dl
+            metadata).
+    """
     meta = raw_meta or {}
     if not meta:
         for meta_file in sorted(dest_dir.rglob("*.json")):
@@ -58,7 +64,7 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None) -> Gal
     # Source detection: gallery-dl uses "category" for the extractor name
     # (e.g., "exhentai", "pixiv"). Resolve through site config to get the
     # canonical source_id (e.g., "ehentai").
-    raw_source = meta.get("category") or "gallery_dl"
+    raw_source = meta.get("category") or fallback_source or "gallery_dl"
     from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
     _cfg = _get_site_config(raw_source)
     source = _cfg.source_id

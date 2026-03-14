@@ -93,7 +93,8 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
         from plugins.registry import plugin_registry
         parser = plugin_registry.get_parser(source)
         if parser:
-            import_data = parser.parse_import(gallery_path, metadata)
+            from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
+            import_data = parse_gallery_dl_import(gallery_path, metadata, fallback_source=source)
             gallery_values = {
                 "source": import_data.source,
                 "source_id": import_data.source_id,
