@@ -43,10 +43,11 @@ function timeAgo(iso: string | null): string {
 }
 
 const CRON_PRESETS = [
-  { label: 'Every hour', value: '0 * * * *' },
-  { label: 'Every 2 hours', value: '0 */2 * * *' },
-  { label: 'Every 6 hours', value: '0 */6 * * *' },
-  { label: 'Daily', value: '0 0 * * *' },
+  { label: '2h', value: '0 */2 * * *' },
+  { label: '6h', value: '0 */6 * * *' },
+  { label: '1d', value: '0 0 * * *' },
+  { label: '3d', value: '0 0 */3 * *' },
+  { label: '1w', value: '0 0 * * 1' },
 ]
 
 function JobStatusBadge({ job }: { job: DownloadJob }) {
@@ -115,6 +116,7 @@ function SubscriptionCard({
   onToggle,
   onCheck,
   onDelete,
+  onCronUpdate,
   checkingId,
 }: {
   sub: Subscription
@@ -122,8 +124,30 @@ function SubscriptionCard({
   onToggle: (sub: Subscription) => void
   onCheck: (sub: Subscription) => void
   onDelete: (sub: Subscription) => void
+  onCronUpdate: (sub: Subscription, cron: string) => void
   checkingId: number | null
 }) {
+  const [editingCron, setEditingCron] = useState<string | undefined>(undefined)
+  const cronValue = editingCron ?? sub.cron_expr ?? '0 */2 * * *'
+
+  const handleCronBlur = () => {
+    if (editingCron !== undefined && editingCron !== sub.cron_expr) {
+      onCronUpdate(sub, editingCron)
+    }
+    setEditingCron(undefined)
+  }
+
+  const handleCronKeyDown = (e: React.KeyboardEvent<HTMLInputElement>) => {
+    if (e.key === 'Enter' && editingCron !== undefined) {
+      e.preventDefault()
+      onCronUpdate(sub, editingCron)
+      setEditingCron(undefined)
+    }
+    if (e.key === 'Escape') {
+      setEditingCron(undefined)
+    }
+  }
+
   return (
     <div className="bg-vault-card border border-vault-border rounded-xl p-3">
       <div className="flex items-start justify-between gap-3">
@@ -142,8 +166,33 @@ function SubscriptionCard({
           {sub.name && (
             <p className="text-xs text-vault-text-muted truncate mb-1">{sub.url}</p>
           )}
+
+          {/* Inline cron editor */}
+          <div className="flex flex-wrap items-center gap-1.5 mb-1">
+            <input
+              type="text"
+              value={cronValue}
+              onChange={(e) => setEditingCron(e.target.value)}
+              onBlur={handleCronBlur}
+              onKeyDown={handleCronKeyDown}
+              className="w-28 px-1.5 py-0.5 bg-vault-input border border-vault-border rounded text-[11px] font-mono text-vault-text"
+            />
+            {CRON_PRESETS.map((p) => (
+              <button
+                key={p.value}
+                onClick={() => onCronUpdate(sub, p.value)}
+                className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                  sub.cron_expr === p.value
+                    ? 'bg-vault-accent/20 text-vault-accent'
+                    : 'bg-vault-bg border border-vault-border text-vault-text-muted hover:text-vault-text'
+                }`}
+              >
+                {p.label}
+              </button>
+            ))}
+          </div>
+
           <div className="flex flex-wrap items-center gap-3 text-[10px] text-vault-text-muted">
-            {sub.cron_expr && <span className="font-mono">{sub.cron_expr}</span>}
             {sub.last_checked_at && (
               <span>{t('subscriptions.lastChecked')}: {timeAgo(sub.last_checked_at)}</span>
             )}
@@ -287,6 +336,16 @@ export default function SubscriptionsPage() {
     }
   }
 
+  const handleCronUpdate = async (sub: Subscription, cron: string) => {
+    try {
+      await updateSub({ id: sub.id, data: { cron_expr: cron } })
+      toast.success(t('subscriptions.updated'))
+      mutate()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('subscriptions.updateFailed'))
+    }
+  }
+
   const handleDelete = async (sub: Subscription) => {
     if (!confirm(t('subscriptions.deleteConfirm', { name: sub.name || sub.url }))) return
     try {
@@ -372,17 +431,28 @@ export default function SubscriptionsPage() {
                 <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${autoDownload ? 'translate-x-4' : ''}`} />
               </button>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex flex-wrap items-center gap-1.5">
               <label className="text-xs text-vault-text-muted">{t('subscriptions.cronExpr')}</label>
-              <select
+              <input
+                type="text"
                 value={cronExpr}
                 onChange={(e) => setCronExpr(e.target.value)}
-                className="px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text"
-              >
-                {CRON_PRESETS.map((p) => (
-                  <option key={p.value} value={p.value}>{p.label}</option>
-                ))}
-              </select>
+                className="w-28 px-1.5 py-0.5 bg-vault-input border border-vault-border rounded text-xs font-mono text-vault-text"
+              />
+              {CRON_PRESETS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => setCronExpr(p.value)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                    cronExpr === p.value
+                      ? 'bg-vault-accent/20 text-vault-accent'
+                      : 'bg-vault-bg border border-vault-border text-vault-text-muted hover:text-vault-text'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
             </div>
           </div>
           <button
@@ -414,6 +484,7 @@ export default function SubscriptionsPage() {
               onToggle={handleToggle}
               onCheck={handleCheck}
               onDelete={handleDelete}
+              onCronUpdate={handleCronUpdate}
               checkingId={checkingId}
             />
           ))}
