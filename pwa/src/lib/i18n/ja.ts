@@ -93,6 +93,7 @@ const ja: Record<string, string> = {
   'library.images': '画像',
   'library.noCover': 'カバーなし',
   'library.noTags': 'タグなし',
+  'library.categoryUncategorized': '未分類',
   'library.failedToLoad': 'ギャラリーの読み込みに失敗しました',
   'library.tagFilterPlaceholder': 'character:rem',
   'library.excludeTagPlaceholder': 'tag:value',

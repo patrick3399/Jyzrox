@@ -380,6 +380,7 @@ export default function GalleryDetailPage() {
                     onChange={(e) => handleCategoryChange(e.target.value)}
                     className="bg-vault-input border border-vault-border rounded px-1 py-0.5 text-vault-text text-sm focus:outline-none"
                   >
+                    <option value="">{t('library.categoryUncategorized')}</option>
                     {['Doujinshi', 'Manga', 'Artist CG', 'Game CG', 'Western', 'Non-H', 'Image Set', 'Cosplay', 'Asian Porn', 'Misc'].map((cat) => (
                       <option key={cat} value={cat}>{cat}</option>
                     ))}

@@ -419,6 +419,7 @@ const en: Record<string, string> = {
   'library.editTitle': 'Edit title',
   'library.titleUpdated': 'Title updated',
   'library.categoryUpdated': 'Category updated',
+  'library.categoryUncategorized': 'Uncategorized',
   'library.updateFailed': 'Failed to update',
   'library.select': 'Select',
   'library.selectAll': 'Select All',

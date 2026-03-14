@@ -26,7 +26,7 @@ const CATEGORY_COLORS: Record<string, { bg: string; text: string; badge: string 
 }
 
 function getCategoryColors(category: string) {
-  return CATEGORY_COLORS[category] ?? CATEGORY_COLORS['Misc']
+  return CATEGORY_COLORS[category] || CATEGORY_COLORS['Misc']
 }
 
 // ── EhGalleryCard ─────────────────────────────────────────────────────
@@ -70,7 +70,7 @@ export function EhGalleryCard({ gallery, onClick }: EhCardProps) {
             shadow
           `}
         >
-          {gallery.category}
+          {gallery.category || t('library.categoryUncategorized')}
         </span>
       </div>
 
@@ -171,7 +171,7 @@ export function LibraryGalleryCard({ gallery, thumbUrl, onClick, selected, selec
             className={`w-full h-full bg-gradient-to-b ${colors.bg} flex items-center justify-center`}
           >
             <span className={`text-sm font-semibold ${colors.text} opacity-70 text-center px-2`}>
-              {gallery.category}
+              {gallery.category || t('library.categoryUncategorized')}
             </span>
           </div>
         )}

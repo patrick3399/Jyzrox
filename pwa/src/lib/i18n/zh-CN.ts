@@ -92,6 +92,7 @@ const zhCN: Record<string, string> = {
   'library.images': '图片',
   'library.noCover': '无封面',
   'library.noTags': '无标签',
+  'library.categoryUncategorized': '未分类',
   'library.failedToLoad': '加载图库失败',
   'library.tagFilterPlaceholder': 'character:rem',
   'library.excludeTagPlaceholder': 'tag:value',

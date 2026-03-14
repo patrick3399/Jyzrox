@@ -92,6 +92,7 @@ const zhTW: Record<string, string> = {
   'library.images': '圖片',
   'library.noCover': '無封面',
   'library.noTags': '無標籤',
+  'library.categoryUncategorized': '未分類',
   'library.failedToLoad': '載入圖庫失敗',
   'library.tagFilterPlaceholder': 'character:rem',
   'library.excludeTagPlaceholder': 'tag:value',

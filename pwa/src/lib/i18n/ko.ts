@@ -93,6 +93,7 @@ const ko: Record<string, string> = {
   'library.images': '이미지',
   'library.noCover': '커버 없음',
   'library.noTags': '태그 없음',
+  'library.categoryUncategorized': '미분류',
   'library.failedToLoad': '갤러리 로드 실패',
   'library.tagFilterPlaceholder': 'character:rem',
   'library.excludeTagPlaceholder': 'tag:value',
