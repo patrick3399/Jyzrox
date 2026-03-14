@@ -104,18 +104,6 @@ async def _build_gallery_dl_config(credentials: dict) -> None:
 class GalleryDlPlugin(SourcePlugin):
     """Fallback SourcePlugin that delegates to gallery-dl subprocess."""
 
-    def __init__(self) -> None:
-        self._on_file_callback: Callable[[Path], Awaitable[None]] | None = None
-        self._options: dict | None = None
-
-    def set_file_callback(self, cb: Callable[[Path], Awaitable[None]] | None) -> None:
-        """Set a callback invoked for each fully-written file during download."""
-        self._on_file_callback = cb
-
-    def set_options(self, options: dict | None) -> None:
-        """Set download options (abort, filesize_min, filesize_max, etc.)."""
-        self._options = options
-
     meta = PluginMeta(
         name="gallery-dl (Fallback)",
         source_id="gallery_dl",
@@ -141,6 +129,8 @@ class GalleryDlPlugin(SourcePlugin):
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
         pause_check: Callable[[], Awaitable[bool]] | None = None,
+        on_file: Callable[[Path], Awaitable[None]] | None = None,
+        options: dict | None = None,
     ) -> DownloadResult:
         """Run gallery-dl as a subprocess and stream progress."""
         from core.redis_client import get_download_delay
@@ -182,13 +172,13 @@ class GalleryDlPlugin(SourcePlugin):
             cmd += ["--http-timeout", str(_site_cfg.http_timeout)]
 
         # Options-driven flags
-        if self._options:
-            if self._options.get("abort"):
-                cmd += ["--abort", str(self._options["abort"])]
-            if self._options.get("filesize_min"):
-                cmd += ["--filesize-min", str(self._options["filesize_min"])]
-            if self._options.get("filesize_max"):
-                cmd += ["--filesize-max", str(self._options["filesize_max"])]
+        if options:
+            if options.get("abort"):
+                cmd += ["--abort", str(options["abort"])]
+            if options.get("filesize_min"):
+                cmd += ["--filesize-min", str(options["filesize_min"])]
+            if options.get("filesize_max"):
+                cmd += ["--filesize-max", str(options["filesize_max"])]
 
         cmd.append(url)
 
@@ -221,6 +211,15 @@ class GalleryDlPlugin(SourcePlugin):
             pending_file: Path | None = None
 
             async for raw_line in proc.stdout:
+                # Check for cancellation at the top of every iteration
+                if cancel_check is not None and await cancel_check():
+                    logger.info("[gallery_dl] cancel detected in stdout loop, killing process: %s", url)
+                    try:
+                        proc.kill()
+                    except ProcessLookupError:
+                        pass
+                    break
+
                 # Soft-pause: stop reading stdout → pipe buffer fills → gallery-dl blocks
                 if pause_check is not None:
                     pause_start = None
@@ -242,9 +241,9 @@ class GalleryDlPlugin(SourcePlugin):
                 if path_match or _FILE_PATH_RE.search(line) or _IMAGE_EXT_RE.search(line):
                     # Process the PREVIOUS pending file (guaranteed complete now that the next
                     # file line has appeared)
-                    if pending_file is not None and self._on_file_callback:
+                    if pending_file is not None and on_file:
                         try:
-                            await self._on_file_callback(pending_file)
+                            await on_file(pending_file)
                         except Exception as exc:
                             logger.warning("[gallery_dl] progressive import error: %s", exc)
 
@@ -267,12 +266,13 @@ class GalleryDlPlugin(SourcePlugin):
                             except Exception:
                                 pass
 
-            # Process the last pending file after the loop ends
-            if pending_file is not None and self._on_file_callback:
-                try:
-                    await self._on_file_callback(pending_file)
-                except Exception as exc:
-                    logger.warning("[gallery_dl] progressive import error (last file): %s", exc)
+            # Process the last pending file after the loop ends — but only if not cancelled
+            if pending_file is not None and on_file:
+                if cancel_check is None or not await cancel_check():
+                    try:
+                        await on_file(pending_file)
+                    except Exception as exc:
+                        logger.warning("[gallery_dl] progressive import error (last file): %s", exc)
 
         try:
             await asyncio.wait_for(
@@ -292,12 +292,33 @@ class GalleryDlPlugin(SourcePlugin):
                 error="download timeout after 3600s",
             )
 
+        # Check if download was cancelled (covers both the break-from-loop path and
+        # the race where SIGTERM was sent externally before _read_stdout detected it)
+        if cancel_check is not None and await cancel_check():
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            logger.info("[gallery_dl] cancelled: %s (files downloaded before cancel=%d)", url, downloaded)
+            return DownloadResult(status="cancelled", downloaded=downloaded, total=downloaded)
+
         stderr_bytes = await proc.stderr.read() if proc.stderr else b""
         stderr_text = stderr_bytes.decode("utf-8", errors="replace")
 
         if proc.returncode != 0:
             err = stderr_text[:500]
             logger.error("[gallery_dl] non-zero exit:\n%s", stderr_text)
+            if downloaded > 0:
+                # Some files were downloaded before the error — treat as partial success
+                logger.warning(
+                    "[gallery_dl] %d file(s) downloaded before failure — returning partial", downloaded
+                )
+                return DownloadResult(
+                    status="partial",
+                    downloaded=downloaded,
+                    total=downloaded,
+                    error=err,
+                )
             return DownloadResult(
                 status="failed",
                 downloaded=downloaded,

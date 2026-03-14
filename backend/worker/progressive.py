@@ -10,7 +10,7 @@ from sqlalchemy.sql import select
 
 from core.database import AsyncSessionLocal
 from db.models import Blob, Gallery, Image
-from services.cas import cas_path, create_library_symlink, store_blob
+from services.cas import cas_path, create_library_symlink, decrement_ref_count, library_dir, store_blob, thumb_dir
 from worker.constants import _VIDEO_EXTS, logger
 from worker.helpers import _sha256, _validate_image_magic
 from worker.thumbnail import generate_single_thumbnail
@@ -285,3 +285,90 @@ class ProgressiveImporter:
                 gallery.pages = count
                 gallery.download_status = "partial" if count > 0 else "downloading"
                 await session.commit()
+
+    async def cleanup(self) -> None:
+        """Cancel pending tasks and fully delete the gallery. Called on user-initiated cancel.
+
+        Decrements blob ref counts, deletes the gallery (CASCADE removes images),
+        then removes the library symlink directory and thumbnail directories for
+        any blobs that are now unreferenced.
+        """
+        import shutil
+
+        from sqlalchemy.orm import selectinload
+
+        # Cancel and drain any in-flight import tasks
+        for task in self._tasks:
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+            self._tasks.clear()
+
+        if not self.gallery_id:
+            return
+
+        g_source = self.source
+        g_source_id = self.source_id
+
+        async with AsyncSessionLocal() as session:
+            gallery = await session.get(Gallery, self.gallery_id)
+            if not gallery:
+                return
+
+            # Load all images and their blobs before deleting DB records
+            images_result = await session.execute(
+                select(Image)
+                .where(Image.gallery_id == self.gallery_id)
+                .options(selectinload(Image.blob))
+            )
+            images = images_result.scalars().all()
+            blob_sha256s = [img.blob_sha256 for img in images]
+
+            # Decrement ref counts for all blobs
+            for sha256 in blob_sha256s:
+                await decrement_ref_count(sha256, session)
+
+            # Delete gallery — CASCADE removes images, gallery_tags, read_progress
+            await session.delete(gallery)
+            await session.commit()
+
+            # Determine which blobs are now unreferenced (safe to remove thumbs)
+            zero_ref_sha256s: set[str] = set()
+            if blob_sha256s:
+                zero_ref_result = await session.execute(
+                    select(Blob.sha256).where(
+                        Blob.sha256.in_(blob_sha256s), Blob.ref_count <= 0
+                    )
+                )
+                zero_ref_sha256s = set(zero_ref_result.scalars().all())
+
+        logger.info(
+            "[progressive] cleanup: deleted gallery_id=%d blobs=%d zero_ref=%d",
+            self.gallery_id,
+            len(blob_sha256s),
+            len(zero_ref_sha256s),
+        )
+
+        def _delete_filesystem() -> None:
+            # Remove the entire library symlink directory for this gallery
+            if g_source and g_source_id:
+                lib_dir = library_dir(g_source, g_source_id)
+                if lib_dir.exists():
+                    try:
+                        shutil.rmtree(str(lib_dir), ignore_errors=True)
+                    except OSError as exc:
+                        logger.warning("[progressive] failed to remove library dir %s: %s", lib_dir, exc)
+
+            # Only remove thumbnail directories for blobs that are no longer referenced
+            for sha256 in zero_ref_sha256s:
+                td = thumb_dir(sha256)
+                if td.exists():
+                    try:
+                        shutil.rmtree(str(td), ignore_errors=True)
+                    except OSError as exc:
+                        logger.warning("[progressive] failed to remove thumb dir %s: %s", td, exc)
+
+        try:
+            await asyncio.to_thread(_delete_filesystem)
+        except Exception as exc:
+            logger.warning("[progressive] filesystem cleanup failed for gallery %d: %s", self.gallery_id, exc)

@@ -92,7 +92,7 @@ class GalleryMetadata(BaseModel):
 
 
 class DownloadResult(BaseModel):
-    status: Literal["done", "cancelled", "failed"]
+    status: Literal["done", "cancelled", "failed", "partial"]
     downloaded: int
     total: int
     failed_pages: list[int] = []

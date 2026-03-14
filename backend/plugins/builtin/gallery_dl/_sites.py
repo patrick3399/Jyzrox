@@ -110,7 +110,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
     GdlSiteConfig(
         domain="twitter.com", source_id="twitter", name="Twitter/X",
         category="social", has_tags=True,
-        image_order="desc", cover_page="last", title_fields=("username",),
+        image_order="desc", cover_page="last", title_fields=("author.name", "user.name", "username"),
         artist_from="twitter_author",
         subscribe_id_key="tweet_id",
         subscribe_url_tpl="https://x.com/{}/media",
@@ -121,7 +121,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
     GdlSiteConfig(
         domain="x.com", source_id="twitter", name="Twitter/X",
         category="social", has_tags=True,
-        image_order="desc", cover_page="last", title_fields=("username",),
+        image_order="desc", cover_page="last", title_fields=("author.name", "user.name", "username"),
         artist_from="twitter_author",
         subscribe_id_key="tweet_id",
         subscribe_url_tpl="https://x.com/{}/media",

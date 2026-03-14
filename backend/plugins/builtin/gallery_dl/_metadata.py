@@ -29,7 +29,14 @@ def _extract_title(source: str, meta: dict, source_id: str) -> str:
     fields = cfg.title_fields
 
     for field_name in fields:
-        val = meta.get(field_name)
+        # Support dot notation for nested fields (e.g., "author.name")
+        val: object = meta
+        for part in field_name.split("."):
+            if isinstance(val, dict):
+                val = val.get(part)
+            else:
+                val = None
+                break
         if val:
             return str(val)[:200]
 

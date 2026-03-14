@@ -190,15 +190,14 @@ async def download_job(
                     })
             await importer.import_file(file_path)
 
-        plugin.set_file_callback(on_file)
-
-    # Pass download options to plugin
-    if hasattr(plugin, "set_options"):
-        plugin.set_options(options)
-
     try:
         async with sem.acquire():
             try:
+                _extra_kwargs: dict = {}
+                if source_id == "gallery_dl":
+                    _extra_kwargs["on_file"] = on_file
+                if options is not None:
+                    _extra_kwargs["options"] = options
                 result = await plugin.download(
                     url=url,
                     dest_dir=target_dir,
@@ -207,6 +206,7 @@ async def download_job(
                     cancel_check=cancel_check,
                     pid_callback=pid_callback,
                     pause_check=pause_check,
+                    **_extra_kwargs,
                 )
             except Exception as exc:
                 err = f"Download failed: {exc}"
@@ -221,10 +221,6 @@ async def download_job(
                         await redis.delete(pid_key)
                     except Exception:
                         pass
-                if source_id == "gallery_dl" and hasattr(plugin, "set_file_callback"):
-                    plugin.set_file_callback(None)
-                if hasattr(plugin, "set_options"):
-                    plugin.set_options(None)
     except TimeoutError:
         err = "No download slot available — timed out waiting. Please try again later."
         logger.error("[download] %s", err)
@@ -233,16 +229,37 @@ async def download_job(
 
     if result.status == "cancelled":
         if importer:
-            await importer.abort()
+            await importer.cleanup()
         await _set_job_status(db_job_id, "cancelled")
         return {"status": "cancelled"}
 
     if result.status == "failed":
+        if result.downloaded > 0 and importer and importer.gallery_id:
+            # Files were downloaded before the failure — fall through to validation +
+            # finalization so the partial gallery is preserved.
+            logger.warning(
+                "[download] treating failed download as partial (downloaded=%d): %s",
+                result.downloaded,
+                result.error,
+            )
+        else:
+            if importer:
+                await importer.abort()
+            err = result.error or "Download failed"
+            await _set_job_status(db_job_id, "failed", err)
+            return {"status": "failed", "error": err}
+
+    # ── Final cancel guard ───────────────────────────────────────────
+    # Handles the race where gallery-dl finished normally but the cancel
+    # endpoint had already written "cancelled" to the DB.  Without this
+    # guard the finalization below would overwrite that status with "done"
+    # or "partial".
+    if await cancel_check():
         if importer:
-            await importer.abort()
-        err = result.error or "Download failed"
-        await _set_job_status(db_job_id, "failed", err)
-        return {"status": "failed", "error": err}
+            await importer.cleanup()
+        await _set_job_status(db_job_id, "cancelled")
+        logger.info("[download] cancelled (post-download guard): %s", url)
+        return {"status": "cancelled"}
 
     # ── Image validation + partial detection ────────────────────────
     from worker.helpers import _validate_image_magic
@@ -290,7 +307,7 @@ async def download_job(
     if target_dir.exists():
         if importer and importer.gallery_id:
             # Progressive import was active — finalize instead of running import_job
-            gallery_id = await importer.finalize(target_dir, partial=bool(all_failed))
+            gallery_id = await importer.finalize(target_dir, partial=bool(all_failed) or result.status in ("failed", "partial"))
             logger.info("[download] progressive import finalized: gallery_id=%s", gallery_id)
             # Skip import_job and thumbnail_job — already done progressively
         else:
@@ -307,10 +324,27 @@ async def download_job(
                     import_user_id = _result.scalar_one_or_none()
             await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id, import_user_id, url)
 
-    if all_failed:
-        await _set_job_status(db_job_id, "partial")
-        logger.warning("[download] partial: %d pages failed: %s", len(all_failed), all_failed)
-        return {"status": "partial", "downloaded": result.downloaded, "failed_pages": all_failed}
+    is_partial = bool(all_failed) or result.status in ("failed", "partial")
+    if is_partial:
+        if all_failed:
+            partial_msg = f"Partial — {len(all_failed)} pages failed"
+            if result.error:
+                partial_msg = f"{partial_msg}; {result.error}"
+        else:
+            partial_msg = result.error or "Partial download"
+        await _set_job_status(db_job_id, "partial", partial_msg)
+        logger.warning(
+            "[download] partial: downloaded=%d failed_pages=%s error=%s",
+            result.downloaded,
+            all_failed or [],
+            result.error,
+        )
+        return {
+            "status": "partial",
+            "downloaded": result.downloaded,
+            "failed_pages": all_failed,
+            "error": result.error,
+        }
 
     await _set_job_status(db_job_id, "done")
     logger.info("[download] done: %s (downloaded=%d)", url, result.downloaded)
