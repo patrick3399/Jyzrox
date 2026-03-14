@@ -222,12 +222,12 @@ class TestOPDSAll:
         assert "/opds/gallery/test/20" in rels["subsection"]
 
     async def test_all_entry_has_urn_id(self, opds_client, db_session):
-        """Gallery entry id should be formatted as urn:jyzrox:gallery:{id}."""
-        gid = await _insert_gallery(db_session, source_id="21")
+        """Gallery entry id should be formatted as urn:jyzrox:gallery:{source}:{source_id}."""
+        await _insert_gallery(db_session, source="test", source_id="21")
         resp = await opds_client.get("/opds/all")
         entries = _entries(_parse(resp))
         entry_id = entries[0].findtext(f"{ATOM}id")
-        assert entry_id == f"urn:jyzrox:gallery:{gid}"
+        assert entry_id == "urn:jyzrox:gallery:test:21"
 
     async def test_all_pagination_next_link_present(self, opds_client, db_session):
         """When there are more galleries than limit, a next link should be included."""
