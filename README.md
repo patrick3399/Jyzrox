@@ -40,17 +40,8 @@ cp .env.example .env  # Edit with your settings
 # Launch
 docker compose up -d
 
-# Access at http://localhost (first visit → setup page)
+# Access at http://localhost:35689 (first visit → setup page)
 ```
-
-## Roadmap
-
-- [x] Pixiv source integration
-- [x] Subscription system (artist following)
-- [x] Plugin-driven credential management
-- [x] AI-based auto-tagging (WD14)
-- [ ] Duplicate detection and management
-- [ ] Multi-user support
 
 ## License
 
