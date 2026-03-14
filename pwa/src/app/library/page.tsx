@@ -446,7 +446,7 @@ function LibraryContent() {
         )}
 
         {selectMode && selectedIds.size > 0 && (
-          <div className="fixed bottom-0 left-0 right-0 bg-vault-card border-t border-vault-border p-3 flex items-center justify-between gap-3 z-50">
+          <div className="fixed bottom-[calc(4rem+var(--sab))] lg:bottom-0 left-0 right-0 bg-vault-card border-t border-vault-border p-3 flex flex-col gap-2 lg:flex-row lg:items-center lg:justify-between z-50">
             <div className="flex items-center gap-3">
               <span className="text-sm text-vault-text font-medium">
                 {t('library.selectedCount', { count: String(selectedIds.size) })}
@@ -464,7 +464,7 @@ function LibraryContent() {
                 {t('library.deselectAll')}
               </button>
             </div>
-            <div className="flex items-center gap-2">
+            <div className="flex items-center gap-2 flex-wrap justify-end">
               <button
                 onClick={async () => {
                   try {

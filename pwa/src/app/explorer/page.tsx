@@ -315,7 +315,7 @@ export default function ExplorerPage() {
 
       {/* Bottom action bar */}
       {selectedItems.size > 0 && (
-        <div className="fixed bottom-0 left-0 right-0 bg-vault-card border-t border-vault-border p-3 flex items-center justify-between z-50 lg:ml-56">
+        <div className="fixed bottom-[calc(4rem+var(--sab))] lg:bottom-0 left-0 right-0 bg-vault-card border-t border-vault-border p-3 flex items-center justify-between z-50 lg:ml-56">
           <span className="text-sm text-vault-text-secondary">
             {t('explorer.selectedCount', { count: String(selectedItems.size) })}
           </span>
