@@ -181,14 +181,19 @@ async def download_eh_gallery(
                 logger.error("[eh_download] page %d failed: %s", page_num, result)
                 failed_pages.append(page_num)
 
-        # 5. Write metadata.json (compatible with import_job's _extract_tags and _build_gallery)
+        # 5. Write metadata.json (compatible with import_job source detection)
+        # "category" = gallery-dl extractor name convention (used by importer)
+        # "gallery_category" = E-Hentai gallery type (Doujinshi, Artist CG, etc.)
+        # "gallery_id" = numeric gid (used by importer source_id_fields lookup)
         metadata_out = {
+            "category": "ehentai",
+            "gallery_category": meta.get("category", ""),
             "title": meta.get("title", ""),
             "title_jpn": meta.get("title_jpn", ""),
-            "category": meta.get("category", ""),
             "uploader": meta.get("uploader", ""),
             "posted": meta.get("posted_at", 0),
             "tags": meta.get("tags", []),
+            "gallery_id": gid,
             "gid": gid,
             "token": token,
         }

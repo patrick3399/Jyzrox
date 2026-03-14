@@ -47,7 +47,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     # Extract source from Category (gallery-dl uses "category" for the extractor name)
     raw_source = metadata.get("category")
     if not raw_source:
-        # Fallback heuristic
+        # Fallback heuristic: infer source from download directory path
         parts = gallery_path.parts
         if "ehentai" in parts:
             raw_source = "ehentai"
