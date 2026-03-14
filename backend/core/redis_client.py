@@ -169,6 +169,8 @@ class DownloadSemaphore:
 
         while True:
             count = await r.incr(self._key)
+            # Set TTL as safety net — if worker crashes, counter auto-expires
+            await r.expire(self._key, 7200)
             if count <= self.max_count:
                 try:
                     yield

@@ -19,7 +19,8 @@ from core.config import get_all_library_paths, settings
 from core.redis_client import close_redis, init_redis
 from core.watcher import LibraryWatcher
 
-from worker.download import download_job
+from arq.worker import func as arq_func
+from worker.download import download_job as _download_job
 from worker.importer import (
     import_job,
     local_import_job,
@@ -70,8 +71,10 @@ async def startup(ctx: dict) -> None:
     from plugins import init_plugins
     await init_plugins()
     r = ctx["redis"]
-    for key in ("download:sem:ehentai", "download:sem:pixiv", "download:sem:other"):
-        await r.delete(key)
+    # Clean up ALL download semaphore keys (including dynamic gallery_dl:{domain} ones)
+    sem_keys = [k async for k in r.scan_iter(match="download:sem:*")]
+    if sem_keys:
+        await r.delete(*sem_keys)
     # Clean up stale scan progress from previous runs
     await r.delete(
         "rescan:progress", "rescan:cancel",
@@ -82,11 +85,11 @@ async def startup(ctx: dict) -> None:
 
     # Clean up stale "running" jobs from previous worker crash
     from core.database import AsyncSessionLocal
-    from db.models import DownloadJob
-    from sqlalchemy import update
+    from db.models import DownloadJob, Gallery
+    from sqlalchemy import select, update
     from datetime import UTC, datetime
     async with AsyncSessionLocal() as session:
-        stale_count = (await session.execute(
+        stale_rows = (await session.execute(
             update(DownloadJob)
             .where(DownloadJob.status == "running")
             .values(
@@ -94,10 +97,26 @@ async def startup(ctx: dict) -> None:
                 error="Worker restarted — job did not complete",
                 finished_at=datetime.now(UTC),
             )
-            .returning(DownloadJob.id)
+            .returning(DownloadJob.id, DownloadJob.gallery_id)
         )).fetchall()
-        if stale_count:
+        if stale_rows:
             await session.commit()
+            # Fix orphaned galleries stuck in "downloading" status
+            stale_gallery_ids = [row[1] for row in stale_rows if row[1] is not None]
+            if stale_gallery_ids:
+                from sqlalchemy import func
+                from db.models import Image
+                for gid in stale_gallery_ids:
+                    img_count = (await session.execute(
+                        select(func.count()).where(Image.gallery_id == gid)
+                    )).scalar_one()
+                    await session.execute(
+                        update(Gallery)
+                        .where(Gallery.id == gid, Gallery.download_status == "downloading")
+                        .values(download_status="partial", pages=img_count)
+                    )
+                await session.commit()
+                logger.info("Fixed %d orphaned downloading galleries", len(stale_gallery_ids))
             logger.info("Cleaned up %d stale running jobs from previous worker session", len(stale_count))
 
     # Start file system watcher.
@@ -237,7 +256,7 @@ async def rate_limit_schedule_job(ctx: dict) -> dict:
 class WorkerSettings:
     redis_settings = RedisSettings.from_dsn(settings.redis_url)
     functions = [
-        download_job,
+        arq_func(_download_job, name="download_job", max_tries=1),
         import_job,
         local_import_job,
         batch_import_job,

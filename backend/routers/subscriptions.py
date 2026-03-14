@@ -260,9 +260,9 @@ async def delete_subscription(
         if not sub or sub.user_id != user_id:
             raise HTTPException(status_code=404, detail="Subscription not found")
 
-        # Cancel active jobs linked to this subscription before deletion.
+        # Cancel active jobs and delete finished jobs linked to this subscription.
         # Must run before the DELETE because the FK has ondelete="SET NULL",
-        # which would clear subscription_id on the jobs before we can filter by it.
+        # which would clear subscription_id and leak jobs into the Queue page.
         from db.models import DownloadJob
         active_jobs = (await session.execute(
             select(DownloadJob).where(
@@ -273,6 +273,14 @@ async def delete_subscription(
         for job in active_jobs:
             job.status = "cancelled"
             cancelled_jobs.append(str(job.id))
+
+        # Delete finished jobs so they don't appear in Queue after SET NULL
+        await session.execute(
+            delete(DownloadJob).where(
+                DownloadJob.subscription_id == sub_id,
+                DownloadJob.status.in_(["done", "failed", "cancelled", "partial"]),
+            )
+        )
 
         await session.delete(sub)
         await session.commit()

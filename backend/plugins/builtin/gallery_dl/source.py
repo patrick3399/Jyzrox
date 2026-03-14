@@ -247,6 +247,9 @@ class GalleryDlPlugin(SourcePlugin):
 
                 line = raw_line.decode("utf-8", errors="replace").rstrip()
 
+                # Lines starting with "# " are archive-skipped files — count but don't import
+                skipped = line.startswith("# ")
+
                 path_match = _FILE_PATH_EXTRACT_RE.search(line)
                 if path_match or _FILE_PATH_RE.search(line) or _IMAGE_EXT_RE.search(line):
                     # Process the PREVIOUS pending file (guaranteed complete now that the next
@@ -257,8 +260,8 @@ class GalleryDlPlugin(SourcePlugin):
                         except Exception as exc:
                             logger.warning("[gallery_dl] progressive import error: %s", exc)
 
-                    # Track the new pending file
-                    if path_match:
+                    # Track the new pending file (only if actually downloaded, not skipped)
+                    if path_match and not skipped:
                         pending_file = Path(path_match.group(1))
                     else:
                         pending_file = None
