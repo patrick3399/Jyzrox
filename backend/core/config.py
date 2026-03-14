@@ -52,6 +52,7 @@ class Settings(BaseSettings):
     data_avatars_path: str = "/data/avatars"
     data_cas_path: str = "/data/cas"
     data_library_path: str = "/data/library"
+    data_archive_path: str = "/data/archive"
 
     # gallery-dl config (bind-mounted)
     gallery_dl_config: str = "/app/config/gallery-dl.json"

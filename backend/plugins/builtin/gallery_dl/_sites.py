@@ -57,6 +57,10 @@ class GdlSiteConfig:
     # ── Artist URL ──
     artist_url_tpl: str | None = None
 
+    # ── Download tuning ──
+    retries: int = 4          # gallery-dl default
+    http_timeout: int = 30    # seconds
+
 
 GDL_SITES: tuple[GdlSiteConfig, ...] = (
     # ── EH / Pixiv (added before social/booru so _BY_SOURCE gets ehentai from e-hentai.org first) ──
@@ -71,6 +75,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         source_id_fields=("gallery_id",),
         normalize_namespaces=True,
         artist_url_tpl="https://e-hentai.org/tag/artist:{}",
+        retries=5, http_timeout=45,
     ),
     GdlSiteConfig(
         domain="exhentai.org", source_id="ehentai", name="ExHentai",
@@ -83,6 +88,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         source_id_fields=("gallery_id",),
         normalize_namespaces=True,
         artist_url_tpl="https://e-hentai.org/tag/artist:{}",
+        retries=5, http_timeout=45,
     ),
     GdlSiteConfig(
         domain="pixiv.net", source_id="pixiv", name="Pixiv",
@@ -97,6 +103,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         source_id_fields=("id",),
         subscribe_id_pattern=r"/users/(\d+)",
         artist_url_tpl="https://www.pixiv.net/users/{}",
+        retries=5, http_timeout=45,
     ),
 
     # ── Social ──
@@ -246,6 +253,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         subscribe_url_tpl="https://kemono.su/{}/",
         subscribe_id_pattern=r"/(\w+)/user/(\d+)",
         subscribe_id_format="{1}:{2}",
+        retries=5, http_timeout=60,
     ),
     GdlSiteConfig(
         domain="mangadex.org", source_id="mangadex", name="MangaDex",

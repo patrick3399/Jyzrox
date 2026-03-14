@@ -192,6 +192,10 @@ async def download_job(
 
         plugin.set_file_callback(on_file)
 
+    # Pass download options to plugin
+    if hasattr(plugin, "set_options"):
+        plugin.set_options(options)
+
     try:
         async with sem.acquire():
             try:
@@ -219,6 +223,8 @@ async def download_job(
                         pass
                 if source_id == "gallery_dl" and hasattr(plugin, "set_file_callback"):
                     plugin.set_file_callback(None)
+                if hasattr(plugin, "set_options"):
+                    plugin.set_options(None)
     except TimeoutError:
         err = "No download slot available — timed out waiting. Please try again later."
         logger.error("[download] %s", err)

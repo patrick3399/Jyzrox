@@ -106,10 +106,15 @@ class GalleryDlPlugin(SourcePlugin):
 
     def __init__(self) -> None:
         self._on_file_callback: Callable[[Path], Awaitable[None]] | None = None
+        self._options: dict | None = None
 
     def set_file_callback(self, cb: Callable[[Path], Awaitable[None]] | None) -> None:
         """Set a callback invoked for each fully-written file during download."""
         self._on_file_callback = cb
+
+    def set_options(self, options: dict | None) -> None:
+        """Set download options (abort, filesize_min, filesize_max, etc.)."""
+        self._options = options
 
     meta = PluginMeta(
         name="gallery-dl (Fallback)",
@@ -159,6 +164,31 @@ class GalleryDlPlugin(SourcePlugin):
         delay_secs = await get_download_delay("gallery_dl", 0)
         if delay_secs > 0:
             cmd += ["--sleep-request", str(delay_secs)]
+
+        # Download archive — skip already-downloaded URLs
+        from pathlib import Path as _Path
+        archive_dir = _Path(settings.data_archive_path)
+        archive_dir.mkdir(parents=True, exist_ok=True)
+        cmd += ["--download-archive", str(archive_dir / "gallery-dl.db")]
+
+        # Per-site download tuning
+        from urllib.parse import urlparse as _urlparse
+        from plugins.builtin.gallery_dl._sites import get_site_by_domain
+        _domain = _urlparse(url).netloc.removeprefix("www.")
+        _site_cfg = get_site_by_domain(_domain)
+        if _site_cfg.retries != 4:  # only add if non-default
+            cmd += ["--retries", str(_site_cfg.retries)]
+        if _site_cfg.http_timeout != 30:  # only add if non-default
+            cmd += ["--http-timeout", str(_site_cfg.http_timeout)]
+
+        # Options-driven flags
+        if self._options:
+            if self._options.get("abort"):
+                cmd += ["--abort", str(self._options["abort"])]
+            if self._options.get("filesize_min"):
+                cmd += ["--filesize-min", str(self._options["filesize_min"])]
+            if self._options.get("filesize_max"):
+                cmd += ["--filesize-max", str(self._options["filesize_max"])]
 
         cmd.append(url)
 

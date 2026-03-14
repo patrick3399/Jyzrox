@@ -31,8 +31,10 @@ _member = require_role("member")
 class DownloadRequest(BaseModel):
     url: str
     source: str = ""  # ignored; kept for backward compat
-    options: dict | None = None  # ignored; kept for backward compat
+    options: dict | None = None
     total: int | None = None
+    filesize_min: str | None = None  # e.g. "100k", "1M"
+    filesize_max: str | None = None  # e.g. "50M", "1G"
 
 
 class QuickDownloadRequest(BaseModel):
@@ -143,7 +145,12 @@ async def enqueue_download(
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    return await _enqueue(req.url, request.app.state.arq, db, options=req.options, total=req.total, user_id=auth["user_id"])
+    merged_options = dict(req.options or {})
+    if req.filesize_min:
+        merged_options["filesize_min"] = req.filesize_min
+    if req.filesize_max:
+        merged_options["filesize_max"] = req.filesize_max
+    return await _enqueue(req.url, request.app.state.arq, db, options=merged_options or None, total=req.total, user_id=auth["user_id"])
 
 
 @router.post("/quick")
