@@ -453,7 +453,7 @@ async def opds_opensearch(
 # ── Single gallery page list (OPDS-PSE) ───────────────────────────────
 
 
-@router.get("/gallery/{source}/{source_id:path}")
+@router.get("/gallery/{source}/{source_id}")
 async def opds_gallery(
     source: str,
     source_id: str,

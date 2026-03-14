@@ -832,7 +832,7 @@ async def list_files(
     return {"directories": result, "total": total, "page": page}
 
 
-@router.get("/files/{source}/{source_id:path}")
+@router.get("/files/{source}/{source_id}")
 async def list_gallery_files(
     source: str,
     source_id: str,
@@ -1102,7 +1102,7 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
     return {"status": "ok", "affected": len(galleries), "deleted_dirs": deleted_count}
 
 
-@router.get("/galleries/{source}/{source_id:path}")
+@router.get("/galleries/{source}/{source_id}")
 async def get_gallery(
     source: str,
     source_id: str,
@@ -1149,7 +1149,7 @@ async def get_gallery(
     return _g(g, cover_thumb=cover_thumb, is_favorited=(fav is not None), my_rating=user_rating_row)
 
 
-@router.get("/galleries/{source}/{source_id:path}/images")
+@router.get("/galleries/{source}/{source_id}/images")
 async def get_gallery_images(
     source: str,
     source_id: str,
@@ -1193,7 +1193,7 @@ async def get_gallery_images(
     return {"gallery_id": gallery_id, "images": [_i(img) for img in images]}
 
 
-@router.get("/galleries/{source}/{source_id:path}/tags")
+@router.get("/galleries/{source}/{source_id}/tags")
 async def get_gallery_tags(
     source: str,
     source_id: str,
@@ -1235,7 +1235,7 @@ class GalleryPatch(BaseModel):
     category: str | None = None
 
 
-@router.patch("/galleries/{source}/{source_id:path}")
+@router.patch("/galleries/{source}/{source_id}")
 async def update_gallery(
     source: str,
     source_id: str,
@@ -1299,7 +1299,7 @@ async def update_gallery(
     return _g(g, is_favorited=(fav is not None), my_rating=user_rating_row)
 
 
-@router.delete("/galleries/{source}/{source_id:path}")
+@router.delete("/galleries/{source}/{source_id}")
 async def delete_gallery(
     source: str,
     source_id: str,
@@ -1386,7 +1386,7 @@ class DeleteImageBody(BaseModel):
     page_num: int
 
 
-@router.post("/galleries/{source}/{source_id:path}/delete-image")
+@router.post("/galleries/{source}/{source_id}/delete-image")
 async def delete_gallery_image(
     source: str,
     source_id: str,
@@ -1471,7 +1471,7 @@ async def delete_gallery_image(
 # ── Read progress ────────────────────────────────────────────────────
 
 
-@router.get("/galleries/{source}/{source_id:path}/progress")
+@router.get("/galleries/{source}/{source_id}/progress")
 async def get_progress(
     source: str,
     source_id: str,
@@ -1494,7 +1494,7 @@ class ProgressBody(BaseModel):
     last_page: int
 
 
-@router.post("/galleries/{source}/{source_id:path}/progress")
+@router.post("/galleries/{source}/{source_id}/progress")
 async def save_progress(
     source: str,
     source_id: str,
@@ -1692,7 +1692,7 @@ async def find_similar_images(
 # ── Excluded Blobs ───────────────────────────────────────────────────
 
 
-@router.get("/galleries/{source}/{source_id:path}/excluded")
+@router.get("/galleries/{source}/{source_id}/excluded")
 async def list_excluded_blobs(
     source: str,
     source_id: str,
@@ -1718,7 +1718,7 @@ async def list_excluded_blobs(
     }
 
 
-@router.delete("/galleries/{source}/{source_id:path}/excluded/{sha256}")
+@router.delete("/galleries/{source}/{source_id}/excluded/{sha256}")
 async def restore_excluded_blob(
     source: str,
     source_id: str,
