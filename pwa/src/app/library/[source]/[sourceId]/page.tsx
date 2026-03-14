@@ -7,7 +7,6 @@ import { toast } from 'sonner'
 import { useLibraryGallery, useGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import { TagBadge } from '@/components/TagBadge'
 import { RatingStars } from '@/components/RatingStars'
 import { t, formatDate } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
@@ -90,6 +89,14 @@ export default function GalleryDetailPage() {
   const [tagData, setTagData] = useState<Array<{ namespace: string; name: string; confidence: number; source: string }>>([])
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.35)
 
+  // Image multi-select & exclusion state
+  const [selectMode, setSelectMode] = useState(false)
+  const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set())
+  const [isHiding, setIsHiding] = useState(false)
+  const [excludedBlobs, setExcludedBlobs] = useState<Array<{ blob_sha256: string; excluded_at: string | null }>>([])
+  const [showExcluded, setShowExcluded] = useState(false)
+  const [restoringHash, setRestoringHash] = useState<string | null>(null)
+
   // Inline-edit state
   const [editingTitle, setEditingTitle] = useState(false)
   const [editTitleValue, setEditTitleValue] = useState('')
@@ -124,7 +131,8 @@ export default function GalleryDetailPage() {
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
+      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return
+      if (selectMode) return
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         if (gallery?.source && gallery?.source_id) {
@@ -138,7 +146,7 @@ export default function GalleryDetailPage() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [gallery?.source, gallery?.source_id, router])
+  }, [gallery?.source, gallery?.source_id, router, selectMode])
 
   const isDownloading = gallery?.download_status === 'downloading'
   useEffect(() => {
@@ -234,6 +242,75 @@ export default function GalleryDetailPage() {
       if (updated) mutateGallery(updated, false)
     } catch {
       toast.error(t('library.ratingError'))
+    }
+  }
+
+  // Toggle image selection
+  const togglePage = (pageNum: number) => {
+    setSelectedPages((prev) => {
+      const next = new Set(prev)
+      if (next.has(pageNum)) next.delete(pageNum)
+      else next.add(pageNum)
+      return next
+    })
+  }
+
+  // Batch hide selected images
+  const handleHideSelected = async () => {
+    if (!source || !sourceId || selectedPages.size === 0) return
+    if (!confirm(t('library.hideSelectedConfirm', { count: selectedPages.size }))) return
+    setIsHiding(true)
+    let hidden = 0
+    try {
+      // Delete one by one (page numbers shift after each delete, so sort descending)
+      const sorted = [...selectedPages].sort((a, b) => b - a)
+      for (const pageNum of sorted) {
+        try {
+          await api.library.deleteImage(source, sourceId, pageNum)
+          hidden++
+        } catch {
+          toast.error(t('library.hideImageFailed'))
+        }
+      }
+      if (hidden > 0) {
+        toast.success(t('library.imagesHidden', { count: hidden }))
+        mutateGallery()
+        mutateImages()
+      }
+    } finally {
+      setSelectedPages(new Set())
+      setSelectMode(false)
+      setIsHiding(false)
+      fetchExcluded()
+    }
+  }
+
+  // Fetch excluded blobs
+  const fetchExcluded = useCallback(async () => {
+    if (!source || !sourceId) return
+    try {
+      const res = await api.library.listExcluded(source, sourceId)
+      setExcludedBlobs(res.excluded)
+    } catch {
+      setExcludedBlobs([])
+    }
+  }, [source, sourceId])
+
+  useEffect(() => { fetchExcluded() }, [fetchExcluded])
+
+  // Restore excluded blob
+  const handleRestore = async (sha256: string) => {
+    if (!source || !sourceId) return
+    if (!confirm(t('library.restoreConfirm'))) return
+    setRestoringHash(sha256)
+    try {
+      await api.library.restoreExcluded(source, sourceId, sha256)
+      toast.success(t('library.restored'))
+      setExcludedBlobs((prev) => prev.filter((b) => b.blob_sha256 !== sha256))
+    } catch {
+      toast.error(t('library.restoreFailed'))
+    } finally {
+      setRestoringHash(null)
     }
   }
 
@@ -574,9 +651,49 @@ export default function GalleryDetailPage() {
 
         {/* Image Thumbnails */}
         <div className="bg-vault-card border border-vault-border rounded-xl p-5">
-          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide mb-3">
-            {t('library.images')} ({gallery.pages} {t('library.metaPages')})
-          </h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
+              {t('library.images')} ({gallery.pages} {t('library.metaPages')})
+            </h2>
+            <div className="flex items-center gap-2">
+              {selectMode ? (
+                <>
+                  <button
+                    onClick={handleHideSelected}
+                    disabled={selectedPages.size === 0 || isHiding}
+                    className="px-3 py-1 rounded text-xs font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                  >
+                    {isHiding ? t('library.hidingImages') : t('library.hideSelected', { count: selectedPages.size })}
+                  </button>
+                  <button
+                    onClick={() => { setSelectMode(false); setSelectedPages(new Set()) }}
+                    className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                  >
+                    {t('library.cancelSelect')}
+                  </button>
+                </>
+              ) : (
+                <>
+                  {images.length > 0 && (
+                    <button
+                      onClick={() => setSelectMode(true)}
+                      className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                    >
+                      {t('library.selectImages')}
+                    </button>
+                  )}
+                  {excludedBlobs.length > 0 && (
+                    <button
+                      onClick={() => setShowExcluded(!showExcluded)}
+                      className="px-3 py-1 rounded text-xs font-medium border bg-yellow-900/30 border-yellow-700/50 text-yellow-400 hover:bg-yellow-900/50 transition-colors"
+                    >
+                      {showExcluded ? t('library.hideExcluded') : t('library.showExcluded', { count: excludedBlobs.length })}
+                    </button>
+                  )}
+                </>
+              )}
+            </div>
+          </div>
 
           {imagesLoading && (
             <div className="flex justify-center py-10">
@@ -586,26 +703,63 @@ export default function GalleryDetailPage() {
 
           {!imagesLoading && (
             <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
-              {images.map((image, idx) => (
-                <Link
-                  key={image.id}
-                  href={`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`}
-                  className="group"
-                >
-                  {image.thumb_path ? (
-                    <img
-                      src={image.thumb_path}
-                      alt={`Page ${image.page_num}`}
-                      loading={idx < 20 ? undefined : 'lazy'}
-                      className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
-                    />
-                  ) : (
-                    <div className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border group-hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors">
-                      {image.page_num}
-                    </div>
-                  )}
-                </Link>
-              ))}
+              {images.map((image, idx) => {
+                const isSelected = selectedPages.has(image.page_num)
+                if (selectMode) {
+                  return (
+                    <button
+                      key={image.id}
+                      type="button"
+                      onClick={() => togglePage(image.page_num)}
+                      className={`relative group rounded border-2 transition-colors ${
+                        isSelected
+                          ? 'border-red-500 ring-2 ring-red-500/30'
+                          : 'border-vault-border hover:border-vault-border-hover'
+                      }`}
+                    >
+                      {image.thumb_path ? (
+                        <img
+                          src={image.thumb_path}
+                          alt={`Page ${image.page_num}`}
+                          loading={idx < 20 ? undefined : 'lazy'}
+                          className={`w-full aspect-[3/4] object-cover rounded ${isSelected ? 'opacity-60' : ''}`}
+                        />
+                      ) : (
+                        <div className="w-full aspect-[3/4] bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
+                          {image.page_num}
+                        </div>
+                      )}
+                      {isSelected && (
+                        <div className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+                          <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
+                          </svg>
+                        </div>
+                      )}
+                    </button>
+                  )
+                }
+                return (
+                  <Link
+                    key={image.id}
+                    href={`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`}
+                    className="group"
+                  >
+                    {image.thumb_path ? (
+                      <img
+                        src={image.thumb_path}
+                        alt={`Page ${image.page_num}`}
+                        loading={idx < 20 ? undefined : 'lazy'}
+                        className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
+                      />
+                    ) : (
+                      <div className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border group-hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors">
+                        {image.page_num}
+                      </div>
+                    )}
+                  </Link>
+                )
+              })}
 
               {/* Placeholder pages if images array is shorter than pages count */}
               {images.length === 0 &&
@@ -618,6 +772,41 @@ export default function GalleryDetailPage() {
                     {i + 1}
                   </Link>
                 ))}
+            </div>
+          )}
+
+          {/* Excluded (hidden) images panel */}
+          {showExcluded && excludedBlobs.length > 0 && (
+            <div className="mt-4 pt-4 border-t border-vault-border">
+              <h3 className="text-sm font-semibold text-yellow-400 mb-3">
+                {t('library.excludedImages')} ({excludedBlobs.length})
+              </h3>
+              <div className="space-y-2">
+                {excludedBlobs.map((blob) => (
+                  <div
+                    key={blob.blob_sha256}
+                    className="flex items-center justify-between bg-vault-input border border-vault-border rounded px-3 py-2"
+                  >
+                    <div className="flex flex-col min-w-0 mr-3">
+                      <span className="text-xs text-vault-text-muted font-mono truncate">
+                        {blob.blob_sha256.slice(0, 16)}...
+                      </span>
+                      {blob.excluded_at && (
+                        <span className="text-[10px] text-vault-text-muted">
+                          {formatDate(blob.excluded_at)}
+                        </span>
+                      )}
+                    </div>
+                    <button
+                      onClick={() => handleRestore(blob.blob_sha256)}
+                      disabled={restoringHash === blob.blob_sha256}
+                      className="px-3 py-1 rounded text-xs font-medium border bg-green-900/30 border-green-700/50 text-green-400 hover:bg-green-900/50 transition-colors disabled:opacity-50 shrink-0"
+                    >
+                      {restoringHash === blob.blob_sha256 ? '...' : t('library.restoreExcluded')}
+                    </button>
+                  </div>
+                ))}
+              </div>
             </div>
           )}
         </div>

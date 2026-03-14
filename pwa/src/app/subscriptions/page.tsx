@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Rss, Plus, X, RefreshCw, Trash2, ExternalLink, Download, CheckCircle, AlertCircle } from 'lucide-react'
+import { Rss, Plus, X, RefreshCw, Trash2, ExternalLink, Download, CheckCircle, AlertCircle, List } from 'lucide-react'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { t } from '@/lib/i18n'
@@ -134,6 +134,7 @@ function SubscriptionCard({
   onCheck,
   onDelete,
   onCronUpdate,
+  onAutoDownloadToggle,
   checkingId,
 }: {
   sub: Subscription
@@ -142,6 +143,7 @@ function SubscriptionCard({
   onCheck: (sub: Subscription) => void
   onDelete: (sub: Subscription) => void
   onCronUpdate: (sub: Subscription, cron: string) => void
+  onAutoDownloadToggle: (sub: Subscription) => void
   checkingId: number | null
 }) {
   const [editingCron, setEditingCron] = useState<string | undefined>(undefined)
@@ -166,16 +168,16 @@ function SubscriptionCard({
   }
 
   return (
-    <div className="bg-vault-card border border-vault-border rounded-xl p-3">
-      <div className="flex items-start justify-between gap-3">
+    <div className="bg-vault-card border border-vault-border rounded-xl p-3 overflow-hidden">
+      <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1">
-            <span className="text-sm font-medium text-vault-text truncate">
+          <div className="flex items-center gap-2 mb-1 min-w-0">
+            <span className="text-sm font-medium text-vault-text truncate min-w-0">
               {sub.name || sub.url}
             </span>
             {sourceBadge(sub.source)}
             {!sub.enabled && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-vault-border text-vault-text-muted">
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-vault-border text-vault-text-muted shrink-0">
                 {t('subscriptions.disabled')}
               </span>
             )}
@@ -185,14 +187,14 @@ function SubscriptionCard({
           )}
 
           {/* Inline cron editor */}
-          <div className="flex flex-wrap items-center gap-1.5 mb-1">
+          <div className="flex flex-wrap items-center gap-1 mb-1">
             <input
               type="text"
               value={cronValue}
               onChange={(e) => setEditingCron(e.target.value)}
               onBlur={handleCronBlur}
               onKeyDown={handleCronKeyDown}
-              className="w-28 px-1.5 py-0.5 bg-vault-input border border-vault-border rounded text-[11px] font-mono text-vault-text"
+              className="w-24 px-1.5 py-0.5 bg-vault-input border border-vault-border rounded text-[11px] font-mono text-vault-text"
             />
             {CRON_PRESETS.map((p) => (
               <button
@@ -213,9 +215,13 @@ function SubscriptionCard({
             {sub.last_checked_at && (
               <span>{t('subscriptions.lastChecked')}: {timeAgo(sub.last_checked_at)}</span>
             )}
-            {sub.auto_download && (
-              <span className="text-vault-accent">{t('subscriptions.autoDownload')}</span>
-            )}
+            <button
+              onClick={() => onAutoDownloadToggle(sub)}
+              className={`transition-colors ${sub.auto_download ? 'text-vault-accent' : 'text-vault-text-muted line-through'}`}
+              title={sub.auto_download ? t('subscriptions.autoDownloadOn') : t('subscriptions.autoDownloadOff')}
+            >
+              {t('subscriptions.autoDownload')}
+            </button>
           </div>
           {sub.last_error && !latestJob && (
             <p className="text-[10px] text-red-400 mt-1 truncate" title={sub.last_error}>
@@ -262,7 +268,7 @@ function SubscriptionCard({
 
 export default function SubscriptionsPage() {
   useLocale()
-  const { data, mutate, isLoading } = useSubscriptions()
+  const { data, mutate, isLoading } = useSubscriptions({ limit: 200 })
   const { trigger: createSub, isMutating: creating } = useCreateSubscription()
   const { trigger: updateSub } = useUpdateSubscription()
   const { trigger: deleteSub } = useDeleteSubscription()
@@ -331,11 +337,17 @@ export default function SubscriptionsPage() {
   }, [lastJobUpdate, mutateJobs])
 
   const [showAdd, setShowAdd] = useState(false)
+  const [showBatch, setShowBatch] = useState(false)
   const [url, setUrl] = useState('')
   const [name, setName] = useState('')
   const [autoDownload, setAutoDownload] = useState(true)
   const [cronExpr, setCronExpr] = useState('0 */2 * * *')
   const [checkingId, setCheckingId] = useState<number | null>(null)
+  const [isDeletingAll, setIsDeletingAll] = useState(false)
+  const [batchUrls, setBatchUrls] = useState('')
+  const [batchAutoDownload, setBatchAutoDownload] = useState(true)
+  const [batchCron, setBatchCron] = useState('0 */2 * * *')
+  const [batchProgress, setBatchProgress] = useState<{ done: number; total: number; success: number; failed: number } | null>(null)
 
   const handleAdd = async () => {
     if (!url.trim()) return
@@ -350,6 +362,77 @@ export default function SubscriptionsPage() {
       mutate()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('subscriptions.addFailed'))
+    }
+  }
+
+  const handleBatchImport = async () => {
+    // Parse and deduplicate URLs
+    const rawLines = batchUrls.split('\n').map(l => l.trim()).filter(l => l && !l.startsWith('#'))
+    if (rawLines.length === 0) {
+      toast.error(t('subscriptions.batchEmpty'))
+      return
+    }
+
+    // Dedup within input list
+    const seen = new Set<string>()
+    const unique: string[] = []
+    for (const url of rawLines) {
+      const normalized = url.replace(/\/+$/, '')
+      if (!seen.has(normalized)) {
+        seen.add(normalized)
+        unique.push(url)
+      }
+    }
+
+    // Dedup against existing subscriptions
+    const existingUrls = new Set(
+      (data?.subscriptions ?? []).map(s => s.url.replace(/\/+$/, ''))
+    )
+    const toImport = unique.filter(u => !existingUrls.has(u.replace(/\/+$/, '')))
+    const dupsRemoved = rawLines.length - toImport.length
+    if (dupsRemoved > 0) {
+      toast.info(t('subscriptions.batchDuplicatesRemoved', { count: dupsRemoved }))
+    }
+    if (toImport.length === 0) {
+      toast.error(t('subscriptions.batchEmpty'))
+      return
+    }
+
+    setBatchProgress({ done: 0, total: toImport.length, success: 0, failed: 0 })
+    let success = 0
+    let failed = 0
+    const failedUrls: string[] = []
+    for (let i = 0; i < toImport.length; i++) {
+      try {
+        await api.subscriptions.create({ url: toImport[i], auto_download: batchAutoDownload, cron_expr: batchCron })
+        success++
+      } catch {
+        failed++
+        failedUrls.push(toImport[i])
+      }
+      setBatchProgress({ done: success + failed, total: toImport.length, success, failed })
+      // Small delay every 10 requests to avoid rate limiting
+      if (i > 0 && i % 10 === 0) await new Promise(r => setTimeout(r, 200))
+    }
+    toast.success(t('subscriptions.batchDone', { success, failed }))
+    // If some failed, keep them in the textarea for retry
+    if (failedUrls.length > 0) {
+      setBatchUrls(failedUrls.join('\n'))
+    }
+    setBatchProgress(null)
+    if (failedUrls.length === 0) {
+      setBatchUrls('')
+      setShowBatch(false)
+    }
+    mutate()
+  }
+
+  const handleAutoDownloadToggle = async (sub: Subscription) => {
+    try {
+      await updateSub({ id: sub.id, data: { auto_download: !sub.auto_download } })
+      mutate()
+    } catch {
+      toast.error(t('subscriptions.updateFailed'))
     }
   }
 
@@ -397,21 +480,67 @@ export default function SubscriptionsPage() {
     }
   }
 
+  const handleDeleteAll = async () => {
+    const subs = data?.subscriptions ?? []
+    if (subs.length === 0) return
+    if (!confirm(t('subscriptions.deleteAllConfirm', { count: subs.length }))) return
+    setIsDeletingAll(true)
+    let deleted = 0
+    let failed = 0
+    try {
+      for (let i = 0; i < subs.length; i++) {
+        try {
+          await deleteSub(subs[i].id)
+          deleted++
+        } catch {
+          failed++
+        }
+        if (i > 0 && i % 10 === 0) await new Promise(r => setTimeout(r, 200))
+      }
+      if (deleted > 0) toast.success(t('subscriptions.deleteAllDone', { deleted, failed }))
+      if (failed > 0) toast.error(t('subscriptions.deleteAllFailed', { failed }))
+      mutate()
+    } finally {
+      setIsDeletingAll(false)
+    }
+  }
+
   return (
-    <div className="max-w-3xl mx-auto px-4 py-6">
+    <div className="max-w-3xl mx-auto px-4 py-6 overflow-x-hidden">
       {/* Header */}
-      <div className="flex items-center justify-between mb-6">
+      <div className="flex items-center justify-between gap-2 mb-6 flex-wrap">
         <div className="flex items-center gap-3">
-          <Rss size={24} className="text-vault-accent" />
+          <Rss size={24} className="text-vault-accent shrink-0" />
           <h1 className="text-xl font-bold text-vault-text">{t('subscriptions.title')}</h1>
         </div>
-        <button
-          onClick={() => setShowAdd(!showAdd)}
-          className="flex items-center gap-1.5 px-3 py-1.5 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors"
-        >
-          {showAdd ? <X size={16} /> : <Plus size={16} />}
-          {showAdd ? t('common.cancel') : t('subscriptions.addNew')}
-        </button>
+        <div className="flex items-center gap-1.5 flex-wrap">
+          {(data?.subscriptions?.length ?? 0) > 0 && (
+            <button
+              onClick={handleDeleteAll}
+              disabled={isDeletingAll}
+              className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-input border border-vault-border text-red-400 hover:bg-red-900/30 hover:border-red-700/50 transition-colors disabled:opacity-50"
+            >
+              <Trash2 size={14} />
+              <span className="hidden sm:inline">{isDeletingAll ? t('subscriptions.deletingAll') : t('subscriptions.deleteAll')}</span>
+            </button>
+          )}
+          <button
+            onClick={() => { setShowBatch(!showBatch); if (showAdd) setShowAdd(false) }}
+            className={`flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium transition-colors ${
+              showBatch ? 'bg-vault-input border border-vault-border text-vault-text' : 'bg-vault-input border border-vault-border text-vault-text-secondary hover:text-vault-text'
+            }`}
+          >
+            {showBatch ? <X size={14} /> : <List size={14} />}
+            {showBatch ? t('common.cancel') : t('subscriptions.batchImport')}
+          </button>
+          <button
+            onClick={() => { setShowAdd(!showAdd); if (showBatch) setShowBatch(false) }}
+            className="flex items-center gap-1 px-2 py-1.5 rounded-lg text-xs font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors"
+          >
+            {showAdd ? <X size={14} /> : <Plus size={14} />}
+            {showAdd ? t('common.cancel') : t('subscriptions.addNew')}
+          </button>
+        </div>
       </div>
 
       {/* Add form — simplified (no preview) */}
@@ -482,6 +611,77 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
+      {/* Batch import form */}
+      {showBatch && (
+        <div className="bg-vault-card border border-vault-border rounded-xl p-4 mb-6 space-y-3">
+          <div>
+            <label className="text-xs text-vault-text-muted block mb-1">{t('subscriptions.batchImport')}</label>
+            <textarea
+              value={batchUrls}
+              onChange={(e) => setBatchUrls(e.target.value)}
+              placeholder={t('subscriptions.batchPlaceholder')}
+              rows={8}
+              className="w-full px-3 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text placeholder-vault-text-muted font-mono resize-y"
+              autoFocus
+            />
+          </div>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-vault-text-muted">{t('subscriptions.autoDownload')}</label>
+              <button
+                onClick={() => setBatchAutoDownload(!batchAutoDownload)}
+                className={`relative w-9 h-5 rounded-full transition-colors ${batchAutoDownload ? 'bg-vault-accent' : 'bg-vault-border'}`}
+              >
+                <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${batchAutoDownload ? 'translate-x-4' : ''}`} />
+              </button>
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5">
+              <label className="text-xs text-vault-text-muted">{t('subscriptions.cronExpr')}</label>
+              <input
+                type="text"
+                value={batchCron}
+                onChange={(e) => setBatchCron(e.target.value)}
+                className="w-28 px-1.5 py-0.5 bg-vault-input border border-vault-border rounded text-xs font-mono text-vault-text"
+              />
+              {CRON_PRESETS.map((p) => (
+                <button
+                  key={p.value}
+                  type="button"
+                  onClick={() => setBatchCron(p.value)}
+                  className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+                    batchCron === p.value
+                      ? 'bg-vault-accent/20 text-vault-accent'
+                      : 'bg-vault-bg border border-vault-border text-vault-text-muted hover:text-vault-text'
+                  }`}
+                >
+                  {p.label}
+                </button>
+              ))}
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <button
+              onClick={handleBatchImport}
+              disabled={!!batchProgress || !batchUrls.trim()}
+              className="px-4 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
+            >
+              {batchProgress
+                ? t('subscriptions.batchImporting', { done: batchProgress.done, total: batchProgress.total })
+                : t('subscriptions.batchImport')
+              }
+            </button>
+            {batchProgress && (
+              <div className="flex-1 h-2 bg-vault-border rounded-full overflow-hidden">
+                <div
+                  className="h-full bg-vault-accent rounded-full transition-all duration-300"
+                  style={{ width: `${Math.round((batchProgress.done / batchProgress.total) * 100)}%` }}
+                />
+              </div>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* List */}
       {isLoading ? (
         <div className="flex justify-center py-12"><LoadingSpinner /></div>
@@ -502,6 +702,7 @@ export default function SubscriptionsPage() {
               onCheck={handleCheck}
               onDelete={handleDelete}
               onCronUpdate={handleCronUpdate}
+              onAutoDownloadToggle={handleAutoDownloadToggle}
               checkingId={checkingId}
             />
           ))}

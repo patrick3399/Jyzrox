@@ -191,10 +191,22 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
     total_checked = 0
     total_enqueued = 0
 
+    now = datetime.now(UTC)
     async with AsyncSessionLocal() as session:
         query = select(Subscription).where(Subscription.enabled == True)
         if user_id:
             query = query.where(Subscription.user_id == user_id)
+        else:
+            # Only check subscriptions whose next_check_at is due (or never checked)
+            # and auto_download is enabled (manual-only subs skip cron)
+            from sqlalchemy import or_
+            query = query.where(
+                Subscription.auto_download == True,
+                or_(
+                    Subscription.next_check_at == None,
+                    Subscription.next_check_at <= now,
+                ),
+            )
         subs = (await session.execute(query)).scalars().all()
 
     for sub in subs:

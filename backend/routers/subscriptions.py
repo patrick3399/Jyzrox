@@ -106,6 +106,10 @@ async def create_subscription(
         except (ValueError, KeyError) as exc:
             raise HTTPException(status_code=400, detail=f"Invalid cron expression: {exc}")
 
+    cron_expr = req.cron_expr or "0 */2 * * *"
+    from datetime import datetime, timezone
+    next_check = croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
+
     async with async_session() as session:
         stmt = pg_insert(Subscription).values(
             user_id=user_id,
@@ -114,13 +118,14 @@ async def create_subscription(
             source=source,
             source_id=None,
             auto_download=req.auto_download,
-            cron_expr=req.cron_expr or "0 */2 * * *",
+            cron_expr=cron_expr,
+            next_check_at=next_check,
         ).on_conflict_do_update(
             constraint="subscriptions_user_id_url_key",
             set_={
                 "name": req.name,
                 "auto_download": req.auto_download,
-                "cron_expr": req.cron_expr or "0 */2 * * *",
+                "cron_expr": cron_expr,
                 "enabled": True,
             },
         ).returning(Subscription.id)

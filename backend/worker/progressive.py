@@ -9,7 +9,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
 from core.database import AsyncSessionLocal
-from db.models import Blob, Gallery, Image
+from db.models import Blob, ExcludedBlob, Gallery, Image
 from plugins.models import GalleryImportData
 from services.cas import cas_path, create_library_symlink, decrement_ref_count, library_dir, store_blob, thumb_dir
 from worker.constants import _VIDEO_EXTS, logger
@@ -33,6 +33,19 @@ class ProgressiveImporter:
         self._sem = asyncio.Semaphore(2)
         self._tasks: list[asyncio.Task] = []
         self._page_num_from_filename = page_num_from_filename
+        self._excluded_set: set[str] = set()
+
+    async def _load_excluded(self) -> None:
+        """Load excluded blob hashes for the current gallery."""
+        if not self.gallery_id:
+            return
+        async with AsyncSessionLocal() as session:
+            rows = (await session.execute(
+                select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == self.gallery_id)
+            )).scalars().all()
+            self._excluded_set = set(rows)
+            if self._excluded_set:
+                logger.info("[progressive] loaded %d excluded blob(s) for gallery %d", len(self._excluded_set), self.gallery_id)
 
     async def ensure_gallery(self, metadata: dict, dest_dir: Path) -> int:
         """Create or update gallery record with download_status='downloading'.
@@ -90,6 +103,7 @@ class ProgressiveImporter:
             await session.commit()
 
         logger.info("[progressive] gallery created: id=%d title=%s", self.gallery_id, self.title)
+        await self._load_excluded()
         return self.gallery_id
 
     async def ensure_gallery_from_url(self, url: str, dest_dir: Path) -> int:
@@ -151,6 +165,7 @@ class ProgressiveImporter:
             await session.commit()
 
         logger.info("[progressive] gallery created from URL: id=%d title=%s", self.gallery_id, self.title)
+        await self._load_excluded()
         return self.gallery_id
 
     async def ensure_gallery_from_import_data(self, data: GalleryImportData) -> int:
@@ -204,6 +219,7 @@ class ProgressiveImporter:
             await session.commit()
 
         logger.info("[progressive] gallery created from import data: id=%d title=%s", self.gallery_id, self.title)
+        await self._load_excluded()
         return self.gallery_id
 
     async def import_file(self, file_path: Path) -> None:
@@ -252,6 +268,11 @@ class ProgressiveImporter:
 
         try:
             sha256 = await asyncio.to_thread(_sha256, file_path)
+
+            # Skip excluded blobs
+            if sha256 in self._excluded_set:
+                logger.debug("[progressive] skipping excluded blob %s for gallery %d", sha256[:12], self.gallery_id)
+                return
 
             async with AsyncSessionLocal() as session:
                 blob = await store_blob(file_path, sha256, session)

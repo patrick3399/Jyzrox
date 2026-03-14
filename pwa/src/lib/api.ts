@@ -372,6 +372,17 @@ const library = {
       { method: 'POST', body: JSON.stringify({ page_num: pageNum }) }
     ),
 
+  listExcluded: (source: string, sourceId: string) =>
+    apiFetch<{ gallery_id: number; excluded: Array<{ blob_sha256: string; excluded_at: string | null }> }>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/excluded`
+    ),
+
+  restoreExcluded: (source: string, sourceId: string, sha256: string) =>
+    apiFetch<{ status: string }>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/excluded/${encodeURIComponent(sha256)}`,
+      { method: 'DELETE' }
+    ),
+
   browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number } = {}) =>
     apiFetch<import('./types').ImageBrowserResponse>(`/api/library/images${qs(params as Record<string, unknown>)}`),
 }
