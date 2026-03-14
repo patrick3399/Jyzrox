@@ -55,6 +55,12 @@ class Downloadable(Protocol):
 
     def requires_credentials(self) -> bool: ...
 
+    async def resolve_metadata(
+        self,
+        url: str,
+        credentials: dict | str | None,
+    ) -> GalleryImportData | None: ...
+
 
 @runtime_checkable
 class Browsable(Protocol):
@@ -135,6 +141,14 @@ class SourcePlugin(ABC):
     def parse_metadata(self, dest_dir: Path) -> GalleryMetadata | None:
         """Parse gallery metadata from a downloaded directory."""
         ...
+
+    async def resolve_metadata(
+        self,
+        url: str,
+        credentials: dict | str | None,
+    ) -> GalleryImportData | None:
+        """Pre-download metadata resolution. Override in subclasses."""
+        return None
 
 
 class BrowsePlugin(ABC):

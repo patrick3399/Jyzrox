@@ -24,6 +24,7 @@ async def download_pixiv_illust(
     on_progress: Callable[[int, int], Awaitable[None]] | None = None,
     cancel_check: Callable[[], Awaitable[bool]] | None = None,
     pause_check: Callable[[], Awaitable[bool]] | None = None,
+    on_file: Callable[[Path], Awaitable[None]] | None = None,
 ) -> dict:
     """
     Download a single Pixiv illustration (including multi-page manga).
@@ -154,6 +155,8 @@ async def download_pixiv_illust(
 
                 filename = f"{i + 1:04d}.{ext}"
                 (output_dir / filename).write_bytes(image_bytes)
+                if on_file is not None:
+                    await on_file(output_dir / filename)
 
                 downloaded += 1
                 if on_progress:
@@ -240,6 +243,7 @@ async def download_pixiv_user_works(
     cancel_check: Callable[[], Awaitable[bool]] | None = None,
     pause_check: Callable[[], Awaitable[bool]] | None = None,
     max_illusts: int = 0,
+    on_file: Callable[[Path], Awaitable[None]] | None = None,
 ) -> dict:
     """
     Download all works by a Pixiv user.
@@ -337,6 +341,7 @@ async def download_pixiv_user_works(
                     output_dir=illust_dir,
                     cancel_check=cancel_check,
                     pause_check=pause_check,
+                    on_file=on_file,
                 )
 
                 if result["status"] == "done":

@@ -10,6 +10,7 @@ from sqlalchemy.sql import select
 
 from core.database import AsyncSessionLocal
 from db.models import Blob, Gallery, Image
+from plugins.models import GalleryImportData
 from services.cas import cas_path, create_library_symlink, decrement_ref_count, library_dir, store_blob, thumb_dir
 from worker.constants import _VIDEO_EXTS, logger
 from worker.helpers import _sha256, _validate_image_magic
@@ -19,7 +20,7 @@ from worker.thumbnail import generate_single_thumbnail
 class ProgressiveImporter:
     """Imports files progressively during gallery-dl download."""
 
-    def __init__(self, db_job_id: str | None, user_id: int | None):
+    def __init__(self, db_job_id: str | None, user_id: int | None, *, page_num_from_filename: bool = False):
         self.db_job_id = db_job_id
         self.user_id = user_id
         self.gallery_id: int | None = None
@@ -31,6 +32,7 @@ class ProgressiveImporter:
         self.source_url: str | None = None
         self._sem = asyncio.Semaphore(2)
         self._tasks: list[asyncio.Task] = []
+        self._page_num_from_filename = page_num_from_filename
 
     async def ensure_gallery(self, metadata: dict, dest_dir: Path) -> int:
         """Create or update gallery record with download_status='downloading'.
@@ -103,7 +105,7 @@ class ProgressiveImporter:
 
         # Derive source from domain
         source = "gallery_dl"
-        for site in plugin_registry.get_supported_sites():
+        for site in plugin_registry.get_all_sites():
             if site.domain == domain:
                 source = site.source_id
                 break
@@ -151,6 +153,59 @@ class ProgressiveImporter:
         logger.info("[progressive] gallery created from URL: id=%d title=%s", self.gallery_id, self.title)
         return self.gallery_id
 
+    async def ensure_gallery_from_import_data(self, data: GalleryImportData) -> int:
+        """Create gallery from plugin-provided metadata (source-agnostic).
+
+        Used by native plugins that can resolve metadata before download starts.
+        """
+        self.title = data.title
+        self.source = data.source
+        self.source_id = data.source_id
+
+        async with AsyncSessionLocal() as session:
+            stmt = (
+                pg_insert(Gallery)
+                .values(
+                    source=data.source,
+                    source_id=data.source_id,
+                    title=data.title,
+                    title_jpn=data.title_jpn,
+                    category=data.category,
+                    language=data.language,
+                    pages=0,
+                    posted_at=data.posted_at,
+                    uploader=data.uploader,
+                    download_status="downloading",
+                    tags_array=data.tags,
+                    artist_id=data.artist_id,
+                    created_by_user_id=self.user_id,
+                    source_url=self.source_url,
+                )
+                .on_conflict_do_update(
+                    index_elements=["source", "source_id"],
+                    set_={
+                        "title": pg_insert(Gallery).excluded.title,
+                        "tags_array": pg_insert(Gallery).excluded.tags_array,
+                        "download_status": "downloading",
+                        "artist_id": pg_insert(Gallery).excluded.artist_id,
+                        "source_url": pg_insert(Gallery).excluded.source_url,
+                    },
+                )
+                .returning(Gallery.id)
+            )
+            self.gallery_id = (await session.execute(stmt)).scalar_one()
+
+            if self.db_job_id:
+                from db.models import DownloadJob
+                job = await session.get(DownloadJob, uuid.UUID(self.db_job_id))
+                if job:
+                    job.gallery_id = self.gallery_id
+
+            await session.commit()
+
+        logger.info("[progressive] gallery created from import data: id=%d title=%s", self.gallery_id, self.title)
+        return self.gallery_id
+
     async def import_file(self, file_path: Path) -> None:
         """Import a single media file with bounded concurrency.
 
@@ -162,9 +217,17 @@ class ProgressiveImporter:
             return
         self._processed.add(str_path)
 
-        # Assign page_num serially to guarantee correct ordering
-        self._page_counter += 1
-        page_num = self._page_counter
+        # Assign page_num: from filename (for parallel downloaders like EH)
+        # or serial counter (for sequential/streaming like gallery-dl)
+        if self._page_num_from_filename:
+            try:
+                page_num = int(file_path.stem.lstrip("0") or "0") or 1
+            except ValueError:
+                self._page_counter += 1
+                page_num = self._page_counter
+        else:
+            self._page_counter += 1
+            page_num = self._page_counter
 
         # Prune completed tasks to avoid unbounded growth
         self._tasks = [t for t in self._tasks if not t.done()]

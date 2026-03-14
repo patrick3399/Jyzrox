@@ -894,7 +894,8 @@ class EhClient:
         GET {base_url}/toplist.php?tl={tl}&p={page}
         tl: 11=All-Time, 12=Past Year, 13=Past Month, 15=Yesterday
         """
-        resp = await self._http.get(f"{self.base_url}/toplist.php?tl={tl}&p={page}")
+        # Toplist only exists on e-hentai.org; exhentai.org returns 404 for this page.
+        resp = await self._http.get(f"{EH_BASE_URL}/toplist.php?tl={tl}&p={page}")
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 

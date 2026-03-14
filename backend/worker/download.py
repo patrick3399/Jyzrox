@@ -1,5 +1,6 @@
 """Download job for the worker package."""
 
+import asyncio
 import json
 from datetime import UTC, datetime
 from pathlib import Path
@@ -20,7 +21,7 @@ async def download_job(
     db_job_id: str | None = None,
     total: int | None = None,
 ) -> dict:
-    """Download a gallery via the plugin registry, falling back to gallery-dl."""
+    """Download a gallery via the plugin registry — unified progressive import."""
     logger.info("[download] url=%s", url)
 
     await _set_job_status(db_job_id, "running")
@@ -29,7 +30,7 @@ async def download_job(
     from plugins.registry import plugin_registry
     from services.credential import list_credentials as _list_creds
 
-    # Find the plugin that handles this URL
+    # ── 1. Find plugin ──────────────────────────────────────────────
     plugin = await plugin_registry.get_handler(url)
     if not plugin:
         plugin = plugin_registry.get_fallback()
@@ -41,9 +42,8 @@ async def download_job(
 
     source_id = plugin.meta.source_id
 
-    # Load credentials
-    if source_id == "gallery_dl":
-        # gallery-dl needs ALL credentials to build its config file
+    # ── 2. Load credentials (unified) ───────────────────────────────
+    if plugin.meta.needs_all_credentials:
         all_creds = await _list_creds()
         credentials: dict | str | None = {}
         for c in all_creds:
@@ -53,24 +53,21 @@ async def download_job(
     else:
         credentials = await get_credential(source_id)
 
-    # Determine output directory via Downloadable protocol — always use the
-    # original plugin's resolver so files land in the right source-specific
-    # subdirectory (e.g. /data/gallery/pixiv/12345) even when we later swap
-    # the executor to the gallery-dl fallback.
+    # ── 3. Output directory ─────────────────────────────────────────
     downloader = plugin_registry.get_downloader(source_id)
     if downloader:
         target_dir = downloader.resolve_output_dir(url, Path(settings.data_gallery_path))
     else:
         target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
 
-    # Credential gate — generic via Downloadable protocol.
+    # ── 4. Credential gate ──────────────────────────────────────────
     if downloader and downloader.requires_credentials() and not credentials:
         err = f"{plugin.meta.name} credentials not configured. Go to Credentials to set up."
         logger.error("[download] %s", err)
         await _set_job_status(db_job_id, "failed", err)
         return {"status": "failed", "error": err}
 
-    # Semaphore — use source_id as the semaphore key (maps to existing keys)
+    # ── 5. Semaphore ────────────────────────────────────────────────
     sem_key = plugin.meta.semaphore_key or source_id
     if sem_key == "gallery_dl":
         domain = urlparse(url).netloc.removeprefix("www.")
@@ -80,7 +77,42 @@ async def download_job(
     _base_progress: dict = {} if total is None else {"total": total}
     await _set_job_progress(db_job_id, {**_base_progress, "status_text": "Waiting for download slot..."})
 
-    # Progress callback
+    # ── 6. Progressive Importer (ALL sources) ───────────────────────
+    import_user_id = None
+    if db_job_id:
+        from core.database import AsyncSessionLocal
+        from sqlalchemy.sql import select as sa_select
+        from db.models import DownloadJob as _DJ
+        async with AsyncSessionLocal() as _sess:
+            _result = await _sess.execute(
+                sa_select(_DJ.user_id).where(_DJ.id == db_job_id)
+            )
+            import_user_id = _result.scalar_one_or_none()
+
+    from worker.progressive import ProgressiveImporter
+    from worker.constants import _MEDIA_EXTS
+
+    # Use filename-based page numbering for plugins with parallel downloads
+    page_from_filename = (plugin.meta.concurrency > 1)
+    importer = ProgressiveImporter(db_job_id, import_user_id, page_num_from_filename=page_from_filename)
+    importer.source_url = url
+
+    # ── 7. Pre-download metadata (native plugins) ──────────────────
+    if hasattr(plugin, 'resolve_metadata'):
+        try:
+            import_data = await plugin.resolve_metadata(url, credentials)
+            if import_data:
+                await importer.ensure_gallery_from_import_data(import_data)
+                await _set_job_progress(db_job_id, {
+                    **_base_progress,
+                    "title": importer.title,
+                    "gallery_id": importer.gallery_id,
+                    "status_text": f"Downloading: {importer.title}",
+                })
+        except Exception as exc:
+            logger.warning("[download] resolve_metadata failed (non-fatal): %s", exc)
+
+    # ── 8. Progress callback ────────────────────────────────────────
     async def on_progress(downloaded: int, total_pages: int) -> None:
         elapsed = (datetime.now(UTC) - started_at).total_seconds()
         speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
@@ -96,15 +128,13 @@ async def download_job(
             "speed": speed,
             "status_text": status_text,
         }
-        # Preserve title / gallery_id set by the on_file callback
-        if importer is not None:
-            if importer.title:
-                progress["title"] = importer.title
-            if importer.gallery_id:
-                progress["gallery_id"] = importer.gallery_id
+        if importer.title:
+            progress["title"] = importer.title
+        if importer.gallery_id:
+            progress["gallery_id"] = importer.gallery_id
         await _set_job_progress(db_job_id, progress)
 
-    # Cancel check — reads the Redis cancel key set by the cancel endpoint
+    # ── 9. Cancel / Pause / PID callbacks ───────────────────────────
     redis = ctx["redis"]
     cancel_key = f"download:cancel:{db_job_id}" if db_job_id else None
 
@@ -117,7 +147,6 @@ async def download_job(
         except Exception:
             return False
 
-    # PID callback for gallery-dl pause/resume
     pid_key = f"download:pid:{db_job_id}" if db_job_id else None
 
     async def pid_callback(pid: int) -> None:
@@ -127,7 +156,6 @@ async def download_job(
             except Exception as exc:
                 logger.warning("[download] failed to store PID in Redis: %s", exc)
 
-    # Pause check — reads the Redis pause key set by the pause endpoint (EH/Pixiv soft-pause)
     pause_key = f"download:pause:{db_job_id}" if db_job_id else None
 
     async def pause_check() -> bool:
@@ -139,65 +167,42 @@ async def download_job(
         except Exception:
             return False
 
-    from worker.progressive import ProgressiveImporter
-    from worker.constants import _MEDIA_EXTS
+    # ── 10. Unified on_file callback (ALL sources) ──────────────────
+    _gallery_create_lock = asyncio.Lock()
 
-    importer: ProgressiveImporter | None = None
+    async def on_file(file_path: Path):
+        if file_path.suffix.lower() not in _MEDIA_EXTS:
+            return
+        # Serialize gallery creation to avoid race with concurrent downloads
+        if not importer.gallery_id:
+            async with _gallery_create_lock:
+                if not importer.gallery_id:  # double-check after acquiring lock
+                    meta_path = Path(str(file_path) + ".json")
+                    if meta_path.exists():
+                        try:
+                            raw = json.loads(meta_path.read_text(encoding="utf-8"))
+                            await importer.ensure_gallery(raw, target_dir)
+                        except Exception as exc:
+                            logger.warning("[download] failed to parse metadata: %s", exc)
+                    if not importer.gallery_id:
+                        try:
+                            await importer.ensure_gallery_from_url(url, target_dir)
+                        except Exception as exc:
+                            logger.warning("[download] failed to create gallery from URL: %s", exc)
+                            return
+                    if importer.gallery_id:
+                        await _set_job_progress(db_job_id, {
+                            **_base_progress,
+                            "title": importer.title,
+                            "gallery_id": importer.gallery_id,
+                            "status_text": f"Downloading: {importer.title}",
+                        })
+        await importer.import_file(file_path)
 
-    if source_id == "gallery_dl":
-        # Look up user_id from the download job
-        import_user_id = None
-        if db_job_id:
-            from core.database import AsyncSessionLocal
-            from sqlalchemy.sql import select as sa_select
-            from db.models import DownloadJob as _DJ
-            async with AsyncSessionLocal() as _sess:
-                _result = await _sess.execute(
-                    sa_select(_DJ.user_id).where(_DJ.id == db_job_id)
-                )
-                import_user_id = _result.scalar_one_or_none()
-
-        importer = ProgressiveImporter(db_job_id, import_user_id)
-        importer.source_url = url
-
-        async def on_file(file_path: Path):
-            # Skip non-media files (metadata json, tags, etc.)
-            if file_path.suffix.lower() not in _MEDIA_EXTS:
-                return
-            # First media file → look for per-image metadata JSON on disk
-            if not importer.gallery_id:
-                meta_path = Path(str(file_path) + ".json")
-                if meta_path.exists():
-                    try:
-                        raw = json.loads(meta_path.read_text(encoding="utf-8"))
-                        await importer.ensure_gallery(raw, target_dir)
-                    except Exception as exc:
-                        logger.warning("[download] failed to parse metadata: %s", exc)
-                # Fallback: no metadata JSON available → create from URL
-                if not importer.gallery_id:
-                    try:
-                        await importer.ensure_gallery_from_url(url, target_dir)
-                    except Exception as exc:
-                        logger.warning("[download] failed to create gallery from URL: %s", exc)
-                        return
-                # Update progress with title and gallery_id
-                if importer.gallery_id:
-                    await _set_job_progress(db_job_id, {
-                        **_base_progress,
-                        "title": importer.title,
-                        "gallery_id": importer.gallery_id,
-                        "status_text": f"Downloading: {importer.title}",
-                    })
-            await importer.import_file(file_path)
-
+    # ── 11. Execute download ────────────────────────────────────────
     try:
         async with sem.acquire():
             try:
-                _extra_kwargs: dict = {}
-                if source_id == "gallery_dl":
-                    _extra_kwargs["on_file"] = on_file
-                if options is not None:
-                    _extra_kwargs["options"] = options
                 result = await plugin.download(
                     url=url,
                     dest_dir=target_dir,
@@ -206,13 +211,13 @@ async def download_job(
                     cancel_check=cancel_check,
                     pid_callback=pid_callback,
                     pause_check=pause_check,
-                    **_extra_kwargs,
+                    on_file=on_file,
+                    **({"options": options} if options else {}),
                 )
             except Exception as exc:
                 err = f"Download failed: {exc}"
                 logger.error("[download] %s", err, exc_info=True)
-                if importer:
-                    await importer.abort()
+                await importer.abort()
                 await _set_job_status(db_job_id, "failed", err)
                 return {"status": "failed", "error": err}
             finally:
@@ -227,50 +232,40 @@ async def download_job(
         await _set_job_status(db_job_id, "failed", err)
         return {"status": "failed", "error": err}
 
+    # ── 12. Post-download: cancel guard ─────────────────────────────
     if result.status == "cancelled":
-        if importer:
-            await importer.cleanup()
+        await importer.cleanup()
         await _set_job_status(db_job_id, "cancelled")
         return {"status": "cancelled"}
 
     if result.status == "failed":
-        if result.downloaded > 0 and importer and importer.gallery_id:
-            # Files were downloaded before the failure — fall through to validation +
-            # finalization so the partial gallery is preserved.
+        if result.downloaded > 0 and importer.gallery_id:
             logger.warning(
                 "[download] treating failed download as partial (downloaded=%d): %s",
                 result.downloaded,
                 result.error,
             )
         else:
-            if importer:
-                await importer.abort()
+            await importer.abort()
             err = result.error or "Download failed"
             await _set_job_status(db_job_id, "failed", err)
             return {"status": "failed", "error": err}
 
-    # ── Final cancel guard ───────────────────────────────────────────
-    # Handles the race where gallery-dl finished normally but the cancel
-    # endpoint had already written "cancelled" to the DB.  Without this
-    # guard the finalization below would overwrite that status with "done"
-    # or "partial".
     if await cancel_check():
-        if importer:
-            await importer.cleanup()
+        await importer.cleanup()
         await _set_job_status(db_job_id, "cancelled")
         logger.info("[download] cancelled (post-download guard): %s", url)
         return {"status": "cancelled"}
 
-    # ── Image validation + partial detection ────────────────────────
+    # ── 13. Image validation ────────────────────────────────────────
     from worker.helpers import _validate_image_magic
     from worker.constants import _IMAGE_EXTS
 
     corrupt_pages: list[int] = []
     if target_dir.exists():
-        for f in sorted(target_dir.iterdir()):
+        for f in sorted(target_dir.rglob("*")):
             if f.suffix.lower() in _IMAGE_EXTS and f.is_file():
                 if not _validate_image_magic(f):
-                    # Extract page number from filename (e.g. "0001.jpg" → 1)
                     try:
                         page_num = int(f.stem.lstrip("0") or "0")
                     except ValueError:
@@ -281,7 +276,7 @@ async def download_job(
 
     all_failed = sorted(set(getattr(result, 'failed_pages', []) + corrupt_pages))
 
-    # Final progress update
+    # ── 14. Final progress update ───────────────────────────────────
     elapsed = (datetime.now(UTC) - started_at).total_seconds()
     speed = round(result.downloaded / elapsed, 3) if elapsed > 0 else 0
     final_progress = {
@@ -293,35 +288,21 @@ async def download_job(
         "speed": speed,
         "status_text": "Complete" if not all_failed else f"Partial — {len(all_failed)} pages failed",
     }
-    # Preserve title / gallery_id set by the on_file callback
-    if importer is not None:
-        if importer.title:
-            final_progress["title"] = importer.title
-        if importer.gallery_id:
-            final_progress["gallery_id"] = importer.gallery_id
+    if importer.title:
+        final_progress["title"] = importer.title
+    if importer.gallery_id:
+        final_progress["gallery_id"] = importer.gallery_id
     if all_failed:
         final_progress["failed_pages"] = all_failed
     await _set_job_progress(db_job_id, final_progress)
 
-    # Trigger import regardless (partial pages are still useful)
+    # ── 15. Finalize ────────────────────────────────────────────────
     if target_dir.exists():
-        if importer and importer.gallery_id:
-            # Progressive import was active — finalize instead of running import_job
+        if importer.gallery_id:
             gallery_id = await importer.finalize(target_dir, partial=bool(all_failed) or result.status in ("failed", "partial"))
             logger.info("[download] progressive import finalized: gallery_id=%s", gallery_id)
-            # Skip import_job and thumbnail_job — already done progressively
         else:
-            # Fallback: no progressive import, use existing import_job
-            import_user_id = None
-            if db_job_id:
-                from core.database import AsyncSessionLocal
-                from sqlalchemy.sql import select as sa_select
-                from db.models import DownloadJob
-                async with AsyncSessionLocal() as session:
-                    _result = await session.execute(
-                        sa_select(DownloadJob.user_id).where(DownloadJob.id == db_job_id)
-                    )
-                    import_user_id = _result.scalar_one_or_none()
+            # Safety fallback: no progressive import occurred (should be rare)
             await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id, import_user_id, url)
 
     is_partial = bool(all_failed) or result.status in ("failed", "partial")

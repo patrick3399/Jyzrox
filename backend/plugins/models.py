@@ -78,6 +78,7 @@ class PluginMeta(BaseModel):
     supported_sites: list[SiteInfo] = []
     concurrency: int = 1
     semaphore_key: str | None = None
+    needs_all_credentials: bool = False
 
 
 class GalleryMetadata(BaseModel):

@@ -81,6 +81,73 @@ class EhSourcePlugin(SourcePlugin):
     async def can_handle(self, url: str) -> bool:
         return "e-hentai.org" in url or "exhentai.org" in url
 
+    async def resolve_metadata(
+        self,
+        url: str,
+        credentials: dict | str | None,
+    ) -> GalleryImportData | None:
+        """Resolve EH gallery metadata before download via API."""
+        from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
+
+        m = EH_GALLERY_URL_RE.search(url)
+        if not m:
+            return None
+
+        gid = int(m.group(1))
+        token = m.group(2)
+
+        # Parse credentials
+        if not credentials:
+            cookies: dict = {}
+        elif isinstance(credentials, str):
+            try:
+                cookies = json.loads(credentials)
+            except (json.JSONDecodeError, TypeError):
+                return None
+        else:
+            cookies = credentials
+
+        from core.config import settings
+        from core.redis_client import get_redis
+        from services import cache
+        from services.eh_client import EhClient
+
+        redis = get_redis()
+        pref = await redis.get("setting:eh_use_ex")
+        if pref is not None:
+            use_ex = pref == b"1"
+        else:
+            use_ex = settings.eh_use_ex or bool(cookies.get("igneous"))
+        if not cookies:
+            use_ex = False
+
+        try:
+            async with EhClient(cookies, use_ex=use_ex) as client:
+                meta = await cache.get_gallery_cache(gid)
+                if not meta:
+                    meta = await client.get_gallery_metadata(gid, token)
+                    await cache.set_gallery_cache(gid, meta)
+        except Exception as exc:
+            logger.warning("[ehentai] resolve_metadata failed: %s", exc)
+            return None
+
+        # Build metadata dict in the same format as download_eh_gallery writes
+        metadata_dict = {
+            "category": "ehentai",
+            "gallery_category": meta.get("category", ""),
+            "title": meta.get("title", ""),
+            "title_jpn": meta.get("title_jpn", ""),
+            "uploader": meta.get("uploader", ""),
+            "posted": meta.get("posted_at", 0),
+            "tags": meta.get("tags", []),
+            "gallery_id": gid,
+            "gid": gid,
+            "token": token,
+        }
+
+        # Reuse existing parse_import to build GalleryImportData
+        return self.parse_import(Path(f"/tmp/eh-{gid}"), metadata_dict)
+
     async def download(
         self,
         url: str,
@@ -90,6 +157,8 @@ class EhSourcePlugin(SourcePlugin):
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
         pause_check: Callable[[], Awaitable[bool]] | None = None,
+        on_file: Callable[[Path], Awaitable[None]] | None = None,
+        options: dict | None = None,
     ) -> DownloadResult:
         """Download an EH gallery using the native EhClient downloader."""
         from core.config import settings
@@ -151,6 +220,7 @@ class EhSourcePlugin(SourcePlugin):
                 on_progress=_progress,
                 cancel_check=cancel_check,
                 pause_check=pause_check,
+                on_file=on_file,
             )
         except PermissionError as exc:
             err = str(exc)

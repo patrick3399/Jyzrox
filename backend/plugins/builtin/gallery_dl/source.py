@@ -114,11 +114,20 @@ class GalleryDlPlugin(SourcePlugin):
         supported_sites=_build_supported_sites(),
         concurrency=1,
         semaphore_key="gallery_dl",
+        needs_all_credentials=True,
     )
 
     async def can_handle(self, url: str) -> bool:
         """Always returns True — gallery-dl is the universal fallback."""
         return True
+
+    async def resolve_metadata(
+        self,
+        url: str,
+        credentials: dict | str | None,
+    ) -> GalleryImportData | None:
+        """gallery-dl discovers metadata during download, not before."""
+        return None
 
     async def download(
         self,

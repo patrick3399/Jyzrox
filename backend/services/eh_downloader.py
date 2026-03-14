@@ -31,6 +31,7 @@ async def download_eh_gallery(
     cancel_key: str | None = None,
     cancel_check: Callable[[], Awaitable[bool]] | None = None,
     pause_check: Callable[[], Awaitable[bool]] | None = None,
+    on_file: Callable[[Path], Awaitable[None]] | None = None,
 ) -> dict:
     """Download all images of an EH gallery using native EhClient.
 
@@ -118,6 +119,8 @@ async def download_eh_gallery(
             # Check if file already exists (resume support)
             existing = list(output_dir.glob(f"{page_num:04d}.*"))
             if existing:
+                if on_file is not None:
+                    await on_file(existing[0])
                 async with lock:
                     downloaded += 1
                     if on_progress:
@@ -143,6 +146,8 @@ async def download_eh_gallery(
                     ext = ext_map.get(media_type, "jpg")
                     filepath = output_dir / f"{page_num:04d}.{ext}"
                     filepath.write_bytes(cached_bytes)
+                    if on_file:
+                        await on_file(filepath)
                     logger.debug("[eh_download] page %d: from cache (%d bytes)", page_num, len(cached_bytes))
                 else:
                     # Download via showpage API
@@ -156,6 +161,8 @@ async def download_eh_gallery(
                         raise  # Propagate so gather captures it and we can detect it below
                     filepath = output_dir / f"{page_num:04d}.{ext}"
                     filepath.write_bytes(data)
+                    if on_file:
+                        await on_file(filepath)
                     logger.debug("[eh_download] page %d: downloaded (%d bytes)", page_num, len(data))
 
                 async with lock:

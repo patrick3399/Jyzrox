@@ -63,6 +63,81 @@ class PixivSourcePlugin(SourcePlugin):
     async def can_handle(self, url: str) -> bool:
         return "pixiv.net" in url
 
+    async def resolve_metadata(
+        self,
+        url: str,
+        credentials: dict | str | None,
+    ) -> GalleryImportData | None:
+        """Resolve Pixiv illustration metadata before download via API."""
+        from services.pixiv_client import PixivClient
+
+        # Extract refresh token
+        if isinstance(credentials, str):
+            refresh_token = credentials
+        elif isinstance(credentials, dict):
+            refresh_token = credentials.get("refresh_token", "")
+        else:
+            return None
+        if not refresh_token:
+            return None
+
+        art_match = _PIXIV_ART_RE.search(url)
+        if not art_match:
+            # User works URLs don't have a single metadata to resolve
+            return None
+
+        illust_id = int(art_match.group(1))
+
+        try:
+            async with PixivClient(refresh_token) as client:
+                detail = await client.illust_detail(illust_id)
+        except Exception as exc:
+            logger.warning("[pixiv] resolve_metadata failed: %s", exc)
+            return None
+
+        if not detail:
+            return None
+
+        # Build metadata dict in the same format as download_pixiv_illust writes
+        tags = detail.get("tags", [])
+        tag_list: list[str] = []
+        for tag in tags:
+            if isinstance(tag, dict):
+                name = tag.get("name", "")
+                if name:
+                    tag_list.append(name)
+                translated = tag.get("translated_name")
+                if translated and translated != name:
+                    tag_list.append(translated)
+            elif isinstance(tag, str):
+                tag_list.append(tag)
+
+        user = detail.get("user", {})
+        posted_ts = 0
+        create_date = detail.get("create_date", "")
+        if create_date:
+            try:
+                from datetime import datetime as _dt
+                posted_ts = int(_dt.fromisoformat(create_date.replace("Z", "+00:00")).timestamp())
+            except (ValueError, TypeError):
+                pass
+
+        metadata_dict = {
+            "title": detail.get("title", f"pixiv_{illust_id}"),
+            "category": "pixiv",
+            "id": str(illust_id),
+            "uploader": user.get("name", ""),
+            "posted": posted_ts,
+            "tags": tag_list,
+            "page_count": detail.get("page_count", 1),
+            "pixiv_user_id": user.get("id"),
+            "pixiv_illust_type": detail.get("type", "illust"),
+            "total_bookmarks": detail.get("total_bookmarks", 0),
+            "total_view": detail.get("total_view", 0),
+        }
+
+        return self.parse_import(Path(f"/tmp/pixiv-{illust_id}"), metadata_dict)
+
     async def download(
         self,
         url: str,
@@ -72,6 +147,8 @@ class PixivSourcePlugin(SourcePlugin):
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
         pause_check: Callable[[], Awaitable[bool]] | None = None,
+        on_file: Callable[[Path], Awaitable[None]] | None = None,
+        options: dict | None = None,
     ) -> DownloadResult:
         """Download a Pixiv artwork or user gallery."""
         from services.pixiv_downloader import download_pixiv_illust, download_pixiv_user_works
@@ -110,6 +187,7 @@ class PixivSourcePlugin(SourcePlugin):
                     on_progress=on_progress,
                     cancel_check=cancel_check,
                     pause_check=pause_check,
+                    on_file=on_file,
                 )
             elif user_match:
                 user_id = int(user_match.group(1))
@@ -120,6 +198,7 @@ class PixivSourcePlugin(SourcePlugin):
                     on_progress=on_progress,
                     cancel_check=cancel_check,
                     pause_check=pause_check,
+                    on_file=on_file,
                 )
             else:
                 return DownloadResult(
