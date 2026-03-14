@@ -21,11 +21,16 @@ import VideoPlayer from './VideoPlayer'
 
 // ── URL resolver ──────────────────────────────────────────────────────
 
-function resolveImageUrl(image: GalleryImage, sourceId: string): string {
+function resolveImageUrl(image: GalleryImage, source: string, sourceId: string): string | null {
   if (image.file_path != null) {
     return image.file_path.replace('/data/', '/media/')
   }
-  return `/api/eh/image-proxy/${sourceId}/${image.page_num}`
+  // Only EH has a browse-level image proxy
+  if (source === 'ehentai') {
+    return `/api/eh/image-proxy/${sourceId}/${image.page_num}`
+  }
+  // Image not yet downloaded — no proxy available
+  return null
 }
 
 // ── Spinner ───────────────────────────────────────────────────────────
@@ -103,6 +108,20 @@ function MediaElement({
   onToggleOverlay?: () => void
   overlayVisible?: boolean
 }) {
+  if (!image.url) {
+    return (
+      <div
+        className={`flex items-center justify-center bg-black/50 ${className ?? ''}`}
+        style={{ minHeight: '200px', minWidth: '200px', ...style }}
+      >
+        <div className="text-center text-white/50">
+          <div className="mx-auto mb-2 h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
+          <p className="text-xs">{t('reader.downloading')}</p>
+        </div>
+      </div>
+    )
+  }
+
   if (image.mediaType === 'video') {
     // VideoPlayer must fill its parent entirely so that the controls overlay anchors
     // to the viewport bottom, not to the middle of a shrink-wrapped box.
@@ -1400,7 +1419,7 @@ export default function Reader({
 
   const images: ReaderImage[] = rawImages.map((img) => ({
     pageNum: img.page_num,
-    url: resolveImageUrl(img, sourceId),
+    url: resolveImageUrl(img, source, sourceId),
     isLocal: img.file_path != null,
     width: img.width ?? undefined,
     height: img.height ?? undefined,

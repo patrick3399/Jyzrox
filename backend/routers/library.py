@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
+import sqlite3
 from datetime import UTC, datetime
 from itertools import combinations
 from typing import Literal
@@ -28,6 +29,20 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["library"])
 
 _member = require_role("member")
+
+
+def _cleanup_archive_entries(archive_keys: list[str]) -> None:
+    """Remove entries from gallery-dl.db so deleted galleries can be re-downloaded."""
+    from pathlib import Path as _Path
+    archive_path = _Path(settings.data_archive_path) / "gallery-dl.db"
+    if not archive_path.exists() or not archive_keys:
+        return
+    conn = sqlite3.connect(str(archive_path))
+    try:
+        conn.executemany("DELETE FROM archive WHERE entry = ?", [(k,) for k in archive_keys])
+        conn.commit()
+    finally:
+        conn.close()
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
@@ -1058,6 +1073,14 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
     # Collect sha256 values
     blob_sha256s = [img.blob_sha256 for img in images]
 
+    # Collect archive keys for gallery-dl.db cleanup
+    gallery_source_map = {g.id: g.source for g in galleries}
+    archive_keys = [
+        f"{gallery_source_map.get(img.gallery_id, '')}{img.filename}"
+        for img in images
+        if img.filename
+    ]
+
     # Decrement ref counts
     for sha256 in blob_sha256s:
         await decrement_ref_count(sha256, db)
@@ -1100,6 +1123,12 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
     except Exception as exc:
         logger.warning("[batch_delete] cleanup failed: %s", exc)
         deleted_count = 0
+
+    if archive_keys:
+        try:
+            await asyncio.to_thread(_cleanup_archive_entries, archive_keys)
+        except Exception as exc:
+            logger.warning("[batch_delete] archive cleanup failed: %s", exc)
 
     return {"status": "ok", "affected": len(galleries), "deleted_dirs": deleted_count}
 
@@ -1332,6 +1361,9 @@ async def delete_gallery(
     # Collect sha256 values for cleanup after commit
     blob_sha256s = [img.blob_sha256 for img in images]
 
+    # Collect archive keys for gallery-dl.db cleanup
+    archive_keys = [f"{g.source}{img.filename}" for img in images if img.filename]
+
     # Decrement ref counts for all blobs
     for sha256 in blob_sha256s:
         await decrement_ref_count(sha256, db)
@@ -1380,6 +1412,12 @@ async def delete_gallery(
     except Exception as exc:
         logger.warning("[delete_gallery] thumbnail/symlink cleanup failed for gallery %d: %s", gallery_id, exc)
         deleted_count = 0
+
+    if archive_keys:
+        try:
+            await asyncio.to_thread(_cleanup_archive_entries, archive_keys)
+        except Exception as exc:
+            logger.warning("[delete_gallery] archive cleanup failed: %s", exc)
 
     return {"status": "ok", "deleted_dirs": deleted_count}
 

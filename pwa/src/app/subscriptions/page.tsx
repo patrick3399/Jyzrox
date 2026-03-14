@@ -1,14 +1,17 @@
 'use client'
 
-import { useState, useEffect } from 'react'
-import { Rss, Plus, X, RefreshCw, Trash2, ExternalLink } from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import { Rss, Plus, X, RefreshCw, Trash2, ExternalLink, Download, CheckCircle, AlertCircle } from 'lucide-react'
 import { toast } from 'sonner'
+import Link from 'next/link'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useWs } from '@/lib/ws'
-import { useSubscriptions, useCreateSubscription, useUpdateSubscription, useDeleteSubscription, useCheckSubscription, useSubscriptionPreview } from '@/hooks/useSubscriptions'
+import { useSubscriptions, useCreateSubscription, useUpdateSubscription, useDeleteSubscription, useCheckSubscription } from '@/hooks/useSubscriptions'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import type { Subscription } from '@/lib/types'
+import { api } from '@/lib/api'
+import type { Subscription, DownloadJob } from '@/lib/types'
+import useSWR from 'swr'
 
 const SOURCE_COLORS: Record<string, string> = {
   pixiv: 'bg-blue-500/20 text-blue-400',
@@ -25,20 +28,6 @@ function sourceBadge(source: string | null) {
     : source
     : t('subscriptions.sourceOther')
   return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${cls}`}>{label}</span>
-}
-
-function statusBadge(status: string) {
-  const cls =
-    status === 'ok' ? 'text-green-400'
-    : status === 'failed' ? 'text-red-400'
-    : status === 'pending' ? 'text-yellow-400'
-    : 'text-vault-text-muted'
-  const label =
-    status === 'ok' ? t('subscriptions.statusOk')
-    : status === 'failed' ? t('subscriptions.statusFailed')
-    : status === 'pending' ? t('subscriptions.statusPending')
-    : status
-  return <span className={`text-[10px] font-medium ${cls}`}>{label}</span>
 }
 
 function timeAgo(iso: string | null): string {
@@ -60,6 +49,151 @@ const CRON_PRESETS = [
   { label: 'Daily', value: '0 0 * * *' },
 ]
 
+function JobStatusBadge({ job }: { job: DownloadJob }) {
+  if (job.status === 'running') {
+    const pct = job.progress?.percent ?? 0
+    return (
+      <div className="mt-2">
+        <div className="flex items-center justify-between text-[10px] text-vault-text-muted mb-1">
+          <span className="text-blue-400 flex items-center gap-1">
+            <Download size={10} />
+            {t('subscriptions.downloading')}
+          </span>
+          <span>{pct}%{job.progress?.downloaded != null && job.progress?.total != null ? ` (${job.progress.downloaded}/${job.progress.total})` : ''}</span>
+        </div>
+        <div className="h-1.5 bg-vault-border rounded-full overflow-hidden">
+          <div
+            className="h-full bg-blue-500 rounded-full transition-all duration-300"
+            style={{ width: `${pct}%` }}
+          />
+        </div>
+      </div>
+    )
+  }
+  if (job.status === 'done') {
+    const gallerySource = job.gallery_source
+    const gallerySourceId = job.gallery_source_id
+    return (
+      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
+        <CheckCircle size={12} className="text-green-400" />
+        <span className="text-green-400">{t('subscriptions.downloadComplete')}</span>
+        {gallerySource && gallerySourceId && (
+          <Link
+            href={`/library/${encodeURIComponent(gallerySource)}/${encodeURIComponent(gallerySourceId)}`}
+            className="text-vault-accent hover:underline ml-1"
+          >
+            {t('subscriptions.viewGallery')}
+          </Link>
+        )}
+      </div>
+    )
+  }
+  if (job.status === 'failed') {
+    return (
+      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
+        <AlertCircle size={12} className="text-red-400" />
+        <span className="text-red-400 truncate" title={job.error || undefined}>
+          {job.error || t('subscriptions.downloadFailed')}
+        </span>
+      </div>
+    )
+  }
+  if (job.status === 'queued') {
+    return (
+      <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-vault-text-muted">
+        <Download size={10} />
+        <span>{t('subscriptions.queued')}</span>
+      </div>
+    )
+  }
+  return null
+}
+
+function SubscriptionCard({
+  sub,
+  latestJob,
+  onToggle,
+  onCheck,
+  onDelete,
+  checkingId,
+}: {
+  sub: Subscription
+  latestJob: DownloadJob | null
+  onToggle: (sub: Subscription) => void
+  onCheck: (sub: Subscription) => void
+  onDelete: (sub: Subscription) => void
+  checkingId: number | null
+}) {
+  return (
+    <div className="bg-vault-card border border-vault-border rounded-xl p-3">
+      <div className="flex items-start justify-between gap-3">
+        <div className="flex-1 min-w-0">
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-sm font-medium text-vault-text truncate">
+              {sub.name || sub.url}
+            </span>
+            {sourceBadge(sub.source)}
+            {!sub.enabled && (
+              <span className="text-[10px] px-1.5 py-0.5 rounded bg-vault-border text-vault-text-muted">
+                {t('subscriptions.disabled')}
+              </span>
+            )}
+          </div>
+          {sub.name && (
+            <p className="text-xs text-vault-text-muted truncate mb-1">{sub.url}</p>
+          )}
+          <div className="flex flex-wrap items-center gap-3 text-[10px] text-vault-text-muted">
+            {sub.cron_expr && <span className="font-mono">{sub.cron_expr}</span>}
+            {sub.last_checked_at && (
+              <span>{t('subscriptions.lastChecked')}: {timeAgo(sub.last_checked_at)}</span>
+            )}
+            {sub.auto_download && (
+              <span className="text-vault-accent">{t('subscriptions.autoDownload')}</span>
+            )}
+          </div>
+          {sub.last_error && !latestJob && (
+            <p className="text-[10px] text-red-400 mt-1 truncate" title={sub.last_error}>
+              {sub.last_error}
+            </p>
+          )}
+          {latestJob && <JobStatusBadge job={latestJob} />}
+        </div>
+
+        <div className="flex items-center gap-1 shrink-0">
+          <button
+            onClick={() => onToggle(sub)}
+            className={`relative w-9 h-5 rounded-full transition-colors ${sub.enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
+          >
+            <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${sub.enabled ? 'translate-x-4' : ''}`} />
+          </button>
+          <button
+            onClick={() => onCheck(sub)}
+            disabled={checkingId === sub.id}
+            className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
+            title={t('subscriptions.downloadNow')}
+          >
+            <RefreshCw size={14} className={checkingId === sub.id ? 'animate-spin' : ''} />
+          </button>
+          <a
+            href={sub.url}
+            target="_blank"
+            rel="noopener noreferrer"
+            className="p-1.5 rounded text-vault-text-muted hover:text-vault-text transition-colors"
+          >
+            <ExternalLink size={14} />
+          </a>
+          <button
+            onClick={() => onDelete(sub)}
+            className="p-1.5 rounded text-vault-text-muted hover:text-red-400 transition-colors"
+          >
+            <Trash2 size={14} />
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 export default function SubscriptionsPage() {
   useLocale()
   const { data, mutate, isLoading } = useSubscriptions()
@@ -67,13 +201,68 @@ export default function SubscriptionsPage() {
   const { trigger: updateSub } = useUpdateSubscription()
   const { trigger: deleteSub } = useDeleteSubscription()
   const { trigger: checkSub } = useCheckSubscription()
-  const { lastBatchUpdate } = useWs()
+  const { lastSubCheck, lastJobUpdate } = useWs()
+
+  // Fetch latest job for each subscription that has a last_job_id
+  const subIds = useMemo(() =>
+    (data?.subscriptions ?? []).filter(s => s.last_job_id).map(s => s.id),
+    [data?.subscriptions]
+  )
+
+  const { data: jobsData, mutate: mutateJobs } = useSWR(
+    subIds.length > 0 ? ['sub-jobs', ...subIds] : null,
+    async () => {
+      const results: Record<number, DownloadJob> = {}
+      // Fetch the latest job for each sub in parallel
+      const promises = (data?.subscriptions ?? [])
+        .filter(s => s.last_job_id)
+        .map(async (s) => {
+          try {
+            const res = await api.subscriptions.jobs(s.id, 1)
+            if (res.jobs.length > 0) {
+              results[s.id] = res.jobs[0]
+            }
+          } catch { /* ignore */ }
+        })
+      await Promise.all(promises)
+      return results
+    },
+    { refreshInterval: 5000 },
+  )
 
   useEffect(() => {
-    if (lastBatchUpdate?.phase === 'done') {
+    if (lastSubCheck) {
       mutate()
+      mutateJobs()
     }
-  }, [lastBatchUpdate, mutate])
+  }, [lastSubCheck, mutate, mutateJobs])
+
+  useEffect(() => {
+    if (!lastJobUpdate) return
+    // Optimistically update the matching job in cache so the progress bar animates
+    // immediately without waiting for an HTTP round-trip.
+    mutateJobs((prev) => {
+      if (!prev) return prev
+      const updated = { ...prev }
+      for (const [subIdStr, job] of Object.entries(updated)) {
+        if (job.id === lastJobUpdate.job_id) {
+          updated[Number(subIdStr)] = {
+            ...job,
+            status: lastJobUpdate.status as DownloadJob['status'],
+            progress: lastJobUpdate.progress != null
+              ? (lastJobUpdate.progress as DownloadJob['progress'])
+              : job.progress,
+          }
+          break
+        }
+      }
+      return updated
+    }, { revalidate: false })
+    // On terminal states do a real re-fetch to pick up gallery_source / gallery_source_id.
+    if (['done', 'failed', 'partial'].includes(lastJobUpdate.status)) {
+      mutateJobs()
+    }
+  }, [lastJobUpdate, mutateJobs])
 
   const [showAdd, setShowAdd] = useState(false)
   const [url, setUrl] = useState('')
@@ -81,35 +270,17 @@ export default function SubscriptionsPage() {
   const [autoDownload, setAutoDownload] = useState(true)
   const [cronExpr, setCronExpr] = useState('0 */2 * * *')
   const [checkingId, setCheckingId] = useState<number | null>(null)
-  const [debouncedUrl, setDebouncedUrl] = useState('')
-  const [showConfirm, setShowConfirm] = useState(false)
 
-  useEffect(() => {
-    const timer = setTimeout(() => setDebouncedUrl(url), 800)
-    return () => clearTimeout(timer)
-  }, [url])
-
-  const { data: preview, isLoading: previewLoading } = useSubscriptionPreview(debouncedUrl)
-
-  const handleAdd = async (forceAutoDownload?: boolean) => {
+  const handleAdd = async () => {
     if (!url.trim()) return
-
-    // Show confirm dialog for bulk downloads
-    const effectiveAutoDownload = forceAutoDownload !== undefined ? forceAutoDownload : autoDownload
-    if (forceAutoDownload === undefined && autoDownload && preview && preview.count > 10) {
-      setShowConfirm(true)
-      return
-    }
-
     try {
-      await createSub({ url: url.trim(), name: name.trim() || undefined, auto_download: effectiveAutoDownload, cron_expr: cronExpr })
+      await createSub({ url: url.trim(), name: name.trim() || undefined, auto_download: autoDownload, cron_expr: cronExpr })
       toast.success(t('subscriptions.added'))
       setUrl('')
       setName('')
       setAutoDownload(true)
       setCronExpr('0 */2 * * *')
       setShowAdd(false)
-      setShowConfirm(false)
       mutate()
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('subscriptions.addFailed'))
@@ -141,7 +312,7 @@ export default function SubscriptionsPage() {
     setCheckingId(sub.id)
     try {
       await checkSub(sub.id)
-      toast.success(t('subscriptions.checked'))
+      toast.success(t('subscriptions.downloadQueued'))
       mutate()
     } catch {
       toast.error(t('subscriptions.checkFailed'))
@@ -167,7 +338,7 @@ export default function SubscriptionsPage() {
         </button>
       </div>
 
-      {/* Add form */}
+      {/* Add form — simplified (no preview) */}
       {showAdd && (
         <div className="bg-vault-card border border-vault-border rounded-xl p-4 mb-6 space-y-3">
           <div>
@@ -181,23 +352,6 @@ export default function SubscriptionsPage() {
               autoFocus
             />
           </div>
-          {/* Preview */}
-          {debouncedUrl.trim().length > 10 && (
-            <div className="flex items-center gap-2 text-xs">
-              {previewLoading ? (
-                <span className="text-vault-text-muted animate-pulse">{t('subscriptions.previewLoading')}</span>
-              ) : preview?.error === 'unsupported' ? (
-                <span className="text-red-400">{t('subscriptions.previewUnsupported')}</span>
-              ) : preview && preview.count > 0 ? (
-                <span className="text-green-400">
-                  {t('subscriptions.previewCount', { count: String(preview.count) })}
-                  {preview.source && <> · {sourceBadge(preview.source)}</>}
-                </span>
-              ) : preview ? (
-                <span className="text-yellow-400">{t('subscriptions.previewNoResults')}</span>
-              ) : null}
-            </div>
-          )}
           <div>
             <label className="text-xs text-vault-text-muted block mb-1">{t('subscriptions.name')}</label>
             <input
@@ -232,46 +386,12 @@ export default function SubscriptionsPage() {
             </div>
           </div>
           <button
-            onClick={() => handleAdd()}
+            onClick={handleAdd}
             disabled={creating || !url.trim()}
             className="px-4 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
           >
             {creating ? t('subscriptions.adding') : t('subscriptions.add')}
           </button>
-        </div>
-      )}
-
-      {/* Confirm bulk download dialog */}
-      {showConfirm && (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
-          <div className="bg-vault-card border border-vault-border rounded-xl p-6 max-w-sm w-full space-y-4">
-            <h3 className="text-base font-semibold text-vault-text">{t('subscriptions.confirmTitle')}</h3>
-            <p className="text-sm text-vault-text-muted">
-              {t('subscriptions.confirmMessage', { count: String(preview?.count ?? 0) })}
-            </p>
-            <div className="flex gap-2">
-              <button
-                onClick={() => handleAdd(true)}
-                disabled={creating}
-                className="flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
-              >
-                {t('subscriptions.confirmDownloadAll')}
-              </button>
-              <button
-                onClick={() => handleAdd(false)}
-                disabled={creating}
-                className="flex-1 px-3 py-2 rounded-lg text-sm font-medium bg-vault-card border border-vault-border text-vault-text hover:bg-vault-card-hover transition-colors disabled:opacity-50"
-              >
-                {t('subscriptions.confirmMonitorOnly')}
-              </button>
-            </div>
-            <button
-              onClick={() => setShowConfirm(false)}
-              className="w-full px-3 py-1.5 text-xs text-vault-text-muted hover:text-vault-text transition-colors"
-            >
-              {t('common.cancel')}
-            </button>
-          </div>
         </div>
       )}
 
@@ -287,103 +407,15 @@ export default function SubscriptionsPage() {
       ) : (
         <div className="space-y-2">
           {data.subscriptions.map((sub) => (
-            <div key={sub.id} className="bg-vault-card border border-vault-border rounded-xl p-3">
-              <div className="flex items-start justify-between gap-3">
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center gap-2 mb-1">
-                    <span className="text-sm font-medium text-vault-text truncate">
-                      {sub.name || sub.url}
-                    </span>
-                    {sourceBadge(sub.source)}
-                    {statusBadge(sub.last_status)}
-                    {!sub.enabled && (
-                      <span className="text-[10px] px-1.5 py-0.5 rounded bg-vault-border text-vault-text-muted">
-                        {t('subscriptions.disabled')}
-                      </span>
-                    )}
-                  </div>
-                  {sub.name && (
-                    <p className="text-xs text-vault-text-muted truncate mb-1">{sub.url}</p>
-                  )}
-                  <div className="flex flex-wrap items-center gap-3 text-[10px] text-vault-text-muted">
-                    {sub.cron_expr && <span className="font-mono">{sub.cron_expr}</span>}
-                    {sub.last_checked_at && (
-                      <span>{t('subscriptions.lastChecked')}: {timeAgo(sub.last_checked_at)}</span>
-                    )}
-                    {sub.auto_download && (
-                      <span className="text-vault-accent">{t('subscriptions.autoDownload')}</span>
-                    )}
-                  </div>
-                  {sub.last_error && (
-                    <p className="text-[10px] text-red-400 mt-1 truncate" title={sub.last_error}>
-                      {sub.last_error}
-                    </p>
-                  )}
-                  {/* Batch progress */}
-                  {(() => {
-                    const batch = lastBatchUpdate?.sub_id === sub.id && lastBatchUpdate?.phase === 'enqueuing'
-                      ? lastBatchUpdate
-                      : sub.batch_total > 0 && sub.batch_enqueued < sub.batch_total
-                      ? { total: sub.batch_total, enqueued: sub.batch_enqueued, failed: 0, phase: 'enqueuing' as const }
-                      : null
-                    if (!batch) return null
-                    const pct = batch.total > 0 ? Math.round((batch.enqueued / batch.total) * 100) : 0
-                    return (
-                      <div className="mt-2">
-                        <div className="flex items-center justify-between text-[10px] text-vault-text-muted mb-1">
-                          <span>{t('subscriptions.batchEnqueuing')}</span>
-                          <span>
-                            {t('subscriptions.batchProgress', { enqueued: String(batch.enqueued), total: String(batch.total) })}
-                            {batch.failed > 0 && (
-                              <span className="text-red-400 ml-1">
-                                ({t('subscriptions.batchFailed', { failed: String(batch.failed) })})
-                              </span>
-                            )}
-                          </span>
-                        </div>
-                        <div className="h-1.5 bg-vault-border rounded-full overflow-hidden">
-                          <div
-                            className="h-full bg-vault-accent rounded-full transition-all duration-300"
-                            style={{ width: `${pct}%` }}
-                          />
-                        </div>
-                      </div>
-                    )
-                  })()}
-                </div>
-
-                <div className="flex items-center gap-1 shrink-0">
-                  <button
-                    onClick={() => handleToggle(sub)}
-                    className={`relative w-9 h-5 rounded-full transition-colors ${sub.enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
-                  >
-                    <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${sub.enabled ? 'translate-x-4' : ''}`} />
-                  </button>
-                  <button
-                    onClick={() => handleCheck(sub)}
-                    disabled={checkingId === sub.id}
-                    className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
-                    title={t('subscriptions.checkNow')}
-                  >
-                    <RefreshCw size={14} className={checkingId === sub.id ? 'animate-spin' : ''} />
-                  </button>
-                  <a
-                    href={sub.url}
-                    target="_blank"
-                    rel="noopener noreferrer"
-                    className="p-1.5 rounded text-vault-text-muted hover:text-vault-text transition-colors"
-                  >
-                    <ExternalLink size={14} />
-                  </a>
-                  <button
-                    onClick={() => handleDelete(sub)}
-                    className="p-1.5 rounded text-vault-text-muted hover:text-red-400 transition-colors"
-                  >
-                    <Trash2 size={14} />
-                  </button>
-                </div>
-              </div>
-            </div>
+            <SubscriptionCard
+              key={sub.id}
+              sub={sub}
+              latestJob={jobsData?.[sub.id] ?? null}
+              onToggle={handleToggle}
+              onCheck={handleCheck}
+              onDelete={handleDelete}
+              checkingId={checkingId}
+            />
           ))}
         </div>
       )}

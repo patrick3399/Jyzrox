@@ -149,6 +149,7 @@ export interface DownloadJob {
   gallery_id?: number | null
   gallery_source?: string
   gallery_source_id?: string
+  subscription_id?: number | null
   progress: {
     percent?: number
     downloaded?: number
@@ -307,20 +308,16 @@ export interface CacheStats {
 // ── WebSocket ────────────────────────────────────────────────────────
 
 export interface WsMessage {
-  type: 'alert' | 'ping' | 'job_update' | 'subscription_batch'
+  type: 'alert' | 'ping' | 'job_update' | 'subscription_checked'
   message?: string
   ts?: string
   // job_update fields:
   job_id?: string
   status?: string
   progress?: Record<string, unknown>
-  // subscription_batch fields:
+  // subscription_checked fields:
   sub_id?: number
-  sub_name?: string | null
-  total?: number
-  enqueued?: number
-  failed?: number
-  phase?: 'enqueuing' | 'done'
+  new_works?: number
   user_id?: number
 }
 
@@ -526,16 +523,7 @@ export interface Subscription {
   last_error: string | null
   next_check_at: string | null
   created_at: string | null
-  batch_total: number
-  batch_enqueued: number
-}
-
-export interface SubscriptionPreview {
-  count: number
-  source: string | null
-  source_id: string | null
-  samples: Array<{ url: string; title: string }>
-  error?: string
+  last_job_id: string | null
 }
 
 // ── File Explorer ────────────────────────────────────────────────────

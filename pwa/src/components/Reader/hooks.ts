@@ -188,6 +188,7 @@ export function useSequentialPrefetch(
         // Each request has a timeout; on timeout it is treated as done and the
         // chain continues to the next page so a slow image never blocks the queue.
         if (inflightCountRef.current >= PROXY_PREFETCH_CONCURRENCY) return
+        if (!img.url) return // skip un-downloaded images — no proxy available
 
         inflightCountRef.current += 1
         const capturedEpoch = epochRef.current
@@ -221,6 +222,7 @@ export function useSequentialPrefetch(
         el.src = img.url
       } else {
         // Local mode: fire-and-forget (concurrent, up to 3 ahead from caller)
+        if (!img.url) return // skip un-downloaded images
         const el = new window.Image()
         activeImagesRef.current.add(el)
         el.onload = el.onerror = () => {

@@ -13,7 +13,6 @@ from plugins.base import (
     HasMeta,
     Parseable,
     SourcePlugin,
-    Subscribable,
     Taggable,
     TaggerPlugin,
 )
@@ -35,7 +34,6 @@ class PluginRegistry:
         self._downloadable: dict[str, Any] = {}
         self._browsable: dict[str, Any] = {}
         self._parseable: dict[str, Any] = {}
-        self._subscribable: dict[str, Any] = {}
         self._credential_providers: dict[str, Any] = {}
         self._taggable: dict[str, Any] = {}
         self._site_index: dict[str, SiteInfo] = {}
@@ -69,8 +67,6 @@ class PluginRegistry:
             self._browsable[sid] = plugin
         if isinstance(plugin, Parseable):
             self._parseable[sid] = plugin
-        if isinstance(plugin, Subscribable):
-            self._subscribable[sid] = plugin
         if isinstance(plugin, CredentialProvider):
             self._credential_providers[sid] = plugin
         if isinstance(plugin, Taggable):
@@ -160,12 +156,6 @@ class PluginRegistry:
         """Return the Parseable plugin for the given source_id, or None."""
         return self._parseable.get(source_id)
 
-    def get_subscribable(self, source_id: str) -> Any:
-        return self._subscribable.get(source_id)
-
-    def list_subscribable(self) -> list[str]:
-        return list(self._subscribable)
-
     def get_credential_provider(self, source_id: str) -> Any:
         return self._credential_providers.get(source_id)
 
@@ -175,11 +165,6 @@ class PluginRegistry:
             if hasattr(plugin, "credential_flows"):
                 result.append((sid, plugin.credential_flows()))
         return result
-
-    def register_subscribable_proxy(self, source_id: str, subscribable: Any) -> None:
-        """Register a Subscribable proxy for a source that doesn't have a full plugin."""
-        self._subscribable[source_id] = subscribable
-        logger.info("Registered subscribable proxy: %s", source_id)
 
     def get_browse_routers(self) -> list[tuple[str, Any]]:
         result = []

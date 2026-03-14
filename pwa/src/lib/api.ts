@@ -42,7 +42,6 @@ import type {
   LibraryFile,
   ScheduledTask,
   Subscription,
-  SubscriptionPreview,
   DedupStats,
   DedupReviewResponse,
   DedupScanProgress,
@@ -1054,11 +1053,8 @@ const subscriptions = {
       method: 'POST',
     }),
 
-  preview: (url: string) =>
-    apiFetch<SubscriptionPreview>('/api/subscriptions/preview', {
-      method: 'POST',
-      body: JSON.stringify({ url }),
-    }),
+  jobs: (id: number, limit = 10) =>
+    apiFetch<{ jobs: DownloadJob[] }>(`/api/subscriptions/${id}/jobs${qs({ limit })}`),
 }
 
 // ── Dedup ────────────────────────────────────────────────────────────

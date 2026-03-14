@@ -475,6 +475,7 @@ def _j(j: DownloadJob, gallery: Gallery | None = None) -> dict:
         "max_retries": j.max_retries,
         "next_retry_at": j.next_retry_at.isoformat() if j.next_retry_at else None,
         "gallery_id": j.gallery_id,
+        "subscription_id": j.subscription_id,
     }
     if gallery:
         d["gallery_source"] = gallery.source

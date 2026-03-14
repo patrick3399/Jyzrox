@@ -3,7 +3,6 @@ Tests for EH subscription functionality.
 
 Covers:
 - check_eh_new_works() from plugins.builtin.ehentai._subscribe
-- _extract_source_id() from routers.subscriptions
 
 EhClient is mocked as an async context manager throughout; no network calls
 are made.  Redis and settings are patched so the lazy imports inside
@@ -506,81 +505,3 @@ class TestCheckEhNewWorksEdgeCases:
         expected_dt = datetime.fromtimestamp(posted_ts, tz=timezone.utc)
         assert work.posted_at == expected_dt
 
-
-# ---------------------------------------------------------------------------
-# _extract_source_id — EH URL pattern extraction
-# ---------------------------------------------------------------------------
-
-
-class TestExtractSourceIdEhentai:
-    """Unit tests for _extract_source_id() with EH URL formats."""
-
-    def _call(self, url: str) -> str | None:
-        from routers.subscriptions import _extract_source_id
-        return _extract_source_id(url, "ehentai")
-
-    def test_extract_source_id_ehentai_f_search(self):
-        assert self._call("https://e-hentai.org/?f_search=uploader:Foo") == "uploader:Foo"
-
-    def test_extract_source_id_ehentai_tag(self):
-        assert self._call("https://e-hentai.org/tag/female:catgirl") == "female:catgirl"
-
-    def test_extract_source_id_ehentai_uploader(self):
-        assert self._call("https://e-hentai.org/uploader/SomeUser") == "uploader:SomeUser"
-
-    def test_extract_source_id_exhentai(self):
-        assert self._call("https://exhentai.org/?f_search=female:catgirl") == "female:catgirl"
-
-    def test_extract_source_id_ehentai_tag_with_plus(self):
-        """Literal '+' in tag path should remain as '+' (not decoded to space)."""
-        assert self._call("https://e-hentai.org/tag/female:cat+girl") == "female:cat+girl"
-
-    def test_extract_source_id_ehentai_tag_percent_encoded(self):
-        """Percent-encoded characters in tag path should be decoded."""
-        assert self._call("https://e-hentai.org/tag/female%3Acatgirl") == "female:catgirl"
-
-    def test_extract_source_id_ehentai_uploader_percent_encoded(self):
-        """Percent-encoded characters in uploader path should be decoded."""
-        assert self._call("https://e-hentai.org/uploader/Some%20User") == "uploader:Some User"
-
-    def test_extract_source_id_ehentai_no_match(self):
-        """Root URL with no recognized pattern should return None."""
-        assert self._call("https://e-hentai.org/") is None
-
-    def test_extract_source_id_ehentai_f_search_multiword(self):
-        """Multi-word f_search query should be returned verbatim."""
-        assert self._call("https://e-hentai.org/?f_search=language:english+female:catgirl") == \
-            "language:english female:catgirl"
-
-    def test_extract_source_id_ehentai_exhentai_tag(self):
-        """exhentai.org/tag/ path should be parsed the same as e-hentai.org/tag/."""
-        assert self._call("https://exhentai.org/tag/male:yaoi") == "male:yaoi"
-
-    def test_extract_source_id_ehentai_exhentai_uploader(self):
-        """exhentai.org/uploader/ path should be parsed like e-hentai.org/uploader/."""
-        assert self._call("https://exhentai.org/uploader/ArtistX") == "uploader:ArtistX"
-
-
-# ---------------------------------------------------------------------------
-# _extract_source_id — other sources (for completeness / non-regression)
-# ---------------------------------------------------------------------------
-
-
-class TestExtractSourceIdOtherSources:
-    """Verify that non-EH source parsing still works and EH returns None for pixiv URLs."""
-
-    def test_extract_source_id_pixiv_user(self):
-        from routers.subscriptions import _extract_source_id
-        result = _extract_source_id("https://www.pixiv.net/en/users/12345678", "pixiv")
-        assert result == "12345678"
-
-    def test_extract_source_id_pixiv_no_user(self):
-        from routers.subscriptions import _extract_source_id
-        result = _extract_source_id("https://www.pixiv.net/", "pixiv")
-        assert result is None
-
-    def test_extract_source_id_ehentai_source_with_pixiv_url_returns_none(self):
-        """Pixiv URL passed with source='ehentai' should return None — wrong URL format."""
-        from routers.subscriptions import _extract_source_id
-        result = _extract_source_id("https://www.pixiv.net/en/users/99999", "ehentai")
-        assert result is None

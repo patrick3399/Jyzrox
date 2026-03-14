@@ -1,10 +1,7 @@
 """Subscription management endpoints."""
 
-import json
 import logging
-import re
 from datetime import UTC, datetime
-from urllib.parse import parse_qs, unquote, urlparse
 
 from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
@@ -15,48 +12,13 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth, require_role
 from core.database import async_session
-from core.redis_client import get_redis
 from core.utils import detect_source
 from db.models import Subscription
-from plugins.registry import plugin_registry
-from services.credential import get_credential
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["subscriptions"])
 
 _member = require_role("member")
-
-
-def _extract_source_id(url: str, source: str) -> str | None:
-    """Extract artist/user ID from URL for subscription tracking."""
-    from plugins.builtin.gallery_dl._sites import get_site_config
-
-    parsed = urlparse(url)
-
-    # EH has complex multi-strategy extraction — keep as special case
-    if source == "ehentai":
-        qs = parse_qs(parsed.query)
-        f_search = qs.get("f_search", [None])[0]
-        if f_search:
-            return f_search.strip()
-        tag_match = re.match(r"/tag/(.+?)/?$", parsed.path)
-        if tag_match:
-            return unquote(tag_match.group(1))
-        uploader_match = re.match(r"/uploader/(.+?)/?$", parsed.path)
-        if uploader_match:
-            return f"uploader:{unquote(uploader_match.group(1))}"
-        return None
-
-    # Data-driven extraction for all other sites
-    cfg = get_site_config(source)
-    if not cfg.subscribe_id_pattern:
-        return None
-    m = re.search(cfg.subscribe_id_pattern, parsed.path)
-    if not m:
-        return None
-    if cfg.subscribe_id_format:
-        return cfg.subscribe_id_format.format(*([''] + list(m.groups())))
-    return m.group(1)
 
 
 class CreateSubscriptionRequest(BaseModel):
@@ -117,10 +79,9 @@ async def list_subscriptions(
                 "last_item_id": s.last_item_id,
                 "last_status": s.last_status,
                 "last_error": s.last_error,
+                "last_job_id": str(s.last_job_id) if s.last_job_id else None,
                 "next_check_at": s.next_check_at.isoformat() if s.next_check_at else None,
                 "created_at": s.created_at.isoformat() if s.created_at else None,
-                "batch_total": s.batch_total,
-                "batch_enqueued": s.batch_enqueued,
             }
             for s in subs
         ],
@@ -138,7 +99,6 @@ async def create_subscription(
     source: str | None = detect_source(req.url)
     if source == "unknown":
         source = None
-    source_id = _extract_source_id(req.url, source) if source else None
 
     if req.cron_expr:
         try:
@@ -152,7 +112,7 @@ async def create_subscription(
             url=req.url,
             name=req.name,
             source=source,
-            source_id=source_id,
+            source_id=None,
             auto_download=req.auto_download,
             cron_expr=req.cron_expr or "0 */2 * * *",
         ).on_conflict_do_update(
@@ -170,60 +130,6 @@ async def create_subscription(
         await session.commit()
 
     return {"status": "ok", "id": row.id if row else None, "source": source}
-
-
-class PreviewRequest(BaseModel):
-    url: str
-
-
-@router.post("/preview")
-async def preview_subscription(req: PreviewRequest, auth: dict = Depends(_member)):
-    """Dry-run check for a subscription URL — returns work count and samples without saving."""
-    _unsupported = {"count": 0, "source": None, "source_id": None, "samples": [], "error": "unsupported"}
-
-    source: str | None = detect_source(req.url)
-    if not source or source == "unknown":
-        return _unsupported
-
-    source_id = _extract_source_id(req.url, source)
-    if not source_id:
-        return _unsupported
-
-    # Check Redis cache
-    redis = get_redis()
-    cache_key = f"subscription:preview:{source}:{source_id}"
-    cached = await redis.get(cache_key)
-    if cached:
-        return json.loads(cached)
-
-    subscribable = plugin_registry.get_subscribable(source)
-    if not subscribable:
-        return _unsupported
-
-    cred_raw = await get_credential(source)
-    credentials: dict | None = json.loads(cred_raw) if cred_raw is not None else None
-
-    try:
-        works = await subscribable.check_new_works(source_id, None, credentials)
-    except Exception as exc:
-        logger.warning("preview_subscription check_new_works failed for %s/%s: %s", source, source_id, exc)
-        return {
-            "count": 0,
-            "source": source,
-            "source_id": source_id,
-            "samples": [],
-            "error": str(exc),
-        }
-
-    result = {
-        "count": len(works),
-        "source": source,
-        "source_id": source_id,
-        "samples": [{"url": w.url, "title": w.title} for w in works[:5]],
-    }
-
-    await redis.set(cache_key, json.dumps(result), ex=300)
-    return result
 
 
 @router.get("/{sub_id}")
@@ -255,11 +161,48 @@ async def get_subscription(
         "last_item_id": sub.last_item_id,
         "last_status": sub.last_status,
         "last_error": sub.last_error,
+        "last_job_id": str(sub.last_job_id) if sub.last_job_id else None,
         "next_check_at": sub.next_check_at.isoformat() if sub.next_check_at else None,
         "created_at": sub.created_at.isoformat() if sub.created_at else None,
-        "batch_total": sub.batch_total,
-        "batch_enqueued": sub.batch_enqueued,
     }
+
+
+@router.get("/{sub_id}/jobs")
+async def get_subscription_jobs(
+    sub_id: int,
+    limit: int = Query(default=10, ge=1, le=50),
+    auth: dict = Depends(require_auth),
+):
+    """Get download jobs linked to a subscription."""
+    from db.models import DownloadJob, Gallery
+    from routers.download import _j
+
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        # Verify ownership
+        sub = (await session.execute(
+            select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == user_id)
+        )).scalar_one_or_none()
+        if not sub:
+            raise HTTPException(status_code=404, detail="Subscription not found")
+
+        # Get linked jobs
+        stmt = (
+            select(DownloadJob)
+            .where(DownloadJob.subscription_id == sub_id)
+            .order_by(DownloadJob.created_at.desc())
+            .limit(limit)
+        )
+        jobs = (await session.execute(stmt)).scalars().all()
+
+        # Load galleries for jobs that have a gallery_id
+        gallery_ids = [j.gallery_id for j in jobs if j.gallery_id]
+        gallery_map = {}
+        if gallery_ids:
+            gs = (await session.execute(select(Gallery).where(Gallery.id.in_(gallery_ids)))).scalars().all()
+            gallery_map = {g.id: g for g in gs}
+
+    return {"jobs": [_j(j, gallery_map.get(j.gallery_id)) for j in jobs]}
 
 
 @router.patch("/{sub_id}")
@@ -323,23 +266,6 @@ async def delete_subscription(
     if not deleted:
         raise HTTPException(status_code=404, detail="Subscription not found")
     return {"status": "ok"}
-
-
-@router.get("/{sub_id}/batch-progress")
-async def get_batch_progress(sub_id: int, auth: dict = Depends(require_auth)):
-    """Get real-time batch enqueue progress from Redis."""
-    from core.redis_client import get_redis
-    redis = get_redis()
-    data = await redis.hgetall(f"subscription:batch:{sub_id}")
-    if not data:
-        return {"active": False}
-    return {
-        "active": True,
-        "total": int(data.get(b"total", 0)),
-        "enqueued": int(data.get(b"enqueued", 0)),
-        "failed": int(data.get(b"failed", 0)),
-        "started_at": (data.get(b"started_at") or b"").decode(),
-    }
 
 
 @router.post("/{sub_id}/check")

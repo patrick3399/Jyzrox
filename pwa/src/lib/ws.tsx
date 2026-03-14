@@ -8,13 +8,11 @@ export interface JobUpdateEvent {
   progress: Record<string, unknown> | null
 }
 
-export interface BatchUpdateEvent {
+export interface SubCheckEvent {
   sub_id: number
-  sub_name: string | null
-  total: number
-  enqueued: number
-  failed: number
-  phase: 'enqueuing' | 'done'
+  status: string
+  new_works: number
+  job_id: string | null
 }
 
 interface WsContextValue {
@@ -22,7 +20,7 @@ interface WsContextValue {
   connected: boolean
   dismissAlert: (index: number) => void
   lastJobUpdate: JobUpdateEvent | null
-  lastBatchUpdate: BatchUpdateEvent | null
+  lastSubCheck: SubCheckEvent | null
 }
 
 const WsContext = createContext<WsContextValue>({
@@ -30,14 +28,14 @@ const WsContext = createContext<WsContextValue>({
   connected: false,
   dismissAlert: () => {},
   lastJobUpdate: null,
-  lastBatchUpdate: null,
+  lastSubCheck: null,
 })
 
 export function WsProvider({ children }: { children: React.ReactNode }) {
   const [alerts, setAlerts] = useState<string[]>([])
   const [connected, setConnected] = useState(false)
   const [lastJobUpdate, setLastJobUpdate] = useState<JobUpdateEvent | null>(null)
-  const [lastBatchUpdate, setLastBatchUpdate] = useState<BatchUpdateEvent | null>(null)
+  const [lastSubCheck, setLastSubCheck] = useState<SubCheckEvent | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const mountedRef = useRef(true)
@@ -62,14 +60,12 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             status: msg.status ?? '',
             progress: msg.progress ?? null,
           })
-        } else if (msg.type === 'subscription_batch' && msg.sub_id) {
-          setLastBatchUpdate({
+        } else if (msg.type === 'subscription_checked' && msg.sub_id) {
+          setLastSubCheck({
             sub_id: msg.sub_id,
-            sub_name: msg.sub_name ?? null,
-            total: msg.total ?? 0,
-            enqueued: msg.enqueued ?? 0,
-            failed: msg.failed ?? 0,
-            phase: msg.phase ?? 'enqueuing',
+            status: msg.status ?? '',
+            new_works: msg.new_works ?? 0,
+            job_id: msg.job_id ?? null,
           })
         }
       } catch {
@@ -107,7 +103,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <WsContext.Provider value={{ alerts, connected, dismissAlert, lastJobUpdate, lastBatchUpdate }}>
+    <WsContext.Provider value={{ alerts, connected, dismissAlert, lastJobUpdate, lastSubCheck }}>
       {children}
     </WsContext.Provider>
   )

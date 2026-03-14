@@ -18,19 +18,3 @@ async def init_plugins() -> None:
     # Pixiv native downloader — takes precedence over gallery-dl for pixiv.net URLs
     plugin_registry.register(PixivSourcePlugin())
     plugin_registry.register(PixivBrowsePlugin())
-
-    # Register gallery-dl subscribable proxies for sites that don't have native plugins
-    from plugins.builtin.gallery_dl._sites import GDL_SITES
-    from plugins.builtin.gallery_dl._subscribe import GalleryDlSubscribableProxy
-
-    gdl = plugin_registry._plugins.get("gallery_dl")
-    if gdl:
-        for site_cfg in GDL_SITES:
-            if site_cfg.subscribe_id_key is None:
-                continue
-            source_id = site_cfg.source_id
-            # Don't override native plugin subscribables (e.g., ehentai, pixiv)
-            # Also skip duplicate source_ids (e.g., x.com duplicates twitter.com)
-            if not plugin_registry.get_subscribable(source_id):
-                proxy = GalleryDlSubscribableProxy(source_id, gdl.meta)
-                plugin_registry.register_subscribable_proxy(source_id, proxy)

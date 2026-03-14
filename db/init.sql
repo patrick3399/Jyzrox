@@ -409,3 +409,8 @@ ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS gallery_id BIGINT REFERENCES 
 
 -- ── Source URL ──────────────────────────────────────────────────────
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_url TEXT;
+
+-- ── Subscription → Download Job linking ──────────────────────────────
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS subscription_id BIGINT REFERENCES subscriptions(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_download_jobs_subscription ON download_jobs(subscription_id) WHERE subscription_id IS NOT NULL;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS last_job_id UUID REFERENCES download_jobs(id) ON DELETE SET NULL;

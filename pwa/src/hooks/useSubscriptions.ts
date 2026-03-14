@@ -31,11 +31,10 @@ export function useCheckSubscription() {
   )
 }
 
-export function useSubscriptionPreview(url: string) {
-  const trimmed = url.trim()
+export function useSubscriptionJobs(subId: number | null) {
   return useSWR(
-    trimmed.length > 10 ? ['subscriptions/preview', trimmed] : null,
-    () => api.subscriptions.preview(trimmed),
-    { dedupingInterval: 10000, keepPreviousData: true },
+    subId ? ['subscription-jobs', subId] : null,
+    () => api.subscriptions.jobs(subId!),
+    { refreshInterval: 5000 },
   )
 }

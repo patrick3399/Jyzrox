@@ -328,7 +328,8 @@ _SQLITE_SCHEMA = [
         retry_count INTEGER DEFAULT 0,
         max_retries INTEGER DEFAULT 3,
         next_retry_at TIMESTAMP,
-        gallery_id INTEGER REFERENCES galleries(id) ON DELETE SET NULL
+        gallery_id INTEGER REFERENCES galleries(id) ON DELETE SET NULL,
+        subscription_id INTEGER
     )
     """,
     """
@@ -481,6 +482,7 @@ _SQLITE_SCHEMA = [
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         batch_total INTEGER DEFAULT 0,
         batch_enqueued INTEGER DEFAULT 0,
+        last_job_id TEXT,
         UNIQUE (user_id, url)
     )
     """,

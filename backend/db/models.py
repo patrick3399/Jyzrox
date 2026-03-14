@@ -179,6 +179,7 @@ class DownloadJob(Base):
     max_retries: Mapped[int] = mapped_column(SmallInteger, default=3)
     next_retry_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     gallery_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"), nullable=True)
+    subscription_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("subscriptions.id", ondelete="SET NULL"), nullable=True)
 
 
 class ReadProgress(Base):
@@ -301,6 +302,7 @@ class Subscription(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     batch_total: Mapped[int] = mapped_column(Integer, default=0)
     batch_enqueued: Mapped[int] = mapped_column(Integer, default=0)
+    last_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("download_jobs.id", ondelete="SET NULL"), nullable=True)
 
     __table_args__ = (
         UniqueConstraint("user_id", "url", name="uq_subscription_user_url"),

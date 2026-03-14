@@ -16,7 +16,6 @@ from plugins.models import (
     DownloadResult,
     GalleryImportData,
     GalleryMetadata,
-    NewWork,
     PluginMeta,
     SearchResult,
     TagResult,
@@ -74,18 +73,6 @@ class Parseable(Protocol):
     meta: PluginMeta
 
     def parse_import(self, dest_dir: Path, raw_meta: dict | None) -> GalleryImportData: ...
-
-
-@runtime_checkable
-class Subscribable(Protocol):
-    meta: PluginMeta
-
-    async def check_new_works(
-        self,
-        artist_id: str,
-        last_known: str | None,
-        credentials: dict | None,
-    ) -> list[NewWork]: ...
 
 
 @runtime_checkable

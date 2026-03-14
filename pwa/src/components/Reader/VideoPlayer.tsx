@@ -81,7 +81,7 @@ export default function VideoPlayer({ image, className, style, innerRef, onLoad,
     >
       <video
         ref={setVideoRef}
-        src={image.url}
+        src={image.url ?? undefined}
         style={{ width: '100%', height: '100%', objectFit: 'contain', display: 'block' }}
         loop
         muted={muted}
