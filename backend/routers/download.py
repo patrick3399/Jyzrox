@@ -98,6 +98,16 @@ async def _enqueue(
 
     Returns a dict suitable for use as the HTTP response body.
     """
+    # Duplicate guard: return existing job if same URL + same user is already active
+    existing_stmt = select(DownloadJob).where(
+        DownloadJob.url == url,
+        DownloadJob.user_id == user_id,
+        DownloadJob.status.in_(["queued", "running"]),
+    ).limit(1)
+    existing_job = (await db.execute(existing_stmt)).scalar_one_or_none()
+    if existing_job:
+        return {"job_id": str(existing_job.id), "status": existing_job.status, "source": existing_job.source, "warning": None}
+
     job_id = uuid.uuid4()
     source = detect_source(url)
     initial_progress = {"total": total} if total is not None else {}

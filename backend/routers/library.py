@@ -1062,6 +1062,22 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
     for g in galleries:
         _check_write_access(auth, g)
 
+    # Filter out galleries with active downloads (skip rather than reject for batch)
+    from db.models import DownloadJob
+    active_gallery_ids_result = await db.execute(
+        select(DownloadJob.gallery_id).where(
+            DownloadJob.gallery_id.in_([g.id for g in galleries]),
+            DownloadJob.status.in_(["queued", "running"]),
+        )
+    )
+    active_gallery_ids = set(active_gallery_ids_result.scalars().all())
+    downloading_ids = {g.id for g in galleries if g.download_status == "downloading"}
+    skip_ids = active_gallery_ids | downloading_ids
+    if skip_ids:
+        galleries = [g for g in galleries if g.id not in skip_ids]
+        if not galleries:
+            return {"status": "ok", "affected": 0, "deleted_dirs": 0, "skipped": len(skip_ids)}
+
     # Load all images with blobs for these galleries
     img_stmt = (
         select(Image)
@@ -1349,6 +1365,19 @@ async def delete_gallery(
     g = await _get_or_404_by_source(db, source, source_id, auth)
     gallery_id = g.id
     _check_write_access(auth, g)
+
+    # Prevent deletion while download is active
+    if g.download_status == "downloading":
+        raise HTTPException(status_code=409, detail="Cannot delete gallery while downloading. Cancel the download first.")
+    from db.models import DownloadJob
+    active_job = (await db.execute(
+        select(DownloadJob.id).where(
+            DownloadJob.gallery_id == g.id,
+            DownloadJob.status.in_(["queued", "running"]),
+        ).limit(1)
+    )).scalar_one_or_none()
+    if active_job:
+        raise HTTPException(status_code=409, detail="Cannot delete gallery with active download job. Cancel the download first.")
 
     # Load all images with their blobs before deleting DB records
     stmt = (

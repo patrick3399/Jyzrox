@@ -46,7 +46,11 @@ function ShareTargetContent() {
       if (result.job_id && !result.job_id.startsWith('offline-')) {
         toast.info(t('share.queuedJob', { jobId: result.job_id }))
       }
-      router.push('/queue')
+      if (window.history.length > 1) {
+        router.back()
+      } else {
+        window.close()
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : t('share.failed')
       toast.error(message)

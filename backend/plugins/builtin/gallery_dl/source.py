@@ -164,11 +164,12 @@ class GalleryDlPlugin(SourcePlugin):
         if delay_secs > 0:
             cmd += ["--sleep-request", str(delay_secs)]
 
-        # Download archive — skip already-downloaded URLs
-        from pathlib import Path as _Path
-        archive_dir = _Path(settings.data_archive_path)
-        archive_dir.mkdir(parents=True, exist_ok=True)
-        cmd += ["--download-archive", str(archive_dir / "gallery-dl.db")]
+        # Download archive — skip already-downloaded URLs (unless skip_archive requested)
+        if not (options and options.get("skip_archive")):
+            from pathlib import Path as _Path
+            archive_dir = _Path(settings.data_archive_path)
+            archive_dir.mkdir(parents=True, exist_ok=True)
+            cmd += ["--download-archive", str(archive_dir / "gallery-dl.db")]
 
         # Per-site download tuning
         from urllib.parse import urlparse as _urlparse

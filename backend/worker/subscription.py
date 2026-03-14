@@ -15,23 +15,82 @@ from worker.helpers import _cron_record, _cron_should_run
 
 async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
     """Create a download job for a subscription and enqueue it."""
-    from core.redis_client import publish_job_event
+    from core.redis_client import get_redis, publish_job_event
 
     pool = ctx.get("redis")
     if not pool:
         return {"status": "failed", "error": "no redis pool"}
 
-    # Duplicate guard: skip if there's already a queued/running job for this sub
+    # Race-condition guard: use Redis SETNX so only one concurrent check per sub proceeds
+    redis = get_redis()
+    lock_key = f"subscription:check_lock:{sub.id}"
+    acquired = await redis.set(lock_key, "1", nx=True, ex=60)
+    if not acquired:
+        logger.info("[subscription] sub=%d check already in progress, skipping", sub.id)
+        return {"status": "skipped", "reason": "check_in_progress"}
+
+    # Source-enabled check
+    source = sub.source or "gallery_dl"
+    try:
+        from routers.download import _check_source_enabled
+        await _check_source_enabled(source)
+    except Exception:
+        logger.warning("[subscription] sub=%d source '%s' disabled, skipping", sub.id, source)
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                update(Subscription).where(Subscription.id == sub.id).values(
+                    last_status="failed",
+                    last_error=f"Download source '{source}' is disabled",
+                )
+            )
+            await session.commit()
+        return {"status": "skipped", "reason": "source_disabled"}
+
+    # Credential check — skip if required credentials are missing
+    from plugins.builtin.gallery_dl._sites import get_site_config
+    cfg = get_site_config(source)
+    if cfg.credential_requirement == "required":
+        from services.credential import get_credential
+        cred = await get_credential(cfg.source_id)
+        if not cred:
+            logger.warning("[subscription] sub=%d source '%s' requires credentials, skipping", sub.id, source)
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(Subscription).where(Subscription.id == sub.id).values(
+                        last_status="failed",
+                        last_error=f"{cfg.name} credentials not configured",
+                    )
+                )
+                await session.commit()
+            return {"status": "skipped", "reason": "credentials_required"}
+
+    # Duplicate guard: skip if there's already ANY queued/running job for this URL (cross-entry protection)
     async with AsyncSessionLocal() as session:
         existing = (await session.execute(
             select(DownloadJob.id).where(
-                DownloadJob.subscription_id == sub.id,
+                DownloadJob.url == sub.url,
                 DownloadJob.status.in_(["queued", "running"]),
             ).limit(1)
         )).scalar_one_or_none()
         if existing:
-            logger.info("[subscription] sub=%d already has active job %s, skipping", sub.id, existing)
+            logger.info("[subscription] sub=%d URL already has active job %s, skipping", sub.id, existing)
             return {"status": "skipped", "reason": "active_job_exists"}
+
+    # Decide archive behavior: query galleries table (stable, not cleared by clear_finished_jobs).
+    # If a gallery with matching source_url exists and is complete/partial, use archive for incremental download.
+    skip_archive = True
+    async with AsyncSessionLocal() as session:
+        from db.models import Gallery
+        existing_gallery = (await session.execute(
+            select(Gallery.id).where(
+                Gallery.source_url == sub.url,
+                Gallery.download_status.in_(["complete", "partial"]),
+            ).limit(1)
+        )).scalar_one_or_none()
+        if existing_gallery:
+            skip_archive = False
+
+    options = {"skip_archive": True} if skip_archive else None
 
     # Create download job
     job_id = uuid.uuid4()
@@ -50,7 +109,7 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
     # Enqueue ARQ job
     await pool.enqueue_job(
         "download_job", sub.url, sub.source or "gallery_dl",
-        None, str(job_id), None,
+        options, str(job_id), None,
         _job_id=str(job_id),
     )
 
