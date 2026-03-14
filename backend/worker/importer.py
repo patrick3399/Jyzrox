@@ -164,7 +164,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
         # Store each file in CAS and create library symlink
         for img_file, sha256 in allowed_pairs:
             blob = await store_blob(img_file, sha256, session)
-            await create_library_symlink(gallery_id, img_file.name, blob)
+            await create_library_symlink(source, source_id, img_file.name, blob)
 
         # Flush blob upserts before inserting images (FK: blob_sha256 → blobs.sha256)
         await session.flush()
@@ -344,6 +344,15 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     processed = 0
     r = ctx["redis"]
 
+    # Load gallery to get source/source_id for library symlink creation
+    async with AsyncSessionLocal() as _gallery_session:
+        _gallery = await _gallery_session.get(Gallery, gallery_id)
+        if not _gallery:
+            logger.error("[local_import] gallery_id=%d not found in DB", gallery_id)
+            return {"status": "failed", "error": "gallery not found"}
+        gallery_source = _gallery.source
+        gallery_source_id = _gallery.source_id
+
     # Load excluded blob hashes for this gallery before processing files
     async with AsyncSessionLocal() as _excl_session:
         excluded_rows = (await _excl_session.execute(
@@ -366,7 +375,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                 # Link mode: record external path, do not copy file
                 blob = await store_blob(f, sha256, session, storage="external", external_path=str(f))
 
-            await create_library_symlink(gallery_id, f.name, blob)
+            await create_library_symlink(gallery_source, gallery_source_id, f.name, blob)
 
             # Flush blob upsert before inserting image (FK constraint)
             await session.flush()

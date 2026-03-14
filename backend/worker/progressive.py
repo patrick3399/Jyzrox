@@ -208,7 +208,7 @@ class ProgressiveImporter:
                 await session.execute(img_stmt)
 
                 # Create library symlink before closing session (need blob data)
-                await create_library_symlink(self.gallery_id, file_path.name, blob)
+                await create_library_symlink(self.source, self.source_id, file_path.name, blob)
 
                 # Generate thumbnail within the same session so blob modifications
                 # (width, height, phash, thumbhash) are tracked and committed

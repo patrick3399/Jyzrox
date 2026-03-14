@@ -6,7 +6,7 @@ import shutil
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import text, tuple_
 from sqlalchemy.sql import select
 
 from core.config import settings
@@ -50,43 +50,43 @@ async def reconciliation_job(ctx: dict) -> dict:
 
     # ── Phase 1: Scan filesystem once, batch-query DB, reconcile in chunks ──
 
-    # Single scandir pass: gallery_map[gallery_id] = set of filenames on disk
+    # Two-level scandir pass: library structure is lib_base/source/source_id/.
+    # gallery_map[(source, source_id)] = set of filenames on disk.
     # Broken symlinks are unlinked here; they are excluded from disk_files so
     # the subsequent DB diff will mark those image records for deletion.
-    gallery_map: dict[int, set[str]] = {}
-    empty_gallery_dirs: set[int] = set()
+    gallery_map: dict[tuple[str, str], set[str]] = {}
+    empty_gallery_dirs: set[tuple[str, str]] = set()
 
     logger.info("[reconcile] Phase 1: scanning %s", lib_base)
-    for entry in os.scandir(str(lib_base)):
-        if not entry.is_dir(follow_symlinks=False):
+    for source_entry in os.scandir(str(lib_base)):
+        if not source_entry.is_dir(follow_symlinks=False):
             continue
-        try:
-            gid = int(entry.name)
-        except ValueError:
-            logger.warning("[reconcile] skipping non-numeric dir: %s", entry.name)
-            continue
+        source = source_entry.name
+        for sid_entry in os.scandir(source_entry.path):
+            if not sid_entry.is_dir(follow_symlinks=False):
+                continue
+            source_id = sid_entry.name
 
-        disk_files: set[str] = set()
-        has_valid = False
-        for fe in os.scandir(entry.path):
-            if fe.is_symlink() and not Path(fe.path).exists():
-                # Broken symlink — remove it silently; absence from disk_files
-                # will cause DB record to be deleted in batch step below.
-                try:
-                    os.unlink(fe.path)
-                except OSError:
-                    pass
-            else:
-                disk_files.add(fe.name)
-                has_valid = True
+            disk_files: set[str] = set()
+            has_valid = False
+            for fe in os.scandir(sid_entry.path):
+                if fe.is_symlink() and not Path(fe.path).exists():
+                    # Broken symlink — remove it silently; absence from disk_files
+                    # will cause DB record to be deleted in batch step below.
+                    try:
+                        os.unlink(fe.path)
+                    except OSError:
+                        pass
+                else:
+                    disk_files.add(fe.name)
+                    has_valid = True
 
-        gallery_map[gid] = disk_files
-        if not has_valid:
-            empty_gallery_dirs.add(gid)
+            gallery_map[(source, source_id)] = disk_files
+            if not has_valid:
+                empty_gallery_dirs.add((source, source_id))
 
-    fs_gallery_ids = set(gallery_map.keys())
-    all_fs_ids_list = sorted(fs_gallery_ids)
-    total_fs = len(all_fs_ids_list)
+    all_fs_keys = sorted(gallery_map.keys())
+    total_fs = len(all_fs_keys)
     logger.info("[reconcile] Phase 1: %d gallery dirs on disk", total_fs)
 
     _CHUNK = 500
@@ -94,26 +94,41 @@ async def reconciliation_job(ctx: dict) -> dict:
     async with AsyncSessionLocal() as session:
         processed_p1 = 0
         for chunk_start in range(0, total_fs, _CHUNK):
-            chunk_ids = all_fs_ids_list[chunk_start : chunk_start + _CHUNK]
+            chunk_keys = all_fs_keys[chunk_start : chunk_start + _CHUNK]
 
-            # Batch query: id, gallery_id, filename, blob_sha256 for this chunk
+            # Query Gallery records for this chunk using tuple IN
+            galleries = (await session.execute(
+                select(Gallery).where(
+                    tuple_(Gallery.source, Gallery.source_id).in_(chunk_keys)
+                )
+            )).scalars().all()
+
+            gallery_by_key = {(g.source, g.source_id): g for g in galleries}
+            chunk_gallery_ids = [g.id for g in galleries]
+
+            # Batch query images for galleries in this chunk
             rows = (await session.execute(
                 select(Image.id, Image.gallery_id, Image.filename, Image.blob_sha256)
-                .where(Image.gallery_id.in_(chunk_ids))
+                .where(Image.gallery_id.in_(chunk_gallery_ids))
             )).all()
 
-            # Group DB rows by gallery_id
-            db_by_gallery: dict[int, dict[str, tuple[int, str]]] = {}
+            # Build reverse map: gallery_id -> (source, source_id)
+            id_to_key = {g.id: (g.source, g.source_id) for g in galleries}
+
+            # Group DB rows by (source, source_id)
+            db_by_gallery: dict[tuple[str, str], dict[str, tuple[int, str]]] = {}
             for row in rows:
-                db_by_gallery.setdefault(row.gallery_id, {})[row.filename] = (row.id, row.blob_sha256)
+                key = id_to_key.get(row.gallery_id)
+                if key:
+                    db_by_gallery.setdefault(key, {})[row.filename] = (row.id, row.blob_sha256)
 
             # Determine which image IDs and blob shas to remove for this chunk
             dead_image_ids: list[int] = []
             dead_blob_shas: list[str] = []
 
-            for gid in chunk_ids:
-                disk_files = gallery_map[gid]
-                db_files = db_by_gallery.get(gid, {})
+            for key in chunk_keys:
+                disk_files = gallery_map[key]
+                db_files = db_by_gallery.get(key, {})
                 for filename, (img_id, sha) in db_files.items():
                     if filename not in disk_files:
                         dead_image_ids.append(img_id)
@@ -136,22 +151,29 @@ async def reconciliation_job(ctx: dict) -> dict:
                 stats["removed_images"] += len(dead_image_ids)
 
             # Delete empty gallery dirs and their DB records in this chunk
-            empty_in_chunk = [gid for gid in chunk_ids if gid in empty_gallery_dirs]
+            empty_in_chunk = [key for key in chunk_keys if key in empty_gallery_dirs]
             if empty_in_chunk:
-                await session.execute(
-                    text("DELETE FROM galleries WHERE id = ANY(:ids)"),
-                    {"ids": empty_in_chunk},
-                )
-                stats["removed_galleries"] += len(empty_in_chunk)
-                for gid in empty_in_chunk:
-                    gdir = lib_base / str(gid)
+                empty_gids = [gallery_by_key[k].id for k in empty_in_chunk if k in gallery_by_key]
+                if empty_gids:
+                    await session.execute(
+                        text("DELETE FROM galleries WHERE id = ANY(:ids)"),
+                        {"ids": empty_gids},
+                    )
+                    stats["removed_galleries"] += len(empty_gids)
+                for key in empty_in_chunk:
+                    source, sid = key
+                    gdir = lib_base / source / sid
                     try:
                         gdir.rmdir()
+                        # Also remove source dir if now empty
+                        source_dir = lib_base / source
+                        if source_dir.exists() and not any(source_dir.iterdir()):
+                            source_dir.rmdir()
                     except OSError:
                         pass
 
             await session.commit()
-            processed_p1 += len(chunk_ids)
+            processed_p1 += len(chunk_keys)
             await r.setex(
                 "reconcile:progress",
                 3600,
@@ -162,18 +184,22 @@ async def reconciliation_job(ctx: dict) -> dict:
                     stats["removed_images"], stats["removed_galleries"])
 
         # ── Phase 2: Orphan galleries — in DB but missing from filesystem ──
-        # Query gallery IDs that are NOT in fs_gallery_ids, in chunks.
-        # We iterate the DB in chunks using OFFSET/LIMIT on the sorted id list
-        # rather than a NOT IN on a potentially 100K-element set.
+        # Query gallery rows and filter those whose (source, source_id) key is
+        # not present on disk.
 
         logger.info("[reconcile] Phase 2: checking for orphan DB galleries")
 
-        # Collect all gallery IDs in DB (non-proxy) using a single streaming query
-        db_gallery_ids_result = (await session.execute(
-            select(Gallery.id).where(Gallery.download_status != "proxy_only")
-        )).scalars().all()
+        fs_keys = set(gallery_map.keys())
 
-        orphan_gallery_ids = [gid for gid in db_gallery_ids_result if gid not in fs_gallery_ids]
+        db_gallery_rows = (await session.execute(
+            select(Gallery.id, Gallery.source, Gallery.source_id)
+            .where(Gallery.download_status != "proxy_only")
+        )).all()
+
+        orphan_gallery_ids = [
+            row.id for row in db_gallery_rows
+            if (row.source, row.source_id) not in fs_keys
+        ]
         total_orphans = len(orphan_gallery_ids)
         logger.info("[reconcile] Phase 2: %d orphan galleries found", total_orphans)
 

@@ -147,6 +147,8 @@ export interface DownloadJob {
   source: string
   status: 'queued' | 'running' | 'done' | 'failed' | 'cancelled' | 'paused' | 'partial'
   gallery_id?: number | null
+  gallery_source?: string
+  gallery_source_id?: string
   progress: {
     percent?: number
     downloaded?: number
@@ -540,6 +542,7 @@ export interface SubscriptionPreview {
 
 export interface LibraryDirectory {
   gallery_id: number
+  source_id: string
   title: string
   category: string | null
   file_count: number

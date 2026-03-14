@@ -22,7 +22,7 @@ from core.config import settings
 from core.database import get_db
 from core.source_display import get_display_config
 from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserRating
-from services.cas import cas_url, decrement_ref_count, library_dir, resolve_blob_path, thumb_dir, thumb_url as cas_thumb_url
+from services.cas import cas_url, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, safe_source_id, thumb_dir, thumb_url as cas_thumb_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["library"])
@@ -817,6 +817,7 @@ async def list_files(
         file_count, disk_size = size_map.get(g.id, (0, 0))
         result.append({
             "gallery_id": g.id,
+            "source_id": g.source_id,
             "title": g.title,
             "category": g.category,
             "file_count": file_count,
@@ -831,9 +832,10 @@ async def list_files(
     return {"directories": result, "total": total, "page": page}
 
 
-@router.get("/files/{gallery_id}")
+@router.get("/files/{source}/{source_id:path}")
 async def list_gallery_files(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
@@ -842,8 +844,9 @@ async def list_gallery_files(
     import os
     from pathlib import Path
 
-    g = await _get_or_404(db, gallery_id, auth)
-    gdir = library_dir(gallery_id)
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = g.id
+    gdir = library_dir(g.source, g.source_id)
 
     def _scan_files() -> list[dict]:
         """Scan the gallery directory and return raw file info."""
@@ -912,6 +915,8 @@ async def list_gallery_files(
 
     return {
         "gallery_id": gallery_id,
+        "source": g.source,
+        "source_id": g.source_id,
         "title": g.title,
         "category": g.category,
         "files": files,
@@ -1071,7 +1076,7 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
     def _delete_filesystem() -> int:
         deleted = 0
         for g in galleries:
-            lib_dir = library_dir(g.id)
+            lib_dir = library_dir(g.source, g.source_id)
             if lib_dir.exists():
                 try:
                     shutil.rmtree(str(lib_dir), ignore_errors=True)
@@ -1097,13 +1102,15 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
     return {"status": "ok", "affected": len(galleries), "deleted_dirs": deleted_count}
 
 
-@router.get("/galleries/{gallery_id}")
+@router.get("/galleries/{source}/{source_id:path}")
 async def get_gallery(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    g = await _get_or_404(db, gallery_id, auth)
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = g.id
     display_cfg = get_display_config(g.source or "")
     if display_cfg.cover_page == "last":
         cover_sub = (
@@ -1142,15 +1149,17 @@ async def get_gallery(
     return _g(g, cover_thumb=cover_thumb, is_favorited=(fav is not None), my_rating=user_rating_row)
 
 
-@router.get("/galleries/{gallery_id}/images")
+@router.get("/galleries/{source}/{source_id:path}/images")
 async def get_gallery_images(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     page: int | None = Query(default=None, ge=1),
     limit: int | None = Query(default=None, ge=1, le=200),
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    g = await _get_or_404(db, gallery_id, auth)
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = g.id
     display_cfg = get_display_config(g.source or "")
     page_order = desc(Image.page_num) if display_cfg.image_order == "desc" else asc(Image.page_num)
     stmt = (
@@ -1184,14 +1193,16 @@ async def get_gallery_images(
     return {"gallery_id": gallery_id, "images": [_i(img) for img in images]}
 
 
-@router.get("/galleries/{gallery_id}/tags")
+@router.get("/galleries/{source}/{source_id:path}/tags")
 async def get_gallery_tags(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """Get gallery tags with confidence scores and source info."""
-    await _get_or_404(db, gallery_id, auth)
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = g.id
     rows = (
         await db.execute(
             select(GalleryTag)
@@ -1224,15 +1235,17 @@ class GalleryPatch(BaseModel):
     category: str | None = None
 
 
-@router.patch("/galleries/{gallery_id}")
+@router.patch("/galleries/{source}/{source_id:path}")
 async def update_gallery(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     patch: GalleryPatch,
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     from sqlalchemy import delete as sa_delete
-    g = await _get_or_404(db, gallery_id, auth)
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = g.id
     _check_write_access(auth, g)
     if patch.favorited is not None:
         if patch.favorited:
@@ -1286,9 +1299,10 @@ async def update_gallery(
     return _g(g, is_favorited=(fav is not None), my_rating=user_rating_row)
 
 
-@router.delete("/galleries/{gallery_id}")
+@router.delete("/galleries/{source}/{source_id:path}")
 async def delete_gallery(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
@@ -1301,7 +1315,8 @@ async def delete_gallery(
     import shutil
     from pathlib import Path
 
-    g = await _get_or_404(db, gallery_id, auth)
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = g.id
     _check_write_access(auth, g)
 
     # Load all images with their blobs before deleting DB records
@@ -1332,10 +1347,14 @@ async def delete_gallery(
         )
         zero_ref_sha256s = set(zero_ref_result.scalars().all())
 
+    # Capture source/source_id for filesystem cleanup before g is detached
+    g_source = g.source
+    g_source_id = g.source_id
+
     def _delete_filesystem() -> int:
         deleted = 0
         # Remove the entire library symlink directory for this gallery
-        lib_dir = library_dir(gallery_id)
+        lib_dir = library_dir(g_source, g_source_id)
         if lib_dir.exists():
             try:
                 shutil.rmtree(str(lib_dir), ignore_errors=True)
@@ -1367,9 +1386,10 @@ class DeleteImageBody(BaseModel):
     page_num: int
 
 
-@router.post("/galleries/{gallery_id}/delete-image")
+@router.post("/galleries/{source}/{source_id:path}/delete-image")
 async def delete_gallery_image(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     body: DeleteImageBody,
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
@@ -1383,7 +1403,8 @@ async def delete_gallery_image(
     import asyncio
     import shutil
 
-    gallery = await _get_or_404(db, gallery_id, auth)
+    gallery = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = gallery.id
     _check_write_access(auth, gallery)
 
     img_stmt = (
@@ -1405,8 +1426,8 @@ async def delete_gallery_image(
     ).on_conflict_do_nothing()
     await db.execute(excl_stmt)
 
-    # Remove the symlink from the library directory
-    symlink_path = library_dir(gallery_id) / filename
+    # Remove the symlink from the library directory (use gallery ORM attributes)
+    symlink_path = library_dir(gallery.source, gallery.source_id) / filename
     await asyncio.to_thread(symlink_path.unlink, True)
 
     # Decrement blob ref count and delete image record
@@ -1450,12 +1471,15 @@ async def delete_gallery_image(
 # ── Read progress ────────────────────────────────────────────────────
 
 
-@router.get("/galleries/{gallery_id}/progress")
+@router.get("/galleries/{source}/{source_id:path}/progress")
 async def get_progress(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = g.id
     prog = await db.get(ReadProgress, (auth["user_id"], gallery_id))
     if not prog:
         return {"gallery_id": gallery_id, "last_page": 0, "last_read_at": None}
@@ -1470,13 +1494,16 @@ class ProgressBody(BaseModel):
     last_page: int
 
 
-@router.post("/galleries/{gallery_id}/progress")
+@router.post("/galleries/{source}/{source_id:path}/progress")
 async def save_progress(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     body: ProgressBody,
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = g.id
     now = datetime.now(UTC)
     stmt = (
         pg_insert(ReadProgress)
@@ -1665,14 +1692,17 @@ async def find_similar_images(
 # ── Excluded Blobs ───────────────────────────────────────────────────
 
 
-@router.get("/galleries/{gallery_id}/excluded")
+@router.get("/galleries/{source}/{source_id:path}/excluded")
 async def list_excluded_blobs(
-    gallery_id: int,
-    _: dict = Depends(require_auth),
+    source: str,
+    source_id: str,
+    auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
     """List excluded blob hashes for a gallery."""
     from db.models import ExcludedBlob
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = g.id
     result = await db.execute(
         select(ExcludedBlob)
         .where(ExcludedBlob.gallery_id == gallery_id)
@@ -1688,15 +1718,17 @@ async def list_excluded_blobs(
     }
 
 
-@router.delete("/galleries/{gallery_id}/excluded/{sha256}")
+@router.delete("/galleries/{source}/{source_id:path}/excluded/{sha256}")
 async def restore_excluded_blob(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     sha256: str,
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
     """Remove a blob from the exclusion list (un-exclude)."""
-    gallery = await _get_or_404(db, gallery_id, auth)
+    gallery = await _get_or_404_by_source(db, source, source_id, auth)
+    gallery_id = gallery.id
     _check_write_access(auth, gallery)
     from db.models import ExcludedBlob
     result = await db.execute(
@@ -1732,12 +1764,21 @@ def _thumb_url(blob) -> str | None:
     return cas_thumb_url(blob.sha256)
 
 
-async def _get_or_404(db: AsyncSession, gallery_id: int, auth: dict | None = None) -> Gallery:
+async def _get_or_404_by_source(db: AsyncSession, source: str, source_id: str, auth: dict | None = None) -> Gallery:
+    """Fetch a gallery by (source, source_id) with optional access filter. Raises 404 if not found."""
     if auth is not None:
-        stmt = select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(auth))
+        stmt = select(Gallery).where(
+            Gallery.source == source,
+            Gallery.source_id == source_id,
+            gallery_access_filter(auth),
+        )
         g = (await db.execute(stmt)).scalar_one_or_none()
     else:
-        g = await db.get(Gallery, gallery_id)
+        stmt = select(Gallery).where(
+            Gallery.source == source,
+            Gallery.source_id == source_id,
+        )
+        g = (await db.execute(stmt)).scalar_one_or_none()
     if not g:
         raise HTTPException(status_code=404, detail="Gallery not found")
     return g

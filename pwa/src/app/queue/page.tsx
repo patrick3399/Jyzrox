@@ -72,7 +72,8 @@ function JobRow({
   const canCancel = job.status === 'queued' || job.status === 'running' || job.status === 'paused'
   const createdAt = new Date(job.created_at).toLocaleString()
   const finishedAt = job.finished_at ? new Date(job.finished_at).toLocaleString() : null
-  const galleryId = job.gallery_id || job.progress?.gallery_id
+  const gallerySource = job.gallery_source
+  const gallerySourceId = job.gallery_source_id
   const galleryTitle = job.progress?.title
 
   return (
@@ -82,9 +83,9 @@ function JobRow({
           {galleryTitle ? (
             <div className="mb-1">
               <p className="text-sm font-medium truncate" title={galleryTitle}>
-                {galleryId ? (
+                {gallerySource && gallerySourceId ? (
                   <a
-                    href={`/library/${galleryId}`}
+                    href={`/library/${gallerySource}/${gallerySourceId}`}
                     onClick={(e) => e.stopPropagation()}
                     className="text-vault-accent hover:underline"
                   >

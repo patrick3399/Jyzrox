@@ -40,7 +40,7 @@ vi.mock('next/navigation', () => ({
 
 // Mock all Reader hooks so we don't need a real API / Redis / etc.
 vi.mock('@/components/Reader/hooks', () => ({
-  useReaderState: (initialPage: number, _totalPages: number, _galleryId: number) => ({
+  useReaderState: (initialPage: number, _totalPages: number, _source: string, _sourceId: string) => ({
     state: {
       currentPage: initialPage,
       viewMode: 'single' as const,
@@ -118,7 +118,7 @@ function makeImage(pageNum: number): GalleryImage {
 }
 
 const defaultProps = {
-  galleryId: 1,
+  source: 'ehentai',
   sourceId: 'abc123',
   downloadStatus: 'complete' as const,
   images: [makeImage(1), makeImage(2), makeImage(3)],
@@ -168,17 +168,17 @@ describe('Reader — rendering', () => {
 
   it('test_reader_singleMode_rendersPreviousPageTapZone', () => {
     render(<Reader {...defaultProps} />)
-    expect(screen.getByLabelText('Previous page')).toBeInTheDocument()
+    expect(screen.getAllByLabelText('common.previousPage').length).toBeGreaterThan(0)
   })
 
   it('test_reader_singleMode_rendersNextPageTapZone', () => {
     render(<Reader {...defaultProps} />)
-    expect(screen.getByLabelText('Next page')).toBeInTheDocument()
+    expect(screen.getAllByLabelText('common.nextPage').length).toBeGreaterThan(0)
   })
 
   it('test_reader_singleMode_rendersToggleControlsTapZone', () => {
     render(<Reader {...defaultProps} />)
-    expect(screen.getByLabelText('Toggle controls')).toBeInTheDocument()
+    expect(screen.getAllByLabelText('reader.toggleControls').length).toBeGreaterThan(0)
   })
 
   it('test_reader_overlayHiddenByDefault_containerHasPointerEventsNoneClass', () => {
@@ -216,19 +216,19 @@ describe('Reader — keyboard navigation', () => {
 describe('Reader — tap zone interactions', () => {
   it('test_reader_tapZone_clickNextPage_doesNotThrow', () => {
     render(<Reader {...defaultProps} />)
-    const nextZone = screen.getByLabelText('Next page')
+    const nextZone = screen.getAllByLabelText('common.nextPage')[0]
     expect(() => fireEvent.click(nextZone)).not.toThrow()
   })
 
   it('test_reader_tapZone_clickPreviousPage_doesNotThrow', () => {
     render(<Reader {...defaultProps} />)
-    const prevZone = screen.getByLabelText('Previous page')
+    const prevZone = screen.getAllByLabelText('common.previousPage')[0]
     expect(() => fireEvent.click(prevZone)).not.toThrow()
   })
 
   it('test_reader_tapZone_clickToggleControls_doesNotThrow', () => {
     render(<Reader {...defaultProps} />)
-    const toggleZone = screen.getByLabelText('Toggle controls')
+    const toggleZone = screen.getAllByLabelText('reader.toggleControls')[0]
     expect(() => fireEvent.click(toggleZone)).not.toThrow()
   })
 })

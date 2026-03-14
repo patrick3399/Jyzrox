@@ -203,7 +203,7 @@ function SystemAlerts({ alerts }: { alerts: string[] }) {
 
 function GalleryThumb({ gallery }: { gallery: Gallery }) {
   return (
-    <Link href={`/library/${gallery.id}`} className="group block">
+    <Link href={`/library/${gallery.source}/${gallery.source_id}`} className="group block">
       <div className="aspect-[2/3] bg-vault-card rounded-lg overflow-hidden border border-vault-border group-hover:border-vault-border-hover transition-colors relative">
         {gallery.cover_thumb ? (
           <img

@@ -33,16 +33,16 @@ export function saveReaderSettings(settings: Partial<ReaderSettings>) {
   localStorage.setItem('reader_settings', JSON.stringify({ ...current, ...settings }))
 }
 
-function loadDirection(galleryId: number): ReadingDirection | null {
+function loadDirection(source: string, sourceId: string): ReadingDirection | null {
   if (typeof window === 'undefined') return null
-  const val = localStorage.getItem(`reader_direction_${galleryId}`)
+  const val = localStorage.getItem(`reader_direction_${source}_${sourceId}`)
   if (val === 'ltr' || val === 'rtl' || val === 'vertical') return val
   return null
 }
 
-function saveDirection(galleryId: number, dir: ReadingDirection) {
+function saveDirection(source: string, sourceId: string, dir: ReadingDirection) {
   if (typeof window === 'undefined') return
-  localStorage.setItem(`reader_direction_${galleryId}`, dir)
+  localStorage.setItem(`reader_direction_${source}_${sourceId}`, dir)
 }
 
 // ── useReaderState ────────────────────────────────────────────────────
@@ -68,9 +68,9 @@ function readerReducer(state: ReaderState, action: ReaderAction): ReaderState {
   }
 }
 
-export function useReaderState(initialPage: number, totalPages: number, galleryId: number) {
+export function useReaderState(initialPage: number, totalPages: number, source: string, sourceId: string) {
   const settings = loadReaderSettings()
-  const savedDirection = loadDirection(galleryId)
+  const savedDirection = loadDirection(source, sourceId)
 
   const [state, dispatch] = useReducer(readerReducer, {
     currentPage: initialPage,
@@ -104,9 +104,9 @@ export function useReaderState(initialPage: number, totalPages: number, galleryI
   const setReadingDirection = useCallback(
     (direction: ReadingDirection) => {
       dispatch({ type: 'SET_READING_DIRECTION', direction })
-      saveDirection(galleryId, direction)
+      saveDirection(source, sourceId, direction)
     },
-    [galleryId],
+    [source, sourceId],
   )
 
   return {
@@ -364,21 +364,21 @@ export function useKeyboardNav(
 
 // ── useProgressSave ───────────────────────────────────────────────────
 
-export function useProgressSave(galleryId: number, currentPage: number) {
+export function useProgressSave(source: string, sourceId: string, currentPage: number) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const retryRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
-    // Skip progress save for proxy-only browsing (galleryId === 0)
-    if (!galleryId) return
+    // Skip progress save for proxy-only browsing (source or sourceId empty)
+    if (!source || !sourceId) return
 
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {
-      api.library.saveProgress(galleryId, currentPage).catch((err) => {
+      api.library.saveProgress(source, sourceId, currentPage).catch((err) => {
         console.warn('[Reader] Failed to save progress, retrying in 5s:', err)
         clearTimeout(retryRef.current)
         retryRef.current = setTimeout(() => {
-          api.library.saveProgress(galleryId, currentPage).catch((retryErr) => {
+          api.library.saveProgress(source, sourceId, currentPage).catch((retryErr) => {
             console.warn('[Reader] Progress save retry also failed:', retryErr)
             toast.error(t('reader.progressSaveFailed'))
           })
@@ -390,7 +390,7 @@ export function useProgressSave(galleryId: number, currentPage: number) {
       clearTimeout(timerRef.current)
       clearTimeout(retryRef.current)
     }
-  }, [galleryId, currentPage])
+  }, [source, sourceId, currentPage])
 }
 
 // ── useAutoAdvance ────────────────────────────────────────────────────

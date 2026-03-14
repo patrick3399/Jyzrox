@@ -60,23 +60,32 @@ export function useInfiniteLibraryGalleries(
   }
 }
 
-export function useLibraryGallery(id: number | null) {
-  return useSWR(id ? ['library/gallery', id] : null, () => api.library.getGallery(id!))
+export function useLibraryGallery(source: string | null, sourceId: string | null) {
+  return useSWR(
+    source && sourceId ? ['library/gallery', source, sourceId] : null,
+    () => api.library.getGallery(source!, sourceId!),
+  )
 }
 
-export function useGalleryImages(id: number | null) {
-  return useSWR(id ? ['gallery/images', id] : null, () => api.library.getImages(id!))
+export function useGalleryImages(source: string | null, sourceId: string | null) {
+  return useSWR(
+    source && sourceId ? ['gallery/images', source, sourceId] : null,
+    () => api.library.getImages(source!, sourceId!),
+  )
 }
 
-export function useGalleryProgress(id: number | null) {
-  return useSWR(id ? ['gallery/progress', id] : null, () => api.library.getProgress(id!))
+export function useGalleryProgress(source: string | null, sourceId: string | null) {
+  return useSWR(
+    source && sourceId ? ['gallery/progress', source, sourceId] : null,
+    () => api.library.getProgress(source!, sourceId!),
+  )
 }
 
-export function useUpdateGallery(id: number) {
+export function useUpdateGallery(source: string, sourceId: string) {
   return useSWRMutation(
-    ['library/gallery', id],
+    ['library/gallery', source, sourceId],
     (_key: unknown, { arg }: { arg: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string } }) =>
-      api.library.updateGallery(id, arg),
+      api.library.updateGallery(source, sourceId, arg),
   )
 }
 

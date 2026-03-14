@@ -84,7 +84,7 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
   return (
     <ErrorBoundary>
       <Reader
-        galleryId={0}
+        source="pixiv"
         sourceId={title}
         downloadStatus="complete"
         images={images}

@@ -69,7 +69,7 @@ export default function ArtistDetailPage() {
     colCount,
     onEnter: (i) => {
       const g = galleries[i]
-      if (g) router.push(`/library/${g.id}`)
+      if (g) router.push(`/library/${g.source}/${g.source_id}`)
     },
     enabled: activeTab === 'galleries',
   })
@@ -175,7 +175,7 @@ export default function ArtistDetailPage() {
                   <button
                     key={gallery.id}
                     data-grid-index={idx}
-                    onClick={() => router.push(`/library/${gallery.id}`)}
+                    onClick={() => router.push(`/library/${gallery.source}/${gallery.source_id}`)}
                     className="bg-vault-card border border-vault-border rounded-xl overflow-hidden hover:border-vault-accent/50 hover:shadow-lg transition-all text-left group focus:outline-none focus:ring-2 focus:ring-vault-accent"
                   >
                     <div className="aspect-[3/4] bg-vault-bg relative overflow-hidden">

@@ -35,10 +35,16 @@ function StarRating({ rating }: { rating: number }) {
 
 const PAGE_LIMIT = 50
 
+// Identifies the currently open gallery by source/source_id pair
+interface CurrentGallery {
+  source: string
+  sourceId: string
+}
+
 export default function ExplorerPage() {
   const router = useRouter()
 
-  const [currentGalleryId, setCurrentGalleryId] = useState<number | null>(null)
+  const [currentGallery, setCurrentGallery] = useState<CurrentGallery | null>(null)
   const [selectedItems, setSelectedItems] = useState<Set<string | number>>(new Set())
   const [searchQuery, setSearchQuery] = useState('')
   const [debouncedQuery, setDebouncedQuery] = useState('')
@@ -59,7 +65,7 @@ export default function ExplorerPage() {
     mutate: mutateDirs,
     isLoading: dirsLoading,
   } = useSWR(
-    currentGalleryId === null ? ['explorer-dirs', debouncedQuery, page] : null,
+    currentGallery === null ? ['explorer-dirs', debouncedQuery, page] : null,
     () => api.library.listFiles({ q: debouncedQuery || undefined, page, limit: PAGE_LIMIT }),
   )
 
@@ -69,24 +75,27 @@ export default function ExplorerPage() {
     mutate: mutateFiles,
     isLoading: filesLoading,
   } = useSWR(
-    currentGalleryId !== null ? ['explorer-files', currentGalleryId] : null,
-    () => api.library.listGalleryFiles(currentGalleryId!),
+    currentGallery !== null ? ['explorer-files', currentGallery.source, currentGallery.sourceId] : null,
+    () => api.library.listGalleryFiles(currentGallery!.source, currentGallery!.sourceId),
   )
 
   // ── Click / selection logic ────────────────────────────────────────
 
   function handleDoubleClick(id: string | number) {
-    if (currentGalleryId === null) {
-      // Navigate into gallery
-      setCurrentGalleryId(id as number)
-      setSelectedItems(new Set())
+    if (currentGallery === null) {
+      // Navigate into gallery: look up source/source_id from the directory listing
+      const dir = dirData?.directories.find((d) => d.gallery_id === (id as number))
+      if (dir && dir.source) {
+        setCurrentGallery({ source: dir.source, sourceId: dir.source_id })
+        setSelectedItems(new Set())
+      }
     } else {
       // Find the file by filename and navigate to reader at that page
       const file = fileData?.files.find((f) => f.filename === id)
       if (file?.page_num != null) {
-        router.push(`/reader/${currentGalleryId}?page=${file.page_num}`)
+        router.push(`/reader/${currentGallery.source}/${currentGallery.sourceId}?page=${file.page_num}`)
       } else {
-        router.push(`/reader/${currentGalleryId}`)
+        router.push(`/reader/${currentGallery.source}/${currentGallery.sourceId}`)
       }
     }
   }
@@ -120,17 +129,18 @@ export default function ExplorerPage() {
   async function handleDelete() {
     if (selectedItems.size === 0) return
 
-    if (currentGalleryId === null) {
+    if (currentGallery === null) {
       // Deleting galleries
       for (const id of selectedItems) {
         const dir = dirData?.directories.find((d) => d.gallery_id === (id as number))
-        const title = dir?.title ?? String(id)
+        if (!dir || !dir.source) continue
+        const title = dir.title ?? String(id)
         const confirmed = window.confirm(
           t('explorer.deleteGalleryConfirm', { title }),
         )
         if (!confirmed) continue
         try {
-          await api.library.deleteGallery(id as number)
+          await api.library.deleteGallery(dir.source, dir.source_id)
           toast.success(t('explorer.galleryDeleted'))
         } catch (err) {
           toast.error(err instanceof Error ? err.message : t('explorer.deleteFileFailed'))
@@ -152,7 +162,7 @@ export default function ExplorerPage() {
         const file = fileData?.files.find((f) => f.filename === filename)
         if (!file || file.page_num == null) continue
         try {
-          const result = await api.library.deleteImage(currentGalleryId, file.page_num)
+          const result = await api.library.deleteImage(currentGallery.source, currentGallery.sourceId, file.page_num)
           successCount++
           lastRemainingPages = result.remaining_pages
         } catch (err) {
@@ -172,9 +182,9 @@ export default function ExplorerPage() {
         const deleteGallery = window.confirm(t('explorer.emptyGalleryPrompt'))
         if (deleteGallery) {
           try {
-            await api.library.deleteGallery(currentGalleryId)
+            await api.library.deleteGallery(currentGallery.source, currentGallery.sourceId)
             toast.success(t('explorer.galleryDeleted'))
-            setCurrentGalleryId(null)
+            setCurrentGallery(null)
             mutateDirs()
           } catch (err) {
             toast.error(err instanceof Error ? err.message : t('explorer.deleteFileFailed'))
@@ -198,10 +208,10 @@ export default function ExplorerPage() {
     <div className="flex flex-col min-h-screen pb-24">
       {/* Header row */}
       <div className="flex items-center gap-3 mb-4 flex-wrap">
-        {currentGalleryId !== null && (
+        {currentGallery !== null && (
           <button
             onClick={() => {
-              setCurrentGalleryId(null)
+              setCurrentGallery(null)
               setSelectedItems(new Set())
             }}
             className="text-sm text-vault-accent hover:underline shrink-0"
@@ -211,12 +221,12 @@ export default function ExplorerPage() {
         )}
 
         <h1 className="text-xl font-bold text-vault-text truncate">
-          {currentGalleryId !== null ? galleryTitle : t('explorer.title')}
+          {currentGallery !== null ? galleryTitle : t('explorer.title')}
         </h1>
 
         <div className="flex-1" />
 
-        {currentGalleryId === null && (
+        {currentGallery === null && (
           <input
             type="text"
             value={searchQuery}
@@ -248,11 +258,11 @@ export default function ExplorerPage() {
       </div>
 
       {/* Breadcrumb for gallery view */}
-      {currentGalleryId !== null && (
+      {currentGallery !== null && (
         <div className="text-xs text-vault-text-secondary mb-3 flex items-center gap-1">
           <button
             onClick={() => {
-              setCurrentGalleryId(null)
+              setCurrentGallery(null)
               setSelectedItems(new Set())
             }}
             className="text-vault-accent hover:underline"
@@ -271,7 +281,7 @@ export default function ExplorerPage() {
           if (e.target === e.currentTarget) setSelectedItems(new Set())
         }}
       >
-        {currentGalleryId === null ? (
+        {currentGallery === null ? (
           <RootView
             directories={directories}
             loading={dirsLoading}
@@ -291,7 +301,7 @@ export default function ExplorerPage() {
       </div>
 
       {/* Pagination (root view only) */}
-      {currentGalleryId === null && totalDirs > PAGE_LIMIT && (
+      {currentGallery === null && totalDirs > PAGE_LIMIT && (
         <div className="flex items-center justify-center gap-3 mt-6">
           <button
             disabled={page === 0}

@@ -180,38 +180,39 @@ describe('useSequentialPrefetch', () => {
   // ── Local mode ───────────────────────────────────────────────────
 
   describe('local mode (concurrent)', () => {
-    it('should fire up to 3 concurrent Image requests on initial render', () => {
+    it('should fire up to 5 concurrent forward Image requests on initial render', () => {
       const images = makeImages(10)
 
       renderHook(() => useSequentialPrefetch(images, 1, false))
 
-      expect(instances).toHaveLength(3)
-      expect(instances.map((i) => i.src)).toEqual([
-        'http://proxy/page/2',
-        'http://proxy/page/3',
-        'http://proxy/page/4',
-      ])
+      // 5 forward (pages 2-6) + 0 backward (page 0 and below are out of bounds)
+      expect(instances).toHaveLength(5)
+      const srcs = instances.map((i) => i.src)
+      expect(srcs).toContain('http://proxy/page/2')
+      expect(srcs).toContain('http://proxy/page/3')
+      expect(srcs).toContain('http://proxy/page/4')
+      expect(srcs).toContain('http://proxy/page/5')
+      expect(srcs).toContain('http://proxy/page/6')
     })
 
-    it('should NOT wait for earlier requests to complete before firing all 3', () => {
+    it('should NOT wait for earlier requests to complete before firing all requests', () => {
       const images = makeImages(10)
 
       renderHook(() => useSequentialPrefetch(images, 1, false))
 
-      expect(instances).toHaveLength(3)
+      const initialCount = instances.length
       act(() => {
         instances[0].triggerLoad()
       })
-      expect(instances).toHaveLength(3)
+      // Local mode is fire-and-forget: no new requests from onload
+      expect(instances).toHaveLength(initialCount)
     })
 
-    it('should fire 3 new requests when currentPage advances', async () => {
+    it('should fire new requests when currentPage advances', async () => {
       const images = makeImages(10)
       let currentPage = 1
 
       const { rerender } = renderHook(() => useSequentialPrefetch(images, currentPage, false))
-
-      expect(instances).toHaveLength(3)
 
       currentPage = 4
       await act(async () => {
@@ -224,14 +225,18 @@ describe('useSequentialPrefetch', () => {
       expect(srcs).toContain('http://proxy/page/7')
     })
 
-    it('should not exceed available pages even if 3 ahead would overflow', () => {
+    it('should prefetch available pages ahead and behind when near the end', () => {
       const images = makeImages(9)
       const currentPage = 8
 
       renderHook(() => useSequentialPrefetch(images, currentPage, false))
 
-      expect(instances).toHaveLength(1)
-      expect(instances[0].src).toBe('http://proxy/page/9')
+      // Forward: only page 9 (1 page)
+      // Backward: pages 7 and 6 (2 pages)
+      // Total: 3 instances
+      expect(instances).toHaveLength(3)
+      const srcs = instances.map((i) => i.src)
+      expect(srcs).toContain('http://proxy/page/9')
     })
 
     it('should handle onerror without throwing and still mark page as prefetched', async () => {

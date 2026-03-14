@@ -304,14 +304,9 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             .options(selectinload(Image.blob))
         )).scalars().all()
 
-        gallery_dir = library_dir(gallery_id)
+        gallery_dir = library_dir(gallery.source, gallery.source_id)
         if not gallery_dir.exists():
-            # Fallback: try source/source_id convention
-            candidate = Path(settings.data_gallery_path) / gallery.source / gallery.source_id
-            if candidate.is_dir():
-                gallery_dir = candidate
-            else:
-                gallery_dir = None
+            gallery_dir = None
 
         new_files_added = 0
         if gallery_dir and gallery_dir.is_dir():
@@ -340,7 +335,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                     continue
                 # New file found on disk that is not in the DB.
                 blob = await store_blob(fpath, file_hash, session)
-                await create_library_symlink(gallery_id, fpath.name, blob)
+                await create_library_symlink(gallery.source, gallery.source_id, fpath.name, blob)
                 await session.flush()
                 max_page += 1
                 stmt = pg_insert_local(Image).values(
@@ -488,11 +483,18 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
     dir_p = Path(dir_path)
 
     gallery_id: int | None = None
-    # Check if this path is a library directory (or inside one)
+    # Check if this path is a library directory (or inside one).
+    # Library structure is lib_base/source/source_id/.
     try:
         rel = dir_p.relative_to(lib_base)
-        # The first component should be the gallery_id
-        gallery_id = int(rel.parts[0])
+        if len(rel.parts) >= 2:
+            source = rel.parts[0]
+            source_id = rel.parts[1]
+            async with AsyncSessionLocal() as session:
+                result = await session.execute(
+                    select(Gallery.id).where(Gallery.source == source, Gallery.source_id == source_id)
+                )
+                gallery_id = result.scalar_one_or_none()
     except (ValueError, IndexError):
         pass
 

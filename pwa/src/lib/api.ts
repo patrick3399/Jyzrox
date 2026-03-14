@@ -288,9 +288,10 @@ const library = {
   getGalleries: (params: GallerySearchParams = {}) =>
     apiFetch<GalleryListResponse>(`/api/library/galleries${qs(params as Record<string, unknown>)}`),
 
-  getGallery: (id: number) => apiFetch<Gallery>(`/api/library/galleries/${id}`),
+  getGallery: (source: string, sourceId: string) =>
+    apiFetch<Gallery>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`),
 
-  getImages: (id: number, opts?: { page?: number; limit?: number }) => {
+  getImages: (source: string, sourceId: string, opts?: { page?: number; limit?: number }) => {
     const params = new URLSearchParams()
     if (opts?.page) params.set('page', String(opts.page))
     if (opts?.limit) params.set('limit', String(opts.limit))
@@ -301,11 +302,11 @@ const library = {
       total?: number
       page?: number
       has_next?: boolean
-    }>(`/api/library/galleries/${id}/images${qs ? `?${qs}` : ''}`)
+    }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/images${qs ? `?${qs}` : ''}`)
   },
 
-  updateGallery: (id: number, patch: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string }) =>
-    apiFetch<Gallery>(`/api/library/galleries/${id}`, {
+  updateGallery: (source: string, sourceId: string, patch: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string }) =>
+    apiFetch<Gallery>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
@@ -316,20 +317,21 @@ const library = {
       body: JSON.stringify(body),
     }),
 
-  deleteGallery: (id: number) =>
-    apiFetch<{ status: string; deleted_files: number }>(`/api/library/galleries/${id}`, {
+  deleteGallery: (source: string, sourceId: string) =>
+    apiFetch<{ status: string; deleted_files: number }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`, {
       method: 'DELETE',
     }),
 
-  getProgress: (id: number) => apiFetch<ReadProgress>(`/api/library/galleries/${id}/progress`),
+  getProgress: (source: string, sourceId: string) =>
+    apiFetch<ReadProgress>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/progress`),
 
-  saveProgress: (id: number, last_page: number) =>
-    apiFetch<{ status: string }>(`/api/library/galleries/${id}/progress`, {
+  saveProgress: (source: string, sourceId: string, last_page: number) =>
+    apiFetch<{ status: string }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/progress`, {
       method: 'POST',
       body: JSON.stringify({ last_page }),
     }),
 
-  getGalleryTags: (id: number) =>
+  getGalleryTags: (source: string, sourceId: string) =>
     apiFetch<{
       gallery_id: number
       tags: Array<{
@@ -338,7 +340,7 @@ const library = {
         confidence: number
         source: string
       }>
-    }>(`/api/library/galleries/${id}/tags`),
+    }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/tags`),
 
   getArtists: (params: { q?: string; source?: string; sort?: string; page?: number; limit?: number } = {}) =>
     apiFetch<{ artists: ArtistSummary[]; total: number }>(`/api/library/artists${qs(params as Record<string, unknown>)}`),
@@ -360,14 +362,14 @@ const library = {
       `/api/library/files${qs(params as Record<string, unknown>)}`
     ),
 
-  listGalleryFiles: (galleryId: number) =>
-    apiFetch<{ gallery_id: number; title: string; category: string | null; files: LibraryFile[]; total_files: number }>(
-      `/api/library/files/${galleryId}`
+  listGalleryFiles: (source: string, sourceId: string) =>
+    apiFetch<{ gallery_id: number; source: string; source_id: string; title: string; category: string | null; files: LibraryFile[]; total_files: number }>(
+      `/api/library/files/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`
     ),
 
-  deleteImage: (galleryId: number, pageNum: number) =>
+  deleteImage: (source: string, sourceId: string, pageNum: number) =>
     apiFetch<{ status: string; remaining_pages: number }>(
-      `/api/library/galleries/${galleryId}/delete-image`,
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/delete-image`,
       { method: 'POST', body: JSON.stringify({ page_num: pageNum }) }
     ),
 

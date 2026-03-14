@@ -13,9 +13,8 @@ interface LoadedData {
 }
 
 export default function ReaderPage() {
-  const { galleryId } = useParams<{ galleryId: string }>()
+  const { source, sourceId } = useParams<{ source: string; sourceId: string }>()
   const searchParams = useSearchParams()
-  const id = Number(galleryId)
   const urlPage = parseInt(searchParams.get('page') ?? '', 10) || 0
 
   const [data, setData] = useState<LoadedData | null>(null)
@@ -23,8 +22,8 @@ export default function ReaderPage() {
   const historyRecordedRef = useRef(false)
 
   useEffect(() => {
-    if (!id || isNaN(id)) {
-      setError('Invalid gallery ID.')
+    if (!source || !sourceId) {
+      setError('Invalid gallery source or ID.')
       return
     }
 
@@ -33,9 +32,9 @@ export default function ReaderPage() {
     async function load() {
       try {
         const [gallery, imagesResp, progress] = await Promise.all([
-          api.library.getGallery(id),
-          api.library.getImages(id),
-          api.library.getProgress(id).catch(() => null),
+          api.library.getGallery(source, sourceId),
+          api.library.getImages(source, sourceId),
+          api.library.getProgress(source, sourceId).catch(() => null),
         ])
 
         if (!cancelled) {
@@ -52,8 +51,8 @@ export default function ReaderPage() {
                 historyRecordedRef.current = true
                 api.history
                   .record({
-                    source: 'local',
-                    source_id: String(gallery.id),
+                    source: gallery.source,
+                    source_id: gallery.source_id,
                     title: gallery.title,
                     thumb: gallery.cover_thumb || undefined,
                   })
@@ -75,7 +74,7 @@ export default function ReaderPage() {
     return () => {
       cancelled = true
     }
-  }, [id])
+  }, [source, sourceId])
 
   useEffect(() => {
     if (data?.gallery.download_status !== 'downloading') return
@@ -83,8 +82,8 @@ export default function ReaderPage() {
     const interval = setInterval(async () => {
       try {
         const [gallery, imagesResp] = await Promise.all([
-          api.library.getGallery(id),
-          api.library.getImages(id),
+          api.library.getGallery(source, sourceId),
+          api.library.getImages(source, sourceId),
         ])
         if (!cancelled) {
           setData((prev) => prev ? { ...prev, gallery, images: imagesResp.images } : prev)
@@ -97,7 +96,7 @@ export default function ReaderPage() {
       cancelled = true
       clearInterval(interval)
     }
-  }, [id, data?.gallery.download_status])
+  }, [source, sourceId, data?.gallery.download_status])
 
   if (error) {
     return (
@@ -123,9 +122,6 @@ export default function ReaderPage() {
 
   const { gallery, images, progress } = data
 
-  // source_id is the numeric EH gid stored as a string in Gallery
-  const sourceId = gallery.source_id
-
   // URL ?page= takes priority over saved progress
   const initialPage = urlPage > 0
     ? Math.min(urlPage, gallery.pages)
@@ -134,8 +130,8 @@ export default function ReaderPage() {
   return (
     <ErrorBoundary>
       <Reader
-        galleryId={gallery.id}
-        sourceId={sourceId}
+        source={gallery.source}
+        sourceId={gallery.source_id}
         downloadStatus={gallery.download_status}
         images={images}
         totalPages={gallery.pages}

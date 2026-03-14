@@ -162,7 +162,7 @@ function LibraryContent() {
       const g = galleries[i]
       if (g) {
         saveScroll()
-        router.push(`/library/${g.id}`)
+        router.push(`/library/${g.source}/${g.source_id}`)
       }
     },
   })
@@ -427,7 +427,7 @@ function LibraryContent() {
                 )
               }
               return (
-                <Link href={`/library/${gallery.id}`} onClick={() => saveScroll()}>
+                <Link href={`/library/${gallery.source}/${gallery.source_id}`} onClick={() => saveScroll()}>
                   <LibraryGalleryCard
                     gallery={gallery}
                     thumbUrl={gallery.cover_thumb ?? undefined}

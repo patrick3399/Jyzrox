@@ -149,7 +149,7 @@ describe('apiFetch', () => {
     const noContentResponse = makeResponse({ status: 204, body: '' })
     vi.mocked(fetch).mockResolvedValueOnce(noContentResponse)
 
-    const result = await api.library.saveProgress(1, 5)
+    const result = await api.library.saveProgress('local', '1', 5)
 
     // An empty string body means the `text ? JSON.parse(text) : {}` branch
     // returns the fallback empty object.
@@ -165,10 +165,10 @@ describe('apiFetch', () => {
 
     vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ jsonBody: {} }))
 
-    await api.library.getGallery(42)
+    await api.library.getGallery('local', '42')
 
     const [url] = vi.mocked(fetch).mock.calls[0]
-    expect(url).toBe('/api/library/galleries/42')
+    expect(url).toBe('/api/library/galleries/local/42')
   })
 })
 

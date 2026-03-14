@@ -151,13 +151,13 @@ class TestListGalleries:
 
 
 class TestGetGallery:
-    """GET /api/library/galleries/{id}"""
+    """GET /api/library/galleries/{source}/{source_id}"""
 
     async def test_get_existing_gallery(self, client, db_session):
-        """Should return gallery details for a valid id."""
-        gid = await _insert_gallery(db_session, title="My Gallery")
+        """Should return gallery details for a valid source/source_id."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="12345", title="My Gallery")
 
-        resp = await client.get(f"/api/library/galleries/{gid}")
+        resp = await client.get("/api/library/galleries/ehentai/12345")
         assert resp.status_code == 200
         data = resp.json()
         assert data["id"] == gid
@@ -166,8 +166,8 @@ class TestGetGallery:
         assert "rating" in data
 
     async def test_gallery_not_found(self, client):
-        """Non-existent gallery id should return 404."""
-        resp = await client.get("/api/library/galleries/99999")
+        """Non-existent source/source_id should return 404."""
+        resp = await client.get("/api/library/galleries/nonexistent/99999")
         assert resp.status_code == 404
         assert "not found" in resp.json()["detail"].lower()
 
@@ -178,15 +178,15 @@ class TestGetGallery:
 
 
 class TestGetGalleryImages:
-    """GET /api/library/galleries/{id}/images"""
+    """GET /api/library/galleries/{source}/{source_id}/images"""
 
     async def test_get_images(self, client, db_session):
         """Should return images ordered by page_num ascending (default for unknown sources)."""
-        gid = await _insert_gallery(db_session)
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="12345")
         await _insert_image(db_session, gid, page_num=1, filename="001.jpg")
         await _insert_image(db_session, gid, page_num=2, filename="002.jpg")
 
-        resp = await client.get(f"/api/library/galleries/{gid}/images")
+        resp = await client.get("/api/library/galleries/ehentai/12345/images")
         assert resp.status_code == 200
         data = resp.json()
         assert data["gallery_id"] == gid
@@ -197,7 +197,7 @@ class TestGetGalleryImages:
 
     async def test_images_gallery_not_found(self, client):
         """Should return 404 when gallery doesn't exist."""
-        resp = await client.get("/api/library/galleries/99999/images")
+        resp = await client.get("/api/library/galleries/nonexistent/99999/images")
         assert resp.status_code == 404
 
 
@@ -207,7 +207,7 @@ class TestGetGalleryImages:
 
 
 class TestUpdateGallery:
-    """PATCH /api/library/galleries/{id}"""
+    """PATCH /api/library/galleries/{source}/{source_id}"""
 
     async def test_update_favorited(self, client, db_session):
         """Should insert into user_favorites and return is_favorited=True.
@@ -216,10 +216,10 @@ class TestUpdateGallery:
         is PostgreSQL-specific. On SQLite this may fail (500). We accept either
         200 with is_favorited=True (PostgreSQL) or 500 (SQLite limitation).
         """
-        gid = await _insert_gallery(db_session, favorited=0)
+        await _insert_gallery(db_session, source="ehentai", source_id="12345", favorited=0)
 
         resp = await client.patch(
-            f"/api/library/galleries/{gid}",
+            "/api/library/galleries/ehentai/12345",
             json={"favorited": True},
         )
         if resp.status_code == 200:
@@ -234,10 +234,10 @@ class TestUpdateGallery:
         is PostgreSQL-specific. On SQLite this may fail (500). We accept either
         200 with my_rating=5 (PostgreSQL) or 500 (SQLite limitation).
         """
-        gid = await _insert_gallery(db_session, rating=0)
+        await _insert_gallery(db_session, source="ehentai", source_id="12345", rating=0)
 
         resp = await client.patch(
-            f"/api/library/galleries/{gid}",
+            "/api/library/galleries/ehentai/12345",
             json={"rating": 5},
         )
         if resp.status_code == 200:
@@ -248,7 +248,7 @@ class TestUpdateGallery:
     async def test_update_nonexistent(self, client):
         """Updating a non-existent gallery should return 404."""
         resp = await client.patch(
-            "/api/library/galleries/99999",
+            "/api/library/galleries/nonexistent/99999",
             json={"rating": 3},
         )
         assert resp.status_code == 404
@@ -260,13 +260,13 @@ class TestUpdateGallery:
 
 
 class TestReadProgress:
-    """GET/POST /api/library/galleries/{id}/progress"""
+    """GET/POST /api/library/galleries/{source}/{source_id}/progress"""
 
     async def test_get_progress_default(self, client, db_session):
         """No progress saved should return last_page=0."""
-        gid = await _insert_gallery(db_session)
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="12345")
 
-        resp = await client.get(f"/api/library/galleries/{gid}/progress")
+        resp = await client.get("/api/library/galleries/ehentai/12345/progress")
         assert resp.status_code == 200
         data = resp.json()
         assert data["gallery_id"] == gid
@@ -274,7 +274,7 @@ class TestReadProgress:
 
     async def test_save_and_get_progress(self, client, db_session):
         """Saving progress should be retrievable."""
-        gid = await _insert_gallery(db_session)
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="12345")
 
         # Save progress — note: this uses pg_insert ON CONFLICT which won't work
         # with SQLite. We test the GET path instead using direct DB insert.
@@ -284,7 +284,7 @@ class TestReadProgress:
         )
         await db_session.commit()
 
-        resp = await client.get(f"/api/library/galleries/{gid}/progress")
+        resp = await client.get("/api/library/galleries/ehentai/12345/progress")
         assert resp.status_code == 200
         data = resp.json()
         assert data["last_page"] == 15

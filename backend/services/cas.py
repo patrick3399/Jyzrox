@@ -24,9 +24,21 @@ def cas_url(sha256: str, ext: str) -> str:
     return f"/media/cas/{sha256[:2]}/{sha256[2:4]}/{sha256}{ext}"
 
 
-def library_dir(gallery_id: int) -> Path:
-    """Return the library symlink directory for a gallery."""
-    return Path(settings.data_library_path) / str(gallery_id)
+def safe_source_id(source_id: str) -> str:
+    """Sanitize a source_id for use as a filesystem path component.
+
+    Replaces '/' with '__', strips '..' to prevent path traversal,
+    and strips leading/trailing whitespace.
+    """
+    return source_id.strip().replace("/", "__").replace("..", "_")
+
+
+def library_dir(source: str, source_id: str) -> Path:
+    """Return the library symlink directory for a gallery.
+
+    Layout: /data/library/{source}/{safe_source_id}/
+    """
+    return Path(settings.data_library_path) / source / safe_source_id(source_id)
 
 
 def resolve_blob_path(blob: Blob) -> Path:
@@ -109,9 +121,9 @@ async def store_blob(
     return result.scalar_one()
 
 
-async def create_library_symlink(gallery_id: int, filename: str, blob: Blob) -> None:
-    """Create a symlink in /data/library/{gallery_id}/ pointing to the blob's actual file."""
-    link_dir = library_dir(gallery_id)
+async def create_library_symlink(source: str, source_id: str, filename: str, blob: Blob) -> None:
+    """Create a symlink in /data/library/{source}/{safe_source_id}/ pointing to the blob's actual file."""
+    link_dir = library_dir(source, source_id)
     link_dir.mkdir(parents=True, exist_ok=True)
 
     target = resolve_blob_path(blob)

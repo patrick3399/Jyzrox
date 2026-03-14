@@ -139,7 +139,7 @@ function MediaElement({
 // ── Props ─────────────────────────────────────────────────────────────
 
 interface ReaderProps {
-  galleryId: number
+  source: string
   sourceId: string
   downloadStatus: 'proxy_only' | 'partial' | 'complete' | 'downloading'
   images: GalleryImage[]
@@ -1385,7 +1385,7 @@ function HelpOverlay({ readingDirection, viewMode, onDismiss }: HelpOverlayProps
 // ── Reader (main component) ───────────────────────────────────────────
 
 export default function Reader({
-  galleryId,
+  source,
   sourceId,
   downloadStatus,
   images: rawImages,
@@ -1417,7 +1417,7 @@ export default function Reader({
     toggleOverlay,
     setScaleMode,
     setReadingDirection,
-  } = useReaderState(initialPage, totalPages, galleryId)
+  } = useReaderState(initialPage, totalPages, source, sourceId)
 
   // Reading direction aware next/prev
   const nextPage = useCallback(() => {
@@ -1561,7 +1561,7 @@ export default function Reader({
   )
 
   useSequentialPrefetch(images, state.currentPage, isProxyMode)
-  useProgressSave(galleryId, state.currentPage)
+  useProgressSave(source, sourceId, state.currentPage)
 
   const handleToggleOverlay = useCallback(() => toggleOverlay(), [toggleOverlay])
   const handleBack = useCallback(() => router.back(), [router])

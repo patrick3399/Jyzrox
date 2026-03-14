@@ -116,7 +116,8 @@ function makeGallery(id: number, title = `Gallery ${id}`) {
     is_favorited: false,
     my_rating: null,
     uploader: 'user',
-    source: 'local',
+    source: 'ehentai',
+    source_id: String(id),
     artist_id: null,
     download_status: 'complete' as const,
     import_mode: null,
@@ -348,7 +349,7 @@ describe('Library page — gallery results', () => {
     setGalleriesState([makeGallery(7)])
     render(<LibraryPage />)
     const link = screen.getByRole('link', { name: /Gallery 7/ })
-    expect(link).toHaveAttribute('href', '/library/7')
+    expect(link).toHaveAttribute('href', '/library/ehentai/7')
   })
 
   it('test_library_withGalleries_showsTotalCount', () => {

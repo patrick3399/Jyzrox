@@ -212,14 +212,14 @@ class TestOPDSAll:
         assert title == "My Gallery"
 
     async def test_all_entry_has_subsection_link(self, opds_client, db_session):
-        """Each gallery entry must have a subsection link to /opds/gallery/{id}."""
-        gid = await _insert_gallery(db_session, source_id="20")
+        """Each gallery entry must have a subsection link to /opds/gallery/{source}/{source_id}."""
+        await _insert_gallery(db_session, source="test", source_id="20")
         resp = await opds_client.get("/opds/all")
         entries = _entries(_parse(resp))
         assert len(entries) == 1
         rels = _link_rels(entries[0])
         assert "subsection" in rels
-        assert f"/opds/gallery/{gid}" in rels["subsection"]
+        assert "/opds/gallery/test/20" in rels["subsection"]
 
     async def test_all_entry_has_urn_id(self, opds_client, db_session):
         """Gallery entry id should be formatted as urn:jyzrox:gallery:{id}."""
@@ -487,45 +487,45 @@ class TestOPDSOpenSearch:
 
 class TestOPDSGalleryDetail:
     async def test_gallery_detail_returns_200(self, opds_client, db_session):
-        """GET /opds/gallery/{id} for an existing gallery should return 200."""
-        gid = await _insert_gallery(db_session, source_id="gd1", title="Detail Gallery")
-        resp = await opds_client.get(f"/opds/gallery/{gid}")
+        """GET /opds/gallery/{source}/{source_id} for an existing gallery should return 200."""
+        await _insert_gallery(db_session, source="test", source_id="gd1", title="Detail Gallery")
+        resp = await opds_client.get("/opds/gallery/test/gd1")
         assert resp.status_code == 200
 
     async def test_gallery_not_found_returns_404(self, opds_client):
-        """GET /opds/gallery/{id} for a non-existent gallery should return 404."""
-        resp = await opds_client.get("/opds/gallery/999999")
+        """GET /opds/gallery/{source}/{source_id} for a non-existent gallery should return 404."""
+        resp = await opds_client.get("/opds/gallery/nonexistent/999999")
         assert resp.status_code == 404
 
     async def test_gallery_detail_is_atom_feed(self, opds_client, db_session):
         """Gallery detail should return a valid Atom feed XML."""
-        gid = await _insert_gallery(db_session, source_id="gd2")
-        resp = await opds_client.get(f"/opds/gallery/{gid}")
+        await _insert_gallery(db_session, source="test", source_id="gd2")
+        resp = await opds_client.get("/opds/gallery/test/gd2")
         root = _parse(resp)
         assert root.tag == f"{ATOM}feed"
 
     async def test_gallery_detail_feed_title_matches_gallery(self, opds_client, db_session):
         """Feed title should match the gallery's title."""
-        gid = await _insert_gallery(db_session, source_id="gd3", title="Named Gallery")
-        resp = await opds_client.get(f"/opds/gallery/{gid}")
+        await _insert_gallery(db_session, source="test", source_id="gd3", title="Named Gallery")
+        resp = await opds_client.get("/opds/gallery/test/gd3")
         root = _parse(resp)
         assert root.findtext(f"{ATOM}title") == "Named Gallery"
 
     async def test_gallery_detail_no_images_returns_empty_feed(self, opds_client, db_session):
         """Gallery with no images should return a feed with zero entries."""
-        gid = await _insert_gallery(db_session, source_id="gd4")
-        resp = await opds_client.get(f"/opds/gallery/{gid}")
+        await _insert_gallery(db_session, source="test", source_id="gd4")
+        resp = await opds_client.get("/opds/gallery/test/gd4")
         entries = _entries(_parse(resp))
         assert entries == []
 
     async def test_gallery_detail_entries_have_pse_index(self, opds_client, db_session):
         """Each image entry should carry a pse:index attribute (0-based)."""
-        gid = await _insert_gallery(db_session, source_id="gd5", pages=3)
+        gid = await _insert_gallery(db_session, source="test", source_id="gd5", pages=3)
         await _insert_image(db_session, gid, page_num=1, filename="001.jpg")
         await _insert_image(db_session, gid, page_num=2, filename="002.jpg")
         await _insert_image(db_session, gid, page_num=3, filename="003.jpg")
 
-        resp = await opds_client.get(f"/opds/gallery/{gid}")
+        resp = await opds_client.get("/opds/gallery/test/gd5")
         entries = _entries(_parse(resp))
         assert len(entries) == 3
         indices = {e.get(f"{PSE}index") for e in entries}
@@ -534,9 +534,9 @@ class TestOPDSGalleryDetail:
 
     async def test_gallery_detail_entries_have_title(self, opds_client, db_session):
         """Each image entry should have a title like 'Page N'."""
-        gid = await _insert_gallery(db_session, source_id="gd6")
+        gid = await _insert_gallery(db_session, source="test", source_id="gd6")
         await _insert_image(db_session, gid, page_num=1)
-        resp = await opds_client.get(f"/opds/gallery/{gid}")
+        resp = await opds_client.get("/opds/gallery/test/gd6")
         entries = _entries(_parse(resp))
         assert entries[0].findtext(f"{ATOM}title") == "Page 1"
 
@@ -547,20 +547,20 @@ class TestOPDSGalleryDetail:
         display config.  For source='test' the default image_order is 'asc',
         so pse:index values come out in ascending order: [0, 1, 2].
         """
-        gid = await _insert_gallery(db_session, source_id="gd7", pages=3)
+        gid = await _insert_gallery(db_session, source="test", source_id="gd7", pages=3)
         # Insert in mixed order to confirm ordering is consistent
         await _insert_image(db_session, gid, page_num=3)
         await _insert_image(db_session, gid, page_num=1)
         await _insert_image(db_session, gid, page_num=2)
 
-        resp = await opds_client.get(f"/opds/gallery/{gid}")
+        resp = await opds_client.get("/opds/gallery/test/gd7")
         entries = _entries(_parse(resp))
         indices = [int(e.get(f"{PSE}index")) for e in entries]
         # Unknown source defaults to image_order="asc": indices are [0, 1, 2]
         assert indices == sorted(indices)
 
     async def test_gallery_detail_fallback_title_when_no_title(self, opds_client, db_session):
-        """When gallery title is null, feed title should fall back to 'Gallery {id}'."""
+        """When gallery title is null, feed title should fall back to 'Gallery {source}/{source_id}'."""
         await db_session.execute(
             text(
                 "INSERT INTO galleries (source, source_id, pages, favorited) "
@@ -568,13 +568,11 @@ class TestOPDSGalleryDetail:
             )
         )
         await db_session.commit()
-        result = await db_session.execute(text("SELECT last_insert_rowid()"))
-        gid = result.scalar()
 
-        resp = await opds_client.get(f"/opds/gallery/{gid}")
+        resp = await opds_client.get("/opds/gallery/test/no-title-1")
         root = _parse(resp)
         feed_title = root.findtext(f"{ATOM}title")
-        assert feed_title == f"Gallery {gid}"
+        assert feed_title == "Gallery test/no-title-1"
 
 
 # ── Authentication tests ───────────────────────────────────────────────────────
@@ -633,6 +631,6 @@ class TestOPDSAuth:
         assert resp.status_code == 401
 
     async def test_gallery_detail_no_auth_returns_401(self, unauthed_opds_client):
-        """Auth check should apply to /opds/gallery/{id} endpoint."""
-        resp = await unauthed_opds_client.get("/opds/gallery/1")
+        """Auth check should apply to /opds/gallery/{source}/{source_id} endpoint."""
+        resp = await unauthed_opds_client.get("/opds/gallery/test/1")
         assert resp.status_code == 401

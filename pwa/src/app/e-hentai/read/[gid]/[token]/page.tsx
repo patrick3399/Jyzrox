@@ -140,7 +140,7 @@ function EhProxyReaderPage() {
   return (
     <ErrorBoundary>
       <Reader
-        galleryId={0}
+        source="ehentai"
         sourceId={String(gid)}
         downloadStatus="proxy_only"
         images={images}

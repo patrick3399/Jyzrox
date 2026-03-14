@@ -101,7 +101,7 @@ export default function ArtistReaderPage() {
   return (
     <ErrorBoundary>
       <Reader
-        galleryId={0}
+        source=""
         sourceId=""
         downloadStatus="complete"
         images={images}

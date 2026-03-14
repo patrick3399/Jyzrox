@@ -161,7 +161,7 @@ export default function HistoryPage() {
       if (item.gid != null && item.token) {
         router.push(`/e-hentai/${item.gid}/${item.token}`)
       } else if (item.source === 'local') {
-        router.push(`/library/${item.source_id}`)
+        router.push(`/library/${item.source}/${item.source_id}`)
       }
     },
     [router],

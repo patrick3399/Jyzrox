@@ -72,18 +72,19 @@ const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: stri
 }
 
 export default function GalleryDetailPage() {
-  const params = useParams()
+  const params = useParams<{ source: string; sourceId: string }>()
   const router = useRouter()
-  const id = params?.id ? Number(params.id) : null
+  const source = params?.source ?? null
+  const sourceId = params?.sourceId ?? null
 
   const {
     data: gallery,
     isLoading: galleryLoading,
     error: galleryError,
     mutate: mutateGallery,
-  } = useLibraryGallery(id)
-  const { data: imagesData, isLoading: imagesLoading, mutate: mutateImages } = useGalleryImages(id)
-  const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(id ?? 0)
+  } = useLibraryGallery(source, sourceId)
+  const { data: imagesData, isLoading: imagesLoading, mutate: mutateImages } = useGalleryImages(source, sourceId)
+  const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(source ?? '', sourceId ?? '')
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRetagging, setIsRetagging] = useState(false)
   const [tagData, setTagData] = useState<Array<{ namespace: string; name: string; confidence: number; source: string }>>([])
@@ -104,8 +105,8 @@ export default function GalleryDetailPage() {
         historyRecordedRef.current = true
         api.history
           .record({
-            source: 'local',
-            source_id: String(gallery.id),
+            source: gallery.source,
+            source_id: gallery.source_id,
             title: gallery.title,
             thumb: gallery.cover_thumb || undefined,
           })
@@ -117,16 +118,18 @@ export default function GalleryDetailPage() {
   }, [gallery])
 
   useEffect(() => {
-    if (!id) return
-    api.library.getGalleryTags(id).then((res) => setTagData(res.tags)).catch(() => {})
-  }, [id])
+    if (!source || !sourceId) return
+    api.library.getGalleryTags(source, sourceId).then((res) => setTagData(res.tags)).catch(() => {})
+  }, [source, sourceId])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
       if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement) return
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
-        if (gallery?.id) router.push(`/reader/${gallery.id}`)
+        if (gallery?.source && gallery?.source_id) {
+          router.push(`/reader/${gallery.source}/${gallery.source_id}`)
+        }
       }
       if (e.key === 'ArrowUp' || e.key === 'Escape') {
         e.preventDefault()
@@ -135,7 +138,7 @@ export default function GalleryDetailPage() {
     }
     window.addEventListener('keydown', handler)
     return () => window.removeEventListener('keydown', handler)
-  }, [gallery?.id, router])
+  }, [gallery?.source, gallery?.source_id, router])
 
   const isDownloading = gallery?.download_status === 'downloading'
   useEffect(() => {
@@ -154,12 +157,12 @@ export default function GalleryDetailPage() {
   }
 
   const handleDelete = async () => {
-    if (!gallery || !id) return
+    if (!gallery || !source || !sourceId) return
     const confirmMsg = t(getDeleteConfirmKey(), { title: gallery.title })
     if (!confirm(confirmMsg)) return
     setIsDeleting(true)
     try {
-      await api.library.deleteGallery(id)
+      await api.library.deleteGallery(source, sourceId)
       toast.success(t('library.deleted'))
       router.push('/library')
     } catch (e: unknown) {
@@ -171,10 +174,10 @@ export default function GalleryDetailPage() {
   }
 
   const handleRetag = async () => {
-    if (!id) return
+    if (!gallery) return
     setIsRetagging(true)
     try {
-      await api.tags.retag(id)
+      await api.tags.retag(gallery.id)
       toast.success(t('library.retagQueued'))
     } catch (e: unknown) {
       const msg = e instanceof Error ? e.message : t('library.retagFailed')
@@ -414,7 +417,7 @@ export default function GalleryDetailPage() {
               {/* Action Buttons */}
               <div className="flex flex-wrap gap-2">
                 <Link
-                  href={`/reader/${gallery.id}`}
+                  href={`/reader/${gallery.source}/${gallery.source_id}`}
                   className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-medium transition-colors"
                 >
                   {t('browse.read')}
@@ -585,7 +588,7 @@ export default function GalleryDetailPage() {
               {images.map((image, idx) => (
                 <Link
                   key={image.id}
-                  href={`/reader/${gallery.id}?page=${image.page_num}`}
+                  href={`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`}
                   className="group"
                 >
                   {image.thumb_path ? (
@@ -608,7 +611,7 @@ export default function GalleryDetailPage() {
                 Array.from({ length: Math.min(gallery.pages, 40) }).map((_, i) => (
                   <Link
                     key={i}
-                    href={`/reader/${gallery.id}?page=${i + 1}`}
+                    href={`/reader/${gallery.source}/${gallery.source_id}?page=${i + 1}`}
                     className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors"
                   >
                     {i + 1}

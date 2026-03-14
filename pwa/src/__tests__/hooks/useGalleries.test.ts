@@ -167,32 +167,32 @@ describe('useLibraryGalleries', () => {
 
 describe('useLibraryGallery', () => {
   it('test_useLibraryGallery_withNullId_passesNullKeyToSWR', () => {
-    useLibraryGallery(null)
+    useLibraryGallery(null, null)
     expect(lastSwrCall().key).toBeNull()
   })
 
   it('test_useLibraryGallery_withId_keyFirstElementIsLibraryGallery', () => {
-    useLibraryGallery(42)
+    useLibraryGallery('ehentai', '42')
     const { key } = lastSwrCall()
     expect(Array.isArray(key)).toBe(true)
     expect((key as unknown[])[0]).toBe('library/gallery')
   })
 
   it('test_useLibraryGallery_withId_keySecondElementMatchesId', () => {
-    useLibraryGallery(42)
+    useLibraryGallery('ehentai', '42')
     const { key } = lastSwrCall()
-    expect((key as unknown[])[1]).toBe(42)
+    expect((key as unknown[])[1]).toBe('ehentai')
   })
 
   it('test_useLibraryGallery_withId_fetcher_callsApiLibraryGetGalleryWithId', async () => {
-    useLibraryGallery(42)
+    useLibraryGallery('ehentai', '42')
     await lastSwrCall().fetcher!()
     expect(mockGetGallery).toHaveBeenCalledOnce()
-    expect(mockGetGallery).toHaveBeenCalledWith(42)
+    expect(mockGetGallery).toHaveBeenCalledWith('ehentai', '42')
   })
 
   it('test_useLibraryGallery_withNullId_fetcher_notCalledByDefault', async () => {
-    useLibraryGallery(null)
+    useLibraryGallery(null, null)
     // The fetcher exists but api.library.getGallery should never be invoked
     // because SWR skips fetching when key is null.
     expect(mockGetGallery).not.toHaveBeenCalled()
@@ -201,47 +201,47 @@ describe('useLibraryGallery', () => {
 
 describe('useGalleryImages', () => {
   it('test_useGalleryImages_withNullId_passesNullKeyToSWR', () => {
-    useGalleryImages(null)
+    useGalleryImages(null, null)
     expect(lastSwrCall().key).toBeNull()
   })
 
   it('test_useGalleryImages_withId_keyFirstElementIsGalleryImages', () => {
-    useGalleryImages(7)
+    useGalleryImages('ehentai', '7')
     const { key } = lastSwrCall()
     expect(Array.isArray(key)).toBe(true)
     expect((key as unknown[])[0]).toBe('gallery/images')
   })
 
-  it('test_useGalleryImages_withId_keySecondElementMatchesId', () => {
-    useGalleryImages(7)
+  it('test_useGalleryImages_withId_keySecondElementMatchesSource', () => {
+    useGalleryImages('ehentai', '7')
     const { key } = lastSwrCall()
-    expect((key as unknown[])[1]).toBe(7)
+    expect((key as unknown[])[1]).toBe('ehentai')
   })
 
-  it('test_useGalleryImages_withId_fetcher_callsApiLibraryGetImagesWithId', async () => {
-    useGalleryImages(7)
+  it('test_useGalleryImages_withId_fetcher_callsApiLibraryGetImagesWithSourceAndId', async () => {
+    useGalleryImages('ehentai', '7')
     await lastSwrCall().fetcher!()
     expect(mockGetImages).toHaveBeenCalledOnce()
-    expect(mockGetImages).toHaveBeenCalledWith(7)
+    expect(mockGetImages).toHaveBeenCalledWith('ehentai', '7')
   })
 })
 
 describe('useGalleryProgress', () => {
   it('test_useGalleryProgress_withNullId_passesNullKeyToSWR', () => {
-    useGalleryProgress(null)
+    useGalleryProgress(null, null)
     expect(lastSwrCall().key).toBeNull()
   })
 
   it('test_useGalleryProgress_withId_keyFirstElementIsGalleryProgress', () => {
-    useGalleryProgress(5)
+    useGalleryProgress('ehentai', '5')
     const { key } = lastSwrCall()
     expect((key as unknown[])[0]).toBe('gallery/progress')
   })
 
-  it('test_useGalleryProgress_withId_fetcher_callsApiLibraryGetProgressWithId', async () => {
-    useGalleryProgress(5)
+  it('test_useGalleryProgress_withId_fetcher_callsApiLibraryGetProgressWithSourceAndId', async () => {
+    useGalleryProgress('ehentai', '5')
     await lastSwrCall().fetcher!()
-    expect(mockGetProgress).toHaveBeenCalledWith(5)
+    expect(mockGetProgress).toHaveBeenCalledWith('ehentai', '5')
   })
 })
 

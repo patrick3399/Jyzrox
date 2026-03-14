@@ -19,7 +19,7 @@ from core.errors import api_error, parse_accept_language
 from core.database import get_db
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites
-from db.models import DownloadJob
+from db.models import DownloadJob, Gallery
 from services.credential import get_credential
 
 logger = logging.getLogger(__name__)
@@ -197,7 +197,14 @@ async def list_jobs(
             stmt = stmt_filtered.order_by(desc(DownloadJob.created_at)).offset(page * limit).limit(limit)
     jobs = (await db.execute(stmt)).scalars().all()
 
-    return {"total": total, "jobs": [_j(j) for j in jobs]}
+    # Batch-load galleries for jobs that have gallery_id
+    gallery_ids = [j.gallery_id for j in jobs if j.gallery_id]
+    gallery_map: dict[int, Gallery] = {}
+    if gallery_ids:
+        gs = (await db.execute(select(Gallery).where(Gallery.id.in_(gallery_ids)))).scalars().all()
+        gallery_map = {g.id: g for g in gs}
+
+    return {"total": total, "jobs": [_j(j, gallery_map.get(j.gallery_id)) for j in jobs]}
 
 
 @router.delete("/jobs")
@@ -288,7 +295,10 @@ async def get_job(
     if job.user_id != auth["user_id"] and auth["role"] != "admin":
         locale = parse_accept_language(request.headers.get("accept-language"))
         raise api_error(status.HTTP_403_FORBIDDEN, "forbidden", locale)
-    return _j(job)
+    gallery = None
+    if job.gallery_id:
+        gallery = await db.get(Gallery, job.gallery_id)
+    return _j(job, gallery)
 
 
 @router.patch("/jobs/{job_id}")
@@ -451,8 +461,8 @@ async def retry_job(
     return {"status": "queued", "retry_count": job.retry_count, "max_retries": job.max_retries}
 
 
-def _j(j: DownloadJob) -> dict:
-    return {
+def _j(j: DownloadJob, gallery: Gallery | None = None) -> dict:
+    d = {
         "id": str(j.id),
         "url": j.url,
         "source": j.source,
@@ -466,3 +476,7 @@ def _j(j: DownloadJob) -> dict:
         "next_retry_at": j.next_retry_at.isoformat() if j.next_retry_at else None,
         "gallery_id": j.gallery_id,
     }
+    if gallery:
+        d["gallery_source"] = gallery.source
+        d["gallery_source_id"] = gallery.source_id
+    return d

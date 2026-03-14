@@ -111,7 +111,7 @@ def _gallery_entry(gallery: Gallery, cover_thumb: str | None, request: Request) 
     title_el.text = title
 
     id_el = ET.SubElement(entry, f"{{{ATOM_NS}}}id")
-    id_el.text = f"urn:jyzrox:gallery:{gallery.id}"
+    id_el.text = f"urn:jyzrox:gallery:{gallery.source}:{gallery.source_id}"
 
     updated_el = ET.SubElement(entry, f"{{{ATOM_NS}}}updated")
     if gallery.added_at:
@@ -126,7 +126,7 @@ def _gallery_entry(gallery: Gallery, cover_thumb: str | None, request: Request) 
     # Subsection link to gallery page list
     sub_link = ET.SubElement(entry, f"{{{ATOM_NS}}}link")
     sub_link.set("rel", "subsection")
-    sub_link.set("href", f"{base}/opds/gallery/{gallery.id}")
+    sub_link.set("href", f"{base}/opds/gallery/{gallery.source}/{gallery.source_id}")
     sub_link.set("type", "application/atom+xml;profile=opds-catalog;kind=acquisition")
 
     # Cover thumbnail link
@@ -453,9 +453,10 @@ async def opds_opensearch(
 # ── Single gallery page list (OPDS-PSE) ───────────────────────────────
 
 
-@router.get("/gallery/{gallery_id}")
+@router.get("/gallery/{source}/{source_id:path}")
 async def opds_gallery(
-    gallery_id: int,
+    source: str,
+    source_id: str,
     request: Request,
     auth: dict = Depends(require_opds_auth),
 ):
@@ -463,7 +464,11 @@ async def opds_gallery(
     async with async_session() as session:
         gallery = (
             await session.execute(
-                select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(auth))
+                select(Gallery).where(
+                    Gallery.source == source,
+                    Gallery.source_id == source_id,
+                    gallery_access_filter(auth),
+                )
             )
         ).scalar_one_or_none()
 
@@ -473,15 +478,15 @@ async def opds_gallery(
         images = (
             await session.execute(
                 select(Image)
-                .where(Image.gallery_id == gallery_id)
+                .where(Image.gallery_id == gallery.id)
                 .order_by(Image.page_num.desc() if get_display_config(gallery.source or "").image_order == "desc" else Image.page_num.asc())
                 .options(selectinload(Image.blob))
             )
         ).scalars().all()
 
     base = _base_url(request)
-    title = gallery.title or gallery.title_jpn or f"Gallery {gallery_id}"
-    root = _make_feed(title, f"urn:jyzrox:gallery:{gallery_id}", request)
+    title = gallery.title or gallery.title_jpn or f"Gallery {source}/{source_id}"
+    root = _make_feed(title, f"urn:jyzrox:gallery:{source}:{source_id}", request)
 
     for img in images:
         blob = img.blob
