@@ -508,6 +508,7 @@ const en: Record<string, string> = {
   'queue.recognized': 'Recognized',
   'queue.downloading': 'Downloading...',
   'queue.viewGallery': 'View Gallery',
+  'queue.subscription': 'Subscription',
 
   // ── Tags (extra) ──
   'tags.selectTag': 'Select a tag to view details',

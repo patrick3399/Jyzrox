@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { Download, X, Plus, Trash2, Pause, Play, ChevronRight, Globe, WifiOff, RotateCcw } from 'lucide-react'
+import { Download, X, Plus, Trash2, Pause, Play, ChevronRight, Globe, WifiOff, RotateCcw, RefreshCw } from 'lucide-react'
 import { toast } from 'sonner'
 import {
   useDownloadJobs,
@@ -105,6 +105,12 @@ function JobRow({
             </p>
           )}
           <div className="flex flex-wrap items-center gap-3 text-xs text-vault-text-muted">
+            {job.subscription_id && (
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-400 text-[11px] font-medium">
+                <RefreshCw className="w-3 h-3" />
+                {t('queue.subscription')}
+              </span>
+            )}
             <span>
               {t('queue.source')}:{' '}
               <span className="text-vault-text-secondary">{job.source || t('common.auto')}</span>
@@ -302,7 +308,7 @@ export default function QueuePage() {
   const { data: sitesData } = useSupportedSites()
   const { data: downloadPreview, isLoading: previewLoading } = useDownloadPreview(debouncedUrl)
 
-  const { data, isLoading, error, mutate } = useDownloadJobs({})
+  const { data, isLoading, error, mutate } = useDownloadJobs({ exclude_subscription: true })
   const { trigger: enqueue, isMutating: isEnqueuing } = useEnqueueDownload()
   const { trigger: cancelJob } = useCancelJob()
   const { trigger: clearJobs, isMutating: isClearing } = useClearFinishedJobs()

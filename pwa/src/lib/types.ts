@@ -663,4 +663,5 @@ export interface JobListParams {
   status?: string
   page?: number
   limit?: number
+  exclude_subscription?: boolean
 }

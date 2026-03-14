@@ -407,7 +407,8 @@ const download = {
       method: 'DELETE',
     }),
 
-  getStats: () => apiFetch<{ running: number; finished: number }>('/api/download/stats'),
+  getStats: (params: { exclude_subscription?: boolean } = {}) =>
+    apiFetch<{ running: number; finished: number }>(`/api/download/stats${qs(params as Record<string, unknown>)}`),
 
   pauseJob: (id: string) =>
     apiFetch<{ status: string }>(`/api/download/jobs/${id}`, {

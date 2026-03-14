@@ -8,13 +8,15 @@ import type { JobListParams } from '@/lib/types'
 const THROTTLE_MS = 1000
 
 export function useDownloadJobs(params: JobListParams = {}) {
-  const { connected, lastJobUpdate } = useWs()
+  const { connected, lastJobUpdate, lastSubCheck } = useWs()
   const { mutate } = useSWRConfig()
   const lastFiredRef = useRef<number>(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
+  // Refresh on job_update or subscription_checked (new job created by subscription)
+  const trigger = lastJobUpdate || lastSubCheck
   useEffect(() => {
-    if (!lastJobUpdate) return
+    if (!trigger) return
     const now = Date.now()
     const elapsed = now - lastFiredRef.current
     if (elapsed >= THROTTLE_MS) {
@@ -28,7 +30,7 @@ export function useDownloadJobs(params: JobListParams = {}) {
       }, THROTTLE_MS - elapsed)
     }
   // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [lastJobUpdate])
+  }, [trigger])
 
   return useSWR(['download/jobs', params], () => api.download.getJobs(params), {
     refreshInterval: connected ? 0 : 3000,
@@ -54,13 +56,14 @@ export function useClearFinishedJobs() {
 }
 
 export function useDownloadStats() {
-  const { connected, lastJobUpdate } = useWs()
+  const { connected, lastJobUpdate, lastSubCheck } = useWs()
   const { mutate } = useSWRConfig()
   const lastFiredRef = useRef<number>(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
+  const trigger = lastJobUpdate || lastSubCheck
   useEffect(() => {
-    if (!lastJobUpdate) return
+    if (!trigger) return
     const now = Date.now()
     const elapsed = now - lastFiredRef.current
     if (elapsed >= THROTTLE_MS) {
@@ -73,9 +76,9 @@ export function useDownloadStats() {
         mutate('download/stats')
       }, THROTTLE_MS - elapsed)
     }
-  }, [lastJobUpdate, mutate])
+  }, [trigger, mutate])
 
-  return useSWR('download/stats', () => api.download.getStats(), {
+  return useSWR('download/stats', () => api.download.getStats({ exclude_subscription: true }), {
     refreshInterval: connected ? 0 : 5000,
     dedupingInterval: 3000,
   })
