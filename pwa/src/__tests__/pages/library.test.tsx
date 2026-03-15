@@ -40,6 +40,7 @@ const { mockUseInfiniteLibraryGalleries } = vi.hoisted(() => ({
 
 vi.mock('@/hooks/useGalleries', () => ({
   useInfiniteLibraryGalleries: mockUseInfiniteLibraryGalleries,
+  useGalleryCategories: () => ({ data: undefined, error: undefined, isLoading: false }),
 }))
 
 vi.mock('@/hooks/useCollections', () => ({

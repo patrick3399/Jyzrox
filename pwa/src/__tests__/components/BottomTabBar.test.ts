@@ -10,6 +10,7 @@ vi.mock('@/components/LocaleProvider', () => ({ useLocale: () => 'en' }))
 vi.mock('lucide-react', () => {
   const stub = () => null
   return {
+    Search: stub,
     Compass: stub,
     Palette: stub,
     BookOpen: stub,
@@ -20,6 +21,16 @@ vi.mock('lucide-react', () => {
     FolderTree: stub,
     Rss: stub,
     Settings: stub,
+    Users: stub,
+    Clock: stub,
+    PackageOpen: stub,
+    FolderInput: stub,
+    Key: stub,
+    Puzzle: stub,
+    Tags: stub,
+    Trash2: stub,
+    CalendarClock: stub,
+    ScanSearch: stub,
   }
 })
 

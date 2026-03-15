@@ -26,6 +26,7 @@ import { render, fireEvent, act } from '@testing-library/react'
 
 vi.mock('@/lib/i18n', () => ({
   t: (key: string) => key,
+  getLocale: () => 'en',
 }))
 
 // ── Import component after mocks ──────────────────────────────────────

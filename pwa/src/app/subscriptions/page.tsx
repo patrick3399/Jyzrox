@@ -169,10 +169,11 @@ function SubscriptionCard({
 
   return (
     <div className="bg-vault-card border border-vault-border rounded-xl p-3 overflow-hidden">
+      {/* Top row: name + badges on left, toggle on right */}
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
-          <div className="flex items-center gap-2 mb-1 min-w-0">
-            <span className="text-sm font-medium text-vault-text truncate min-w-0">
+          <div className="flex flex-wrap items-center gap-1.5 mb-1">
+            <span className="text-sm font-medium text-vault-text break-all">
               {sub.name || sub.url}
             </span>
             {sourceBadge(sub.source)}
@@ -185,94 +186,97 @@ function SubscriptionCard({
           {sub.name && (
             <p className="text-xs text-vault-text-muted truncate mb-1">{sub.url}</p>
           )}
-
-          {/* Inline cron editor */}
-          <div className="flex flex-wrap items-center gap-1 mb-1">
-            <input
-              type="text"
-              value={cronValue}
-              onChange={(e) => setEditingCron(e.target.value)}
-              onBlur={handleCronBlur}
-              onKeyDown={handleCronKeyDown}
-              className="w-24 px-1.5 py-0.5 bg-vault-input border border-vault-border rounded text-[11px] font-mono text-vault-text"
-            />
-            {CRON_PRESETS.map((p) => (
-              <button
-                key={p.value}
-                onClick={() => onCronUpdate(sub, p.value)}
-                className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
-                  sub.cron_expr === p.value
-                    ? 'bg-vault-accent/20 text-vault-accent'
-                    : 'bg-vault-bg border border-vault-border text-vault-text-muted hover:text-vault-text'
-                }`}
-              >
-                {p.label}
-              </button>
-            ))}
-          </div>
-
-          <div className="flex flex-wrap items-center gap-3 text-[10px] text-vault-text-muted">
-            {sub.last_checked_at && (
-              <span className={sub.last_status === 'ok' ? 'text-emerald-400' : sub.last_status === 'failed' ? 'text-red-400' : undefined}>{t('subscriptions.lastChecked')}: {timeAgo(sub.last_checked_at)}</span>
-            )}
-            <button
-              onClick={() => onAutoDownloadToggle(sub)}
-              className={`transition-colors ${sub.auto_download ? 'text-vault-accent' : 'text-vault-text-muted line-through'}`}
-              title={sub.auto_download ? t('subscriptions.autoDownloadOn') : t('subscriptions.autoDownloadOff')}
-            >
-              {t('subscriptions.autoDownload')}
-            </button>
-          </div>
-          {sub.last_error && !latestJob && (
-            <p className="text-[10px] text-red-400 mt-1 truncate" title={sub.last_error}>
-              {sub.last_error}
-            </p>
-          )}
-          {latestJob && <JobStatusBadge job={latestJob} />}
         </div>
 
-        <div className="flex items-center gap-1 shrink-0">
+        {/* Toggle switch — stays top-right */}
+        <button
+          onClick={() => onToggle(sub)}
+          className={`relative w-9 h-5 rounded-full transition-colors shrink-0 mt-0.5 ${sub.enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
+        >
+          <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${sub.enabled ? 'translate-x-4' : ''}`} />
+        </button>
+      </div>
+
+      {/* Inline cron editor */}
+      <div className="flex flex-wrap items-center gap-1 mb-1">
+        <input
+          type="text"
+          value={cronValue}
+          onChange={(e) => setEditingCron(e.target.value)}
+          onBlur={handleCronBlur}
+          onKeyDown={handleCronKeyDown}
+          className="w-24 px-1.5 py-0.5 bg-vault-input border border-vault-border rounded text-[11px] font-mono text-vault-text"
+        />
+        {CRON_PRESETS.map((p) => (
           <button
-            onClick={() => onToggle(sub)}
-            className={`relative w-9 h-5 rounded-full transition-colors ${sub.enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
+            key={p.value}
+            onClick={() => onCronUpdate(sub, p.value)}
+            className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
+              sub.cron_expr === p.value
+                ? 'bg-vault-accent/20 text-vault-accent'
+                : 'bg-vault-bg border border-vault-border text-vault-text-muted hover:text-vault-text'
+            }`}
           >
-            <span className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${sub.enabled ? 'translate-x-4' : ''}`} />
+            {p.label}
           </button>
-          <button
-            onClick={() => onCheck(sub)}
-            disabled={checkingId === sub.id}
-            className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
-            title={t('subscriptions.downloadNow')}
-          >
-            <RefreshCw size={14} className={checkingId === sub.id ? 'animate-spin' : ''} />
-          </button>
-          <a
-            href={sub.url}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="p-1.5 rounded text-vault-text-muted hover:text-vault-text transition-colors"
-          >
-            <ExternalLink size={14} />
-          </a>
-          <button
-            onClick={() => {
-              navigator.clipboard.writeText(
-                `${window.location.origin}/api/rss/subscriptions/${sub.id}?token=YOUR_API_TOKEN`
-              )
-              toast.success(t('rss.copied'))
-            }}
-            className="p-1.5 rounded text-vault-text-muted hover:text-orange-400 transition-colors"
-            title={t('rss.subscriptionFeed')}
-          >
-            <Rss size={14} />
-          </button>
-          <button
-            onClick={() => onDelete(sub)}
-            className="p-1.5 rounded text-vault-text-muted hover:text-red-400 transition-colors"
-          >
-            <Trash2 size={14} />
-          </button>
-        </div>
+        ))}
+      </div>
+
+      <div className="flex flex-wrap items-center gap-3 text-[10px] text-vault-text-muted">
+        <button
+          onClick={() => onAutoDownloadToggle(sub)}
+          className={`px-1.5 py-0.5 rounded transition-colors ${sub.auto_download ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/15 text-red-400/70'}`}
+          title={sub.auto_download ? t('subscriptions.autoDownloadOn') : t('subscriptions.autoDownloadOff')}
+        >
+          {t('subscriptions.autoDownload')}
+        </button>
+        {sub.last_checked_at && (
+          <span className={sub.last_status === 'ok' ? 'text-emerald-400' : sub.last_status === 'failed' ? 'text-red-400' : undefined}>{t('subscriptions.lastChecked')}: {timeAgo(sub.last_checked_at)}</span>
+        )}
+      </div>
+      {sub.last_error && !latestJob && (
+        <p className="text-[10px] text-red-400 mt-1 truncate" title={sub.last_error}>
+          {sub.last_error}
+        </p>
+      )}
+      {latestJob && <JobStatusBadge job={latestJob} />}
+
+      {/* Bottom action row: secondary buttons */}
+      <div className="flex items-center gap-0.5 mt-2 pt-2 border-t border-vault-border/50">
+        <button
+          onClick={() => onCheck(sub)}
+          disabled={checkingId === sub.id}
+          className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
+          title={t('subscriptions.downloadNow')}
+        >
+          <RefreshCw size={14} className={checkingId === sub.id ? 'animate-spin' : ''} />
+        </button>
+        <a
+          href={sub.url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className="p-1.5 rounded text-vault-text-muted hover:text-vault-text transition-colors"
+        >
+          <ExternalLink size={14} />
+        </a>
+        <button
+          onClick={() => {
+            navigator.clipboard.writeText(
+              `${window.location.origin}/api/rss/subscriptions/${sub.id}?token=YOUR_API_TOKEN`
+            )
+            toast.success(t('rss.copied'))
+          }}
+          className="p-1.5 rounded text-vault-text-muted hover:text-orange-400 transition-colors"
+          title={t('rss.subscriptionFeed')}
+        >
+          <Rss size={14} />
+        </button>
+        <button
+          onClick={() => onDelete(sub)}
+          className="p-1.5 rounded text-vault-text-muted hover:text-red-400 transition-colors ml-auto"
+        >
+          <Trash2 size={14} />
+        </button>
       </div>
     </div>
   )

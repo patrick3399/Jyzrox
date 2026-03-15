@@ -1,6 +1,6 @@
 'use client'
 
-import { useRef, useState, useCallback, useEffect } from 'react'
+import { useRef, useState, useCallback, useEffect, useMemo } from 'react'
 import { t, getLocale } from '@/lib/i18n'
 
 interface TimelineImage {
@@ -79,8 +79,14 @@ export function TimelineScrubber({
   onJump,
   images,
   scrollElement,
-  percentiles = [],
+  percentiles: percentilesProp,
 }: TimelineScrubberProps) {
+  // Stabilize the percentiles reference: when the prop is omitted (undefined), a default
+  // parameter `percentiles = []` would create a new array on every render, causing fireJump
+  // and handleDragEnd to be recreated on each render, which re-attaches drag listeners on
+  // every mousemove (event listener leak). useMemo keeps the same [] identity as long as
+  // the prop identity does not change.
+  const percentiles = useMemo(() => percentilesProp ?? [], [percentilesProp])
   const trackRef = useRef<HTMLDivElement>(null)
   const [isDragging, setIsDragging] = useState(false)
   const [thumbRatio, setThumbRatio] = useState(0) // 0 = top (newest), 1 = bottom (oldest)
