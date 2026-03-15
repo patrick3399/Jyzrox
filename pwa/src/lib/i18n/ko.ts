@@ -880,6 +880,21 @@ const ko: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': '필터 표시',
   'library.hideFilters': '필터 숨기기',
+
+  // ── Trash ──
+  'nav.trash': '휴지통',
+  'trash.title': '휴지통',
+  'trash.restore': '복원',
+  'trash.permanentDelete': '영구 삭제',
+  'trash.permanentDeleteConfirm': '이 갤러리를 영구적으로 삭제합니다. 되돌릴 수 없습니다. 계속하시겠습니까?',
+  'trash.emptyTrash': '휴지통 비우기',
+  'trash.emptyTrashConfirm': '휴지통의 모든 갤러리를 영구적으로 삭제합니다. 되돌릴 수 없습니다. 계속하시겠습니까?',
+  'trash.daysRemaining': '{days}일 남음',
+  'trash.movedToTrash': '휴지통으로 이동됨',
+  'trash.restored': '갤러리가 복원되었습니다',
+  'trash.empty': '휴지통이 비어 있습니다',
+  'trash.permanentlyDeleted': '영구 삭제됨',
+  'trash.deletedAt': '{time}에 삭제됨',
 }
 
 export default ko

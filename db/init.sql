@@ -414,3 +414,7 @@ ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_url TEXT;
 ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS subscription_id BIGINT REFERENCES subscriptions(id) ON DELETE SET NULL;
 CREATE INDEX IF NOT EXISTS idx_download_jobs_subscription ON download_jobs(subscription_id) WHERE subscription_id IS NOT NULL;
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS last_job_id UUID REFERENCES download_jobs(id) ON DELETE SET NULL;
+
+-- Soft delete support
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
+CREATE INDEX IF NOT EXISTS idx_galleries_deleted_at ON galleries (deleted_at) WHERE deleted_at IS NOT NULL;

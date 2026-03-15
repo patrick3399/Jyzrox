@@ -1394,6 +1394,21 @@ const en: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': 'Show Filters',
   'library.hideFilters': 'Hide Filters',
+
+  // ── Trash ──
+  'nav.trash': 'Trash',
+  'trash.title': 'Trash',
+  'trash.restore': 'Restore',
+  'trash.permanentDelete': 'Delete Permanently',
+  'trash.permanentDeleteConfirm': 'This will permanently delete this gallery. This cannot be undone. Continue?',
+  'trash.emptyTrash': 'Empty Trash',
+  'trash.emptyTrashConfirm': 'This will permanently delete all galleries in trash. This cannot be undone. Continue?',
+  'trash.daysRemaining': '{days} days remaining',
+  'trash.movedToTrash': 'Moved to trash',
+  'trash.restored': 'Gallery restored',
+  'trash.empty': 'Trash is empty',
+  'trash.permanentlyDeleted': 'Permanently deleted',
+  'trash.deletedAt': 'Deleted {time}',
 }
 
 export default en

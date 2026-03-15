@@ -1262,10 +1262,7 @@ async def batch_galleries(
 
 
 async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth: dict) -> dict:
-    """Delete multiple galleries, decrement blob ref counts, cleanup filesystem."""
-    import asyncio
-    import shutil
-
+    """Soft-delete multiple galleries by setting deleted_at timestamp."""
     # Load all galleries
     stmt = select(Gallery).where(Gallery.id.in_(gallery_ids))
     galleries = (await db.execute(stmt)).scalars().all()
@@ -1291,7 +1288,23 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
         if not galleries:
             return {"status": "ok", "affected": 0, "deleted_dirs": 0, "skipped": len(skip_ids)}
 
-    # Load all images with blobs for these galleries
+    now = datetime.now(UTC)
+    for g in galleries:
+        g.deleted_at = now
+    await db.commit()
+    await _invalidate_sources_cache()
+    return {"status": "ok", "affected": len(galleries), "deleted_dirs": 0}
+
+
+async def _hard_delete_galleries(db: AsyncSession, galleries: list) -> dict:
+    """Permanently delete galleries: decrement blob refs, remove DB records, cleanup filesystem."""
+    import asyncio
+    import shutil
+
+    if not galleries:
+        return {"affected": 0, "deleted_dirs": 0}
+
+    # Load all images with blobs
     img_stmt = (
         select(Image)
         .where(Image.gallery_id.in_([g.id for g in galleries]))
@@ -1299,29 +1312,23 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
     )
     images = (await db.execute(img_stmt)).scalars().all()
 
-    # Collect sha256 values
     blob_sha256s = [img.blob_sha256 for img in images]
 
-    # Collect archive keys for gallery-dl.db cleanup
     gallery_source_map = {g.id: g.source for g in galleries}
     archive_keys = [
         f"{gallery_source_map.get(img.gallery_id, '')}{img.filename}"
-        for img in images
-        if img.filename
+        for img in images if img.filename
     ]
 
-    # Decrement ref counts
     for sha256 in blob_sha256s:
         await decrement_ref_count(sha256, db)
 
-    # Delete galleries (CASCADE removes images, gallery_tags, read_progress)
     for g in galleries:
         await db.delete(g)
     await db.commit()
 
     await _invalidate_sources_cache()
 
-    # Find zero-ref blobs for thumbnail cleanup
     zero_ref_sha256s: set[str] = set()
     if blob_sha256s:
         zero_ref_result = await db.execute(
@@ -1338,30 +1345,150 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
                     shutil.rmtree(str(lib_dir), ignore_errors=True)
                     deleted += 1
                 except OSError as exc:
-                    logger.warning("[batch_delete] failed to remove library dir %s: %s", lib_dir, exc)
-        for sha256 in zero_ref_sha256s:
-            td = thumb_dir(sha256)
-            if td.exists():
-                try:
-                    shutil.rmtree(str(td), ignore_errors=True)
-                    deleted += 1
-                except OSError as exc:
-                    logger.warning("[batch_delete] failed to remove thumb dir %s: %s", td, exc)
+                    logger.warning("[hard_delete] failed to remove library dir %s: %s", lib_dir, exc)
+            for sha256 in zero_ref_sha256s:
+                td = thumb_dir(sha256)
+                if td.exists():
+                    try:
+                        shutil.rmtree(str(td), ignore_errors=True)
+                        deleted += 1
+                    except OSError as exc:
+                        logger.warning("[hard_delete] failed to remove thumb dir %s: %s", td, exc)
         return deleted
 
     try:
         deleted_count = await asyncio.to_thread(_delete_filesystem)
     except Exception as exc:
-        logger.warning("[batch_delete] cleanup failed: %s", exc)
+        logger.warning("[hard_delete] cleanup failed: %s", exc)
         deleted_count = 0
 
     if archive_keys:
         try:
             await asyncio.to_thread(_cleanup_archive_entries, archive_keys)
         except Exception as exc:
-            logger.warning("[batch_delete] archive cleanup failed: %s", exc)
+            logger.warning("[hard_delete] archive cleanup failed: %s", exc)
 
-    return {"status": "ok", "affected": len(galleries), "deleted_dirs": deleted_count}
+    return {"affected": len(galleries), "deleted_dirs": deleted_count}
+
+
+# ── Trash endpoints ───────────────────────────────────────────────────
+
+
+@router.get("/trash/count")
+async def trash_count(
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return count of soft-deleted galleries."""
+    filters = [Gallery.deleted_at.is_not(None)]
+    if auth.get("role") != "admin":
+        filters.append(or_(
+            Gallery.created_by_user_id == auth["user_id"],
+            Gallery.created_by_user_id.is_(None),
+        ))
+    count = (await db.execute(
+        select(func.count()).select_from(Gallery).where(*filters)
+    )).scalar_one()
+    return {"count": count}
+
+
+@router.get("/trash")
+async def list_trash(
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List soft-deleted galleries (trash)."""
+    filters = [Gallery.deleted_at.is_not(None)]
+    if auth.get("role") != "admin":
+        filters.append(or_(
+            Gallery.created_by_user_id == auth["user_id"],
+            Gallery.created_by_user_id.is_(None),
+        ))
+
+    count_result = await db.execute(
+        select(func.count()).select_from(Gallery).where(*filters)
+    )
+    total = count_result.scalar_one()
+
+    rows = (await db.execute(
+        select(Gallery).where(*filters).order_by(desc(Gallery.deleted_at)).limit(limit).offset(offset)
+    )).scalars().all()
+
+    return {
+        "total": total,
+        "galleries": [_g(g) for g in rows],
+    }
+
+
+@router.post("/galleries/{source}/{source_id}/restore")
+async def restore_gallery(
+    source: str,
+    source_id: str,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restore a soft-deleted gallery from trash."""
+    g = (await db.execute(
+        select(Gallery).where(
+            Gallery.source == source,
+            Gallery.source_id == source_id,
+            Gallery.deleted_at.is_not(None),
+        )
+    )).scalar_one_or_none()
+    if not g:
+        raise HTTPException(status_code=404, detail="Gallery not found in trash")
+    _check_write_access(auth, g)
+    g.deleted_at = None
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.post("/galleries/{source}/{source_id}/permanent-delete")
+async def permanent_delete_gallery(
+    source: str,
+    source_id: str,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete a gallery (from trash). Irreversible."""
+    g = (await db.execute(
+        select(Gallery).where(
+            Gallery.source == source,
+            Gallery.source_id == source_id,
+            Gallery.deleted_at.is_not(None),
+        )
+    )).scalar_one_or_none()
+    if not g:
+        raise HTTPException(status_code=404, detail="Gallery not found in trash")
+    _check_write_access(auth, g)
+    result = await _hard_delete_galleries(db, [g])
+    return {"status": "ok", **result}
+
+
+@router.post("/trash/empty")
+async def empty_trash(
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Permanently delete all galleries in trash."""
+    filters = [Gallery.deleted_at.is_not(None)]
+    if auth.get("role") != "admin":
+        filters.append(or_(
+            Gallery.created_by_user_id == auth["user_id"],
+            Gallery.created_by_user_id.is_(None),
+        ))
+
+    galleries = (await db.execute(
+        select(Gallery).where(*filters)
+    )).scalars().all()
+
+    if not galleries:
+        return {"status": "ok", "affected": 0}
+
+    result = await _hard_delete_galleries(db, galleries)
+    return {"status": "ok", **result}
 
 
 @router.get("/galleries/{source}/{source_id}")
@@ -1568,17 +1695,13 @@ async def delete_gallery(
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a gallery, decrement blob ref counts, remove library symlinks and thumbnails.
+    """Soft-delete a gallery by setting deleted_at timestamp.
 
-    CAS blob files themselves are NOT deleted here — a separate GC job handles
-    unreferenced blobs (ref_count == 0).
+    The gallery is moved to trash and can be restored or permanently deleted later.
+    A GC worker will permanently delete galleries that have been in trash longer
+    than the configured retention period.
     """
-    import asyncio
-    import shutil
-    from pathlib import Path
-
     g = await _get_or_404_by_source(db, source, source_id, auth)
-    gallery_id = g.id
     _check_write_access(auth, g)
 
     # Prevent deletion while download is active
@@ -1594,78 +1717,10 @@ async def delete_gallery(
     if active_job:
         raise HTTPException(status_code=409, detail="Cannot delete gallery with active download job. Cancel the download first.")
 
-    # Load all images with their blobs before deleting DB records
-    stmt = (
-        select(Image)
-        .where(Image.gallery_id == gallery_id)
-        .options(selectinload(Image.blob))
-    )
-    images = (await db.execute(stmt)).scalars().all()
-
-    # Collect sha256 values for cleanup after commit
-    blob_sha256s = [img.blob_sha256 for img in images]
-
-    # Collect archive keys for gallery-dl.db cleanup
-    archive_keys = [f"{g.source}{img.filename}" for img in images if img.filename]
-
-    # Decrement ref counts for all blobs
-    for sha256 in blob_sha256s:
-        await decrement_ref_count(sha256, db)
-
-    # Delete from DB (CASCADE removes images, gallery_tags, read_progress)
-    await db.delete(g)
+    g.deleted_at = datetime.now(UTC)
     await db.commit()
-
     await _invalidate_sources_cache()
-
-    # Determine which blobs are now unreferenced (safe to delete thumbs).
-    # Query after commit so ref_count reflects all decrements.
-    zero_ref_sha256s: set[str] = set()
-    if blob_sha256s:
-        zero_ref_result = await db.execute(
-            select(Blob.sha256).where(Blob.sha256.in_(blob_sha256s), Blob.ref_count <= 0)
-        )
-        zero_ref_sha256s = set(zero_ref_result.scalars().all())
-
-    # Capture source/source_id for filesystem cleanup before g is detached
-    g_source = g.source
-    g_source_id = g.source_id
-
-    def _delete_filesystem() -> int:
-        deleted = 0
-        # Remove the entire library symlink directory for this gallery
-        lib_dir = library_dir(g_source, g_source_id)
-        if lib_dir.exists():
-            try:
-                shutil.rmtree(str(lib_dir), ignore_errors=True)
-                deleted += 1
-            except OSError as exc:
-                logger.warning("[delete_gallery] failed to remove library dir %s: %s", lib_dir, exc)
-
-        # Only remove thumbnail directories for blobs that are no longer referenced
-        for sha256 in zero_ref_sha256s:
-            td = thumb_dir(sha256)
-            if td.exists():
-                try:
-                    shutil.rmtree(str(td), ignore_errors=True)
-                    deleted += 1
-                except OSError as exc:
-                    logger.warning("[delete_gallery] failed to remove thumb dir %s: %s", td, exc)
-        return deleted
-
-    try:
-        deleted_count = await asyncio.to_thread(_delete_filesystem)
-    except Exception as exc:
-        logger.warning("[delete_gallery] thumbnail/symlink cleanup failed for gallery %d: %s", gallery_id, exc)
-        deleted_count = 0
-
-    if archive_keys:
-        try:
-            await asyncio.to_thread(_cleanup_archive_entries, archive_keys)
-        except Exception as exc:
-            logger.warning("[delete_gallery] archive cleanup failed: %s", exc)
-
-    return {"status": "ok", "deleted_dirs": deleted_count}
+    return {"status": "ok", "deleted_files": 0}
 
 
 class DeleteImageBody(BaseModel):

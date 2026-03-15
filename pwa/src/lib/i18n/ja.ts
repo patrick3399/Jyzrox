@@ -882,6 +882,21 @@ const ja: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': 'フィルターを表示',
   'library.hideFilters': 'フィルターを非表示',
+
+  // ── Trash ──
+  'nav.trash': 'ゴミ箱',
+  'trash.title': 'ゴミ箱',
+  'trash.restore': '復元',
+  'trash.permanentDelete': '完全に削除',
+  'trash.permanentDeleteConfirm': 'このギャラリーを完全に削除します。元に戻せません。続行しますか？',
+  'trash.emptyTrash': 'ゴミ箱を空にする',
+  'trash.emptyTrashConfirm': 'ゴミ箱のすべてのギャラリーを完全に削除します。元に戻せません。続行しますか？',
+  'trash.daysRemaining': '残り{days}日',
+  'trash.movedToTrash': 'ゴミ箱に移動しました',
+  'trash.restored': 'ギャラリーを復元しました',
+  'trash.empty': 'ゴミ箱は空です',
+  'trash.permanentlyDeleted': '完全に削除しました',
+  'trash.deletedAt': '{time}に削除',
 }
 
 export default ja

@@ -570,7 +570,7 @@ function LibraryContent() {
                     action: 'delete',
                     gallery_ids: [...selectedIds],
                   })
-                  toast.success(t('library.batchDeleteSuccess', { count: String(res.affected) }))
+                  toast.success(t('trash.movedToTrash'))
                   setTimeout(() => window.location.reload(), 500)
                 } catch {
                   toast.error(t('library.updateFailed'))

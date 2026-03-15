@@ -196,18 +196,24 @@ async def require_opds_auth(
 def gallery_access_filter(auth: dict):
     """Return SQLAlchemy WHERE clause for gallery visibility based on user role.
 
-    Admin sees everything. Non-admin sees own + system + public galleries.
+    Admin sees everything except soft-deleted. Non-admin sees own + system + public galleries,
+    also excluding soft-deleted galleries.
     Import: from core.auth import gallery_access_filter
     Usage: stmt = stmt.where(gallery_access_filter(auth))
     """
-    from sqlalchemy import or_
+    from sqlalchemy import and_, or_
     from db.models import Gallery
 
+    not_deleted = Gallery.deleted_at.is_(None)
+
     if auth.get("role") == "admin":
-        return Gallery.id.isnot(None)  # always-true condition
+        return not_deleted  # admin sees everything except soft-deleted
     user_id = auth["user_id"]
-    return or_(
-        Gallery.created_by_user_id == user_id,
-        Gallery.created_by_user_id.is_(None),
-        Gallery.visibility == "public",
+    return and_(
+        not_deleted,
+        or_(
+            Gallery.created_by_user_id == user_id,
+            Gallery.created_by_user_id.is_(None),
+            Gallery.visibility == "public",
+        )
     )

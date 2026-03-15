@@ -881,6 +881,21 @@ const zhTW: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': '顯示篩選',
   'library.hideFilters': '隱藏篩選',
+
+  // ── Trash ──
+  'nav.trash': '垃圾桶',
+  'trash.title': '垃圾桶',
+  'trash.restore': '還原',
+  'trash.permanentDelete': '永久刪除',
+  'trash.permanentDeleteConfirm': '這將永久刪除此圖庫，無法復原。確定繼續？',
+  'trash.emptyTrash': '清空垃圾桶',
+  'trash.emptyTrashConfirm': '這將永久刪除垃圾桶中的所有圖庫，無法復原。確定繼續？',
+  'trash.daysRemaining': '剩餘 {days} 天',
+  'trash.movedToTrash': '已移至垃圾桶',
+  'trash.restored': '圖庫已還原',
+  'trash.empty': '垃圾桶是空的',
+  'trash.permanentlyDeleted': '已永久刪除',
+  'trash.deletedAt': '刪除於 {time}',
 }
 
 export default zhTW

@@ -881,6 +881,21 @@ const zhCN: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': '显示筛选',
   'library.hideFilters': '隐藏筛选',
+
+  // ── Trash ──
+  'nav.trash': '回收站',
+  'trash.title': '回收站',
+  'trash.restore': '还原',
+  'trash.permanentDelete': '永久删除',
+  'trash.permanentDeleteConfirm': '这将永久删除此图库，无法恢复。确定继续？',
+  'trash.emptyTrash': '清空回收站',
+  'trash.emptyTrashConfirm': '这将永久删除回收站中的所有图库，无法恢复。确定继续？',
+  'trash.daysRemaining': '剩余 {days} 天',
+  'trash.movedToTrash': '已移至回收站',
+  'trash.restored': '图库已还原',
+  'trash.empty': '回收站为空',
+  'trash.permanentlyDeleted': '已永久删除',
+  'trash.deletedAt': '删除于 {time}',
 }
 
 export default zhCN

@@ -388,6 +388,27 @@ const library = {
 
   browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number; source?: string } = {}) =>
     apiFetch<import('./types').ImageBrowserResponse>(`/api/library/images${qs(params as Record<string, unknown>)}`),
+
+  trashList: (params: { limit?: number; offset?: number } = {}) =>
+    apiFetch<{ total: number; galleries: Gallery[] }>(`/api/library/trash${qs(params as Record<string, unknown>)}`),
+
+  trashCount: () =>
+    apiFetch<{ count: number }>('/api/library/trash/count'),
+
+  restore: (source: string, sourceId: string) =>
+    apiFetch<{ status: string }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/restore`, {
+      method: 'POST',
+    }),
+
+  permanentDelete: (source: string, sourceId: string) =>
+    apiFetch<{ status: string; affected: number; deleted_dirs: number }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/permanent-delete`, {
+      method: 'POST',
+    }),
+
+  emptyTrash: () =>
+    apiFetch<{ status: string; affected: number }>('/api/library/trash/empty', {
+      method: 'POST',
+    }),
 }
 
 // ── Download ──────────────────────────────────────────────────────────
