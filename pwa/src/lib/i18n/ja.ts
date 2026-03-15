@@ -331,6 +331,8 @@ const ja: Record<string, string> = {
   'queue.elapsed': '経過時間：{time}',
   'queue.remaining': '残り約{time}',
   'queue.waitingSlot': 'ダウンロードスロット待機中...',
+  'queue.retryCount': 'リトライ {count}/{max}',
+  'queue.failedPages': '{count}ページ失敗',
 
   // ── Tags (extra) ──
   'tags.selectTag': 'タグを選択して詳細を表示',

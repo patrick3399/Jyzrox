@@ -330,6 +330,8 @@ const zhCN: Record<string, string> = {
   'queue.elapsed': '已用时：{time}',
   'queue.remaining': '约剩 {time}',
   'queue.waitingSlot': '等待下载位置...',
+  'queue.retryCount': '重试 {count}/{max}',
+  'queue.failedPages': '{count} 页失败',
 
   // ── Tags (extra) ──
   'tags.selectTag': '选择标签以查看详情',

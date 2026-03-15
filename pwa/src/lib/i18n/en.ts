@@ -524,6 +524,8 @@ const en: Record<string, string> = {
   'queue.downloading': 'Downloading...',
   'queue.viewGallery': 'View Gallery',
   'queue.subscription': 'Subscription',
+  'queue.retryCount': 'Retry {count}/{max}',
+  'queue.failedPages': '{count} pages failed',
 
   // ── Tags (extra) ──
   'tags.selectTag': 'Select a tag to view details',

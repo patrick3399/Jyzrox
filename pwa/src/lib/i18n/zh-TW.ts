@@ -330,6 +330,8 @@ const zhTW: Record<string, string> = {
   'queue.elapsed': '已用時：{time}',
   'queue.remaining': '約剩 {time}',
   'queue.waitingSlot': '等待下載位置...',
+  'queue.retryCount': '重試 {count}/{max}',
+  'queue.failedPages': '{count} 頁失敗',
 
   // ── Tags (extra) ──
   'tags.selectTag': '選擇標籤以查看詳情',

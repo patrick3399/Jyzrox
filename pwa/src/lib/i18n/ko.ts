@@ -331,6 +331,8 @@ const ko: Record<string, string> = {
   'queue.elapsed': '경과 시간: {time}',
   'queue.remaining': '약 {time} 남음',
   'queue.waitingSlot': '다운로드 슬롯 대기 중...',
+  'queue.retryCount': '재시도 {count}/{max}',
+  'queue.failedPages': '{count}페이지 실패',
 
   // ── Tags (extra) ──
   'tags.selectTag': '태그를 선택하여 상세 보기',
