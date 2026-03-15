@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Download, Copy, Share2 } from 'lucide-react'
+import { Download, Copy, Share2, EyeOff } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
 interface ImageContextMenuProps {
@@ -11,9 +11,10 @@ interface ImageContextMenuProps {
   position: { x: number; y: number }
   imageUrl: string
   imageName?: string
+  onHide?: () => void
 }
 
-export function ImageContextMenu({ open, onClose, position, imageUrl, imageName }: ImageContextMenuProps) {
+export function ImageContextMenu({ open, onClose, position, imageUrl, imageName, onHide }: ImageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Auto-dismiss on click outside or Escape
@@ -80,8 +81,10 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName 
   // Viewport boundary detection to prevent going off-screen
   const MENU_WIDTH = 200
   const ITEM_HEIGHT = 48
+  const SEPARATOR_HEIGHT = 1
   const hasShare = typeof navigator !== 'undefined' && !!navigator.share
-  const MENU_HEIGHT = (hasShare ? 3 : 2) * ITEM_HEIGHT
+  const baseItems = hasShare ? 3 : 2
+  const MENU_HEIGHT = baseItems * ITEM_HEIGHT + (onHide ? SEPARATOR_HEIGHT + ITEM_HEIGHT : 0)
 
   const x = Math.min(position.x, window.innerWidth - MENU_WIDTH - 8)
   const y = Math.min(position.y, window.innerHeight - MENU_HEIGHT - 8)
@@ -118,6 +121,18 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName 
             <span>{label}</span>
           </button>
         ))}
+        {onHide && (
+          <>
+            <div className="border-t border-white/10" />
+            <button
+              onClick={onHide}
+              className="w-full px-4 py-3 text-sm text-red-400 hover:bg-white/10 flex items-center gap-3 transition-colors text-left"
+            >
+              <EyeOff className="w-4 h-4 shrink-0 text-red-400/70" />
+              <span>{t('reader.hideImage')}</span>
+            </button>
+          </>
+        )}
       </div>
     </>
   )

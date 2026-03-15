@@ -74,8 +74,20 @@ export interface ImageBrowserResponse {
   has_next: boolean
 }
 
+export interface ImageTimeRangeResponse {
+  min_at: string | null
+  max_at: string | null
+}
+
+export interface TimelinePercentilesResponse {
+  timestamps: string[]
+  total_buckets: number
+}
+
 export interface ArtistImageItem extends GalleryImage {
   gallery_title: string
+  gallery_source: string
+  gallery_source_id: string
 }
 
 export interface ArtistDetail {

@@ -1,7 +1,7 @@
 import useSWRInfinite from 'swr/infinite'
 import { useMemo } from 'react'
 import { api } from '@/lib/api'
-import type { ImageBrowserResponse, BrowseImage } from '@/lib/types'
+import type { ImageBrowserResponse } from '@/lib/types'
 
 interface UseImageBrowserParams {
   tags?: string[]
@@ -10,21 +10,26 @@ interface UseImageBrowserParams {
   gallery_id?: number
   source?: string
   limit?: number
+  jumpAt?: string
 }
 
 export function useImageBrowser(params: UseImageBrowserParams = {}) {
+  const { jumpAt, ...restParams } = params
+
   const getKey = (pageIndex: number, previousPageData: ImageBrowserResponse | null) => {
-    if (pageIndex === 0) return ['library/images', params]
+    if (pageIndex === 0) {
+      return ['library/images', { ...restParams, ...(jumpAt ? { jump_at: jumpAt } : {}) }]
+    }
     if (previousPageData && !previousPageData.has_next) return null
     if (previousPageData?.next_cursor) {
-      return ['library/images', { ...params, cursor: previousPageData.next_cursor }]
+      return ['library/images', { ...restParams, cursor: previousPageData.next_cursor }]
     }
     return null
   }
 
-  const { data, error, size, setSize, isValidating, isLoading } = useSWRInfinite<ImageBrowserResponse>(
+  const { data, error, size, setSize, isLoading } = useSWRInfinite<ImageBrowserResponse>(
     getKey,
-    ([, fetchParams]: [string, UseImageBrowserParams & { cursor?: string }]) =>
+    ([, fetchParams]: [string, UseImageBrowserParams & { cursor?: string; jump_at?: string }]) =>
       api.library.browseImages(fetchParams),
     { revalidateOnFocus: false },
   )

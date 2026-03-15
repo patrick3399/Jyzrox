@@ -163,3 +163,115 @@ html {
   background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
   animation: shimmer 1.5s infinite;
 }
+
+/* ── Hide native scrollbar (used by pages with custom scrubber) ──── */
+/* Uses clip-path to physically clip the overflow area where iOS Safari
+   renders its overlay scrollbar indicator.  padding-right pushes the
+   scrollbar outside the visible clip region.  This is the only reliable
+   approach on iOS Safari where scrollbar-width and ::-webkit-scrollbar
+   do not affect the native overlay indicator. */
+.hide-scrollbar {
+  overflow-y: auto;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+  /* iOS clip trick: push scrollbar out + clip it */
+  padding-right: 20px;
+  margin-right: -20px;
+  clip-path: inset(0);
+}
+.hide-scrollbar::-webkit-scrollbar {
+  display: none;
+  width: 0;
+  height: 0;
+  background: transparent;
+}
+
+/* Hide scrollbar without changing overflow behavior */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
+}
+
+/* ── Timeline Scrubber ────────────────────────────────────────────── */
+.timeline-scrubber {
+  position: fixed;
+  right: calc(4px + env(safe-area-inset-right, 0px));
+  top: calc(4.5rem + env(safe-area-inset-top, 0px));
+  /* Desktop: 3rem clearance. Mobile: clear the BottomTabBar (4rem + safe-area) + 1rem extra */
+  bottom: calc(3rem + env(safe-area-inset-bottom, 0px));
+  z-index: 51;
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+}
+
+@media (max-width: 1023px) {
+  .timeline-scrubber {
+    bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
+  }
+}
+
+.timeline-scrubber__track {
+  position: relative;
+  width: 20px;
+  height: 100%;
+  cursor: pointer;
+  display: flex;
+  align-items: stretch;
+  justify-content: center;
+  touch-action: none;
+  pointer-events: auto;
+}
+
+@media (max-width: 640px) {
+  .timeline-scrubber__track {
+    width: 24px;
+  }
+}
+
+.timeline-scrubber__track::after {
+  content: '';
+  width: 3px;
+  background: var(--color-vault-border);
+  border-radius: 1.5px;
+  margin: 8px 0;
+  opacity: 0.5;
+}
+
+.timeline-scrubber__indicator {
+  position: absolute;
+  right: 0;
+  transform: translateY(-50%);
+  display: flex;
+  align-items: center;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.15s ease;
+}
+
+.timeline-scrubber__indicator--visible {
+  opacity: 1;
+}
+
+.timeline-scrubber__thumb {
+  width: 16px;
+  height: 32px;
+  background: var(--color-vault-accent);
+  border-radius: 8px;
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.3);
+  flex-shrink: 0;
+}
+
+.timeline-scrubber__label {
+  margin-right: 8px;
+  padding: 6px 12px;
+  background: rgba(0, 0, 0, 0.75);
+  color: #fff;
+  font-size: 0.8125rem;
+  font-weight: 500;
+  white-space: nowrap;
+  border-radius: 6px;
+}

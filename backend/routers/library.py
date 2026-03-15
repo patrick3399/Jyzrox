@@ -480,25 +480,9 @@ def _i_browse(img: Image) -> dict:
 # ── Image browser ─────────────────────────────────────────────────────
 
 
-@router.get("/images")
-async def browse_images(
-    tags: list[str] = Query(default=[]),
-    exclude_tags: list[str] = Query(default=[]),
-    cursor: str | None = None,
-    limit: int = Query(default=40, le=100),
-    sort: Literal["newest", "oldest"] = "newest",
-    gallery_id: int | None = None,
-    source: str | None = Query(default=None),
-    db: AsyncSession = Depends(get_db),
-    auth: dict = Depends(require_auth),
-):
-    """Cross-gallery image browser with cursor-based pagination."""
-    stmt = (
-        select(Image)
-        .join(Gallery, Image.gallery_id == Gallery.id)
-        .where(gallery_access_filter(auth))
-        .options(selectinload(Image.blob), selectinload(Image.gallery))
-    )
+async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, auth, db):
+    """Apply common image browser filters (tags, source, blocked tags, gallery access)."""
+    stmt = stmt.where(gallery_access_filter(auth))
 
     if gallery_id is not None:
         stmt = stmt.where(Image.gallery_id == gallery_id)
@@ -522,6 +506,114 @@ async def browse_images(
     if blocked_rows:
         blocked_patterns = [f"{ns}:{name}" for ns, name in blocked_rows]
         stmt = stmt.where(not_(Image.tags_array.overlap(cast(blocked_patterns, ARRAY(Text)))))
+
+    return stmt
+
+
+@router.get("/images/timeline_percentiles")
+async def image_timeline_percentiles(
+    tags: list[str] = Query(default=[]),
+    exclude_tags: list[str] = Query(default=[]),
+    source: str | None = Query(default=None),
+    gallery_id: int | None = None,
+    buckets: int = Query(default=100, le=200),
+    db: AsyncSession = Depends(get_db),
+    auth: dict = Depends(require_auth),
+):
+    """Return percentile timestamps for the filtered image set.
+
+    Returns ~buckets timestamps evenly distributed by image count,
+    enabling count-based (not time-based) scrubber interpolation.
+    Index 0 = newest, last index = oldest (matches scrubber convention
+    where ratio 0 = top = newest, ratio 1 = bottom = oldest).
+    """
+    base = select(Image.added_at).join(Gallery, Image.gallery_id == Gallery.id)
+    base = await _apply_image_filters(
+        base, tags=tags, exclude_tags=exclude_tags, source=source,
+        gallery_id=gallery_id, auth=auth, db=db,
+    )
+    base = base.where(Image.added_at.isnot(None))
+
+    # Use NTILE window function to split images into N evenly-sized buckets
+    # ordered newest-first so bucket 1 = newest, bucket N = oldest
+    bucket_col = func.ntile(buckets).over(order_by=desc(Image.added_at)).label("bucket")
+    sub = base.add_columns(bucket_col).subquery()
+
+    stmt = (
+        select(sub.c.bucket, func.min(sub.c.added_at).label("ts"))
+        .group_by(sub.c.bucket)
+        .order_by(sub.c.bucket)
+    )
+
+    rows = (await db.execute(stmt)).all()
+    return {
+        "timestamps": [row.ts.isoformat() for row in rows if row.ts],
+        "total_buckets": len(rows),
+    }
+
+
+@router.get("/images/time_range")
+async def image_time_range(
+    tags: list[str] = Query(default=[]),
+    exclude_tags: list[str] = Query(default=[]),
+    source: str | None = Query(default=None),
+    gallery_id: int | None = None,
+    db: AsyncSession = Depends(get_db),
+    auth: dict = Depends(require_auth),
+):
+    """Return min/max added_at for the filtered image set."""
+    stmt = (
+        select(func.min(Image.added_at), func.max(Image.added_at))
+        .join(Gallery, Image.gallery_id == Gallery.id)
+    )
+    stmt = await _apply_image_filters(
+        stmt, tags=tags, exclude_tags=exclude_tags, source=source,
+        gallery_id=gallery_id, auth=auth, db=db,
+    )
+    row = (await db.execute(stmt)).one()
+    return {
+        "min_at": row[0].isoformat() if row[0] else None,
+        "max_at": row[1].isoformat() if row[1] else None,
+    }
+
+
+@router.get("/images")
+async def browse_images(
+    tags: list[str] = Query(default=[]),
+    exclude_tags: list[str] = Query(default=[]),
+    cursor: str | None = None,
+    jump_at: str | None = None,
+    limit: int = Query(default=40, le=100),
+    sort: Literal["newest", "oldest"] = "newest",
+    gallery_id: int | None = None,
+    source: str | None = Query(default=None),
+    db: AsyncSession = Depends(get_db),
+    auth: dict = Depends(require_auth),
+):
+    """Cross-gallery image browser with cursor-based pagination."""
+    if jump_at is not None and cursor is not None:
+        raise HTTPException(400, "jump_at and cursor are mutually exclusive")
+
+    stmt = (
+        select(Image)
+        .join(Gallery, Image.gallery_id == Gallery.id)
+        .options(selectinload(Image.blob), selectinload(Image.gallery))
+    )
+    stmt = await _apply_image_filters(
+        stmt, tags=tags, exclude_tags=exclude_tags, source=source,
+        gallery_id=gallery_id, auth=auth, db=db,
+    )
+
+    # jump_at: seek to a specific timestamp anchor
+    if jump_at is not None:
+        try:
+            jump_at_dt = datetime.fromisoformat(jump_at)
+        except ValueError:
+            raise HTTPException(400, "Invalid jump_at datetime format")
+        if sort == "newest":
+            stmt = stmt.where(Image.added_at <= jump_at_dt)
+        else:
+            stmt = stmt.where(Image.added_at >= jump_at_dt)
 
     # Sort direction
     if sort == "newest":
@@ -797,7 +889,7 @@ async def list_artist_images(
         desc(Gallery.added_at) if sort == "newest" else asc(Gallery.added_at)
     )
     stmt = (
-        select(Image, Gallery.title.label("gallery_title"))
+        select(Image, Gallery.title.label("gallery_title"), Gallery.source.label("gallery_source"), Gallery.source_id.label("gallery_source_id"))
         .join(Gallery, Image.gallery_id == Gallery.id)
         .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
         .order_by(gallery_order, asc(Image.page_num))
@@ -811,6 +903,8 @@ async def list_artist_images(
     for row in rows:
         img: Image = row[0]
         gallery_title: str = row[1]
+        gallery_source: str = row[2]
+        gallery_source_id: str = row[3]
         blob = img.blob
         images.append({
             "id": img.id,
@@ -826,6 +920,8 @@ async def list_artist_images(
             "media_type": blob.media_type if blob else "image",
             "duration": blob.duration if blob else None,
             "gallery_title": gallery_title,
+            "gallery_source": gallery_source,
+            "gallery_source_id": gallery_source_id,
         })
 
     return {

@@ -1,7 +1,7 @@
 'use client'
 
 import { useRef, useEffect, useState, useMemo, type ReactNode } from 'react'
-import { useWindowVirtualizer } from '@tanstack/react-virtual'
+import { useVirtualizer, useWindowVirtualizer } from '@tanstack/react-virtual'
 import justifiedLayout from 'justified-layout'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 
@@ -15,6 +15,8 @@ export interface JustifiedGridProps<T> {
   onLoadMore?: () => void
   hasMore?: boolean
   isLoading?: boolean
+  /** When provided, virtualizer scrolls within this element instead of the window. */
+  scrollElement?: HTMLElement | null
 }
 
 interface RowData<T> {
@@ -33,12 +35,15 @@ export function JustifiedGrid<T>({
   onLoadMore,
   hasMore = false,
   isLoading = false,
+  scrollElement,
 }: JustifiedGridProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollMargin, setScrollMargin] = useState(0)
   const prevScrollMarginRef = useRef(0)
 
+  // scrollMargin is only meaningful for window-based virtualizer
   useEffect(() => {
+    if (scrollElement != null) return // element virtualizer: no scrollMargin needed
     const el = containerRef.current
     if (!el) return
     const initialMargin = el.offsetTop
@@ -55,7 +60,7 @@ export function JustifiedGrid<T>({
     })
     ro.observe(el)
     return () => ro.disconnect()
-  }, [])
+  }, [scrollElement])
 
   // Compute layout
   const { rows, totalHeight } = useMemo(() => {
@@ -92,12 +97,25 @@ export function JustifiedGrid<T>({
     return { rows: sortedRows, totalHeight: Math.ceil(layout.containerHeight) }
   }, [items, containerWidth, targetRowHeight, boxSpacing, getAspectRatio])
 
-  const virtualizer = useWindowVirtualizer({
+  // Element-scroll virtualizer — used when a custom scrollElement is provided.
+  const elementVirtualizer = useVirtualizer({
+    count: rows.length,
+    estimateSize: (i) => rows[i]?.height + boxSpacing || targetRowHeight,
+    overscan: 5,
+    getScrollElement: () => scrollElement ?? null,
+    enabled: scrollElement != null,
+  })
+
+  // Window-scroll virtualizer — default mode when no scrollElement is given.
+  const windowVirtualizer = useWindowVirtualizer({
     count: rows.length,
     estimateSize: (i) => rows[i]?.height + boxSpacing || targetRowHeight,
     overscan: 5,
     scrollMargin,
+    enabled: scrollElement == null,
   })
+
+  const virtualizer = scrollElement != null ? elementVirtualizer : windowVirtualizer
 
   const virtualItems = virtualizer.getVirtualItems()
 
@@ -144,7 +162,7 @@ export function JustifiedGrid<T>({
                 top: 0,
                 left: 0,
                 right: 0,
-                transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
+                transform: `translateY(${virtualRow.start - (virtualizer.options.scrollMargin ?? 0)}px)`,
                 height: row.height + boxSpacing,
                 contain: 'layout style paint',
               }}

@@ -168,7 +168,7 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
         </div>
 
         {/* Nav links */}
-        <nav className="flex-1 px-3 py-3 overflow-y-auto">
+        <nav className="flex-1 px-3 py-3 overflow-y-auto no-scrollbar">
           {navSections.map((section, sectionIdx) => {
             const visibleLinks = section.links.filter(link => hasRole(profile?.role, link.minRole))
             if (visibleLinks.length === 0) return null

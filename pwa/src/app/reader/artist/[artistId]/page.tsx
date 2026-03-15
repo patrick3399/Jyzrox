@@ -1,10 +1,10 @@
 'use client'
-import { useEffect, useState } from 'react'
+import { useCallback, useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
-import type { GalleryImage } from '@/lib/types'
+import type { ArtistImageItem, GalleryImage } from '@/lib/types'
 
 export default function ArtistReaderPage() {
   const { artistId } = useParams<{ artistId: string }>()
@@ -14,6 +14,7 @@ export default function ArtistReaderPage() {
   const startParam = Number(searchParams.get('start')) || 1
 
   const [images, setImages] = useState<GalleryImage[] | null>(null)
+  const originalImagesRef = useRef<ArtistImageItem[]>([])
   const [loaded, setLoaded] = useState(0)
   const [total, setTotal] = useState<number | null>(null)
   const [error, setError] = useState<string | null>(null)
@@ -53,6 +54,7 @@ export default function ArtistReaderPage() {
         }
 
         if (!cancelled) {
+          originalImagesRef.current = accumulated as ArtistImageItem[]
           const reindexed: GalleryImage[] = accumulated.map((img, i) => ({
             ...img,
             page_num: i + 1,
@@ -71,6 +73,16 @@ export default function ArtistReaderPage() {
       cancelled = true
     }
   }, [decodedArtistId])
+
+  const handleHideImage = useCallback(async (reindexedPageNum: number) => {
+    const originalIndex = reindexedPageNum - 1
+    const original = originalImagesRef.current[originalIndex]
+    if (!original) throw new Error('Image not found')
+
+    await api.library.deleteImage(original.gallery_source, original.gallery_source_id, original.page_num)
+
+    originalImagesRef.current = originalImagesRef.current.filter((_, i) => i !== originalIndex)
+  }, [])
 
   if (error) {
     return (
@@ -107,6 +119,7 @@ export default function ArtistReaderPage() {
         images={images}
         totalPages={images.length}
         initialPage={startParam}
+        onHideImage={handleHideImage}
       />
     </ErrorBoundary>
   )
