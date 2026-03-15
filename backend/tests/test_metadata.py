@@ -496,3 +496,63 @@ class TestParsePixivImportArtistId:
         meta = {"id": 99}
         result = parse_pixiv_import(Path("/tmp/test"), meta)
         assert result.artist_id is None
+
+
+# ---------------------------------------------------------------------------
+# _extract_tags — CJK hashtag extraction
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTagsCJKHashtags:
+    """_extract_tags captures CJK hashtags from social platform content."""
+
+    def test_extract_tags_japanese_katakana_hashtag(self):
+        """Japanese Katakana hashtag #コスプレ is captured."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"content": "New photo #コスプレ"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
+        assert "general:コスプレ" in tags
+
+    def test_extract_tags_chinese_hanzi_hashtag(self):
+        """Chinese Hanzi hashtag #动漫 is captured."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"content": "#动漫 artwork"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
+        assert "general:动漫" in tags
+
+    def test_extract_tags_korean_hangul_hashtag(self):
+        """Korean Hangul hashtag #만화 is captured."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"content": "Check this #만화"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
+        assert "general:만화" in tags
+
+    def test_extract_tags_mixed_cjk_latin_hashtag(self):
+        """Mixed CJK/Latin hashtag #Fate零 is captured as one tag."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"content": "#Fate零 is great"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
+        assert "general:fate零" in tags
+
+    def test_extract_tags_multiple_cjk_hashtags(self):
+        """Multiple CJK hashtags in one content string are all captured."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"content": "#コスプレ #动漫 #만화 #artwork"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
+        assert "general:コスプレ" in tags
+        assert "general:动漫" in tags
+        assert "general:만화" in tags
+        assert "general:artwork" in tags
+
+    def test_extract_tags_hiragana_hashtag(self):
+        """Japanese Hiragana hashtag #おえかき is captured."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"content": "#おえかき"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
+        assert "general:おえかき" in tags

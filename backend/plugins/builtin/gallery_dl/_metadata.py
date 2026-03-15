@@ -148,7 +148,7 @@ def _extract_tags(gallery_path: Path, metadata: dict, source: str | None = None)
             import re
             content = metadata.get("content") or metadata.get("description") or ""
             seen = {t.lower() for t in tags}
-            for ht in re.findall(r"#(\w+)", content):
+            for ht in re.findall(r"#([\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff\uac00-\ud7af]+)", content):
                 tag_str = f"general:{ht.lower()}"
                 if tag_str not in seen:
                     tags.append(tag_str)

@@ -171,9 +171,14 @@ export function TagAutocomplete({
                     : 'text-vault-text hover:bg-vault-card-hover'
                 }`}
               >
-                <span>
+                <span className="min-w-0 truncate">
                   <span className="text-vault-text-muted text-xs">{tag.namespace}:</span>
                   <span className="font-medium">{tag.name}</span>
+                  {tag.translation && (
+                    <span className="text-vault-text-muted text-xs ml-1">
+                      ({tag.translation})
+                    </span>
+                  )}
                 </span>
                 <span className="text-xs text-vault-text-muted ml-2 shrink-0">{tag.count}</span>
               </button>

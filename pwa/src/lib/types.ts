@@ -181,6 +181,7 @@ export interface TagItem {
   namespace: string
   name: string
   count: number
+  translation?: string
 }
 
 export interface TagAlias {

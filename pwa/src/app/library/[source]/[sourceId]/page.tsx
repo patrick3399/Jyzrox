@@ -5,6 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import { useLibraryGallery, useGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
+import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
@@ -342,6 +343,7 @@ export default function GalleryDetailPage() {
   if (!gallery) return null
 
   const tagGroups = groupTagsByNamespace(gallery.tags_array)
+  const { data: tagTranslations } = useTagTranslations(gallery.tags_array)
   const aiTags = tagData.filter((tag) => tag.source === 'ai' && tag.confidence >= confidenceThreshold)
   const images = imagesData?.images ?? []
   const statusInfo =
@@ -588,10 +590,12 @@ export default function GalleryDetailPage() {
                   <div className="flex flex-wrap gap-1">
                     {values.map((value) => {
                       const fullTag = namespace === 'general' ? value : `${namespace}:${value}`
+                      const translation = tagTranslations?.[fullTag]
                       return (
                         <span
                           key={value}
                           className={`px-2 py-0.5 rounded border text-xs ${getTagColor(fullTag)}`}
+                          title={translation || undefined}
                         >
                           {value}
                         </span>

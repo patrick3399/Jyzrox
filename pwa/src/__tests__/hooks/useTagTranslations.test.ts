@@ -25,6 +25,12 @@ const { mockGetTranslations } = vi.hoisted(() => ({
   mockGetTranslations: vi.fn(),
 }))
 
+// ── LocaleProvider mock ───────────────────────────────────────────────
+
+vi.mock('@/components/LocaleProvider', () => ({
+  useLocale: () => ({ locale: 'zh-TW' as const, setLocale: vi.fn() }),
+}))
+
 // ── api mock ─────────────────────────────────────────────────────────
 
 vi.mock('@/lib/api', () => ({
@@ -98,20 +104,25 @@ describe('useTagTranslations — SWR key derivation', () => {
     expect((lastCall().key as [string, string])[0]).toBe('tags/translations')
   })
 
-  it('should join sorted tags with "," as the second element of the key', () => {
+  it('should use the derived language as the second element of the key', () => {
+    useTagTranslations(['artist:bob'])
+    expect((lastCall().key as [string, string, string])[1]).toBe('zh')
+  })
+
+  it('should join sorted tags with "," as the third element of the key', () => {
     useTagTranslations(['parody:foo', 'artist:bob'])
     // sorted: ['artist:bob', 'parody:foo']
-    expect((lastCall().key as [string, string])[1]).toBe('artist:bob,parody:foo')
+    expect((lastCall().key as [string, string, string])[2]).toBe('artist:bob,parody:foo')
   })
 
   it('should produce the same cache key regardless of input order', () => {
     useTagTranslations(['parody:foo', 'artist:bob'])
-    const keyA = (lastCall().key as [string, string])[1]
+    const keyA = (lastCall().key as [string, string, string])[2]
 
     swrCalls.length = 0
 
     useTagTranslations(['artist:bob', 'parody:foo'])
-    const keyB = (lastCall().key as [string, string])[1]
+    const keyB = (lastCall().key as [string, string, string])[2]
 
     expect(keyA).toBe(keyB)
   })
@@ -127,7 +138,7 @@ describe('useTagTranslations — fetcher', () => {
     await lastCall().fetcher!()
 
     expect(mockGetTranslations).toHaveBeenCalledOnce()
-    expect(mockGetTranslations).toHaveBeenCalledWith(tags)
+    expect(mockGetTranslations).toHaveBeenCalledWith(tags, 'zh')
   })
 
   it('should not invoke api.tags.getTranslations when tags array is empty', () => {

@@ -136,6 +136,7 @@ function ToggleRow({
 
 function AiTaggingSection() {
   const [isRetagging, setIsRetagging] = useState(false)
+  const [isImporting, setIsImporting] = useState(false)
 
   const handleRetagAll = async () => {
     if (!window.confirm(t('settings.retagAllConfirm'))) return
@@ -150,18 +151,44 @@ function AiTaggingSection() {
     }
   }
 
+  const handleImportEhtag = async () => {
+    setIsImporting(true)
+    try {
+      const result = await api.tags.importEhtag()
+      toast.success(t('settings.importEhtagSuccess', { count: result.count }))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('settings.importEhtagFailed'))
+    } finally {
+      setIsImporting(false)
+    }
+  }
+
   return (
     <div className="px-5 pb-5 border-t border-vault-border">
       <p className="text-xs text-vault-text-muted mt-4 mb-4">
         {t('settings.aiTaggingDesc')}
       </p>
-      <button
-        onClick={handleRetagAll}
-        disabled={isRetagging}
-        className="px-4 py-2 bg-purple-900/30 border border-purple-700/50 text-purple-400 hover:bg-purple-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
-      >
-        {isRetagging ? t('settings.retagging') : t('settings.retagAll')}
-      </button>
+      <div className="flex flex-wrap gap-3">
+        <button
+          onClick={handleRetagAll}
+          disabled={isRetagging}
+          className="px-4 py-2 bg-purple-900/30 border border-purple-700/50 text-purple-400 hover:bg-purple-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {isRetagging ? t('settings.retagging') : t('settings.retagAll')}
+        </button>
+        <div>
+          <button
+            onClick={handleImportEhtag}
+            disabled={isImporting}
+            className="px-4 py-2 bg-blue-900/30 border border-blue-700/50 text-blue-400 hover:bg-blue-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+          >
+            {isImporting ? t('settings.importingEhtag') : t('settings.importEhtag')}
+          </button>
+          <p className="text-[10px] text-vault-text-muted mt-1">
+            {t('settings.importEhtagDesc')}
+          </p>
+        </div>
+      </div>
     </div>
   )
 }

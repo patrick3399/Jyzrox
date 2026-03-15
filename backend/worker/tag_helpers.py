@@ -1,9 +1,9 @@
 """Shared tag helper utilities for worker jobs."""
 
-from sqlalchemy import text
+from sqlalchemy import func, select, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from db.models import TagTranslation
+from db.models import GalleryTag, Tag, TagTranslation
 
 
 async def rebuild_gallery_tags_array(session, gallery_id: int) -> list[str]:
@@ -50,3 +50,38 @@ async def upsert_tag_translations(session, translations: list[dict]) -> None:
         .on_conflict_do_nothing(index_elements=["namespace", "name", "language"])
     )
     await session.execute(stmt)
+
+
+async def rebuild_tag_counts(session) -> int:
+    """Recalculate all tags.count from gallery_tags GROUP BY.
+
+    Returns the number of tags updated.
+    """
+    # Subquery: actual count per tag_id from gallery_tags
+    subq = (
+        select(
+            GalleryTag.tag_id,
+            func.count().label("actual_count"),
+        )
+        .group_by(GalleryTag.tag_id)
+        .subquery()
+    )
+
+    # Update tags where count differs
+    stmt = (
+        Tag.__table__.update()
+        .where(Tag.id == subq.c.tag_id)
+        .values(count=subq.c.actual_count)
+    )
+    result = await session.execute(stmt)
+
+    # Zero out tags with no gallery_tags entries
+    orphan_stmt = (
+        Tag.__table__.update()
+        .where(~Tag.id.in_(select(GalleryTag.tag_id).distinct()))
+        .where(Tag.count > 0)
+        .values(count=0)
+    )
+    await session.execute(orphan_stmt)
+
+    return result.rowcount

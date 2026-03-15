@@ -665,8 +665,8 @@ const tags = {
   autocomplete: (q: string, limit = 10) =>
     apiFetch<TagItem[]>(`/api/tags/autocomplete${qs({ q, limit })}`),
 
-  getTranslations: (tags: string[]) =>
-    apiFetch<Record<string, string>>(`/api/tags/translations${qs({ tags: tags.join(',') })}`),
+  getTranslations: (tags: string[], language = 'zh') =>
+    apiFetch<Record<string, string>>(`/api/tags/translations${qs({ tags: tags.join(','), language })}`),
 
   listBlocked: () => apiFetch<BlockedTag[]>('/api/tags/blocked'),
 
@@ -686,6 +686,9 @@ const tags = {
 
   retagAll: () =>
     apiFetch<{ status: string; total: number }>('/api/tags/retag-all', { method: 'POST' }),
+
+  importEhtag: () =>
+    apiFetch<{ status: string; count: number }>('/api/tags/import-ehtag', { method: 'POST' }),
 }
 
 // ── API Tokens ───────────────────────────────────────────────────────

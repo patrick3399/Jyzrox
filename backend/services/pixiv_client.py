@@ -37,6 +37,7 @@ class PixivClient:
 
     async def __aenter__(self) -> "PixivClient":
         self._api = AppPixivAPI()
+        self._api.additional_headers = {"Accept-Language": "en"}
         await self._ensure_token()
         self._img_http = httpx.AsyncClient(
             headers={

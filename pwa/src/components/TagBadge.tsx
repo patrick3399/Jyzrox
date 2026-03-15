@@ -2,6 +2,7 @@ import { t } from '@/lib/i18n'
 
 interface TagBadgeProps {
   tag: string
+  translation?: string
   onClick?: () => void
   onRemove?: () => void
   variant?: 'default' | 'include' | 'exclude'
@@ -32,7 +33,7 @@ function getVariantStyles(variant: 'default' | 'include' | 'exclude'): string {
   }
 }
 
-export function TagBadge({ tag, onClick, onRemove, variant = 'default' }: TagBadgeProps) {
+export function TagBadge({ tag, translation, onClick, onRemove, variant = 'default' }: TagBadgeProps) {
   const colonIndex = tag.indexOf(':')
   const namespace = colonIndex !== -1 ? tag.slice(0, colonIndex) : 'general'
   const name = colonIndex !== -1 ? tag.slice(colonIndex + 1) : tag
@@ -56,6 +57,7 @@ export function TagBadge({ tag, onClick, onRemove, variant = 'default' }: TagBad
     <span
       className={`${baseClasses} ${clickableClasses}`}
       onClick={onClick}
+      title={translation || undefined}
       role={onClick ? 'button' : undefined}
       tabIndex={onClick ? 0 : undefined}
       onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}

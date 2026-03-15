@@ -51,7 +51,9 @@ def process_pixiv_tags(detail: dict) -> tuple[list[str], list[dict]]:
 
     # Auto-tag: rating from sanity_level
     sanity = detail.get("sanity_level", 0)
-    if sanity >= 6 and "rating:r18" not in seen_tags:
+    if sanity >= 8 and "rating:r18g" not in seen_tags:
+        tag_list.append("rating:r18g")
+    elif sanity >= 6 and "rating:r18" not in seen_tags:
         tag_list.append("rating:r18")
 
     # Auto-tag: illust type

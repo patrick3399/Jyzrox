@@ -342,32 +342,72 @@ async def delete_implication(
 async def autocomplete_tags(
     q: str = Query(default="", description="Tag name prefix or 'namespace:name' prefix"),
     limit: int = Query(default=10, ge=1, le=30),
+    language: str = Query(default="zh", description="Translation language for search and display"),
     _: dict = Depends(require_auth),
 ):
-    """Return tags matching the given prefix, ordered by count DESC."""
+    """Return tags matching the given prefix (or translation), ordered by count DESC."""
     if not q:
         return []
 
+    def _escape_like(s: str) -> str:
+        return s.replace('%', '\\%').replace('_', '\\_')
+
     async with async_session() as session:
-        # Support 'namespace:name' prefix format
+        base = (
+            select(
+                Tag.id,
+                Tag.namespace,
+                Tag.name,
+                Tag.count,
+                TagTranslation.translation,
+            )
+            .outerjoin(
+                TagTranslation,
+                (TagTranslation.namespace == Tag.namespace)
+                & (TagTranslation.name == Tag.name)
+                & (TagTranslation.language == language),
+            )
+        )
+
         if ":" in q:
             ns, name_prefix = q.split(":", 1)
+            safe_ns = _escape_like(ns)
+            safe_name = _escape_like(name_prefix)
             query = (
-                select(Tag)
-                .where(Tag.namespace.ilike(f"{ns}%"), Tag.name.ilike(f"{name_prefix}%"))
+                base.where(
+                    Tag.namespace.ilike(f"{safe_ns}%"),
+                    or_(
+                        Tag.name.ilike(f"{safe_name}%"),
+                        TagTranslation.translation.ilike(f"%{safe_name}%"),
+                    ),
+                )
                 .order_by(desc(Tag.count), desc(Tag.id))
                 .limit(limit)
             )
         else:
+            safe_q = _escape_like(q)
             query = (
-                select(Tag)
-                .where(Tag.name.ilike(f"{q}%"))
+                base.where(
+                    or_(
+                        Tag.name.ilike(f"{safe_q}%"),
+                        TagTranslation.translation.ilike(f"%{safe_q}%"),
+                    )
+                )
                 .order_by(desc(Tag.count), desc(Tag.id))
                 .limit(limit)
             )
-        rows = (await session.execute(query)).scalars().all()
+        rows = (await session.execute(query)).all()
 
-    return [{"id": r.id, "namespace": r.namespace, "name": r.name, "count": r.count} for r in rows]
+    return [
+        {
+            "id": r.id,
+            "namespace": r.namespace,
+            "name": r.name,
+            "count": r.count,
+            "translation": r.translation,
+        }
+        for r in rows
+    ]
 
 
 # ── Tag Translations ──────────────────────────────────────────────────
@@ -666,15 +706,42 @@ async def manual_tag_gallery(
             await session.commit()
             return {"status": "ok", "affected": 0}
 
-        # Query 2: delete all matching manual gallery_tags in one statement
+        # Query 2: find which tag_ids actually have manual source rows for this gallery
+        manual_tag_ids = (
+            await session.execute(
+                select(GalleryTag.tag_id).where(
+                    GalleryTag.gallery_id == gallery_id,
+                    GalleryTag.tag_id.in_(tag_ids),
+                    GalleryTag.source == "manual",
+                )
+            )
+        ).scalars().all()
+
+        if not manual_tag_ids:
+            await rebuild_gallery_tags_array(session, gallery_id)
+            await session.commit()
+            return {"status": "ok", "affected": 0}
+
+        # Query 3: delete only the confirmed manual gallery_tags
         del_result = await session.execute(
             delete(GalleryTag).where(
                 GalleryTag.gallery_id == gallery_id,
-                GalleryTag.tag_id.in_(tag_ids),
+                GalleryTag.tag_id.in_(manual_tag_ids),
                 GalleryTag.source == "manual",
             )
         )
         removed = del_result.rowcount
+
+        # Decrement tag counts only for the tags that were actually deleted
+        if removed > 0:
+            await session.execute(
+                Tag.__table__.update()
+                .where(Tag.id.in_(manual_tag_ids))
+                .values(count=sql_case(
+                    (Tag.count > 0, Tag.count - 1),
+                    else_=0,
+                ))
+            )
 
         await rebuild_gallery_tags_array(session, gallery_id)
         await session.commit()
@@ -743,3 +810,18 @@ async def retag_all_galleries(
         offset += CHUNK
 
     return {"status": "enqueued", "total": enqueued}
+
+
+# ── EhTagTranslation Import ──────────────────────────────────────────
+
+
+@router.post("/import-ehtag")
+async def import_ehtag_translations(_: dict = Depends(_admin)):
+    """Import ~50k Chinese translations from EhTagTranslation CDN."""
+    from services.ehtag_importer import import_ehtag_translations as do_import
+
+    try:
+        count = await do_import()
+    except Exception as exc:
+        raise HTTPException(status_code=502, detail=f"Failed to fetch EhTag data: {exc}")
+    return {"status": "ok", "count": count}
