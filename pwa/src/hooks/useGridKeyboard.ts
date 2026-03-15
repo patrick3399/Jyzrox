@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 
 interface UseGridKeyboardOptions {
   totalItems: number
@@ -78,10 +78,20 @@ export function useGridKeyboard({
     return () => window.removeEventListener('keydown', handler)
   }, [enabled, totalItems, colCount, onEnter])
 
+  const elementMapRef = useRef(new Map<number, HTMLElement>())
+
+  const registerElement = useCallback((index: number, el: HTMLElement | null) => {
+    if (el) {
+      elementMapRef.current.set(index, el)
+    } else {
+      elementMapRef.current.delete(index)
+    }
+  }, [])
+
   // Focus the grid item wrapper (has tabIndex={-1}) so the ring appears.
   useEffect(() => {
     if (focusedIndex === null) return
-    const el = document.querySelector(`[data-grid-index="${focusedIndex}"]`) as HTMLElement | null
+    const el = elementMapRef.current.get(focusedIndex)
     el?.focus({ preventScroll: true })
   }, [focusedIndex])
 
@@ -90,5 +100,5 @@ export function useGridKeyboard({
     setFocusedIndex(null)
   }, [totalItems])
 
-  return { focusedIndex }
+  return { focusedIndex, registerElement }
 }

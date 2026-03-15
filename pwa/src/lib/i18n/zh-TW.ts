@@ -14,6 +14,9 @@ const zhTW: Record<string, string> = {
   'nav.export': '匯出',
   'nav.import': '匯入',
   'nav.logout': '登出',
+  'nav.sectionBrowse': '瀏覽',
+  'nav.sectionManage': '管理',
+  'nav.sectionAdmin': '管理員',
 
   // ── Dashboard ──
   'dashboard.title': '主頁',
@@ -379,6 +382,9 @@ const zhTW: Record<string, string> = {
   'reader.viewModeDouble': '雙頁',
   'reader.scaleMode': '縮放',
   'reader.direction': '方向',
+  'reader.saveImage': '儲存圖片',
+  'reader.copyImage': '複製圖片',
+  'reader.shareImage': '分享圖片',
   'settings.reader': '閱讀器 / Reader',
 
   // ── Browse (extra) ──
@@ -731,6 +737,7 @@ const zhTW: Record<string, string> = {
   'common.next': '下一頁',
   'common.loading': '載入中...',
   'common.dismissAlert': '關閉提示',
+  'common.scrollToTop': '返回頂部',
   'common.noResults': '未找到圖庫',
   'common.galleries': '個圖庫',
   'common.showing': '顯示',
@@ -739,6 +746,7 @@ const zhTW: Record<string, string> = {
   'common.theme': '主題',
   'common.light': '亮色',
   'common.dark': '暗色',
+  'common.amoled': 'AMOLED',
   'common.system': '系統',
   'common.failedToLoad': '載入失敗',
   'common.all': '全部',
@@ -850,6 +858,16 @@ const zhTW: Record<string, string> = {
   'settings.subscriptionEnqueueDelay': '排入間隔',
   'settings.subscriptionBatchMax': '批次上限（0 = 無限）',
   'settings.subscriptionEnqueueDesc': '節流訂閱自動下載。間隔為每次排入的暫停時間；批次上限限制每次檢查的項目數。',
+
+  // ── Context Menu ──
+  'contextMenu.read': '閱讀',
+  'contextMenu.download': '下載',
+  'contextMenu.favorite': '收藏',
+  'contextMenu.openDetail': '查看詳情',
+
+  // ── Library filter panel ──
+  'library.showFilters': '顯示篩選',
+  'library.hideFilters': '隱藏篩選',
 }
 
 export default zhTW

@@ -36,13 +36,22 @@ export function JustifiedGrid<T>({
 }: JustifiedGridProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollMargin, setScrollMargin] = useState(0)
+  const prevScrollMarginRef = useRef(0)
 
   useEffect(() => {
     const el = containerRef.current
     if (!el) return
-    setScrollMargin(el.offsetTop)
+    const initialMargin = el.offsetTop
+    if (initialMargin !== prevScrollMarginRef.current) {
+      prevScrollMarginRef.current = initialMargin
+      setScrollMargin(initialMargin)
+    }
     const ro = new ResizeObserver(() => {
-      setScrollMargin(el.offsetTop)
+      const newMargin = el.offsetTop
+      if (newMargin !== prevScrollMarginRef.current) {
+        prevScrollMarginRef.current = newMargin
+        setScrollMargin(newMargin)
+      }
     })
     ro.observe(el)
     return () => ro.disconnect()
@@ -86,7 +95,7 @@ export function JustifiedGrid<T>({
   const virtualizer = useWindowVirtualizer({
     count: rows.length,
     estimateSize: (i) => rows[i]?.height + boxSpacing || targetRowHeight,
-    overscan: 3,
+    overscan: 5,
     scrollMargin,
   })
 
@@ -145,9 +154,11 @@ export function JustifiedGrid<T>({
                   key={i}
                   style={{
                     position: 'absolute',
-                    left: cell.left,
+                    left: 0,
                     width: cell.width,
                     height: cell.height,
+                    transform: `translateX(${cell.left}px)`,
+                    willChange: 'transform',
                   }}
                 >
                   {renderItem(cell.item, { width: cell.width, height: cell.height })}

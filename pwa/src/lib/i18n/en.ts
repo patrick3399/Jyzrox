@@ -20,6 +20,9 @@ const en: Record<string, string> = {
   'nav.logout': 'Logout',
   'nav.users': 'Users',
   'nav.images': 'Images',
+  'nav.sectionBrowse': 'Browse',
+  'nav.sectionManage': 'Manage',
+  'nav.sectionAdmin': 'Admin',
 
   // ── Dashboard ──
   'dashboard.title': 'Dashboard',
@@ -1144,6 +1147,7 @@ const en: Record<string, string> = {
   'common.next': 'Next',
   'common.loading': 'Loading...',
   'common.dismissAlert': 'Dismiss alert',
+  'common.scrollToTop': 'Scroll to top',
   'common.noResults': 'No galleries found',
   'common.galleries': 'galleries',
   'common.showing': 'Showing',
@@ -1152,6 +1156,7 @@ const en: Record<string, string> = {
   'common.theme': 'Theme',
   'common.light': 'Light',
   'common.dark': 'Dark',
+  'common.amoled': 'AMOLED',
   'common.system': 'System',
   'common.failedToLoad': 'Failed to load',
   'common.invalidId': 'Invalid ID',
@@ -1347,6 +1352,9 @@ const en: Record<string, string> = {
   'common.setRating': 'Set rating',
   'common.rateN': 'Rate {n} out of 5',
   'common.removeTag': 'Remove tag {tag}',
+  'reader.saveImage': 'Save Image',
+  'reader.copyImage': 'Copy Image',
+  'reader.shareImage': 'Share Image',
   'reader.toggleControls': 'Toggle controls',
   'reader.videoSeek': 'Seek',
   'library.clearArtistFilter': 'Clear artist filter',
@@ -1363,6 +1371,16 @@ const en: Record<string, string> = {
   'images.title': 'Image Browser',
   'images.noResults': 'No images found.',
   'images.filterByTags': 'Filter by tags...',
+
+  // ── Context Menu ──
+  'contextMenu.read': 'Read',
+  'contextMenu.download': 'Download',
+  'contextMenu.favorite': 'Favorite',
+  'contextMenu.openDetail': 'Open Detail',
+
+  // ── Library filter panel ──
+  'library.showFilters': 'Show Filters',
+  'library.hideFilters': 'Hide Filters',
 }
 
 export default en

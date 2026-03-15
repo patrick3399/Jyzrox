@@ -7,6 +7,7 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { toast } from 'sonner'
 import type { LibraryDirectory, LibraryFile } from '@/lib/types'
+import { SkeletonGrid } from '@/components/Skeleton'
 
 // ── Utilities ─────────────────────────────────────────────────────────
 
@@ -490,11 +491,7 @@ function SourceView({ sourceGroups, loading, viewMode, onSourceDoubleClick }: So
   }
 
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <span className="text-vault-text-secondary text-sm">{t('common.loading')}</span>
-      </div>
-    )
+    return <SkeletonGrid count={4} />
   }
 
   if (sourceGroups.size === 0) {
@@ -575,11 +572,7 @@ interface RootViewProps {
 
 function RootView({ directories, loading, viewMode, selectedItems, onItemClick }: RootViewProps) {
   if (loading) {
-    return (
-      <div className="flex items-center justify-center py-16">
-        <span className="text-vault-text-secondary text-sm">{t('common.loading')}</span>
-      </div>
-    )
+    return <SkeletonGrid count={8} />
   }
 
   if (directories.length === 0) {

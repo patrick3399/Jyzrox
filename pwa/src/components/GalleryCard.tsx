@@ -1,5 +1,11 @@
+'use client'
+import { useState, useCallback } from 'react'
+import { useRouter } from 'next/navigation'
+import { BookOpen, ExternalLink, Heart, Download } from 'lucide-react'
 import type { Gallery, EhGallery } from '@/lib/types'
 import { RatingStars } from './RatingStars'
+import { ContextMenu } from './ContextMenu'
+import { useLongPress } from '@/hooks/useLongPress'
 import { t } from '@/lib/i18n'
 
 // ── Category colours ──────────────────────────────────────────────────
@@ -38,54 +44,117 @@ interface EhCardProps {
 
 export function EhGalleryCard({ gallery, onClick }: EhCardProps) {
   const colors = getCategoryColors(gallery.category)
+  const router = useRouter()
+
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
+
+  const handleLongPress = useCallback(
+    (e: React.TouchEvent | React.MouseEvent) => {
+      e.preventDefault()
+      let x = 0
+      let y = 0
+      if ('touches' in e && e.touches.length > 0) {
+        x = e.touches[0].clientX
+        y = e.touches[0].clientY
+      } else if ('changedTouches' in e && e.changedTouches.length > 0) {
+        x = e.changedTouches[0].clientX
+        y = e.changedTouches[0].clientY
+      } else {
+        const me = e as React.MouseEvent
+        x = me.clientX
+        y = me.clientY
+      }
+      setMenuPos({ x, y })
+      setMenuOpen(true)
+    },
+    [],
+  )
+
+  const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
+
+  // Detail URL: E-Hentai galleries use the gallery_id / gallery_token fields.
+  // Navigate to the detail page if the gallery object carries those fields;
+  // otherwise fall back to the source URL stored in `thumb`.
+  const handleOpenDetail = useCallback(() => {
+    const g = gallery as EhGallery & { gallery_id?: number; gallery_token?: string; url?: string }
+    if (g.gallery_id && g.gallery_token) {
+      router.push(`/eh/${g.gallery_id}/${g.gallery_token}`)
+    } else if (g.url) {
+      window.open(g.url, '_blank', 'noopener,noreferrer')
+    }
+  }, [gallery, router])
+
+  const contextItems = [
+    {
+      label: t('contextMenu.read'),
+      icon: BookOpen,
+      onClick: () => onClick?.(),
+    },
+    {
+      label: t('contextMenu.openDetail'),
+      icon: ExternalLink,
+      onClick: handleOpenDetail,
+    },
+  ]
 
   return (
-    <article
-      onClick={onClick}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
-      className={`
-        relative flex flex-col
-        bg-vault-card border border-vault-border rounded-lg overflow-hidden
-        transition-all duration-200 cursor-pointer
-        hover:scale-[1.02] hover:border-vault-accent hover:shadow-lg hover:shadow-vault-accent/20
-        focus:outline-none focus:ring-2 focus:ring-vault-accent
-      `}
-    >
-      {/* Thumbnail */}
-      <div className="relative aspect-[3/4] bg-vault-bg overflow-hidden">
-        <img
-          src={gallery.thumb ? `/api/eh/thumb-proxy?url=${encodeURIComponent(gallery.thumb)}` : ''}
-          alt={gallery.title}
-          className="w-full h-full object-cover"
-          loading="lazy"
-        />
-        {/* Category badge */}
-        <span
-          className={`
-            absolute top-1.5 left-1.5
-            px-1.5 py-0.5 rounded text-xs font-semibold
-            ${colors.badge} text-white
-            shadow
-          `}
-        >
-          {gallery.category || t('library.categoryUncategorized')}
-        </span>
-      </div>
-
-      {/* Info */}
-      <div className="flex flex-col gap-1.5 p-2.5 flex-1">
-        <h3 className="text-vault-text text-sm font-medium line-clamp-2 leading-snug">
-          {gallery.title || gallery.title_jpn}
-        </h3>
-
-        <div className="flex items-center justify-between mt-auto pt-1">
-          <RatingStars rating={gallery.rating} readonly />
-          <span className="text-xs text-vault-text-muted">{gallery.pages}p</span>
+    <>
+      <article
+        onClick={onClick}
+        role={onClick ? 'button' : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
+        {...longPressHandlers}
+        className={`
+          relative flex flex-col select-none
+          bg-vault-card border border-vault-border rounded-lg overflow-hidden
+          transition-all duration-200 cursor-pointer
+          hover:scale-[1.02] hover:border-vault-accent hover:shadow-lg hover:shadow-vault-accent/20 hover:brightness-105
+          focus:outline-none focus:ring-2 focus:ring-vault-accent
+        `}
+      >
+        {/* Thumbnail */}
+        <div className="relative aspect-[3/4] bg-vault-bg overflow-hidden">
+          <img
+            src={gallery.thumb ? `/api/eh/thumb-proxy?url=${encodeURIComponent(gallery.thumb)}` : ''}
+            alt={gallery.title}
+            className="w-full h-full object-cover"
+            loading="lazy"
+          />
+          {/* Category badge */}
+          <span
+            className={`
+              absolute top-1.5 left-1.5
+              px-1.5 py-0.5 rounded text-xs font-semibold
+              ${colors.badge} text-white
+              shadow
+            `}
+          >
+            {gallery.category || t('library.categoryUncategorized')}
+          </span>
         </div>
-      </div>
-    </article>
+
+        {/* Info */}
+        <div className="flex flex-col gap-1.5 p-2.5 flex-1">
+          <h3 className="text-vault-text text-sm font-medium line-clamp-2 leading-snug">
+            {gallery.title || gallery.title_jpn}
+          </h3>
+
+          <div className="flex items-center justify-between mt-auto pt-1">
+            <RatingStars rating={gallery.rating} readonly />
+            <span className="text-xs text-vault-text-muted">{gallery.pages}p</span>
+          </div>
+        </div>
+      </article>
+
+      <ContextMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        position={menuPos}
+        items={contextItems}
+      />
+    </>
   )
 }
 
@@ -97,10 +166,50 @@ interface LibraryCardProps {
   onClick?: () => void
   selected?: boolean
   selectMode?: boolean
+  onFavoriteToggle?: (gallery: Gallery) => void
+  onDownload?: (gallery: Gallery) => void
 }
 
-export function LibraryGalleryCard({ gallery, thumbUrl, onClick, selected, selectMode }: LibraryCardProps) {
+export function LibraryGalleryCard({
+  gallery,
+  thumbUrl,
+  onClick,
+  selected,
+  selectMode,
+  onFavoriteToggle,
+  onDownload,
+}: LibraryCardProps) {
   const colors = getCategoryColors(gallery.category)
+  const router = useRouter()
+
+  const [menuOpen, setMenuOpen] = useState(false)
+  const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
+
+  const handleLongPress = useCallback(
+    (e: React.TouchEvent | React.MouseEvent) => {
+      // Do not interfere with select-mode — long-press still opens context menu,
+      // but callers can rely on the normal click to toggle selection.
+      e.preventDefault()
+      let x = 0
+      let y = 0
+      if ('touches' in e && e.touches.length > 0) {
+        x = e.touches[0].clientX
+        y = e.touches[0].clientY
+      } else if ('changedTouches' in e && e.changedTouches.length > 0) {
+        x = e.changedTouches[0].clientX
+        y = e.changedTouches[0].clientY
+      } else {
+        const me = e as React.MouseEvent
+        x = me.clientX
+        y = me.clientY
+      }
+      setMenuPos({ x, y })
+      setMenuOpen(true)
+    },
+    [],
+  )
+
+  const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
 
   const sourceStyle = (() => {
     if (gallery.source === 'ehentai') return { label: 'E-Hentai', className: 'bg-purple-900/50 text-purple-300 border-purple-800' }
@@ -111,90 +220,131 @@ export function LibraryGalleryCard({ gallery, thumbUrl, onClick, selected, selec
     return { label: gallery.source.charAt(0).toUpperCase() + gallery.source.slice(1), className: 'bg-vault-card text-vault-text-muted border-vault-border' }
   })()
 
+  const contextItems = [
+    {
+      label: t('contextMenu.read'),
+      icon: BookOpen,
+      onClick: () => router.push(`/reader/${gallery.source}/${gallery.source_id}`),
+    },
+    {
+      label: t('contextMenu.openDetail'),
+      icon: ExternalLink,
+      onClick: () => router.push(`/library/${gallery.source}/${gallery.source_id}`),
+    },
+    ...(onFavoriteToggle
+      ? [
+          {
+            label: t('contextMenu.favorite'),
+            icon: Heart,
+            onClick: () => onFavoriteToggle(gallery),
+          },
+        ]
+      : []),
+    ...(onDownload
+      ? [
+          {
+            label: t('contextMenu.download'),
+            icon: Download,
+            onClick: () => onDownload(gallery),
+          },
+        ]
+      : []),
+  ]
+
   return (
-    <article
-      onClick={onClick}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
-      className={`
-        relative flex flex-col
-        bg-vault-card rounded-lg overflow-hidden
-        transition-all duration-200 cursor-pointer
-        hover:scale-[1.02] hover:shadow-lg hover:shadow-vault-accent/20
-        focus:outline-none focus:ring-2 focus:ring-vault-accent
-        ${selected ? 'border-2 border-vault-accent' : 'border border-vault-border hover:border-vault-accent'}
-      `}
-    >
-      {/* Select-mode checkbox overlay */}
-      {selectMode && (
-        <div className="absolute top-1.5 left-1.5 z-10">
-          <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-            selected ? 'bg-vault-accent border-vault-accent text-white' : 'border-white/60 bg-black/30'
-          }`}>
-            {selected && <span className="text-xs">✓</span>}
+    <>
+      <article
+        onClick={onClick}
+        role={onClick ? 'button' : undefined}
+        tabIndex={onClick ? 0 : undefined}
+        onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
+        {...longPressHandlers}
+        className={`
+          relative flex flex-col select-none
+          bg-vault-card rounded-lg overflow-hidden
+          transition-all duration-200 cursor-pointer
+          hover:scale-[1.02] hover:shadow-lg hover:shadow-vault-accent/20 hover:brightness-105
+          focus:outline-none focus:ring-2 focus:ring-vault-accent
+          ${selected ? 'border-2 border-vault-accent' : 'border border-vault-border hover:border-vault-accent'}
+        `}
+      >
+        {/* Select-mode checkbox overlay */}
+        {selectMode && (
+          <div className="absolute top-1.5 left-1.5 z-10">
+            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+              selected ? 'bg-vault-accent border-vault-accent text-white' : 'border-white/60 bg-black/30'
+            }`}>
+              {selected && <span className="text-xs">✓</span>}
+            </div>
           </div>
-        </div>
-      )}
+        )}
 
-      {/* Favourite indicator */}
-      {gallery.is_favorited && (
-        <span
-          className="absolute top-1.5 right-1.5 z-10 text-red-400 text-base leading-none drop-shadow"
-          aria-label={t('common.favourited')}
-        >
-          ♥
-        </span>
-      )}
-
-      {/* Download-in-progress indicator */}
-      {gallery.download_status === 'downloading' && !selectMode && (
-        <div className="absolute top-1.5 left-1.5 z-10">
-          <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600/90 text-white text-[10px] font-medium shadow">
-            <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
-            {t('queue.downloading')}
-          </span>
-        </div>
-      )}
-
-      {/* Thumbnail or gradient placeholder */}
-      <div className="relative aspect-[3/4] overflow-hidden">
-        {thumbUrl ? (
-          <img
-            src={thumbUrl}
-            alt={gallery.title}
-            className="w-full h-full object-cover"
-            loading="lazy"
-          />
-        ) : (
-          <div
-            className={`w-full h-full bg-gradient-to-b ${colors.bg} flex items-center justify-center`}
+        {/* Favourite indicator */}
+        {gallery.is_favorited && (
+          <span
+            className="absolute top-1.5 right-1.5 z-10 text-red-400 text-base leading-none drop-shadow"
+            aria-label={t('common.favourited')}
           >
-            <span className={`text-sm font-semibold ${colors.text} opacity-70 text-center px-2`}>
-              {gallery.category || t('library.categoryUncategorized')}
+            ♥
+          </span>
+        )}
+
+        {/* Download-in-progress indicator */}
+        {gallery.download_status === 'downloading' && !selectMode && (
+          <div className="absolute top-1.5 left-1.5 z-10">
+            <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-blue-600/90 text-white text-[10px] font-medium shadow">
+              <span className="w-1.5 h-1.5 rounded-full bg-white animate-pulse" />
+              {t('queue.downloading')}
             </span>
           </div>
         )}
 
-        {/* Source badge */}
-        <div className="absolute bottom-1.5 left-1.5">
-          <span className={`inline-block px-1.5 py-0.5 rounded border text-xs font-medium ${sourceStyle.className}`}>
-            {sourceStyle.label}
-          </span>
-        </div>
-      </div>
+        {/* Thumbnail or gradient placeholder */}
+        <div className="relative aspect-[3/4] overflow-hidden">
+          {thumbUrl ? (
+            <img
+              src={thumbUrl}
+              alt={gallery.title}
+              className="w-full h-full object-cover"
+              loading="lazy"
+            />
+          ) : (
+            <div
+              className={`w-full h-full bg-gradient-to-b ${colors.bg} flex items-center justify-center`}
+            >
+              <span className={`text-sm font-semibold ${colors.text} opacity-70 text-center px-2`}>
+                {gallery.category || t('library.categoryUncategorized')}
+              </span>
+            </div>
+          )}
 
-      {/* Info */}
-      <div className="flex flex-col gap-1.5 p-2.5 flex-1">
-        <h3 className="text-vault-text text-sm font-medium line-clamp-2 leading-snug">
-          {gallery.title || gallery.title_jpn}
-        </h3>
-
-        <div className="flex items-center justify-between mt-auto pt-1">
-          <RatingStars rating={gallery.my_rating ?? gallery.rating} readonly />
-          <span className="text-xs text-vault-text-muted">{gallery.pages}p</span>
+          {/* Source badge */}
+          <div className="absolute bottom-1.5 left-1.5">
+            <span className={`inline-block px-1.5 py-0.5 rounded border text-xs font-medium ${sourceStyle.className}`}>
+              {sourceStyle.label}
+            </span>
+          </div>
         </div>
-      </div>
-    </article>
+
+        {/* Info */}
+        <div className="flex flex-col gap-1.5 p-2.5 flex-1">
+          <h3 className="text-vault-text text-sm font-medium line-clamp-2 leading-snug">
+            {gallery.title || gallery.title_jpn}
+          </h3>
+
+          <div className="flex items-center justify-between mt-auto pt-1">
+            <RatingStars rating={gallery.my_rating ?? gallery.rating} readonly />
+            <span className="text-xs text-vault-text-muted">{gallery.pages}p</span>
+          </div>
+        </div>
+      </article>
+
+      <ContextMenu
+        open={menuOpen}
+        onClose={() => setMenuOpen(false)}
+        position={menuPos}
+        items={contextItems}
+      />
+    </>
   )
 }

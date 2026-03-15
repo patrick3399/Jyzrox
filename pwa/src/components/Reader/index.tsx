@@ -18,6 +18,7 @@ import {
   saveReaderSettings,
 } from './hooks'
 import VideoPlayer from './VideoPlayer'
+import { ImageContextMenu } from './ImageContextMenu'
 
 // ── URL resolver ──────────────────────────────────────────────────────
 
@@ -174,6 +175,13 @@ interface ReaderProps {
 
 // ── SinglePageView ────────────────────────────────────────────────────
 
+interface ImageLongPressHandlers {
+  onTouchStart: (e: React.TouchEvent) => void
+  onTouchMove: (e: React.TouchEvent) => void
+  onTouchEnd: () => void
+  onContextMenu: (e: React.MouseEvent) => void
+}
+
 interface SinglePageViewProps {
   image: ReaderImage
   isLoading: boolean
@@ -186,6 +194,7 @@ interface SinglePageViewProps {
   showOverlay: boolean
   currentPage: number
   onZoomChange?: (isZoomed: boolean) => void
+  imageLongPress?: ImageLongPressHandlers
 }
 
 function SinglePageView({
@@ -200,6 +209,7 @@ function SinglePageView({
   showOverlay,
   currentPage,
   onZoomChange,
+  imageLongPress,
 }: SinglePageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // Center tap zone: delay toggle to prevent double-tap from also toggling overlay.
@@ -226,7 +236,14 @@ function SinglePageView({
   const isVideo = image.mediaType === 'video'
 
   return (
-    <div ref={containerRef} className={`${getScaleContainerClass(scaleMode)} h-full w-full`}>
+    <div
+      ref={containerRef}
+      className={`${getScaleContainerClass(scaleMode)} h-full w-full`}
+      onTouchStart={imageLongPress?.onTouchStart}
+      onTouchMove={imageLongPress?.onTouchMove}
+      onTouchEnd={imageLongPress?.onTouchEnd}
+      onContextMenu={imageLongPress?.onContextMenu}
+    >
       <div
         style={{
           transform,
@@ -323,9 +340,10 @@ interface WebtoonViewProps {
   /** When this changes and differs from the last scroll-reported page, scroll to that page. */
   scrollToPage?: number
   scaleMode: ScaleMode
+  imageLongPress?: (pageNum: number, imageUrl: string) => ImageLongPressHandlers
 }
 
-function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage, scaleMode }: WebtoonViewProps) {
+function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage, scaleMode, imageLongPress }: WebtoonViewProps) {
   const elRefs = useRef<Map<number, HTMLElement>>(new Map())
   const scrollRef = useRef<HTMLDivElement>(null)
   const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set())
@@ -435,19 +453,29 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage, scal
         }
       }}
     >
-      {images.map((img) => (
-        <MediaElement
-          key={img.pageNum}
-          innerRef={(el: HTMLImageElement | HTMLVideoElement | null) => {
-            if (el) elRefs.current.set(img.pageNum, el)
-            else elRefs.current.delete(img.pageNum)
-          }}
-          image={img}
-          className={scaleClass}
-          dataPage={img.pageNum}
-          onLoad={() => handleImageLoaded(img.pageNum)}
-        />
-      ))}
+      {images.map((img) => {
+        const lpHandlers = imageLongPress && img.url ? imageLongPress(img.pageNum, img.url) : undefined
+        return (
+          <div
+            key={img.pageNum}
+            onTouchStart={lpHandlers?.onTouchStart}
+            onTouchMove={lpHandlers?.onTouchMove}
+            onTouchEnd={lpHandlers?.onTouchEnd}
+            onContextMenu={lpHandlers?.onContextMenu}
+          >
+            <MediaElement
+              innerRef={(el: HTMLImageElement | HTMLVideoElement | null) => {
+                if (el) elRefs.current.set(img.pageNum, el)
+                else elRefs.current.delete(img.pageNum)
+              }}
+              image={img}
+              className={scaleClass}
+              dataPage={img.pageNum}
+              onLoad={() => handleImageLoaded(img.pageNum)}
+            />
+          </div>
+        )
+      })}
       {showBottomSpinner && (
         <div className="flex justify-center py-8">
           <Spinner />
@@ -472,6 +500,7 @@ interface DoublePageViewProps {
   showOverlay: boolean
   currentPage: number
   onZoomChange?: (isZoomed: boolean) => void
+  imageLongPress?: (pageNum: number, imageUrl: string) => ImageLongPressHandlers
 }
 
 function DoublePageView({
@@ -487,6 +516,7 @@ function DoublePageView({
   showOverlay,
   currentPage,
   onZoomChange,
+  imageLongPress,
 }: DoublePageViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   // Center tap zone: delay toggle to prevent double-tap from also toggling overlay.
@@ -533,30 +563,52 @@ function DoublePageView({
         className="flex h-full w-full flex-row"
       >
         <div className="flex h-full w-1/2 items-center justify-center overflow-hidden">
-          {firstImage ? (
-            <MediaElement
-              image={firstImage}
-              className={imgClass}
-              draggable={false}
-              onLoad={onImageLoaded}
-              onToggleOverlay={onToggleOverlay}
-              overlayVisible={showOverlay}
-            />
-          ) : (
+          {firstImage ? (() => {
+            const lp = imageLongPress && firstImage.url ? imageLongPress(firstImage.pageNum, firstImage.url) : undefined
+            return (
+              <div
+                className="w-full h-full flex items-center justify-center"
+                onTouchStart={lp?.onTouchStart}
+                onTouchMove={lp?.onTouchMove}
+                onTouchEnd={lp?.onTouchEnd}
+                onContextMenu={lp?.onContextMenu}
+              >
+                <MediaElement
+                  image={firstImage}
+                  className={imgClass}
+                  draggable={false}
+                  onLoad={onImageLoaded}
+                  onToggleOverlay={onToggleOverlay}
+                  overlayVisible={showOverlay}
+                />
+              </div>
+            )
+          })() : (
             <div className="h-full w-full" />
           )}
         </div>
         <div className="flex h-full w-1/2 items-center justify-center overflow-hidden">
-          {secondImage ? (
-            <MediaElement
-              image={secondImage}
-              className={imgClass}
-              draggable={false}
-              onLoad={onImageLoaded}
-              onToggleOverlay={onToggleOverlay}
-              overlayVisible={showOverlay}
-            />
-          ) : (
+          {secondImage ? (() => {
+            const lp = imageLongPress && secondImage.url ? imageLongPress(secondImage.pageNum, secondImage.url) : undefined
+            return (
+              <div
+                className="w-full h-full flex items-center justify-center"
+                onTouchStart={lp?.onTouchStart}
+                onTouchMove={lp?.onTouchMove}
+                onTouchEnd={lp?.onTouchEnd}
+                onContextMenu={lp?.onContextMenu}
+              >
+                <MediaElement
+                  image={secondImage}
+                  className={imgClass}
+                  draggable={false}
+                  onLoad={onImageLoaded}
+                  onToggleOverlay={onToggleOverlay}
+                  overlayVisible={showOverlay}
+                />
+              </div>
+            )
+          })() : (
             <div className="h-full w-full" />
           )}
         </div>
@@ -1663,6 +1715,83 @@ export default function Reader({
   const handleDismissHelp = useCallback(() => setShowHelp(false), [])
   const handleShowHelp = useCallback(() => setShowHelp(true), [])
 
+  // ── Image long-press / context menu ───────────────────────────────────
+  const [imageMenu, setImageMenu] = useState<{
+    open: boolean
+    position: { x: number; y: number }
+    imageUrl: string
+    imageName: string
+  } | null>(null)
+
+  const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const longPressStartRef = useRef<{ x: number; y: number } | null>(null)
+
+  const makeImageLongPressHandlers = useCallback(
+    (imageUrl: string, imageName: string): ImageLongPressHandlers => ({
+      onTouchStart: (e: React.TouchEvent) => {
+        const touch = e.touches[0]
+        longPressStartRef.current = { x: touch.clientX, y: touch.clientY }
+        longPressTimerRef.current = setTimeout(() => {
+          setImageMenu({
+            open: true,
+            position: { x: touch.clientX, y: touch.clientY },
+            imageUrl,
+            imageName,
+          })
+        }, 500)
+      },
+      onTouchMove: (e: React.TouchEvent) => {
+        if (!longPressStartRef.current || !longPressTimerRef.current) return
+        const touch = e.touches[0]
+        const dx = touch.clientX - longPressStartRef.current.x
+        const dy = touch.clientY - longPressStartRef.current.y
+        if (Math.sqrt(dx * dx + dy * dy) > 10) {
+          clearTimeout(longPressTimerRef.current)
+          longPressTimerRef.current = null
+        }
+      },
+      onTouchEnd: () => {
+        if (longPressTimerRef.current) {
+          clearTimeout(longPressTimerRef.current)
+          longPressTimerRef.current = null
+        }
+      },
+      onContextMenu: (e: React.MouseEvent) => {
+        e.preventDefault()
+        setImageMenu({
+          open: true,
+          position: { x: e.clientX, y: e.clientY },
+          imageUrl,
+          imageName,
+        })
+      },
+    }),
+    [],
+  )
+
+  // Helper used by SinglePageView (single image, known at call site)
+  const makeSinglePageHandlers = useCallback(
+    (image: ReaderImage): ImageLongPressHandlers | undefined => {
+      if (!image.url) return undefined
+      return makeImageLongPressHandlers(image.url, `page_${image.pageNum}`)
+    },
+    [makeImageLongPressHandlers],
+  )
+
+  // Helper used by WebtoonView / DoublePageView (page num + url supplied per-image)
+  const makePerImageHandlers = useCallback(
+    (pageNum: number, imageUrl: string): ImageLongPressHandlers =>
+      makeImageLongPressHandlers(imageUrl, `page_${pageNum}`),
+    [makeImageLongPressHandlers],
+  )
+
+  // Clean up long-press timer on unmount
+  useEffect(() => {
+    return () => {
+      if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
+    }
+  }, [])
+
   const handleAutoAdvanceToggle = useCallback(() => {
     const next = !autoAdvanceEnabled
     setAutoAdvanceEnabled(next)
@@ -1724,6 +1853,7 @@ export default function Reader({
             showOverlay={state.showOverlay}
             currentPage={state.currentPage}
             onZoomChange={handleZoomChange}
+            imageLongPress={makeSinglePageHandlers(currentImage)}
           />
         )}
 
@@ -1734,6 +1864,7 @@ export default function Reader({
             onToggleOverlay={handleToggleOverlay}
             scrollToPage={state.currentPage}
             scaleMode={state.scaleMode}
+            imageLongPress={makePerImageHandlers}
           />
         )}
 
@@ -1751,6 +1882,7 @@ export default function Reader({
             showOverlay={state.showOverlay}
             currentPage={state.currentPage}
             onZoomChange={handleZoomChange}
+            imageLongPress={makePerImageHandlers}
           />
         )}
 
@@ -1802,6 +1934,17 @@ export default function Reader({
       {/* Help overlay */}
       {showHelp && (
         <HelpOverlay readingDirection={state.readingDirection} viewMode={state.viewMode} onDismiss={handleDismissHelp} />
+      )}
+
+      {/* Image context menu (long-press / right-click) */}
+      {imageMenu?.open && (
+        <ImageContextMenu
+          open={true}
+          onClose={() => setImageMenu(null)}
+          position={imageMenu.position}
+          imageUrl={imageMenu.imageUrl}
+          imageName={imageMenu.imageName}
+        />
       )}
     </div>
   )

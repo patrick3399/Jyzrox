@@ -1,6 +1,7 @@
 @import "tailwindcss";
 
 @custom-variant dark (&:where(.dark, .dark *));
+@custom-variant amoled (&:where(.amoled, .amoled *));
 
 @theme inline {
   --color-vault-bg: var(--color-bg);
@@ -30,8 +31,8 @@
 
 .dark {
   --color-bg: #0a0a0a;
-  --color-card: #111111;
-  --color-card-hover: #161616;
+  --color-card: #141414;
+  --color-card-hover: #1a1a1a;
   --color-border: #2a2a2a;
   --color-border-hover: #444444;
   --color-text: #e5e5e5;
@@ -39,6 +40,19 @@
   --color-text-muted: #737373;
   --color-accent: #6366f1;
   --color-input: #1a1a1a;
+}
+
+.amoled {
+  --color-bg: #000000;
+  --color-card: #0a0a0a;
+  --color-card-hover: #111111;
+  --color-border: #1a1a1a;
+  --color-border-hover: #333333;
+  --color-text: #e5e5e5;
+  --color-text-secondary: #a3a3a3;
+  --color-text-muted: #737373;
+  --color-accent: #6366f1;
+  --color-input: #0a0a0a;
 }
 
 html,
@@ -114,4 +128,38 @@ html {
   100% {
     transform: translateX(100%);
   }
+}
+
+/* ── Fast Scroller ─────────────────────────────────────────────────── */
+.fast-scroller-thumb {
+  width: 6px;
+  border-radius: 3px;
+  background: var(--color-text-secondary);
+  opacity: 0.4;
+  transition: opacity 0.2s, width 0.15s;
+  touch-action: none;
+}
+.fast-scroller-thumb.dragging {
+  width: 10px;
+  opacity: 0.8;
+}
+.fast-scroller-thumb.visible {
+  opacity: 0.4;
+}
+.fast-scroller-thumb.hidden {
+  opacity: 0;
+  pointer-events: none;
+}
+
+/* ── Skeleton shimmer ──────────────────────────────────────────────── */
+.animate-shimmer {
+  position: relative;
+  overflow: hidden;
+}
+.animate-shimmer::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(90deg, transparent, rgba(255,255,255,0.04), transparent);
+  animation: shimmer 1.5s infinite;
 }
