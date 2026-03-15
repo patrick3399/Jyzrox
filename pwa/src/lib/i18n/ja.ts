@@ -860,6 +860,14 @@ const ja: Record<string, string> = {
   'subscriptions.deleteAllFailed': '{failed} 件の削除に失敗しました',
   'subscriptions.autoDownloadOn': '自動ダウンロード有効 — cronが新しいコンテンツを自動ダウンロード',
   'subscriptions.autoDownloadOff': '自動ダウンロード無効 — 手動のみ',
+
+  // ── RSS ──
+  'rss.feedUrl': 'RSSフィードURL',
+  'rss.copyUrl': 'RSS URLをコピー',
+  'rss.copied': 'RSS URLをコピーしました',
+  'rss.recentFeed': '最近のギャラリーフィード',
+  'rss.subscriptionFeed': 'サブスクリプションフィード',
+
   'settings.subscriptionEnqueue': 'サブスクリプション キュー',
   'settings.subscriptionEnqueueDelay': 'キュー間隔',
   'settings.subscriptionBatchMax': 'バッチ上限（0 = 無制限）',

@@ -859,6 +859,14 @@ const zhCN: Record<string, string> = {
   'subscriptions.deleteAllFailed': '{failed} 个删除失败',
   'subscriptions.autoDownloadOn': '自动下载已启用 — 定时任务会自动下载新内容',
   'subscriptions.autoDownloadOff': '自动下载已关闭 — 仅手动下载',
+
+  // ── RSS ──
+  'rss.feedUrl': 'RSS Feed 地址',
+  'rss.copyUrl': '复制 RSS 地址',
+  'rss.copied': 'RSS 地址已复制',
+  'rss.recentFeed': '最近入库 Feed',
+  'rss.subscriptionFeed': '订阅 Feed',
+
   'settings.subscriptionEnqueue': '订阅排入',
   'settings.subscriptionEnqueueDelay': '排入间隔',
   'settings.subscriptionBatchMax': '批次上限（0 = 无限）',

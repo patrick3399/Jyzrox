@@ -858,6 +858,14 @@ const ko: Record<string, string> = {
   'subscriptions.deleteAllFailed': '{failed}개 삭제 실패',
   'subscriptions.autoDownloadOn': '자동 다운로드 활성화 — cron이 새 콘텐츠를 자동 다운로드',
   'subscriptions.autoDownloadOff': '자동 다운로드 비활성화 — 수동만',
+
+  // ── RSS ──
+  'rss.feedUrl': 'RSS 피드 URL',
+  'rss.copyUrl': 'RSS URL 복사',
+  'rss.copied': 'RSS URL 복사됨',
+  'rss.recentFeed': '최근 갤러리 피드',
+  'rss.subscriptionFeed': '구독 피드',
+
   'settings.subscriptionEnqueue': '구독 대기열',
   'settings.subscriptionEnqueueDelay': '대기열 간격',
   'settings.subscriptionBatchMax': '배치 최대값 (0 = 무제한)',

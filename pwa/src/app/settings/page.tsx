@@ -2241,6 +2241,28 @@ export default function SettingsPage() {
                   )}
                 </div>
 
+                {/* RSS Feeds */}
+                <div className="mt-3 px-3 py-2 bg-vault-bg rounded border border-vault-border">
+                  <p className="text-xs text-vault-text-muted mb-1">{t('rss.recentFeed')}</p>
+                  <div className="flex items-center gap-2">
+                    <code className="text-xs text-vault-text-secondary flex-1 truncate">
+                      {typeof window !== 'undefined' ? window.location.origin : ''}/api/rss/recent?token=YOUR_TOKEN
+                    </code>
+                    <button
+                      onClick={() => {
+                        navigator.clipboard.writeText(
+                          `${window.location.origin}/api/rss/recent?token=YOUR_TOKEN`
+                        )
+                        toast.success(t('rss.copied'))
+                      }}
+                      className="p-1 rounded text-vault-text-muted hover:text-vault-accent transition-colors shrink-0"
+                      title={t('rss.copyUrl')}
+                    >
+                      <Copy size={14} />
+                    </button>
+                  </div>
+                </div>
+
                 {/* API usage info */}
                 <div className="mt-5 pt-4 border-t border-vault-border">
                   <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">

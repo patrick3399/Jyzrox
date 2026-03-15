@@ -900,6 +900,14 @@ const en: Record<string, string> = {
   'subscriptions.deleteAllFailed': '{failed} deletion(s) failed',
   'subscriptions.autoDownloadOn': 'Auto download enabled — cron will download new content',
   'subscriptions.autoDownloadOff': 'Auto download disabled — manual only',
+
+  // ── RSS ──
+  'rss.feedUrl': 'RSS Feed URL',
+  'rss.copyUrl': 'Copy RSS URL',
+  'rss.copied': 'RSS URL copied',
+  'rss.recentFeed': 'Recent Galleries Feed',
+  'rss.subscriptionFeed': 'Subscription Feed',
+
   'settings.subscriptionEnqueue': 'Subscription Enqueue',
   'settings.subscriptionEnqueueDelay': 'Enqueue Delay',
   'settings.subscriptionBatchMax': 'Batch Max (0 = no limit)',

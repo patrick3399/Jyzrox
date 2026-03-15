@@ -859,6 +859,14 @@ const zhTW: Record<string, string> = {
   'subscriptions.deleteAllFailed': '{failed} 個刪除失敗',
   'subscriptions.autoDownloadOn': '自動下載已啟用 — 排程會自動下載新內容',
   'subscriptions.autoDownloadOff': '自動下載已關閉 — 僅手動下載',
+
+  // ── RSS ──
+  'rss.feedUrl': 'RSS Feed 網址',
+  'rss.copyUrl': '複製 RSS 網址',
+  'rss.copied': 'RSS 網址已複製',
+  'rss.recentFeed': '最近入庫 Feed',
+  'rss.subscriptionFeed': '訂閱 Feed',
+
   'settings.subscriptionEnqueue': '訂閱排入',
   'settings.subscriptionEnqueueDelay': '排入間隔',
   'settings.subscriptionBatchMax': '批次上限（0 = 無限）',

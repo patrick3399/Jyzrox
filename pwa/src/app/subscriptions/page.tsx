@@ -255,6 +255,18 @@ function SubscriptionCard({
             <ExternalLink size={14} />
           </a>
           <button
+            onClick={() => {
+              navigator.clipboard.writeText(
+                `${window.location.origin}/api/rss/subscriptions/${sub.id}?token=YOUR_API_TOKEN`
+              )
+              toast.success(t('rss.copied'))
+            }}
+            className="p-1.5 rounded text-vault-text-muted hover:text-orange-400 transition-colors"
+            title={t('rss.subscriptionFeed')}
+          >
+            <Rss size={14} />
+          </button>
+          <button
             onClick={() => onDelete(sub)}
             className="p-1.5 rounded text-vault-text-muted hover:text-red-400 transition-colors"
           >
