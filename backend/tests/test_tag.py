@@ -867,3 +867,195 @@ class TestTagTranslations:
             assert resp2.status_code == 200
             data2 = resp2.json()
             assert "tags" in data2
+
+
+# ---------------------------------------------------------------------------
+# EhTag import endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestImportEhtag:
+    """POST /api/tags/import-ehtag"""
+
+    async def test_import_ehtag_success(self, client, monkeypatch):
+        """Successful import returns status=ok and count."""
+        from unittest.mock import AsyncMock
+
+        mock_import = AsyncMock(return_value=50000)
+        monkeypatch.setattr(
+            "services.ehtag_importer.import_ehtag_translations", mock_import
+        )
+
+        resp = await client.post("/api/tags/import-ehtag")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["count"] == 50000
+
+    async def test_import_ehtag_failure_returns_502(self, client, monkeypatch):
+        """When the importer raises an exception, endpoint returns 502."""
+        from unittest.mock import AsyncMock
+
+        mock_import = AsyncMock(side_effect=Exception("CDN timeout"))
+        monkeypatch.setattr(
+            "services.ehtag_importer.import_ehtag_translations", mock_import
+        )
+
+        resp = await client.post("/api/tags/import-ehtag")
+        assert resp.status_code == 502
+
+    async def test_import_ehtag_requires_admin(self, make_client):
+        """Non-admin users should get 403."""
+        async with make_client(user_id=1, role="viewer") as ac:
+            resp = await ac.post("/api/tags/import-ehtag")
+        assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Autocomplete with translation search
+# ---------------------------------------------------------------------------
+
+
+class TestAutocompleteTranslation:
+    """GET /api/tags/autocomplete — translation search."""
+
+    async def test_autocomplete_empty_query_returns_empty(self, client):
+        """Empty q= should return empty list."""
+        resp = await client.get("/api/tags/autocomplete", params={"q": ""})
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    async def test_autocomplete_matches_tag_name(self, client, db_session):
+        """Should match tags by name prefix."""
+        await _insert_tag(db_session, "character", "rem")
+        resp = await client.get("/api/tags/autocomplete", params={"q": "rem"})
+        assert resp.status_code == 200
+        results = resp.json()
+        assert len(results) >= 1
+        assert any(r["name"] == "rem" for r in results)
+
+    async def test_autocomplete_matches_namespaced_query(self, client, db_session):
+        """'character:r' should match tags in character namespace starting with r."""
+        await _insert_tag(db_session, "character", "ram")
+        resp = await client.get("/api/tags/autocomplete", params={"q": "character:r"})
+        assert resp.status_code == 200
+        results = resp.json()
+        assert len(results) >= 1
+        assert all(r["namespace"] == "character" for r in results)
+
+    async def test_autocomplete_matches_translation(self, client, db_session):
+        """Should also match by translation text."""
+        await _insert_tag(db_session, "character", "rem_trans_test")
+        await _insert_translation(db_session, "character", "rem_trans_test", "zh", "雷姆")
+
+        resp = await client.get(
+            "/api/tags/autocomplete", params={"q": "雷姆", "language": "zh"}
+        )
+        assert resp.status_code == 200
+        results = resp.json()
+        assert len(results) >= 1
+        # Should include translation in result
+        match = next((r for r in results if r["name"] == "rem_trans_test"), None)
+        assert match is not None
+        assert match["translation"] == "雷姆"
+
+    async def test_autocomplete_returns_translation_field(self, client, db_session):
+        """Result items should include 'translation' field (may be null)."""
+        await _insert_tag(db_session, "general", "autocomplete_test")
+        resp = await client.get("/api/tags/autocomplete", params={"q": "autocomplete"})
+        assert resp.status_code == 200
+        results = resp.json()
+        assert len(results) >= 1
+        assert "translation" in results[0]
+
+    async def test_autocomplete_escapes_like_wildcards(self, client, db_session):
+        """% and _ in query should be escaped, not treated as wildcards."""
+        await _insert_tag(db_session, "general", "normal_tag")
+        resp = await client.get("/api/tags/autocomplete", params={"q": "%"})
+        assert resp.status_code == 200
+        # Should NOT match everything — % is escaped
+        results = resp.json()
+        # No tags start with literal '%'
+        assert len(results) == 0
+
+    async def test_autocomplete_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get(
+            "/api/tags/autocomplete", params={"q": "test"}
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Retag endpoints
+# ---------------------------------------------------------------------------
+
+
+class TestRetagEndpoints:
+    """POST /api/tags/retag/{gallery_id} and POST /api/tags/retag-all"""
+
+    async def test_retag_gallery_not_found(self, client, monkeypatch):
+        """Retag a non-existent gallery should return 404."""
+        from core.config import settings
+        monkeypatch.setattr(settings, "tag_model_enabled", True)
+
+        resp = await client.post("/api/tags/retag/99999")
+        assert resp.status_code == 404
+
+    async def test_retag_gallery_tag_model_disabled(self, client, monkeypatch):
+        """When TAG_MODEL_ENABLED is false, retag should return 400."""
+        from core.config import settings
+        monkeypatch.setattr(settings, "tag_model_enabled", False)
+
+        resp = await client.post("/api/tags/retag/1")
+        assert resp.status_code == 400
+        assert "not enabled" in resp.json()["detail"]
+
+    async def test_retag_gallery_enqueues_job(self, client, db_session, monkeypatch):
+        """When tag model is enabled and gallery exists, should enqueue job and return 200."""
+        from core.config import settings
+
+        monkeypatch.setattr(settings, "tag_model_enabled", True)
+
+        gid = await _insert_gallery(db_session, source_id="retag_test")
+
+        resp = await client.post(f"/api/tags/retag/{gid}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "enqueued"
+        assert data["gallery_id"] == gid
+
+    async def test_retag_all_tag_model_disabled(self, client, monkeypatch):
+        """retag-all when tag model is disabled should return 400."""
+        from core.config import settings
+        monkeypatch.setattr(settings, "tag_model_enabled", False)
+
+        resp = await client.post("/api/tags/retag-all")
+        assert resp.status_code == 400
+
+    async def test_retag_all_enqueues_jobs_for_all_galleries(self, client, db_session, monkeypatch):
+        """retag-all should enqueue one job per gallery and return total count."""
+        from core.config import settings
+
+        monkeypatch.setattr(settings, "tag_model_enabled", True)
+
+        for i in range(3):
+            await _insert_gallery(db_session, source_id=f"retag_all_{i}")
+
+        resp = await client.post("/api/tags/retag-all")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "enqueued"
+        assert data["total"] >= 3
+
+    async def test_retag_requires_admin(self, make_client):
+        """Non-admin users should get 403."""
+        async with make_client(user_id=1, role="viewer") as ac:
+            resp = await ac.post("/api/tags/retag/1")
+        assert resp.status_code == 403
+
+    async def test_retag_all_requires_admin(self, make_client):
+        """Non-admin users should get 403 for retag-all."""
+        async with make_client(user_id=1, role="viewer") as ac:
+            resp = await ac.post("/api/tags/retag-all")
+        assert resp.status_code == 403

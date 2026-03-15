@@ -20,17 +20,12 @@ _VALID_NAMESPACES = frozenset({
 })
 
 
-async def import_ehtag_translations() -> int:
-    """Fetch EhTagTranslation database and upsert all translations.
+def parse_ehtag_payload(payload: dict) -> list[dict]:
+    """Parse EhTagTranslation JSON payload into translation rows.
 
-    Returns the number of translations upserted.
+    Returns a list of dicts with keys: namespace, name, language, translation.
     """
-    async with httpx.AsyncClient(timeout=60) as client:
-        resp = await client.get(EHTAG_CDN_URL)
-        resp.raise_for_status()
-        payload = resp.json()
-
-    rows_to_upsert: list[dict] = []
+    rows: list[dict] = []
     for ns_entry in payload.get("data", []):
         namespace = ns_entry.get("namespace", "")
         if namespace not in _VALID_NAMESPACES:
@@ -42,13 +37,26 @@ async def import_ehtag_translations() -> int:
             translation = tag_info.get("name", "")
             if not translation:
                 continue
-            rows_to_upsert.append({
+            rows.append({
                 "namespace": namespace,
                 "name": tag_name,
                 "language": "zh",
                 "translation": translation,
             })
+    return rows
 
+
+async def import_ehtag_translations() -> int:
+    """Fetch EhTagTranslation database and upsert all translations.
+
+    Returns the number of translations upserted.
+    """
+    async with httpx.AsyncClient(timeout=60) as client:
+        resp = await client.get(EHTAG_CDN_URL)
+        resp.raise_for_status()
+        payload = resp.json()
+
+    rows_to_upsert = parse_ehtag_payload(payload)
     if not rows_to_upsert:
         return 0
 

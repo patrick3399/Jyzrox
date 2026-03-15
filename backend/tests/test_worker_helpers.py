@@ -617,3 +617,126 @@ class TestValidateImageMagicFtypBox:
         f = tmp_path / "image.avif"
         f.write_bytes(data)
         assert _validate_image_magic(f) is False
+
+
+# ---------------------------------------------------------------------------
+# rebuild_tag_counts
+# ---------------------------------------------------------------------------
+
+
+class TestRebuildTagCounts:
+    """worker.tag_helpers.rebuild_tag_counts recalculates tag counts from gallery_tags."""
+
+    async def _insert_tag(self, session, namespace, name, count=0):
+        """Insert a tag and return its id."""
+        from sqlalchemy import text as _text
+        await session.execute(
+            _text(
+                "INSERT OR IGNORE INTO tags (namespace, name, count) "
+                "VALUES (:ns, :name, :count)"
+            ),
+            {"ns": namespace, "name": name, "count": count},
+        )
+        await session.commit()
+        result = await session.execute(
+            _text("SELECT id FROM tags WHERE namespace = :ns AND name = :name"),
+            {"ns": namespace, "name": name},
+        )
+        return result.scalar()
+
+    async def _insert_gallery(self, session, source_id="g1"):
+        """Insert a gallery and return its id."""
+        from sqlalchemy import text as _text
+        await session.execute(
+            _text(
+                "INSERT OR IGNORE INTO galleries (source, source_id, title) "
+                "VALUES ('test', :sid, 'Test')"
+            ),
+            {"sid": source_id},
+        )
+        await session.commit()
+        result = await session.execute(
+            _text("SELECT id FROM galleries WHERE source_id = :sid"),
+            {"sid": source_id},
+        )
+        return result.scalar()
+
+    async def _insert_gallery_tag(self, session, gallery_id, tag_id):
+        """Insert a gallery_tag row."""
+        from sqlalchemy import text as _text
+        await session.execute(
+            _text(
+                "INSERT OR IGNORE INTO gallery_tags (gallery_id, tag_id, confidence, source) "
+                "VALUES (:gid, :tid, 1.0, 'metadata')"
+            ),
+            {"gid": gallery_id, "tid": tag_id},
+        )
+        await session.commit()
+
+    async def _get_tag_count(self, session, tag_id):
+        """Get the current count for a tag."""
+        from sqlalchemy import text as _text
+        result = await session.execute(
+            _text("SELECT count FROM tags WHERE id = :tid"),
+            {"tid": tag_id},
+        )
+        return result.scalar()
+
+    async def test_rebuild_corrects_drifted_counts(self, db_session):
+        """Tags with incorrect counts are corrected to match actual gallery_tags."""
+        from worker.tag_helpers import rebuild_tag_counts
+
+        # Create a tag with count=99 (wrong)
+        tag_id = await self._insert_tag(db_session, "general", "rebuild_drift", count=99)
+        gal_id = await self._insert_gallery(db_session, source_id="rebuild_g1")
+
+        # Link tag to 1 gallery
+        await self._insert_gallery_tag(db_session, gal_id, tag_id)
+
+        # Rebuild — should correct count to 1
+        await rebuild_tag_counts(db_session)
+        await db_session.commit()
+
+        actual = await self._get_tag_count(db_session, tag_id)
+        assert actual == 1
+
+    async def test_rebuild_zeros_orphan_tags(self, db_session):
+        """Tags with no gallery_tags entries get count=0."""
+        from worker.tag_helpers import rebuild_tag_counts
+
+        # Create a tag with count=5 but no gallery_tags
+        tag_id = await self._insert_tag(db_session, "general", "rebuild_orphan", count=5)
+
+        await rebuild_tag_counts(db_session)
+        await db_session.commit()
+
+        actual = await self._get_tag_count(db_session, tag_id)
+        assert actual == 0
+
+    async def test_rebuild_handles_multiple_galleries(self, db_session):
+        """A tag linked to 3 galleries should have count=3."""
+        from worker.tag_helpers import rebuild_tag_counts
+
+        tag_id = await self._insert_tag(db_session, "general", "rebuild_multi", count=0)
+        for i in range(3):
+            gal_id = await self._insert_gallery(db_session, source_id=f"rebuild_multi_g{i}")
+            await self._insert_gallery_tag(db_session, gal_id, tag_id)
+
+        await rebuild_tag_counts(db_session)
+        await db_session.commit()
+
+        actual = await self._get_tag_count(db_session, tag_id)
+        assert actual == 3
+
+    async def test_rebuild_returns_rowcount(self, db_session):
+        """rebuild_tag_counts should return the number of tags updated."""
+        from worker.tag_helpers import rebuild_tag_counts
+
+        tag_id = await self._insert_tag(db_session, "general", "rebuild_rc", count=99)
+        gal_id = await self._insert_gallery(db_session, source_id="rebuild_rc_g")
+        await self._insert_gallery_tag(db_session, gal_id, tag_id)
+
+        result = await rebuild_tag_counts(db_session)
+        await db_session.commit()
+        # At least 1 tag was updated
+        assert result >= 1
