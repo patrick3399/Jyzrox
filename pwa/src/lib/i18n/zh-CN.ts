@@ -40,6 +40,9 @@ const zhCN: Record<string, string> = {
   'dashboard.quickLinks.tagsDesc': '管理标签、别名和蕴含关系',
   'dashboard.quickLinks.settings': '设置',
   'dashboard.quickLinks.settingsDesc': '凭证与系统设置',
+  'dashboard.quickLinks.title': '快速链接',
+  'dashboard.quickLinks.compactView': '紧凑视图',
+  'dashboard.quickLinks.expandedView': '展开视图',
 
   // ── Browse ──
   'browse.searchPlaceholder': '搜索 E-Hentai...',

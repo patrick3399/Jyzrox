@@ -15,6 +15,7 @@ import { useRescanLibrary, useRescanStatus, useCancelRescan } from '@/hooks/useI
 import { TaskList } from '@/components/ScheduledTasks/TaskList'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
 import { loadSWCacheConfig, saveSWCacheConfig, type SWCacheConfig, DEFAULT_SW_CACHE_CONFIG } from '@/lib/swCacheConfig'
+import { BottomTabConfig } from '@/components/BottomTabConfig'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
 import type {
   SystemHealth,
@@ -31,6 +32,7 @@ type SectionKey =
   | 'system'
   | 'account'
   | 'browse'
+  | 'bottomTab'
   | 'security'
   | 'features'
   | 'rateLimits'
@@ -1822,6 +1824,17 @@ export default function SettingsPage() {
             {openSections.has('browse') && (
               <BrowseSettings />
             )}
+          </div>
+
+          {/* ── Bottom Tab Bar ── */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            <SectionHeader
+              title={t('settings.bottomTab')}
+              sectionKey="bottomTab"
+              openSections={openSections}
+              onToggle={toggleSection}
+            />
+            {openSections.has('bottomTab') && <BottomTabConfig />}
           </div>
 
           {/* ── Blocked Tags ── */}

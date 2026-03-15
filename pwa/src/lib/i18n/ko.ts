@@ -40,6 +40,9 @@ const ko: Record<string, string> = {
   'dashboard.quickLinks.tagsDesc': '태그, 별칭 및 함의 관리',
   'dashboard.quickLinks.settings': '설정',
   'dashboard.quickLinks.settingsDesc': '인증 정보 및 시스템 설정',
+  'dashboard.quickLinks.title': '빠른 링크',
+  'dashboard.quickLinks.compactView': '컴팩트 보기',
+  'dashboard.quickLinks.expandedView': '확장 보기',
 
   // ── Browse ──
   'browse.searchPlaceholder': 'E-Hentai 검색...',

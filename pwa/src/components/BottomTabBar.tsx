@@ -2,26 +2,89 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { Compass, Palette, BookOpen, Download, Menu } from 'lucide-react'
+import {
+  Compass,
+  Palette,
+  BookOpen,
+  Download,
+  Menu,
+  LayoutDashboard,
+  Images,
+  FolderTree,
+  Rss,
+  Settings,
+} from 'lucide-react'
+import type { LucideIcon } from 'lucide-react'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+import { useState, useEffect } from 'react'
+
+export interface TabDefinition {
+  href: string
+  labelKey: string
+  icon: LucideIcon
+}
+
+export const ALL_TABS: TabDefinition[] = [
+  { href: '/e-hentai', labelKey: 'nav.ehentai', icon: Compass },
+  { href: '/pixiv', labelKey: 'nav.pixiv', icon: Palette },
+  { href: '/library', labelKey: 'nav.library', icon: BookOpen },
+  { href: '/queue', labelKey: 'nav.queue', icon: Download },
+  { href: '/', labelKey: 'nav.dashboard', icon: LayoutDashboard },
+  { href: '/images', labelKey: 'nav.images', icon: Images },
+  { href: '/subscriptions', labelKey: 'nav.subscriptions', icon: Rss },
+  { href: '/explorer', labelKey: 'nav.explorer', icon: FolderTree },
+  { href: '/settings', labelKey: 'nav.settings', icon: Settings },
+]
+
+export const DEFAULT_TAB_HREFS = ['/e-hentai', '/pixiv', '/library', '/queue']
+export const BOTTOM_TAB_CONFIG_KEY = 'bottom_tab_config'
+export const TAB_COUNT = 4
+
+export function loadTabConfig(): TabDefinition[] {
+  if (typeof window === 'undefined') return getDefaultTabs()
+  try {
+    const raw = localStorage.getItem(BOTTOM_TAB_CONFIG_KEY)
+    if (!raw) return getDefaultTabs()
+    const parsed: unknown = JSON.parse(raw)
+    if (!Array.isArray(parsed) || parsed.length !== TAB_COUNT) return getDefaultTabs()
+    const resolved: TabDefinition[] = []
+    for (const href of parsed) {
+      if (typeof href !== 'string') return getDefaultTabs()
+      const found = ALL_TABS.find((tab) => tab.href === href)
+      if (!found) return getDefaultTabs()
+      resolved.push(found)
+    }
+    return resolved
+  } catch {
+    return getDefaultTabs()
+  }
+}
+
+function getDefaultTabs(): TabDefinition[] {
+  return DEFAULT_TAB_HREFS.map((href) => ALL_TABS.find((t) => t.href === href)!)
+}
 
 interface BottomTabBarProps {
   onMoreClick: () => void
 }
 
-const tabs = [
-  { href: '/e-hentai', labelKey: 'nav.ehentai', icon: Compass },
-  { href: '/pixiv', labelKey: 'nav.pixiv', icon: Palette },
-  { href: '/library', labelKey: 'nav.library', icon: BookOpen },
-  { href: '/queue', labelKey: 'nav.queue', icon: Download },
-] as const
-
 export function BottomTabBar({ onMoreClick }: BottomTabBarProps) {
   useLocale()
   const pathname = usePathname()
   const { data: stats } = useDownloadStats()
+  const [tabs, setTabs] = useState<TabDefinition[]>(loadTabConfig)
+
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key === BOTTOM_TAB_CONFIG_KEY) {
+        setTabs(loadTabConfig())
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
 
   if (pathname.startsWith('/reader/')) return null
 
@@ -31,7 +94,7 @@ export function BottomTabBar({ onMoreClick }: BottomTabBarProps) {
       style={{ paddingBottom: 'var(--sab)', height: 'calc(4rem + var(--sab))' }}
     >
       {tabs.map(({ href, labelKey, icon: Icon }) => {
-        const isActive = pathname === href || pathname.startsWith(href)
+        const isActive = pathname === href || (href !== '/' && pathname.startsWith(href))
         return (
           <Link
             key={href}

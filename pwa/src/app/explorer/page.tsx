@@ -171,21 +171,28 @@ export default function ExplorerPage() {
     if (selectedItems.size === 0) return
 
     if (currentGallery === null) {
-      // Deleting galleries (from source view)
-      for (const id of selectedItems) {
-        const dir = filteredDirectories.find((d) => d.gallery_id === (id as number))
-        if (!dir || !dir.source) continue
-        const title = dir.title ?? String(id)
-        const confirmed = window.confirm(
-          t('explorer.deleteGalleryConfirm', { title }),
-        )
-        if (!confirmed) continue
-        try {
-          await api.library.deleteGallery(dir.source, dir.source_id)
-          toast.success(t('explorer.galleryDeleted'))
-        } catch (err) {
-          toast.error(err instanceof Error ? err.message : t('explorer.deleteFileFailed'))
+      // Deleting galleries (from source view) — single batch call
+      const count = selectedItems.size
+      const confirmed = window.confirm(
+        t('explorer.deleteGalleriesConfirm', { count: String(count) }),
+      )
+      if (!confirmed) return
+
+      const galleryIds = Array.from(selectedItems) as number[]
+      try {
+        const result = await api.library.batchGalleries({ action: 'delete', gallery_ids: galleryIds })
+        const skipped = count - result.affected
+        if (skipped > 0) {
+          toast.success(
+            t('explorer.galleriesDeleted', { count: String(result.affected) }) +
+            ' ' +
+            t('explorer.galleriesDeleteSkipped', { count: String(skipped) }),
+          )
+        } else {
+          toast.success(t('explorer.galleriesDeleted', { count: String(result.affected) }))
         }
+      } catch (err) {
+        toast.error(err instanceof Error ? err.message : t('explorer.deleteFileFailed'))
       }
       setSelectedItems(new Set())
       mutateDirs()
