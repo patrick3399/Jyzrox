@@ -51,7 +51,11 @@ const {
 
 vi.mock('next/navigation', () => ({
   useRouter: () => ({ push: mockRouterPush, replace: vi.fn() }),
-  useSearchParams: () => ({ get: (_key: string) => null }),
+  // Default the 'tab' param to 'search' so the search content section is
+  // rendered on initial mount.  All other params return null.
+  useSearchParams: () => ({
+    get: (key: string) => (key === 'tab' ? 'search' : null),
+  }),
 }))
 
 vi.mock('sonner', () => ({
@@ -91,7 +95,15 @@ vi.mock('@/hooks/useGalleries', () => ({
   useEhFavorites: mockUseEhFavorites,
 }))
 
+vi.mock('@/hooks/useSubscriptions', () => ({
+  useCreateSubscription: () => ({ trigger: vi.fn(), isMutating: false }),
+}))
+
 // Stub heavy sub-components
+vi.mock('@/components/CredentialBanner', () => ({
+  CredentialBanner: () => null,
+}))
+
 vi.mock('@/components/Pagination', () => ({
   Pagination: () => <div data-testid="pagination" />,
 }))
@@ -194,7 +206,7 @@ describe('Browse page — initial render', () => {
     await act(async () => {
       render(<BrowsePage />)
     })
-    expect(screen.getByText('browse.searchTab')).toBeInTheDocument()
+    expect(screen.getByText('browse.latestTab')).toBeInTheDocument()
   })
 })
 
@@ -290,7 +302,7 @@ describe('Browse page — tab switching', () => {
       await user.click(screen.getByText('browse.popularTab'))
     })
     await act(async () => {
-      await user.click(screen.getByText('browse.searchTab'))
+      await user.click(screen.getByText('browse.latestTab'))
     })
     expect(screen.getByPlaceholderText('browse.searchPlaceholder')).toBeInTheDocument()
   })

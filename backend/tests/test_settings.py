@@ -368,3 +368,387 @@ class TestListCredentials:
         """Unauthenticated request should return 401."""
         resp = await unauthed_client.get("/api/settings/credentials")
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Feature toggles
+# ---------------------------------------------------------------------------
+
+
+class TestFeatureToggles:
+    """GET /api/settings/features and PATCH /api/settings/features/{feature}"""
+
+    async def test_get_features_returns_all_keys(self, client, mock_redis):
+        """GET features should return a dict with all expected feature keys."""
+        mock_redis.get = AsyncMock(return_value=None)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.get("/api/settings/features")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "csrf_enabled" in data
+        assert "rate_limit_enabled" in data
+        assert "opds_enabled" in data
+        assert "external_api_enabled" in data
+        assert "ai_tagging_enabled" in data
+        assert "retry_enabled" in data
+
+    async def test_get_features_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/settings/features")
+        assert resp.status_code == 401
+
+    async def test_patch_feature_toggle_boolean(self, client, mock_redis):
+        """Patching a boolean feature should return the feature and its new state."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/opds_enabled",
+                json={"enabled": True},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["feature"] == "opds_enabled"
+        assert data["enabled"] is True
+
+    async def test_patch_feature_unknown_returns_400(self, client, mock_redis):
+        """Patching an unknown feature name should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/nonexistent_feature",
+                json={"enabled": True},
+            )
+        assert resp.status_code == 400
+        assert "unknown feature" in resp.json()["detail"].lower()
+
+    async def test_patch_feature_numeric_threshold(self, client, mock_redis):
+        """Patching dedup_phash_threshold should accept a value and return it."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/dedup_phash_threshold",
+                json={"value": 8},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["feature"] == "dedup_phash_threshold"
+        assert data["value"] == 8
+
+    async def test_patch_feature_retry_max_retries_out_of_range_returns_400(self, client, mock_redis):
+        """retry_max_retries outside [1, 10] should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/retry_max_retries",
+                json={"value": 99},
+            )
+        assert resp.status_code == 400
+
+    async def test_patch_feature_requires_admin(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.patch(
+            "/api/settings/features/opds_enabled",
+            json={"enabled": True},
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# EH site preference
+# ---------------------------------------------------------------------------
+
+
+class TestEhSitePreference:
+    """GET/PATCH /api/settings/eh-site — ExHentai preference toggle."""
+
+    async def test_get_eh_site_default_returns_use_ex_field(self, client, mock_redis):
+        """GET eh-site should return a dict with use_ex key."""
+        mock_redis.get = AsyncMock(return_value=None)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.get("/api/settings/eh-site")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "use_ex" in data
+        assert isinstance(data["use_ex"], bool)
+
+    async def test_patch_eh_site_updates_preference(self, client, mock_redis):
+        """PATCH eh-site should store the preference and return updated use_ex."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch("/api/settings/eh-site", json={"use_ex": True})
+        assert resp.status_code == 200
+        assert resp.json()["use_ex"] is True
+
+    async def test_get_eh_site_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/settings/eh-site")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Rate-limit override
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimitOverride:
+    """POST /api/settings/rate-limits/override — unlock override."""
+
+    async def test_set_override_unlocked(self, client, mock_redis):
+        """Setting unlocked=True should return override_active=True."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.post(
+                "/api/settings/rate-limits/override",
+                json={"unlocked": True},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["override_active"] is True
+
+    async def test_set_override_locked(self, client, mock_redis):
+        """Setting unlocked=False should return override_active=False."""
+        mock_redis.delete = AsyncMock(return_value=1)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.post(
+                "/api/settings/rate-limits/override",
+                json={"unlocked": False},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["override_active"] is False
+
+
+# ---------------------------------------------------------------------------
+# Feature toggles — additional numeric settings
+# ---------------------------------------------------------------------------
+
+
+class TestFeatureTogglesNumeric:
+    """PATCH /api/settings/features/{feature} — numeric feature paths."""
+
+    async def test_patch_dedup_opencv_threshold(self, client, mock_redis):
+        """Patching dedup_opencv_threshold should return the value."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/dedup_opencv_threshold",
+                json={"value": 0.90},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["feature"] == "dedup_opencv_threshold"
+
+    async def test_patch_retry_base_delay_minutes_valid(self, client, mock_redis):
+        """retry_base_delay_minutes in [1,60] should succeed."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/retry_base_delay_minutes",
+                json={"value": 10},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["value"] == 10
+
+    async def test_patch_retry_base_delay_minutes_out_of_range_returns_400(self, client, mock_redis):
+        """retry_base_delay_minutes > 60 should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/retry_base_delay_minutes",
+                json={"value": 999},
+            )
+        assert resp.status_code == 400
+
+    async def test_patch_subscription_enqueue_delay_valid(self, client, mock_redis):
+        """subscription_enqueue_delay_ms >= 100 should succeed."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/subscription_enqueue_delay_ms",
+                json={"value": 500},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["value"] == 500
+
+    async def test_patch_subscription_enqueue_delay_too_low_returns_400(self, client, mock_redis):
+        """subscription_enqueue_delay_ms < 100 should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/subscription_enqueue_delay_ms",
+                json={"value": 50},
+            )
+        assert resp.status_code == 400
+
+    async def test_patch_subscription_batch_max_valid(self, client, mock_redis):
+        """subscription_batch_max >= 0 should succeed."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/subscription_batch_max",
+                json={"value": 10},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["value"] == 10
+
+    async def test_patch_subscription_batch_max_negative_returns_400(self, client, mock_redis):
+        """subscription_batch_max < 0 should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/subscription_batch_max",
+                json={"value": -1},
+            )
+        assert resp.status_code == 400
+
+    async def test_patch_boolean_feature_missing_enabled_returns_400(self, client, mock_redis):
+        """Patching a boolean feature without 'enabled' field should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/opds_enabled",
+                json={},
+            )
+        assert resp.status_code == 400
+
+    async def test_patch_rate_limit_enabled_toggle(self, client, mock_redis):
+        """Patching rate_limit_enabled should succeed (special case path)."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/rate_limit_enabled",
+                json={"enabled": False},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["feature"] == "rate_limit_enabled"
+        assert resp.json()["enabled"] is False
+
+
+# ---------------------------------------------------------------------------
+# Credentials — set generic cookie and delete
+# ---------------------------------------------------------------------------
+
+
+class TestCredentialOperations:
+    """POST /api/settings/credentials/generic and DELETE /api/settings/credentials/{source}"""
+
+    async def test_set_generic_cookie_valid(self, client):
+        """Setting a generic cookie for a custom source should return status=ok."""
+        with patch("routers.settings.set_credential", new_callable=AsyncMock):
+            resp = await client.post(
+                "/api/settings/credentials/generic",
+                json={"source": "danbooru", "cookies": {"session": "abc123"}},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+        assert resp.json()["source"] == "danbooru"
+
+    async def test_set_generic_cookie_empty_source_returns_400(self, client):
+        """Empty source name should return 400."""
+        resp = await client.post(
+            "/api/settings/credentials/generic",
+            json={"source": "   ", "cookies": {"k": "v"}},
+        )
+        assert resp.status_code == 400
+
+    async def test_set_generic_cookie_empty_cookies_returns_400(self, client):
+        """Empty cookies dict should return 400."""
+        resp = await client.post(
+            "/api/settings/credentials/generic",
+            json={"source": "danbooru", "cookies": {}},
+        )
+        assert resp.status_code == 400
+
+    async def test_delete_credential_not_found_returns_404(self, client, db_session_factory):
+        """Deleting a credential that doesn't exist should return 404."""
+        with patch("routers.settings.async_session", db_session_factory):
+            resp = await client.delete("/api/settings/credentials/nonexistent_source_xyz")
+        assert resp.status_code == 404
+
+    async def test_set_generic_cookie_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.post(
+            "/api/settings/credentials/generic",
+            json={"source": "danbooru", "cookies": {"session": "abc"}},
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Rate limits — validation paths
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimitsValidation:
+    """PATCH /api/settings/rate-limits — invalid values should return 400."""
+
+    async def test_patch_rate_limits_invalid_source_returns_400(self, client, mock_redis):
+        """Patching an unknown source should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/rate-limits",
+                json={"sites": {"unknownsource": {"concurrency": 1}}},
+            )
+        assert resp.status_code == 400
+
+    async def test_patch_rate_limits_concurrency_out_of_range_returns_400(self, client, mock_redis):
+        """Concurrency outside [1, 10] should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/rate-limits",
+                json={"sites": {"ehentai": {"concurrency": 99}}},
+            )
+        assert resp.status_code == 400
+
+    async def test_patch_rate_limits_invalid_schedule_mode_returns_400(self, client, mock_redis):
+        """An unrecognized schedule mode should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/rate-limits",
+                json={"schedule": {"mode": "turtle_speed"}},
+            )
+        assert resp.status_code == 400
+
+    async def test_patch_rate_limits_delay_ms_out_of_range_returns_400(self, client, mock_redis):
+        """delay_ms outside [0, 10000] should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/rate-limits",
+                json={"sites": {"pixiv": {"page_delay_ms": 99999}}},
+            )
+        assert resp.status_code == 400
+
+    async def test_patch_rate_limits_invalid_hour_returns_400(self, client, mock_redis):
+        """Schedule hour outside [0, 23] should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/rate-limits",
+                json={"schedule": {"start_hour": 25}},
+            )
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Pixiv OAuth URL
+# ---------------------------------------------------------------------------
+
+
+class TestPixivOAuthUrl:
+    """GET /api/settings/credentials/pixiv/oauth-url"""
+
+    async def test_get_pixiv_oauth_url_returns_url_and_verifier(self, client):
+        """Should return url and code_verifier fields."""
+        resp = await client.get("/api/settings/credentials/pixiv/oauth-url")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "url" in data
+        assert "code_verifier" in data
+        assert "pixiv" in data["url"].lower()
+
+    async def test_get_pixiv_oauth_url_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/settings/credentials/pixiv/oauth-url")
+        assert resp.status_code == 401

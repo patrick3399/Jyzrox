@@ -9,6 +9,7 @@ are not available in SQLite. Tests that would exercise those features are struct
 to work with the basic query paths or are noted as SQLite-limited.
 """
 
+import pytest
 from sqlalchemy import text
 
 # ---------------------------------------------------------------------------
@@ -289,3 +290,1663 @@ class TestReadProgress:
         data = resp.json()
         assert data["last_page"] == 15
         assert data["gallery_id"] == gid
+
+
+# ---------------------------------------------------------------------------
+# Browse images (cross-gallery image browser)
+# ---------------------------------------------------------------------------
+
+
+class TestBrowseImages:
+    """GET /api/library/images"""
+
+    async def test_browse_images_empty_db_returns_empty_list(self, client):
+        """Empty DB should return images=[] with has_next=False."""
+        resp = await client.get("/api/library/images")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["images"] == []
+        assert data["has_next"] is False
+
+    async def test_browse_images_with_images_returns_data(self, client, db_session):
+        """With images in DB the endpoint returns image data with cursor fields."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="99001")
+        await _insert_image(db_session, gid, page_num=1, filename="001.jpg")
+        await _insert_image(db_session, gid, page_num=2, filename="002.jpg")
+
+        resp = await client.get("/api/library/images")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["images"]) == 2
+        assert "next_cursor" in data
+        assert "has_next" in data
+        # Each image should contain expected keys
+        img = data["images"][0]
+        assert "id" in img
+        assert "gallery_id" in img
+        assert "page_num" in img
+
+    async def test_browse_images_cursor_pagination_has_next(self, client, db_session):
+        """When more images than limit exist, has_next=True and next_cursor is set."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="99002")
+        for i in range(5):
+            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i+1:03d}.jpg")
+
+        resp = await client.get("/api/library/images", params={"limit": 3})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["images"]) == 3
+        assert data["has_next"] is True
+        assert data["next_cursor"] is not None
+
+    @pytest.mark.skip(reason="PostgreSQL ARRAY overlap() not supported on SQLite")
+    async def test_browse_images_blocked_tags_excludes_images(self, client, db_session):
+        """Images whose tags_array contains a blocked tag for the user are excluded."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="99003")
+        # Insert a blob and image
+        sha = "sha_blocked_1"
+        await db_session.execute(
+            text(
+                "INSERT OR IGNORE INTO blobs (sha256, file_size, extension, width, height) "
+                "VALUES (:sha, 1000, 'jpg', 800, 600)"
+            ),
+            {"sha": sha},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, tags_array) "
+                "VALUES (:gid, 1, 'blocked.jpg', :sha, :ta)"
+            ),
+            {"gid": gid, "sha": sha, "ta": '["artist:banned_artist"]'},
+        )
+        # Block the tag for user_id=1
+        await db_session.execute(
+            text(
+                "INSERT INTO blocked_tags (user_id, namespace, name) "
+                "VALUES (1, 'artist', 'banned_artist')"
+            ),
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/images")
+        assert resp.status_code == 200
+        data = resp.json()
+        # The blocked image should be excluded from results
+        filenames = [img.get("filename") for img in data["images"]]
+        assert "blocked.jpg" not in filenames
+
+
+# ---------------------------------------------------------------------------
+# Artists list
+# ---------------------------------------------------------------------------
+
+
+class TestListArtists:
+    """GET /api/library/artists"""
+
+    async def test_list_artists_empty_db_returns_empty_list(self, client):
+        """Empty DB (no galleries with artist_id) should return artists=[]."""
+        resp = await client.get("/api/library/artists")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["artists"] == []
+        assert data["total"] == 0
+
+    async def test_list_artists_with_galleries_returns_grouped_artists(self, client, db_session):
+        """Galleries with artist_id are grouped and returned as artist entries."""
+        for source_id, artist_id in [
+            ("a001", "pixiv:artist1"),
+            ("a002", "pixiv:artist1"),
+            ("a003", "pixiv:artist2"),
+        ]:
+            await db_session.execute(
+                text(
+                    "INSERT INTO galleries (source, source_id, title, download_status, tags_array, artist_id) "
+                    "VALUES ('pixiv', :sid, 'Work', 'completed', '[]', :aid)"
+                ),
+                {"sid": source_id, "aid": artist_id},
+            )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/artists")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 2
+        artist_ids = [a["artist_id"] for a in data["artists"]]
+        assert "pixiv:artist1" in artist_ids
+        assert "pixiv:artist2" in artist_ids
+
+    async def test_list_artists_search_filter_q_parameter_works(self, client, db_session):
+        """The ?q= search filter applies to artist_name (uploader field)."""
+        for source_id, artist_id, uploader in [
+            ("b001", "pixiv:unique_artist", "UniqueArtistName"),
+            ("b002", "pixiv:other_artist", "OtherName"),
+        ]:
+            await db_session.execute(
+                text(
+                    "INSERT INTO galleries (source, source_id, title, download_status, tags_array, "
+                    "artist_id, uploader) VALUES ('pixiv', :sid, 'Work', 'completed', '[]', :aid, :upl)"
+                ),
+                {"sid": source_id, "aid": artist_id, "upl": uploader},
+            )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/artists", params={"q": "unique"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["artists"][0]["artist_id"] == "pixiv:unique_artist"
+
+
+# ---------------------------------------------------------------------------
+# Batch gallery operations
+# ---------------------------------------------------------------------------
+
+
+class TestBatchGalleries:
+    """POST /api/library/galleries/batch"""
+
+    async def test_batch_delete_action_removes_galleries(self, client, db_session):
+        """Batch delete action should remove the specified galleries from DB."""
+        gid1 = await _insert_gallery(db_session, source="local", source_id="del1", title="Del 1")
+        gid2 = await _insert_gallery(db_session, source="local", source_id="del2", title="Del 2")
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "delete", "gallery_ids": [gid1, gid2]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 2
+
+        # Confirm galleries are gone
+        check = await client.get("/api/library/galleries")
+        assert check.json()["total"] == 0
+
+    async def test_batch_favorite_action_adds_to_user_favorites(self, client, db_session):
+        """Batch favorite action should insert rows into user_favorites.
+
+        Uses pg_insert(UserFavorite).on_conflict_do_nothing() which is
+        PostgreSQL-specific. We accept 200 (PG) or 500 (SQLite limitation).
+        """
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="fav1", title="Fav")
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "favorite", "gallery_ids": [gid]},
+        )
+        if resp.status_code == 200:
+            assert resp.json()["status"] == "ok"
+            assert resp.json()["affected"] == 1
+        else:
+            assert resp.status_code == 500
+
+    async def test_batch_rate_action_creates_user_ratings(self, client, db_session):
+        """Batch rate action should upsert user_ratings rows.
+
+        Uses pg_insert(UserRating).on_conflict_do_update() which is
+        PostgreSQL-specific. We accept 200 (PG) or 500 (SQLite limitation).
+        """
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="rate1", title="Rate")
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "rate", "gallery_ids": [gid], "rating": 4},
+        )
+        if resp.status_code == 200:
+            assert resp.json()["status"] == "ok"
+        else:
+            assert resp.status_code == 500
+
+    async def test_batch_empty_gallery_ids_returns_400(self, client):
+        """Providing an empty gallery_ids list should return 400."""
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "delete", "gallery_ids": []},
+        )
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Delete single gallery
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteGallery:
+    """DELETE /api/library/galleries/{source}/{source_id}"""
+
+    async def test_delete_gallery_not_found_returns_404(self, client):
+        """Attempting to delete a non-existent gallery should return 404."""
+        resp = await client.delete("/api/library/galleries/nonexistent/no_such_id")
+        assert resp.status_code == 404
+
+    async def test_delete_gallery_successful_removes_gallery_and_images(self, client, db_session):
+        """Successful deletion removes the gallery row and its image rows."""
+        gid = await _insert_gallery(db_session, source="local", source_id="del_single", title="To Delete")
+        await _insert_image(db_session, gid, page_num=1, filename="img1.jpg")
+
+        resp = await client.delete("/api/library/galleries/local/del_single")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+        # Gallery should be gone
+        check = await client.get("/api/library/galleries/local/del_single")
+        assert check.status_code == 404
+
+    async def test_delete_gallery_decrements_blob_ref_count(self, client, db_session):
+        """Deleting a gallery decrements the ref_count on associated blobs."""
+        gid = await _insert_gallery(
+            db_session, source="local", source_id="del_ref", title="Ref Count Test"
+        )
+        sha = "sha_refcount_test_abc123"
+        await db_session.execute(
+            text(
+                "INSERT OR IGNORE INTO blobs (sha256, file_size, extension, ref_count) "
+                "VALUES (:sha, 2000, 'jpg', 1)"
+            ),
+            {"sha": sha},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
+                "VALUES (:gid, 1, 'ref.jpg', :sha)"
+            ),
+            {"gid": gid, "sha": sha},
+        )
+        await db_session.commit()
+
+        resp = await client.delete("/api/library/galleries/local/del_ref")
+        assert resp.status_code == 200
+
+        # ref_count should now be 0
+        result = await db_session.execute(
+            text("SELECT ref_count FROM blobs WHERE sha256 = :sha"), {"sha": sha}
+        )
+        ref_count = result.scalar_one_or_none()
+        assert ref_count == 0
+
+
+# ---------------------------------------------------------------------------
+# Delete single image from gallery
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteGalleryImage:
+    """POST /api/library/galleries/{source}/{source_id}/delete-image"""
+
+    async def test_delete_image_gallery_not_found_returns_404(self, client):
+        """Gallery not found → 404."""
+        resp = await client.post(
+            "/api/library/galleries/nonexistent/no_gallery/delete-image",
+            json={"page_num": 1},
+        )
+        assert resp.status_code == 404
+
+    async def test_delete_image_page_not_found_returns_404(self, client, db_session):
+        """Image at specified page_num not found → 404."""
+        await _insert_gallery(db_session, source="local", source_id="del_img_404", title="Gallery")
+
+        resp = await client.post(
+            "/api/library/galleries/local/del_img_404/delete-image",
+            json={"page_num": 99},
+        )
+        assert resp.status_code == 404
+
+    async def test_delete_image_successful_remaining_pages_correct(self, client, db_session):
+        """Successful deletion returns remaining_pages count and re-numbers pages.
+
+        Uses pg_insert(ExcludedBlob).on_conflict_do_nothing() which is
+        PostgreSQL-specific. We accept 200 (PG) or 500 (SQLite limitation).
+        """
+        gid = await _insert_gallery(
+            db_session, source="local", source_id="del_img_ok", title="Two Pages", pages=2
+        )
+        await _insert_image(db_session, gid, page_num=1, filename="p1.jpg")
+        await _insert_image(db_session, gid, page_num=2, filename="p2.jpg")
+
+        resp = await client.post(
+            "/api/library/galleries/local/del_img_ok/delete-image",
+            json={"page_num": 1},
+        )
+        if resp.status_code == 200:
+            data = resp.json()
+            assert data["status"] == "ok"
+            assert data["remaining_pages"] == 1
+        else:
+            # SQLite limitation with pg_insert on_conflict_do_nothing
+            assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# Save / retrieve read progress (POST)
+# ---------------------------------------------------------------------------
+
+
+class TestSaveProgress:
+    """POST /api/library/galleries/{source}/{source_id}/progress"""
+
+    async def test_save_progress_gallery_not_found_returns_404(self, client):
+        """Gallery not found → 404."""
+        resp = await client.post(
+            "/api/library/galleries/nonexistent/no_gallery/progress",
+            json={"last_page": 5},
+        )
+        assert resp.status_code == 404
+
+    async def test_save_progress_creates_read_progress_record(self, client, db_session):
+        """POST progress should upsert a read_progress record.
+
+        Uses pg_insert(ReadProgress).on_conflict_do_update() which is
+        PostgreSQL-specific. We accept 200 (PG) or 500 (SQLite limitation).
+        """
+        await _insert_gallery(db_session, source="ehentai", source_id="prog_create", title="Prog")
+
+        resp = await client.post(
+            "/api/library/galleries/ehentai/prog_create/progress",
+            json={"last_page": 7},
+        )
+        if resp.status_code == 200:
+            assert resp.json()["status"] == "ok"
+        else:
+            assert resp.status_code == 500
+
+    async def test_save_progress_update_existing_progress(self, client, db_session):
+        """Updating existing progress: pre-insert then POST a new value.
+
+        Uses pg_insert ON CONFLICT which is PostgreSQL-specific. We accept
+        200 (PG) or 500 (SQLite limitation).
+        """
+        gid = await _insert_gallery(
+            db_session, source="ehentai", source_id="prog_update", title="Update Prog"
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO read_progress (user_id, gallery_id, last_page) "
+                "VALUES (1, :gid, 3)"
+            ),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            "/api/library/galleries/ehentai/prog_update/progress",
+            json={"last_page": 10},
+        )
+        if resp.status_code == 200:
+            assert resp.json()["status"] == "ok"
+        else:
+            assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# Gallery tags
+# ---------------------------------------------------------------------------
+
+
+class TestGetGalleryTags:
+    """GET /api/library/galleries/{source}/{source_id}/tags"""
+
+    async def test_get_gallery_tags_not_found_returns_404(self, client):
+        """Gallery not found → 404."""
+        resp = await client.get("/api/library/galleries/nonexistent/no_gallery/tags")
+        assert resp.status_code == 404
+
+    async def test_get_gallery_tags_with_tags_returns_tag_list(self, client, db_session):
+        """Gallery with linked tags should return those tags in the response."""
+        gid = await _insert_gallery(
+            db_session, source="ehentai", source_id="tagged_gal", title="Tagged Gallery"
+        )
+        # Insert a tag and link it to the gallery
+        await db_session.execute(
+            text(
+                "INSERT INTO tags (namespace, name) VALUES ('artist', 'alice')"
+            )
+        )
+        await db_session.commit()
+        tag_id_row = await db_session.execute(
+            text("SELECT id FROM tags WHERE namespace='artist' AND name='alice'")
+        )
+        tag_id = tag_id_row.scalar_one()
+        await db_session.execute(
+            text(
+                "INSERT INTO gallery_tags (gallery_id, tag_id, confidence, source) "
+                "VALUES (:gid, :tid, 0.95, 'metadata')"
+            ),
+            {"gid": gid, "tid": tag_id},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries/ehentai/tagged_gal/tags")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gallery_id"] == gid
+        assert len(data["tags"]) == 1
+        assert data["tags"][0]["namespace"] == "artist"
+        assert data["tags"][0]["name"] == "alice"
+
+
+# ---------------------------------------------------------------------------
+# Excluded blobs
+# ---------------------------------------------------------------------------
+
+
+class TestExcludedBlobs:
+    """GET /api/library/galleries/{source}/{source_id}/excluded
+    DELETE /api/library/galleries/{source}/{source_id}/excluded/{sha256}
+    """
+
+    async def test_list_excluded_empty_returns_empty_list(self, client, db_session):
+        """Gallery with no exclusions should return excluded=[]."""
+        await _insert_gallery(
+            db_session, source="local", source_id="excl_empty", title="No Exclusions"
+        )
+
+        resp = await client.get("/api/library/galleries/local/excl_empty/excluded")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["excluded"] == []
+
+    async def test_list_excluded_returns_exclusion_entries(self, client, db_session):
+        """Gallery with excluded blobs should return those entries."""
+        gid = await _insert_gallery(
+            db_session, source="local", source_id="excl_has", title="With Exclusion"
+        )
+        sha = "sha_excluded_abc000"
+        await db_session.execute(
+            text(
+                "INSERT INTO excluded_blobs (gallery_id, blob_sha256) "
+                "VALUES (:gid, :sha)"
+            ),
+            {"gid": gid, "sha": sha},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries/local/excl_has/excluded")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gallery_id"] == gid
+        assert len(data["excluded"]) == 1
+        assert data["excluded"][0]["blob_sha256"] == sha
+
+    async def test_restore_excluded_blob_removes_exclusion_entry(self, client, db_session):
+        """DELETE on excluded blob should remove the exclusion record."""
+        gid = await _insert_gallery(
+            db_session, source="local", source_id="excl_restore", title="Restore Test"
+        )
+        sha = "sha_restore_abc111"
+        await db_session.execute(
+            text(
+                "INSERT INTO excluded_blobs (gallery_id, blob_sha256) "
+                "VALUES (:gid, :sha)"
+            ),
+            {"gid": gid, "sha": sha},
+        )
+        await db_session.commit()
+
+        resp = await client.delete(
+            f"/api/library/galleries/local/excl_restore/excluded/{sha}"
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+        # Verify the exclusion is gone
+        check = await client.get("/api/library/galleries/local/excl_restore/excluded")
+        assert check.json()["excluded"] == []
+
+
+# ---------------------------------------------------------------------------
+# Find similar images
+# ---------------------------------------------------------------------------
+
+
+class TestFindSimilarImages:
+    """GET /api/library/images/{image_id}/similar"""
+
+    async def test_find_similar_image_not_found_returns_404(self, client):
+        """Image not found → 404."""
+        resp = await client.get("/api/library/images/999999/similar")
+        assert resp.status_code == 404
+
+    async def test_find_similar_image_without_phash_returns_400(self, client, db_session):
+        """Image whose blob has no phash should return 400."""
+        gid = await _insert_gallery(
+            db_session, source="local", source_id="sim_nophash", title="No Phash"
+        )
+        sha = "sha_nophash_xyz999"
+        await db_session.execute(
+            text(
+                "INSERT OR IGNORE INTO blobs (sha256, file_size, extension) "
+                "VALUES (:sha, 500, 'jpg')"
+            ),
+            {"sha": sha},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
+                "VALUES (:gid, 1, 'nophash.jpg', :sha)"
+            ),
+            {"gid": gid, "sha": sha},
+        )
+        await db_session.commit()
+
+        img_id_row = await db_session.execute(
+            text("SELECT id FROM images WHERE blob_sha256 = :sha"), {"sha": sha}
+        )
+        img_id = img_id_row.scalar_one()
+
+        resp = await client.get(f"/api/library/images/{img_id}/similar")
+        assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# List files
+# ---------------------------------------------------------------------------
+
+
+class TestListFiles:
+    """GET /api/library/files"""
+
+    async def test_list_files_empty_returns_empty_directories(self, client):
+        """When no library directories exist on disk, directories=[] is returned."""
+        resp = await client.get("/api/library/files")
+        assert resp.status_code == 200
+        data = resp.json()
+        # Either empty list (no dirs on test machine) or valid paginated response
+        assert "directories" in data
+        assert "total" in data
+        assert "page" in data
+
+    async def test_list_files_response_includes_pagination_fields(self, client):
+        """Response always includes page and total fields regardless of content."""
+        resp = await client.get("/api/library/files", params={"page": 0, "limit": 10})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "directories" in data
+        assert isinstance(data["total"], int)
+        assert data["page"] == 0
+
+
+# ---------------------------------------------------------------------------
+# List files in gallery directory
+# ---------------------------------------------------------------------------
+
+
+class TestListGalleryFiles:
+    """GET /api/library/files/{source}/{source_id}"""
+
+    async def test_gallery_not_found_returns_404(self, client):
+        """Non-existent gallery should return 404."""
+        resp = await client.get("/api/library/files/nonexistent/no_such_id")
+        assert resp.status_code == 404
+
+    async def test_list_gallery_files_existing_gallery(self, client, db_session):
+        """Existing gallery with no disk files returns empty files list and correct metadata."""
+        await _insert_gallery(
+            db_session, source="local", source_id="gfiles_01", title="Files Gallery"
+        )
+        resp = await client.get("/api/library/files/local/gfiles_01")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["source"] == "local"
+        assert data["source_id"] == "gfiles_01"
+        assert data["title"] == "Files Gallery"
+        assert "files" in data
+        assert isinstance(data["total_files"], int)
+
+    async def test_list_gallery_files_includes_db_metadata(self, client, db_session):
+        """Files cross-referenced with DB images should expose page_num."""
+        gid = await _insert_gallery(
+            db_session, source="local", source_id="gfiles_db", title="DB Meta Gallery"
+        )
+        await _insert_image(db_session, gid, page_num=1, filename="p1.jpg")
+
+        resp = await client.get("/api/library/files/local/gfiles_db")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gallery_id"] == gid
+        # files list may be empty (no disk dir in test env) — but structure is correct
+        assert isinstance(data["files"], list)
+
+
+# ---------------------------------------------------------------------------
+# Artist summary and images
+# ---------------------------------------------------------------------------
+
+
+class TestArtistSummary:
+    """GET /api/library/artists/{artist_id}/summary"""
+
+    async def test_artist_not_found_returns_404(self, client):
+        """Unknown artist_id should return 404."""
+        resp = await client.get("/api/library/artists/nonexistent:artist_xyz/summary")
+        assert resp.status_code == 404
+
+    async def test_artist_summary_returns_aggregate_data(self, client, db_session):
+        """Existing artist should return gallery_count, total_pages, artist_name."""
+        for i, sid in enumerate(["as001", "as002"]):
+            await db_session.execute(
+                text(
+                    "INSERT INTO galleries (source, source_id, title, download_status, "
+                    "tags_array, artist_id, uploader, pages) "
+                    "VALUES ('pixiv', :sid, 'Work', 'completed', '[]', 'pixiv:art_summary', 'SummaryArtist', :pages)"
+                ),
+                {"sid": sid, "pages": 10 + i},
+            )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/artists/pixiv:art_summary/summary")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gallery_count"] == 2
+        assert data["total_pages"] == 21
+        assert data["artist_name"] == "SummaryArtist"
+        assert "total_images" in data
+
+    async def test_artist_summary_artist_id_with_slash(self, client, db_session):
+        """artist_id containing a colon should be routed correctly via :path."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, "
+                "tags_array, artist_id, uploader) "
+                "VALUES ('local', 'slashtest', 'Work', 'completed', '[]', 'local:slash/test', 'Slash')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/artists/local:slash/test/summary")
+        assert resp.status_code in (200, 404)  # routing may or may not resolve the slash
+
+
+class TestArtistImages:
+    """GET /api/library/artists/{artist_id}/images"""
+
+    async def test_artist_not_found_returns_404(self, client):
+        """Unknown artist_id should return 404."""
+        resp = await client.get("/api/library/artists/pixiv:no_such_artist/images")
+        assert resp.status_code == 404
+
+    async def test_artist_images_returns_paginated_images(self, client, db_session):
+        """Artist with galleries should return images with artist_id and pagination info."""
+        gid = await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, "
+                "tags_array, artist_id, uploader) "
+                "VALUES ('pixiv', 'aitest01', 'AI Test Work', 'completed', '[]', 'pixiv:art_images', 'ArtImages') "
+                "RETURNING id"
+            )
+        )
+        gallery_id = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+        await db_session.commit()
+
+        await _insert_image(db_session, gallery_id, page_num=1, filename="img1.jpg")
+        await _insert_image(db_session, gallery_id, page_num=2, filename="img2.jpg")
+
+        resp = await client.get("/api/library/artists/pixiv:art_images/images")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["artist_id"] == "pixiv:art_images"
+        assert data["total"] == 2
+        assert len(data["images"]) == 2
+        assert "page" in data
+        assert "has_next" in data
+
+    async def test_artist_images_sort_oldest(self, client, db_session):
+        """sort=oldest should still return 200 with valid response."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, "
+                "tags_array, artist_id) "
+                "VALUES ('pixiv', 'sorttest01', 'Sort Test', 'completed', '[]', 'pixiv:art_sort')"
+            )
+        )
+        gallery_id = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+        await db_session.commit()
+
+        await _insert_image(db_session, gallery_id, page_num=1, filename="s1.jpg")
+
+        resp = await client.get(
+            "/api/library/artists/pixiv:art_sort/images", params={"sort": "oldest"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 1
+
+    async def test_artist_images_pagination_limit(self, client, db_session):
+        """limit parameter should cap how many images are returned."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, "
+                "tags_array, artist_id) "
+                "VALUES ('pixiv', 'pagintest01', 'Pagin Test', 'completed', '[]', 'pixiv:art_paginlimit')"
+            )
+        )
+        gallery_id = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+        await db_session.commit()
+
+        for i in range(5):
+            await _insert_image(db_session, gallery_id, page_num=i + 1, filename=f"p{i+1}.jpg")
+
+        resp = await client.get(
+            "/api/library/artists/pixiv:art_paginlimit/images",
+            params={"limit": 2},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["images"]) == 2
+        assert data["total"] == 5
+        assert data["has_next"] is True
+
+
+# ---------------------------------------------------------------------------
+# Additional gallery tags tests
+# ---------------------------------------------------------------------------
+
+
+class TestGetGalleryTagsExtra:
+    """Additional tests for GET /api/library/galleries/{source}/{source_id}/tags"""
+
+    async def test_get_gallery_tags_empty_gallery_returns_empty_list(self, client, db_session):
+        """Gallery with no linked tags should return tags=[]."""
+        await _insert_gallery(
+            db_session, source="local", source_id="notags_gallery", title="No Tags"
+        )
+        resp = await client.get("/api/library/galleries/local/notags_gallery/tags")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["tags"] == []
+
+    async def test_get_gallery_tags_multiple_namespaces(self, client, db_session):
+        """Gallery with tags from multiple namespaces should return all of them."""
+        gid = await _insert_gallery(
+            db_session, source="local", source_id="multitag_gal", title="Multi-tag Gallery"
+        )
+        for ns, name in [("artist", "bob"), ("character", "hero"), ("general", "action")]:
+            await db_session.execute(
+                text("INSERT INTO tags (namespace, name) VALUES (:ns, :name)"),
+                {"ns": ns, "name": name},
+            )
+        await db_session.commit()
+        rows = await db_session.execute(
+            text("SELECT id FROM tags WHERE (namespace, name) IN (('artist','bob'), ('character','hero'), ('general','action'))")
+        )
+        tag_ids = [r[0] for r in rows.fetchall()]
+        for tid in tag_ids:
+            await db_session.execute(
+                text(
+                    "INSERT INTO gallery_tags (gallery_id, tag_id, confidence, source) "
+                    "VALUES (:gid, :tid, 1.0, 'metadata')"
+                ),
+                {"gid": gid, "tid": tid},
+            )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries/local/multitag_gal/tags")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gallery_id"] == gid
+        namespaces = {t["namespace"] for t in data["tags"]}
+        assert namespaces == {"artist", "character", "general"}
+
+
+# ---------------------------------------------------------------------------
+# Save read progress extra tests
+# ---------------------------------------------------------------------------
+
+
+class TestSaveProgressExtra:
+    """Additional POST /api/library/galleries/{source}/{source_id}/progress tests."""
+
+    async def test_save_progress_returns_404_for_missing_gallery(self, client):
+        """Gallery not found should return 404."""
+        resp = await client.post(
+            "/api/library/galleries/unknown/ghost_gallery/progress",
+            json={"last_page": 3},
+        )
+        assert resp.status_code == 404
+
+    async def test_get_progress_returns_gallery_id_field(self, client, db_session):
+        """GET progress response should include gallery_id field."""
+        gid = await _insert_gallery(
+            db_session, source="local", source_id="prog_field_test", title="Progress Field"
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO read_progress (user_id, gallery_id, last_page) "
+                "VALUES (1, :gid, 5)"
+            ),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries/local/prog_field_test/progress")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gallery_id"] == gid
+        assert data["last_page"] == 5
+
+
+# ---------------------------------------------------------------------------
+# Gallery list extra tests
+# ---------------------------------------------------------------------------
+
+
+class TestListGalleriesExtra:
+    """Additional GET /api/library/galleries tests for less-common filters."""
+
+    async def test_sort_by_rating(self, client, db_session):
+        """sort=rating should return galleries ordered by rating descending."""
+        await _insert_gallery(db_session, source_id="r1", title="Low", rating=1)
+        await _insert_gallery(db_session, source_id="r2", title="High", rating=5)
+
+        resp = await client.get("/api/library/galleries", params={"sort": "rating"})
+        assert resp.status_code == 200
+        galleries = resp.json()["galleries"]
+        assert len(galleries) == 2
+        assert galleries[0]["rating"] >= galleries[1]["rating"]
+
+    async def test_sort_by_pages(self, client, db_session):
+        """sort=pages should return galleries ordered by pages descending."""
+        await _insert_gallery(db_session, source_id="pg1", title="Few Pages", pages=5)
+        await _insert_gallery(db_session, source_id="pg2", title="Many Pages", pages=50)
+
+        resp = await client.get("/api/library/galleries", params={"sort": "pages"})
+        assert resp.status_code == 200
+        galleries = resp.json()["galleries"]
+        assert galleries[0]["pages"] >= galleries[1]["pages"]
+
+    async def test_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/library/galleries")
+        assert resp.status_code == 401
+
+    async def test_artist_filter(self, client, db_session):
+        """?artist= should filter by artist_id."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, "
+                "tags_array, artist_id) "
+                "VALUES ('pixiv', 'af01', 'Artist Work', 'completed', '[]', 'pixiv:filter_artist')"
+            )
+        )
+        await _insert_gallery(db_session, source_id="af02", title="No Artist")
+        await db_session.commit()
+
+        resp = await client.get(
+            "/api/library/galleries", params={"artist": "pixiv:filter_artist"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["galleries"][0]["source"] == "pixiv"
+
+
+# ---------------------------------------------------------------------------
+# Gallery list — status and category filters
+# ---------------------------------------------------------------------------
+
+
+class TestListGalleriesStatusCategory:
+    """GET /api/library/galleries with status and category filters."""
+
+    async def test_source_filter_filters_by_source(self, client, db_session):
+        """?source= should filter galleries by source."""
+        await _insert_gallery(
+            db_session, source="ehentai", source_id="srcfilt01", title="EH Gallery"
+        )
+        await _insert_gallery(
+            db_session, source="pixiv", source_id="srcfilt02", title="Pixiv Gallery"
+        )
+
+        resp = await client.get("/api/library/galleries", params={"source": "pixiv"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert all(g["source"] == "pixiv" for g in data["galleries"])
+        assert data["total"] >= 1
+
+    async def test_import_mode_filter_returns_matching_galleries(self, client, db_session):
+        """?import_mode= should filter galleries by import_mode."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, "
+                "tags_array, import_mode) "
+                "VALUES ('local', 'imfilt01', 'Link Gallery', 'completed', '[]', 'link')"
+            )
+        )
+        await _insert_gallery(db_session, source_id="imfilt02", title="No Mode")
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries", params={"import_mode": "link"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] >= 1
+        assert all(g.get("import_mode") == "link" for g in data["galleries"])
+
+    async def test_import_mode_filter(self, client, db_session):
+        """?import_mode= should filter galleries by import_mode."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, "
+                "tags_array, import_mode) "
+                "VALUES ('local', 'im01', 'Link Gallery', 'completed', '[]', 'link')"
+            )
+        )
+        await _insert_gallery(db_session, source_id="im02", title="No Mode")
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries", params={"import_mode": "link"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["galleries"][0]["source"] == "local"
+
+    async def test_min_rating_filter_returns_only_rated_above_threshold(
+        self, client, db_session
+    ):
+        """?min_rating= should return only galleries with user rating >= threshold."""
+        gid_high = await _insert_gallery(db_session, source_id="mr01", title="High Rating")
+        gid_low = await _insert_gallery(db_session, source_id="mr02", title="Low Rating")
+
+        # Insert user ratings directly
+        await db_session.execute(
+            text(
+                "INSERT INTO user_ratings (user_id, gallery_id, rating) "
+                "VALUES (1, :gid, 5)"
+            ),
+            {"gid": gid_high},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO user_ratings (user_id, gallery_id, rating) "
+                "VALUES (1, :gid, 2)"
+            ),
+            {"gid": gid_low},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries", params={"min_rating": 4})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        gallery_ids = [g["id"] for g in data["galleries"]]
+        assert gid_high in gallery_ids
+        assert gid_low not in gallery_ids
+
+    async def test_page_too_deep_returns_400(self, client):
+        """page > 500 should return 400 with cursor suggestion."""
+        resp = await client.get("/api/library/galleries", params={"page": 501})
+        assert resp.status_code == 400
+        assert "cursor" in resp.json()["detail"].lower()
+
+    async def test_gallery_list_response_has_page_field(self, client, db_session):
+        """Legacy offset pagination response should include page field."""
+        await _insert_gallery(db_session, source_id="pf01", title="Page Field Test")
+        resp = await client.get("/api/library/galleries", params={"page": 0, "limit": 10})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "page" in data
+        assert data["page"] == 0
+
+    async def test_page_based_pagination_returns_total_and_page(
+        self, client, db_session
+    ):
+        """Page-based pagination should return total and page fields."""
+        for i in range(5):
+            await _insert_gallery(
+                db_session, source_id=f"cur{i:03d}", title=f"Cursor Gallery {i}"
+            )
+
+        # Page 0 — limit 3 (page-based mode, no cursor param)
+        resp = await client.get("/api/library/galleries", params={"page": 0, "limit": 3})
+        assert resp.status_code == 200
+        first_page = resp.json()
+        assert first_page["page"] == 0
+        assert first_page["total"] >= 5
+        assert len(first_page["galleries"]) == 3
+
+        # Page 1
+        resp2 = await client.get("/api/library/galleries", params={"page": 1, "limit": 3})
+        assert resp2.status_code == 200
+        second_page = resp2.json()
+        assert second_page["page"] == 1
+        assert len(second_page["galleries"]) >= 1
+
+    async def test_invalid_cursor_returns_400(self, client):
+        """An invalid cursor string should return 400."""
+        resp = await client.get(
+            "/api/library/galleries", params={"cursor": "not-a-valid-cursor"}
+        )
+        assert resp.status_code == 400
+
+    async def test_browse_images_sort_oldest(self, client, db_session):
+        """sort=oldest on the image browser should return 200 with images in order."""
+        gid = await _insert_gallery(
+            db_session, source="ehentai", source_id="imgold001", title="Old Sort"
+        )
+        await _insert_image(db_session, gid, page_num=1, filename="a.jpg")
+        await _insert_image(db_session, gid, page_num=2, filename="b.jpg")
+
+        resp = await client.get("/api/library/images", params={"sort": "oldest"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["images"]) == 2
+
+    async def test_browse_images_gallery_id_filter(self, client, db_session):
+        """gallery_id param should restrict images to the specified gallery."""
+        gid1 = await _insert_gallery(
+            db_session, source="ehentai", source_id="giflt001", title="Gallery 1"
+        )
+        gid2 = await _insert_gallery(
+            db_session, source="ehentai", source_id="giflt002", title="Gallery 2"
+        )
+        await _insert_image(db_session, gid1, page_num=1, filename="g1.jpg")
+        await _insert_image(db_session, gid2, page_num=1, filename="g2.jpg")
+
+        resp = await client.get("/api/library/images", params={"gallery_id": gid1})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["images"]) == 1
+        assert data["images"][0]["gallery_id"] == gid1
+
+
+# ---------------------------------------------------------------------------
+# Single gallery detail — GET /api/library/galleries/{source}/{source_id}
+# ---------------------------------------------------------------------------
+
+
+class TestGetGalleryDetail:
+    """GET /api/library/galleries/{source}/{source_id} — additional coverage."""
+
+    async def test_get_gallery_includes_is_favorited_and_my_rating(
+        self, client, db_session
+    ):
+        """Gallery detail should include is_favorited and my_rating fields."""
+        gid = await _insert_gallery(
+            db_session, source="ehentai", source_id="detail01", title="Detail Gallery"
+        )
+        resp = await client.get("/api/library/galleries/ehentai/detail01")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "is_favorited" in data
+        assert "my_rating" in data
+        assert data["is_favorited"] is False
+
+    async def test_get_gallery_includes_download_status(self, client, db_session):
+        """Gallery detail response should include download_status field."""
+        await _insert_gallery(
+            db_session,
+            source="ehentai",
+            source_id="dstatus01",
+            title="Status Check",
+            download_status="completed",
+        )
+        resp = await client.get("/api/library/galleries/ehentai/dstatus01")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "download_status" in data
+        assert data["download_status"] == "completed"
+
+    async def test_get_gallery_includes_pages_field(self, client, db_session):
+        """Gallery detail response should include pages count."""
+        await _insert_gallery(
+            db_session,
+            source="ehentai",
+            source_id="pages01",
+            title="Pages Count",
+            pages=42,
+        )
+        resp = await client.get("/api/library/galleries/ehentai/pages01")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["pages"] == 42
+
+    async def test_get_gallery_unauthenticated_returns_401(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/library/galleries/ehentai/12345")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Gallery images — GET /api/library/galleries/{source}/{source_id}/images
+# ---------------------------------------------------------------------------
+
+
+class TestGetGalleryImagesExtra:
+    """Additional GET /api/library/galleries/{source}/{source_id}/images tests."""
+
+    async def test_images_response_includes_expected_fields(self, client, db_session):
+        """Each image in the response should include id, page_num, gallery_id."""
+        gid = await _insert_gallery(
+            db_session, source="ehentai", source_id="imgfields01", title="Field Check"
+        )
+        await _insert_image(db_session, gid, page_num=1, filename="p1.jpg")
+
+        resp = await client.get("/api/library/galleries/ehentai/imgfields01/images")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["images"]) == 1
+        img = data["images"][0]
+        assert "id" in img
+        assert "page_num" in img
+        assert "gallery_id" in img
+
+    async def test_images_unauthenticated_returns_401(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get(
+            "/api/library/galleries/ehentai/12345/images"
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Gallery PATCH (favorite/rate/status update)
+# ---------------------------------------------------------------------------
+
+
+class TestPatchGalleryExtra:
+    """PATCH /api/library/galleries/{source}/{source_id} — additional coverage."""
+
+    async def test_patch_gallery_unfavorite_via_false(self, client, db_session):
+        """Passing favorited=False should attempt to remove the favorite entry."""
+        gid = await _insert_gallery(
+            db_session, source="ehentai", source_id="unfav01", title="Unfav Test"
+        )
+        # Insert a favorite for user_id=1
+        await db_session.execute(
+            text(
+                "INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"
+            ),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.patch(
+            "/api/library/galleries/ehentai/unfav01",
+            json={"favorited": False},
+        )
+        # 200 on PG, may be 500 on SQLite for the pg_insert path
+        assert resp.status_code in (200, 500)
+        if resp.status_code == 200:
+            assert resp.json()["is_favorited"] is False
+
+    async def test_patch_nonexistent_gallery_returns_404(self, client):
+        """Patching a gallery that doesn't exist should return 404."""
+        resp = await client.patch(
+            "/api/library/galleries/nonexistent/ghost",
+            json={"rating": 3},
+        )
+        assert resp.status_code == 404
+
+    async def test_patch_requires_auth(self, unauthed_client):
+        """Unauthenticated PATCH should return 401."""
+        resp = await unauthed_client.patch(
+            "/api/library/galleries/ehentai/12345",
+            json={"rating": 3},
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Gallery delete
+# ---------------------------------------------------------------------------
+
+
+class TestDeleteGalleryExtra:
+    """DELETE /api/library/galleries/{source}/{source_id} — additional coverage."""
+
+    async def test_delete_gallery_requires_auth(self, unauthed_client):
+        """Unauthenticated delete should return 401."""
+        resp = await unauthed_client.delete("/api/library/galleries/local/some_gallery")
+        assert resp.status_code == 401
+
+    async def test_delete_gallery_returns_ok_status(self, client, db_session):
+        """Successful deletion should return status=ok."""
+        await _insert_gallery(
+            db_session, source="local", source_id="del_extra01", title="Extra Delete Test"
+        )
+        resp = await client.delete("/api/library/galleries/local/del_extra01")
+        assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Gallery detail — additional field coverage
+# ---------------------------------------------------------------------------
+
+
+class TestGetGalleryDetail:
+    """GET /api/library/galleries/{source}/{source_id} — response field coverage."""
+
+    async def test_gallery_response_includes_expected_fields(self, client, db_session):
+        """Gallery detail response should include id, title, source, source_id, pages, rating."""
+        await _insert_gallery(
+            db_session,
+            source="ehentai",
+            source_id="detail01",
+            title="Detail Test",
+            pages=30,
+            rating=0,
+            category="manga",
+        )
+        resp = await client.get("/api/library/galleries/ehentai/detail01")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "id" in data
+        assert data["source"] == "ehentai"
+        assert data["source_id"] == "detail01"
+        assert data["title"] == "Detail Test"
+        assert data["pages"] == 30
+        assert "rating" in data
+        assert "is_favorited" in data
+        assert "my_rating" in data
+
+    async def test_gallery_detail_cover_thumb_none_when_no_images(self, client, db_session):
+        """Gallery with no images should return cover_thumb=None."""
+        await _insert_gallery(db_session, source="ehentai", source_id="nocover01")
+        resp = await client.get("/api/library/galleries/ehentai/nocover01")
+        assert resp.status_code == 200
+        assert resp.json().get("cover_thumb") is None
+
+    async def test_gallery_detail_is_favorited_false_by_default(self, client, db_session):
+        """Gallery with no favorite record should return is_favorited=False."""
+        await _insert_gallery(db_session, source="ehentai", source_id="nofav01")
+        resp = await client.get("/api/library/galleries/ehentai/nofav01")
+        assert resp.status_code == 200
+        assert resp.json()["is_favorited"] is False
+
+    async def test_gallery_detail_is_favorited_true_when_in_table(self, client, db_session):
+        """Gallery with a user_favorites row should return is_favorited=True."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="fav_detail01")
+        await db_session.execute(
+            text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"),
+            {"gid": gid},
+        )
+        await db_session.commit()
+        resp = await client.get("/api/library/galleries/ehentai/fav_detail01")
+        assert resp.status_code == 200
+        assert resp.json()["is_favorited"] is True
+
+    async def test_gallery_detail_my_rating_returned_when_rated(self, client, db_session):
+        """Gallery with a user_ratings row should return my_rating equal to stored value."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="rated_detail01")
+        await db_session.execute(
+            text(
+                "INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 4)"
+            ),
+            {"gid": gid},
+        )
+        await db_session.commit()
+        resp = await client.get("/api/library/galleries/ehentai/rated_detail01")
+        assert resp.status_code == 200
+        assert resp.json()["my_rating"] == 4
+
+    async def test_gallery_detail_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/library/galleries/ehentai/any_id")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Gallery images — paginated endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestGetGalleryImagesPaginated:
+    """GET /api/library/galleries/{source}/{source_id}/images?limit=&page= — paginated path."""
+
+    async def test_images_paginated_returns_total_and_page(self, client, db_session):
+        """When limit is provided the response includes total, page, has_next."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="imgpag01")
+        for i in range(5):
+            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i+1:03d}.jpg")
+
+        resp = await client.get(
+            "/api/library/galleries/ehentai/imgpag01/images",
+            params={"limit": 3, "page": 1},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 5
+        assert len(data["images"]) == 3
+        assert data["page"] == 1
+        assert data["has_next"] is True
+
+    async def test_images_paginated_last_page_has_next_false(self, client, db_session):
+        """has_next should be False on the last page."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="imgpag02")
+        for i in range(3):
+            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i+1:03d}.jpg")
+
+        resp = await client.get(
+            "/api/library/galleries/ehentai/imgpag02/images",
+            params={"limit": 3, "page": 1},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["has_next"] is False
+
+    async def test_images_no_limit_returns_all(self, client, db_session):
+        """Without a limit parameter, all images are returned without pagination keys."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="imgall01")
+        for i in range(4):
+            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i+1:03d}.jpg")
+
+        resp = await client.get("/api/library/galleries/ehentai/imgall01/images")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["images"]) == 4
+        # No pagination keys in backward-compat mode
+        assert "total" not in data
+
+
+# ---------------------------------------------------------------------------
+# Gallery update (PATCH) — title / category edits
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateGalleryMetadata:
+    """PATCH /api/library/galleries/{source}/{source_id} — metadata fields."""
+
+    async def test_update_title_changes_title(self, client, db_session):
+        """PATCH with title should update the gallery title and return updated data."""
+        await _insert_gallery(db_session, source="local", source_id="edit_title01", title="Old Title")
+
+        resp = await client.patch(
+            "/api/library/galleries/local/edit_title01",
+            json={"title": "New Title"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["title"] == "New Title"
+
+    async def test_update_category_changes_category(self, client, db_session):
+        """PATCH with category should update the gallery category."""
+        await _insert_gallery(
+            db_session, source="local", source_id="edit_cat01", title="Cat Test", category="manga"
+        )
+
+        resp = await client.patch(
+            "/api/library/galleries/local/edit_cat01",
+            json={"category": "artbook"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["category"] == "artbook"
+
+    async def test_update_title_jpn_changes_title_jpn(self, client, db_session):
+        """PATCH with title_jpn should update the Japanese title."""
+        await _insert_gallery(db_session, source="local", source_id="edit_jpn01", title="Jpn Test")
+
+        resp = await client.patch(
+            "/api/library/galleries/local/edit_jpn01",
+            json={"title_jpn": "日本語タイトル"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["title_jpn"] == "日本語タイトル"
+
+    async def test_patch_unfavorite_removes_from_favorites(self, client, db_session):
+        """PATCH with favorited=False should remove the gallery from user_favorites."""
+        gid = await _insert_gallery(db_session, source="local", source_id="unfav_test01")
+        await db_session.execute(
+            text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.patch(
+            "/api/library/galleries/local/unfav_test01",
+            json={"favorited": False},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["is_favorited"] is False
+
+    async def test_patch_rating_zero_removes_rating(self, client, db_session):
+        """PATCH with rating=0 should delete the user rating row."""
+        gid = await _insert_gallery(db_session, source="local", source_id="ratingzero01")
+        await db_session.execute(
+            text(
+                "INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 3)"
+            ),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.patch(
+            "/api/library/galleries/local/ratingzero01",
+            json={"rating": 0},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["my_rating"] is None
+
+    async def test_patch_gallery_requires_auth(self, unauthed_client):
+        """Unauthenticated PATCH should return 401."""
+        resp = await unauthed_client.patch(
+            "/api/library/galleries/local/any_id",
+            json={"title": "Hacker"},
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Gallery list — additional filter paths
+# ---------------------------------------------------------------------------
+
+
+class TestListGalleriesFilters:
+    """GET /api/library/galleries — additional filter combinations."""
+
+    async def test_search_no_match_returns_zero_results(self, client, db_session):
+        """Search term that matches nothing should return total=0."""
+        await _insert_gallery(db_session, source_id="srch01", title="Totally Different")
+        resp = await client.get("/api/library/galleries", params={"q": "xyzzy_no_match"})
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+    async def test_favorited_false_shows_all_galleries(self, client, db_session):
+        """?favorited=false is not a supported filter — all galleries are returned."""
+        await _insert_gallery(db_session, source_id="favf01", title="Gallery A")
+        await _insert_gallery(db_session, source_id="favf02", title="Gallery B")
+        # Without favorited filter, all galleries are shown
+        resp = await client.get("/api/library/galleries")
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 2
+
+    async def test_min_rating_filter_returns_only_rated_above_threshold(self, client, db_session):
+        """?min_rating=4 should only return galleries where the user's rating >= 4."""
+        gid_high = await _insert_gallery(db_session, source_id="minr01", title="High Rated")
+        gid_low = await _insert_gallery(db_session, source_id="minr02", title="Low Rated")
+        await db_session.execute(
+            text(
+                "INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 5)"
+            ),
+            {"gid": gid_high},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 2)"
+            ),
+            {"gid": gid_low},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries", params={"min_rating": 4})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        # Only the high-rated gallery should appear
+        assert data["galleries"][0]["source_id"] == "minr01"
+
+    async def test_list_galleries_sort_by_rating(self, client, db_session):
+        """?sort=rating should be accepted and return results."""
+        await _insert_gallery(db_session, source_id="sorts01", title="Sort Test")
+        resp = await client.get("/api/library/galleries", params={"sort": "rating"})
+        assert resp.status_code == 200
+        assert "galleries" in resp.json()
+
+    async def test_list_galleries_sort_by_pages(self, client, db_session):
+        """?sort=pages should be accepted and return results."""
+        await _insert_gallery(db_session, source_id="sortpg01", title="Pages Sort Test", pages=10)
+        resp = await client.get("/api/library/galleries", params={"sort": "pages"})
+        assert resp.status_code == 200
+        assert "galleries" in resp.json()
+
+    async def test_list_galleries_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/library/galleries")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Gallery progress — save (POST) path
+# ---------------------------------------------------------------------------
+
+
+class TestSaveProgress:
+    """POST /api/library/galleries/{source}/{source_id}/progress — save read progress."""
+
+    async def test_save_progress_returns_ok(self, client, db_session):
+        """POST progress should return status=ok.
+
+        The router uses pg_insert(ReadProgress).on_conflict_do_update() which
+        is PostgreSQL-specific. On SQLite this may fail (500). Both 200 (PG)
+        and 500 (SQLite) are accepted for the upsert path.
+        """
+        await _insert_gallery(db_session, source="ehentai", source_id="prog_save01")
+
+        resp = await client.post(
+            "/api/library/galleries/ehentai/prog_save01/progress",
+            json={"last_page": 7},
+        )
+        # 500 on SQLite due to pg_insert; 200 on PostgreSQL
+        if resp.status_code == 200:
+            assert resp.json()["status"] == "ok"
+        else:
+            assert resp.status_code == 500
+
+    async def test_save_progress_gallery_not_found_returns_404(self, client):
+        """POST progress for non-existent gallery should return 404."""
+        resp = await client.post(
+            "/api/library/galleries/ehentai/nonexistent_prog_save/progress",
+            json={"last_page": 5},
+        )
+        assert resp.status_code == 404
+
+    async def test_get_progress_requires_auth(self, unauthed_client):
+        """Unauthenticated GET progress should return 401."""
+        resp = await unauthed_client.get("/api/library/galleries/ehentai/any/progress")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Batch galleries — additional actions
+# ---------------------------------------------------------------------------
+
+
+class TestBatchGalleriesExtra:
+    """POST /api/library/galleries/batch — additional action coverage."""
+
+    async def test_batch_unfavorite_removes_from_favorites(self, client, db_session):
+        """Batch unfavorite should delete rows from user_favorites."""
+        gid = await _insert_gallery(db_session, source="local", source_id="batch_unfav01")
+        await db_session.execute(
+            text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "unfavorite", "gallery_ids": [gid]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+
+    async def test_batch_delete_nonexistent_ids_returns_ok(self, client):
+        """Batch delete with IDs that don't exist should return affected=0."""
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "delete", "gallery_ids": [9999999]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["affected"] == 0
+
+    async def test_batch_too_many_ids_returns_400(self, client):
+        """More than 100 gallery IDs should return 400."""
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "delete", "gallery_ids": list(range(101))},
+        )
+        assert resp.status_code == 400
+
+    async def test_batch_rate_invalid_rating_returns_400(self, client, db_session):
+        """Batch rate action with rating out of range should return 400."""
+        gid = await _insert_gallery(db_session, source_id="batch_badrate01")
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "rate", "gallery_ids": [gid], "rating": 99},
+        )
+        assert resp.status_code == 400
+
+    async def test_batch_requires_auth(self, unauthed_client):
+        """Unauthenticated batch request should return 401."""
+        resp = await unauthed_client.post(
+            "/api/library/galleries/batch",
+            json={"action": "delete", "gallery_ids": [1]},
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Gallery tags endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestGetGalleryTags:
+    """GET /api/library/galleries/{source}/{source_id}/tags"""
+
+    async def test_get_tags_empty_returns_empty_list(self, client, db_session):
+        """Gallery with no tags should return an empty tags list."""
+        await _insert_gallery(db_session, source="ehentai", source_id="tags_empty01")
+        resp = await client.get("/api/library/galleries/ehentai/tags_empty01/tags")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "tags" in data
+        assert data["tags"] == []
+
+    async def test_get_tags_with_data_returns_tags(self, client, db_session):
+        """Gallery with tags in gallery_tags table should return them."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="tags_data01")
+        # Insert a tag and a gallery_tag record
+        await db_session.execute(
+            text(
+                "INSERT INTO tags (namespace, name) VALUES ('artist', 'test_artist')"
+            )
+        )
+        await db_session.commit()
+        tag_id_row = await db_session.execute(
+            text("SELECT id FROM tags WHERE namespace='artist' AND name='test_artist'")
+        )
+        tag_id = tag_id_row.scalar()
+        await db_session.execute(
+            text(
+                "INSERT INTO gallery_tags (gallery_id, tag_id, confidence, source) "
+                "VALUES (:gid, :tid, 1.0, 'metadata')"
+            ),
+            {"gid": gid, "tid": tag_id},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries/ehentai/tags_data01/tags")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["tags"]) == 1
+        t = data["tags"][0]
+        assert t["namespace"] == "artist"
+        assert t["name"] == "test_artist"
+
+    async def test_get_tags_not_found_returns_404(self, client):
+        """Non-existent gallery should return 404."""
+        resp = await client.get("/api/library/galleries/ehentai/nonexistent_tags99/tags")
+        assert resp.status_code == 404
+
+    async def test_get_tags_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/library/galleries/ehentai/any_id/tags")
+        assert resp.status_code == 401

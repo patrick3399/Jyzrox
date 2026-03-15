@@ -15,7 +15,7 @@ import asyncio
 import os
 import sys
 import types as _types
-from contextlib import asynccontextmanager
+from contextlib import ExitStack, asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -677,7 +677,7 @@ async def client(db_session, db_session_factory, mock_redis):
     _app.state.arq = AsyncMock()
     _app.state.arq.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job"))
 
-    with (
+    _patches = [
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
@@ -694,10 +694,18 @@ async def client(db_session, db_session_factory, mock_redis):
         patch("routers.import_router.async_session", db_session_factory),
         patch("routers.artists.async_session", db_session_factory),
         patch("routers.subscriptions.async_session", db_session_factory),
+        patch("routers.dedup.async_session", db_session_factory),
         patch("plugins.builtin.ehentai.browse.async_session", db_session_factory),
         patch("plugins.builtin.ehentai.browse.get_redis", return_value=mock_redis),
         patch("routers.settings.get_redis", return_value=mock_redis),
-    ):
+        patch("routers.import_router.get_redis", return_value=mock_redis),
+        patch("routers.users.get_redis", return_value=mock_redis),
+        patch("routers.system.get_redis", return_value=mock_redis),
+        patch("routers.scheduled_tasks.get_redis", return_value=mock_redis),
+    ]
+    with ExitStack() as stack:
+        for p in _patches:
+            stack.enter_context(p)
         transport = ASGITransport(app=_app, raise_app_exceptions=False)
         async with AsyncClient(
             transport=transport,

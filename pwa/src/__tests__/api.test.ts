@@ -93,13 +93,13 @@ describe('apiFetch', () => {
 
     vi.mocked(fetch).mockResolvedValueOnce(
       makeResponse({
-        status: 403,
+        status: 422,
         ok: false,
-        jsonBody: { detail: 'Access denied' },
+        jsonBody: { detail: 'Validation failed' },
       }),
     )
 
-    await expect(api.auth.login('wrong', 'pass')).rejects.toThrow('Access denied')
+    await expect(api.auth.login('wrong', 'pass')).rejects.toThrow('Validation failed')
   })
 
   it('should throw "HTTP <status>" when the error body has no detail field', async () => {
