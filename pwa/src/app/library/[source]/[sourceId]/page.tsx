@@ -26,11 +26,11 @@ const TAG_NAMESPACE_COLORS: Record<string, string> = {
 function getSourceLink(sourceUrl: string, source: string): { href: string; external: boolean } {
   if (source === 'ehentai') {
     const match = sourceUrl.match(/\/g\/(\d+)\/([a-f0-9]+)/)
-    if (match) return { href: `/browse/eh/g/${match[1]}/${match[2]}`, external: false }
+    if (match) return { href: `/e-hentai/${match[1]}/${match[2]}`, external: false }
   }
   if (source === 'pixiv') {
     const match = sourceUrl.match(/artworks\/(\d+)/)
-    if (match) return { href: `/browse/pixiv/artworks/${match[1]}`, external: false }
+    if (match) return { href: `/pixiv/illust/${match[1]}`, external: false }
   }
   return { href: sourceUrl, external: true }
 }
