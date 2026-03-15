@@ -3,8 +3,8 @@
 import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useImageBrowser } from '@/hooks/useImageBrowser'
+import { useThumbhash } from '@/hooks/useThumbhash'
 import { JustifiedGrid } from '@/components/JustifiedGrid'
-import { thumbHashToDataURL } from '@/lib/thumbhash'
 import { t } from '@/lib/i18n'
 import type { BrowseImage } from '@/lib/types'
 
@@ -47,15 +47,15 @@ function ImageBrowserInner() {
     limit: 60,
   })
 
-  const thumbhashUrls = useMemo(() => {
-    const map = new Map<string, string | null>()
+  const uniqueHashes = useMemo(() => {
+    const seen = new Set<string>()
     for (const img of images) {
-      if (img.thumbhash && !map.has(img.thumbhash)) {
-        map.set(img.thumbhash, thumbHashToDataURL(img.thumbhash))
-      }
+      if (img.thumbhash) seen.add(img.thumbhash)
     }
-    return map
+    return Array.from(seen)
   }, [images])
+
+  const thumbhashUrls = useThumbhash(uniqueHashes)
 
   const getAspectRatio = useCallback((img: BrowseImage) => {
     if (img.width && img.height && img.height > 0) return img.width / img.height

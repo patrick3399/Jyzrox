@@ -7,6 +7,7 @@ import { MobileNav } from './MobileNav'
 import { BottomTabBar } from './BottomTabBar'
 import { Toaster } from 'sonner'
 import { SWUpdatePrompt } from './SWUpdatePrompt'
+import { FloatingActions } from './FloatingActions'
 import { WsProvider } from '@/lib/ws'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 
@@ -52,6 +53,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
 
       <Toaster position="bottom-right" richColors />
       <SWUpdatePrompt />
+      {!isReader && <FloatingActions />}
     </WsProvider>
   )
 }

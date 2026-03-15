@@ -14,6 +14,9 @@ const zhCN: Record<string, string> = {
   'nav.export': '导出',
   'nav.import': '导入',
   'nav.logout': '退出登录',
+  'nav.sectionBrowse': '浏览',
+  'nav.sectionManage': '管理',
+  'nav.sectionAdmin': '管理员',
 
   // ── Dashboard ──
   'dashboard.title': '主页',
@@ -377,6 +380,9 @@ const zhCN: Record<string, string> = {
   'reader.viewModeDouble': '双页',
   'reader.scaleMode': '缩放',
   'reader.direction': '方向',
+  'reader.saveImage': '保存图片',
+  'reader.copyImage': '复制图片',
+  'reader.shareImage': '分享图片',
   'settings.reader': '阅读器 / Reader',
 
   // ── Browse (extra) ──
@@ -722,6 +728,7 @@ const zhCN: Record<string, string> = {
   'common.next': '下一页',
   'common.loading': '加载中...',
   'common.dismissAlert': '关闭提示',
+  'common.scrollToTop': '返回顶部',
   'common.noResults': '未找到图库',
   'common.galleries': '个图库',
   'common.showing': '显示',
@@ -730,6 +737,7 @@ const zhCN: Record<string, string> = {
   'common.theme': '主题',
   'common.light': '浅色',
   'common.dark': '深色',
+  'common.amoled': 'AMOLED',
   'common.system': '系统',
   'common.failedToLoad': '加载失败',
   'common.all': '全部',
@@ -841,6 +849,16 @@ const zhCN: Record<string, string> = {
   'settings.subscriptionEnqueueDelay': '排入间隔',
   'settings.subscriptionBatchMax': '批次上限（0 = 无限）',
   'settings.subscriptionEnqueueDesc': '节流订阅自动下载。间隔为每次排入的暂停时间；批次上限限制每次检查的项目数。',
+
+  // ── Context Menu ──
+  'contextMenu.read': '阅读',
+  'contextMenu.download': '下载',
+  'contextMenu.favorite': '收藏',
+  'contextMenu.openDetail': '查看详情',
+
+  // ── Library filter panel ──
+  'library.showFilters': '显示筛选',
+  'library.hideFilters': '隐藏筛选',
 }
 
 export default zhCN

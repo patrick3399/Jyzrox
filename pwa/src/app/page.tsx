@@ -24,7 +24,7 @@ import {
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
-import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { SkeletonGrid } from '@/components/Skeleton'
 import { EmptyState } from '@/components/EmptyState'
 import type { Gallery, DownloadJob } from '@/lib/types'
 
@@ -262,23 +262,25 @@ export default function Dashboard() {
         {alerts.length > 0 && <SystemAlerts alerts={alerts} />}
 
         {/* Quick Links */}
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-2 lg:gap-3">
           {QUICK_LINKS.map((link) => {
             const Icon = link.icon
             return (
               <Link
                 key={link.href}
                 href={link.href}
-                className="bg-vault-card border border-vault-border rounded-lg p-4 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group"
+                className="bg-vault-card border border-vault-border rounded-lg p-3 lg:p-4 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group flex flex-col items-center lg:items-start gap-1"
               >
-                <div className="flex items-center gap-2 mb-1">
-                  <Icon
-                    size={16}
-                    className="text-vault-text-muted group-hover:text-vault-accent transition-colors"
-                  />
+                <Icon
+                  size={20}
+                  className="text-vault-text-muted group-hover:text-vault-accent transition-colors lg:hidden"
+                />
+                <div className="hidden lg:flex items-center gap-2 mb-1">
+                  <Icon size={16} className="text-vault-text-muted group-hover:text-vault-accent transition-colors" />
                   <p className="font-medium text-sm">{link.label()}</p>
                 </div>
-                <p className="text-xs text-vault-text-muted">{link.desc()}</p>
+                <p className="text-xs text-vault-text-secondary text-center lg:text-left font-medium lg:font-normal lg:hidden">{link.label()}</p>
+                <p className="text-xs text-vault-text-muted hidden lg:block">{link.desc()}</p>
               </Link>
             )
           })}
@@ -339,11 +341,7 @@ export default function Dashboard() {
             </Link>
           </div>
 
-          {libraryLoading && (
-            <div className="flex justify-center py-12">
-              <LoadingSpinner />
-            </div>
-          )}
+          {libraryLoading && <SkeletonGrid count={12} />}
 
           {!libraryLoading && libraryData && libraryData.galleries.length === 0 && (
             <EmptyState

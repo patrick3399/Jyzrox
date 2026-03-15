@@ -61,11 +61,12 @@ const navLinks = [
   { href: '/admin/users', label: () => t('nav.users'), icon: ShieldCheck, minRole: 'admin' as UserRole },
 ]
 
-const themeCycle = ['light', 'dark', 'system'] as const
-const themeIcon = { light: Sun, dark: Moon, system: Monitor }
+const themeCycle = ['light', 'dark', 'amoled', 'system'] as const
+const themeIcon = { light: Sun, dark: Moon, amoled: Moon, system: Monitor }
 const themeLabel = {
   light: () => t('common.light'),
   dark: () => t('common.dark'),
+  amoled: () => t('common.amoled'),
   system: () => t('common.system'),
 }
 

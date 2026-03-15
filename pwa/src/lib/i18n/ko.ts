@@ -14,6 +14,9 @@ const ko: Record<string, string> = {
   'nav.export': '내보내기',
   'nav.import': '가져오기',
   'nav.logout': '로그아웃',
+  'nav.sectionBrowse': '탐색',
+  'nav.sectionManage': '관리',
+  'nav.sectionAdmin': '관리자',
 
   // ── Dashboard ──
   'dashboard.title': '대시보드',
@@ -378,6 +381,9 @@ const ko: Record<string, string> = {
   'reader.viewModeDouble': '더블',
   'reader.scaleMode': '스케일',
   'reader.direction': '방향',
+  'reader.saveImage': '이미지 저장',
+  'reader.copyImage': '이미지 복사',
+  'reader.shareImage': '이미지 공유',
   'settings.reader': '리더 / Reader',
 
   // ── Browse (extra) ──
@@ -723,6 +729,7 @@ const ko: Record<string, string> = {
   'common.next': '다음',
   'common.loading': '로딩 중...',
   'common.dismissAlert': '알림 닫기',
+  'common.scrollToTop': '맨 위로',
   'common.noResults': '갤러리를 찾을 수 없습니다',
   'common.galleries': '갤러리',
   'common.showing': '표시',
@@ -731,6 +738,7 @@ const ko: Record<string, string> = {
   'common.theme': '테마',
   'common.light': '라이트',
   'common.dark': '다크',
+  'common.amoled': 'AMOLED',
   'common.system': '시스템',
   'common.failedToLoad': '로드 실패',
   'common.all': '전체',
@@ -840,6 +848,16 @@ const ko: Record<string, string> = {
   'settings.subscriptionEnqueueDelay': '대기열 간격',
   'settings.subscriptionBatchMax': '배치 최대값 (0 = 무제한)',
   'settings.subscriptionEnqueueDesc': '구독 자동 다운로드를 제한합니다. 간격은 각 대기열 추가 사이의 지연, 배치 최대값은 확인당 항목 수를 제한합니다.',
+
+  // ── Context Menu ──
+  'contextMenu.read': '읽기',
+  'contextMenu.download': '다운로드',
+  'contextMenu.favorite': '즐겨찾기',
+  'contextMenu.openDetail': '상세 보기',
+
+  // ── Library filter panel ──
+  'library.showFilters': '필터 표시',
+  'library.hideFilters': '필터 숨기기',
 }
 
 export default ko

@@ -14,6 +14,9 @@ const ja: Record<string, string> = {
   'nav.export': 'エクスポート',
   'nav.import': 'インポート',
   'nav.logout': 'ログアウト',
+  'nav.sectionBrowse': '閲覧',
+  'nav.sectionManage': '管理',
+  'nav.sectionAdmin': '管理者',
 
   // ── Dashboard ──
   'dashboard.title': 'ダッシュボード',
@@ -378,6 +381,9 @@ const ja: Record<string, string> = {
   'reader.viewModeDouble': '見開き',
   'reader.scaleMode': 'スケール',
   'reader.direction': '方向',
+  'reader.saveImage': '画像を保存',
+  'reader.copyImage': '画像をコピー',
+  'reader.shareImage': '画像を共有',
   'settings.reader': 'リーダー / Reader',
 
   // ── Browse (extra) ──
@@ -723,6 +729,7 @@ const ja: Record<string, string> = {
   'common.next': '次へ',
   'common.loading': '読み込み中...',
   'common.dismissAlert': 'アラートを閉じる',
+  'common.scrollToTop': 'トップへ戻る',
   'common.noResults': 'ギャラリーが見つかりません',
   'common.galleries': 'ギャラリー',
   'common.showing': '表示',
@@ -731,6 +738,7 @@ const ja: Record<string, string> = {
   'common.theme': 'テーマ',
   'common.light': 'ライト',
   'common.dark': 'ダーク',
+  'common.amoled': 'AMOLED',
   'common.system': 'システム',
   'common.failedToLoad': '読み込みに失敗しました',
   'common.all': 'すべて',
@@ -842,6 +850,16 @@ const ja: Record<string, string> = {
   'settings.subscriptionEnqueueDelay': 'キュー間隔',
   'settings.subscriptionBatchMax': 'バッチ上限（0 = 無制限）',
   'settings.subscriptionEnqueueDesc': 'サブスクリプションの自動ダウンロードを制御します。間隔は各キュー追加の遅延、バッチ上限は1回のチェックあたりの最大数です。',
+
+  // ── Context Menu ──
+  'contextMenu.read': '読む',
+  'contextMenu.download': 'ダウンロード',
+  'contextMenu.favorite': 'お気に入り',
+  'contextMenu.openDetail': '詳細を開く',
+
+  // ── Library filter panel ──
+  'library.showFilters': 'フィルターを表示',
+  'library.hideFilters': 'フィルターを非表示',
 }
 
 export default ja

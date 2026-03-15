@@ -3,6 +3,7 @@
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { FastScroller } from '@/components/FastScroller'
 
 // Map of Tailwind breakpoints to column counts (px)
 export interface ColumnConfig {
@@ -29,6 +30,7 @@ export interface VirtualGridProps<T> {
   focusedIndex?: number | null
   onScrollToIndex?: (index: number) => void
   onColCountChange?: (count: number) => void
+  onRegisterElement?: (index: number, el: HTMLElement | null) => void
 }
 
 function getColumnCount(width: number, config: ColumnConfig): number {
@@ -50,10 +52,11 @@ export function VirtualGrid<T>({
   hasMore = false,
   isLoading = false,
   loadingElement,
-  overscan = 3,
+  overscan = 5,
   className,
   focusedIndex,
   onColCountChange,
+  onRegisterElement,
 }: VirtualGridProps<T>) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [scrollMargin, setScrollMargin] = useState(0)
@@ -205,6 +208,7 @@ export function VirtualGrid<T>({
                 transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                 paddingBottom: gap,
                 contain: 'layout style paint',
+                willChange: 'transform',
               }}
             >
               {/* CSS grid row — same column count as the Tailwind equivalent */}
@@ -220,6 +224,7 @@ export function VirtualGrid<T>({
                   return (
                     <div
                       key={globalIndex}
+                      ref={(el) => onRegisterElement?.(globalIndex, el)}
                       data-grid-index={globalIndex}
                       tabIndex={-1}
                       className="rounded-lg outline-none focus:ring-2 focus:ring-vault-accent focus:ring-offset-1 focus:ring-offset-vault-bg"
@@ -233,6 +238,8 @@ export function VirtualGrid<T>({
           )
         })}
       </div>
+
+      <FastScroller totalHeight={totalHeight} visible={items.length > 0} />
 
       {/* Loading / end indicator */}
       {(isLoading || hasMore) && (
