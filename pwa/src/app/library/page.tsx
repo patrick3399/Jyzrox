@@ -23,17 +23,13 @@ const SORT_OPTIONS = [
   { value: 'pages', label: () => t('library.pagesSort') },
 ] as const
 
-function sourceDisplayName(value: string): string {
-  const STATIC: Record<string, string> = {
-    ehentai: 'E-Hentai',
-    pixiv: 'Pixiv',
-    local: 'Local',
-    gallery_dl: 'gallery-dl',
-  }
-  if (value === 'local:link') return t('library.monitored')
-  if (value === 'local:copy') return t('library.imported')
-  return STATIC[value] ?? value
-}
+const SOURCE_OPTIONS = [
+  { value: '', label: () => t('library.allSources') },
+  { value: 'ehentai', label: () => 'E-Hentai' },
+  { value: 'pixiv', label: () => 'Pixiv' },
+  { value: 'local:link', label: () => t('library.monitored') },
+  { value: 'local:copy', label: () => t('library.imported') },
+]
 
 const PAGE_SIZE = 24
 
@@ -77,7 +73,6 @@ function LibraryContent() {
   }, [])
 
   const { data: collectionsData } = useCollections()
-  const { data: dynamicSources } = useLibrarySources()
 
   const handleSearchKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
