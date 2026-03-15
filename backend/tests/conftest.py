@@ -311,7 +311,8 @@ _SQLITE_SCHEMA = [
         artist_id TEXT,
         visibility TEXT DEFAULT 'public',
         created_by_user_id INTEGER REFERENCES users(id),
-        source_url TEXT
+        source_url TEXT,
+        deleted_at TIMESTAMP
     )
     """,
     """

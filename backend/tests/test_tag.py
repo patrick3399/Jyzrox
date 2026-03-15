@@ -546,6 +546,16 @@ class TestManualTagGallery:
         _fake_th = types.ModuleType("worker.tag_helpers")
         _fake_th.rebuild_gallery_tags_array = AsyncMock(return_value=[])
         _fake_th.upsert_tag_translations = AsyncMock()
+        # Real pure function — no heavy deps, safe to use directly
+        def _parse_tag_strings(tags):
+            seen, result = set(), []
+            for tag_str in tags:
+                ns, name = tag_str.split(":", 1) if ":" in tag_str else ("general", tag_str)
+                if (ns, name) not in seen:
+                    seen.add((ns, name))
+                    result.append((ns, name))
+            return result
+        _fake_th.parse_tag_strings = _parse_tag_strings
         monkeypatch.setitem(sys.modules, "worker.tag_helpers", _fake_th)
 
     @staticmethod
@@ -1372,6 +1382,15 @@ class TestManualTagRemoveEdgeCases:
         _fake_th = types.ModuleType("worker.tag_helpers")
         _fake_th.rebuild_gallery_tags_array = AsyncMock(return_value=[])
         _fake_th.upsert_tag_translations = AsyncMock()
+        def _parse_tag_strings(tags):
+            seen, result = set(), []
+            for tag_str in tags:
+                ns, name = tag_str.split(":", 1) if ":" in tag_str else ("general", tag_str)
+                if (ns, name) not in seen:
+                    seen.add((ns, name))
+                    result.append((ns, name))
+            return result
+        _fake_th.parse_tag_strings = _parse_tag_strings
         monkeypatch.setitem(sys.modules, "worker.tag_helpers", _fake_th)
 
     async def test_remove_bare_name_defaults_to_general_namespace(
