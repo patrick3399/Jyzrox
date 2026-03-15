@@ -4,6 +4,7 @@ import { useState, useEffect, useRef, useCallback } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
+import useSWR from 'swr'
 import { useLibraryGallery, useGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { api } from '@/lib/api'
@@ -86,6 +87,13 @@ export default function GalleryDetailPage() {
   const { data: imagesData, isLoading: imagesLoading, mutate: mutateImages } = useGalleryImages(source, sourceId)
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(source ?? '', sourceId ?? '')
   const { data: tagTranslations } = useTagTranslations(gallery?.tags_array ?? [])
+  const { data: featureSettings } = useSWR('settings/features', () => api.settings.getFeatures(), {
+    revalidateOnFocus: false,
+    dedupingInterval: 300000, // 5 min cache
+  })
+  const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
+  const [pagesOutdated, setPagesOutdated] = useState<{ old: number; new: number } | null>(null)
+  const updateCheckedRef = useRef<boolean>(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRetagging, setIsRetagging] = useState(false)
   const [tagData, setTagData] = useState<Array<{ namespace: string; name: string; confidence: number; source: string }>>([])
@@ -125,6 +133,62 @@ export default function GalleryDetailPage() {
       // localStorage may be unavailable in some contexts
     }
   }, [gallery])
+
+  // Auto-check gallery metadata update (once per page visit)
+  useEffect(() => {
+    if (!gallery || !featureSettings || updateCheckedRef.current) return
+    // Only EH galleries support metadata check
+    if (gallery.source !== 'ehentai') {
+      updateCheckedRef.current = true
+      return
+    }
+    const checkDays: number = (featureSettings as unknown as Record<string, number>).gallery_update_check_days ?? -1
+    if (checkDays === -1) {
+      updateCheckedRef.current = true
+      return
+    }
+    let shouldCheck = false
+    if (checkDays === 0) {
+      shouldCheck = true
+    } else {
+      const updatedAt = gallery.metadata_updated_at
+      if (!updatedAt) {
+        shouldCheck = true
+      } else {
+        const diffMs = Date.now() - new Date(updatedAt).getTime()
+        const diffDays = diffMs / (1000 * 60 * 60 * 24)
+        if (diffDays >= checkDays) shouldCheck = true
+      }
+    }
+    if (!shouldCheck) {
+      updateCheckedRef.current = true
+      return
+    }
+    setIsCheckingUpdate(true)
+    api.library.checkUpdate(gallery.source, gallery.source_id)
+      .then((result) => {
+        if (result.status === 'updated') {
+          mutateGallery()
+          if (result.pages_diff) {
+            toast.success(t('library.metadataPagesChanged', {
+              old: String(result.pages_diff.old),
+              new: String(result.pages_diff.new),
+            }))
+            if (result.pages_diff.new > result.pages_diff.old) {
+              setPagesOutdated(result.pages_diff)
+            }
+          } else {
+            const fields = result.changed_fields?.join(', ') ?? ''
+            toast.success(t('library.metadataFieldsUpdated', { fields }))
+          }
+        }
+      })
+      .catch(() => {})
+      .finally(() => {
+        setIsCheckingUpdate(false)
+        updateCheckedRef.current = true
+      })
+  }, [gallery, featureSettings, mutateGallery])
 
   useEffect(() => {
     if (!source || !sourceId) return
@@ -399,11 +463,17 @@ export default function GalleryDetailPage() {
                     {gallery.title}
                   </h1>
                 )}
-                <span
-                  className={`shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
-                >
-                  {t(statusInfo.labelKey)}
-                </span>
+                {pagesOutdated && gallery.download_status === 'complete' ? (
+                  <span className="shrink-0 px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
+                    {t('library.statusOutdated')}
+                  </span>
+                ) : (
+                  <span
+                    className={`shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
+                  >
+                    {t(statusInfo.labelKey)}
+                  </span>
+                )}
               </div>
               {(gallery.title_jpn || editingTitleJpn) && (
                 editingTitleJpn ? (
@@ -561,6 +631,10 @@ export default function GalleryDetailPage() {
             </div>
           </div>
         </div>
+
+        {isCheckingUpdate && (
+          <p className="text-xs text-vault-text-muted animate-pulse mb-2">{t('library.checkingMetadata')}</p>
+        )}
 
         {gallery.download_status === 'downloading' && (
           <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-5 flex items-center gap-2 text-blue-400 text-sm">

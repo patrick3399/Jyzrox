@@ -471,6 +471,10 @@ const en: Record<string, string> = {
   'library.batchTagsPlaceholder': 'Enter tag (e.g. artist:name or tagname)',
   'library.batchTagsConfirm': 'Apply',
   'library.batchTagsTitle': 'Batch Tag Edit',
+  'library.metadataFieldsUpdated': '{fields} updated from source',
+  'library.metadataPagesChanged': 'Pages changed: {old} → {new}',
+  'library.statusOutdated': 'Outdated',
+  'library.checkingMetadata': 'Checking for updates...',
 
   // ── Artists ──
   'artists.title': 'Artists',
@@ -925,6 +929,9 @@ const en: Record<string, string> = {
   'rss.recentFeed': 'Recent Galleries Feed',
   'rss.subscriptionFeed': 'Subscription Feed',
 
+  'settings.galleryUpdateCheckDays': 'Gallery metadata auto-check',
+  'settings.galleryUpdateCheckDaysDesc': '-1 = never, 0 = always, N = check if older than N days',
+
   'settings.subscriptionEnqueue': 'Subscription Enqueue',
   'settings.subscriptionEnqueueDelay': 'Enqueue Delay',
   'settings.subscriptionBatchMax': 'Batch Max (0 = no limit)',
@@ -1247,6 +1254,7 @@ const en: Record<string, string> = {
   // ── Common (additions) ──
   'common.close': 'Close',
   'common.add': 'Add',
+  'common.days': 'days',
 
   // ── Scheduled Tasks page ──
   'scheduledTasks.title': 'Scheduled Tasks',

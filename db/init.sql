@@ -36,6 +36,7 @@ CREATE TABLE IF NOT EXISTS galleries (
     import_mode     TEXT,
     tags_array      TEXT[] DEFAULT '{}',
     source_url      TEXT,
+    metadata_updated_at TIMESTAMPTZ,
     UNIQUE (source, source_id)
 );
 

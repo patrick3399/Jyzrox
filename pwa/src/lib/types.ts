@@ -35,6 +35,7 @@ export interface Gallery {
   display_order?: 'asc' | 'desc'
   source_url?: string | null
   deleted_at?: string | null
+  metadata_updated_at?: string | null
 }
 
 export interface GalleryImage {

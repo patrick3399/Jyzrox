@@ -338,6 +338,7 @@ class ProgressiveImporter:
                 )).scalar_one()
                 gallery.pages = count
                 gallery.download_status = "partial" if partial else "complete"
+                gallery.metadata_updated_at = func.now()
                 await session.commit()
 
         try:

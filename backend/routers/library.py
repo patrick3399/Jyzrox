@@ -5,6 +5,7 @@ import hashlib
 import hmac
 import json
 import logging
+import re as _re
 import sqlite3
 from datetime import UTC, datetime
 from itertools import combinations
@@ -26,6 +27,7 @@ from core.redis_client import get_redis
 from core.source_display import get_display_config
 from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserRating
 from services.cas import cas_url, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, safe_source_id, thumb_dir, thumb_url as cas_thumb_url
+from plugins.builtin.ehentai.browse import _make_client as _make_eh_client
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["library"])
@@ -201,6 +203,29 @@ async def _build_cover_map(
             cover_map[r.gallery_id] = cas_thumb_url(r.sha256)
 
     return cover_map
+
+
+async def _single_cover_thumb(db: AsyncSession, gallery_id: int, source: str) -> str | None:
+    """Get cover thumbnail for a single gallery."""
+    cover_map = await _build_cover_map(db, [gallery_id], {gallery_id: source})
+    return cover_map.get(gallery_id)
+
+
+async def _user_gallery_state(db: AsyncSession, user_id: int, gallery_id: int) -> tuple[bool, int | None]:
+    """Return (is_favorited, my_rating) for a user+gallery pair."""
+    fav_row = await db.execute(
+        select(UserFavorite).where(
+            UserFavorite.user_id == user_id,
+            UserFavorite.gallery_id == gallery_id,
+        )
+    )
+    rating_row = await db.execute(
+        select(UserRating.rating).where(
+            UserRating.user_id == user_id,
+            UserRating.gallery_id == gallery_id,
+        )
+    )
+    return (fav_row.scalar_one_or_none() is not None, rating_row.scalar_one_or_none())
 
 
 _SOURCES_CACHE_KEY = "library:sources"
@@ -1592,43 +1617,9 @@ async def get_gallery(
     db: AsyncSession = Depends(get_db),
 ):
     g = await _get_or_404_by_source(db, source, source_id, auth)
-    gallery_id = g.id
-    display_cfg = get_display_config(g.source or "")
-    if display_cfg.cover_page == "last":
-        cover_sub = (
-            select(func.max(Image.page_num))
-            .where(Image.gallery_id == gallery_id)
-            .scalar_subquery()
-        )
-        cover_row = (
-            await db.execute(
-                select(Blob.sha256)
-                .join(Image, Image.blob_sha256 == Blob.sha256)
-                .where(Image.gallery_id == gallery_id, Image.page_num == cover_sub)
-            )
-        ).scalar_one_or_none()
-    else:
-        cover_row = (
-            await db.execute(
-                select(Blob.sha256)
-                .join(Image, Image.blob_sha256 == Blob.sha256)
-                .where(Image.gallery_id == gallery_id, Image.page_num == 1)
-            )
-        ).scalar_one_or_none()
-    cover_thumb = cas_thumb_url(cover_row) if cover_row else None
-    fav = (await db.execute(
-        select(UserFavorite).where(
-            UserFavorite.user_id == auth["user_id"],
-            UserFavorite.gallery_id == gallery_id,
-        )
-    )).scalar_one_or_none()
-    user_rating_row = (await db.execute(
-        select(UserRating.rating).where(
-            UserRating.user_id == auth["user_id"],
-            UserRating.gallery_id == gallery_id,
-        )
-    )).scalar_one_or_none()
-    return _g(g, cover_thumb=cover_thumb, is_favorited=(fav is not None), my_rating=user_rating_row)
+    cover_thumb = await _single_cover_thumb(db, g.id, g.source or "")
+    is_fav, my_rating = await _user_gallery_state(db, auth["user_id"], g.id)
+    return _g(g, cover_thumb=cover_thumb, is_favorited=is_fav, my_rating=my_rating)
 
 
 @router.get("/galleries/{source}/{source_id}/images")
@@ -1765,19 +1756,8 @@ async def update_gallery(
         g.category = patch.category
     await db.commit()
     # Fetch updated per-user state to return accurate response
-    fav = (await db.execute(
-        select(UserFavorite).where(
-            UserFavorite.user_id == auth["user_id"],
-            UserFavorite.gallery_id == gallery_id,
-        )
-    )).scalar_one_or_none()
-    user_rating_row = (await db.execute(
-        select(UserRating.rating).where(
-            UserRating.user_id == auth["user_id"],
-            UserRating.gallery_id == gallery_id,
-        )
-    )).scalar_one_or_none()
-    return _g(g, is_favorited=(fav is not None), my_rating=user_rating_row)
+    is_fav, my_rating = await _user_gallery_state(db, auth["user_id"], gallery_id)
+    return _g(g, is_favorited=is_fav, my_rating=my_rating)
 
 
 @router.delete("/galleries/{source}/{source_id}")
@@ -2183,6 +2163,105 @@ async def restore_excluded_blob(
     return {"status": "ok"}
 
 
+@router.post("/galleries/{source}/{source_id}/check-update")
+async def check_gallery_update(
+    source: str,
+    source_id: str,
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Auto-check and update gallery metadata from source."""
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+
+    if source != "ehentai":
+        return {"status": "skipped", "reason": "unsupported_source"}
+
+    # Parse gid/token from source_url
+    if not g.source_url:
+        return {"status": "skipped", "reason": "no_source_url"}
+
+    match = _re.search(r"/g/(\d+)/([a-f0-9]+)/", g.source_url)
+    if not match:
+        return {"status": "skipped", "reason": "no_source_url"}
+
+    gid, token = int(match.group(1)), match.group(2)
+
+    try:
+        async with await _make_eh_client() as client:
+            meta = await client.get_gallery_metadata(gid, token)
+    except ValueError as exc:
+        err_msg = str(exc)
+        if "expunged" in err_msg.lower():
+            # Gallery was expunged — set timestamp so we don't re-check
+            g.metadata_updated_at = func.now()
+            await db.commit()
+            await db.refresh(g)
+            return {"status": "expunged"}
+        # Other errors (auth, 509, etc.) — don't set timestamp, retry next visit
+        return {"status": "error", "reason": str(exc)}
+    except Exception:
+        return {"status": "error", "reason": "fetch_failed"}
+
+    # Snapshot before update
+    old = {
+        "title": g.title,
+        "title_jpn": g.title_jpn,
+        "category": g.category,
+        "uploader": g.uploader,
+        "pages": g.pages,
+        "rating": g.rating,
+        "tags_array": list(g.tags_array or []),
+    }
+
+    # Update source-level fields only (use `is not None` to allow 0/"" from source)
+    if meta.get("title") is not None:
+        g.title = meta["title"]
+    if meta.get("title_jpn") is not None:
+        g.title_jpn = meta["title_jpn"]
+    if meta.get("category") is not None:
+        g.category = meta["category"]
+    if meta.get("uploader") is not None:
+        g.uploader = meta["uploader"]
+    if meta.get("pages") is not None:
+        g.pages = meta["pages"]
+    if meta.get("rating") is not None:
+        g.rating = int(round(meta["rating"]))
+
+    # Convert EH tags (format: "namespace:tag") to tags_array
+    if meta.get("tags"):
+        g.tags_array = meta["tags"]
+
+    # Build changed fields list
+    changed_fields = [
+        f for f in ("title", "title_jpn", "category", "uploader", "pages", "rating")
+        if getattr(g, f) != old[f]
+    ]
+    if list(g.tags_array or []) != old["tags_array"]:
+        changed_fields.append("tags")
+
+    # Detect page count change
+    pages_diff = None
+    if "pages" in changed_fields:
+        pages_diff = {"old": old["pages"], "new": g.pages}
+
+    g.metadata_updated_at = func.now()
+    await db.commit()
+    await db.refresh(g)
+
+    if not changed_fields:
+        return {"status": "unchanged"}
+
+    # Build response with updated gallery
+    cover_thumb = await _single_cover_thumb(db, g.id, g.source or "")
+    is_fav, my_rating = await _user_gallery_state(db, auth["user_id"], g.id)
+    return {
+        "status": "updated",
+        "gallery": _g(g, cover_thumb, is_fav, my_rating),
+        "changed_fields": changed_fields,
+        "pages_diff": pages_diff,
+    }
+
+
 # ── Helpers ──────────────────────────────────────────────────────────
 
 
@@ -2260,6 +2339,7 @@ def _g(g: Gallery, cover_thumb: str | None = None, is_favorited: bool = False, m
         "cover_thumb": cover_thumb,
         "source_url": g.source_url,
         "display_order": display_cfg.image_order,
+        "metadata_updated_at": g.metadata_updated_at.isoformat() if g.metadata_updated_at else None,
     }
 
 

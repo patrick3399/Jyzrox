@@ -287,6 +287,7 @@ function RateLimitsSection() {
       .then((f: any) => {
         setSubDelay(f.subscription_enqueue_delay_ms ?? 500)
         setSubBatchMax(f.subscription_batch_max ?? 0)
+        setUpdateCheckDays(f.gallery_update_check_days ?? -1)
       })
       .catch(() => {})
   }, [])
@@ -368,6 +369,9 @@ function RateLimitsSection() {
     }
   }, [data])
 
+  const [updateCheckDays, setUpdateCheckDays] = useState(-1)
+  const updateCheckDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
   const subDelayDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const subBatchDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
@@ -388,6 +392,17 @@ function RateLimitsSection() {
     subBatchDebounce.current = setTimeout(async () => {
       try {
         await api.settings.setFeatureValue('subscription_batch_max', Math.max(0, v))
+        toast.success(t('common.saved'))
+      } catch { toast.error(t('common.failedToSave')) }
+    }, 500)
+  }, [])
+
+  const handleUpdateCheckDaysChange = useCallback((v: number) => {
+    setUpdateCheckDays(v)
+    clearTimeout(updateCheckDebounce.current)
+    updateCheckDebounce.current = setTimeout(async () => {
+      try {
+        await api.settings.setFeatureValue('gallery_update_check_days', Math.max(-1, v))
         toast.success(t('common.saved'))
       } catch { toast.error(t('common.failedToSave')) }
     }, 500)
@@ -644,6 +659,26 @@ function RateLimitsSection() {
           </div>
         </div>
         <p className="text-[10px] text-vault-text-muted mt-1">{t('settings.subscriptionEnqueueDesc')}</p>
+      </div>
+
+      {/* Gallery Metadata Auto-Check */}
+      <div>
+        <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-1">
+          {t('settings.galleryUpdateCheckDays')}
+        </p>
+        <div className="bg-vault-input border border-vault-border rounded-lg px-3 py-2 flex items-center gap-2">
+          <input
+            type="number"
+            min={-1}
+            max={365}
+            step={1}
+            value={updateCheckDays}
+            onChange={(e) => handleUpdateCheckDaysChange(Number(e.target.value))}
+            className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
+          />
+          <span className="text-xs text-vault-text-muted">{t('common.days')}</span>
+        </div>
+        <p className="text-[10px] text-vault-text-muted mt-1">{t('settings.galleryUpdateCheckDaysDesc')}</p>
       </div>
     </div>
   )

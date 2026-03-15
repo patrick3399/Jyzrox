@@ -419,6 +419,18 @@ const library = {
     apiFetch<{ status: string; affected: number }>('/api/library/trash/empty', {
       method: 'POST',
     }),
+
+  checkUpdate: (source: string, sourceId: string) =>
+    apiFetch<{
+      status: string
+      reason?: string
+      gallery?: Gallery
+      changed_fields?: string[]
+      pages_diff?: { old: number; new: number } | null
+    }>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/check-update`,
+      { method: 'POST' }
+    ),
 }
 
 // ── Download ──────────────────────────────────────────────────────────

@@ -533,6 +533,7 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "retry_base_delay_minutes": await _get_int_setting("setting:retry_base_delay_minutes", 5),
         "subscription_enqueue_delay_ms": await _get_int_setting("setting:subscription_enqueue_delay_ms", 500),
         "subscription_batch_max": await _get_int_setting("setting:subscription_batch_max", 0),
+        "gallery_update_check_days": await _get_int_setting("setting:gallery_update_check_days", -1),
     }
 
 
@@ -562,6 +563,7 @@ async def patch_feature_toggle(
         "retry_base_delay_minutes": "setting:retry_base_delay_minutes",
         "subscription_enqueue_delay_ms": "setting:subscription_enqueue_delay_ms",
         "subscription_batch_max": "setting:subscription_batch_max",
+        "gallery_update_check_days": "setting:gallery_update_check_days",
     }
     if feature not in ALLOWED:
         raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
@@ -614,6 +616,15 @@ async def patch_feature_toggle(
         if val < 0:
             raise HTTPException(status_code=400, detail="subscription_batch_max must be >= 0")
         await get_redis().set("setting:subscription_batch_max", str(val))
+        return {"feature": feature, "value": val}
+
+    if feature == "gallery_update_check_days":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for gallery_update_check_days")
+        val = int(req.value)
+        if val < -1:
+            raise HTTPException(status_code=400, detail="gallery_update_check_days must be >= -1")
+        await get_redis().set("setting:gallery_update_check_days", str(val))
         return {"feature": feature, "value": val}
 
     if req.enabled is None:

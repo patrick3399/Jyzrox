@@ -6,7 +6,7 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import func, text
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
@@ -107,6 +107,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
                 "posted_at": import_data.posted_at,
                 "uploader": import_data.uploader,
                 "download_status": "complete",
+                "metadata_updated_at": func.now(),
                 "tags_array": import_data.tags,
                 "artist_id": import_data.artist_id,
                 "created_by_user_id": user_id,
@@ -127,6 +128,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
                     "title": pg_insert(Gallery).excluded.title,
                     "tags_array": pg_insert(Gallery).excluded.tags_array,
                     "download_status": "complete",
+                    "metadata_updated_at": func.now(),
                     "pages": pg_insert(Gallery).excluded.pages,
                     "artist_id": pg_insert(Gallery).excluded.artist_id,
                     "source_url": pg_insert(Gallery).excluded.source_url,
@@ -281,6 +283,7 @@ def _build_gallery(
         "posted_at": posted_at,
         "uploader": meta.get("uploader", ""),
         "download_status": "complete",
+        "metadata_updated_at": func.now(),
         "tags_array": tags,
         "artist_id": artist_id,
     }
@@ -417,6 +420,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         if gallery:
             gallery.pages = processed
             gallery.download_status = "complete"
+            gallery.metadata_updated_at = func.now()
 
         await session.commit()
 
