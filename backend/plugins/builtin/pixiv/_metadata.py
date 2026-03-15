@@ -31,10 +31,13 @@ def parse_pixiv_import(dest_dir: Path, raw_meta: dict | None = None) -> GalleryI
     elif isinstance(raw, list):
         tags.extend(raw)
 
-    # Artist ID from uploader
+    # Artist ID: prefer numeric pixiv_user_id over display name
     artist_id: str | None = None
+    pixiv_user_id = meta.get("pixiv_user_id")
     uploader = meta.get("uploader", "")
-    if uploader:
+    if pixiv_user_id:
+        artist_id = f"pixiv:{pixiv_user_id}"
+    elif uploader:
         artist_id = f"pixiv:{uploader}"
 
     posted_at: datetime | None = None

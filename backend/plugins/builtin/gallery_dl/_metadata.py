@@ -83,7 +83,7 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fal
             break
 
     # Tag extraction and normalization
-    tags = _extract_tags(dest_dir, meta)
+    tags = _extract_tags(dest_dir, meta, source=source)
     tags = _normalize_tags(tags, source)
 
     # Artist extraction
@@ -116,7 +116,7 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fal
     )
 
 
-def _extract_tags(gallery_path: Path, metadata: dict) -> list[str]:
+def _extract_tags(gallery_path: Path, metadata: dict, source: str | None = None) -> list[str]:
     """Extract tags in 'namespace:name' format from metadata or tags.txt."""
     tags: list[str] = []
 
@@ -139,6 +139,20 @@ def _extract_tags(gallery_path: Path, metadata: dict) -> list[str]:
                 tags = [t.strip() for t in tags_file.read_text().splitlines() if t.strip()]
             except OSError:
                 pass
+
+    # Extract hashtags from content for social platforms
+    if source:
+        from plugins.builtin.gallery_dl._sites import get_site_config
+        cfg = get_site_config(source)
+        if cfg.category == "social":
+            import re
+            content = metadata.get("content") or metadata.get("description") or ""
+            seen = {t.lower() for t in tags}
+            for ht in re.findall(r"#(\w+)", content):
+                tag_str = f"general:{ht.lower()}"
+                if tag_str not in seen:
+                    tags.append(tag_str)
+                    seen.add(tag_str)
 
     return tags
 
@@ -179,6 +193,13 @@ def _extract_artist(source: str, meta: dict, tags: list[str]) -> str | None:
             handle = meta.get("uploader")
         if handle:
             return f"twitter:{handle}"
+    elif strategy == "pixiv_user":
+        pixiv_uid = meta.get("pixiv_user_id")
+        if pixiv_uid:
+            return f"pixiv:{pixiv_uid}"
+        uploader = meta.get("uploader", "")
+        if uploader:
+            return f"pixiv:{uploader}"
     elif strategy == "tag":
         for tag in tags:
             if tag.startswith("artist:"):

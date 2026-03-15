@@ -189,6 +189,17 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
 
         # Upsert tags + gallery_tags
         await _upsert_tags(session, gallery_id, tags)
+
+        # Upsert tag translations if present in metadata
+        tag_translations = metadata.get("tag_translations")
+        if tag_translations:
+            from worker.tag_helpers import upsert_tag_translations
+            await upsert_tag_translations(session, tag_translations)
+
+        # Rebuild tags_array from gallery_tags (single source of truth)
+        from worker.tag_helpers import rebuild_gallery_tags_array
+        await rebuild_gallery_tags_array(session, gallery_id)
+
         await session.commit()
 
     # Delete the temporary download directory

@@ -109,8 +109,41 @@ def _patched_result_processor(self, dialect, coltype):
 
 PG_UUID.result_processor = _patched_result_processor
 
-# JSONB → store as JSON text in SQLite
+# ARRAY → store as JSON text in SQLite
 import json as _json
+from sqlalchemy import ARRAY as SA_ARRAY
+
+_original_array_bind = SA_ARRAY.bind_processor
+
+
+def _patched_array_bind(self, dialect):
+    if dialect.name != "postgresql":
+        def process(value):
+            if value is not None:
+                return _json.dumps(value) if not isinstance(value, str) else value
+            return value
+        return process
+    return _original_array_bind(self, dialect)
+
+
+SA_ARRAY.bind_processor = _patched_array_bind
+
+_original_array_result = SA_ARRAY.result_processor
+
+
+def _patched_array_result(self, dialect, coltype):
+    if dialect.name != "postgresql":
+        def process(value):
+            if value is not None and isinstance(value, str):
+                return _json.loads(value)
+            return value
+        return process
+    return _original_array_result(self, dialect, coltype)
+
+
+SA_ARRAY.result_processor = _patched_array_result
+
+# JSONB → store as JSON text in SQLite
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 
 _original_jsonb_bind = PG_JSONB.bind_processor

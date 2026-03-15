@@ -27,7 +27,7 @@ class GdlSiteConfig:
     title_fields: tuple[str, ...] = ("title", "title_en")
 
     # ── Artist extraction strategy (replaces if/elif chains) ──
-    artist_from: Literal["uploader", "tag", "twitter_author", "none"] = "uploader"
+    artist_from: Literal["uploader", "tag", "twitter_author", "pixiv_user", "none"] = "uploader"
 
     # ── Subscription (replaces SITE_CONFIG in _subscribe.py) ──
     subscribe_id_key: str | None = None
@@ -94,6 +94,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
     GdlSiteConfig(
         domain="pixiv.net", source_id="pixiv", name="Pixiv",
         category="art", has_tags=True,
+        artist_from="pixiv_user",
         subscribe_id_key="id",
         subscribe_url_tpl="https://www.pixiv.net/users/{}/",
         credential_type="refresh_token",

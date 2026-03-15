@@ -3,20 +3,22 @@
 import base64
 import json
 from collections import deque
+from typing import Literal as LiteralType
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import desc, func, or_, select
+from sqlalchemy import case as sql_case, desc, func, literal as sql_literal, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth, require_role
 from core.database import async_session, get_db
-from db.models import BlockedTag, Gallery, Tag, TagAlias, TagImplication, TagTranslation
+from db.models import BlockedTag, Gallery, GalleryTag, Tag, TagAlias, TagImplication, TagTranslation
 
 router = APIRouter(tags=["tags"])
 
 _admin = require_role("admin")
+_member = require_role("member")
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
@@ -546,6 +548,121 @@ async def remove_blocked_tag(
         await session.delete(row)
         await session.commit()
     return {"status": "ok"}
+
+
+# ── Manual Tagging ────────────────────────────────────────────────────
+
+
+class ManualTagRequest(BaseModel):
+    tags: list[str]  # "namespace:name" or bare "name"
+    action: LiteralType["add", "remove"] = "add"
+
+
+@router.post("/gallery/{gallery_id}")
+async def manual_tag_gallery(
+    gallery_id: int,
+    body: ManualTagRequest,
+    auth: dict = Depends(_member),
+    session: AsyncSession = Depends(get_db),
+):
+    """Add or remove manual tags on a gallery."""
+    from worker.tag_helpers import rebuild_gallery_tags_array
+
+    # Verify gallery exists
+    gallery = await session.get(Gallery, gallery_id)
+    if not gallery:
+        raise HTTPException(status_code=404, detail="Gallery not found")
+
+    if body.action == "add":
+        # Parse and deduplicate tags
+        seen: set[tuple[str, str]] = set()
+        parsed: list[tuple[str, str]] = []
+        for tag_str in body.tags:
+            if ":" in tag_str:
+                ns, name = tag_str.split(":", 1)
+            else:
+                ns, name = "general", tag_str
+            if (ns, name) not in seen:
+                seen.add((ns, name))
+                parsed.append((ns, name))
+
+        if not parsed:
+            return {"status": "ok", "affected": 0}
+
+        # Upsert tags table (increment count)
+        tag_values = [{"namespace": ns, "name": name, "count": 1} for ns, name in parsed]
+        tag_stmt = (
+            pg_insert(Tag)
+            .values(tag_values)
+            .on_conflict_do_update(
+                index_elements=["namespace", "name"],
+                set_={"count": Tag.count + 1},
+            )
+            .returning(Tag.id)
+        )
+        tag_ids = (await session.execute(tag_stmt)).scalars().all()
+
+        # Upsert gallery_tags with source='manual'
+        # ON CONFLICT: overwrite 'ai' source but not 'metadata'
+        gt_values = [
+            {"gallery_id": gallery_id, "tag_id": tid, "confidence": 1.0, "source": "manual"}
+            for tid in tag_ids
+        ]
+        if gt_values:
+            gt_stmt = (
+                pg_insert(GalleryTag)
+                .values(gt_values)
+                .on_conflict_do_update(
+                    index_elements=["gallery_id", "tag_id"],
+                    set_={
+                        "confidence": sql_case(
+                            (GalleryTag.source == "metadata", GalleryTag.confidence),
+                            else_=pg_insert(GalleryTag).excluded.confidence,
+                        ),
+                        "source": sql_case(
+                            (GalleryTag.source == "metadata", GalleryTag.source),
+                            else_=sql_literal("manual"),
+                        ),
+                    },
+                )
+            )
+            await session.execute(gt_stmt)
+
+        await rebuild_gallery_tags_array(session, gallery_id)
+        await session.commit()
+        return {"status": "ok", "affected": len(tag_ids)}
+
+    else:  # remove
+        removed = 0
+        for tag_str in body.tags:
+            if ":" in tag_str:
+                ns, name = tag_str.split(":", 1)
+            else:
+                ns, name = "general", tag_str
+
+            # Find tag ID
+            tag_row = (await session.execute(
+                select(Tag.id).where(Tag.namespace == ns, Tag.name == name)
+            )).scalar_one_or_none()
+            if not tag_row:
+                continue
+
+            # Delete only manual-source gallery_tags
+            result = await session.execute(
+                select(GalleryTag).where(
+                    GalleryTag.gallery_id == gallery_id,
+                    GalleryTag.tag_id == tag_row,
+                    GalleryTag.source == "manual",
+                )
+            )
+            gt = result.scalar_one_or_none()
+            if gt:
+                await session.delete(gt)
+                removed += 1
+
+        await rebuild_gallery_tags_array(session, gallery_id)
+        await session.commit()
+        return {"status": "ok", "affected": removed}
 
 
 # ── AI Re-tag ─────────────────────────────────────────────────────────

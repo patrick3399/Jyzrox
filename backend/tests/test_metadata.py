@@ -364,3 +364,135 @@ class TestParseImportFallbackSource:
         assert result.source == "twitter"
         assert result.source_id == "5555555555"
         assert result.title == "json_file_artist"
+
+
+# ---------------------------------------------------------------------------
+# _extract_tags (gallery_dl._metadata) — hashtag extraction
+# ---------------------------------------------------------------------------
+
+
+class TestExtractTagsHashtags:
+    """_extract_tags extracts hashtags from content for social sources."""
+
+    def test_extract_tags_social_source_extracts_hashtags(self):
+        """content field with hashtags on a social source yields 'general:<tag>' entries."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"content": "#cosplay #anime test"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
+        assert "general:cosplay" in tags
+        assert "general:anime" in tags
+
+    def test_extract_tags_non_social_source_ignores_hashtags(self):
+        """Hashtags in content are NOT extracted for non-social sources (e.g. ehentai)."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"content": "#cosplay #anime test", "category": "gallery"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="ehentai")
+        assert "general:cosplay" not in tags
+        assert "general:anime" not in tags
+
+    def test_extract_tags_no_source_ignores_hashtags(self):
+        """When source=None, hashtag extraction is skipped entirely."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"content": "#sketch #artwork"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source=None)
+        assert "general:sketch" not in tags
+        assert "general:artwork" not in tags
+
+    def test_extract_tags_hashtag_dedup_with_existing(self):
+        """A hashtag matching an already-present tag is not duplicated."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"tags": ["general:cosplay"], "content": "#cosplay #anime"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
+        assert tags.count("general:cosplay") == 1
+        assert "general:anime" in tags
+
+    def test_extract_tags_hashtag_from_description_field(self):
+        """When 'content' is absent, hashtags are extracted from 'description'."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"description": "#sketch"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
+        assert "general:sketch" in tags
+
+    def test_extract_tags_hashtag_lowercased(self):
+        """Hashtag text is lowercased before building the tag string."""
+        from plugins.builtin.gallery_dl._metadata import _extract_tags
+
+        metadata = {"content": "#CosPlay"}
+        tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
+        assert "general:cosplay" in tags
+        assert "general:CosPlay" not in tags
+
+
+# ---------------------------------------------------------------------------
+# _extract_artist (gallery_dl._metadata)
+# ---------------------------------------------------------------------------
+
+
+class TestExtractArtistPixivUser:
+    """_extract_artist handles pixiv_user strategy and twitter_author strategy."""
+
+    def test_extract_artist_pixiv_user_with_user_id(self):
+        """pixiv source with pixiv_user_id produces 'pixiv:<id>'."""
+        from plugins.builtin.gallery_dl._metadata import _extract_artist
+
+        result = _extract_artist("pixiv", {"pixiv_user_id": 12345, "uploader": "someone"}, [])
+        assert result == "pixiv:12345"
+
+    def test_extract_artist_pixiv_user_fallback_to_uploader(self):
+        """pixiv source without pixiv_user_id falls back to 'pixiv:<uploader>'."""
+        from plugins.builtin.gallery_dl._metadata import _extract_artist
+
+        result = _extract_artist("pixiv", {"uploader": "someone"}, [])
+        assert result == "pixiv:someone"
+
+    def test_extract_artist_pixiv_user_no_data(self):
+        """pixiv source with no pixiv_user_id and no uploader returns None."""
+        from plugins.builtin.gallery_dl._metadata import _extract_artist
+
+        result = _extract_artist("pixiv", {}, [])
+        assert result is None
+
+    def test_extract_artist_twitter_still_works(self):
+        """twitter source extracts artist from author.name dict (existing behavior)."""
+        from plugins.builtin.gallery_dl._metadata import _extract_artist
+
+        result = _extract_artist("twitter", {"author": {"name": "alice"}}, [])
+        assert result == "twitter:alice"
+
+
+# ---------------------------------------------------------------------------
+# parse_pixiv_import — artist_id extraction
+# ---------------------------------------------------------------------------
+
+
+class TestParsePixivImportArtistId:
+    """parse_pixiv_import resolves artist_id with priority: pixiv_user_id > uploader > None."""
+
+    def test_parse_pixiv_import_artist_id_from_user_id(self):
+        """pixiv_user_id in meta → artist_id == 'pixiv:<user_id>'."""
+        from plugins.builtin.pixiv._metadata import parse_pixiv_import
+
+        meta = {"pixiv_user_id": 12345, "uploader": "name", "id": 99}
+        result = parse_pixiv_import(Path("/tmp/test"), meta)
+        assert result.artist_id == "pixiv:12345"
+
+    def test_parse_pixiv_import_artist_id_fallback_uploader(self):
+        """No pixiv_user_id but uploader present → artist_id == 'pixiv:<uploader>'."""
+        from plugins.builtin.pixiv._metadata import parse_pixiv_import
+
+        meta = {"uploader": "name", "id": 99}
+        result = parse_pixiv_import(Path("/tmp/test"), meta)
+        assert result.artist_id == "pixiv:name"
+
+    def test_parse_pixiv_import_artist_id_none(self):
+        """No pixiv_user_id and no uploader → artist_id is None."""
+        from plugins.builtin.pixiv._metadata import parse_pixiv_import
+
+        meta = {"id": 99}
+        result = parse_pixiv_import(Path("/tmp/test"), meta)
+        assert result.artist_id is None

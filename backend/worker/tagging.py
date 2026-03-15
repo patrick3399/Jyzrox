@@ -3,12 +3,13 @@
 import logging
 
 import httpx
+from sqlalchemy import case, func, literal
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
 from core.config import settings
 from core.database import AsyncSessionLocal
-from db.models import Image, ImageTag, Tag
+from db.models import GalleryTag, Image, ImageTag, Tag
 from services.cas import resolve_blob_path
 from worker.constants import _IMAGE_EXTS, logger
 
@@ -44,6 +45,71 @@ async def _predict_remote(
     resp.raise_for_status()
     data = resp.json()
     return [(t["namespace"], t["name"], t["confidence"]) for t in data["tags"]]
+
+
+async def _aggregate_to_gallery(session, gallery_id: int, threshold: float) -> int:
+    """
+    Aggregate image-level AI tags up to gallery_tags.
+
+    For each tag that appears in at least one image of the gallery with
+    MAX(confidence) >= threshold, upsert a gallery_tags row with source='ai'.
+    Existing 'metadata' or 'manual' source rows are never downgraded.
+
+    Returns the number of tag rows upserted.
+    """
+    image_ids = (
+        await session.execute(
+            select(Image.id).where(Image.gallery_id == gallery_id)
+        )
+    ).scalars().all()
+
+    if not image_ids:
+        return 0
+
+    agg_rows = (
+        await session.execute(
+            select(
+                ImageTag.tag_id,
+                func.max(ImageTag.confidence).label("max_conf"),
+            )
+            .where(ImageTag.image_id.in_(image_ids))
+            .group_by(ImageTag.tag_id)
+            .having(func.max(ImageTag.confidence) >= threshold)
+        )
+    ).all()
+
+    if not agg_rows:
+        return 0
+
+    gt_values = [
+        {
+            "gallery_id": gallery_id,
+            "tag_id": row.tag_id,
+            "confidence": row.max_conf,
+            "source": "ai",
+        }
+        for row in agg_rows
+    ]
+
+    stmt = (
+        pg_insert(GalleryTag)
+        .values(gt_values)
+        .on_conflict_do_update(
+            index_elements=["gallery_id", "tag_id"],
+            set_={
+                "confidence": case(
+                    (GalleryTag.source.in_(["metadata", "manual"]), GalleryTag.confidence),
+                    else_=pg_insert(GalleryTag).excluded.confidence,
+                ),
+                "source": case(
+                    (GalleryTag.source.in_(["metadata", "manual"]), GalleryTag.source),
+                    else_=literal("ai"),
+                ),
+            },
+        )
+    )
+    await session.execute(stmt)
+    return len(gt_values)
 
 
 async def tag_job(ctx: dict, gallery_id: int) -> dict:
@@ -146,6 +212,12 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
                 img.tags_array = list(existing_tags)
 
                 tagged += 1
+
+            # Aggregate AI tags to gallery level
+            count = await _aggregate_to_gallery(session, gallery_id, settings.tag_general_threshold)
+            from worker.tag_helpers import rebuild_gallery_tags_array
+            await rebuild_gallery_tags_array(session, gallery_id)
+            logger.info("[tag] gallery_id=%d: %d tags aggregated to gallery", gallery_id, count)
 
             await session.commit()
 

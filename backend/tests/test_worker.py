@@ -299,3 +299,32 @@ class TestWorkerSha256:
         finally:
             p1.unlink(missing_ok=True)
             p2.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# Pixiv tag processing — importer._extract_tags with namespaced auto-tags
+# ---------------------------------------------------------------------------
+
+
+class TestPixivTagProcessing:
+    """Verify importer._extract_tags preserves namespaced auto-tag format."""
+
+    def test_extract_tags_with_namespaced_auto_tags(self, tmp_path: Path):
+        """Tags already in namespace:name format pass through unchanged."""
+        from worker.importer import _extract_tags
+
+        metadata = {"tags": ["landscape", "rating:r18", "meta:manga"]}
+        tags = _extract_tags(tmp_path, metadata)
+        assert "landscape" in tags
+        assert "rating:r18" in tags
+        assert "meta:manga" in tags
+
+    def test_extract_tags_list_with_mixed_namespaces(self, tmp_path: Path):
+        """Mixed namespaced and bare tags are all preserved in the output list."""
+        from worker.importer import _extract_tags
+
+        metadata = {"tags": ["general:tree", "rating:safe", "bare_tag"]}
+        tags = _extract_tags(tmp_path, metadata)
+        assert "general:tree" in tags
+        assert "rating:safe" in tags
+        assert "bare_tag" in tags

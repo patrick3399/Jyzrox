@@ -175,16 +175,41 @@ async def download_pixiv_illust(
         # Write metadata.json compatible with import_job
         tags = detail.get("tags", [])
         tag_list: list[str] = []
+        tag_translations_data: list[dict] = []
+        seen_tags: set[str] = set()
+
         for tag in tags:
             if isinstance(tag, dict):
                 name = tag.get("name", "")
-                if name:
-                    tag_list.append(name)
                 translated = tag.get("translated_name")
-                if translated and translated != name:
-                    tag_list.append(translated)
-            elif isinstance(tag, str):
+                # Prefer English (translated_name) over Japanese (name)
+                canonical = translated if translated else name
+                if canonical and canonical.lower() not in seen_tags:
+                    tag_list.append(canonical)
+                    seen_tags.add(canonical.lower())
+                # Store Japanese as translation
+                if name and translated and name != translated:
+                    tag_translations_data.append({
+                        "namespace": "general",
+                        "name": translated,
+                        "language": "ja",
+                        "translation": name,
+                    })
+            elif isinstance(tag, str) and tag.lower() not in seen_tags:
                 tag_list.append(tag)
+                seen_tags.add(tag.lower())
+
+        # Auto-tag: rating from sanity_level
+        sanity = detail.get("sanity_level", 0)
+        if sanity >= 6 and "rating:r18" not in seen_tags:
+            tag_list.append("rating:r18")
+
+        # Auto-tag: illust type
+        illust_type = detail.get("type", "illust")
+        if illust_type == "manga":
+            tag_list.append("meta:manga")
+        elif illust_type == "ugoira":
+            tag_list.append("meta:ugoira")
 
         user = detail.get("user", {})
         posted_ts = 0
@@ -206,6 +231,7 @@ async def download_pixiv_illust(
             "uploader": user.get("name", ""),
             "posted": posted_ts,
             "tags": tag_list,
+            "tag_translations": tag_translations_data,
             "page_count": page_count,
             "pixiv_user_id": user.get("id"),
             "pixiv_illust_type": detail.get("type", "illust"),

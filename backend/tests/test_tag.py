@@ -498,3 +498,227 @@ class TestTagImplications:
                 json={"antecedent_id": 1, "consequent_id": 2},
             )
         ).status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Manual gallery tagging
+# ---------------------------------------------------------------------------
+
+
+async def _insert_gallery(db_session, source="test", source_id="g1", title="Test Gallery"):
+    """Insert a minimal gallery row and return its id."""
+    await db_session.execute(
+        text(
+            "INSERT OR IGNORE INTO galleries (source, source_id, title) "
+            "VALUES (:src, :sid, :title)"
+        ),
+        {"src": source, "sid": source_id, "title": title},
+    )
+    await db_session.commit()
+    result = await db_session.execute(
+        text("SELECT id FROM galleries WHERE source = :src AND source_id = :sid"),
+        {"src": source, "sid": source_id},
+    )
+    return result.scalar()
+
+
+class TestManualTagGallery:
+    """POST /api/tags/gallery/{gallery_id}"""
+
+    # ------------------------------------------------------------------
+    # Helpers used by this class
+    # ------------------------------------------------------------------
+
+    @staticmethod
+    def _patch_worker_helpers(monkeypatch):
+        """
+        Inject a fake worker.tag_helpers module into sys.modules so that
+        ``from worker.tag_helpers import rebuild_gallery_tags_array``
+        inside the endpoint resolves without importing the real worker
+        package (which pulls in arq and heavy deps unavailable in tests).
+        """
+        import sys
+        import types
+        from unittest.mock import AsyncMock
+
+        if "worker" not in sys.modules:
+            monkeypatch.setitem(sys.modules, "worker", types.ModuleType("worker"))
+        _fake_th = types.ModuleType("worker.tag_helpers")
+        _fake_th.rebuild_gallery_tags_array = AsyncMock(return_value=[])
+        _fake_th.upsert_tag_translations = AsyncMock()
+        monkeypatch.setitem(sys.modules, "worker.tag_helpers", _fake_th)
+
+    @staticmethod
+    def _add_patch(monkeypatch):
+        """
+        Patch pg_insert and rebuild_gallery_tags_array so add-action tests
+        can run on the SQLite test engine without hitting PostgreSQL-only
+        ON CONFLICT syntax or the ARRAY column serialisation issue.
+
+        pg_insert is replaced with sqlalchemy.dialects.sqlite.insert, which
+        also supports on_conflict_do_update on SQLite 3.24+.
+        rebuild_gallery_tags_array is replaced with a no-op coroutine.
+        """
+        import routers.tag as _tag_mod
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        TestManualTagGallery._patch_worker_helpers(monkeypatch)
+        monkeypatch.setattr(_tag_mod, "pg_insert", sqlite_insert)
+
+    # ------------------------------------------------------------------
+    # Happy-path: add action
+    # ------------------------------------------------------------------
+
+    async def test_manual_tag_add_basic(self, client, db_session, monkeypatch):
+        """POST with action=add and a namespaced tag should return affected=1."""
+        self._add_patch(monkeypatch)
+        gid = await _insert_gallery(db_session, source_id="add_basic")
+
+        resp = await client.post(
+            f"/api/tags/gallery/{gid}",
+            json={"tags": ["character:rem"], "action": "add"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 1
+
+    async def test_manual_tag_add_bare_name(self, client, db_session, monkeypatch):
+        """A bare name without namespace should default to general:<name>."""
+        self._add_patch(monkeypatch)
+        gid = await _insert_gallery(db_session, source_id="add_bare")
+
+        resp = await client.post(
+            f"/api/tags/gallery/{gid}",
+            json={"tags": ["landscape"], "action": "add"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 1
+
+    async def test_manual_tag_add_multiple(self, client, db_session, monkeypatch):
+        """Multiple distinct tags should all be added, affected equals tag count."""
+        self._add_patch(monkeypatch)
+        gid = await _insert_gallery(db_session, source_id="add_multi")
+
+        resp = await client.post(
+            f"/api/tags/gallery/{gid}",
+            json={"tags": ["character:rem", "artist:someone", "cute"], "action": "add"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 3
+
+    async def test_manual_tag_add_duplicate_in_request(self, client, db_session, monkeypatch):
+        """Duplicate tags within a single request should be deduplicated — no crash, affected=1."""
+        self._add_patch(monkeypatch)
+        gid = await _insert_gallery(db_session, source_id="add_dedup")
+
+        resp = await client.post(
+            f"/api/tags/gallery/{gid}",
+            json={"tags": ["foo", "foo"], "action": "add"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 1
+
+    # ------------------------------------------------------------------
+    # Happy-path: remove action
+    # ------------------------------------------------------------------
+
+    async def test_manual_tag_remove(self, client, db_session, monkeypatch):
+        """Remove an existing manual tag should return affected=1."""
+        self._patch_worker_helpers(monkeypatch)
+
+        gid = await _insert_gallery(db_session, source_id="remove_tag")
+
+        # Insert the tag and gallery_tag directly so the remove path can find them
+        tag_id = await _insert_tag(db_session, "character", "rem_remove")
+        await db_session.execute(
+            text(
+                "INSERT OR IGNORE INTO gallery_tags (gallery_id, tag_id, confidence, source) "
+                "VALUES (:gid, :tid, 1.0, 'manual')"
+            ),
+            {"gid": gid, "tid": tag_id},
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            f"/api/tags/gallery/{gid}",
+            json={"tags": ["character:rem_remove"], "action": "remove"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 1
+
+    async def test_manual_tag_remove_nonexistent(self, client, db_session, monkeypatch):
+        """Removing a tag that does not exist should return affected=0 without error."""
+        self._patch_worker_helpers(monkeypatch)
+
+        gid = await _insert_gallery(db_session, source_id="remove_none")
+
+        resp = await client.post(
+            f"/api/tags/gallery/{gid}",
+            json={"tags": ["character:ghost_tag_xyz"], "action": "remove"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 0
+
+    # ------------------------------------------------------------------
+    # Error paths
+    # ------------------------------------------------------------------
+
+    async def test_manual_tag_gallery_not_found(self, client, monkeypatch):
+        """POST to a non-existent gallery_id should return 404."""
+        self._patch_worker_helpers(monkeypatch)
+        resp = await client.post(
+            "/api/tags/gallery/99999",
+            json={"tags": ["character:rem"], "action": "add"},
+        )
+        assert resp.status_code == 404
+        assert "not found" in resp.json()["detail"].lower()
+
+    async def test_manual_tag_requires_member_role(self, make_client, db_session, monkeypatch):
+        """A viewer-role user should receive 403 (insufficient role)."""
+        self._patch_worker_helpers(monkeypatch)
+        gid = await _insert_gallery(db_session, source_id="role_viewer")
+
+        async with make_client(user_id=1, role="viewer") as ac:
+            resp = await ac.post(
+                f"/api/tags/gallery/{gid}",
+                json={"tags": ["character:rem"], "action": "add"},
+            )
+        assert resp.status_code == 403
+
+    async def test_manual_tag_admin_can_access(self, make_client, db_session, monkeypatch):
+        """An admin-role user (higher than member) should be allowed and get 200."""
+        self._add_patch(monkeypatch)
+        gid = await _insert_gallery(db_session, source_id="role_admin_mtag")
+
+        async with make_client(user_id=1, role="admin") as ac:
+            resp = await ac.post(
+                f"/api/tags/gallery/{gid}",
+                json={"tags": ["character:rem"], "action": "add"},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+    async def test_manual_tag_empty_tags_list(self, client, db_session, monkeypatch):
+        """An empty tags list with action=add should return affected=0 without error."""
+        self._patch_worker_helpers(monkeypatch)
+        gid = await _insert_gallery(db_session, source_id="empty_tags")
+
+        resp = await client.post(
+            f"/api/tags/gallery/{gid}",
+            json={"tags": [], "action": "add"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 0
