@@ -16,6 +16,7 @@ import { VirtualGrid } from '@/components/VirtualGrid'
 import { t, formatNumber } from '@/lib/i18n'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { useSWRConfig } from 'swr'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -35,6 +36,7 @@ const PAGE_SIZE = 24
 
 function LibraryContent() {
   const router = useRouter()
+  const { mutate: globalMutate } = useSWRConfig()
   const { state, dispatch, parsedSource, parsedImportMode, handleSearchChange, handleSearchCommit } =
     useLibraryFilters()
 
@@ -464,7 +466,7 @@ function LibraryContent() {
                     gallery_ids: [...selectedIds],
                   })
                   toast.success(t('library.batchSuccess', { count: String(res.affected) }))
-                  setTimeout(() => window.location.reload(), 500)
+                  globalMutate(() => true)
                 } catch {
                   toast.error(t('library.updateFailed'))
                 }
@@ -481,7 +483,7 @@ function LibraryContent() {
                     gallery_ids: [...selectedIds],
                   })
                   toast.success(t('library.batchSuccess', { count: String(res.affected) }))
-                  setTimeout(() => window.location.reload(), 500)
+                  globalMutate(() => true)
                 } catch {
                   toast.error(t('library.updateFailed'))
                 }
@@ -502,7 +504,7 @@ function LibraryContent() {
                     rating,
                   })
                   toast.success(t('library.batchSuccess', { count: String(res.affected) }))
-                  setTimeout(() => window.location.reload(), 500)
+                  globalMutate(() => true)
                 } catch {
                   toast.error(t('library.updateFailed'))
                 }
@@ -571,7 +573,7 @@ function LibraryContent() {
                     gallery_ids: [...selectedIds],
                   })
                   toast.success(t('trash.movedToTrash'))
-                  setTimeout(() => window.location.reload(), 500)
+                  globalMutate(() => true)
                 } catch {
                   toast.error(t('library.updateFailed'))
                 }
@@ -638,7 +640,7 @@ function LibraryContent() {
                     toast.success(t('library.batchSuccess', { count: String(res.affected) }))
                     setBatchTagMode(null)
                     setBatchTagList([])
-                    setTimeout(() => window.location.reload(), 500)
+                    globalMutate(() => true)
                   } catch {
                     toast.error(t('library.updateFailed'))
                   }

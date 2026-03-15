@@ -167,10 +167,9 @@ async def rss_subscription(
             )
         ).scalar_one_or_none()
 
-    if not subscription or subscription.user_id != auth["user_id"]:
-        raise HTTPException(status_code=404, detail="Subscription not found")
+        if not subscription or subscription.user_id != auth["user_id"]:
+            raise HTTPException(status_code=404, detail="Subscription not found")
 
-    async with async_session() as session:
         # Join download_jobs to galleries for done jobs belonging to this subscription
         rows = (
             await session.execute(

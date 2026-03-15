@@ -18,14 +18,16 @@ function daysRemaining(deletedAt: string): number {
   return Math.max(0, remaining)
 }
 
-function timeAgo(iso: string): string {
+function timeAgo(iso: string | null): string {
+  if (!iso) return t('settings.tasks.never')
   const diff = Date.now() - new Date(iso).getTime()
   const mins = Math.floor(diff / 60000)
-  if (mins < 60) return `${mins}m ago`
+  if (mins < 1) return t('history.justNow')
+  if (mins < 60) return t('history.minutesAgo', { n: String(mins) })
   const hours = Math.floor(mins / 60)
-  if (hours < 24) return `${hours}h ago`
+  if (hours < 24) return t('history.hoursAgo', { n: String(hours) })
   const days = Math.floor(hours / 24)
-  return `${days}d ago`
+  return t('history.daysAgo', { n: String(days) })
 }
 
 export default function TrashPage() {
@@ -118,7 +120,7 @@ export default function TrashPage() {
               <div className="flex-1 min-w-0">
                 <p className="text-sm font-medium text-vault-text truncate">{g.title || g.title_jpn || `${g.source}/${g.source_id}`}</p>
                 <div className="flex items-center gap-3 text-xs text-vault-text-muted mt-0.5">
-                  <span>{g.pages} pages</span>
+                  <span>{t('queue.previewPages', { count: String(g.pages || 0) })}</span>
                   <span>{g.source}</span>
                   {g.deleted_at && (
                     <>

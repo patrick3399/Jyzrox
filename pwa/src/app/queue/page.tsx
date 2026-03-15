@@ -19,7 +19,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { t } from '@/lib/i18n'
 import { useWs } from '@/lib/ws'
-import type { DownloadJob } from '@/lib/types'
+import type { DownloadJob, DownloadPreview } from '@/lib/types'
 
 const STATUS_STYLES: Record<string, string> = {
   queued: 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400',
@@ -251,19 +251,7 @@ function JobRow({
   )
 }
 
-interface PreviewData {
-  source: string
-  preview_available: boolean
-  title?: string | null
-  pages?: number | null
-  tags?: string[] | null
-  uploader?: string | null
-  rating?: number | null
-  thumb_url?: string | null
-  category?: string | null
-}
-
-function DownloadPreviewPanel({ preview }: { preview: PreviewData }) {
+function DownloadPreviewPanel({ preview }: { preview: DownloadPreview }) {
   if (!preview.preview_available) {
     return (
       <div className="mt-3 p-3 bg-vault-input/50 border border-vault-border rounded-lg">
@@ -468,7 +456,7 @@ export default function QueuePage() {
           )}
           {/* Download Preview */}
           {debouncedUrl.trim() && downloadPreview && !previewLoading && (
-            <DownloadPreviewPanel preview={downloadPreview as PreviewData} />
+            <DownloadPreviewPanel preview={downloadPreview} />
           )}
           {debouncedUrl.trim() && previewLoading && (
             <div className="mt-3 flex items-center gap-2 text-xs text-vault-text-muted animate-pulse">

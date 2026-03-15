@@ -614,17 +614,8 @@ async def manual_tag_gallery(
         raise HTTPException(status_code=404, detail="Gallery not found")
 
     if body.action == "add":
-        # Parse and deduplicate tags
-        seen: set[tuple[str, str]] = set()
-        parsed: list[tuple[str, str]] = []
-        for tag_str in body.tags:
-            if ":" in tag_str:
-                ns, name = tag_str.split(":", 1)
-            else:
-                ns, name = "general", tag_str
-            if (ns, name) not in seen:
-                seen.add((ns, name))
-                parsed.append((ns, name))
+        from worker.tag_helpers import parse_tag_strings
+        parsed = parse_tag_strings(body.tags)
 
         if not parsed:
             return {"status": "ok", "affected": 0}
@@ -673,19 +664,10 @@ async def manual_tag_gallery(
         return {"status": "ok", "affected": len(tag_ids)}
 
     else:  # remove
-        # Parse all tag strings into (namespace, name) pairs up front
-        seen: set[tuple[str, str]] = set()
-        parsed_remove: list[tuple[str, str]] = []
-        for tag_str in body.tags:
-            if ":" in tag_str:
-                ns, name = tag_str.split(":", 1)
-            else:
-                ns, name = "general", tag_str
-            if (ns, name) not in seen:
-                seen.add((ns, name))
-                parsed_remove.append((ns, name))
+        from worker.tag_helpers import parse_tag_strings
+        parsed = parse_tag_strings(body.tags)
 
-        if not parsed_remove:
+        if not parsed:
             await rebuild_gallery_tags_array(session, gallery_id)
             await session.commit()
             return {"status": "ok", "affected": 0}
@@ -694,7 +676,7 @@ async def manual_tag_gallery(
         ns_name_filter = or_(
             *[
                 (Tag.namespace == ns) & (Tag.name == name)
-                for ns, name in parsed_remove
+                for ns, name in parsed
             ]
         )
         tag_ids = (

@@ -3,7 +3,7 @@ import useSWRMutation from 'swr/mutation'
 import { useEffect, useRef } from 'react'
 import { api } from '@/lib/api'
 import { useWs } from '@/lib/ws'
-import type { JobListParams } from '@/lib/types'
+import type { JobListParams, DownloadPreview } from '@/lib/types'
 
 const THROTTLE_MS = 1000
 
@@ -123,9 +123,9 @@ export function useSupportedSites() {
 export function useDownloadPreview(url: string) {
   const trimmed = url.trim()
 
-  return useSWR(
+  return useSWR<DownloadPreview | null>(
     trimmed.length > 10 ? ['download/preview', trimmed] : null,
-    async () => {
+    async (): Promise<DownloadPreview | null> => {
       try {
         const result = await api.download.preview(trimmed)
         if (result.preview_available) {

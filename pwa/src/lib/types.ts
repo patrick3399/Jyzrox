@@ -669,3 +669,17 @@ export interface JobListParams {
   limit?: number
   exclude_subscription?: boolean
 }
+
+// ── Download Preview ──────────────────────────────────────────────────
+
+export interface DownloadPreview {
+  source: string
+  preview_available: boolean
+  title?: string | null
+  pages?: number | null
+  tags?: string[] | null
+  uploader?: string | null
+  rating?: number | null
+  thumb_url?: string | null
+  category?: string | null
+}

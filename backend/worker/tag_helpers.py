@@ -6,6 +6,24 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from db.models import GalleryTag, Tag, TagTranslation
 
 
+def parse_tag_strings(tags: list[str]) -> list[tuple[str, str]]:
+    """Parse 'namespace:name' strings into deduplicated (namespace, name) tuples.
+
+    Bare names without ':' default to namespace='general'.
+    """
+    seen: set[tuple[str, str]] = set()
+    result: list[tuple[str, str]] = []
+    for tag_str in tags:
+        if ":" in tag_str:
+            ns, name = tag_str.split(":", 1)
+        else:
+            ns, name = "general", tag_str
+        if (ns, name) not in seen:
+            seen.add((ns, name))
+            result.append((ns, name))
+    return result
+
+
 async def rebuild_gallery_tags_array(session, gallery_id: int) -> list[str]:
     """
     Rebuild galleries.tags_array from gallery_tags join tags (single source of truth).

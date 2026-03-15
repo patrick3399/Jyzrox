@@ -12,7 +12,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import ARRAY, Text, and_, asc, case as sql_case, cast, desc, func, not_, or_, select
+from sqlalchemy import ARRAY, Text, and_, asc, case as sql_case, cast, delete as sa_delete, desc, func, not_, or_, select, tuple_
 from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import text as sql_text
@@ -31,6 +31,17 @@ logger = logging.getLogger(__name__)
 router = APIRouter(tags=["library"])
 
 _member = require_role("member")
+
+
+def _trash_filter(auth: dict):
+    """Return WHERE clause for trash visibility: soft-deleted galleries the user can see."""
+    filters = [Gallery.deleted_at.is_not(None)]
+    if auth.get("role") != "admin":
+        filters.append(or_(
+            Gallery.created_by_user_id == auth["user_id"],
+            Gallery.created_by_user_id.is_(None),
+        ))
+    return and_(*filters)
 
 
 def _cleanup_archive_entries(archive_keys: list[str]) -> None:
@@ -1029,7 +1040,6 @@ async def batch_galleries(
         raise HTTPException(status_code=400, detail="Rating must be 0-5 for rate action")
 
     if body.action == "favorite":
-        from sqlalchemy import delete as sa_delete
         for gid in body.gallery_ids:
             stmt = pg_insert(UserFavorite).values(
                 user_id=auth["user_id"], gallery_id=gid,
@@ -1039,7 +1049,6 @@ async def batch_galleries(
         return {"status": "ok", "affected": len(body.gallery_ids)}
 
     elif body.action == "unfavorite":
-        from sqlalchemy import delete as sa_delete
         result = await db.execute(
             sa_delete(UserFavorite).where(
                 UserFavorite.user_id == auth["user_id"],
@@ -1050,7 +1059,6 @@ async def batch_galleries(
         return {"status": "ok", "affected": result.rowcount}
 
     elif body.action == "rate":
-        from sqlalchemy import delete as sa_delete
         for gid in body.gallery_ids:
             if body.rating == 0:
                 await db.execute(
@@ -1113,98 +1121,89 @@ async def batch_galleries(
     elif body.action == "add_tags":
         if not body.tags:
             raise HTTPException(status_code=400, detail="tags required for add_tags action")
-        from sqlalchemy import delete as sa_delete
-        from worker.tag_helpers import rebuild_gallery_tags_array
+        from worker.tag_helpers import parse_tag_strings, rebuild_gallery_tags_array
 
-        # Parse and deduplicate tags
-        seen: set[tuple[str, str]] = set()
-        parsed: list[tuple[str, str]] = []
-        for tag_str in body.tags:
-            if ":" in tag_str:
-                ns, name = tag_str.split(":", 1)
-            else:
-                ns, name = "general", tag_str
-            if (ns, name) not in seen:
-                seen.add((ns, name))
-                parsed.append((ns, name))
-
+        parsed = parse_tag_strings(body.tags)
         if not parsed:
             return {"status": "ok", "affected": 0}
 
-        total_affected = 0
-        for gid in body.gallery_ids:
-            # Upsert tags table (increment count)
-            tag_values = [{"namespace": ns, "name": name, "count": 1} for ns, name in parsed]
-            tag_stmt = (
-                pg_insert(Tag)
-                .values(tag_values)
-                .on_conflict_do_update(
-                    index_elements=["namespace", "name"],
-                    set_={"count": Tag.count + 1},
+        # Upsert tags ONCE (count=0 to just ensure they exist without inflating counts)
+        tag_values = [{"namespace": ns, "name": name, "count": 0} for ns, name in parsed]
+        tag_stmt = (
+            pg_insert(Tag)
+            .values(tag_values)
+            .on_conflict_do_nothing(index_elements=["namespace", "name"])
+            .returning(Tag.id)
+        )
+        await db.execute(tag_stmt)
+
+        # Resolve tag IDs in one query
+        tag_ids = (
+            await db.execute(
+                select(Tag.id).where(
+                    tuple_(Tag.namespace, Tag.name).in_(parsed)
                 )
-                .returning(Tag.id)
             )
-            tag_ids = (await db.execute(tag_stmt)).scalars().all()
+        ).scalars().all()
 
-            # Upsert gallery_tags with source='manual'
-            # ON CONFLICT: overwrite 'ai' source but not 'metadata'
-            gt_values = [
-                {"gallery_id": gid, "tag_id": tid, "confidence": 1.0, "source": "manual"}
-                for tid in tag_ids
-            ]
-            if gt_values:
-                gt_stmt = (
-                    pg_insert(GalleryTag)
-                    .values(gt_values)
-                    .on_conflict_do_update(
-                        index_elements=["gallery_id", "tag_id"],
-                        set_={
-                            "confidence": sql_case(
-                                (GalleryTag.source == "metadata", GalleryTag.confidence),
-                                else_=pg_insert(GalleryTag).excluded.confidence,
-                            ),
-                            "source": sql_case(
-                                (GalleryTag.source == "metadata", GalleryTag.source),
-                                else_=sql_literal("manual"),
-                            ),
-                        },
-                    )
+        if not tag_ids:
+            return {"status": "ok", "affected": 0}
+
+        # Upsert gallery_tags for ALL galleries at once
+        gt_values = [
+            {"gallery_id": gid, "tag_id": tid, "confidence": 1.0, "source": "manual"}
+            for gid in body.gallery_ids
+            for tid in tag_ids
+        ]
+        if gt_values:
+            gt_stmt = (
+                pg_insert(GalleryTag)
+                .values(gt_values)
+                .on_conflict_do_update(
+                    index_elements=["gallery_id", "tag_id"],
+                    set_={
+                        "confidence": sql_case(
+                            (GalleryTag.source == "metadata", GalleryTag.confidence),
+                            else_=pg_insert(GalleryTag).excluded.confidence,
+                        ),
+                        "source": sql_case(
+                            (GalleryTag.source == "metadata", GalleryTag.source),
+                            else_=sql_literal("manual"),
+                        ),
+                    },
                 )
-                await db.execute(gt_stmt)
+            )
+            await db.execute(gt_stmt)
 
+        # Rebuild tags_array for each gallery
+        for gid in body.gallery_ids:
             await rebuild_gallery_tags_array(db, gid)
-            total_affected += len(tag_ids)
+
+        # Recalculate counts for affected tags (correct, not inflated)
+        for tid in tag_ids:
+            count_result = await db.execute(
+                select(func.count()).where(GalleryTag.tag_id == tid)
+            )
+            actual_count = count_result.scalar_one()
+            await db.execute(
+                Tag.__table__.update().where(Tag.id == tid).values(count=actual_count)
+            )
 
         await db.commit()
-        return {"status": "ok", "affected": total_affected}
+        return {"status": "ok", "affected": len(body.gallery_ids)}
 
     elif body.action == "remove_tags":
         if not body.tags:
             raise HTTPException(status_code=400, detail="tags required for remove_tags action")
-        from sqlalchemy import delete as sa_delete
-        from worker.tag_helpers import rebuild_gallery_tags_array
+        from worker.tag_helpers import parse_tag_strings, rebuild_gallery_tags_array
 
-        # Parse and deduplicate tags
-        seen: set[tuple[str, str]] = set()
-        parsed_remove: list[tuple[str, str]] = []
-        for tag_str in body.tags:
-            if ":" in tag_str:
-                ns, name = tag_str.split(":", 1)
-            else:
-                ns, name = "general", tag_str
-            if (ns, name) not in seen:
-                seen.add((ns, name))
-                parsed_remove.append((ns, name))
-
-        if not parsed_remove:
+        parsed = parse_tag_strings(body.tags)
+        if not parsed:
             return {"status": "ok", "affected": 0}
 
-        # Resolve tag IDs once for all galleries
+        # Resolve tag IDs once
         ns_name_filter = or_(
-            *[
-                (Tag.namespace == ns) & (Tag.name == name)
-                for ns, name in parsed_remove
-            ]
+            *[(Tag.namespace == ns) & (Tag.name == name) for ns, name in parsed]
         )
         tag_ids = (
             await db.execute(select(Tag.id).where(ns_name_filter))
@@ -1213,49 +1212,32 @@ async def batch_galleries(
         if not tag_ids:
             return {"status": "ok", "affected": 0}
 
-        total_removed = 0
-        for gid in body.gallery_ids:
-            # Find which tag_ids have manual source rows for this gallery
-            manual_tag_ids = (
-                await db.execute(
-                    select(GalleryTag.tag_id).where(
-                        GalleryTag.gallery_id == gid,
-                        GalleryTag.tag_id.in_(tag_ids),
-                        GalleryTag.source == "manual",
-                    )
-                )
-            ).scalars().all()
-
-            if not manual_tag_ids:
-                await rebuild_gallery_tags_array(db, gid)
-                continue
-
-            # Delete manual gallery_tags for this gallery
-            del_result = await db.execute(
-                sa_delete(GalleryTag).where(
-                    GalleryTag.gallery_id == gid,
-                    GalleryTag.tag_id.in_(manual_tag_ids),
-                    GalleryTag.source == "manual",
-                )
+        # Bulk delete gallery_tags across all galleries in one statement
+        del_result = await db.execute(
+            sa_delete(GalleryTag).where(
+                GalleryTag.gallery_id.in_(body.gallery_ids),
+                GalleryTag.tag_id.in_(tag_ids),
+                GalleryTag.source == "manual",
             )
-            removed = del_result.rowcount
+        )
+        removed = del_result.rowcount
 
-            # Decrement tag counts for tags that were actually deleted
-            if removed > 0:
-                await db.execute(
-                    Tag.__table__.update()
-                    .where(Tag.id.in_(manual_tag_ids))
-                    .values(count=sql_case(
-                        (Tag.count > 0, Tag.count - 1),
-                        else_=0,
-                    ))
-                )
-                total_removed += removed
+        # Recalculate counts for affected tags
+        for tid in tag_ids:
+            count_result = await db.execute(
+                select(func.count()).where(GalleryTag.tag_id == tid)
+            )
+            actual_count = count_result.scalar_one()
+            await db.execute(
+                Tag.__table__.update().where(Tag.id == tid).values(count=actual_count)
+            )
 
+        # Rebuild tags_array for each gallery
+        for gid in body.gallery_ids:
             await rebuild_gallery_tags_array(db, gid)
 
         await db.commit()
-        return {"status": "ok", "affected": total_removed}
+        return {"status": "ok", "affected": removed}
 
     elif body.action == "delete":
         return await _batch_delete_galleries(db, body.gallery_ids, auth)
@@ -1346,14 +1328,15 @@ async def _hard_delete_galleries(db: AsyncSession, galleries: list) -> dict:
                     deleted += 1
                 except OSError as exc:
                     logger.warning("[hard_delete] failed to remove library dir %s: %s", lib_dir, exc)
-            for sha256 in zero_ref_sha256s:
-                td = thumb_dir(sha256)
-                if td.exists():
-                    try:
-                        shutil.rmtree(str(td), ignore_errors=True)
-                        deleted += 1
-                    except OSError as exc:
-                        logger.warning("[hard_delete] failed to remove thumb dir %s: %s", td, exc)
+        # Thumbnail cleanup — once, not per gallery
+        for sha256 in zero_ref_sha256s:
+            td = thumb_dir(sha256)
+            if td.exists():
+                try:
+                    shutil.rmtree(str(td), ignore_errors=True)
+                    deleted += 1
+                except OSError as exc:
+                    logger.warning("[hard_delete] failed to remove thumb dir %s: %s", td, exc)
         return deleted
 
     try:
@@ -1380,14 +1363,9 @@ async def trash_count(
     db: AsyncSession = Depends(get_db),
 ):
     """Return count of soft-deleted galleries."""
-    filters = [Gallery.deleted_at.is_not(None)]
-    if auth.get("role") != "admin":
-        filters.append(or_(
-            Gallery.created_by_user_id == auth["user_id"],
-            Gallery.created_by_user_id.is_(None),
-        ))
+    trash_cond = _trash_filter(auth)
     count = (await db.execute(
-        select(func.count()).select_from(Gallery).where(*filters)
+        select(func.count()).select_from(Gallery).where(trash_cond)
     )).scalar_one()
     return {"count": count}
 
@@ -1400,20 +1378,15 @@ async def list_trash(
     db: AsyncSession = Depends(get_db),
 ):
     """List soft-deleted galleries (trash)."""
-    filters = [Gallery.deleted_at.is_not(None)]
-    if auth.get("role") != "admin":
-        filters.append(or_(
-            Gallery.created_by_user_id == auth["user_id"],
-            Gallery.created_by_user_id.is_(None),
-        ))
+    trash_cond = _trash_filter(auth)
 
     count_result = await db.execute(
-        select(func.count()).select_from(Gallery).where(*filters)
+        select(func.count()).select_from(Gallery).where(trash_cond)
     )
     total = count_result.scalar_one()
 
     rows = (await db.execute(
-        select(Gallery).where(*filters).order_by(desc(Gallery.deleted_at)).limit(limit).offset(offset)
+        select(Gallery).where(trash_cond).order_by(desc(Gallery.deleted_at)).limit(limit).offset(offset)
     )).scalars().all()
 
     return {
@@ -1473,15 +1446,10 @@ async def empty_trash(
     db: AsyncSession = Depends(get_db),
 ):
     """Permanently delete all galleries in trash."""
-    filters = [Gallery.deleted_at.is_not(None)]
-    if auth.get("role") != "admin":
-        filters.append(or_(
-            Gallery.created_by_user_id == auth["user_id"],
-            Gallery.created_by_user_id.is_(None),
-        ))
+    trash_cond = _trash_filter(auth)
 
     galleries = (await db.execute(
-        select(Gallery).where(*filters)
+        select(Gallery).where(trash_cond)
     )).scalars().all()
 
     if not galleries:
@@ -1632,7 +1600,6 @@ async def update_gallery(
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    from sqlalchemy import delete as sa_delete
     g = await _get_or_404_by_source(db, source, source_id, auth)
     gallery_id = g.id
     _check_write_access(auth, g)
