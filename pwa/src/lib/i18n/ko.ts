@@ -100,6 +100,11 @@ const ko: Record<string, string> = {
   'library.failedToLoad': '갤러리 로드 실패',
   'library.tagFilterPlaceholder': 'character:rem',
   'library.excludeTagPlaceholder': 'tag:value',
+  'library.batchAddTags': '태그 추가',
+  'library.batchRemoveTags': '태그 제거',
+  'library.batchTagsPlaceholder': '태그 입력 (예: artist:name)',
+  'library.batchTagsConfirm': '적용',
+  'library.batchTagsTitle': '태그 일괄 편집',
 
   // ── Queue ──
   'queue.title': '다운로드 대기열',

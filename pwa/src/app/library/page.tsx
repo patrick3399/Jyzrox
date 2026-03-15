@@ -56,6 +56,9 @@ function LibraryContent() {
   } = state
 
   const [colCount, setColCount] = useState(4)
+  const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
+  const [batchTagInput, setBatchTagInput] = useState('')
+  const [batchTagList, setBatchTagList] = useState<string[]>([])
 
   // Collapsible filter panel: collapsed by default on mobile, expanded on desktop
   const [filtersOpen, setFiltersOpen] = useState<boolean>(() => {
@@ -548,6 +551,18 @@ function LibraryContent() {
               </select>
             )}
             <button
+              onClick={() => { setBatchTagMode('add'); setBatchTagList([]); setBatchTagInput('') }}
+              className="px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded text-white text-sm transition-colors"
+            >
+              {t('library.batchAddTags')}
+            </button>
+            <button
+              onClick={() => { setBatchTagMode('remove'); setBatchTagList([]); setBatchTagInput('') }}
+              className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 rounded text-white text-sm transition-colors"
+            >
+              {t('library.batchRemoveTags')}
+            </button>
+            <button
               onClick={async () => {
                 if (!confirm(t('library.batchDeleteConfirm', { count: String(selectedIds.size) }))) return
                 try {
@@ -571,6 +586,68 @@ function LibraryContent() {
             >
               {t('common.cancel')}
             </button>
+          </div>
+        </div>
+      )}
+
+      {batchTagMode && (
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]" onClick={() => setBatchTagMode(null)}>
+          <div className="bg-vault-card border border-vault-border rounded-lg p-4 w-96 max-w-[90vw]" onClick={e => e.stopPropagation()}>
+            <h3 className="text-lg font-medium text-vault-text mb-3">
+              {batchTagMode === 'add' ? t('library.batchAddTags') : t('library.batchRemoveTags')}
+            </h3>
+            <div className="flex gap-2 mb-3">
+              <input
+                type="text"
+                value={batchTagInput}
+                onChange={e => setBatchTagInput(e.target.value)}
+                onKeyDown={e => {
+                  if (e.key === 'Enter' && batchTagInput.trim()) {
+                    setBatchTagList(prev => [...prev, batchTagInput.trim()])
+                    setBatchTagInput('')
+                  }
+                }}
+                placeholder={t('library.batchTagsPlaceholder')}
+                className="flex-1 bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted text-sm focus:outline-none focus:border-vault-border-hover"
+                autoFocus
+              />
+            </div>
+            <div className="flex flex-wrap gap-1 mb-3 min-h-[2rem]">
+              {batchTagList.map((tag, i) => (
+                <span key={i} className="flex items-center gap-1 px-2 py-0.5 bg-vault-accent/10 border border-vault-accent/30 text-vault-accent rounded text-xs">
+                  {tag}
+                  <button onClick={() => setBatchTagList(prev => prev.filter((_, j) => j !== i))} className="hover:text-red-400">
+                    <X size={12} />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex justify-end gap-2">
+              <button onClick={() => setBatchTagMode(null)} className="px-3 py-1.5 text-vault-text-muted text-sm">
+                {t('common.cancel')}
+              </button>
+              <button
+                disabled={batchTagList.length === 0}
+                onClick={async () => {
+                  try {
+                    const res = await api.library.batchGalleries({
+                      action: batchTagMode === 'add' ? 'add_tags' : 'remove_tags',
+                      gallery_ids: [...selectedIds],
+                      tags: batchTagList,
+                    })
+                    toast.success(t('library.batchSuccess', { count: String(res.affected) }))
+                    setBatchTagMode(null)
+                    setBatchTagList([])
+                    setTimeout(() => window.location.reload(), 500)
+                  } catch {
+                    toast.error(t('library.updateFailed'))
+                  }
+                }}
+                className="px-3 py-1.5 bg-vault-accent hover:bg-vault-accent/80 rounded text-white text-sm disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                {t('library.batchTagsConfirm')}
+              </button>
+            </div>
           </div>
         </div>
       )}

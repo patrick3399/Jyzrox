@@ -100,6 +100,11 @@ const ja: Record<string, string> = {
   'library.failedToLoad': 'ギャラリーの読み込みに失敗しました',
   'library.tagFilterPlaceholder': 'character:rem',
   'library.excludeTagPlaceholder': 'tag:value',
+  'library.batchAddTags': 'タグ追加',
+  'library.batchRemoveTags': 'タグ削除',
+  'library.batchTagsPlaceholder': 'タグを入力（例: artist:name）',
+  'library.batchTagsConfirm': '適用',
+  'library.batchTagsTitle': 'タグ一括編集',
 
   // ── Queue ──
   'queue.title': 'ダウンロードキュー',

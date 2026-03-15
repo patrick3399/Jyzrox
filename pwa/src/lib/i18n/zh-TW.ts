@@ -99,6 +99,11 @@ const zhTW: Record<string, string> = {
   'library.failedToLoad': '載入圖庫失敗',
   'library.tagFilterPlaceholder': 'character:rem',
   'library.excludeTagPlaceholder': 'tag:value',
+  'library.batchAddTags': '新增標籤',
+  'library.batchRemoveTags': '移除標籤',
+  'library.batchTagsPlaceholder': '輸入標籤（如 artist:name 或 tagname）',
+  'library.batchTagsConfirm': '套用',
+  'library.batchTagsTitle': '批次編輯標籤',
 
   // ── Queue ──
   'queue.title': '下載佇列',

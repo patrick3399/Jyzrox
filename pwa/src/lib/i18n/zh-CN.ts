@@ -99,6 +99,11 @@ const zhCN: Record<string, string> = {
   'library.failedToLoad': '加载图库失败',
   'library.tagFilterPlaceholder': 'character:rem',
   'library.excludeTagPlaceholder': 'tag:value',
+  'library.batchAddTags': '添加标签',
+  'library.batchRemoveTags': '移除标签',
+  'library.batchTagsPlaceholder': '输入标签（如 artist:name 或 tagname）',
+  'library.batchTagsConfirm': '应用',
+  'library.batchTagsTitle': '批量编辑标签',
 
   // ── Queue ──
   'queue.title': '下载队列',

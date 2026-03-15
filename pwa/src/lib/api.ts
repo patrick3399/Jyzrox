@@ -313,7 +313,7 @@ const library = {
       body: JSON.stringify(patch),
     }),
 
-  batchGalleries: (body: { action: 'delete' | 'favorite' | 'unfavorite' | 'rate' | 'add_to_collection'; gallery_ids: number[]; rating?: number; collection_id?: number }) =>
+  batchGalleries: (body: { action: 'delete' | 'favorite' | 'unfavorite' | 'rate' | 'add_to_collection' | 'add_tags' | 'remove_tags'; gallery_ids: number[]; rating?: number; collection_id?: number; tags?: string[] }) =>
     apiFetch<{ status: string; affected: number; deleted_dirs?: number }>('/api/library/galleries/batch', {
       method: 'POST',
       body: JSON.stringify(body),

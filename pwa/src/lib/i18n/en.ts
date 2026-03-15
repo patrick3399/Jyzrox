@@ -453,6 +453,11 @@ const en: Record<string, string> = {
   'library.batchDeleteConfirm': 'Delete {count} galleries? This cannot be undone.',
   'library.batchSuccess': '{count} galleries updated',
   'library.batchDeleteSuccess': '{count} galleries deleted',
+  'library.batchAddTags': 'Add Tags',
+  'library.batchRemoveTags': 'Remove Tags',
+  'library.batchTagsPlaceholder': 'Enter tag (e.g. artist:name or tagname)',
+  'library.batchTagsConfirm': 'Apply',
+  'library.batchTagsTitle': 'Batch Tag Edit',
 
   // ── Artists ──
   'artists.title': 'Artists',
