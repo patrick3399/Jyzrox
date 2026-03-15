@@ -1,5 +1,6 @@
 'use client'
 
+import { useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { t } from '@/lib/i18n'
@@ -10,6 +11,13 @@ interface BackButtonProps {
 
 export function BackButton({ fallback }: BackButtonProps) {
   const router = useRouter()
+
+  useEffect(() => {
+    document.documentElement.style.setProperty('--fab-offset', '4.5rem')
+    return () => {
+      document.documentElement.style.setProperty('--fab-offset', '')
+    }
+  }, [])
 
   const handleClick = () => {
     if (window.history.length > 1) {
