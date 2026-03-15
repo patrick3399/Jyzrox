@@ -12,13 +12,7 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { ExternalLink, ArrowLeft, BookOpen } from 'lucide-react'
 import { BackButton } from '@/components/BackButton'
-
-function sanitizeHtml(html: string): string {
-  return html
-    .replace(/<script\b[^<]*(?:(?!<\/script>)<[^<]*)*<\/script>/gi, '')
-    .replace(/\s*on\w+\s*=\s*["'][^"']*["']/gi, '')
-    .replace(/javascript:/gi, '')
-}
+import DOMPurify from 'dompurify'
 
 export default function IllustDetailPage({ params }: { params: Promise<{ id: string }> }) {
   useLocale()
@@ -262,7 +256,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
               </p>
               <div
                 className="text-sm text-vault-text leading-relaxed prose prose-invert max-w-none prose-a:text-vault-accent"
-                dangerouslySetInnerHTML={{ __html: sanitizeHtml(illust.caption) }}
+                dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(illust.caption) }}
               />
             </div>
           )}
