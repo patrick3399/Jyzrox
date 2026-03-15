@@ -10,7 +10,7 @@ are NOT tested here. Rate-limit, alerts, and API token CRUD are covered.
 """
 
 import uuid
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import text
 
@@ -921,3 +921,315 @@ class TestRateLimitsScheduleActive:
         """Unauthenticated PATCH rate-limits should return 401."""
         resp = await unauthed_client.patch("/api/settings/rate-limits", json={})
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# EH cookies check
+# ---------------------------------------------------------------------------
+
+
+class TestEhCookiesCheck:
+    """POST /api/settings/credentials/ehentai/cookies-check"""
+
+    async def test_cookies_check_no_credentials_returns_404(self, client):
+        """When no EH credentials are configured, should return 404."""
+        with patch("routers.settings.get_credential", new_callable=AsyncMock, return_value=None):
+            resp = await client.post("/api/settings/credentials/ehentai/cookies-check")
+        assert resp.status_code == 404
+        assert "not configured" in resp.json()["detail"].lower()
+
+    async def test_cookies_check_with_valid_cookies_returns_status(self, client):
+        """When credentials exist and cookies are valid, should return eh_valid/ex_valid dict."""
+        import json as _json
+        cookies_json = _json.dumps({
+            "ipb_member_id": "12345",
+            "ipb_pass_hash": "abcdef",
+            "igneous": "testigneous",
+        })
+
+        mock_client = AsyncMock()
+        mock_client.check_cookies = AsyncMock(return_value=True)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("routers.settings.get_credential", new_callable=AsyncMock, return_value=cookies_json),
+            patch("routers.settings.EhClient", return_value=mock_client),
+        ):
+            resp = await client.post("/api/settings/credentials/ehentai/cookies-check")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "eh_valid" in data
+        assert "ex_valid" in data
+        assert "has_igneous" in data
+        assert data["has_igneous"] is True
+
+    async def test_cookies_check_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.post("/api/settings/credentials/ehentai/cookies-check")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# EH account info
+# ---------------------------------------------------------------------------
+
+
+class TestEhAccountInfo:
+    """GET /api/settings/eh/account"""
+
+    async def test_eh_account_no_credentials_returns_404(self, client):
+        """When no EH credentials are configured, should return 404."""
+        with patch("routers.settings.get_credential", new_callable=AsyncMock, return_value=None):
+            resp = await client.get("/api/settings/eh/account")
+        assert resp.status_code == 404
+
+    async def test_eh_account_invalid_cookies_returns_401(self, client):
+        """When cookies fail check_cookies(), should return 401."""
+        import json as _json
+        cookies_json = _json.dumps({"ipb_member_id": "bad", "ipb_pass_hash": "bad"})
+
+        mock_client = AsyncMock()
+        mock_client.check_cookies = AsyncMock(return_value=False)
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("routers.settings.get_credential", new_callable=AsyncMock, return_value=cookies_json),
+            patch("routers.settings.EhClient", return_value=mock_client),
+            patch("routers.settings.push_system_alert", new_callable=AsyncMock),
+        ):
+            resp = await client.get("/api/settings/eh/account")
+
+        assert resp.status_code == 401
+        assert "invalid" in resp.json()["detail"].lower()
+
+    async def test_eh_account_valid_cookies_returns_account_info(self, client):
+        """When cookies are valid, should return valid=True plus account info."""
+        import json as _json
+        cookies_json = _json.dumps({"ipb_member_id": "12345", "ipb_pass_hash": "hash"})
+
+        mock_client = AsyncMock()
+        mock_client.check_cookies = AsyncMock(return_value=True)
+        mock_client.get_account_info = AsyncMock(return_value={"username": "testuser", "gp": 9999})
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("routers.settings.get_credential", new_callable=AsyncMock, return_value=cookies_json),
+            patch("routers.settings.EhClient", return_value=mock_client),
+        ):
+            resp = await client.get("/api/settings/eh/account")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["valid"] is True
+        assert data["username"] == "testuser"
+
+    async def test_eh_account_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/settings/eh/account")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# EH manual cookie save (POST /credentials/ehentai)
+# ---------------------------------------------------------------------------
+
+
+class TestSetEhCredentials:
+    """POST /api/settings/credentials/ehentai — manual cookie save."""
+
+    async def test_set_eh_credentials_saves_and_returns_ok(self, client):
+        """Valid cookies should be saved without validation failure."""
+        mock_client = AsyncMock()
+        mock_client.get_account_info = AsyncMock(return_value={"username": "eh_user"})
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("routers.settings.set_credential", new_callable=AsyncMock),
+            patch("routers.settings.EhClient", return_value=mock_client),
+        ):
+            resp = await client.post(
+                "/api/settings/credentials/ehentai",
+                json={
+                    "ipb_member_id": "12345",
+                    "ipb_pass_hash": "abcdefgh",
+                    "sk": "sk_value",
+                    "igneous": "igneous_val",
+                },
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+
+    async def test_set_eh_credentials_without_igneous(self, client):
+        """Cookies without igneous (no ExHentai access) should still save."""
+        mock_client = AsyncMock()
+        mock_client.get_account_info = AsyncMock(return_value={"username": "eh_user"})
+        mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+        mock_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("routers.settings.set_credential", new_callable=AsyncMock),
+            patch("routers.settings.EhClient", return_value=mock_client),
+        ):
+            resp = await client.post(
+                "/api/settings/credentials/ehentai",
+                json={"ipb_member_id": "12345", "ipb_pass_hash": "abcdefgh"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+    async def test_set_eh_credentials_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.post(
+            "/api/settings/credentials/ehentai",
+            json={"ipb_member_id": "x", "ipb_pass_hash": "y"},
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Pixiv OAuth callback
+# ---------------------------------------------------------------------------
+
+
+class TestPixivOAuthCallback:
+    """POST /api/settings/credentials/pixiv/oauth-callback"""
+
+    async def test_oauth_callback_exchanges_code_for_token(self, client):
+        """Valid code + verifier should return status=ok with username."""
+        mock_token_resp = MagicMock()
+        mock_token_resp.status_code = 200
+        mock_token_resp.json.return_value = {
+            "refresh_token": "new_refresh_token_xyz",
+            "user": {"name": "PixivUser"},
+        }
+        mock_token_resp.raise_for_status = MagicMock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_token_resp)
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("routers.settings.set_credential", new_callable=AsyncMock),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            resp = await client.post(
+                "/api/settings/credentials/pixiv/oauth-callback",
+                json={"code": "test_auth_code", "code_verifier": "test_verifier"},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["username"] == "PixivUser"
+
+    async def test_oauth_callback_accepts_full_callback_url(self, client):
+        """When user pastes the full callback URL, code should be extracted from it."""
+        full_url = (
+            "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback"
+            "?code=extracted_code_123&state=abc"
+        )
+
+        mock_token_resp = MagicMock()
+        mock_token_resp.status_code = 200
+        mock_token_resp.json.return_value = {
+            "refresh_token": "rt_from_url",
+            "user": {"name": "URLUser"},
+        }
+        mock_token_resp.raise_for_status = MagicMock()
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(return_value=mock_token_resp)
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("routers.settings.set_credential", new_callable=AsyncMock),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            resp = await client.post(
+                "/api/settings/credentials/pixiv/oauth-callback",
+                json={"code": full_url, "code_verifier": "verifier_x"},
+            )
+
+        assert resp.status_code == 200
+
+    async def test_oauth_callback_http_error_returns_400(self, client):
+        """When Pixiv token exchange fails, should return 400."""
+        import httpx
+
+        mock_http = AsyncMock()
+        mock_http.post = AsyncMock(side_effect=httpx.HTTPStatusError(
+            "401 Unauthorized",
+            request=MagicMock(),
+            response=MagicMock(status_code=401),
+        ))
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with patch("httpx.AsyncClient", return_value=mock_http):
+            resp = await client.post(
+                "/api/settings/credentials/pixiv/oauth-callback",
+                json={"code": "bad_code", "code_verifier": "verifier"},
+            )
+
+        assert resp.status_code == 400
+        assert "pixiv oauth failed" in resp.json()["detail"].lower()
+
+    async def test_oauth_callback_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.post(
+            "/api/settings/credentials/pixiv/oauth-callback",
+            json={"code": "c", "code_verifier": "v"},
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Credentials list — with real data
+# ---------------------------------------------------------------------------
+
+
+class TestListCredentialsWithData:
+    """GET /api/settings/credentials — non-empty credential list."""
+
+    async def test_list_credentials_shows_configured_sources(self, client):
+        """Configured sources should appear in the result with configured=True."""
+        mock_creds = [
+            {"source": "ehentai", "credential_type": "cookie"},
+            {"source": "pixiv", "credential_type": "oauth_token"},
+        ]
+        with patch("routers.settings.list_credentials", new_callable=AsyncMock, return_value=mock_creds):
+            resp = await client.get("/api/settings/credentials")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "ehentai" in data
+        assert data["ehentai"]["configured"] is True
+        assert "pixiv" in data
+        assert data["pixiv"]["configured"] is True
+
+    async def test_delete_credential_existing_source(self, client, db_session, db_session_factory):
+        """Deleting an existing credential should return status=ok."""
+        from sqlalchemy import text as _text
+        await db_session.execute(
+            _text(
+                "INSERT OR REPLACE INTO credentials (source, credential_type, value_encrypted) "
+                "VALUES ('testsite', 'cookie', X'deadbeef')"
+            )
+        )
+        await db_session.commit()
+
+        with patch("routers.settings.async_session", db_session_factory):
+            resp = await client.delete("/api/settings/credentials/testsite")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"

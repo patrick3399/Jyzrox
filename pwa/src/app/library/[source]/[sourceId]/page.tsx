@@ -85,6 +85,7 @@ export default function GalleryDetailPage() {
   } = useLibraryGallery(source, sourceId)
   const { data: imagesData, isLoading: imagesLoading, mutate: mutateImages } = useGalleryImages(source, sourceId)
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(source ?? '', sourceId ?? '')
+  const { data: tagTranslations } = useTagTranslations(gallery?.tags_array ?? [])
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRetagging, setIsRetagging] = useState(false)
   const [tagData, setTagData] = useState<Array<{ namespace: string; name: string; confidence: number; source: string }>>([])
@@ -343,7 +344,6 @@ export default function GalleryDetailPage() {
   if (!gallery) return null
 
   const tagGroups = groupTagsByNamespace(gallery.tags_array)
-  const { data: tagTranslations } = useTagTranslations(gallery.tags_array)
   const aiTags = tagData.filter((tag) => tag.source === 'ai' && tag.confidence >= confidenceThreshold)
   const images = imagesData?.images ?? []
   const statusInfo =

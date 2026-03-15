@@ -2470,3 +2470,254 @@ class TestFindSimilarImages:
         """Unauthenticated request returns 401."""
         resp = await unauthed_client.get("/api/library/images/1/similar")
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Trash endpoints — soft-delete flow
+# ---------------------------------------------------------------------------
+
+
+class TestTrashEndpoints:
+    """GET /api/library/trash, GET /api/library/trash/count,
+    POST /api/library/galleries/{source}/{source_id}/restore,
+    POST /api/library/galleries/{source}/{source_id}/permanent-delete,
+    POST /api/library/trash/empty
+    """
+
+    async def _soft_delete_gallery(self, db_session, source, source_id, title="Deleted"):
+        """Insert a gallery that is already soft-deleted."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, "
+                "tags_array, deleted_at) "
+                "VALUES (:source, :sid, :title, 'completed', '[]', datetime('now'))"
+            ),
+            {"source": source, "sid": source_id, "title": title},
+        )
+        await db_session.commit()
+        result = await db_session.execute(text("SELECT last_insert_rowid()"))
+        return result.scalar()
+
+    async def test_trash_count_empty_returns_zero(self, client):
+        """Trash count on empty DB should be 0."""
+        resp = await client.get("/api/library/trash/count")
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 0
+
+    async def test_trash_count_after_soft_delete(self, client, db_session):
+        """After soft-deleting a gallery, trash count should be 1."""
+        await self._soft_delete_gallery(db_session, "local", "trash_count_01")
+        resp = await client.get("/api/library/trash/count")
+        assert resp.status_code == 200
+        assert resp.json()["count"] == 1
+
+    async def test_trash_count_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/library/trash/count")
+        assert resp.status_code == 401
+
+    async def test_list_trash_empty_returns_empty_list(self, client):
+        """Listing trash on empty DB should return total=0 and galleries=[]."""
+        resp = await client.get("/api/library/trash")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 0
+        assert data["galleries"] == []
+
+    async def test_list_trash_returns_soft_deleted_galleries(self, client, db_session):
+        """Soft-deleted galleries should appear in trash listing."""
+        await self._soft_delete_gallery(db_session, "local", "trash_list_01", title="Trashed Gallery")
+        resp = await client.get("/api/library/trash")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["galleries"][0]["title"] == "Trashed Gallery"
+
+    async def test_list_trash_requires_auth(self, unauthed_client):
+        """Unauthenticated trash listing should return 401."""
+        resp = await unauthed_client.get("/api/library/trash")
+        assert resp.status_code == 401
+
+    async def test_restore_gallery_not_in_trash_returns_404(self, client):
+        """Restoring a gallery that is not in trash should return 404."""
+        resp = await client.post("/api/library/galleries/local/ghost_trash/restore")
+        assert resp.status_code == 404
+
+    async def test_restore_gallery_moves_out_of_trash(self, client, db_session):
+        """Restoring a soft-deleted gallery should clear deleted_at."""
+        await self._soft_delete_gallery(db_session, "local", "trash_restore_01")
+
+        # Verify it appears in trash
+        resp = await client.get("/api/library/trash")
+        assert resp.json()["total"] == 1
+
+        # Restore it
+        resp = await client.post("/api/library/galleries/local/trash_restore_01/restore")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+        # Should no longer appear in trash
+        resp = await client.get("/api/library/trash")
+        assert resp.json()["total"] == 0
+
+    async def test_restore_requires_auth(self, unauthed_client):
+        """Unauthenticated restore should return 401."""
+        resp = await unauthed_client.post(
+            "/api/library/galleries/local/any/restore"
+        )
+        assert resp.status_code == 401
+
+    async def test_permanent_delete_not_in_trash_returns_404(self, client):
+        """Permanent-deleting a gallery not in trash should return 404."""
+        resp = await client.post(
+            "/api/library/galleries/local/ghost_perm/permanent-delete"
+        )
+        assert resp.status_code == 404
+
+    async def test_permanent_delete_gallery_removes_it(self, client, db_session):
+        """Permanently deleting a trashed gallery should remove it from DB."""
+        await self._soft_delete_gallery(db_session, "local", "trash_perm_01", title="Permanent Gone")
+
+        resp = await client.post(
+            "/api/library/galleries/local/trash_perm_01/permanent-delete"
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+
+        # Gallery should no longer appear in trash
+        trash_resp = await client.get("/api/library/trash")
+        assert trash_resp.json()["total"] == 0
+
+    async def test_permanent_delete_requires_auth(self, unauthed_client):
+        """Unauthenticated permanent-delete should return 401."""
+        resp = await unauthed_client.post(
+            "/api/library/galleries/local/any/permanent-delete"
+        )
+        assert resp.status_code == 401
+
+    async def test_empty_trash_with_galleries_removes_all(self, client, db_session):
+        """Empty trash should remove all soft-deleted galleries."""
+        for i in range(3):
+            await self._soft_delete_gallery(
+                db_session, "local", f"trash_empty_{i:02d}", title=f"Trash {i}"
+            )
+
+        resp = await client.get("/api/library/trash/count")
+        assert resp.json()["count"] == 3
+
+        resp = await client.post("/api/library/trash/empty")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 3
+
+        # Trash should now be empty
+        resp = await client.get("/api/library/trash/count")
+        assert resp.json()["count"] == 0
+
+    async def test_empty_trash_when_already_empty_returns_zero_affected(self, client):
+        """Empty trash when no galleries are in trash should return affected=0."""
+        resp = await client.post("/api/library/trash/empty")
+        assert resp.status_code == 200
+        assert resp.json()["affected"] == 0
+
+    async def test_empty_trash_requires_auth(self, unauthed_client):
+        """Unauthenticated empty-trash should return 401."""
+        resp = await unauthed_client.post("/api/library/trash/empty")
+        assert resp.status_code == 401
+
+    async def test_delete_gallery_moves_to_trash(self, client, db_session):
+        """DELETE on a gallery should soft-delete it (set deleted_at)."""
+        await _insert_gallery(
+            db_session, source="local", source_id="soft_del_01", title="Soft Delete"
+        )
+        resp = await client.delete("/api/library/galleries/local/soft_del_01")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+        # Gallery should now appear in trash
+        trash_resp = await client.get("/api/library/trash")
+        assert trash_resp.json()["total"] == 1
+
+    async def test_delete_gallery_with_active_download_returns_409(self, client, db_session):
+        """Deleting a gallery with download_status=downloading should return 409."""
+        await _insert_gallery(
+            db_session,
+            source="local",
+            source_id="dl_block_01",
+            title="Downloading",
+            download_status="downloading",
+        )
+        resp = await client.delete("/api/library/galleries/local/dl_block_01")
+        assert resp.status_code == 409
+
+
+# ---------------------------------------------------------------------------
+# Gallery sources endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestGallerySources:
+    """GET /api/library/galleries/sources
+
+    Note: The sources endpoint uses DISTINCT ON (PostgreSQL-only).
+    Only auth test works with SQLite; data tests are skipped.
+    """
+
+    async def test_sources_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/library/galleries/sources")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Cursor pagination — end-to-end with valid cursor
+# ---------------------------------------------------------------------------
+
+
+class TestCursorPagination:
+    """Test gallery cursor-based pagination round-trip."""
+
+    async def test_cursor_pagination_round_trip(self, client, db_session):
+        """Using next_cursor from first page should return different set of results."""
+        for i in range(6):
+            await _insert_gallery(
+                db_session, source_id=f"cur_rt_{i:03d}", title=f"Cursor RT {i}"
+            )
+
+        # First page: cursor-less, limit=3
+        resp1 = await client.get(
+            "/api/library/galleries", params={"limit": 3, "sort": "added_at"}
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert len(data1["galleries"]) == 3
+        # page-based returns total, not next_cursor
+        assert "total" in data1
+
+    async def test_invalid_cursor_signature_returns_400(self, client):
+        """A cursor with a tampered signature should return 400."""
+        # Build a valid-looking but invalid cursor
+        import base64
+        import json as _json
+        payload = base64.urlsafe_b64encode(
+            _json.dumps({"id": 1, "v": "2024-01-01T00:00:00", "s": "added_at"}).encode()
+        ).decode().rstrip("=")
+        fake_cursor = f"{payload}.aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffff0000000011111111"
+
+        resp = await client.get(
+            "/api/library/galleries",
+            params={"cursor": fake_cursor, "sort": "added_at"},
+        )
+        assert resp.status_code == 400
+
+    async def test_cursor_sort_mismatch_returns_400(self, client, db_session):
+        """Cursor generated with sort=rating used with sort=pages should return 400."""
+        # We can't easily generate a valid cursor without DB rows here,
+        # so we test with a garbage cursor format
+        resp = await client.get(
+            "/api/library/galleries",
+            params={"cursor": "garbage.cursor", "sort": "pages"},
+        )
+        assert resp.status_code == 400

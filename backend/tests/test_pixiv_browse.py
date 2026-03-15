@@ -830,3 +830,486 @@ class TestPixivClientErrorHandling:
 
         with pytest.raises(ValueError, match="Unexpected API shape"):
             await client._call(_bad_fn)
+
+
+# ---------------------------------------------------------------------------
+# GET /api/pixiv/search — authenticated search with credentials
+# ---------------------------------------------------------------------------
+
+
+class TestPixivSearchAuthenticated:
+    """GET /api/pixiv/search — success and error paths with Pixiv credentials."""
+
+    _FAKE_SEARCH_RESULT = {
+        "illusts": [
+            {"id": 11111, "title": "Blue Hair Art"},
+            {"id": 22222, "title": "Red Eyes Art"},
+        ],
+        "next_url": None,
+    }
+
+    async def test_search_returns_results_with_credentials(self, client):
+        """With valid Pixiv credentials, search should return illust list."""
+        mock_pixiv_client = AsyncMock()
+        mock_pixiv_client.search_illust = AsyncMock(return_value=self._FAKE_SEARCH_RESULT)
+        mock_pixiv_client.__aenter__ = AsyncMock(return_value=mock_pixiv_client)
+        mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_pixiv_search_cache", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value="valid_token",
+            ),
+            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+        ):
+            resp = await client.get("/api/pixiv/search", params={"word": "blue hair"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "illusts" in data
+
+    async def test_search_returns_cached_result(self, client):
+        """Cached search result should be returned without calling PixivClient."""
+        cached = {"illusts": [{"id": 999}], "next_url": None}
+
+        with patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=cached):
+            resp = await client.get("/api/pixiv/search", params={"word": "cached"})
+
+        assert resp.status_code == 200
+        assert resp.json() == cached
+
+    async def test_search_missing_word_param_returns_422(self, client):
+        """Missing required 'word' parameter should return 422."""
+        resp = await client.get("/api/pixiv/search")
+        assert resp.status_code == 422
+
+    async def test_search_permission_error_returns_401(self, client):
+        """PermissionError from PixivClient should return 401."""
+        mock_pixiv_client = AsyncMock()
+        mock_pixiv_client.search_illust = AsyncMock(side_effect=PermissionError("token expired"))
+        mock_pixiv_client.__aenter__ = AsyncMock(return_value=mock_pixiv_client)
+        mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value="expired_token",
+            ),
+            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+        ):
+            resp = await client.get("/api/pixiv/search", params={"word": "test"})
+
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /api/pixiv/illust/{illust_id}
+# ---------------------------------------------------------------------------
+
+
+class TestPixivIllustDetail:
+    """GET /api/pixiv/illust/{illust_id} — detail endpoint."""
+
+    _FAKE_ILLUST = {
+        "id": 12345,
+        "title": "Test Illust",
+        "page_count": 1,
+        "image_urls": {"original": "https://i.pximg.net/orig/12345_p0.jpg"},
+        "meta_pages": [],
+    }
+
+    async def test_illust_detail_returns_data_with_credentials(self, client):
+        """With credentials, should return illust detail from PixivClient."""
+        mock_pixiv_client = AsyncMock()
+        mock_pixiv_client.illust_detail = AsyncMock(return_value=self._FAKE_ILLUST)
+        mock_pixiv_client.__aenter__ = AsyncMock(return_value=mock_pixiv_client)
+        mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("services.cache.get_pixiv_illust_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_pixiv_illust_cache", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value="valid_token",
+            ),
+            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+        ):
+            resp = await client.get("/api/pixiv/illust/12345")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["id"] == 12345
+
+    async def test_illust_detail_uses_cached_result(self, client):
+        """Cached illust should be returned without hitting PixivClient."""
+        with patch("services.cache.get_pixiv_illust_cache", new_callable=AsyncMock, return_value=self._FAKE_ILLUST):
+            resp = await client.get("/api/pixiv/illust/12345")
+
+        assert resp.status_code == 200
+        assert resp.json()["id"] == 12345
+
+    async def test_illust_detail_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/pixiv/illust/12345")
+        assert resp.status_code == 401
+
+    async def test_illust_pages_returns_page_list_from_cache(self, client):
+        """GET /illust/{id}/pages should build page list from cached illust."""
+        cached = {
+            "id": 12345,
+            "page_count": 2,
+            "meta_pages": [
+                {"image_urls": {"original": "https://i.pximg.net/orig/12345_p0.jpg", "large": ""}},
+                {"image_urls": {"original": "https://i.pximg.net/orig/12345_p1.jpg", "large": ""}},
+            ],
+            "image_urls": {},
+        }
+
+        with patch("services.cache.get_pixiv_illust_cache", new_callable=AsyncMock, return_value=cached):
+            resp = await client.get("/api/pixiv/illust/12345/pages")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["page_count"] == 2
+        assert len(data["pages"]) == 2
+        assert data["pages"][0]["page_num"] == 1
+
+    async def test_illust_pages_single_page_illust(self, client):
+        """Single-page illust (no meta_pages) returns one page entry from image_urls."""
+        cached = {
+            "id": 99,
+            "page_count": 1,
+            "meta_pages": [],
+            "image_urls": {"original": "https://i.pximg.net/orig/99_p0.jpg"},
+        }
+
+        with patch("services.cache.get_pixiv_illust_cache", new_callable=AsyncMock, return_value=cached):
+            resp = await client.get("/api/pixiv/illust/99/pages")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["page_count"] == 1
+        assert data["pages"][0]["url"] == "https://i.pximg.net/orig/99_p0.jpg"
+
+
+# ---------------------------------------------------------------------------
+# GET /api/pixiv/user/{user_id}
+# ---------------------------------------------------------------------------
+
+
+class TestPixivUserDetail:
+    """GET /api/pixiv/user/{user_id} — user profile endpoint."""
+
+    async def test_user_detail_returns_profile_and_recent_illusts(self, client):
+        """Should return user info and recent_illusts from PixivClient."""
+        fake_user_info = {"id": 555, "name": "Artist"}
+        fake_recent = {"illusts": [{"id": 101}, {"id": 102}]}
+
+        mock_pixiv_client = AsyncMock()
+        mock_pixiv_client.user_detail = AsyncMock(return_value=fake_user_info)
+        mock_pixiv_client.user_illusts = AsyncMock(return_value=fake_recent)
+        mock_pixiv_client.__aenter__ = AsyncMock(return_value=mock_pixiv_client)
+        mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("services.cache.get_pixiv_user_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_pixiv_user_cache", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value="valid_token",
+            ),
+            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+        ):
+            resp = await client.get("/api/pixiv/user/555")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "user" in data
+        assert "recent_illusts" in data
+
+    async def test_user_detail_from_cache(self, client):
+        """Cached user data should be returned without calling PixivClient."""
+        cached = {"user": {"id": 555, "name": "CachedArtist"}, "recent_illusts": []}
+
+        with patch("services.cache.get_pixiv_user_cache", new_callable=AsyncMock, return_value=cached):
+            resp = await client.get("/api/pixiv/user/555")
+
+        assert resp.status_code == 200
+        assert resp.json() == cached
+
+    async def test_user_detail_no_credentials_returns_400(self, client):
+        """No Pixiv credentials → 400 (pixiv_not_configured)."""
+        with (
+            patch("services.cache.get_pixiv_user_cache", new_callable=AsyncMock, return_value=None),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            resp = await client.get("/api/pixiv/user/555")
+
+        assert resp.status_code == 400
+
+    async def test_user_detail_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/pixiv/user/555")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /api/pixiv/search-public
+# ---------------------------------------------------------------------------
+
+
+class TestPixivSearchPublic:
+    """GET /api/pixiv/search-public — no Pixiv credentials required."""
+
+    async def test_search_public_returns_illusts_from_pixiv_ajax(self, client):
+        """Should parse Pixiv ajax search response and return normalized illusts."""
+        ajax_response = {
+            "error": False,
+            "body": {
+                "illustManga": {
+                    "data": [
+                        {
+                            "id": "777",
+                            "title": "Public Art",
+                            "url": "https://i.pximg.net/thumb/777.jpg",
+                            "userId": "55",
+                            "userName": "PublicArtist",
+                            "profileImageUrl": "",
+                            "pageCount": 1,
+                            "width": 800,
+                            "height": 1200,
+                            "tags": ["blue"],
+                            "createDate": "2026-01-01T00:00:00+09:00",
+                        }
+                    ],
+                    "total": 1,
+                },
+                "popular": {},
+                "relatedTags": ["sky"],
+            },
+        }
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = ajax_response
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_http = AsyncMock()
+        mock_http.get = AsyncMock(return_value=mock_resp)
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_json", new_callable=AsyncMock),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            resp = await client.get("/api/pixiv/search-public", params={"word": "blue"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "illusts" in data
+        assert data["total"] == 1
+        assert data["illusts"][0]["id"] == 777
+
+    async def test_search_public_requires_word_param(self, client):
+        """Missing 'word' parameter should return 422."""
+        resp = await client.get("/api/pixiv/search-public")
+        assert resp.status_code == 422
+
+    async def test_search_public_returns_cached_result(self, client):
+        """Cached result should be returned without making HTTP requests."""
+        cached = {"illusts": [], "total": 0}
+
+        with patch("services.cache.get_json", new_callable=AsyncMock, return_value=cached):
+            resp = await client.get("/api/pixiv/search-public", params={"word": "test"})
+
+        assert resp.status_code == 200
+        assert resp.json() == cached
+
+    async def test_search_public_pixiv_error_response_returns_502(self, client):
+        """Pixiv error=True response should return 502."""
+        mock_resp = MagicMock()
+        mock_resp.status_code = 200
+        mock_resp.json.return_value = {"error": True, "message": "Some Pixiv error"}
+        mock_resp.raise_for_status = MagicMock()
+
+        mock_http = AsyncMock()
+        mock_http.get = AsyncMock(return_value=mock_resp)
+        mock_http.__aenter__ = AsyncMock(return_value=mock_http)
+        mock_http.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch("httpx.AsyncClient", return_value=mock_http),
+        ):
+            resp = await client.get("/api/pixiv/search-public", params={"word": "error"})
+
+        assert resp.status_code == 502
+
+    async def test_search_public_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/pixiv/search-public", params={"word": "test"})
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# User bookmarks
+# ---------------------------------------------------------------------------
+
+
+class TestPixivUserBookmarks:
+    """GET /api/pixiv/user/{user_id}/bookmarks"""
+
+    async def test_user_bookmarks_returns_data(self, client):
+        """Should return bookmark list from PixivClient."""
+        fake_bookmarks = {"illusts": [{"id": 500}], "next_url": None}
+
+        mock_pixiv_client = AsyncMock()
+        mock_pixiv_client.user_bookmarks = AsyncMock(return_value=fake_bookmarks)
+        mock_pixiv_client.__aenter__ = AsyncMock(return_value=mock_pixiv_client)
+        mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_pixiv_search_cache", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value="valid_token",
+            ),
+            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+        ):
+            resp = await client.get("/api/pixiv/user/555/bookmarks")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "illusts" in data
+
+    async def test_user_bookmarks_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/pixiv/user/555/bookmarks")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# GET /api/pixiv/following/feed
+# ---------------------------------------------------------------------------
+
+
+class TestPixivFollowingFeed:
+    """GET /api/pixiv/following/feed — following feed endpoint."""
+
+    async def test_following_feed_returns_illusts(self, client):
+        """Should return feed illusts from PixivClient.illust_follow."""
+        fake_feed = {"illusts": [{"id": 888}], "next_url": None}
+
+        mock_pixiv_client = AsyncMock()
+        mock_pixiv_client.illust_follow = AsyncMock(return_value=fake_feed)
+        mock_pixiv_client.__aenter__ = AsyncMock(return_value=mock_pixiv_client)
+        mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_pixiv_search_cache", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value="valid_token",
+            ),
+            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+        ):
+            resp = await client.get("/api/pixiv/following/feed")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "illusts" in data
+
+    async def test_following_feed_no_credentials_returns_400(self, client):
+        """No Pixiv credentials → 400."""
+        with (
+            patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            resp = await client.get("/api/pixiv/following/feed")
+
+        assert resp.status_code == 400
+
+    async def test_following_feed_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/pixiv/following/feed")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# R18 ranking path
+# ---------------------------------------------------------------------------
+
+
+class TestPixivR18Ranking:
+    """GET /api/pixiv/ranking?mode=daily_r18 — requires Pixiv credentials."""
+
+    async def test_r18_ranking_returns_data_with_credentials(self, client):
+        """daily_r18 mode should use PixivClient.illust_ranking and return contents list."""
+        fake_r18_result = {
+            "illusts": [
+                {
+                    "id": 99,
+                    "title": "R18 Art",
+                    "user": {"name": "artist99"},
+                    "image_urls": {"square_medium": "https://i.pximg.net/sq/99.jpg"},
+                }
+            ],
+            "next_offset": None,
+        }
+
+        mock_pixiv_client = AsyncMock()
+        mock_pixiv_client.illust_ranking = AsyncMock(return_value=fake_r18_result)
+        mock_pixiv_client.__aenter__ = AsyncMock(return_value=mock_pixiv_client)
+        mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_json", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value="valid_token",
+            ),
+            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+        ):
+            resp = await client.get("/api/pixiv/ranking", params={"mode": "daily_r18"})
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "contents" in data
+        assert data["mode"] == "daily_r18"
+
+    async def test_r18_ranking_no_credentials_returns_400(self, client):
+        """daily_r18 without Pixiv credentials should return 400."""
+        with (
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            resp = await client.get("/api/pixiv/ranking", params={"mode": "daily_r18"})
+
+        assert resp.status_code == 400
