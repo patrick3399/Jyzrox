@@ -44,7 +44,7 @@ export type FilterAction =
   | { type: 'TOGGLE_SELECTED_ID'; payload: number }
   | { type: 'CLEAR_SELECTION' }
 
-function filterReducer(state: FilterState, action: FilterAction): FilterState {
+export function filterReducer(state: FilterState, action: FilterAction): FilterState {
   switch (action.type) {
     case 'SET_SEARCH_INPUT':
       return { ...state, searchInput: action.payload }
@@ -106,7 +106,7 @@ function filterReducer(state: FilterState, action: FilterAction): FilterState {
   }
 }
 
-function initFilterState(searchParams: URLSearchParams): FilterState {
+export function initFilterState(searchParams: URLSearchParams): FilterState {
   return {
     searchQuery: searchParams.get('q') ?? '',
     searchInput: searchParams.get('q') ?? '',

@@ -290,4 +290,219 @@ describe('qs() query-string builder', () => {
     expect(search.get('page')).toBe('2')
     expect(search.getAll('tags')).toEqual(['action', 'romance'])
   })
+
+  it('should include boolean false value as "false" in the query string', async () => {
+    const { api } = await import('../lib/api')
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
+    )
+
+    await api.library.getGalleries({ favorites_only: false } as never)
+
+    const [url] = vi.mocked(fetch).mock.calls[0]
+    const search = new URL(url as string, 'http://localhost').searchParams
+    expect(search.get('favorites_only')).toBe('false')
+  })
+
+  it('should include numeric 0 value as "0" in the query string', async () => {
+    const { api } = await import('../lib/api')
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
+    )
+
+    await api.library.getGalleries({ page: 0 } as never)
+
+    const [url] = vi.mocked(fetch).mock.calls[0]
+    const search = new URL(url as string, 'http://localhost').searchParams
+    expect(search.get('page')).toBe('0')
+  })
+})
+
+// ── CSRF token handling ───────────────────────────────────────────────
+
+describe('apiFetch — CSRF handling', () => {
+  it('should include X-CSRF-Token header on POST requests when csrf_token cookie exists', async () => {
+    const { api } = await import('../lib/api')
+
+    Object.defineProperty(document, 'cookie', {
+      writable: true,
+      configurable: true,
+      value: 'csrf_token=test-token-123',
+    })
+
+    vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ jsonBody: { status: 'ok' } }))
+    await api.auth.logout()
+
+    const [, init] = vi.mocked(fetch).mock.calls[0]
+    const headers = new Headers(init?.headers as HeadersInit)
+    expect(headers.get('X-CSRF-Token')).toBe('test-token-123')
+
+    Object.defineProperty(document, 'cookie', { writable: true, configurable: true, value: '' })
+  })
+
+  it('should NOT include X-CSRF-Token header on GET requests', async () => {
+    const { api } = await import('../lib/api')
+
+    Object.defineProperty(document, 'cookie', {
+      writable: true,
+      configurable: true,
+      value: 'csrf_token=test-token-123',
+    })
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
+    )
+    await api.library.getGalleries()
+
+    const [, init] = vi.mocked(fetch).mock.calls[0]
+    const headers = new Headers(init?.headers as HeadersInit)
+    expect(headers.get('X-CSRF-Token')).toBeNull()
+
+    Object.defineProperty(document, 'cookie', { writable: true, configurable: true, value: '' })
+  })
+})
+
+// ── HTTP status code handling ─────────────────────────────────────────
+
+describe('apiFetch — HTTP status codes', () => {
+  it('should throw "Unauthorized" and redirect to /login on 401 response', async () => {
+    const { api } = await import('../lib/api')
+
+    // Provide a writable location so the code can set href.
+    const originalLocation = window.location
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: { pathname: '/library', href: '' } as Location,
+    })
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({ status: 401, ok: false, jsonBody: {} }),
+    )
+
+    await expect(api.library.getGalleries()).rejects.toThrow('Unauthorized')
+    expect(window.location.href).toBe('/login')
+
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: originalLocation,
+    })
+  })
+
+  it('should throw "Forbidden" and redirect to /forbidden on 403 response', async () => {
+    // Reset module so the isRedirecting flag starts as false (it may have been
+    // set to true by the 401 test which shares the same module instance).
+    vi.resetModules()
+    const { api } = await import('../lib/api')
+
+    const originalLocation = window.location
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: { pathname: '/library', href: '' } as Location,
+    })
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({ status: 403, ok: false, jsonBody: {} }),
+    )
+
+    await expect(api.library.getGalleries()).rejects.toThrow('Forbidden')
+    expect(window.location.href).toBe('/forbidden')
+
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: originalLocation,
+    })
+  })
+
+  it('should throw the rate-limit error message on 429 response', async () => {
+    const { api } = await import('../lib/api')
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({ status: 429, ok: false, jsonBody: {} }),
+    )
+
+    await expect(api.library.getGalleries()).rejects.toThrow()
+  })
+
+  it('should translate error code when detail has a code field', async () => {
+    const { api } = await import('../lib/api')
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({
+        status: 400,
+        ok: false,
+        jsonBody: { detail: { code: 'unknown_error_code_xyz', message: 'fallback message' } },
+      }),
+    )
+
+    // When the i18n key is not found, t() returns the key itself, so the code
+    // falls back to the message field provided by the server.
+    await expect(api.library.getGalleries()).rejects.toThrow('fallback message')
+  })
+})
+
+// ── Namespace → URL routing ───────────────────────────────────────────
+
+describe('api namespace URL routing', () => {
+  it('api.auth.login sends POST to /api/auth/login with username+password body', async () => {
+    const { api } = await import('../lib/api')
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({ jsonBody: { status: 'ok', role: 'member' } }),
+    )
+
+    await api.auth.login('alice', 'secret')
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/auth/login')
+    expect((init as RequestInit).method).toBe('POST')
+    expect(JSON.parse((init as RequestInit).body as string)).toEqual({
+      username: 'alice',
+      password: 'secret',
+    })
+  })
+
+  it('api.library.getGallery sends GET to /api/library/galleries/:source/:id', async () => {
+    const { api } = await import('../lib/api')
+
+    vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ jsonBody: {} }))
+
+    await api.library.getGallery('local', '42')
+
+    const [url] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/library/galleries/local/42')
+  })
+
+  it('api.library.getGalleries appends scalar query params to the URL', async () => {
+    const { api } = await import('../lib/api')
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({ jsonBody: { total: 0, page: 1, galleries: [] } }),
+    )
+
+    await api.library.getGalleries({ q: 'test' } as never)
+
+    const [url] = vi.mocked(fetch).mock.calls[0]
+    const search = new URL(url as string, 'http://localhost').searchParams
+    expect(search.get('q')).toBe('test')
+  })
+
+  it('api.system.health sends GET to /api/system/health', async () => {
+    const { api } = await import('../lib/api')
+
+    vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ jsonBody: { status: 'ok' } }))
+
+    await api.system.health()
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/system/health')
+    // GET is the default — method may be undefined or explicitly 'GET'.
+    const method = ((init as RequestInit).method ?? 'GET').toUpperCase()
+    expect(method).toBe('GET')
+  })
 })

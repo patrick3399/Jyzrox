@@ -33,7 +33,7 @@ export interface VirtualGridProps<T> {
   onRegisterElement?: (index: number, el: HTMLElement | null) => void
 }
 
-function getColumnCount(width: number, config: ColumnConfig): number {
+export function getColumnCount(width: number, config: ColumnConfig): number {
   if (config.xxl !== undefined && width >= 1536) return config.xxl
   if (config.xl !== undefined && width >= 1280) return config.xl
   if (config.lg !== undefined && width >= 1024) return config.lg
