@@ -2,7 +2,7 @@
 
 import Link from 'next/link'
 import useSWR from 'swr'
-import { useState } from 'react'
+import { useState, useCallback } from 'react'
 import {
   Search,
   BookOpen,
@@ -21,6 +21,8 @@ import {
   Key,
   Puzzle,
   Rss,
+  LayoutList,
+  LayoutGrid,
 } from 'lucide-react'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
@@ -116,6 +118,7 @@ const QUICK_LINKS = [
 ]
 
 const DISMISSED_KEY = 'dashboard:dismissed_alerts'
+const COMPACT_LINKS_KEY = 'dashboard_compact_links'
 
 function alertSeverity(msg: string): 'error' | 'warning' | 'info' {
   const lower = msg.toLowerCase()
@@ -249,6 +252,23 @@ export default function Dashboard() {
     (j: DownloadJob) => j.status === 'queued' || j.status === 'running',
   )
 
+  // Compact links state — persisted to localStorage.
+  // Default: compact on mobile (< lg = 1024px), expanded on desktop.
+  const [compactLinks, setCompactLinks] = useState<boolean>(() => {
+    if (typeof window === 'undefined') return false
+    const stored = localStorage.getItem(COMPACT_LINKS_KEY)
+    if (stored !== null) return stored === 'true'
+    return window.innerWidth < 1024
+  })
+
+  const toggleCompactLinks = useCallback(() => {
+    setCompactLinks((prev) => {
+      const next = !prev
+      try { localStorage.setItem(COMPACT_LINKS_KEY, String(next)) } catch { /* noop */ }
+      return next
+    })
+  }, [])
+
   return (
     <div className="space-y-8">
         {/* Header */}
@@ -262,28 +282,70 @@ export default function Dashboard() {
         {alerts.length > 0 && <SystemAlerts alerts={alerts} />}
 
         {/* Quick Links */}
-        <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7 gap-2 lg:gap-3">
-          {QUICK_LINKS.map((link) => {
-            const Icon = link.icon
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className="bg-vault-card border border-vault-border rounded-lg p-3 lg:p-4 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group flex flex-col items-center lg:items-start gap-1"
-              >
-                <Icon
-                  size={20}
-                  className="text-vault-text-muted group-hover:text-vault-accent transition-colors lg:hidden"
-                />
-                <div className="hidden lg:flex items-center gap-2 mb-1">
-                  <Icon size={16} className="text-vault-text-muted group-hover:text-vault-accent transition-colors" />
-                  <p className="font-medium text-sm">{link.label()}</p>
-                </div>
-                <p className="text-xs text-vault-text-secondary text-center lg:text-left font-medium lg:font-normal lg:hidden">{link.label()}</p>
-                <p className="text-xs text-vault-text-muted hidden lg:block">{link.desc()}</p>
-              </Link>
-            )
-          })}
+        <div>
+          {/* Section header with toggle */}
+          <div className="flex items-center justify-between mb-2">
+            <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
+              {t('dashboard.quickLinks.title')}
+            </h2>
+            <button
+              onClick={toggleCompactLinks}
+              className="p-1.5 rounded-md text-vault-text-muted hover:text-vault-text hover:bg-vault-card-hover transition-colors"
+              aria-label={compactLinks ? t('dashboard.quickLinks.expandedView') : t('dashboard.quickLinks.compactView')}
+              title={compactLinks ? t('dashboard.quickLinks.expandedView') : t('dashboard.quickLinks.compactView')}
+            >
+              {compactLinks ? <LayoutList size={15} /> : <LayoutGrid size={15} />}
+            </button>
+          </div>
+
+          {/* Grid — animates between compact and expanded */}
+          <div
+            className={`grid gap-2 transition-all duration-200 ${
+              compactLinks
+                ? 'grid-cols-4 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9 xl:grid-cols-10'
+                : 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7'
+            }`}
+          >
+            {QUICK_LINKS.map((link) => {
+              const Icon = link.icon
+              if (compactLinks) {
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className="bg-vault-card border border-vault-border rounded-lg p-2 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group flex flex-col items-center gap-1.5"
+                    title={link.desc()}
+                  >
+                    <Icon
+                      size={18}
+                      className="text-vault-text-muted group-hover:text-vault-accent transition-colors shrink-0"
+                    />
+                    <p className="text-[10px] text-vault-text-secondary text-center leading-tight font-medium line-clamp-2">
+                      {link.label()}
+                    </p>
+                  </Link>
+                )
+              }
+              return (
+                <Link
+                  key={link.href}
+                  href={link.href}
+                  className="bg-vault-card border border-vault-border rounded-lg p-3 lg:p-4 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group flex flex-col items-center lg:items-start gap-1"
+                >
+                  <Icon
+                    size={20}
+                    className="text-vault-text-muted group-hover:text-vault-accent transition-colors lg:hidden"
+                  />
+                  <div className="hidden lg:flex items-center gap-2 mb-1">
+                    <Icon size={16} className="text-vault-text-muted group-hover:text-vault-accent transition-colors" />
+                    <p className="font-medium text-sm">{link.label()}</p>
+                  </div>
+                  <p className="text-xs text-vault-text-secondary text-center lg:text-left font-medium lg:font-normal lg:hidden">{link.label()}</p>
+                  <p className="text-xs text-vault-text-muted hidden lg:block">{link.desc()}</p>
+                </Link>
+              )
+            })}
+          </div>
         </div>
 
         {/* Active Downloads */}

@@ -15,6 +15,7 @@
   },
   "dependencies": {
     "@tanstack/react-virtual": "^3.13.21",
+    "dompurify": "^3.3.3",
     "justified-layout": "^4.1.0",
     "lucide-react": "^0.577.0",
     "next": "^16.0.0",
@@ -29,6 +30,7 @@
     "@testing-library/jest-dom": "^6.9.1",
     "@testing-library/react": "^16.0.0",
     "@testing-library/user-event": "^14.6.1",
+    "@types/dompurify": "^3.0.5",
     "@types/justified-layout": "^4.1.4",
     "@types/node": "^22",
     "@types/react": "^19",

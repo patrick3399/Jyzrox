@@ -40,6 +40,9 @@ const ja: Record<string, string> = {
   'dashboard.quickLinks.tagsDesc': 'タグ・エイリアス・含意を管理',
   'dashboard.quickLinks.settings': '設定',
   'dashboard.quickLinks.settingsDesc': '認証情報とシステム設定',
+  'dashboard.quickLinks.title': 'クイックリンク',
+  'dashboard.quickLinks.compactView': 'コンパクト表示',
+  'dashboard.quickLinks.expandedView': '展開表示',
 
   // ── Browse ──
   'browse.searchPlaceholder': 'E-Hentaiを検索...',

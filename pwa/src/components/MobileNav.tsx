@@ -34,6 +34,7 @@ import {
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
+import { useNavCounts } from '@/hooks/useNavCounts'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import type { UserRole } from '@/lib/types'
@@ -101,6 +102,7 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
   const { logout } = useAuth()
   const { data: profile } = useProfile()
   const { data: stats } = useDownloadStats()
+  const navCounts = useNavCounts()
 
   // Close drawer on route change
   useEffect(() => {
@@ -207,6 +209,11 @@ export function MobileNav({ open, onClose }: MobileNavProps) {
                                 {stats.finished}
                               </span>
                             )}
+                          </span>
+                        )}
+                        {link.href !== '/queue' && (navCounts[link.href as keyof typeof navCounts] ?? 0) > 0 && (
+                          <span className="ml-auto min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-vault-accent/20 text-vault-accent text-[10px] font-bold px-1">
+                            {navCounts[link.href as keyof typeof navCounts]}
                           </span>
                         )}
                       </Link>

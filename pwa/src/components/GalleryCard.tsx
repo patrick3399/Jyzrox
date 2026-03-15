@@ -6,6 +6,7 @@ import type { Gallery, EhGallery } from '@/lib/types'
 import { RatingStars } from './RatingStars'
 import { ContextMenu } from './ContextMenu'
 import { useLongPress } from '@/hooks/useLongPress'
+import { getSourceStyle, getEventPosition } from '@/lib/galleryUtils'
 import { t } from '@/lib/i18n'
 
 // ── Category colours ──────────────────────────────────────────────────
@@ -52,20 +53,7 @@ export function EhGalleryCard({ gallery, onClick }: EhCardProps) {
   const handleLongPress = useCallback(
     (e: React.TouchEvent | React.MouseEvent) => {
       e.preventDefault()
-      let x = 0
-      let y = 0
-      if ('touches' in e && e.touches.length > 0) {
-        x = e.touches[0].clientX
-        y = e.touches[0].clientY
-      } else if ('changedTouches' in e && e.changedTouches.length > 0) {
-        x = e.changedTouches[0].clientX
-        y = e.changedTouches[0].clientY
-      } else {
-        const me = e as React.MouseEvent
-        x = me.clientX
-        y = me.clientY
-      }
-      setMenuPos({ x, y })
+      setMenuPos(getEventPosition(e))
       setMenuOpen(true)
     },
     [],
@@ -187,23 +175,8 @@ export function LibraryGalleryCard({
 
   const handleLongPress = useCallback(
     (e: React.TouchEvent | React.MouseEvent) => {
-      // Do not interfere with select-mode — long-press still opens context menu,
-      // but callers can rely on the normal click to toggle selection.
       e.preventDefault()
-      let x = 0
-      let y = 0
-      if ('touches' in e && e.touches.length > 0) {
-        x = e.touches[0].clientX
-        y = e.touches[0].clientY
-      } else if ('changedTouches' in e && e.changedTouches.length > 0) {
-        x = e.changedTouches[0].clientX
-        y = e.changedTouches[0].clientY
-      } else {
-        const me = e as React.MouseEvent
-        x = me.clientX
-        y = me.clientY
-      }
-      setMenuPos({ x, y })
+      setMenuPos(getEventPosition(e))
       setMenuOpen(true)
     },
     [],
@@ -211,14 +184,7 @@ export function LibraryGalleryCard({
 
   const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
 
-  const sourceStyle = (() => {
-    if (gallery.source === 'ehentai') return { label: 'E-Hentai', className: 'bg-purple-900/50 text-purple-300 border-purple-800' }
-    if (gallery.source === 'pixiv') return { label: 'Pixiv', className: 'bg-blue-900/50 text-blue-300 border-blue-800' }
-    if (gallery.source === 'local' && gallery.import_mode === 'link') return { label: t('library.monitored'), className: 'bg-teal-900/50 text-teal-300 border-teal-800' }
-    if (gallery.source === 'local' && gallery.import_mode === 'copy') return { label: t('library.imported'), className: 'bg-amber-900/50 text-amber-300 border-amber-800' }
-    if (gallery.source === 'local') return { label: 'Local', className: 'bg-green-900/50 text-green-300 border-green-800' }
-    return { label: gallery.source.charAt(0).toUpperCase() + gallery.source.slice(1), className: 'bg-vault-card text-vault-text-muted border-vault-border' }
-  })()
+  const sourceStyle = getSourceStyle(gallery)
 
   const contextItems = [
     {

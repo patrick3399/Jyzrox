@@ -3,13 +3,14 @@
 import { useState, useCallback, Suspense, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { BookOpen, Plus, Minus, X, ChevronDown } from 'lucide-react'
+import { BookOpen, Plus, Minus, X, ChevronDown, LayoutGrid, List } from 'lucide-react'
 import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { useCollections } from '@/hooks/useCollections'
 import { useLibraryFilters } from '@/hooks/useLibraryFilters'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
+import { GalleryListCard } from '@/components/GalleryListCard'
 import { SkeletonGrid } from '@/components/Skeleton'
 import { EmptyState } from '@/components/EmptyState'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -61,6 +62,17 @@ function LibraryContent() {
   const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
   const [batchTagInput, setBatchTagInput] = useState('')
   const [batchTagList, setBatchTagList] = useState<string[]>([])
+
+  // View mode: 'grid' | 'list', persisted to localStorage
+  const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
+    if (typeof window === 'undefined') return 'grid'
+    return (localStorage.getItem('library_view_mode') as 'grid' | 'list') ?? 'grid'
+  })
+
+  const handleViewModeChange = useCallback((mode: 'grid' | 'list') => {
+    setViewMode(mode)
+    localStorage.setItem('library_view_mode', mode)
+  }, [])
 
   // Collapsible filter panel: collapsed by default on mobile, expanded on desktop
   const [filtersOpen, setFiltersOpen] = useState<boolean>(() => {
@@ -380,8 +392,27 @@ function LibraryContent() {
       )}
 
       {total !== undefined && (
-        <div className="text-sm text-vault-text-muted mb-4">
-          {`${formatNumber(total)} ${t('library.galleries')}`}
+        <div className="flex items-center justify-between mb-4">
+          <span className="text-sm text-vault-text-muted">
+            {`${formatNumber(total)} ${t('library.galleries')}`}
+          </span>
+          {/* View mode toggle */}
+          <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
+            <button
+              onClick={() => handleViewModeChange('grid')}
+              title={t('browse.gridView')}
+              className={`px-3 py-2 transition-colors ${viewMode === 'grid' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
+            >
+              <LayoutGrid size={15} />
+            </button>
+            <button
+              onClick={() => handleViewModeChange('list')}
+              title={t('browse.listView')}
+              className={`px-3 py-2 transition-colors ${viewMode === 'list' ? 'bg-vault-input text-vault-text' : 'text-vault-text-muted hover:text-vault-text'}`}
+            >
+              <List size={15} />
+            </button>
+          </div>
         </div>
       )}
 
@@ -396,13 +427,14 @@ function LibraryContent() {
       {!isLoading && galleries.length > 0 && (
         <VirtualGrid
           items={galleries}
-          columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }}
-          gap={12}
-          estimateHeight={300}
+          columns={viewMode === 'list' ? { base: 1 } : { base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }}
+          gap={viewMode === 'list' ? 8 : 12}
+          estimateHeight={viewMode === 'list' ? 134 : 300}
           focusedIndex={focusedIndex}
           onColCountChange={setColCount}
           onRegisterElement={registerElement}
           renderItem={(gallery) => {
+            const Card = viewMode === 'list' ? GalleryListCard : LibraryGalleryCard
             if (selectMode) {
               const isSelected = selectedIds.has(gallery.id)
               return (
@@ -411,7 +443,7 @@ function LibraryContent() {
                     dispatch({ type: 'TOGGLE_SELECTED_ID', payload: gallery.id })
                   }}
                 >
-                  <LibraryGalleryCard
+                  <Card
                     gallery={gallery}
                     thumbUrl={gallery.cover_thumb ?? undefined}
                     selected={isSelected}
@@ -422,7 +454,7 @@ function LibraryContent() {
             }
             return (
               <Link href={`/library/${gallery.source}/${gallery.source_id}`} onClick={() => saveScroll()}>
-                <LibraryGalleryCard gallery={gallery} thumbUrl={gallery.cover_thumb ?? undefined} />
+                <Card gallery={gallery} thumbUrl={gallery.cover_thumb ?? undefined} />
               </Link>
             )
           }}

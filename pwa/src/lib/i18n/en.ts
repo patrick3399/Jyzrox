@@ -64,6 +64,9 @@ const en: Record<string, string> = {
   'dashboard.quickLinks.pluginsDesc': 'View installed plugins',
   'dashboard.quickLinks.settings': 'Settings',
   'dashboard.quickLinks.settingsDesc': 'Credentials and system config',
+  'dashboard.quickLinks.title': 'Quick Links',
+  'dashboard.quickLinks.compactView': 'Compact view',
+  'dashboard.quickLinks.expandedView': 'Expanded view',
 
   // ── Browse ──
   'browse.searchPlaceholder': 'Search E-Hentai...',
@@ -494,7 +497,10 @@ const en: Record<string, string> = {
   'explorer.deleteFileFailed': 'Failed to delete file',
   'explorer.deleteGallery': 'Delete Gallery',
   'explorer.deleteGalleryConfirm': 'Delete gallery "{title}" and all its files?',
+  'explorer.deleteGalleriesConfirm': 'Delete {count} gallery/galleries and all their files? This cannot be undone.',
   'explorer.galleryDeleted': 'Gallery deleted',
+  'explorer.galleriesDeleted': '{count} gallery/galleries deleted',
+  'explorer.galleriesDeleteSkipped': '({count} skipped)',
   'explorer.noGalleries': 'No gallery directories found',
   'explorer.emptyGalleryPrompt': 'Gallery has no files left. Delete the gallery too?',
   'explorer.selectedCount': '{count} selected',
@@ -1324,6 +1330,10 @@ const en: Record<string, string> = {
 
   // ── Bottom Tab Bar ──
   'nav.more': 'More',
+  'settings.bottomTab': 'Bottom Tab Bar',
+  'settings.bottomTabDesc': 'Choose the 4 shortcuts shown in the mobile bottom navigation bar.',
+  'settings.bottomTabSelect': 'Select exactly 4 tabs',
+  'settings.bottomTabReset': 'Reset to defaults',
 
   // ── Back Button ──
   'common.back': 'Back',
@@ -1410,6 +1420,11 @@ const en: Record<string, string> = {
   'trash.empty': 'Trash is empty',
   'trash.permanentlyDeleted': 'Permanently deleted',
   'trash.deletedAt': 'Deleted {time}',
+
+  // ── Pull to Refresh ──
+  'pullToRefresh.pull': 'Pull to refresh',
+  'pullToRefresh.release': 'Release to refresh',
+  'pullToRefresh.refreshing': 'Refreshing...',
 }
 
 export default en

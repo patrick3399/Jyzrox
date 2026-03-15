@@ -308,7 +308,7 @@ describe('Library page — loading state', () => {
   it('test_library_loading_rendersSpinner', () => {
     setLoadingState()
     render(<LibraryPage />)
-    expect(screen.getByTestId('loading-spinner')).toBeInTheDocument()
+    expect(screen.getByTestId('skeleton-grid')).toBeInTheDocument()
   })
 
   it('test_library_loading_doesNotRenderEmptyState', () => {
@@ -410,5 +410,85 @@ describe('Library page — favorites filter', () => {
     const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
     // favorited: true or truthy
     expect(lastCall[0]?.favorited).toBeTruthy()
+  })
+})
+
+describe('Library page — viewMode toggle', () => {
+  beforeEach(() => {
+    localStorage.clear()
+  })
+
+  it('test_library_viewMode_gridToggleButton_rendersWhenGalleriesExist', () => {
+    setGalleriesState([makeGallery(1)])
+    render(<LibraryPage />)
+    const gridBtn = screen.getByTitle('browse.gridView')
+    expect(gridBtn).toBeInTheDocument()
+  })
+
+  it('test_library_viewMode_listToggleButton_rendersWhenGalleriesExist', () => {
+    setGalleriesState([makeGallery(1)])
+    render(<LibraryPage />)
+    const listBtn = screen.getByTitle('browse.listView')
+    expect(listBtn).toBeInTheDocument()
+  })
+
+  it('test_library_viewMode_defaultIsGrid_whenLocalStorageEmpty', () => {
+    setGalleriesState([makeGallery(1)])
+    render(<LibraryPage />)
+    const gridBtn = screen.getByTitle('browse.gridView')
+    // Grid button should carry the active background class when viewMode is 'grid'
+    expect(gridBtn.className).toContain('bg-vault-input')
+  })
+
+  it('test_library_viewMode_readsInitialValueFromLocalStorage', () => {
+    localStorage.setItem('library_view_mode', 'list')
+    setGalleriesState([makeGallery(1)])
+    render(<LibraryPage />)
+    const listBtn = screen.getByTitle('browse.listView')
+    expect(listBtn.className).toContain('bg-vault-input')
+  })
+
+  it('test_library_viewMode_clickingListButton_activatesListView', async () => {
+    const user = userEvent.setup()
+    setGalleriesState([makeGallery(1)])
+    render(<LibraryPage />)
+    const listBtn = screen.getByTitle('browse.listView')
+    await user.click(listBtn)
+    expect(listBtn.className).toContain('bg-vault-input')
+  })
+
+  it('test_library_viewMode_clickingGridButton_activatesGridView', async () => {
+    const user = userEvent.setup()
+    localStorage.setItem('library_view_mode', 'list')
+    setGalleriesState([makeGallery(1)])
+    render(<LibraryPage />)
+    const gridBtn = screen.getByTitle('browse.gridView')
+    await user.click(gridBtn)
+    expect(gridBtn.className).toContain('bg-vault-input')
+  })
+
+  it('test_library_viewMode_clickingListButton_persistsToLocalStorage', async () => {
+    const user = userEvent.setup()
+    setGalleriesState([makeGallery(1)])
+    render(<LibraryPage />)
+    await user.click(screen.getByTitle('browse.listView'))
+    expect(localStorage.getItem('library_view_mode')).toBe('list')
+  })
+
+  it('test_library_viewMode_toggleButtons_notRendered_whenTotalIsUndefined', () => {
+    // The toggle only renders when total !== undefined.
+    // Simulate loading state where total is not yet available.
+    mockUseInfiniteLibraryGalleries.mockReturnValue({
+      galleries: [],
+      total: undefined,
+      isLoading: false,
+      error: null,
+      isLoadingMore: false,
+      isReachingEnd: true,
+      loadMore: vi.fn(),
+    })
+    render(<LibraryPage />)
+    expect(screen.queryByTitle('browse.gridView')).not.toBeInTheDocument()
+    expect(screen.queryByTitle('browse.listView')).not.toBeInTheDocument()
   })
 })
