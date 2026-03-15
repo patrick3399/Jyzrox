@@ -37,6 +37,7 @@ class TestBatchScan:
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
+            patch("os.sep", "/"),
             patch("routers.import_router.get_redis", return_value=mock_redis),
             patch("os.walk", return_value=iter(walk_data)),
         ):
@@ -69,13 +70,26 @@ class TestBatchScan:
             ("/mnt/test_lib/root/artist_name", ["gallery_name"], []),
             ("/mnt/test_lib/root/artist_name/gallery_name", [], ["page1.jpg", "page2.jpg", "page3.png"]),
         ]
+
+        def _posix_relpath(path, start):
+            # Strip start prefix and return forward-slash relative path
+            path = path.replace("\\", "/")
+            start = start.replace("\\", "/")
+            if path == start:
+                return "."
+            if path.startswith(start.rstrip("/") + "/"):
+                return path[len(start.rstrip("/")) + 1:]
+            return path
+
         with (
             patch("core.config.settings.data_gallery_path", "/data/gallery"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.relpath", side_effect=_posix_relpath),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
+            patch("os.sep", "/"),
             patch("routers.import_router.get_redis", return_value=mock_redis),
             patch("os.walk", return_value=iter(walk_data)),
         ):
@@ -100,13 +114,25 @@ class TestBatchScan:
             ("/mnt/test_lib/root/deep", ["nested"], []),
             ("/mnt/test_lib/root/deep/nested", [], ["img.jpg"]),
         ]
+
+        def _posix_relpath(path, start):
+            path = path.replace("\\", "/")
+            start = start.replace("\\", "/")
+            if path == start:
+                return "."
+            if path.startswith(start.rstrip("/") + "/"):
+                return path[len(start.rstrip("/")) + 1:]
+            return path
+
         with (
             patch("core.config.settings.data_gallery_path", "/data/gallery"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("routers.import_router.get_all_library_paths", AsyncMock(return_value=["/mnt/test_lib"])),
             patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.path.relpath", side_effect=_posix_relpath),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
+            patch("os.sep", "/"),
             patch("routers.import_router.get_redis", return_value=mock_redis),
             patch("os.walk", return_value=iter(walk_data)),
         ):
@@ -135,6 +161,7 @@ class TestBatchScan:
             patch("core.config.settings.data_gallery_path", "/data/gallery"),
             patch("core.config.settings.library_base_path", "/mnt"),
             patch("os.path.realpath", side_effect=lambda p: p),
+            patch("os.sep", "/"),
         ):
             resp = await client.post(
                 "/api/import/batch/scan",
@@ -168,6 +195,7 @@ class TestBatchStart:
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
+            patch("os.sep", "/"),
             patch("routers.import_router.get_redis", return_value=mock_redis),
         ):
             resp = await client.post(
@@ -210,6 +238,7 @@ class TestBatchStart:
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
+            patch("os.sep", "/"),
             patch("routers.import_router.get_redis", return_value=mock_redis),
             patch("routers.import_router.async_session", mock_session_factory),
         ):
@@ -233,6 +262,7 @@ class TestBatchStart:
             patch("os.path.realpath", side_effect=lambda p: p),
             patch("os.path.isdir", return_value=True),
             patch("os.access", return_value=True),
+            patch("os.sep", "/"),
             patch("routers.import_router.get_redis", return_value=mock_redis),
         ):
             resp = await client.post(

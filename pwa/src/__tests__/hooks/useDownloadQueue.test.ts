@@ -58,6 +58,30 @@ vi.mock('@/lib/api', () => ({
   },
 }))
 
+// ── React hook stubs ─────────────────────────────────────────────────
+// useDownloadJobs and useDownloadStats call useRef/useEffect from React
+// directly, which throws "Invalid hook call" outside a component.
+// We stub those two hooks here so the tests can call the hooks in plain
+// test scope without a rendering context.  All other React exports are
+// kept real so JSX in the rest of the suite continues to work.
+
+vi.mock('react', async () => {
+  const actual = await vi.importActual<typeof import('react')>('react')
+  return {
+    ...actual,
+    useRef: () => ({ current: undefined }),
+    useEffect: vi.fn(),
+  }
+})
+
+// ── @/lib/ws stub ─────────────────────────────────────────────────────
+// useDownloadJobs and useDownloadStats call useWs() which reads from a
+// React Context.  Provide a plain stub so no context provider is needed.
+
+vi.mock('@/lib/ws', () => ({
+  useWs: () => ({ connected: false, lastJobUpdate: null, lastSubCheck: null }),
+}))
+
 // ── swr / swr/mutation mocks ──────────────────────────────────────────
 
 // We capture key, fetcher, and options from every useSWR call.
