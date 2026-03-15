@@ -64,6 +64,12 @@ function ImageBrowserInner() {
     return () => ro.disconnect()
   }, [])
 
+  const targetRowHeight = useMemo(() => {
+    if (containerWidth < 768) return 150
+    if (containerWidth < 1024) return 180
+    return 200
+  }, [containerWidth])
+
   const { data: dynamicSources } = useLibrarySources()
   const { data: categoriesData } = useGalleryCategories()
 
@@ -287,7 +293,7 @@ function ImageBrowserInner() {
               items={images}
               getAspectRatio={getAspectRatio}
               containerWidth={containerWidth}
-              targetRowHeight={240}
+              targetRowHeight={targetRowHeight}
               boxSpacing={4}
               renderItem={renderItem}
               onLoadMore={loadMore}
