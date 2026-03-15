@@ -331,7 +331,7 @@ class EhClient:
             )
         return meta
 
-    def _parse_detail_html(self, html: str) -> tuple[dict[int, str], dict[int, str]]:
+    def _parse_detail_html(self, html: str, gid: int = 0) -> tuple[dict[int, str], dict[int, str]]:
         """Parse a single gallery detail page HTML for pTokens + preview thumbnails."""
         token_map: dict[int, str] = {}
         preview_map: dict[int, str] = {}
@@ -339,7 +339,10 @@ class EhClient:
         # Extract pTokens from preview links
         for match in _PTOKEN_RE.finditer(html):
             ptoken = match.group(1)
+            match_gid = int(match.group(2))
             page_num = int(match.group(3))
+            if gid and match_gid != gid:
+                continue  # Skip links belonging to other galleries
             token_map[page_num] = ptoken
 
         # Extract preview thumbnails — try new format first (2024+), then legacy formats
@@ -397,7 +400,7 @@ class EhClient:
             raise
         self._check_auth(resp.text, resp)
 
-        _, preview_map = self._parse_detail_html(resp.text)
+        _, preview_map = self._parse_detail_html(resp.text, gid=gid)
         return preview_map
 
     async def get_image_tokens(self, gid: int, token: str, total_pages: int) -> tuple[dict[int, str], dict[int, str]]:
@@ -434,7 +437,7 @@ class EhClient:
                 raise
             self._check_auth(resp.text, resp)
 
-            page_tokens, page_previews = self._parse_detail_html(resp.text)
+            page_tokens, page_previews = self._parse_detail_html(resp.text, gid=gid)
             token_map.update(page_tokens)
             preview_map.update(page_previews)
 
@@ -508,7 +511,7 @@ class EhClient:
                 raise
             self._check_auth(resp.text, resp)
 
-            page_tokens, page_previews = self._parse_detail_html(resp.text)
+            page_tokens, page_previews = self._parse_detail_html(resp.text, gid=gid)
             token_map.update(page_tokens)
             preview_map.update(page_previews)
 

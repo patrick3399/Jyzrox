@@ -18,6 +18,7 @@ export interface FilterState {
   artistFilter: string
   sort: SortValue
   collectionFilter: number | undefined
+  categoryFilter: string
   selectMode: boolean
   selectedIds: Set<number>
 }
@@ -37,6 +38,7 @@ export type FilterAction =
   | { type: 'SET_ARTIST_FILTER'; payload: string }
   | { type: 'SET_SORT'; payload: SortValue }
   | { type: 'SET_COLLECTION_FILTER'; payload: number | undefined }
+  | { type: 'SET_CATEGORY'; payload: string }
   | { type: 'SET_SELECT_MODE'; payload: boolean }
   | { type: 'SET_SELECTED_IDS'; payload: Set<number> }
   | { type: 'TOGGLE_SELECTED_ID'; payload: number }
@@ -82,6 +84,8 @@ function filterReducer(state: FilterState, action: FilterAction): FilterState {
       return { ...state, sort: action.payload }
     case 'SET_COLLECTION_FILTER':
       return { ...state, collectionFilter: action.payload }
+    case 'SET_CATEGORY':
+      return { ...state, categoryFilter: action.payload }
     case 'SET_SELECT_MODE':
       return { ...state, selectMode: action.payload }
     case 'SET_SELECTED_IDS':
@@ -116,6 +120,7 @@ function initFilterState(searchParams: URLSearchParams): FilterState {
     artistFilter: searchParams.get('artist') ?? '',
     sort: (searchParams.get('sort') as SortValue) ?? 'added_at',
     collectionFilter: undefined,
+    categoryFilter: searchParams.get('category') ?? '',
     selectMode: false,
     selectedIds: new Set(),
   }
@@ -143,6 +148,7 @@ export function useLibraryFilters() {
       if (state.minRating !== undefined) params.set('rating', String(state.minRating))
       if (state.onlyFavorited) params.set('fav', '1')
       if (state.artistFilter) params.set('artist', state.artistFilter)
+      if (state.categoryFilter) params.set('category', state.categoryFilter)
       if (state.includeTags.length > 0) params.set('tags', state.includeTags.join(','))
       if (state.excludeTags.length > 0) params.set('notags', state.excludeTags.join(','))
 
@@ -161,6 +167,7 @@ export function useLibraryFilters() {
     state.minRating,
     state.onlyFavorited,
     state.artistFilter,
+    state.categoryFilter,
     state.includeTags,
     state.excludeTags,
     router,

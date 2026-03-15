@@ -6,6 +6,7 @@ interface UseTimeRangeParams {
   tags?: string[]
   exclude_tags?: string[]
   source?: string
+  category?: string
   gallery_id?: number
 }
 

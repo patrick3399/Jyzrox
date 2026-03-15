@@ -4,7 +4,7 @@ import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'rea
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useImageBrowser } from '@/hooks/useImageBrowser'
 import { useTimeRange, useTimelinePercentiles } from '@/hooks/useTimeRange'
-import { useLibrarySources } from '@/hooks/useGalleries'
+import { useLibrarySources, useGalleryCategories } from '@/hooks/useGalleries'
 import { useThumbhash } from '@/hooks/useThumbhash'
 import { JustifiedGrid } from '@/components/JustifiedGrid'
 import { TimelineScrubber } from '@/components/TimelineScrubber'
@@ -39,11 +39,13 @@ function ImageBrowserInner() {
   const excludeParam = searchParams.get('exclude_tags')
 
   const sourceParam = searchParams.get('source') ?? ''
+  const categoryParam = searchParams.get('category') ?? ''
 
   const tags = useMemo(() => tagsParam ? tagsParam.split(',').filter(Boolean) : [], [tagsParam])
   const excludeTags = useMemo(() => excludeParam ? excludeParam.split(',').filter(Boolean) : [], [excludeParam])
 
   const [sourceFilter, setSourceFilter] = useState(sourceParam)
+  const [categoryFilter, setCategoryFilter] = useState(categoryParam)
   const [tagInput, setTagInput] = useState('')
   const [jumpAt, setJumpAt] = useState<string | undefined>(undefined)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -63,30 +65,31 @@ function ImageBrowserInner() {
   }, [])
 
   const { data: dynamicSources } = useLibrarySources()
+  const { data: categoriesData } = useGalleryCategories()
 
-  // Sync source filter to URL
+  // Sync source and category filters to URL
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
-    if (sourceFilter) {
-      params.set('source', sourceFilter)
-    } else {
-      params.delete('source')
-    }
+    if (sourceFilter) params.set('source', sourceFilter)
+    else params.delete('source')
+    if (categoryFilter) params.set('category', categoryFilter)
+    else params.delete('category')
     const qs = params.toString()
     const newUrl = qs ? `/images?${qs}` : '/images'
     router.replace(newUrl, { scroll: false })
-  }, [sourceFilter, searchParams, router])
+  }, [sourceFilter, categoryFilter, searchParams, router])
 
   // Reset jumpAt when filters change
   useEffect(() => {
     setJumpAt(undefined)
-  }, [sourceFilter, tags, excludeTags])
+  }, [sourceFilter, categoryFilter, tags, excludeTags])
 
   const filterParams = useMemo(() => ({
     tags: tags.length > 0 ? tags : undefined,
     exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
     source: sourceFilter || undefined,
-  }), [tags, excludeTags, sourceFilter])
+    category: categoryFilter || undefined,
+  }), [tags, excludeTags, sourceFilter, categoryFilter])
 
   const { minAt, maxAt } = useTimeRange(filterParams)
   const { percentiles } = useTimelinePercentiles(filterParams)
@@ -227,6 +230,24 @@ function ImageBrowserInner() {
               ))}
             </select>
           </div>
+          {categoriesData && (
+            <div className="flex items-center gap-2">
+              <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                {t('library.filterCategory')}
+              </label>
+              <select
+                value={categoryFilter}
+                onChange={(e) => setCategoryFilter(e.target.value)}
+                className="bg-vault-input border border-vault-border rounded px-2 py-1.5 text-vault-text text-sm focus:outline-none"
+              >
+                <option value="">{t('library.allCategories')}</option>
+                <option value="__uncategorized__">{t('library.categoryUncategorized')}</option>
+                {categoriesData.categories.map((cat) => (
+                  <option key={cat} value={cat}>{cat}</option>
+                ))}
+              </select>
+            </div>
+          )}
           <div className="flex items-center gap-2">
             <input
               type="text"

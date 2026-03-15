@@ -659,6 +659,7 @@ export interface GallerySearchParams {
   limit?: number
   sort?: 'added_at' | 'rating' | 'pages'
   collection?: number
+  category?: string
 }
 
 export interface EhSearchParams {

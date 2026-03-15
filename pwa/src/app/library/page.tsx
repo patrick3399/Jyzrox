@@ -4,7 +4,7 @@ import { useState, useCallback, Suspense, useEffect } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { BookOpen, Plus, Minus, X, ChevronDown, LayoutGrid, List } from 'lucide-react'
-import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
+import { useInfiniteLibraryGalleries, useGalleryCategories } from '@/hooks/useGalleries'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { useCollections } from '@/hooks/useCollections'
@@ -54,9 +54,12 @@ function LibraryContent() {
     artistFilter,
     sort,
     collectionFilter,
+    categoryFilter,
     selectMode,
     selectedIds,
   } = state
+
+  const { data: categoriesData } = useGalleryCategories()
 
   const [colCount, setColCount] = useState(4)
   const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
@@ -131,6 +134,7 @@ function LibraryContent() {
       sort,
       limit: PAGE_SIZE,
       collection: collectionFilter,
+      category: categoryFilter || undefined,
     })
 
   // ── Scroll restoration ──────────────────────────────────
@@ -297,6 +301,29 @@ function LibraryContent() {
                     ))}
                   </select>
                 </div>
+
+                {categoriesData && (
+                  <div className="flex items-center gap-2">
+                    <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+                      {t('library.filterCategory')}
+                    </label>
+                    <select
+                      value={categoryFilter}
+                      onChange={(e) => {
+                        dispatch({ type: 'SET_CATEGORY', payload: e.target.value })
+                      }}
+                      className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
+                    >
+                      <option value="">{t('library.allCategories')}</option>
+                      <option value="__uncategorized__">{t('library.categoryUncategorized')}</option>
+                      {categoriesData.categories.map((cat) => (
+                        <option key={cat} value={cat}>
+                          {cat}
+                        </option>
+                      ))}
+                    </select>
+                  </div>
+                )}
 
                 {collectionsData && collectionsData.collections.length > 0 && (
                   <div className="flex items-center gap-2">

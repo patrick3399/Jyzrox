@@ -75,6 +75,7 @@ const zhTW: Record<string, string> = {
   'browse.read': '閱讀',
   'browse.preview': '預覽',
   'browse.recent': '最近',
+  'browse.loadMorePreviews': '載入更多預覽',
 
   // ── Library ──
   'library.title': '圖庫',
@@ -772,6 +773,7 @@ const zhTW: Record<string, string> = {
   'common.locale.ja': '日本語',
   'common.locale.ko': '한국어',
   'common.loadMore': '載入更多',
+  'common.loadFailed': '載入失敗',
 
   // ── API Error Codes ──
   'error.not_authenticated': '未登入',
@@ -885,6 +887,8 @@ const zhTW: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': '顯示篩選',
   'library.hideFilters': '隱藏篩選',
+  'library.filterCategory': '分類',
+  'library.allCategories': '所有分類',
 
   // ── Trash ──
   'nav.trash': '垃圾桶',

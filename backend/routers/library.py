@@ -255,6 +255,21 @@ async def list_gallery_sources(
     return sources
 
 
+@router.get("/galleries/categories")
+async def list_gallery_categories(
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return distinct non-empty category values from the galleries table."""
+    result = await db.execute(
+        select(Gallery.category)
+        .where(Gallery.category.isnot(None), Gallery.category != "")
+        .distinct()
+        .order_by(Gallery.category)
+    )
+    return {"categories": [r[0] for r in result.all()]}
+
+
 @router.get("/galleries")
 async def list_galleries(
     q: str = Query(default=""),
@@ -265,6 +280,7 @@ async def list_galleries(
     source: str | None = Query(default=None),
     artist: str | None = Query(default=None),
     import_mode: str | None = Query(default=None),
+    category: str | None = Query(default=None),
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=20, ge=1, le=100),
     sort: Literal["added_at", "rating", "pages"] = Query(default="added_at"),
@@ -316,6 +332,11 @@ async def list_galleries(
         stmt = stmt.where(Gallery.artist_id == artist)
     if import_mode:
         stmt = stmt.where(Gallery.import_mode == import_mode)
+    if category:
+        if category == "__uncategorized__":
+            stmt = stmt.where(or_(Gallery.category.is_(None), Gallery.category == ""))
+        else:
+            stmt = stmt.where(Gallery.category == category)
     if q:
         stmt = stmt.where(Gallery.title.ilike(f"%{q}%"))
     if collection is not None:
@@ -480,8 +501,8 @@ def _i_browse(img: Image) -> dict:
 # ── Image browser ─────────────────────────────────────────────────────
 
 
-async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, auth, db):
-    """Apply common image browser filters (tags, source, blocked tags, gallery access)."""
+async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, auth, db, category=None):
+    """Apply common image browser filters (tags, source, category, blocked tags, gallery access)."""
     stmt = stmt.where(gallery_access_filter(auth))
 
     if gallery_id is not None:
@@ -493,6 +514,11 @@ async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, 
             stmt = stmt.where(Gallery.source == source[:colon_idx], Gallery.import_mode == source[colon_idx + 1:])
         else:
             stmt = stmt.where(Gallery.source == source)
+    if category is not None:
+        if category == "__uncategorized__":
+            stmt = stmt.where(or_(Gallery.category.is_(None), Gallery.category == ""))
+        else:
+            stmt = stmt.where(Gallery.category == category)
     if tags:
         stmt = stmt.where(Image.tags_array.contains(cast(tags, ARRAY(Text))))
     if exclude_tags:
@@ -515,6 +541,7 @@ async def image_timeline_percentiles(
     tags: list[str] = Query(default=[]),
     exclude_tags: list[str] = Query(default=[]),
     source: str | None = Query(default=None),
+    category: str | None = Query(default=None),
     gallery_id: int | None = None,
     buckets: int = Query(default=100, le=200),
     db: AsyncSession = Depends(get_db),
@@ -530,7 +557,7 @@ async def image_timeline_percentiles(
     base = select(Image.added_at).join(Gallery, Image.gallery_id == Gallery.id)
     base = await _apply_image_filters(
         base, tags=tags, exclude_tags=exclude_tags, source=source,
-        gallery_id=gallery_id, auth=auth, db=db,
+        gallery_id=gallery_id, auth=auth, db=db, category=category,
     )
     base = base.where(Image.added_at.isnot(None))
 
@@ -557,6 +584,7 @@ async def image_time_range(
     tags: list[str] = Query(default=[]),
     exclude_tags: list[str] = Query(default=[]),
     source: str | None = Query(default=None),
+    category: str | None = Query(default=None),
     gallery_id: int | None = None,
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(require_auth),
@@ -568,7 +596,7 @@ async def image_time_range(
     )
     stmt = await _apply_image_filters(
         stmt, tags=tags, exclude_tags=exclude_tags, source=source,
-        gallery_id=gallery_id, auth=auth, db=db,
+        gallery_id=gallery_id, auth=auth, db=db, category=category,
     )
     row = (await db.execute(stmt)).one()
     return {
@@ -587,6 +615,7 @@ async def browse_images(
     sort: Literal["newest", "oldest"] = "newest",
     gallery_id: int | None = None,
     source: str | None = Query(default=None),
+    category: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(require_auth),
 ):
@@ -601,7 +630,7 @@ async def browse_images(
     )
     stmt = await _apply_image_filters(
         stmt, tags=tags, exclude_tags=exclude_tags, source=source,
-        gallery_id=gallery_id, auth=auth, db=db,
+        gallery_id=gallery_id, auth=auth, db=db, category=category,
     )
 
     # jump_at: seek to a specific timestamp anchor

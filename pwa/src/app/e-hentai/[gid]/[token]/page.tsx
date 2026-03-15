@@ -228,6 +228,13 @@ export default function EhGalleryDetailPage() {
   const [isFavorited, setIsFavorited] = useState(false)
   const favRef = useRef<HTMLDivElement>(null)
 
+  // Load More previews state
+  const [extraPreviews, setExtraPreviews] = useState<Record<string, string>>({})
+  const [hasMore, setHasMore] = useState(true)
+  const [loadingMore, setLoadingMore] = useState(false)
+  const [infiniteScroll, setInfiniteScroll] = useState(false) // enabled after first Load More
+  const sentinelRef = useRef<HTMLDivElement>(null)
+
   // Close fav picker on outside click
   useEffect(() => {
     const handler = (e: MouseEvent) => {
@@ -316,10 +323,11 @@ export default function EhGalleryDetailPage() {
     })
   }, [gallery])
 
-  // Build first 6 preview thumbnails from previewData
+  // Build preview thumbnails from all available preview data
   const previewThumbs = useMemo(() => {
     if (!previewData?.previews || !gallery) return []
-    const count = Math.min(6, gallery.pages)
+    const allPreviews = { ...previewData.previews, ...extraPreviews }
+    const maxPage = Math.max(0, ...Object.keys(allPreviews).map(Number))
     const thumbs: {
       page: number
       url: string
@@ -328,8 +336,8 @@ export default function EhGalleryDetailPage() {
       width?: number
       height?: number
     }[] = []
-    for (let i = 1; i <= count; i++) {
-      const raw = previewData.previews[String(i)]
+    for (let i = 1; i <= maxPage; i++) {
+      const raw = allPreviews[String(i)]
       if (!raw) continue
       if (raw.includes('|')) {
         const [spriteUrl, ox, w, h] = raw.split('|')
@@ -346,7 +354,7 @@ export default function EhGalleryDetailPage() {
       }
     }
     return thumbs
-  }, [previewData, gallery])
+  }, [previewData, extraPreviews, gallery])
 
   const handleTagClick = useCallback(
     (ns: string, name: string) => {
@@ -373,6 +381,44 @@ export default function EhGalleryDetailPage() {
     },
     [router, gid, token],
   )
+
+  const loadMorePreviews = useCallback(async () => {
+    if (!gallery || loadingMore || !hasMore) return
+
+    setLoadingMore(true)
+    try {
+      // Start from the highest page we already have
+      const allKeys = [
+        ...Object.keys(previewData?.previews || {}),
+        ...Object.keys(extraPreviews),
+      ].map(Number)
+      const startPage = allKeys.length > 0 ? Math.max(...allKeys) : 0
+      const result = await api.eh.getImagesPaginated(gallery.gid, gallery.token, startPage, 30)
+      setExtraPreviews((prev) => ({ ...prev, ...result.previews }))
+      setHasMore(result.has_more)
+      setInfiniteScroll(true)
+    } catch {
+      toast.error(t('common.loadFailed'))
+    } finally {
+      setLoadingMore(false)
+    }
+  }, [gallery, previewData, extraPreviews, loadingMore, hasMore])
+
+  // Infinite scroll: auto-load when sentinel enters viewport
+  useEffect(() => {
+    if (!infiniteScroll || !hasMore || !sentinelRef.current) return
+    const sentinel = sentinelRef.current
+    const observer = new IntersectionObserver(
+      (entries) => {
+        if (entries[0].isIntersecting) {
+          loadMorePreviews()
+        }
+      },
+      { rootMargin: '200px' },
+    )
+    observer.observe(sentinel)
+    return () => observer.disconnect()
+  }, [infiniteScroll, hasMore, loadMorePreviews])
 
   // ── Keyboard navigation ──
 
@@ -578,13 +624,28 @@ export default function EhGalleryDetailPage() {
           </div>
         </div>
 
-        {/* ── Preview thumbnails (6 max) ── */}
+        {/* ── Preview thumbnails ── */}
         {previewThumbs.length > 0 && (
           <div className="space-y-3">
             <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
-              {t('browse.preview')} ({gallery.pages} pages)
+              {t('browse.preview')} ({gallery.pages} {t('browse.pages')})
             </h2>
             <PreviewGrid thumbs={previewThumbs} onRead={handleRead} />
+            {gallery.pages > previewThumbs.length && hasMore && !infiniteScroll && (
+              <button
+                onClick={loadMorePreviews}
+                disabled={loadingMore}
+                className="w-full py-2.5 rounded-lg border border-vault-border text-vault-text-secondary text-sm
+                           hover:bg-vault-hover hover:text-vault-text transition-colors disabled:opacity-50"
+              >
+                {loadingMore ? t('common.loading') : t('browse.loadMorePreviews')}
+              </button>
+            )}
+            {infiniteScroll && hasMore && (
+              <div ref={sentinelRef} className="flex justify-center py-4">
+                {loadingMore && <LoadingSpinner />}
+              </div>
+            )}
           </div>
         )}
       </div>

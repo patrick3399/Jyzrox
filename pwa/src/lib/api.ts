@@ -288,6 +288,9 @@ const library = {
   getSources: () =>
     apiFetch<{ value: string; label: string }[]>('/api/library/galleries/sources'),
 
+  getCategories: () =>
+    apiFetch<{ categories: string[] }>('/api/library/galleries/categories'),
+
   getGalleries: (params: GallerySearchParams = {}) =>
     apiFetch<GalleryListResponse>(`/api/library/galleries${qs(params as Record<string, unknown>)}`),
 
@@ -387,13 +390,13 @@ const library = {
       { method: 'DELETE' }
     ),
 
-  browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number; source?: string; jump_at?: string } = {}) =>
+  browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number; source?: string; category?: string; jump_at?: string } = {}) =>
     apiFetch<import('./types').ImageBrowserResponse>(`/api/library/images${qs(params as Record<string, unknown>)}`),
 
-  imageTimeRange: (params: { tags?: string[]; exclude_tags?: string[]; source?: string; gallery_id?: number } = {}) =>
+  imageTimeRange: (params: { tags?: string[]; exclude_tags?: string[]; source?: string; category?: string; gallery_id?: number } = {}) =>
     apiFetch<import('./types').ImageTimeRangeResponse>(`/api/library/images/time_range${qs(params as Record<string, unknown>)}`),
 
-  imageTimelinePercentiles: (params: { tags?: string[]; exclude_tags?: string[]; source?: string; gallery_id?: number; buckets?: number } = {}) =>
+  imageTimelinePercentiles: (params: { tags?: string[]; exclude_tags?: string[]; source?: string; category?: string; gallery_id?: number; buckets?: number } = {}) =>
     apiFetch<import('./types').TimelinePercentilesResponse>(`/api/library/images/timeline_percentiles${qs(params as Record<string, unknown>)}`),
 
   trashList: (params: { limit?: number; offset?: number } = {}) =>

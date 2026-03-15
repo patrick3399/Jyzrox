@@ -9,6 +9,7 @@ interface UseImageBrowserParams {
   sort?: 'newest' | 'oldest'
   gallery_id?: number
   source?: string
+  category?: string
   limit?: number
   jumpAt?: string
 }

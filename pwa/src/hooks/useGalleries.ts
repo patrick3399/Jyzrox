@@ -15,6 +15,13 @@ export function useLibrarySources() {
   })
 }
 
+export function useGalleryCategories() {
+  return useSWR('library/categories', () => api.library.getCategories(), {
+    revalidateOnFocus: false,
+    dedupingInterval: 300_000,
+  })
+}
+
 export function useLibraryGalleries(params: GallerySearchParams = {}) {
   // Include cursor in the SWR key so each cursor page gets its own cache slot.
   // When cursor is absent the key degrades to the same shape as before.

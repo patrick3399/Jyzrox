@@ -111,6 +111,7 @@ const en: Record<string, string> = {
   'browse.read': 'Read',
   'browse.preview': 'Preview',
   'browse.recent': 'Recent',
+  'browse.loadMorePreviews': 'Load More Previews',
 
   // ── Library ──
   'library.title': 'Library',
@@ -1205,6 +1206,7 @@ const en: Record<string, string> = {
   'common.locale.ja': '日本語',
   'common.locale.ko': '한국어',
   'common.loadMore': 'Load more',
+  'common.loadFailed': 'Failed to load',
   'common.firstPage': 'First page',
   'common.rateLimited': 'Too many requests. Please wait a moment.',
 
@@ -1424,6 +1426,8 @@ const en: Record<string, string> = {
   // ── Library filter panel ──
   'library.showFilters': 'Show Filters',
   'library.hideFilters': 'Hide Filters',
+  'library.filterCategory': 'Category',
+  'library.allCategories': 'All Categories',
 
   // ── Trash ──
   'nav.trash': 'Trash',
