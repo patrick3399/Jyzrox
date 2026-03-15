@@ -21,6 +21,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from core.auth import gallery_access_filter, require_auth, require_role
 from core.config import settings
 from core.database import get_db
+from core.redis_client import get_redis
 from core.source_display import get_display_config
 from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserRating
 from services.cas import cas_url, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, safe_source_id, thumb_dir, thumb_url as cas_thumb_url
@@ -188,6 +189,58 @@ async def _build_cover_map(
             cover_map[r.gallery_id] = cas_thumb_url(r.sha256)
 
     return cover_map
+
+
+_SOURCES_CACHE_KEY = "library:sources"
+_SOURCES_CACHE_TTL = 300  # 5 minutes
+
+
+async def _invalidate_sources_cache() -> None:
+    """Delete the cached sources list so next request re-queries."""
+    try:
+        await get_redis().delete(_SOURCES_CACHE_KEY)
+    except Exception:
+        pass
+
+
+@router.get("/galleries/sources")
+async def list_gallery_sources(
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Return distinct source values from the galleries table.
+
+    Cached in Redis for 5 minutes to avoid repeated DB hits.
+    """
+    r = get_redis()
+    cached = await r.get(_SOURCES_CACHE_KEY)
+    if cached is not None:
+        return json.loads(cached)
+
+    rows = (await db.execute(
+        select(Gallery.source).where(Gallery.source.is_not(None)).distinct()
+    )).scalars().all()
+
+    # Build source list with import_mode variants for 'local'
+    sources: list[dict] = []
+    for src in sorted(rows):
+        if src == "local":
+            # Check which import_modes exist
+            modes = (await db.execute(
+                select(Gallery.import_mode).where(
+                    Gallery.source == "local",
+                    Gallery.import_mode.is_not(None),
+                ).distinct()
+            )).scalars().all()
+            for mode in sorted(modes):
+                sources.append({"value": f"local:{mode}", "label": f"local:{mode}"})
+            if not modes:
+                sources.append({"value": "local", "label": "local"})
+        else:
+            sources.append({"value": src, "label": src})
+
+    await r.set(_SOURCES_CACHE_KEY, json.dumps(sources), ex=_SOURCES_CACHE_TTL)
+    return sources
 
 
 @router.get("/galleries")
@@ -423,6 +476,7 @@ async def browse_images(
     limit: int = Query(default=40, le=100),
     sort: Literal["newest", "oldest"] = "newest",
     gallery_id: int | None = None,
+    source: str | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(require_auth),
 ):
@@ -436,6 +490,13 @@ async def browse_images(
 
     if gallery_id is not None:
         stmt = stmt.where(Image.gallery_id == gallery_id)
+    if source is not None:
+        # Support compound source filter like "local:link" → source="local", import_mode="link"
+        colon_idx = source.find(":")
+        if colon_idx != -1:
+            stmt = stmt.where(Gallery.source == source[:colon_idx], Gallery.import_mode == source[colon_idx + 1:])
+        else:
+            stmt = stmt.where(Gallery.source == source)
     if tags:
         stmt = stmt.where(Image.tags_array.contains(cast(tags, ARRAY(Text))))
     if exclude_tags:
@@ -1109,6 +1170,8 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
         await db.delete(g)
     await db.commit()
 
+    await _invalidate_sources_cache()
+
     # Find zero-ref blobs for thumbnail cleanup
     zero_ref_sha256s: set[str] = set()
     if blob_sha256s:
@@ -1403,6 +1466,8 @@ async def delete_gallery(
     # Delete from DB (CASCADE removes images, gallery_tags, read_progress)
     await db.delete(g)
     await db.commit()
+
+    await _invalidate_sources_cache()
 
     # Determine which blobs are now unreferenced (safe to delete thumbs).
     # Query after commit so ref_count reflects all decrements.

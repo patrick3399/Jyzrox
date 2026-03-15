@@ -4,7 +4,7 @@ import { useState, useCallback, useRef, useEffect, Suspense } from 'react'
 import Link from 'next/link'
 import { useSearchParams, useRouter } from 'next/navigation'
 import { BookOpen, Plus, Minus, X } from 'lucide-react'
-import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
+import { useInfiniteLibraryGalleries, useLibrarySources } from '@/hooks/useGalleries'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { useCollections } from '@/hooks/useCollections'
@@ -22,13 +22,17 @@ const SORT_OPTIONS = [
   { value: 'pages', label: () => t('library.pagesSort') },
 ] as const
 
-const SOURCE_OPTIONS = [
-  { value: '', label: () => t('library.allSources') },
-  { value: 'ehentai', label: () => 'E-Hentai' },
-  { value: 'pixiv', label: () => 'Pixiv' },
-  { value: 'local:link', label: () => t('library.monitored') },
-  { value: 'local:copy', label: () => t('library.imported') },
-]
+function sourceDisplayName(value: string): string {
+  const STATIC: Record<string, string> = {
+    ehentai: 'E-Hentai',
+    pixiv: 'Pixiv',
+    local: 'Local',
+    gallery_dl: 'gallery-dl',
+  }
+  if (value === 'local:link') return t('library.monitored')
+  if (value === 'local:copy') return t('library.imported')
+  return STATIC[value] ?? value
+}
 
 const PAGE_SIZE = 24
 
@@ -62,6 +66,7 @@ function LibraryContent() {
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
   const { data: collectionsData } = useCollections()
+  const { data: dynamicSources } = useLibrarySources()
 
   useEffect(() => {
     return () => {
@@ -284,9 +289,10 @@ function LibraryContent() {
                 }}
                 className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
               >
-                {SOURCE_OPTIONS.map((opt) => (
+                <option value="">{t('library.allSources')}</option>
+                {(dynamicSources ?? []).map((opt) => (
                   <option key={opt.value} value={opt.value}>
-                    {opt.label()}
+                    {sourceDisplayName(opt.value)}
                   </option>
                 ))}
               </select>

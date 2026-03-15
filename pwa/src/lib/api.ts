@@ -284,6 +284,9 @@ const eh = {
 // ── Library ───────────────────────────────────────────────────────────
 
 const library = {
+  getSources: () =>
+    apiFetch<{ value: string; label: string }[]>('/api/library/galleries/sources'),
+
   getGalleries: (params: GallerySearchParams = {}) =>
     apiFetch<GalleryListResponse>(`/api/library/galleries${qs(params as Record<string, unknown>)}`),
 
@@ -383,7 +386,7 @@ const library = {
       { method: 'DELETE' }
     ),
 
-  browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number } = {}) =>
+  browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number; source?: string } = {}) =>
     apiFetch<import('./types').ImageBrowserResponse>(`/api/library/images${qs(params as Record<string, unknown>)}`),
 }
 

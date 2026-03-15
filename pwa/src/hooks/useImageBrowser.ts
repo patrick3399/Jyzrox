@@ -8,6 +8,7 @@ interface UseImageBrowserParams {
   exclude_tags?: string[]
   sort?: 'newest' | 'oldest'
   gallery_id?: number
+  source?: string
   limit?: number
 }
 

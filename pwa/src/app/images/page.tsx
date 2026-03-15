@@ -3,10 +3,23 @@
 import { Suspense, useState, useRef, useEffect, useCallback, useMemo } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useImageBrowser } from '@/hooks/useImageBrowser'
+import { useLibrarySources } from '@/hooks/useGalleries'
 import { JustifiedGrid } from '@/components/JustifiedGrid'
 import { thumbHashToDataURL } from '@/lib/thumbhash'
 import { t } from '@/lib/i18n'
 import type { BrowseImage } from '@/lib/types'
+
+function sourceDisplayName(value: string): string {
+  const STATIC: Record<string, string> = {
+    ehentai: 'E-Hentai',
+    pixiv: 'Pixiv',
+    local: 'Local',
+    gallery_dl: 'gallery-dl',
+  }
+  if (value === 'local:link') return t('library.monitored')
+  if (value === 'local:copy') return t('library.imported')
+  return STATIC[value] ?? value
+}
 
 export default function ImageBrowserPage() {
   return (
@@ -23,9 +36,12 @@ function ImageBrowserInner() {
   const tagsParam = searchParams.get('tags')
   const excludeParam = searchParams.get('exclude_tags')
 
+  const sourceParam = searchParams.get('source') ?? ''
+
   const tags = useMemo(() => tagsParam ? tagsParam.split(',').filter(Boolean) : [], [tagsParam])
   const excludeTags = useMemo(() => excludeParam ? excludeParam.split(',').filter(Boolean) : [], [excludeParam])
 
+  const [sourceFilter, setSourceFilter] = useState(sourceParam)
   const [tagInput, setTagInput] = useState('')
   const containerRef = useRef<HTMLDivElement>(null)
   const [containerWidth, setContainerWidth] = useState(0)
@@ -41,9 +57,25 @@ function ImageBrowserInner() {
     return () => ro.disconnect()
   }, [])
 
+  const { data: dynamicSources } = useLibrarySources()
+
+  // Sync source filter to URL
+  useEffect(() => {
+    const params = new URLSearchParams(searchParams.toString())
+    if (sourceFilter) {
+      params.set('source', sourceFilter)
+    } else {
+      params.delete('source')
+    }
+    const qs = params.toString()
+    const newUrl = qs ? `/images?${qs}` : '/images'
+    router.replace(newUrl, { scroll: false })
+  }, [sourceFilter, searchParams, router])
+
   const { images, isLoading, isLoadingMore, isReachingEnd, loadMore } = useImageBrowser({
     tags: tags.length > 0 ? tags : undefined,
     exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
+    source: sourceFilter || undefined,
     limit: 60,
   })
 
@@ -127,8 +159,25 @@ function ImageBrowserInner() {
     <div>
       <h1 className="text-2xl font-bold mb-4">{t('images.title')}</h1>
 
-      {/* Tag filter bar */}
+      {/* Filter bar */}
       <div className="flex flex-wrap items-center gap-2 mb-4">
+        <div className="flex items-center gap-2">
+          <label className="text-xs text-vault-text-muted uppercase tracking-wide">
+            {t('library.source')}
+          </label>
+          <select
+            value={sourceFilter}
+            onChange={(e) => setSourceFilter(e.target.value)}
+            className="bg-vault-input border border-vault-border rounded px-2 py-1.5 text-vault-text text-sm focus:outline-none"
+          >
+            <option value="">{t('library.allSources')}</option>
+            {(dynamicSources ?? []).map((opt) => (
+              <option key={opt.value} value={opt.value}>
+                {sourceDisplayName(opt.value)}
+              </option>
+            ))}
+          </select>
+        </div>
         <div className="flex items-center gap-2">
           <input
             type="text"
