@@ -62,13 +62,13 @@ def _source_to_extractor(source: str) -> str:
 
 
 async def _build_gallery_dl_config(credentials: dict) -> None:
-    """Write source-specific credentials into the gallery-dl config file.
+    """Write source-specific credentials and tuning params into the gallery-dl config file.
 
     Args:
         credentials: Dict mapping source name -> credential value string.
                      e.g. {"ehentai": '{"ipb_member_id": ...}', "pixiv": "token..."}
     """
-    from plugins.builtin.gallery_dl._sites import get_site_config
+    from plugins.builtin.gallery_dl._sites import GDL_SITES, get_site_config
 
     config: dict = {
         "extractor": {
@@ -77,6 +77,15 @@ async def _build_gallery_dl_config(credentials: dict) -> None:
         },
     }
 
+    # Inject per-site tuning params (sleep-request, retries, timeout) for ALL sites
+    for site_cfg in GDL_SITES:
+        if site_cfg.sleep_request is None:
+            continue
+        ext = site_cfg.extractor or site_cfg.source_id
+        entry = config["extractor"].setdefault(ext, {})
+        entry["sleep-request"] = list(site_cfg.sleep_request) if isinstance(site_cfg.sleep_request, tuple) else site_cfg.sleep_request
+
+    # Merge credentials on top
     for src, cred_val in credentials.items():
         if not cred_val:
             continue
@@ -84,13 +93,13 @@ async def _build_gallery_dl_config(credentials: dict) -> None:
         ext = cfg.extractor or cfg.source_id
 
         if cfg.credential_type == "refresh_token":
-            config["extractor"][ext] = {"refresh-token": cred_val}
+            config["extractor"].setdefault(ext, {})["refresh-token"] = cred_val
         elif cfg.credential_type == "cookies":
             try:
                 cookies = json.loads(cred_val)
-                config["extractor"][ext] = {"cookies": cookies}
+                config["extractor"].setdefault(ext, {})["cookies"] = cookies
                 for extra in cfg.extra_extractors:
-                    config["extractor"][extra] = {"cookies": cookies}
+                    config["extractor"].setdefault(extra, {})["cookies"] = cookies
             except (json.JSONDecodeError, TypeError):
                 logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
         # credential_type == "none" → skip

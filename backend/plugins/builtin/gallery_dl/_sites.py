@@ -60,6 +60,7 @@ class GdlSiteConfig:
     # ── Download tuning ──
     retries: int = 4          # gallery-dl default
     http_timeout: int = 30    # seconds
+    sleep_request: float | tuple[float, float] | None = None  # seconds between requests
 
 
 GDL_SITES: tuple[GdlSiteConfig, ...] = (
@@ -142,6 +143,9 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         subscribe_id_key="post_id",
         subscribe_url_tpl="https://www.facebook.com/{}/photos",
         subscribe_id_pattern=r"^/([^/]+)",
+        credential_requirement="recommended",
+        sleep_request=(2.0, 4.0),
+        retries=5, http_timeout=45,
     ),
     GdlSiteConfig(
         domain="bsky.app", source_id="bluesky", name="Bluesky",
