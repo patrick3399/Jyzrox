@@ -126,6 +126,7 @@ const zhTW: Record<string, string> = {
   'queue.clearing': '清除中...',
   'queue.cleared': '已清除 {count} 個任務',
   'queue.clearError': '清除任務失敗',
+  'queue.previewNotAvailable': '此來源不支援預覽',
 
   // ── Tags ──
   'tags.title': '標籤管理',

@@ -127,6 +127,7 @@ const ko: Record<string, string> = {
   'queue.clearing': '지우는 중...',
   'queue.cleared': '{count}개 작업 삭제됨',
   'queue.clearError': '작업 삭제 실패',
+  'queue.previewNotAvailable': '이 소스는 미리보기를 지원하지 않습니다',
 
   // ── Tags ──
   'tags.title': '태그 관리',

@@ -2,6 +2,7 @@
 
 import logging
 import os
+import re
 import signal
 import urllib.parse
 import uuid
@@ -43,6 +44,18 @@ class QuickDownloadRequest(BaseModel):
 
 class JobActionRequest(BaseModel):
     action: str  # "pause" or "resume"
+
+
+class PreviewResponse(BaseModel):
+    source: str
+    preview_available: bool
+    title: str | None = None
+    pages: int | None = None
+    tags: list[str] | None = None
+    uploader: str | None = None
+    rating: float | None = None
+    thumb_url: str | None = None
+    category: str | None = None
 
 
 async def _credential_warning(source: str) -> str | None:
@@ -296,6 +309,101 @@ async def supported_sites(
 ):
     """Return all supported download sites grouped by category."""
     return {"categories": get_supported_sites()}
+
+
+_EH_URL_RE = re.compile(r"https?://e[-x]hentai\.org/g/(\d+)/([a-f0-9]{10})/?")
+_PIXIV_URL_RE = re.compile(r"https?://(?:www\.)?pixiv\.net/(?:\w+/)?artworks/(\d+)")
+
+
+@router.get("/preview", response_model=PreviewResponse)
+async def preview_url(
+    url: str = Query(...),
+    _: dict = Depends(require_auth),
+):
+    """Preview metadata for a URL before downloading.
+
+    Returns structured preview data for supported sources (EH, Pixiv).
+    For gallery-dl sites without a dedicated client, returns preview_available=False
+    with basic site info so the frontend can still confirm the URL is recognised.
+    """
+    source = detect_source(url)
+
+    if source == "unknown":
+        raise HTTPException(status_code=400, detail="Unsupported URL")
+
+    # E-Hentai / ExHentai preview
+    eh_match = _EH_URL_RE.match(url)
+    if eh_match:
+        gid = int(eh_match.group(1))
+        token = eh_match.group(2)
+        try:
+            import json as _json
+            from core.redis_client import get_redis as _get_redis
+            from core.config import settings as _cfg
+            from services.credential import get_credential as _get_cred
+            from services.eh_client import EhClient as _EhClient
+
+            cred_json = await _get_cred("ehentai")
+            cookies = _json.loads(cred_json) if cred_json else {}
+            pref = await _get_redis().get("setting:eh_use_ex")
+            if pref is not None:
+                use_ex = pref == b"1"
+            else:
+                use_ex = _cfg.eh_use_ex or bool(cookies.get("igneous"))
+
+            async with _EhClient(cookies=cookies, use_ex=use_ex) as client:
+                meta = await client.get_gallery_metadata(gid, token)
+
+            return PreviewResponse(
+                source="ehentai",
+                preview_available=True,
+                title=meta.get("title") or meta.get("title_jpn") or None,
+                pages=meta.get("pages"),
+                tags=(meta.get("tags") or [])[:30] or None,
+                uploader=meta.get("uploader") or None,
+                rating=float(meta["rating"]) if meta.get("rating") else None,
+                thumb_url=meta.get("thumb") or None,
+                category=meta.get("category") or None,
+            )
+        except Exception as exc:
+            logger.warning("[preview] EH metadata fetch failed for %s: %s", url, exc)
+
+    # Pixiv preview
+    pixiv_match = _PIXIV_URL_RE.search(url)
+    if pixiv_match:
+        illust_id = int(pixiv_match.group(1))
+        try:
+            from services.credential import get_credential as _get_cred
+            from services.pixiv_client import PixivClient as _PixivClient
+
+            refresh_token = await _get_cred("pixiv")
+            if refresh_token:
+                async with _PixivClient(refresh_token=refresh_token) as client:
+                    illust = await client.illust_detail(illust_id)
+
+                tags = [t.get("name", "") for t in (illust.get("tags") or []) if t.get("name")]
+                user = illust.get("user") or {}
+                image_urls = illust.get("image_urls") or {}
+                return PreviewResponse(
+                    source="pixiv",
+                    preview_available=True,
+                    title=illust.get("title") or None,
+                    pages=illust.get("page_count"),
+                    tags=tags[:30] or None,
+                    uploader=user.get("name") or None,
+                    thumb_url=image_urls.get("square_medium") or None,
+                )
+        except Exception as exc:
+            logger.warning("[preview] Pixiv metadata fetch failed for %s: %s", url, exc)
+
+    # Fallback for gallery-dl sites (and EH/Pixiv when metadata fetch fails)
+    site_info = detect_source_info(url)
+    return PreviewResponse(
+        source=source,
+        preview_available=False,
+        title=site_info.get("name") if site_info else None,
+        category=site_info.get("category") if site_info else None,
+    )
 
 
 @router.get("/jobs/{job_id}")

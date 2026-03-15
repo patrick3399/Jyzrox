@@ -472,6 +472,19 @@ const download = {
     apiFetch<{ categories: Record<string, Array<{ source_id: string; name: string; domain: string; has_tags: boolean }>> }>(
       '/api/download/supported-sites',
     ),
+
+  preview: (url: string) =>
+    apiFetch<{
+      source: string
+      preview_available: boolean
+      title?: string | null
+      pages?: number | null
+      tags?: string[] | null
+      uploader?: string | null
+      rating?: number | null
+      thumb_url?: string | null
+      category?: string | null
+    }>(`/api/download/preview${qs({ url })}`),
 }
 
 // ── Settings ──────────────────────────────────────────────────────────

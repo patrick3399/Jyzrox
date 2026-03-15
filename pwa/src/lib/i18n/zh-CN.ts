@@ -126,6 +126,7 @@ const zhCN: Record<string, string> = {
   'queue.clearing': '清除中...',
   'queue.cleared': '已清除 {count} 个任务',
   'queue.clearError': '清除任务失败',
+  'queue.previewNotAvailable': '此来源不支持预览',
 
   // ── Tags ──
   'tags.title': '标签管理',

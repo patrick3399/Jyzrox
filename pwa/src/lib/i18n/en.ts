@@ -179,6 +179,7 @@ const en: Record<string, string> = {
   'queue.preview': 'Preview',
   'queue.previewPages': '{count} pages',
   'queue.previewUploader': 'Uploader: {name}',
+  'queue.previewNotAvailable': 'Preview not available for this source',
 
   // ── Tags ──
   'tags.title': 'Tag Management',

@@ -127,6 +127,7 @@ const ja: Record<string, string> = {
   'queue.clearing': 'クリア中...',
   'queue.cleared': '{count}件のジョブをクリアしました',
   'queue.clearError': 'ジョブのクリアに失敗しました',
+  'queue.previewNotAvailable': 'このソースではプレビューできません',
 
   // ── Tags ──
   'tags.title': 'タグ管理',
