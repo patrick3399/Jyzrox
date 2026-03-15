@@ -64,6 +64,14 @@ const en: Record<string, string> = {
   'dashboard.quickLinks.pluginsDesc': 'View installed plugins',
   'dashboard.quickLinks.settings': 'Settings',
   'dashboard.quickLinks.settingsDesc': 'Credentials and system config',
+  'dashboard.quickLinks.images': 'Images',
+  'dashboard.quickLinks.imagesDesc': 'Browse all images across galleries',
+  'dashboard.quickLinks.dedup': 'Dedup',
+  'dashboard.quickLinks.dedupDesc': 'Find and resolve duplicate images',
+  'dashboard.quickLinks.scheduledTasks': 'Scheduled Tasks',
+  'dashboard.quickLinks.scheduledTasksDesc': 'Manage recurring cron jobs',
+  'dashboard.quickLinks.trash': 'Trash',
+  'dashboard.quickLinks.trashDesc': 'View and restore deleted galleries',
   'dashboard.quickLinks.title': 'Quick Links',
   'dashboard.quickLinks.compactView': 'Compact view',
   'dashboard.quickLinks.expandedView': 'Expanded view',
@@ -1334,6 +1342,12 @@ const en: Record<string, string> = {
   'settings.bottomTabDesc': 'Choose the 4 shortcuts shown in the mobile bottom navigation bar.',
   'settings.bottomTabSelect': 'Select exactly 4 tabs',
   'settings.bottomTabReset': 'Reset to defaults',
+
+  // ── Dashboard Quick Links ──
+  'settings.dashboardLinks': 'Dashboard Quick Links',
+  'settings.dashboardLinksDesc': 'Choose and reorder the quick links shown on the dashboard.',
+  'settings.dashboardLinksReset': 'Reset to defaults',
+  'settings.dashboardLinksSelect': 'Selected links',
 
   // ── Back Button ──
   'common.back': 'Back',

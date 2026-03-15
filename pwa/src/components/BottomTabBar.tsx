@@ -2,41 +2,17 @@
 
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import {
-  Compass,
-  Palette,
-  BookOpen,
-  Download,
-  Menu,
-  LayoutDashboard,
-  Images,
-  FolderTree,
-  Rss,
-  Settings,
-} from 'lucide-react'
-import type { LucideIcon } from 'lucide-react'
+import { Menu } from 'lucide-react'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useState, useEffect } from 'react'
+import { PAGE_REGISTRY, type PageDef } from '@/lib/pageRegistry'
 
-export interface TabDefinition {
-  href: string
-  labelKey: string
-  icon: LucideIcon
-}
+// Re-export for BottomTabConfig compatibility
+export type TabDefinition = PageDef
 
-export const ALL_TABS: TabDefinition[] = [
-  { href: '/e-hentai', labelKey: 'nav.ehentai', icon: Compass },
-  { href: '/pixiv', labelKey: 'nav.pixiv', icon: Palette },
-  { href: '/library', labelKey: 'nav.library', icon: BookOpen },
-  { href: '/queue', labelKey: 'nav.queue', icon: Download },
-  { href: '/', labelKey: 'nav.dashboard', icon: LayoutDashboard },
-  { href: '/images', labelKey: 'nav.images', icon: Images },
-  { href: '/subscriptions', labelKey: 'nav.subscriptions', icon: Rss },
-  { href: '/explorer', labelKey: 'nav.explorer', icon: FolderTree },
-  { href: '/settings', labelKey: 'nav.settings', icon: Settings },
-]
+export const ALL_TABS: TabDefinition[] = PAGE_REGISTRY.filter((p) => p.nav)
 
 export const DEFAULT_TAB_HREFS = ['/e-hentai', '/pixiv', '/library', '/queue']
 export const BOTTOM_TAB_CONFIG_KEY = 'bottom_tab_config'

@@ -16,6 +16,7 @@ import { TaskList } from '@/components/ScheduledTasks/TaskList'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
 import { loadSWCacheConfig, saveSWCacheConfig, type SWCacheConfig, DEFAULT_SW_CACHE_CONFIG } from '@/lib/swCacheConfig'
 import { BottomTabConfig } from '@/components/BottomTabConfig'
+import { DashboardLinksConfig } from '@/components/DashboardLinksConfig'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
 import type {
   SystemHealth,
@@ -33,6 +34,7 @@ type SectionKey =
   | 'account'
   | 'browse'
   | 'bottomTab'
+  | 'dashboardLinks'
   | 'security'
   | 'features'
   | 'rateLimits'
@@ -1835,6 +1837,17 @@ export default function SettingsPage() {
               onToggle={toggleSection}
             />
             {openSections.has('bottomTab') && <BottomTabConfig />}
+          </div>
+
+          {/* ── Dashboard Quick Links ── */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            <SectionHeader
+              title={t('settings.dashboardLinks')}
+              sectionKey="dashboardLinks"
+              openSections={openSections}
+              onToggle={toggleSection}
+            />
+            {openSections.has('dashboardLinks') && <DashboardLinksConfig />}
           </div>
 
           {/* ── Blocked Tags ── */}

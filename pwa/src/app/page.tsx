@@ -2,25 +2,11 @@
 
 import Link from 'next/link'
 import useSWR from 'swr'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import {
-  Search,
-  BookOpen,
-  Download,
-  Tags,
-  Settings,
   ArrowRight,
   BookMarked,
   X,
-  Palette,
-  FolderTree,
-  Users,
-  Clock,
-  PackageOpen,
-  FolderInput,
-  Key,
-  Puzzle,
-  Rss,
   LayoutList,
   LayoutGrid,
 } from 'lucide-react'
@@ -29,93 +15,7 @@ import { t } from '@/lib/i18n'
 import { SkeletonGrid } from '@/components/Skeleton'
 import { EmptyState } from '@/components/EmptyState'
 import type { Gallery, DownloadJob } from '@/lib/types'
-
-const QUICK_LINKS = [
-  {
-    href: '/e-hentai',
-    label: () => t('dashboard.quickLinks.ehentai'),
-    desc: () => t('dashboard.quickLinks.ehentaiDesc'),
-    icon: Search,
-  },
-  {
-    href: '/pixiv',
-    label: () => t('dashboard.quickLinks.pixiv'),
-    desc: () => t('dashboard.quickLinks.pixivDesc'),
-    icon: Palette,
-  },
-  {
-    href: '/library',
-    label: () => t('dashboard.quickLinks.library'),
-    desc: () => t('dashboard.quickLinks.libraryDesc'),
-    icon: BookOpen,
-  },
-  {
-    href: '/explorer',
-    label: () => t('dashboard.quickLinks.explorer'),
-    desc: () => t('dashboard.quickLinks.explorerDesc'),
-    icon: FolderTree,
-  },
-  {
-    href: '/artists',
-    label: () => t('dashboard.quickLinks.artists'),
-    desc: () => t('dashboard.quickLinks.artistsDesc'),
-    icon: Users,
-  },
-  {
-    href: '/subscriptions',
-    label: () => t('dashboard.quickLinks.subscriptions'),
-    desc: () => t('dashboard.quickLinks.subscriptionsDesc'),
-    icon: Rss,
-  },
-  {
-    href: '/history',
-    label: () => t('dashboard.quickLinks.history'),
-    desc: () => t('dashboard.quickLinks.historyDesc'),
-    icon: Clock,
-  },
-  {
-    href: '/queue',
-    label: () => t('dashboard.quickLinks.queue'),
-    desc: () => t('dashboard.quickLinks.queueDesc'),
-    icon: Download,
-  },
-  {
-    href: '/tags',
-    label: () => t('dashboard.quickLinks.tags'),
-    desc: () => t('dashboard.quickLinks.tagsDesc'),
-    icon: Tags,
-  },
-  {
-    href: '/export',
-    label: () => t('dashboard.quickLinks.export'),
-    desc: () => t('dashboard.quickLinks.exportDesc'),
-    icon: PackageOpen,
-  },
-  {
-    href: '/import',
-    label: () => t('dashboard.quickLinks.import'),
-    desc: () => t('dashboard.quickLinks.importDesc'),
-    icon: FolderInput,
-  },
-  {
-    href: '/credentials',
-    label: () => t('dashboard.quickLinks.credentials'),
-    desc: () => t('dashboard.quickLinks.credentialsDesc'),
-    icon: Key,
-  },
-  {
-    href: '/plugins',
-    label: () => t('dashboard.quickLinks.plugins'),
-    desc: () => t('dashboard.quickLinks.pluginsDesc'),
-    icon: Puzzle,
-  },
-  {
-    href: '/settings',
-    label: () => t('dashboard.quickLinks.settings'),
-    desc: () => t('dashboard.quickLinks.settingsDesc'),
-    icon: Settings,
-  },
-]
+import { loadDashboardConfig, DASHBOARD_LINKS_CONFIG_KEY } from '@/components/DashboardLinksConfig'
 
 const DISMISSED_KEY = 'dashboard:dismissed_alerts'
 const COMPACT_LINKS_KEY = 'dashboard_compact_links'
@@ -252,6 +152,19 @@ export default function Dashboard() {
     (j: DownloadJob) => j.status === 'queued' || j.status === 'running',
   )
 
+  // Quick links config — user-customisable via Settings > Dashboard Quick Links
+  const [quickLinks, setQuickLinks] = useState(() => loadDashboardConfig())
+
+  useEffect(() => {
+    function onStorage(e: StorageEvent) {
+      if (e.key === DASHBOARD_LINKS_CONFIG_KEY) {
+        setQuickLinks(loadDashboardConfig())
+      }
+    }
+    window.addEventListener('storage', onStorage)
+    return () => window.removeEventListener('storage', onStorage)
+  }, [])
+
   // Compact links state — persisted to localStorage.
   // Default: compact on mobile (< lg = 1024px), expanded on desktop.
   const [compactLinks, setCompactLinks] = useState<boolean>(() => {
@@ -306,7 +219,7 @@ export default function Dashboard() {
                 : 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7'
             }`}
           >
-            {QUICK_LINKS.map((link) => {
+            {quickLinks.map((link) => {
               const Icon = link.icon
               if (compactLinks) {
                 return (
@@ -314,14 +227,14 @@ export default function Dashboard() {
                     key={link.href}
                     href={link.href}
                     className="bg-vault-card border border-vault-border rounded-lg p-2 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group flex flex-col items-center gap-1.5"
-                    title={link.desc()}
+                    title={link.descKey ? t(link.descKey) : t(link.labelKey)}
                   >
                     <Icon
                       size={18}
                       className="text-vault-text-muted group-hover:text-vault-accent transition-colors shrink-0"
                     />
                     <p className="text-[10px] text-vault-text-secondary text-center leading-tight font-medium line-clamp-2">
-                      {link.label()}
+                      {t(link.labelKey)}
                     </p>
                   </Link>
                 )
@@ -338,10 +251,10 @@ export default function Dashboard() {
                   />
                   <div className="hidden lg:flex items-center gap-2 mb-1">
                     <Icon size={16} className="text-vault-text-muted group-hover:text-vault-accent transition-colors" />
-                    <p className="font-medium text-sm">{link.label()}</p>
+                    <p className="font-medium text-sm">{t(link.labelKey)}</p>
                   </div>
-                  <p className="text-xs text-vault-text-secondary text-center lg:text-left font-medium lg:font-normal lg:hidden">{link.label()}</p>
-                  <p className="text-xs text-vault-text-muted hidden lg:block">{link.desc()}</p>
+                  <p className="text-xs text-vault-text-secondary text-center lg:text-left font-medium lg:font-normal lg:hidden">{t(link.labelKey)}</p>
+                  <p className="text-xs text-vault-text-muted hidden lg:block">{link.descKey ? t(link.descKey) : ''}</p>
                 </Link>
               )
             })}

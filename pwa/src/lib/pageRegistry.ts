@@ -1,0 +1,188 @@
+import type { LucideIcon } from 'lucide-react'
+import {
+  Search,
+  Palette,
+  BookOpen,
+  Download,
+  LayoutDashboard,
+  Images,
+  FolderTree,
+  Rss,
+  Settings,
+  Users,
+  Clock,
+  PackageOpen,
+  FolderInput,
+  Key,
+  Puzzle,
+  Tags,
+  Trash2,
+  CalendarClock,
+  ScanSearch,
+} from 'lucide-react'
+
+export interface PageDef {
+  href: string
+  labelKey: string
+  descKey?: string
+  icon: LucideIcon
+  /** Appears in the BottomTabBar candidate pool */
+  nav: boolean
+  /** Appears in the Dashboard Quick Links grid */
+  dashboard: boolean
+}
+
+export const PAGE_REGISTRY: PageDef[] = [
+  {
+    href: '/',
+    labelKey: 'nav.dashboard',
+    descKey: undefined,
+    icon: LayoutDashboard,
+    nav: true,
+    dashboard: false,
+  },
+  {
+    href: '/e-hentai',
+    labelKey: 'nav.ehentai',
+    descKey: 'dashboard.quickLinks.ehentaiDesc',
+    icon: Search,
+    nav: true,
+    dashboard: true,
+  },
+  {
+    href: '/pixiv',
+    labelKey: 'nav.pixiv',
+    descKey: 'dashboard.quickLinks.pixivDesc',
+    icon: Palette,
+    nav: true,
+    dashboard: true,
+  },
+  {
+    href: '/library',
+    labelKey: 'nav.library',
+    descKey: 'dashboard.quickLinks.libraryDesc',
+    icon: BookOpen,
+    nav: true,
+    dashboard: true,
+  },
+  {
+    href: '/images',
+    labelKey: 'nav.images',
+    descKey: 'dashboard.quickLinks.imagesDesc',
+    icon: Images,
+    nav: true,
+    dashboard: true,
+  },
+  {
+    href: '/explorer',
+    labelKey: 'nav.explorer',
+    descKey: 'dashboard.quickLinks.explorerDesc',
+    icon: FolderTree,
+    nav: true,
+    dashboard: true,
+  },
+  {
+    href: '/artists',
+    labelKey: 'nav.artists',
+    descKey: 'dashboard.quickLinks.artistsDesc',
+    icon: Users,
+    nav: false,
+    dashboard: true,
+  },
+  {
+    href: '/subscriptions',
+    labelKey: 'nav.subscriptions',
+    descKey: 'dashboard.quickLinks.subscriptionsDesc',
+    icon: Rss,
+    nav: true,
+    dashboard: true,
+  },
+  {
+    href: '/history',
+    labelKey: 'nav.history',
+    descKey: 'dashboard.quickLinks.historyDesc',
+    icon: Clock,
+    nav: false,
+    dashboard: true,
+  },
+  {
+    href: '/queue',
+    labelKey: 'nav.queue',
+    descKey: 'dashboard.quickLinks.queueDesc',
+    icon: Download,
+    nav: true,
+    dashboard: true,
+  },
+  {
+    href: '/tags',
+    labelKey: 'nav.tags',
+    descKey: 'dashboard.quickLinks.tagsDesc',
+    icon: Tags,
+    nav: false,
+    dashboard: true,
+  },
+  {
+    href: '/export',
+    labelKey: 'nav.export',
+    descKey: 'dashboard.quickLinks.exportDesc',
+    icon: PackageOpen,
+    nav: false,
+    dashboard: true,
+  },
+  {
+    href: '/import',
+    labelKey: 'nav.import',
+    descKey: 'dashboard.quickLinks.importDesc',
+    icon: FolderInput,
+    nav: true,
+    dashboard: true,
+  },
+  {
+    href: '/credentials',
+    labelKey: 'nav.credentials',
+    descKey: 'dashboard.quickLinks.credentialsDesc',
+    icon: Key,
+    nav: false,
+    dashboard: true,
+  },
+  {
+    href: '/plugins',
+    labelKey: 'nav.plugins',
+    descKey: 'dashboard.quickLinks.pluginsDesc',
+    icon: Puzzle,
+    nav: false,
+    dashboard: true,
+  },
+  {
+    href: '/dedup',
+    labelKey: 'nav.dedup',
+    descKey: 'dashboard.quickLinks.dedupDesc',
+    icon: ScanSearch,
+    nav: false,
+    dashboard: true,
+  },
+  {
+    href: '/scheduled-tasks',
+    labelKey: 'nav.scheduledTasks',
+    descKey: 'dashboard.quickLinks.scheduledTasksDesc',
+    icon: CalendarClock,
+    nav: false,
+    dashboard: true,
+  },
+  {
+    href: '/trash',
+    labelKey: 'nav.trash',
+    descKey: 'dashboard.quickLinks.trashDesc',
+    icon: Trash2,
+    nav: false,
+    dashboard: true,
+  },
+  {
+    href: '/settings',
+    labelKey: 'nav.settings',
+    descKey: 'dashboard.quickLinks.settingsDesc',
+    icon: Settings,
+    nav: true,
+    dashboard: true,
+  },
+]
