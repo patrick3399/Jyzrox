@@ -145,4 +145,22 @@ describe('useImageBrowser', () => {
     loadMore()
     expect(mockSetSize).toHaveBeenCalledWith(size + 1)
   })
+
+  it('includes jump_at in page 0 key when jumpAt is provided', () => {
+    useImageBrowser({ tags: ['tag1'], jumpAt: '2024-06-01T00:00:00Z' })
+    const { getKey } = lastInfiniteCall()
+    const key = getKey(0, null) as [string, Record<string, unknown>]
+    expect(key[1]).toHaveProperty('jump_at', '2024-06-01T00:00:00Z')
+    // jumpAt should NOT appear as a raw property (it's renamed to jump_at)
+    expect(key[1]).not.toHaveProperty('jumpAt')
+  })
+
+  it('excludes jump_at from subsequent page keys using cursor', () => {
+    useImageBrowser({ tags: ['tag1'], jumpAt: '2024-06-01T00:00:00Z' })
+    const { getKey } = lastInfiniteCall()
+    const key = getKey(1, { images: [], has_next: true, next_cursor: 'cursor-xyz' }) as [string, Record<string, unknown>]
+    expect(key[1]).not.toHaveProperty('jump_at')
+    expect(key[1]).not.toHaveProperty('jumpAt')
+    expect(key[1]).toHaveProperty('cursor', 'cursor-xyz')
+  })
 })

@@ -5,6 +5,8 @@ import type { GalleryImage } from '@/lib/types'
 import type { ReaderImage, ViewMode, ScaleMode, ReadingDirection, ReaderSettings } from './types'
 import { DEFAULT_READER_SETTINGS } from './types'
 import { t } from '@/lib/i18n'
+import { api } from '@/lib/api'
+import { toast } from 'sonner'
 import {
   useReaderState,
   useSequentialPrefetch,
@@ -171,6 +173,8 @@ interface ReaderProps {
   onPageChange?: (page: number) => void
   /** Called when user seeks to a page that may not have tokens yet — triggers eager batch fetch */
   onSeekToPage?: (page: number) => Promise<void>
+  /** Custom hide handler — used by artist reader where images span multiple galleries */
+  onHideImage?: (pageNum: number) => Promise<void>
 }
 
 // ── SinglePageView ────────────────────────────────────────────────────
@@ -1465,19 +1469,24 @@ export default function Reader({
   previews,
   onPageChange,
   onSeekToPage,
+  onHideImage,
 }: ReaderProps) {
   const router = useRouter()
   const isProxyMode = downloadStatus === 'proxy_only'
 
-  const images: ReaderImage[] = rawImages.map((img) => ({
-    pageNum: img.page_num,
-    url: resolveImageUrl(img, source, sourceId),
-    isLocal: img.file_path != null,
-    width: img.width ?? undefined,
-    height: img.height ?? undefined,
-    mediaType: img.media_type,
-    duration: img.duration ?? undefined,
-  }))
+  const [hiddenPages, setHiddenPages] = useState<Set<number>>(new Set())
+
+  const images: ReaderImage[] = rawImages
+    .filter((img) => !hiddenPages.has(img.page_num))
+    .map((img) => ({
+      pageNum: img.page_num,
+      url: resolveImageUrl(img, source, sourceId),
+      isLocal: img.file_path != null,
+      width: img.width ?? undefined,
+      height: img.height ?? undefined,
+      mediaType: img.media_type,
+      duration: img.duration ?? undefined,
+    }))
 
   const {
     state,
@@ -1523,7 +1532,10 @@ export default function Reader({
     setAutoAdvanceSeconds(s.autoAdvanceSeconds)
   }, [])
 
-  const isLastPage = state.currentPage >= totalPages
+  const effectiveTotalPages = totalPages - hiddenPages.size
+  const isLastPage = images.length > 0
+    ? state.currentPage >= images[images.length - 1].pageNum
+    : true
 
   const { countdown, resetCountdown } = useAutoAdvance(
     autoAdvanceEnabled,
@@ -1721,13 +1733,14 @@ export default function Reader({
     position: { x: number; y: number }
     imageUrl: string
     imageName: string
+    pageNum: number
   } | null>(null)
 
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null)
 
   const makeImageLongPressHandlers = useCallback(
-    (imageUrl: string, imageName: string): ImageLongPressHandlers => ({
+    (imageUrl: string, imageName: string, pageNum: number): ImageLongPressHandlers => ({
       onTouchStart: (e: React.TouchEvent) => {
         const touch = e.touches[0]
         longPressStartRef.current = { x: touch.clientX, y: touch.clientY }
@@ -1737,6 +1750,7 @@ export default function Reader({
             position: { x: touch.clientX, y: touch.clientY },
             imageUrl,
             imageName,
+            pageNum,
           })
         }, 500)
       },
@@ -1763,6 +1777,7 @@ export default function Reader({
           position: { x: e.clientX, y: e.clientY },
           imageUrl,
           imageName,
+          pageNum,
         })
       },
     }),
@@ -1773,7 +1788,7 @@ export default function Reader({
   const makeSinglePageHandlers = useCallback(
     (image: ReaderImage): ImageLongPressHandlers | undefined => {
       if (!image.url) return undefined
-      return makeImageLongPressHandlers(image.url, `page_${image.pageNum}`)
+      return makeImageLongPressHandlers(image.url, `page_${image.pageNum}`, image.pageNum)
     },
     [makeImageLongPressHandlers],
   )
@@ -1781,7 +1796,7 @@ export default function Reader({
   // Helper used by WebtoonView / DoublePageView (page num + url supplied per-image)
   const makePerImageHandlers = useCallback(
     (pageNum: number, imageUrl: string): ImageLongPressHandlers =>
-      makeImageLongPressHandlers(imageUrl, `page_${pageNum}`),
+      makeImageLongPressHandlers(imageUrl, `page_${pageNum}`, pageNum),
     [makeImageLongPressHandlers],
   )
 
@@ -1791,6 +1806,51 @@ export default function Reader({
       if (longPressTimerRef.current) clearTimeout(longPressTimerRef.current)
     }
   }, [])
+
+  const handleHideImage = useCallback(async () => {
+    if (!imageMenu) return
+    const { pageNum } = imageMenu
+
+    // Close menu first so the confirm dialog appears without the menu behind it
+    setImageMenu(null)
+
+    if (!window.confirm(t('reader.hideImageConfirm'))) return
+
+    try {
+      if (onHideImage) {
+        await onHideImage(pageNum)
+      } else {
+        await api.library.deleteImage(source, sourceId, pageNum)
+      }
+      toast.success(t('reader.imageHidden'))
+
+      // Compute remaining images after this hide (hiddenPages state not yet updated)
+      const remainingImages = rawImages.filter(
+        (img) => !hiddenPages.has(img.page_num) && img.page_num !== pageNum,
+      )
+
+      if (remainingImages.length === 0) {
+        // All images hidden — leave the reader
+        router.back()
+        return
+      }
+
+      // If the current page is the one being hidden, navigate to the nearest available page
+      if (state.currentPage === pageNum) {
+        const nextAvailable =
+          remainingImages.find((img) => img.page_num > pageNum) ??
+          remainingImages[remainingImages.length - 1]
+        if (nextAvailable) {
+          setPage(nextAvailable.page_num)
+        }
+      }
+
+      // Update local state to remove the hidden image instantly
+      setHiddenPages((prev) => new Set(prev).add(pageNum))
+    } catch {
+      toast.error(t('reader.hideImageFailed'))
+    }
+  }, [imageMenu, source, sourceId, rawImages, hiddenPages, state.currentPage, setPage, router, onHideImage])
 
   const handleAutoAdvanceToggle = useCallback(() => {
     const next = !autoAdvanceEnabled
@@ -1820,7 +1880,7 @@ export default function Reader({
       >
         <ReaderOverlay
           currentPage={state.currentPage}
-          totalPages={totalPages}
+          totalPages={effectiveTotalPages}
           viewMode={state.viewMode}
           scaleMode={state.scaleMode}
           readingDirection={state.readingDirection}
@@ -1922,7 +1982,7 @@ export default function Reader({
       >
         <StatusBar
           currentPage={state.currentPage}
-          totalPages={totalPages}
+          totalPages={effectiveTotalPages}
           settings={readerSettings}
           countdown={countdown}
           autoAdvanceEnabled={autoAdvanceEnabled}
@@ -1944,6 +2004,11 @@ export default function Reader({
           position={imageMenu.position}
           imageUrl={imageMenu.imageUrl}
           imageName={imageMenu.imageName}
+          onHide={
+            (imageMenu.pageNum && images.find(i => i.pageNum === imageMenu.pageNum)?.isLocal) || onHideImage
+              ? handleHideImage
+              : undefined
+          }
         />
       )}
     </div>

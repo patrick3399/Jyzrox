@@ -1379,6 +1379,10 @@ const en: Record<string, string> = {
   'reader.saveImage': 'Save Image',
   'reader.copyImage': 'Copy Image',
   'reader.shareImage': 'Share Image',
+  'reader.hideImage': 'Hide Image',
+  'reader.hideImageConfirm': "Hide this image? It won't appear in future re-imports.",
+  'reader.imageHidden': 'Image hidden',
+  'reader.hideImageFailed': 'Failed to hide image',
   'reader.toggleControls': 'Toggle controls',
   'reader.videoSeek': 'Seek',
   'library.clearArtistFilter': 'Clear artist filter',
@@ -1395,6 +1399,7 @@ const en: Record<string, string> = {
   'images.title': 'Image Browser',
   'images.noResults': 'No images found.',
   'images.filterByTags': 'Filter by tags...',
+  'images.scrubberLabel': 'Timeline scrubber',
 
   // ── Context Menu ──
   'contextMenu.read': 'Read',

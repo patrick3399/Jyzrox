@@ -93,7 +93,7 @@ export function Sidebar() {
       </div>
 
       {/* Nav links */}
-      <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto">
+      <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto no-scrollbar">
         {navLinks.filter(link => hasRole(profile?.role, link.minRole)).map((link) => {
           const Icon = link.icon
           const isActive =
