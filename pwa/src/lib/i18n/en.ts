@@ -703,6 +703,7 @@ const en: Record<string, string> = {
   'history.loadMore': 'Load More',
   'history.source.ehentai': 'E-Hentai',
   'history.source.local': 'Library',
+  'history.source.twitter': 'Twitter',
 
   // ── Tag Autocomplete ──
   'tag.autocomplete.placeholder': 'Type to search tags...',

@@ -27,6 +27,7 @@ function formatRelativeTime(iso: string): string {
 function sourceLabel(source: string): string {
   if (source === 'ehentai' || source === 'exhentai') return t('history.source.ehentai')
   if (source === 'local') return t('history.source.local')
+  if (source === 'twitter') return t('history.source.twitter')
   return source
 }
 
@@ -40,7 +41,7 @@ function HistoryCard({
   onClick: () => void
 }) {
   const thumbSrc = item.thumb
-    ? item.source === 'ehentai' || item.source === 'exhentai'
+    ? (item.source === 'ehentai' || item.source === 'exhentai') && item.thumb.startsWith('http')
       ? `/api/eh/thumb-proxy?url=${encodeURIComponent(item.thumb)}`
       : item.thumb
     : null
@@ -160,7 +161,7 @@ export default function HistoryPage() {
     (item: BrowseHistoryItem) => {
       if (item.gid != null && item.token) {
         router.push(`/e-hentai/${item.gid}/${item.token}`)
-      } else if (item.source === 'local') {
+      } else {
         router.push(`/library/${item.source}/${item.source_id}`)
       }
     },
