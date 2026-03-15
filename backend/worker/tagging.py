@@ -57,14 +57,7 @@ async def _aggregate_to_gallery(session, gallery_id: int, threshold: float) -> i
 
     Returns the number of tag rows upserted.
     """
-    image_ids = (
-        await session.execute(
-            select(Image.id).where(Image.gallery_id == gallery_id)
-        )
-    ).scalars().all()
-
-    if not image_ids:
-        return 0
+    image_subq = select(Image.id).where(Image.gallery_id == gallery_id)
 
     agg_rows = (
         await session.execute(
@@ -72,7 +65,7 @@ async def _aggregate_to_gallery(session, gallery_id: int, threshold: float) -> i
                 ImageTag.tag_id,
                 func.max(ImageTag.confidence).label("max_conf"),
             )
-            .where(ImageTag.image_id.in_(image_ids))
+            .where(ImageTag.image_id.in_(image_subq))
             .group_by(ImageTag.tag_id)
             .having(func.max(ImageTag.confidence) >= threshold)
         )

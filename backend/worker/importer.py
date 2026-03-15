@@ -21,6 +21,7 @@ from worker.constants import (
     logger,
 )
 from worker.helpers import _sha256, _validate_image_magic
+from worker.tag_helpers import rebuild_gallery_tags_array, upsert_tag_translations
 
 
 async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id: int | None = None, source_url: str | None = None) -> dict:
@@ -193,11 +194,9 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
         # Upsert tag translations if present in metadata
         tag_translations = metadata.get("tag_translations")
         if tag_translations:
-            from worker.tag_helpers import upsert_tag_translations
             await upsert_tag_translations(session, tag_translations)
 
         # Rebuild tags_array from gallery_tags (single source of truth)
-        from worker.tag_helpers import rebuild_gallery_tags_array
         await rebuild_gallery_tags_array(session, gallery_id)
 
         await session.commit()

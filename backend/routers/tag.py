@@ -3,11 +3,11 @@
 import base64
 import json
 from collections import deque
-from typing import Literal as LiteralType
+from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import case as sql_case, desc, func, literal as sql_literal, or_, select
+from sqlalchemy import case as sql_case, delete, desc, func, literal as sql_literal, or_, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -555,7 +555,7 @@ async def remove_blocked_tag(
 
 class ManualTagRequest(BaseModel):
     tags: list[str]  # "namespace:name" or bare "name"
-    action: LiteralType["add", "remove"] = "add"
+    action: Literal["add", "remove"] = "add"
 
 
 @router.post("/gallery/{gallery_id}")
@@ -633,32 +633,48 @@ async def manual_tag_gallery(
         return {"status": "ok", "affected": len(tag_ids)}
 
     else:  # remove
-        removed = 0
+        # Parse all tag strings into (namespace, name) pairs up front
+        seen: set[tuple[str, str]] = set()
+        parsed_remove: list[tuple[str, str]] = []
         for tag_str in body.tags:
             if ":" in tag_str:
                 ns, name = tag_str.split(":", 1)
             else:
                 ns, name = "general", tag_str
+            if (ns, name) not in seen:
+                seen.add((ns, name))
+                parsed_remove.append((ns, name))
 
-            # Find tag ID
-            tag_row = (await session.execute(
-                select(Tag.id).where(Tag.namespace == ns, Tag.name == name)
-            )).scalar_one_or_none()
-            if not tag_row:
-                continue
+        if not parsed_remove:
+            await rebuild_gallery_tags_array(session, gallery_id)
+            await session.commit()
+            return {"status": "ok", "affected": 0}
 
-            # Delete only manual-source gallery_tags
-            result = await session.execute(
-                select(GalleryTag).where(
-                    GalleryTag.gallery_id == gallery_id,
-                    GalleryTag.tag_id == tag_row,
-                    GalleryTag.source == "manual",
-                )
+        # Query 1: resolve all (namespace, name) pairs to tag IDs in one round-trip
+        ns_name_filter = or_(
+            *[
+                (Tag.namespace == ns) & (Tag.name == name)
+                for ns, name in parsed_remove
+            ]
+        )
+        tag_ids = (
+            await session.execute(select(Tag.id).where(ns_name_filter))
+        ).scalars().all()
+
+        if not tag_ids:
+            await rebuild_gallery_tags_array(session, gallery_id)
+            await session.commit()
+            return {"status": "ok", "affected": 0}
+
+        # Query 2: delete all matching manual gallery_tags in one statement
+        del_result = await session.execute(
+            delete(GalleryTag).where(
+                GalleryTag.gallery_id == gallery_id,
+                GalleryTag.tag_id.in_(tag_ids),
+                GalleryTag.source == "manual",
             )
-            gt = result.scalar_one_or_none()
-            if gt:
-                await session.delete(gt)
-                removed += 1
+        )
+        removed = del_result.rowcount
 
         await rebuild_gallery_tags_array(session, gallery_id)
         await session.commit()

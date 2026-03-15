@@ -99,43 +99,8 @@ class PixivSourcePlugin(SourcePlugin):
             return None
 
         # Build metadata dict in the same format as download_pixiv_illust writes
-        tags = detail.get("tags", [])
-        tag_list: list[str] = []
-        tag_translations_data: list[dict] = []
-        seen_tags: set[str] = set()
-
-        for tag in tags:
-            if isinstance(tag, dict):
-                name = tag.get("name", "")
-                translated = tag.get("translated_name")
-                # Prefer English (translated_name) over Japanese (name)
-                canonical = translated if translated else name
-                if canonical and canonical.lower() not in seen_tags:
-                    tag_list.append(canonical)
-                    seen_tags.add(canonical.lower())
-                # Store Japanese as translation
-                if name and translated and name != translated:
-                    tag_translations_data.append({
-                        "namespace": "general",
-                        "name": translated,
-                        "language": "ja",
-                        "translation": name,
-                    })
-            elif isinstance(tag, str) and tag.lower() not in seen_tags:
-                tag_list.append(tag)
-                seen_tags.add(tag.lower())
-
-        # Auto-tag: rating from sanity_level
-        sanity = detail.get("sanity_level", 0)
-        if sanity >= 6 and "rating:r18" not in seen_tags:
-            tag_list.append("rating:r18")
-
-        # Auto-tag: illust type
-        illust_type = detail.get("type", "illust")
-        if illust_type == "manga":
-            tag_list.append("meta:manga")
-        elif illust_type == "ugoira":
-            tag_list.append("meta:ugoira")
+        from plugins.builtin.pixiv._tags import process_pixiv_tags
+        tag_list, tag_translations_data = process_pixiv_tags(detail)
 
         user = detail.get("user", {})
         posted_ts = 0
