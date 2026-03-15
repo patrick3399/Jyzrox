@@ -454,3 +454,379 @@ class TestPixivSearch:
         assert resp.status_code == 400
         data = resp.json()
         assert data["detail"]["code"] == "pixiv_not_configured"
+
+
+# ---------------------------------------------------------------------------
+# PixivClient unit tests — _normalize_illust, _normalize_user, helpers
+# ---------------------------------------------------------------------------
+
+
+class TestPixivIllustParsing:
+    """Unit tests for PixivClient normalisation helpers (no HTTP, no Redis)."""
+
+    def _make_illust(self, **overrides) -> dict:
+        """Minimal illust dict as returned by pixivpy3."""
+        base = {
+            "id": 99999,
+            "title": "Test Illust",
+            "type": "illust",
+            "image_urls": {
+                "square_medium": "https://i.pximg.net/sq/99999.jpg",
+                "medium": "https://i.pximg.net/med/99999.jpg",
+                "large": "https://i.pximg.net/lg/99999.jpg",
+            },
+            "caption": "A test caption",
+            "user": {
+                "id": 12345,
+                "name": "TestArtist",
+                "account": "testartist",
+                "profile_image_urls": {"medium": "https://i.pximg.net/avatar/12345.jpg"},
+            },
+            "tags": [
+                {"name": "オリジナル", "translated_name": "original"},
+                {"name": "女の子", "translated_name": "girl"},
+            ],
+            "create_date": "2026-01-15T12:00:00+09:00",
+            "page_count": 1,
+            "width": 1200,
+            "height": 1800,
+            "sanity_level": 2,
+            "total_view": 5000,
+            "total_bookmarks": 300,
+            "is_bookmarked": False,
+            "meta_single_page": {"original_image_url": "https://i.pximg.net/orig/99999_p0.jpg"},
+            "meta_pages": [],
+        }
+        base.update(overrides)
+        return base
+
+    def test_normalize_illust_parses_single_page_detail(self):
+        """_normalize_illust should extract all fields from a single-page illust."""
+        from services.pixiv_client import PixivClient
+
+        illust = self._make_illust()
+        result = PixivClient._normalize_illust(illust)
+
+        assert result["id"] == 99999
+        assert result["title"] == "Test Illust"
+        assert result["type"] == "illust"
+        assert result["caption"] == "A test caption"
+        assert result["page_count"] == 1
+        assert result["width"] == 1200
+        assert result["height"] == 1800
+        assert result["total_view"] == 5000
+        assert result["total_bookmarks"] == 300
+        assert result["is_bookmarked"] is False
+        assert result["image_urls"]["original"] == "https://i.pximg.net/orig/99999_p0.jpg"
+        assert result["user"]["id"] == 12345
+        assert result["user"]["name"] == "TestArtist"
+
+    def test_normalize_illust_handles_multi_page(self):
+        """Multi-page illusts should take original URL from meta_pages[0]."""
+        from services.pixiv_client import PixivClient
+
+        illust = self._make_illust(
+            page_count=3,
+            meta_pages=[
+                {"image_urls": {"original": "https://i.pximg.net/orig/99999_p0.jpg", "large": ""}},
+                {"image_urls": {"original": "https://i.pximg.net/orig/99999_p1.jpg", "large": ""}},
+                {"image_urls": {"original": "https://i.pximg.net/orig/99999_p2.jpg", "large": ""}},
+            ],
+            meta_single_page={},
+        )
+        result = PixivClient._normalize_illust(illust)
+
+        assert result["page_count"] == 3
+        # original should point to first page's original
+        assert result["image_urls"]["original"] == "https://i.pximg.net/orig/99999_p0.jpg"
+        assert len(result["meta_pages"]) == 3
+        assert result["meta_pages"][2]["image_urls"]["original"] == "https://i.pximg.net/orig/99999_p2.jpg"
+
+    def test_normalize_illust_handles_deleted_or_empty(self):
+        """Minimal/empty illust dict should not raise; missing fields fall back to defaults."""
+        from services.pixiv_client import PixivClient
+
+        # Simulate a near-empty response (deleted/restricted illust has minimal data)
+        illust = {"id": 0}
+        result = PixivClient._normalize_illust(illust)
+
+        assert result["id"] == 0
+        assert result["title"] == ""
+        assert result["type"] == "illust"
+        assert result["page_count"] == 1
+        assert result["tags"] == []
+        assert result["meta_pages"] == []
+        assert result["image_urls"]["original"] == ""
+
+    def test_normalize_illust_parses_tags_with_translations(self):
+        """Tags list should include name and translated_name for each entry."""
+        from services.pixiv_client import PixivClient
+
+        illust = self._make_illust(
+            tags=[
+                {"name": "blue_hair", "translated_name": "青い髪"},
+                {"name": "solo", "translated_name": None},
+                {"name": "safe"},  # missing translated_name key entirely
+            ]
+        )
+        result = PixivClient._normalize_illust(illust)
+
+        assert len(result["tags"]) == 3
+        assert result["tags"][0] == {"name": "blue_hair", "translated_name": "青い髪"}
+        assert result["tags"][1] == {"name": "solo", "translated_name": None}
+        assert result["tags"][2]["name"] == "safe"
+
+
+# ---------------------------------------------------------------------------
+# PixivClient._normalize_user
+# ---------------------------------------------------------------------------
+
+
+class TestPixivUserProfile:
+    """Unit tests for _normalize_user and related helpers."""
+
+    def _make_user_detail(self, **overrides) -> dict:
+        """Minimal user_detail response dict."""
+        base = {
+            "user": {
+                "id": 12345,
+                "name": "TestArtist",
+                "account": "testartist",
+                "comment": "Hello from test artist",
+                "is_followed": True,
+                "profile_image_urls": {"medium": "https://i.pximg.net/avatar/12345.jpg"},
+            },
+            "profile": {
+                "total_illusts": 100,
+                "total_manga": 5,
+                "total_novels": 0,
+            },
+        }
+        base.update(overrides)
+        return base
+
+    def test_normalize_user_parses_full_profile(self):
+        """_normalize_user should extract all expected fields."""
+        from services.pixiv_client import PixivClient
+
+        response = self._make_user_detail()
+        result = PixivClient._normalize_user(response)
+
+        assert result["id"] == 12345
+        assert result["name"] == "TestArtist"
+        assert result["account"] == "testartist"
+        assert result["comment"] == "Hello from test artist"
+        assert result["total_illusts"] == 100
+        assert result["total_manga"] == 5
+        assert result["total_novels"] == 0
+        assert result["is_followed"] is True
+        assert "pximg.net" in result["profile_image"]
+
+    def test_normalize_user_empty_response_returns_defaults(self):
+        """Empty dict should not raise; fields default to zero / empty string."""
+        from services.pixiv_client import PixivClient
+
+        result = PixivClient._normalize_user({})
+
+        assert result["id"] is None
+        assert result["name"] == ""
+        assert result["total_illusts"] == 0
+        assert result["is_followed"] is False
+
+    def test_normalize_illust_list_wraps_multiple_illusts(self):
+        """_normalize_illust_list should return {illusts, next_offset} and wrap each illust."""
+        from services.pixiv_client import PixivClient
+
+        client = PixivClient.__new__(PixivClient)  # skip __init__
+        raw = {
+            "illusts": [
+                {"id": 1, "title": "A"},
+                {"id": 2, "title": "B"},
+            ],
+            "next_url": "https://app-api.pixiv.net/v1/search/illust?offset=30",
+        }
+        result = client._normalize_illust_list(raw)
+
+        assert len(result["illusts"]) == 2
+        assert result["illusts"][0]["id"] == 1
+        assert result["illusts"][1]["id"] == 2
+        assert result["next_offset"] == 30
+
+
+# ---------------------------------------------------------------------------
+# PixivClient search result parsing (unit — no HTTP)
+# ---------------------------------------------------------------------------
+
+
+class TestPixivSearchResultParsing:
+    """Unit tests for search result parsing helpers."""
+
+    def test_next_offset_parses_offset_from_next_url(self):
+        """_next_offset should extract integer offset from next_url query string."""
+        from services.pixiv_client import PixivClient
+
+        response = {
+            "illusts": [],
+            "next_url": "https://app-api.pixiv.net/v1/search/illust?word=test&offset=60",
+        }
+        offset = PixivClient._next_offset(response)
+        assert offset == 60
+
+    def test_next_offset_returns_none_when_no_next_url(self):
+        """When next_url is absent or None, _next_offset should return None."""
+        from services.pixiv_client import PixivClient
+
+        assert PixivClient._next_offset({"next_url": None}) is None
+        assert PixivClient._next_offset({}) is None
+
+    def test_normalize_illust_list_empty_illusts_returns_empty(self):
+        """Empty illusts list in response should produce empty result with no next_offset."""
+        from services.pixiv_client import PixivClient
+
+        client = PixivClient.__new__(PixivClient)
+        result = client._normalize_illust_list({"illusts": [], "next_url": None})
+
+        assert result["illusts"] == []
+        assert result["next_offset"] is None
+
+
+# ---------------------------------------------------------------------------
+# PixivClient token management (unit — Redis + pixivpy3 mocked)
+# ---------------------------------------------------------------------------
+
+
+class TestPixivTokenRefresh:
+    """Unit tests for _ensure_token / _refresh_token flow."""
+
+    async def test_ensure_token_uses_cached_access_token(self):
+        """When Redis has a cached access_token, _ensure_token should use it without calling auth."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from services.pixiv_client import PixivClient
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=b"cached_access_token_abc")
+
+        mock_api = MagicMock()
+        mock_api.set_auth = MagicMock()
+
+        client = PixivClient.__new__(PixivClient)
+        client.refresh_token = "my_refresh_token"
+        client._api = mock_api
+
+        with patch("services.pixiv_client.get_redis", return_value=mock_redis):
+            await client._ensure_token()
+
+        mock_api.set_auth.assert_called_once_with("cached_access_token_abc", "my_refresh_token")
+        # auth() should NOT have been called (token was cached)
+        assert not hasattr(mock_api, "auth") or not mock_api.auth.called
+
+    async def test_refresh_token_stores_access_token_in_redis(self):
+        """_refresh_token should call pixivpy3.auth and store access_token in Redis."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from services.pixiv_client import PixivClient
+
+        mock_redis = AsyncMock()
+        mock_redis.setex = AsyncMock()
+
+        fake_token_response = MagicMock()
+        fake_token_response.access_token = "new_access_token_xyz"
+
+        mock_api = MagicMock()
+        mock_api.auth = MagicMock(return_value=fake_token_response)
+
+        client = PixivClient.__new__(PixivClient)
+        client.refresh_token = "valid_refresh_token"
+        client._api = mock_api
+
+        with patch("services.pixiv_client.get_redis", return_value=mock_redis):
+            await client._refresh_token()
+
+        mock_redis.setex.assert_called_once()
+        call_args = mock_redis.setex.call_args[0]
+        assert call_args[0] == "pixiv:access_token"
+        assert call_args[2] == "new_access_token_xyz"
+
+    async def test_refresh_token_raises_permission_error_on_auth_failure(self):
+        """When pixivpy3.auth raises, _refresh_token should wrap it in PermissionError."""
+        import asyncio
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        import pytest
+
+        from services.pixiv_client import PixivClient
+
+        mock_redis = AsyncMock()
+
+        mock_api = MagicMock()
+        mock_api.auth = MagicMock(side_effect=Exception("invalid_grant"))
+
+        client = PixivClient.__new__(PixivClient)
+        client.refresh_token = "bad_refresh_token"
+        client._api = mock_api
+
+        with (
+            patch("services.pixiv_client.get_redis", return_value=mock_redis),
+            pytest.raises(PermissionError, match="Pixiv token invalid or expired"),
+        ):
+            await client._refresh_token()
+
+
+# ---------------------------------------------------------------------------
+# PixivClient error handling (unit)
+# ---------------------------------------------------------------------------
+
+
+class TestPixivClientErrorHandling:
+    """Unit tests for error handling inside PixivClient._call."""
+
+    async def test_call_retries_on_403_token_expired(self):
+        """When a pixivpy3 call raises a 403 error, _call should flush Redis and retry once."""
+        from unittest.mock import AsyncMock, MagicMock, call, patch
+
+        from services.pixiv_client import PixivClient
+
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+
+        call_count = 0
+
+        def _flaky_fn():
+            nonlocal call_count
+            call_count += 1
+            if call_count == 1:
+                raise Exception("403 Forbidden")
+            return {"illusts": [], "next_url": None}
+
+        mock_api = MagicMock()
+        fake_token_response = MagicMock()
+        fake_token_response.access_token = "refreshed_token"
+        mock_api.auth = MagicMock(return_value=fake_token_response)
+
+        client = PixivClient.__new__(PixivClient)
+        client.refresh_token = "some_token"
+        client._api = mock_api
+
+        with patch("services.pixiv_client.get_redis", return_value=mock_redis):
+            result = await client._call(_flaky_fn)
+
+        assert call_count == 2
+        mock_redis.delete.assert_called_with("pixiv:access_token")
+        assert result == {"illusts": [], "next_url": None}
+
+    async def test_call_propagates_non_auth_exception(self):
+        """Non-auth exceptions from pixivpy3 should propagate directly from _call."""
+        import pytest
+
+        from services.pixiv_client import PixivClient
+
+        def _bad_fn():
+            raise ValueError("Unexpected API shape")
+
+        client = PixivClient.__new__(PixivClient)
+        client.refresh_token = "token"
+        client._api = MagicMock()
+
+        with pytest.raises(ValueError, match="Unexpected API shape"):
+            await client._call(_bad_fn)

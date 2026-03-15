@@ -299,3 +299,210 @@ class TestWorkerSha256:
         finally:
             p1.unlink(missing_ok=True)
             p2.unlink(missing_ok=True)
+
+
+# ---------------------------------------------------------------------------
+# toggle_watcher_job
+# ---------------------------------------------------------------------------
+
+
+class TestToggleWatcherJob:
+    """Unit tests for worker.toggle_watcher_job."""
+
+    async def test_start_watcher_calls_watcher_start(self):
+        """toggle_watcher_job(enabled=True) must start the watcher and return status='started'."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.set = AsyncMock(return_value=True)
+
+        mock_watcher = MagicMock()
+        mock_watcher.is_running = False
+        mock_watcher.start = MagicMock()
+
+        with (
+            patch("worker.get_all_library_paths", new=AsyncMock(return_value=["/lib/path1"])),
+            patch("worker._watcher", mock_watcher),
+        ):
+            from worker import toggle_watcher_job
+
+            ctx = {"redis": mock_redis}
+            result = await toggle_watcher_job(ctx, enabled=True)
+
+        assert result["status"] == "started"
+        mock_watcher.start.assert_called_once()
+
+    async def test_stop_watcher_calls_watcher_stop(self):
+        """toggle_watcher_job(enabled=False) must stop the watcher and return status='stopped'."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+
+        mock_watcher = MagicMock()
+        mock_watcher.is_running = True
+        mock_watcher.stop = MagicMock()
+
+        with patch("worker._watcher", mock_watcher):
+            from worker import toggle_watcher_job
+
+            ctx = {"redis": mock_redis}
+            result = await toggle_watcher_job(ctx, enabled=False)
+
+        assert result["status"] == "stopped"
+        mock_watcher.stop.assert_called_once()
+
+    async def test_no_library_paths_returns_no_paths(self):
+        """When no library paths are configured, start must return status='no_paths'."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+
+        mock_watcher = MagicMock()
+        mock_watcher.is_running = False
+
+        with (
+            patch("worker.get_all_library_paths", new=AsyncMock(return_value=[])),
+            patch("worker._watcher", mock_watcher),
+        ):
+            from worker import toggle_watcher_job
+
+            ctx = {"redis": mock_redis}
+            result = await toggle_watcher_job(ctx, enabled=True)
+
+        assert result["status"] == "no_paths"
+        mock_watcher.start.assert_not_called()
+
+    async def test_already_running_no_op(self):
+        """toggle_watcher_job(enabled=True) when watcher is already running must return already_running."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        mock_redis = AsyncMock()
+
+        mock_watcher = MagicMock()
+        mock_watcher.is_running = True
+
+        with patch("worker._watcher", mock_watcher):
+            from worker import toggle_watcher_job
+
+            ctx = {"redis": mock_redis}
+            result = await toggle_watcher_job(ctx, enabled=True)
+
+        assert result["status"] == "already_running"
+
+
+# ---------------------------------------------------------------------------
+# rate_limit_schedule_job
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimitScheduleJob:
+    """Unit tests for worker.rate_limit_schedule_job."""
+
+    async def test_disabled_returns_disabled(self):
+        """When schedule is not enabled, job must return status='disabled'."""
+        from unittest.mock import AsyncMock, patch
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=b"0")
+        mock_redis.delete = AsyncMock(return_value=1)
+
+        from worker import rate_limit_schedule_job
+
+        result = await rate_limit_schedule_job({"redis": mock_redis})
+
+        assert result["status"] == "disabled"
+
+    async def test_active_window_returns_active(self):
+        """When current hour falls inside the rate-limit window, status must be 'active'."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from datetime import datetime, timezone
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock(return_value=1)
+
+        def _get_side(key):
+            mapping = {
+                "rate_limit:schedule:enabled": b"1",
+                "rate_limit:schedule:start_hour": b"0",
+                "rate_limit:schedule:end_hour": b"23",
+            }
+            return mapping.get(key)
+
+        mock_redis.get = AsyncMock(side_effect=_get_side)
+
+        # Force current_hour=12, which is inside 0..23
+        fixed_dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+        from worker import rate_limit_schedule_job
+
+        # rate_limit_schedule_job does `from datetime import datetime, timezone` locally.
+        # Patch the datetime class inside the datetime module so .now() returns our value.
+        with patch("datetime.datetime") as mock_dt_cls:
+            mock_dt_cls.now = MagicMock(return_value=fixed_dt)
+            result = await rate_limit_schedule_job({"redis": mock_redis})
+
+        assert result["status"] == "active"
+
+    async def test_outside_window_returns_inactive(self):
+        """When current hour is outside the window, status must be 'inactive'."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from datetime import datetime, timezone
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock(return_value=1)
+
+        def _get_side(key):
+            mapping = {
+                "rate_limit:schedule:enabled": b"1",
+                "rate_limit:schedule:start_hour": b"1",
+                "rate_limit:schedule:end_hour": b"3",
+            }
+            return mapping.get(key)
+
+        mock_redis.get = AsyncMock(side_effect=_get_side)
+
+        # Force current_hour=12 which is outside 1..3
+        fixed_dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+
+        from worker import rate_limit_schedule_job
+
+        with patch("datetime.datetime") as mock_dt_cls:
+            mock_dt_cls.now = MagicMock(return_value=fixed_dt)
+            result = await rate_limit_schedule_job({"redis": mock_redis})
+
+        assert result["status"] == "inactive"
+
+    async def test_midnight_wrap_window_correctly_detected(self):
+        """Wrap-midnight window (e.g. 22-06) must correctly detect in-window hours."""
+        from unittest.mock import AsyncMock, MagicMock, patch
+        from datetime import datetime, timezone
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock(return_value=1)
+
+        def _get_side(key):
+            mapping = {
+                "rate_limit:schedule:enabled": b"1",
+                "rate_limit:schedule:start_hour": b"22",
+                "rate_limit:schedule:end_hour": b"6",
+            }
+            return mapping.get(key)
+
+        mock_redis.get = AsyncMock(side_effect=_get_side)
+
+        # Hour=23 is inside the wrap-midnight window 22..6
+        fixed_dt = datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc)
+
+        from worker import rate_limit_schedule_job
+
+        with patch("datetime.datetime") as mock_dt_cls:
+            mock_dt_cls.now = MagicMock(return_value=fixed_dt)
+            result = await rate_limit_schedule_job({"redis": mock_redis})
+
+        assert result["status"] == "active"

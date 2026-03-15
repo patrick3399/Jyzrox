@@ -440,3 +440,308 @@ class TestProgressiveImporterFinalize:
 
         result = await importer.finalize(dest_dir, partial=False)
         assert result is None, "finalize() should return None when gallery_id is not set"
+
+
+# ---------------------------------------------------------------------------
+# TestProgressiveImporterEnsureGallery
+# ---------------------------------------------------------------------------
+
+
+def _make_mock_session_for_ensure(gallery_id: int):
+    """Return a fully-mocked async session that pretends to execute pg_insert/RETURNING."""
+    from contextlib import asynccontextmanager
+    from unittest.mock import AsyncMock, MagicMock
+
+    # scalar_one() must return the fake gallery_id
+    execute_result = MagicMock()
+    execute_result.scalar_one = MagicMock(return_value=gallery_id)
+    # scalar_one_or_none for max_page query in _load_gallery_state
+    execute_result.scalar_one_or_none = MagicMock(return_value=None)
+    # scalars().all() for ExcludedBlob query in _load_gallery_state
+    scalars_mock = MagicMock()
+    scalars_mock.all = MagicMock(return_value=[])
+    execute_result.scalars = MagicMock(return_value=scalars_mock)
+
+    session = AsyncMock()
+    session.execute = AsyncMock(return_value=execute_result)
+    session.get = AsyncMock(return_value=None)
+    session.commit = AsyncMock()
+
+    @asynccontextmanager
+    async def _cm():
+        yield session
+
+    class _Factory:
+        def __call__(self):
+            return _cm()
+
+    return _Factory(), session
+
+
+class TestProgressiveImporterEnsureGallery:
+    """Tests for ProgressiveImporter.ensure_gallery_from_url."""
+
+    async def test_ensure_gallery_from_url_creates_gallery_record(self):
+        """ensure_gallery_from_url must return the gallery id from the DB."""
+        from worker.progressive import ProgressiveImporter
+
+        fake_factory, _ = _make_mock_session_for_ensure(gallery_id=42)
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            gid = await importer.ensure_gallery_from_url(
+                "https://example.com/comics/my_series", Path("/tmp/dest")
+            )
+
+        assert gid == 42
+        assert importer.gallery_id == 42
+
+    async def test_ensure_gallery_from_url_populates_source_and_source_id(self):
+        """ensure_gallery_from_url must set source and source_id on the importer."""
+        from worker.progressive import ProgressiveImporter
+
+        fake_factory, _ = _make_mock_session_for_ensure(gallery_id=7)
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            await importer.ensure_gallery_from_url(
+                "https://www.testsite.org/gallery/12345", Path("/tmp/dest")
+            )
+
+        # Path component "gallery" is used as source_id
+        assert importer.source_id == "gallery"
+        assert importer.source is not None
+
+    async def test_ensure_gallery_from_url_duplicate_upserts_without_error(self):
+        """Calling ensure_gallery_from_url twice with the same URL must not raise."""
+        from worker.progressive import ProgressiveImporter
+
+        fake_factory1, _ = _make_mock_session_for_ensure(gallery_id=10)
+        importer1 = ProgressiveImporter(db_job_id=None, user_id=None)
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory1):
+            gid1 = await importer1.ensure_gallery_from_url(
+                "https://dup.example.com/art/9999", Path("/tmp/dest_dup")
+            )
+
+        fake_factory2, _ = _make_mock_session_for_ensure(gallery_id=10)
+        importer2 = ProgressiveImporter(db_job_id=None, user_id=None)
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory2):
+            gid2 = await importer2.ensure_gallery_from_url(
+                "https://dup.example.com/art/9999", Path("/tmp/dest_dup")
+            )
+
+        assert isinstance(gid1, int)
+        assert isinstance(gid2, int)
+
+
+# ---------------------------------------------------------------------------
+# TestProgressiveImporterImportFile
+# ---------------------------------------------------------------------------
+
+
+class TestProgressiveImporterImportFile:
+    """Tests for ProgressiveImporter._import_single (via import_file)."""
+
+    async def test_import_file_with_excluded_blob_is_skipped(
+        self, db_session, db_session_factory, tmp_path
+    ):
+        """A file whose sha256 is in the excluded set must be silently skipped."""
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(db_session)
+        sha = "ex" + "0" * 62
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "test_001"
+        importer._excluded_set = {sha}
+
+        # Create a minimal JPEG file
+        fake_file = tmp_path / "excluded.jpg"
+        fake_file.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive._sha256", return_value=sha),
+        ):
+            await importer.import_file(fake_file)
+            # Drain all tasks
+            import asyncio
+            if importer._tasks:
+                await asyncio.gather(*importer._tasks, return_exceptions=True)
+
+        count = (
+            await db_session.execute(
+                text("SELECT COUNT(*) FROM images WHERE gallery_id=:gid"),
+                {"gid": gallery_id},
+            )
+        ).scalar()
+        assert count == 0, "Excluded blob must not produce an image record"
+
+    async def test_import_file_validates_magic_bytes(
+        self, db_session, db_session_factory, tmp_path
+    ):
+        """File with invalid magic bytes must be skipped without importing."""
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(db_session, source_id="magic_test")
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "magic_test"
+
+        # Write garbage bytes that fail magic check
+        bad_file = tmp_path / "bad.jpg"
+        bad_file.write_bytes(b"\x00\x01\x02\x03\x04")
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            await importer.import_file(bad_file)
+            import asyncio
+            if importer._tasks:
+                await asyncio.gather(*importer._tasks, return_exceptions=True)
+
+        count = (
+            await db_session.execute(
+                text("SELECT COUNT(*) FROM images WHERE gallery_id=:gid"),
+                {"gid": gallery_id},
+            )
+        ).scalar()
+        assert count == 0, "File with invalid magic bytes must not be imported"
+
+    async def test_import_file_increments_page_counter(self, tmp_path):
+        """Each call to import_file must increment _page_counter by 1."""
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = 1
+        importer.source = "test"
+        importer.source_id = "test_001"
+
+        # Create fake valid files (import_file assigns page_num before spawning task)
+        f1 = tmp_path / "img1.jpg"
+        f2 = tmp_path / "img2.jpg"
+        f3 = tmp_path / "img3.jpg"
+        for f in (f1, f2, f3):
+            f.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+
+        # We only test that the serial counter advances — mock _import_single
+        with patch.object(importer, "_import_single", new=AsyncMock()):
+            await importer.import_file(f1)
+            await importer.import_file(f2)
+            await importer.import_file(f3)
+
+        assert importer._page_counter == 3
+
+    async def test_import_file_deduplicates_same_path(self, tmp_path):
+        """Passing the same file path twice must only increment counter once."""
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = 1
+        importer.source = "test"
+        importer.source_id = "test_001"
+
+        f = tmp_path / "dup.jpg"
+        f.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+
+        with patch.object(importer, "_import_single", new=AsyncMock()):
+            await importer.import_file(f)
+            await importer.import_file(f)  # duplicate — must be ignored
+
+        assert importer._page_counter == 1
+
+
+# ---------------------------------------------------------------------------
+# TestProgressiveImporterPageNumbering
+# ---------------------------------------------------------------------------
+
+
+class TestProgressiveImporterPageNumbering:
+    """Tests for the page numbering behaviour of ProgressiveImporter."""
+
+    async def test_page_numbering_starts_from_zero_offset(self, tmp_path):
+        """First file imported must receive page_num=1 (counter starts at 0)."""
+        import asyncio
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = 1
+        importer.source = "test"
+        importer.source_id = "test_001"
+
+        captured_pages: list[int] = []
+
+        async def _capture(file_path, page_num):
+            captured_pages.append(page_num)
+
+        f = tmp_path / "p1.jpg"
+        f.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+
+        with patch.object(importer, "_import_single", new=_capture):
+            await importer.import_file(f)
+            # Drain spawned asyncio tasks so _capture is actually called
+            if importer._tasks:
+                await asyncio.gather(*importer._tasks, return_exceptions=True)
+
+        assert captured_pages == [1]
+
+    async def test_sequential_page_numbering_maintained(self, tmp_path):
+        """Files imported sequentially must receive consecutive page numbers."""
+        import asyncio
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = 1
+        importer.source = "test"
+        importer.source_id = "test_001"
+
+        captured_pages: list[int] = []
+
+        async def _capture(file_path, page_num):
+            captured_pages.append(page_num)
+
+        files = []
+        for i in range(1, 6):
+            f = tmp_path / f"page{i}.jpg"
+            f.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+            files.append(f)
+
+        with patch.object(importer, "_import_single", new=_capture):
+            for f in files:
+                await importer.import_file(f)
+            # Drain all spawned tasks
+            if importer._tasks:
+                await asyncio.gather(*importer._tasks, return_exceptions=True)
+
+        assert captured_pages == [1, 2, 3, 4, 5]
+
+    async def test_page_counter_resumes_from_loaded_max(
+        self, db_session, db_session_factory, tmp_path
+    ):
+        """After _load_gallery_state, new pages must continue from existing max page_num."""
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(db_session, source_id="resume_test")
+        sha = "rr" + "0" * 62
+        await _insert_blob(db_session, sha)
+        # Pre-existing image at page_num=5
+        await _insert_image(db_session, gallery_id, 5, sha)
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "resume_test"
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            await importer._load_gallery_state()
+
+        assert importer._page_counter == 5, (
+            "Counter must resume from existing max page_num so new pages start at 6"
+        )
