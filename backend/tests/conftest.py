@@ -834,6 +834,74 @@ async def ext_client(db_session, db_session_factory, mock_redis):
 
 
 @pytest.fixture
+def make_client(db_session, db_session_factory, mock_redis):
+    """
+    Factory that creates an authenticated AsyncClient for any user_id/role.
+
+    Usage (inside an async test):
+        async with make_client(user_id=2, role="member") as ac:
+            resp = await ac.get("/api/subscriptions/")
+
+    The two clients cannot be open simultaneously because dependency_overrides
+    is global — open one, close it, then open the other.
+    """
+
+    @asynccontextmanager
+    async def _make(user_id: int, role: str = "member"):
+        from httpx import ASGITransport, AsyncClient
+
+        from core.auth import require_auth
+
+        async def _override_get_db():
+            yield db_session
+
+        async def _override_require_auth():
+            return {"user_id": user_id, "role": role}
+
+        _app.dependency_overrides[_fake_get_db] = _override_get_db
+        _app.dependency_overrides[require_auth] = _override_require_auth
+
+        _app.state.arq = AsyncMock()
+        _app.state.arq.enqueue_job = AsyncMock(
+            return_value=MagicMock(job_id=f"test-job-{user_id}")
+        )
+
+        with (
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("core.rate_limit.get_redis", return_value=mock_redis),
+            patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
+            patch("routers.auth.get_redis", return_value=mock_redis),
+            patch("routers.auth.check_rate_limit", new_callable=AsyncMock),
+            patch("routers.auth.async_session", db_session_factory),
+            patch("routers.search.async_session", db_session_factory),
+            patch("routers.tag.async_session", db_session_factory),
+            patch("routers.opds.async_session", db_session_factory),
+            patch("routers.history.async_session", db_session_factory),
+            patch("routers.external.async_session", db_session_factory),
+            patch("routers.export.async_session", db_session_factory),
+            patch("routers.settings.async_session", db_session_factory),
+            patch("routers.import_router.async_session", db_session_factory),
+            patch("routers.artists.async_session", db_session_factory),
+            patch("routers.subscriptions.async_session", db_session_factory),
+            patch("plugins.builtin.ehentai.browse.async_session", db_session_factory),
+            patch("plugins.builtin.ehentai.browse.get_redis", return_value=mock_redis),
+            patch("routers.settings.get_redis", return_value=mock_redis),
+        ):
+            transport = ASGITransport(app=_app, raise_app_exceptions=False)
+            async with AsyncClient(
+                transport=transport,
+                base_url="http://test",
+                cookies={"csrf_token": "test-csrf"},
+                headers={"X-CSRF-Token": "test-csrf"},
+            ) as ac:
+                yield ac
+
+        _app.dependency_overrides.clear()
+
+    return _make
+
+
+@pytest.fixture
 async def hist_client(db_session, db_session_factory, mock_redis):
     """
     Authenticated httpx.AsyncClient for history router tests.

@@ -213,7 +213,7 @@ function SubscriptionCard({
 
           <div className="flex flex-wrap items-center gap-3 text-[10px] text-vault-text-muted">
             {sub.last_checked_at && (
-              <span>{t('subscriptions.lastChecked')}: {timeAgo(sub.last_checked_at)}</span>
+              <span className={sub.last_status === 'ok' ? 'text-emerald-400' : sub.last_status === 'failed' ? 'text-red-400' : undefined}>{t('subscriptions.lastChecked')}: {timeAgo(sub.last_checked_at)}</span>
             )}
             <button
               onClick={() => onAutoDownloadToggle(sub)}

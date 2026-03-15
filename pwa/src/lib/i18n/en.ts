@@ -65,6 +65,9 @@ const en: Record<string, string> = {
   // ── Browse ──
   'browse.searchPlaceholder': 'Search E-Hentai...',
   'browse.search': 'Search',
+  'browse.advancedSearch': 'Advanced Search',
+  'browse.searchIn': 'Search in',
+  'browse.filters': 'Filters',
   'browse.listView': 'List view',
   'browse.gridView': 'Grid view',
   'browse.searchTab': 'Search',
@@ -526,6 +529,10 @@ const en: Record<string, string> = {
   'queue.subscription': 'Subscription',
   'queue.retryCount': 'Retry {count}/{max}',
   'queue.failedPages': '{count} pages failed',
+  'queue.permanentlyFailed': 'Permanently failed — max retries reached',
+  'queue.retry': 'Retry',
+  'queue.retryQueued': 'Job queued for retry',
+  'queue.retryError': 'Failed to retry job',
 
   // ── Tags (extra) ──
   'tags.selectTag': 'Select a tag to view details',
@@ -926,6 +933,7 @@ const en: Record<string, string> = {
   'settings.unblock': 'Unblock',
   'settings.aiTaggingSection': 'AI Tagging',
   'settings.apiTokensSection': 'API Tokens',
+  'settings.tokenName': 'Token name',
   'settings.tokenNamePlaceholder': 'e.g. Homepage widget, CI/CD',
   'settings.never': 'Never',
   'settings.days7': '7 days',
