@@ -421,3 +421,317 @@ class TestSearchAliasExpansion:
         """Search with no include tags should skip alias expansion entirely."""
         resp = await client.get("/api/search/", params={"q": "title:test"})
         assert resp.status_code == 200
+
+
+# ---------------------------------------------------------------------------
+# Cursor-based pagination
+# ---------------------------------------------------------------------------
+
+
+def _make_cursor(gallery_id: int, sort_value: str, sort_key: str) -> str:
+    """Encode a cursor the same way the router does."""
+    import base64
+    import json
+
+    payload = {"id": gallery_id, "v": sort_value, "s": sort_key}
+    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+
+
+class TestCursorPagination:
+    """GET /api/search/ with cursor= — keyset pagination edge cases."""
+
+    async def test_cursor_pagination_basic_flow_added_at(self, client, db_session):
+        """Get first page via cursor, use next_cursor to get second page.
+
+        Verifies that cursor-based pagination returns non-overlapping results
+        across two consecutive pages when sorted by added_at (DESC).
+
+        Bootstrap strategy: supply an "open" cursor pointing to a far-future
+        timestamp so the first cursor-request returns the newest gallery first.
+        """
+        # Use ISO format with T separator so that SQLite string comparisons
+        # align with the isoformat() values that _encode_cursor produces.
+        timestamps = [
+            "2024-01-03T00:00:00",
+            "2024-01-02T00:00:00",
+            "2024-01-01T00:00:00",
+        ]
+        for i, ts in enumerate(timestamps):
+            await db_session.execute(
+                text(
+                    "INSERT INTO galleries "
+                    "(source, source_id, title, category, language, pages, rating, "
+                    "favorited, download_status, tags_array, added_at) "
+                    "VALUES (:src, :sid, :title, 'doujinshi', 'english', 10, 0, 0, "
+                    "'completed', '[]', :added_at)"
+                ),
+                {
+                    "src": "cursor_basic_src",
+                    "sid": f"cursor_basic_{i}",
+                    "title": f"CursorGallery {i}",
+                    "added_at": ts,
+                },
+            )
+        await db_session.commit()
+
+        # Bootstrap cursor: points to a far-future date so DESC scan starts at newest row.
+        start_cursor = _make_cursor(
+            gallery_id=999999999,
+            sort_value="2099-12-31T00:00:00",
+            sort_key="added_at",
+        )
+
+        # Page 1
+        resp1 = await client.get(
+            "/api/search/",
+            params={"limit": 1, "q": "source:cursor_basic_src", "cursor": start_cursor},
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["has_next"] is True
+        assert data1["next_cursor"] is not None
+        assert len(data1["items"]) == 1
+        first_id = data1["items"][0]["id"]
+
+        # Page 2 using the cursor returned from page 1
+        resp2 = await client.get(
+            "/api/search/",
+            params={
+                "limit": 1,
+                "q": "source:cursor_basic_src",
+                "cursor": data1["next_cursor"],
+            },
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert len(data2["items"]) == 1
+        second_id = data2["items"][0]["id"]
+
+        # Items must differ and be in DESC added_at order
+        assert first_id != second_id
+
+    async def test_cursor_sort_key_mismatch_returns_400(self, client):
+        """Cursor issued for sort:added_at must not be used with sort:rating.
+
+        The router checks c['s'] against effective_sort and raises 400 when
+        they differ, protecting against corrupted or cross-sort cursors.
+        """
+        # Craft a cursor whose sort key is 'added_at'
+        added_at_cursor = _make_cursor(
+            gallery_id=1,
+            sort_value="2024-01-01T00:00:00",
+            sort_key="added_at",
+        )
+
+        # Submit it with sort:rating — the keys disagree → 400
+        resp = await client.get(
+            "/api/search/",
+            params={"cursor": added_at_cursor, "q": "sort:rating"},
+        )
+        assert resp.status_code == 400
+        assert "sort" in resp.json()["detail"].lower()
+
+    async def test_cursor_invalid_base64_returns_400(self, client):
+        """A tampered/non-base64 cursor string must return 400."""
+        resp = await client.get("/api/search/", params={"cursor": "!!!not-valid-base64!!!"})
+        assert resp.status_code == 400
+        assert "cursor" in resp.json()["detail"].lower()
+
+    async def test_cursor_invalid_cursor_value_for_rating_returns_400(self, client):
+        """A cursor with a non-integer value for sort:rating must return 400."""
+        bad_cursor = _make_cursor(gallery_id=1, sort_value="not-a-number", sort_key="rating")
+        resp = await client.get(
+            "/api/search/",
+            params={"cursor": bad_cursor, "q": "sort:rating"},
+        )
+        assert resp.status_code == 400
+        assert "cursor" in resp.json()["detail"].lower()
+
+    async def test_cursor_invalid_cursor_value_for_pages_returns_400(self, client):
+        """A cursor with a non-integer value for sort:pages must return 400."""
+        bad_cursor = _make_cursor(gallery_id=1, sort_value="not-a-number", sort_key="pages")
+        resp = await client.get(
+            "/api/search/",
+            params={"cursor": bad_cursor, "q": "sort:pages"},
+        )
+        assert resp.status_code == 400
+        assert "cursor" in resp.json()["detail"].lower()
+
+    async def test_cursor_invalid_cursor_value_for_added_at_returns_400(self, client):
+        """A cursor with an unparseable datetime for sort:added_at must return 400."""
+        bad_cursor = _make_cursor(gallery_id=1, sort_value="not-a-datetime", sort_key="added_at")
+        resp = await client.get("/api/search/", params={"cursor": bad_cursor})
+        assert resp.status_code == 400
+        assert "cursor" in resp.json()["detail"].lower()
+
+    async def test_cursor_invalid_cursor_value_for_posted_at_returns_400(self, client):
+        """A cursor with an unparseable datetime for sort:posted_at must return 400."""
+        bad_cursor = _make_cursor(gallery_id=1, sort_value="bad-date", sort_key="posted_at")
+        resp = await client.get(
+            "/api/search/",
+            params={"cursor": bad_cursor, "q": "sort:posted_at"},
+        )
+        assert resp.status_code == 400
+        assert "cursor" in resp.json()["detail"].lower()
+
+    async def test_cursor_pagination_sort_by_rating(self, client, db_session):
+        """Cursor pagination with sort:rating returns pages in DESC rating order.
+
+        Uses a unique source value to isolate inserted galleries from other tests.
+        Bootstraps page 1 with an open cursor (rating=999) so all three galleries
+        are reachable via cursor pagination.
+        """
+        for rating, sid in [(5, "cr5"), (3, "cr3"), (1, "cr1")]:
+            await _insert_gallery(
+                db_session, source_id=sid, title=f"Rated {rating}", rating=rating,
+                source="cursor_rating_src",
+            )
+
+        start_cursor = _make_cursor(
+            gallery_id=999999999, sort_value="999", sort_key="rating"
+        )
+        resp1 = await client.get(
+            "/api/search/",
+            params={"q": "sort:rating source:cursor_rating_src", "limit": 1, "cursor": start_cursor},
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["items"][0]["rating"] == 5
+        assert data1["has_next"] is True
+
+        resp2 = await client.get(
+            "/api/search/",
+            params={
+                "q": "sort:rating source:cursor_rating_src",
+                "limit": 1,
+                "cursor": data1["next_cursor"],
+            },
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert data2["items"][0]["rating"] == 3
+
+    async def test_cursor_pagination_sort_by_pages(self, client, db_session):
+        """Cursor pagination with sort:pages returns pages in DESC page-count order.
+
+        Uses a unique source value and a bootstrap cursor to isolate this test.
+        """
+        for pages, sid in [(100, "cp100"), (50, "cp50"), (10, "cp10")]:
+            await _insert_gallery(
+                db_session, source_id=sid, title=f"{pages} Pages", pages=pages,
+                source="cursor_pages_src",
+            )
+
+        start_cursor = _make_cursor(
+            gallery_id=999999999, sort_value="999999", sort_key="pages"
+        )
+        resp1 = await client.get(
+            "/api/search/",
+            params={"q": "sort:pages source:cursor_pages_src", "limit": 1, "cursor": start_cursor},
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["items"][0]["pages"] == 100
+        assert data1["has_next"] is True
+
+        resp2 = await client.get(
+            "/api/search/",
+            params={
+                "q": "sort:pages source:cursor_pages_src",
+                "limit": 1,
+                "cursor": data1["next_cursor"],
+            },
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["items"][0]["pages"] == 50
+
+    async def test_cursor_pagination_sort_by_title_asc(self, client, db_session):
+        """Cursor pagination with sort:title returns items in ASC alphabetical order.
+
+        For ASC (title) sort the keyset condition is title > cursor_val, so a
+        bootstrap cursor with sort_value="" (empty string) returns everything.
+        """
+        for title, sid in [("Alpha", "ct_a"), ("Beta", "ct_b"), ("Gamma", "ct_g")]:
+            await _insert_gallery(db_session, source_id=sid, title=title, source="cursor_title_src")
+
+        # Bootstrap cursor: empty string < "Alpha" in ASC order
+        start_cursor = _make_cursor(gallery_id=0, sort_value="", sort_key="title")
+        resp1 = await client.get(
+            "/api/search/",
+            params={"q": "sort:title source:cursor_title_src", "limit": 1, "cursor": start_cursor},
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["items"][0]["title"] == "Alpha"
+        assert data1["has_next"] is True
+
+        resp2 = await client.get(
+            "/api/search/",
+            params={
+                "q": "sort:title source:cursor_title_src",
+                "limit": 1,
+                "cursor": data1["next_cursor"],
+            },
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["items"][0]["title"] == "Beta"
+
+    async def test_cursor_pagination_sort_by_posted_at(self, client, db_session):
+        """Cursor pagination with sort:posted_at returns items newest-first."""
+        # ISO format with T separator to match isoformat() output for SQLite string comparison.
+        for i, ts in enumerate(
+            ["2024-03-01T00:00:00", "2024-02-01T00:00:00", "2024-01-01T00:00:00"]
+        ):
+            await db_session.execute(
+                text(
+                    "INSERT INTO galleries "
+                    "(source, source_id, title, category, language, pages, rating, "
+                    "favorited, download_status, tags_array, posted_at) "
+                    "VALUES ('cursor_posted', :sid, :title, 'doujinshi', 'english', "
+                    "10, 0, 0, 'completed', '[]', :posted_at)"
+                ),
+                {"sid": f"cpa_{i}", "title": f"Posted {i}", "posted_at": ts},
+            )
+        await db_session.commit()
+
+        start_cursor = _make_cursor(
+            gallery_id=999999999,
+            sort_value="2099-12-31T00:00:00",
+            sort_key="posted_at",
+        )
+        resp1 = await client.get(
+            "/api/search/",
+            params={"q": "sort:posted_at source:cursor_posted", "limit": 1, "cursor": start_cursor},
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert "2024-03-01" in data1["items"][0]["posted_at"]
+        assert data1["has_next"] is True
+
+        resp2 = await client.get(
+            "/api/search/",
+            params={
+                "q": "sort:posted_at source:cursor_posted",
+                "limit": 1,
+                "cursor": data1["next_cursor"],
+            },
+        )
+        assert resp2.status_code == 200
+        assert "2024-02-01" in resp2.json()["items"][0]["posted_at"]
+
+    async def test_cursor_has_next_false_on_last_page(self, client, db_session):
+        """When all results fit in one page, has_next must be False and next_cursor null."""
+        await _insert_gallery(db_session, source_id="last_only", title="Only Gallery", source="last_page_src")
+
+        resp = await client.get(
+            "/api/search/",
+            params={"q": "source:last_page_src", "limit": 10, "cursor": _make_cursor(
+                gallery_id=9999999,
+                sort_value="2099-01-01T00:00:00",
+                sort_key="added_at",
+            )},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["has_next"] is False
+        assert data["next_cursor"] is None

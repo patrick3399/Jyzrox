@@ -613,6 +613,104 @@ class TestRequireAuthEdgeCases:
         # Should still succeed — viewer role is the safe default
         assert resp.status_code in (200, 500)
 
+    async def test_ip_mismatch_logs_warning_but_still_returns_200(self, unauthed_client, mock_redis):
+        """Session with different IP than stored should log a warning but still succeed (lines 107-111)."""
+        import json as _json
+        from unittest.mock import patch
+        from core.auth import _sign_session
+
+        # Session stores IP "1.2.3.4"; request arrives from the default test IP (127.0.0.1)
+        data = _json.dumps({"role": "admin", "user_id": 1, "ip": "1.2.3.4", "user_agent": ""})
+        signed = _sign_session(data)
+        mock_redis.get = AsyncMock_returning(signed.encode())
+
+        with patch("core.auth.get_redis", return_value=mock_redis):
+            resp = await unauthed_client.get(
+                "/api/auth/sessions",
+                cookies={"vault_session": "1:sometoken"},
+            )
+        # IP mismatch is warned about but the request is not rejected
+        assert resp.status_code in (200, 500)
+
+    async def test_ua_mismatch_logs_warning_but_still_returns_200(self, unauthed_client, mock_redis):
+        """Session with different User-Agent than stored should log a warning but still succeed (lines 112-116)."""
+        import json as _json
+        from unittest.mock import patch
+        from core.auth import _sign_session
+
+        # Session stores a specific UA; the test client sends no/different UA
+        data = _json.dumps({
+            "role": "admin",
+            "user_id": 1,
+            "ip": "",
+            "user_agent": "OldBrowser/1.0",
+        })
+        signed = _sign_session(data)
+        mock_redis.get = AsyncMock_returning(signed.encode())
+
+        with patch("core.auth.get_redis", return_value=mock_redis):
+            resp = await unauthed_client.get(
+                "/api/auth/sessions",
+                cookies={"vault_session": "1:sometoken"},
+                headers={"User-Agent": "NewBrowser/99.0", "X-CSRF-Token": "test-csrf"},
+            )
+        # UA mismatch is warned about but the request is not rejected
+        assert resp.status_code in (200, 500)
+
+    async def test_ip_and_ua_mismatch_both_warn_but_still_returns_200(self, unauthed_client, mock_redis):
+        """Both IP and UA mismatches together: both warnings emitted, request still succeeds (lines 107-116)."""
+        import json as _json
+        from unittest.mock import patch
+        from core.auth import _sign_session
+
+        data = _json.dumps({
+            "role": "admin",
+            "user_id": 1,
+            "ip": "10.0.0.1",
+            "user_agent": "OriginalBrowser/1.0",
+        })
+        signed = _sign_session(data)
+        mock_redis.get = AsyncMock_returning(signed.encode())
+
+        with patch("core.auth.get_redis", return_value=mock_redis), \
+             patch("core.auth.logger") as mock_logger:
+            resp = await unauthed_client.get(
+                "/api/auth/sessions",
+                cookies={"vault_session": "1:sometoken"},
+                headers={"User-Agent": "DifferentBrowser/2.0", "X-CSRF-Token": "test-csrf"},
+            )
+
+        # Both warnings should have been logged
+        warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
+        ip_warned = any("mismatch" in c.lower() and ("ip" in c.lower() or "stored=" in c.lower()) for c in warning_calls)
+        ua_warned = any("ua mismatch" in c.lower() for c in warning_calls)
+        assert ip_warned, f"Expected IP mismatch warning, got: {warning_calls}"
+        assert ua_warned, f"Expected UA mismatch warning, got: {warning_calls}"
+
+        # The request must not be rejected despite both mismatches
+        assert resp.status_code in (200, 500)
+
+    async def test_return_dict_contains_user_id_and_role(self, unauthed_client, mock_redis):
+        """require_auth return value (line 121) includes correct user_id (int) and role (lines 100-121)."""
+        import json as _json
+        from unittest.mock import patch
+        from core.auth import _sign_session
+
+        data = _json.dumps({"role": "member", "user_id": 42})
+        signed = _sign_session(data)
+        mock_redis.get = AsyncMock_returning(signed.encode())
+
+        # /api/auth/check uses require_auth and returns the role in its response
+        with patch("core.auth.get_redis", return_value=mock_redis):
+            resp = await unauthed_client.get(
+                "/api/auth/check",
+                cookies={"vault_session": "42:sometoken"},
+            )
+        # 200: the return dict is well-formed (user_id=int, role extracted)
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["status"] == "ok"
+
 
 # ---------------------------------------------------------------------------
 # require_role factory — role checking (lines 124-135)

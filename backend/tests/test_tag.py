@@ -1059,3 +1059,399 @@ class TestRetagEndpoints:
         async with make_client(user_id=1, role="viewer") as ac:
             resp = await ac.post("/api/tags/retag-all")
         assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# Cursor helpers: _encode_tag_cursor / _decode_tag_cursor (lines 27-36)
+# ---------------------------------------------------------------------------
+
+
+class TestTagCursorHelpers:
+    """Unit tests for _encode_tag_cursor and _decode_tag_cursor."""
+
+    def test_encode_decode_roundtrip(self):
+        """Encoding then decoding a cursor should reproduce the original values."""
+        from routers.tag import _decode_tag_cursor, _encode_tag_cursor
+        from unittest.mock import MagicMock
+
+        fake_tag = MagicMock()
+        fake_tag.id = 42
+        fake_tag.count = 99
+
+        cursor = _encode_tag_cursor(fake_tag)
+        assert isinstance(cursor, str)
+        decoded = _decode_tag_cursor(cursor)
+        assert decoded["id"] == 42
+        assert decoded["count"] == 99
+
+    def test_decode_invalid_cursor_raises_400(self):
+        """Decoding a garbage string should raise HTTPException with status 400."""
+        import pytest
+        from fastapi import HTTPException
+        from routers.tag import _decode_tag_cursor
+
+        with pytest.raises(HTTPException) as exc_info:
+            _decode_tag_cursor("not-valid-base64!!")
+        assert exc_info.value.status_code == 400
+        assert "invalid cursor" in exc_info.value.detail.lower()
+
+    def test_decode_valid_base64_but_not_json_raises_400(self):
+        """Base64 that decodes to non-JSON should still raise HTTPException 400."""
+        import base64
+        import pytest
+        from fastapi import HTTPException
+        from routers.tag import _decode_tag_cursor
+
+        bad_cursor = base64.urlsafe_b64encode(b"not-json").decode()
+        with pytest.raises(HTTPException) as exc_info:
+            _decode_tag_cursor(bad_cursor)
+        assert exc_info.value.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Cursor-based keyset pagination (lines 67-90)
+# ---------------------------------------------------------------------------
+
+
+class TestListTagsCursorPagination:
+    """GET /api/tags/ with cursor= param exercises the keyset pagination branch."""
+
+    async def test_cursor_pagination_returns_second_page(self, client, db_session):
+        """Given 12 tags, cursor from page 1 should produce a non-overlapping page 2."""
+        for i in range(12):
+            await _insert_tag(db_session, "general", f"kp_tag_{i:02d}", count=i + 1)
+
+        # Page 1 via offset (no cursor) with limit=5
+        resp1 = await client.get("/api/tags/", params={"limit": 5})
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert len(data1["tags"]) == 5
+
+        # The offset path does not return a cursor, so we must request with cursor=
+        # by encoding the last tag of page 1 manually.
+        from routers.tag import _encode_tag_cursor
+        from unittest.mock import MagicMock
+
+        last = data1["tags"][-1]
+        fake_tag = MagicMock()
+        fake_tag.id = last["id"]
+        fake_tag.count = last["count"]
+        cursor = _encode_tag_cursor(fake_tag)
+
+        resp2 = await client.get("/api/tags/", params={"cursor": cursor, "limit": 5})
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert "tags" in data2
+        assert "has_next" in data2
+
+        # No tag should appear in both pages
+        ids1 = {t["id"] for t in data1["tags"]}
+        ids2 = {t["id"] for t in data2["tags"]}
+        assert ids1.isdisjoint(ids2)
+
+    async def test_cursor_pagination_has_next_true_when_more_exist(self, client, db_session):
+        """has_next should be True when the next page still has items."""
+        for i in range(10):
+            await _insert_tag(db_session, "general", f"hn_tag_{i:02d}", count=i + 1)
+
+        # Encode cursor pointing just before the highest-count tag so all 10 remain
+        from routers.tag import _encode_tag_cursor
+        from unittest.mock import MagicMock
+
+        # Simulate a cursor ahead of all tags (very high count)
+        fake_tag = MagicMock()
+        fake_tag.id = 999999
+        fake_tag.count = 99999
+        cursor = _encode_tag_cursor(fake_tag)
+
+        resp = await client.get("/api/tags/", params={"cursor": cursor, "limit": 5})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["has_next"] is True
+        assert data["next_cursor"] is not None
+        assert len(data["tags"]) == 5
+
+    async def test_cursor_pagination_has_next_false_on_last_page(self, client, db_session):
+        """has_next should be False when there are no more items after the page."""
+        for i in range(3):
+            await _insert_tag(db_session, "general", f"lp_tag_{i:02d}", count=i + 1)
+
+        from routers.tag import _encode_tag_cursor
+        from unittest.mock import MagicMock
+
+        fake_tag = MagicMock()
+        fake_tag.id = 999999
+        fake_tag.count = 99999
+        cursor = _encode_tag_cursor(fake_tag)
+
+        # limit=10 > 3 items — all fit, has_next must be False
+        resp = await client.get("/api/tags/", params={"cursor": cursor, "limit": 10})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["has_next"] is False
+        assert data["next_cursor"] is None
+
+    async def test_cursor_pagination_invalid_cursor_returns_400(self, client):
+        """Providing a garbage cursor string should return 400."""
+        resp = await client.get("/api/tags/", params={"cursor": "INVALID_CURSOR_XYZ"})
+        assert resp.status_code == 400
+
+    async def test_cursor_pagination_with_namespace_filter(self, client, db_session):
+        """Cursor pagination should respect the namespace= filter."""
+        for i in range(6):
+            await _insert_tag(db_session, "artist", f"artist_tag_{i:02d}", count=i + 1)
+        for i in range(6):
+            await _insert_tag(db_session, "general", f"general_tag_{i:02d}", count=i + 1)
+
+        from routers.tag import _encode_tag_cursor
+        from unittest.mock import MagicMock
+
+        fake_tag = MagicMock()
+        fake_tag.id = 999999
+        fake_tag.count = 99999
+        cursor = _encode_tag_cursor(fake_tag)
+
+        resp = await client.get(
+            "/api/tags/", params={"cursor": cursor, "limit": 10, "namespace": "artist"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        for tag in data["tags"]:
+            assert tag["namespace"] == "artist"
+
+
+# ---------------------------------------------------------------------------
+# Alias update (upsert) path — line 176
+# ---------------------------------------------------------------------------
+
+
+class TestAliasUpdate:
+    """POST /api/tags/aliases — existing alias should be updated, not duplicated."""
+
+    async def test_create_alias_twice_updates_canonical_id(self, client, db_session):
+        """Creating an alias that already exists should update canonical_id (line 176).
+
+        pg_insert is not available on SQLite, so the endpoint uses ORM-level
+        SELECT + UPDATE via the existing-row branch.  We accept 200 on both
+        SQLite (ORM path) and PostgreSQL (pg_insert path).
+        """
+        cid1 = await _insert_tag(db_session, "character", "orig_canonical", count=5)
+        cid2 = await _insert_tag(db_session, "character", "new_canonical", count=3)
+
+        # First creation — happy path
+        resp1 = await client.post(
+            "/api/tags/aliases",
+            json={
+                "alias_namespace": "character",
+                "alias_name": "shared_alias",
+                "canonical_id": cid1,
+            },
+        )
+        assert resp1.status_code == 200
+
+        # Second creation with the same alias_namespace/alias_name but different canonical_id
+        # This must hit the `existing.canonical_id = req.canonical_id` branch (line 176).
+        resp2 = await client.post(
+            "/api/tags/aliases",
+            json={
+                "alias_namespace": "character",
+                "alias_name": "shared_alias",
+                "canonical_id": cid2,
+            },
+        )
+        assert resp2.status_code == 200
+        assert resp2.json()["status"] == "ok"
+
+        # Verify the alias now points to cid2
+        resp3 = await client.get("/api/tags/aliases", params={"tag_id": cid2})
+        assert resp3.status_code == 200
+        data = resp3.json()
+        assert any(a["alias_name"] == "shared_alias" for a in data)
+
+
+# ---------------------------------------------------------------------------
+# _has_cycle — cycle detection hit (line 243) and max_depth limit (line 274)
+# ---------------------------------------------------------------------------
+
+
+class TestHasCycleEdgeCases:
+    """Additional cycle detection edge cases beyond the basic two-node test."""
+
+    async def test_create_implication_cycle_direct(self, client, db_session):
+        """Direct two-node cycle: A→B then B→A should return 400 (line 243)."""
+        tid_a = await _insert_tag(db_session, "general", "cycle_direct_a", count=1)
+        tid_b = await _insert_tag(db_session, "general", "cycle_direct_b", count=1)
+
+        # Insert A→B directly into DB
+        await _insert_implication(db_session, tid_a, tid_b)
+
+        # Attempt B→A via API — must hit _has_cycle and detect the cycle
+        resp = await client.post(
+            "/api/tags/implications",
+            json={"antecedent_id": tid_b, "consequent_id": tid_a},
+        )
+        assert resp.status_code == 400
+        assert "circular" in resp.json()["detail"].lower()
+
+    async def test_create_implication_cycle_long_chain(self, client, db_session):
+        """Multi-hop chain: A→B→C→D, then D→A should be rejected as circular."""
+        tid_a = await _insert_tag(db_session, "general", "chain_a", count=1)
+        tid_b = await _insert_tag(db_session, "general", "chain_b", count=1)
+        tid_c = await _insert_tag(db_session, "general", "chain_c", count=1)
+        tid_d = await _insert_tag(db_session, "general", "chain_d", count=1)
+
+        await _insert_implication(db_session, tid_a, tid_b)
+        await _insert_implication(db_session, tid_b, tid_c)
+        await _insert_implication(db_session, tid_c, tid_d)
+
+        # D→A would close the cycle
+        resp = await client.post(
+            "/api/tags/implications",
+            json={"antecedent_id": tid_d, "consequent_id": tid_a},
+        )
+        assert resp.status_code == 400
+        assert "circular" in resp.json()["detail"].lower()
+
+    async def test_has_cycle_max_depth_conservative(self):
+        """When BFS visits max_depth nodes without finding target, _has_cycle returns True.
+
+        This tests line 285: `return len(visited) >= max_depth`.
+        We set max_depth=2 and build a graph where BFS expands exactly 2 nodes
+        that are not the target, so the function conservatively returns True.
+        """
+        import pytest
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        # Build a mock session that simulates a graph with no actual cycle but
+        # enough nodes to hit the depth limit.
+        # Graph: 1→2, 2→3.  We call _has_cycle(session, from_id=1, target_id=99, max_depth=2).
+        # BFS: visit 1 (get neighbour 2), visit 2 (get neighbour 3) → len(visited)==2 >= max_depth=2
+        # → return True conservatively.
+
+        call_count = 0
+
+        async def fake_execute(stmt):
+            nonlocal call_count
+            call_count += 1
+            result = MagicMock()
+            if call_count == 1:
+                # Neighbours of node 1 → [2]
+                result.scalars.return_value.all.return_value = [2]
+            elif call_count == 2:
+                # Neighbours of node 2 → [3]
+                result.scalars.return_value.all.return_value = [3]
+            else:
+                result.scalars.return_value.all.return_value = []
+            return result
+
+        mock_session = MagicMock()
+        mock_session.execute = fake_execute
+
+        from routers.tag import _has_cycle
+
+        result = await _has_cycle(mock_session, from_id=1, target_id=99, max_depth=2)
+        assert result is True
+
+
+# ---------------------------------------------------------------------------
+# Manual tag remove edge cases (lines 683, 689-691, 721-723)
+# ---------------------------------------------------------------------------
+
+
+class TestManualTagRemoveEdgeCases:
+    """Edge cases in the remove branch of POST /api/tags/gallery/{gallery_id}."""
+
+    @staticmethod
+    def _patch_worker_helpers(monkeypatch):
+        import sys
+        import types
+        from unittest.mock import AsyncMock
+
+        if "worker" not in sys.modules:
+            monkeypatch.setitem(sys.modules, "worker", types.ModuleType("worker"))
+        _fake_th = types.ModuleType("worker.tag_helpers")
+        _fake_th.rebuild_gallery_tags_array = AsyncMock(return_value=[])
+        _fake_th.upsert_tag_translations = AsyncMock()
+        monkeypatch.setitem(sys.modules, "worker.tag_helpers", _fake_th)
+
+    async def test_remove_bare_name_defaults_to_general_namespace(
+        self, client, db_session, monkeypatch
+    ):
+        """A bare tag name (no colon) in a remove action should resolve to general:<name>.
+
+        This exercises line 683: `ns, name = "general", tag_str`.
+        """
+        self._patch_worker_helpers(monkeypatch)
+        gid = await _insert_gallery(db_session, source_id="remove_bare_ns")
+
+        # Insert tag in general namespace and attach it with source=manual
+        tag_id = await _insert_tag(db_session, "general", "bare_removal_tag")
+        await db_session.execute(
+            text(
+                "INSERT OR IGNORE INTO gallery_tags (gallery_id, tag_id, confidence, source) "
+                "VALUES (:gid, :tid, 1.0, 'manual')"
+            ),
+            {"gid": gid, "tid": tag_id},
+        )
+        await db_session.commit()
+
+        # Remove using bare name (no namespace prefix) — must map to general:bare_removal_tag
+        resp = await client.post(
+            f"/api/tags/gallery/{gid}",
+            json={"tags": ["bare_removal_tag"], "action": "remove"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 1
+
+    async def test_remove_empty_tags_list_returns_affected_zero(
+        self, client, db_session, monkeypatch
+    ):
+        """Removing with an empty tags list should return affected=0 (lines 689-691).
+
+        The parsed_remove list is empty, so the endpoint returns early.
+        """
+        self._patch_worker_helpers(monkeypatch)
+        gid = await _insert_gallery(db_session, source_id="remove_empty_list")
+
+        resp = await client.post(
+            f"/api/tags/gallery/{gid}",
+            json={"tags": [], "action": "remove"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 0
+
+    async def test_remove_tag_with_non_manual_source_returns_affected_zero(
+        self, client, db_session, monkeypatch
+    ):
+        """Removing a tag that exists but has source != 'manual' should return affected=0.
+
+        This exercises lines 720-723: manual_tag_ids is empty after the
+        source='manual' filter, so the endpoint returns early with affected=0.
+        """
+        self._patch_worker_helpers(monkeypatch)
+        gid = await _insert_gallery(db_session, source_id="remove_non_manual")
+
+        # Insert the tag and attach it with source='metadata' (not 'manual')
+        tag_id = await _insert_tag(db_session, "general", "metadata_tagged")
+        await db_session.execute(
+            text(
+                "INSERT OR IGNORE INTO gallery_tags (gallery_id, tag_id, confidence, source) "
+                "VALUES (:gid, :tid, 0.9, 'metadata')"
+            ),
+            {"gid": gid, "tid": tag_id},
+        )
+        await db_session.commit()
+
+        # Try to remove it — the source filter should block it, giving affected=0
+        resp = await client.post(
+            f"/api/tags/gallery/{gid}",
+            json={"tags": ["general:metadata_tagged"], "action": "remove"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["affected"] == 0

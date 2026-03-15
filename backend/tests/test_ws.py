@@ -693,3 +693,201 @@ class TestWebsocketEndpoint:
         assert msgs[1] == {"type": "alert", "message": "alert two"}
         assert msgs[2] == {"type": "alert", "message": "alert three"}
         assert msgs[3]["type"] == "ping"
+
+
+# ---------------------------------------------------------------------------
+# Edge case tests — uncovered lines 62-64, 86-88, 111-137
+# ---------------------------------------------------------------------------
+
+
+class TestPubsubListenerErrorPath:
+    """Cover lines 62-64: generic Exception in _pubsub_listener is re-raised."""
+
+    async def test_pubsub_listener_reraises_generic_exception(self):
+        """A non-CancelledError/WebSocketDisconnect exception from pubsub is re-raised."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+
+        # Build an async generator that raises a generic RuntimeError mid-iteration
+        async def _listen_raises():
+            yield {"type": "subscribe", "data": b"ok"}
+            raise RuntimeError("pubsub broken")
+
+        pubsub = MagicMock()
+        pubsub.subscribe = AsyncMock()
+        pubsub.unsubscribe = AsyncMock()
+        pubsub.aclose = AsyncMock()
+        pubsub.listen = _listen_raises
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(RuntimeError, match="pubsub broken"):
+                await _pubsub_listener(ws, user_id="1", role="admin")
+
+        # Cleanup is still called even on generic exception
+        pubsub.unsubscribe.assert_called_once_with("download:events")
+        pubsub.aclose.assert_called_once()
+
+    async def test_pubsub_listener_reraises_os_error(self):
+        """OSError from pubsub is re-raised after cleanup (covers line 62-64)."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+
+        async def _listen_os_error():
+            raise OSError("connection reset by peer")
+            yield  # pragma: no cover  # make it an async generator
+
+        pubsub = MagicMock()
+        pubsub.subscribe = AsyncMock()
+        pubsub.unsubscribe = AsyncMock()
+        pubsub.aclose = AsyncMock()
+        pubsub.listen = _listen_os_error
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(OSError):
+                await _pubsub_listener(ws, user_id="1", role="admin")
+
+        pubsub.aclose.assert_called_once()
+
+
+class TestPingLoopErrorPath:
+    """Cover lines 86-88: ConnectionError / RuntimeError in _ping_loop is re-raised."""
+
+    async def test_ping_loop_reraises_connection_error_from_send_json(self):
+        """ConnectionError from ws.send_json is caught and re-raised (lines 86-88)."""
+        from routers.ws import _ping_loop
+
+        ws = AsyncMock()
+        ws.send_json = AsyncMock(side_effect=ConnectionError("broken pipe"))
+
+        with (
+            patch("routers.ws.get_system_alerts", new_callable=AsyncMock, return_value=[]),
+            patch("routers.ws.clear_system_alerts", new_callable=AsyncMock),
+        ):
+            with pytest.raises(ConnectionError, match="broken pipe"):
+                await _ping_loop(ws)
+
+    async def test_ping_loop_reraises_runtime_error_from_send_json(self):
+        """RuntimeError from ws.send_json is caught and re-raised (lines 86-88)."""
+        from routers.ws import _ping_loop
+
+        ws = AsyncMock()
+        ws.send_json = AsyncMock(side_effect=RuntimeError("event loop closed"))
+
+        with (
+            patch("routers.ws.get_system_alerts", new_callable=AsyncMock, return_value=[]),
+            patch("routers.ws.clear_system_alerts", new_callable=AsyncMock),
+        ):
+            with pytest.raises(RuntimeError, match="event loop closed"):
+                await _ping_loop(ws)
+
+    async def test_ping_loop_connection_error_from_alert_send(self):
+        """ConnectionError while sending an alert message is also caught and re-raised."""
+        from routers.ws import _ping_loop
+
+        call_count = 0
+
+        async def _send_json_side_effect(payload):
+            nonlocal call_count
+            call_count += 1
+            # The first call is for the alert message
+            raise ConnectionError("write failed")
+
+        ws = AsyncMock()
+        ws.send_json = AsyncMock(side_effect=_send_json_side_effect)
+
+        with (
+            patch("routers.ws.get_system_alerts", new_callable=AsyncMock, return_value=["alert!"]),
+            patch("routers.ws.clear_system_alerts", new_callable=AsyncMock),
+        ):
+            with pytest.raises(ConnectionError):
+                await _ping_loop(ws)
+
+
+class TestWebsocketEndpointTaskCleanup:
+    """Cover lines 111-137: task cancellation and cleanup in websocket_endpoint."""
+
+    async def test_websocket_endpoint_cancels_pending_tasks_on_first_completion(self):
+        """websocket_endpoint cancels all pending tasks when one task finishes first.
+
+        This covers the done/pending cleanup loop (lines 126-135).
+        We invoke websocket_endpoint directly with a mock WebSocket object and
+        arrange for _ws_receiver to return immediately (simulating client disconnect),
+        which makes it the first task to complete and triggers cancellation of the
+        remaining two tasks (_pubsub_listener, _ping_loop).
+        """
+        from routers.ws import websocket_endpoint
+
+        session_data = json.dumps({"role": "admin"})
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=session_data.encode())
+
+        # Mock WebSocket: accept succeeds, receive raises WebSocketDisconnect immediately
+        from fastapi import WebSocketDisconnect
+
+        ws = AsyncMock()
+        ws.cookies = {"vault_session": "1:tok"}
+        ws.client = "127.0.0.1:9999"
+        ws.accept = AsyncMock()
+        ws.receive = AsyncMock(side_effect=WebSocketDisconnect(code=1000))
+
+        # pubsub blocks until cancelled
+        async def _listen_never():
+            await asyncio.sleep(60)
+            yield  # pragma: no cover
+
+        pubsub = MagicMock()
+        pubsub.subscribe = AsyncMock()
+        pubsub.unsubscribe = AsyncMock()
+        pubsub.aclose = AsyncMock()
+        pubsub.listen = _listen_never
+
+        with (
+            patch("routers.ws.get_redis", return_value=mock_redis),
+            patch("routers.ws.get_pubsub", return_value=pubsub),
+            patch("routers.ws.get_system_alerts", new_callable=AsyncMock, return_value=[]),
+            patch("routers.ws.clear_system_alerts", new_callable=AsyncMock),
+            # Make asyncio.sleep in _ping_loop block, but sleep in _listen_never
+            # will be cancelled automatically when _ws_receiver finishes.
+        ):
+            # The endpoint should return cleanly — not raise
+            await websocket_endpoint(ws)
+
+        ws.accept.assert_called_once()
+        # pubsub cleanup must have been triggered (called from _pubsub_listener finally)
+        pubsub.aclose.assert_called()
+
+    async def test_websocket_endpoint_unauthorized_does_not_accept(self):
+        """websocket_endpoint calls ws.close without accept when session is invalid (lines 111-114)."""
+        from routers.ws import websocket_endpoint
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)  # no session
+
+        ws = AsyncMock()
+        ws.cookies = {"vault_session": "9:badtoken"}
+        ws.client = "127.0.0.1:1234"
+        ws.close = AsyncMock()
+        ws.accept = AsyncMock()
+
+        with patch("routers.ws.get_redis", return_value=mock_redis):
+            await websocket_endpoint(ws)
+
+        ws.close.assert_called_once_with(code=4001, reason="Unauthorized")
+        ws.accept.assert_not_called()
+
+    async def test_websocket_endpoint_no_cookie_does_not_accept(self):
+        """websocket_endpoint calls ws.close without accept when no cookie present."""
+        from routers.ws import websocket_endpoint
+
+        ws = AsyncMock()
+        ws.cookies = {}
+        ws.client = "127.0.0.1:1234"
+        ws.close = AsyncMock()
+        ws.accept = AsyncMock()
+
+        await websocket_endpoint(ws)
+
+        ws.close.assert_called_once_with(code=4001, reason="Unauthorized")
+        ws.accept.assert_not_called()

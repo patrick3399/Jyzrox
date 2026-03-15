@@ -752,3 +752,172 @@ class TestPixivOAuthUrl:
         """Unauthenticated request should return 401."""
         resp = await unauthed_client.get("/api/settings/credentials/pixiv/oauth-url")
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Feature toggles — missing-value paths (each numeric feature requires value)
+# ---------------------------------------------------------------------------
+
+
+class TestFeatureTogglesValueRequired:
+    """PATCH /api/settings/features/{feature} — missing value field returns 400."""
+
+    async def test_patch_dedup_phash_threshold_missing_value_returns_400(self, client, mock_redis):
+        """Patching dedup_phash_threshold without 'value' should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/dedup_phash_threshold",
+                json={"enabled": True},
+            )
+        assert resp.status_code == 400
+        assert "value required" in resp.json()["detail"].lower()
+
+    async def test_patch_dedup_opencv_threshold_missing_value_returns_400(self, client, mock_redis):
+        """Patching dedup_opencv_threshold without 'value' should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/dedup_opencv_threshold",
+                json={},
+            )
+        assert resp.status_code == 400
+        assert "value required" in resp.json()["detail"].lower()
+
+    async def test_patch_retry_max_retries_missing_value_returns_400(self, client, mock_redis):
+        """Patching retry_max_retries without 'value' should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/retry_max_retries",
+                json={},
+            )
+        assert resp.status_code == 400
+        assert "value required" in resp.json()["detail"].lower()
+
+    async def test_patch_retry_base_delay_minutes_missing_value_returns_400(self, client, mock_redis):
+        """Patching retry_base_delay_minutes without 'value' should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/retry_base_delay_minutes",
+                json={},
+            )
+        assert resp.status_code == 400
+        assert "value required" in resp.json()["detail"].lower()
+
+    async def test_patch_subscription_enqueue_delay_missing_value_returns_400(self, client, mock_redis):
+        """Patching subscription_enqueue_delay_ms without 'value' should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/subscription_enqueue_delay_ms",
+                json={},
+            )
+        assert resp.status_code == 400
+        assert "value required" in resp.json()["detail"].lower()
+
+    async def test_patch_subscription_batch_max_missing_value_returns_400(self, client, mock_redis):
+        """Patching subscription_batch_max without 'value' should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/subscription_batch_max",
+                json={},
+            )
+        assert resp.status_code == 400
+        assert "value required" in resp.json()["detail"].lower()
+
+    async def test_patch_retry_max_retries_boundary_low_returns_400(self, client, mock_redis):
+        """retry_max_retries of 0 (below min of 1) should return 400."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/retry_max_retries",
+                json={"value": 0},
+            )
+        assert resp.status_code == 400
+
+    async def test_patch_retry_max_retries_boundary_high_is_valid(self, client, mock_redis):
+        """retry_max_retries of 10 (max allowed) should succeed."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/retry_max_retries",
+                json={"value": 10},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["value"] == 10
+
+    async def test_patch_subscription_enqueue_delay_boundary_exact_100_is_valid(self, client, mock_redis):
+        """subscription_enqueue_delay_ms of exactly 100 (boundary) should succeed."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/subscription_enqueue_delay_ms",
+                json={"value": 100},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["value"] == 100
+
+
+# ---------------------------------------------------------------------------
+# Rate limits — schedule active path
+# ---------------------------------------------------------------------------
+
+
+class TestRateLimitsScheduleActive:
+    """PATCH /api/settings/rate-limits — schedule_active reflects current hour window."""
+
+    async def test_patch_rate_limits_schedule_disabled_clears_active(self, client, mock_redis):
+        """When schedule.enabled=False is patched, schedule_active should be cleared/False."""
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.delete = AsyncMock(return_value=1)
+        # Simulate Redis returning "0" for enabled check after our set
+        mock_redis.get = AsyncMock(return_value=b"0")
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/rate-limits",
+                json={"schedule": {"enabled": False}},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        # schedule_active must be False when schedule is disabled
+        assert data["schedule_active"] is False
+
+    async def test_patch_rate_limits_pixiv_all_delays(self, client, mock_redis):
+        """Patching all Pixiv delay fields simultaneously should succeed."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/rate-limits",
+                json={
+                    "sites": {
+                        "pixiv": {
+                            "concurrency": 2,
+                            "page_delay_ms": 300,
+                            "pagination_delay_ms": 800,
+                            "illust_delay_ms": 1500,
+                        }
+                    }
+                },
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "pixiv" in data["sites"]
+
+    async def test_patch_rate_limits_gallery_dl_site(self, client, mock_redis):
+        """Patching gallery_dl concurrency and delay should succeed."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/rate-limits",
+                json={"sites": {"gallery_dl": {"concurrency": 1, "delay_ms": 500}}},
+            )
+        assert resp.status_code == 200
+        assert "gallery_dl" in resp.json()["sites"]
+
+    async def test_patch_rate_limits_requires_admin(self, unauthed_client):
+        """Unauthenticated PATCH rate-limits should return 401."""
+        resp = await unauthed_client.patch("/api/settings/rate-limits", json={})
+        assert resp.status_code == 401
