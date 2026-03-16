@@ -592,6 +592,7 @@ const settings = {
       dedup_heuristic_enabled: boolean
       dedup_opencv_enabled: boolean
       dedup_opencv_threshold: number
+      tag_translation_enabled: boolean
     }>('/api/settings/features'),
 
   setFeature: (feature: string, enabled: boolean) =>

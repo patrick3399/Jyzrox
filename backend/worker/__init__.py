@@ -52,6 +52,7 @@ from worker.dedup_scan import dedup_scan_job
 from worker.thumbhash_backfill import thumbhash_backfill_job
 from worker.retry import retry_failed_downloads_job
 from worker.trash import trash_gc_job
+from worker.ehtag_sync import ehtag_sync_job
 from worker.helpers import _sha256
 
 logging.basicConfig(
@@ -281,6 +282,7 @@ class WorkerSettings:
         thumbhash_backfill_job,
         retry_failed_downloads_job,
         trash_gc_job,
+        ehtag_sync_job,
     ]
     cron_jobs = [
         cron(
@@ -328,6 +330,14 @@ class WorkerSettings:
             unique=True,
             timeout=3600,
         ),
+        cron(
+            ehtag_sync_job,
+            hour=4,
+            minute=30,
+            run_at_startup=True,   # ensures first-boot import
+            unique=True,
+            timeout=300,
+        ),
     ]
     on_startup = startup
     on_shutdown = shutdown
@@ -361,6 +371,7 @@ __all__ = [
     "thumbhash_backfill_job",
     "retry_failed_downloads_job",
     "trash_gc_job",
+    "ehtag_sync_job",
     "startup",
     "shutdown",
     "WorkerSettings",

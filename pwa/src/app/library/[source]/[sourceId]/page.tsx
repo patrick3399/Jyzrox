@@ -397,6 +397,10 @@ export default function GalleryDetailPage() {
     }
   }
 
+  const manualTagSet = useMemo(() => new Set(
+    tagData.filter((td) => td.source === 'manual').map((td) => `${td.namespace}:${td.name}`)
+  ), [tagData])
+
   if (galleryLoading) {
     return (
       <div className="min-h-screen bg-vault-bg flex items-center justify-center">
@@ -426,9 +430,6 @@ export default function GalleryDetailPage() {
 
   const tagGroups = groupTagsByNamespace(gallery.tags_array)
   const aiTags = tagData.filter((tag) => tag.source === 'ai' && tag.confidence >= confidenceThreshold)
-  const manualTagSet = useMemo(() => new Set(
-    tagData.filter((td) => td.source === 'manual').map((td) => `${td.namespace}:${td.name}`)
-  ), [tagData])
   const images = imagesData?.images ?? []
   const statusInfo =
     DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
@@ -712,9 +713,9 @@ export default function GalleryDetailPage() {
                         <span
                           key={value}
                           className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs ${getTagColor(fullTag)}`}
-                          title={translation || undefined}
+                          title={translation ? `${namespace}:${value}` : undefined}
                         >
-                          {value}
+                          {translation || value}
                           {editingTags && isManual && (
                             <button
                               type="button"

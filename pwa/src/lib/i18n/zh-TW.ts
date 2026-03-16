@@ -187,6 +187,8 @@ const zhTW: Record<string, string> = {
   'settings.version': '版本',
   'settings.ehMaxConcurrency': 'EH 最大並發數',
   'settings.aiTagging': 'AI 標籤',
+  'settings.tagTranslation': '標籤翻譯',
+  'settings.tagTranslationDesc': '以翻譯語言顯示標籤，而非原始標籤',
   'settings.enabled': '啟用',
   'settings.disabled': '停用',
   'settings.security': '安全性',

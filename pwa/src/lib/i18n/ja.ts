@@ -187,6 +187,8 @@ const ja: Record<string, string> = {
   'settings.version': 'バージョン',
   'settings.ehMaxConcurrency': 'EH最大同時接続数',
   'settings.aiTagging': 'AIタグ付け',
+  'settings.tagTranslation': 'タグ翻訳',
+  'settings.tagTranslationDesc': '元のタグではなく翻訳言語でタグを表示',
   'settings.enabled': '有効',
   'settings.disabled': '無効',
   'settings.security': 'セキュリティ',

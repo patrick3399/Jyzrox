@@ -260,6 +260,8 @@ const en: Record<string, string> = {
   'settings.externalApi': 'External API',
   'settings.externalApiDesc': 'Enables the token-authenticated external API for third-party integrations.',
   'settings.aiTaggingToggleDesc': 'Enable WD14 AI-based tag predictions for imported galleries.',
+  'settings.tagTranslation': 'Tag Translation',
+  'settings.tagTranslationDesc': 'Display tags in translated language instead of original',
   'settings.downloadEh': 'E-Hentai',
   'settings.downloadEhDesc': 'Allow downloading from E-Hentai / ExHentai.',
   'settings.downloadPixiv': 'Pixiv',

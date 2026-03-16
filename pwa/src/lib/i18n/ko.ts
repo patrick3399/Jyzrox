@@ -187,6 +187,8 @@ const ko: Record<string, string> = {
   'settings.version': '버전',
   'settings.ehMaxConcurrency': 'EH 최대 동시 접속 수',
   'settings.aiTagging': 'AI 태그',
+  'settings.tagTranslation': '태그 번역',
+  'settings.tagTranslationDesc': '원래 태그 대신 번역된 언어로 태그 표시',
   'settings.enabled': '활성화',
   'settings.disabled': '비활성화',
   'settings.security': '보안',

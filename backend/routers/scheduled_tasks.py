@@ -64,6 +64,13 @@ TASK_DEFS = {
         "default_enabled": True,
         "job": "retry_failed_downloads_job",
     },
+    "ehtag_sync": {
+        "name": "EhTag Translation Sync",
+        "description": "Sync tag translations from EhTagTranslation database (CDN)",
+        "default_cron": "0 4 * * 0",
+        "default_enabled": True,
+        "job": "ehtag_sync_job",
+    },
 }
 
 

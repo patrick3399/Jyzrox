@@ -1901,6 +1901,13 @@ export default function SettingsPage() {
                     onChange={(v) => handleFeatureToggle('ai_tagging_enabled', v)}
                     disabled={featuresLoading}
                   />
+                  <ToggleRow
+                    label={t('settings.tagTranslation')}
+                    description={t('settings.tagTranslationDesc')}
+                    checked={features.tag_translation_enabled ?? true}
+                    onChange={(v) => handleFeatureToggle('tag_translation_enabled', v)}
+                    disabled={featuresLoading}
+                  />
                 </div>
 
                 {/* Download Sources */}

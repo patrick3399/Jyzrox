@@ -186,6 +186,8 @@ const zhCN: Record<string, string> = {
   'settings.version': '版本',
   'settings.ehMaxConcurrency': 'EH 最大并发数',
   'settings.aiTagging': 'AI 标签',
+  'settings.tagTranslation': '标签翻译',
+  'settings.tagTranslationDesc': '以翻译语言显示标签，而非原始标签',
   'settings.enabled': '启用',
   'settings.disabled': '停用',
   'settings.security': '安全性',
