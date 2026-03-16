@@ -744,10 +744,13 @@ async def browse_images(
         last = images_out[-1]
         next_cursor = _encode_image_cursor(last)
 
+    fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images_out])
+
     return {
         "images": [_i_browse(img) for img in images_out],
         "next_cursor": next_cursor,
         "has_next": has_next,
+        "favorited_image_ids": sorted(fav_ids),
     }
 
 

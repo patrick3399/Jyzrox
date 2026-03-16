@@ -6,9 +6,14 @@ import { useImageBrowser } from '@/hooks/useImageBrowser'
 import { useTimeRange, useTimelinePercentiles } from '@/hooks/useTimeRange'
 import { useLibrarySources, useGalleryCategories } from '@/hooks/useGalleries'
 import { useThumbhash } from '@/hooks/useThumbhash'
+import { useLongPress } from '@/hooks/useLongPress'
 import { JustifiedGrid } from '@/components/JustifiedGrid'
 import { TimelineScrubber } from '@/components/TimelineScrubber'
+import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
 import { t } from '@/lib/i18n'
+import { api } from '@/lib/api'
+import { toast } from 'sonner'
+import { Heart } from 'lucide-react'
 import type { BrowseImage } from '@/lib/types'
 
 function sourceDisplayName(value: string): string {
@@ -53,6 +58,23 @@ function ImageBrowserInner() {
   const [containerWidth, setContainerWidth] = useState(0)
   const scrollRef = useRef<HTMLDivElement>(null)
   const [scrollEl, setScrollEl] = useState<HTMLElement | null>(null)
+
+  // Context menu state
+  const [imageMenu, setImageMenu] = useState<{
+    open: boolean
+    position: { x: number; y: number }
+    imageUrl: string
+    imageName: string
+    imageId: number
+    pageNum: number
+    source: string
+    sourceId: string
+  } | null>(null)
+
+  const activeImageRef = useRef<BrowseImage | null>(null)
+
+  // Optimistic favorite overrides
+  const [localFavOverrides, setLocalFavOverrides] = useState<Map<number, boolean>>(new Map())
 
   useEffect(() => {
     const el = containerRef.current
@@ -102,7 +124,7 @@ function ImageBrowserInner() {
   const { minAt, maxAt } = useTimeRange(filterParams)
   const { percentiles } = useTimelinePercentiles(filterParams)
 
-  const { images, isLoading, isLoadingMore, isReachingEnd, loadMore } = useImageBrowser({
+  const { images, favoritedImageIds, mutate, isLoading, isLoadingMore, isReachingEnd, loadMore } = useImageBrowser({
     ...filterParams,
     limit: 60,
     jumpAt,
@@ -155,19 +177,110 @@ function ImageBrowserInner() {
     scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' })
   }, [])
 
+  const isFavorited = useCallback((imageId: number) => {
+    if (localFavOverrides.has(imageId)) return localFavOverrides.get(imageId)!
+    return favoritedImageIds.has(imageId)
+  }, [localFavOverrides, favoritedImageIds])
+
+  const handleLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    const img = activeImageRef.current
+    if (!img) return
+    const pos = 'touches' in e
+      ? { x: (e as React.TouchEvent).touches[0].clientX, y: (e as React.TouchEvent).touches[0].clientY }
+      : { x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY }
+    setImageMenu({
+      open: true,
+      position: pos,
+      imageUrl: img.file_path || img.thumb_path || '',
+      imageName: `page_${img.page_num}`,
+      imageId: img.id,
+      pageNum: img.page_num,
+      source: img.source || '',
+      sourceId: img.source_id || '',
+    })
+  }, [])
+
+  const { onTouchStart: lpStart, onTouchMove: lpMove, onTouchEnd: lpEnd, onContextMenu: lpMenu } = useLongPress({ onLongPress: handleLongPress })
+
+  const handleToggleFavorite = useCallback(async () => {
+    if (!imageMenu) return
+    const { imageId } = imageMenu
+    const wasFavorited = isFavorited(imageId)
+
+    setImageMenu(null)
+
+    // Optimistic update
+    setLocalFavOverrides(prev => new Map(prev).set(imageId, !wasFavorited))
+
+    try {
+      if (wasFavorited) {
+        await api.library.unfavoriteImage(imageId)
+      } else {
+        await api.library.favoriteImage(imageId)
+      }
+      toast.success(wasFavorited ? t('reader.imageUnfavorited') : t('reader.imageFavorited'))
+      mutate(prev => {
+        if (!prev) return prev
+        return prev.map(page => ({
+          ...page,
+          favorited_image_ids: wasFavorited
+            ? page.favorited_image_ids.filter(id => id !== imageId)
+            : [...page.favorited_image_ids, imageId],
+        }))
+      }, { revalidate: false })
+      setLocalFavOverrides(prev => {
+        const next = new Map(prev)
+        next.delete(imageId)
+        return next
+      })
+    } catch {
+      // Revert
+      setLocalFavOverrides(prev => {
+        const next = new Map(prev)
+        next.delete(imageId)
+        return next
+      })
+      toast.error(t('reader.favoriteFailed'))
+    }
+  }, [imageMenu, isFavorited, mutate])
+
+  const handleHideImage = useCallback(async () => {
+    if (!imageMenu) return
+    const { source, sourceId, pageNum } = imageMenu
+
+    setImageMenu(null)
+
+    if (!window.confirm(t('reader.hideImageConfirm'))) return
+
+    try {
+      await api.library.deleteImage(source, sourceId, pageNum)
+      toast.success(t('reader.imageHidden'))
+      await mutate()
+    } catch {
+      toast.error(t('common.error'))
+    }
+  }, [imageMenu, mutate])
+
   const renderItem = useCallback((img: BrowseImage, geometry: { width: number; height: number }) => {
     const thumbhashUrl = thumbhashUrls.get(img.thumbhash || '') || null
+    const favorited = isFavorited(img.id)
 
     return (
       <button
         onClick={() => handleImageClick(img)}
-        className="block w-full h-full overflow-hidden rounded-sm relative group cursor-pointer"
+        onTouchStart={(e) => { activeImageRef.current = img; lpStart(e) }}
+        onTouchMove={lpMove}
+        onTouchEnd={lpEnd}
+        onContextMenu={(e) => { activeImageRef.current = img; lpMenu(e) }}
+        className="block w-full h-full overflow-hidden rounded-sm relative group cursor-pointer select-none [&_img]:pointer-events-none"
+        style={{ WebkitTouchCallout: 'none' }}
       >
         {/* Thumbhash placeholder */}
         {thumbhashUrl && (
           <img
             src={thumbhashUrl}
             alt=""
+            draggable={false}
             className="absolute inset-0 w-full h-full object-cover"
             aria-hidden
           />
@@ -177,17 +290,24 @@ function ImageBrowserInner() {
           src={img.thumb_path || ''}
           alt=""
           loading="lazy"
+          draggable={false}
           className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
           onLoad={(e) => {
             e.currentTarget.style.opacity = '1'
           }}
           style={{ opacity: img.thumbhash ? 0 : undefined }}
         />
+        {/* Favorite indicator */}
+        {favorited && (
+          <div className="absolute top-1 right-1 z-10">
+            <Heart className="w-4 h-4 fill-red-500 text-red-500 drop-shadow-md" />
+          </div>
+        )}
         {/* Hover overlay */}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
       </button>
     )
-  }, [handleImageClick, thumbhashUrls])
+  }, [handleImageClick, thumbhashUrls, lpStart, lpMove, lpEnd, lpMenu, isFavorited])
 
   // Suppress the native viewport scrollbar: lock html/body overflow so the
   // only scroll surface is our wrapper div (which hides its own scrollbar).
@@ -331,6 +451,19 @@ function ImageBrowserInner() {
         scrollElement={scrollEl}
         percentiles={percentiles}
       />
+
+      {imageMenu?.open && (
+        <ImageContextMenu
+          open={true}
+          onClose={() => setImageMenu(null)}
+          position={imageMenu.position}
+          imageUrl={imageMenu.imageUrl}
+          imageName={imageMenu.imageName}
+          onHide={imageMenu.source ? handleHideImage : undefined}
+          isFavorited={isFavorited(imageMenu.imageId)}
+          onToggleFavorite={handleToggleFavorite}
+        />
+      )}
     </div>
   )
 }

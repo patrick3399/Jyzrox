@@ -73,6 +73,7 @@ export interface ImageBrowserResponse {
   images: BrowseImage[]
   next_cursor: string | null
   has_next: boolean
+  favorited_image_ids: number[]
 }
 
 export interface ImageTimeRangeResponse {
