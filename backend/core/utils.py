@@ -1,5 +1,4 @@
 """Shared utility functions used across routers and workers."""
-import urllib.parse
 
 
 def detect_source(url: str) -> str:
