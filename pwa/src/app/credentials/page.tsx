@@ -2,26 +2,13 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronUp, ChevronDown, Eye, EyeOff, RefreshCw, Trash2, Key, ExternalLink } from 'lucide-react'
+import { ChevronUp, ChevronDown, Eye, EyeOff, RefreshCw, Trash2, Key, ExternalLink, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useProfile } from '@/hooks/useProfile'
 import type { Credentials, EhAccount, PluginInfo, CredentialFlow } from '@/lib/types'
-
-// Common site presets with suggested cookie keys
-const SITE_PRESETS: Record<string, string[]> = {
-  twitter: ['auth_token', 'ct0'],
-  instagram: ['sessionid', 'csrftoken'],
-  facebook: ['c_user', 'xs'],
-  danbooru: ['_danbooru2_session'],
-  kemono: ['session'],
-  gelbooru: ['user_id', 'pass_hash'],
-  sankaku: ['login', 'pass_hash'],
-}
-
-const PRESET_SITE_NAMES = Object.keys(SITE_PRESETS)
 
 // ── Shared style constants ─────────────────────────────────────────────────
 
@@ -604,9 +591,9 @@ function PluginCredentialSection({
   )
 }
 
-// ── GenericCookieSection ───────────────────────────────────────────────────
+// ── SiteCredentialSection ──────────────────────────────────────────────────
 
-function GenericCookieSection({
+function SiteCredentialSection({
   credentials,
   credLoading,
   onCredentialsChange,
@@ -616,10 +603,20 @@ function GenericCookieSection({
   onCredentialsChange: (next: Credentials) => void
 }) {
   const [isOpen, setIsOpen] = useState(false)
-  const [genericSiteName, setGenericSiteName] = useState('')
-  const [genericCookiesText, setGenericCookiesText] = useState('')
-  const [genericSaving, setGenericSaving] = useState(false)
-  const [genericClearingSource, setGenericClearingSource] = useState<string | null>(null)
+
+  // URL detection state
+  const [urlInput, setUrlInput] = useState('')
+  const [detecting, setDetecting] = useState(false)
+  const [detectedName, setDetectedName] = useState<string | null>(null)
+
+  // Form state
+  const [sourceName, setSourceName] = useState('')
+  const [activeTab, setActiveTab] = useState<'cookies' | 'userpass'>('cookies')
+  const [cookiesText, setCookiesText] = useState('')
+  const [username, setUsername] = useState('')
+  const [password, setPassword] = useState('')
+  const [saving, setSaving] = useState(false)
+  const [clearingSource, setClearingSource] = useState<string | null>(null)
 
   const genericSites = credentials
     ? Object.entries(credentials).filter(
@@ -627,47 +624,62 @@ function GenericCookieSection({
       )
     : []
 
-  const suggestedKeys =
-    genericSiteName && SITE_PRESETS[genericSiteName.toLowerCase()]
-      ? SITE_PRESETS[genericSiteName.toLowerCase()]
-      : null
-
-  const handleGenericSave = async () => {
-    const source = genericSiteName.trim()
-    if (!source || !genericCookiesText.trim()) return
-    const cookies: Record<string, string> = {}
-    for (const line of genericCookiesText.split('\n')) {
-      const trimmed = line.trim()
-      if (!trimmed) continue
-      const eqIdx = trimmed.indexOf('=')
-      if (eqIdx <= 0) continue
-      const k = trimmed.slice(0, eqIdx).trim()
-      const v = trimmed.slice(eqIdx + 1).trim()
-      if (k) cookies[k] = v
-    }
-    if (Object.keys(cookies).length === 0) {
-      toast.error(t('credentials.saveFailed'))
-      return
-    }
-    setGenericSaving(true)
+  const handleDetect = async () => {
+    if (!urlInput.trim()) return
+    setDetecting(true)
+    setDetectedName(null)
     try {
-      await api.settings.setGenericCookie(source, cookies)
-      toast.success(t('credentials.saved', { source }))
-      if (credentials) {
-        onCredentialsChange({ ...credentials, [source]: { configured: true } })
+      const res = await api.settings.detectSite(urlInput.trim())
+      if (res.detected && res.source) {
+        setSourceName(res.source)
+        setDetectedName(res.site_name || res.source)
+      } else {
+        toast.error(t('credentials.detectFailed'))
       }
-      setGenericSiteName('')
-      setGenericCookiesText('')
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : t('credentials.saveFailed'))
+    } catch {
+      toast.error(t('credentials.detectFailed'))
     } finally {
-      setGenericSaving(false)
+      setDetecting(false)
     }
   }
 
-  const handleGenericClear = async (source: string) => {
+  const handleSave = async () => {
+    const source = sourceName.trim().toLowerCase()
+    if (!source) return
+    if (activeTab === 'cookies' && !cookiesText.trim()) return
+    if (activeTab === 'userpass' && !username.trim()) return
+
+    setSaving(true)
+    try {
+      if (activeTab === 'cookies') {
+        await api.settings.setSiteCredential(source, { cookies: cookiesText.trim() })
+      } else {
+        await api.settings.setSiteCredential(source, {
+          username: username.trim(),
+          password: password.trim() || undefined,
+        })
+      }
+      toast.success(t('credentials.savedSite', { source }))
+      if (credentials) {
+        onCredentialsChange({ ...credentials, [source]: { configured: true } })
+      }
+      // Reset form
+      setSourceName('')
+      setCookiesText('')
+      setUsername('')
+      setPassword('')
+      setUrlInput('')
+      setDetectedName(null)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('credentials.saveFailed'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const handleClear = async (source: string) => {
     if (!confirm(t('credentials.clearConfirm', { source }))) return
-    setGenericClearingSource(source)
+    setClearingSource(source)
     try {
       await api.settings.deleteCredential(source)
       toast.success(t('credentials.cleared', { source }))
@@ -679,9 +691,13 @@ function GenericCookieSection({
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('credentials.clearFailed'))
     } finally {
-      setGenericClearingSource(null)
+      setClearingSource(null)
     }
   }
+
+  const canSave =
+    sourceName.trim() &&
+    (activeTab === 'cookies' ? cookiesText.trim() : username.trim())
 
   return (
     <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
@@ -729,12 +745,12 @@ function GenericCookieSection({
                       <span className="text-sm text-vault-text font-medium">{source}</span>
                     </div>
                     <button
-                      onClick={() => handleGenericClear(source)}
-                      disabled={genericClearingSource === source}
+                      onClick={() => handleClear(source)}
+                      disabled={clearingSource === source}
                       className="text-xs text-red-400/70 hover:text-red-400 transition-colors flex items-center gap-1 px-2 py-1 disabled:opacity-40"
                       aria-label={t('credentials.clearConfirm', { source })}
                     >
-                      {genericClearingSource === source ? (
+                      {clearingSource === source ? (
                         <span>...</span>
                       ) : (
                         <Trash2 size={13} />
@@ -752,82 +768,123 @@ function GenericCookieSection({
             </p>
           )}
 
-          {/* Add site form */}
+          {/* Add credentials form */}
           <div className="pt-3 border-t border-vault-border/50">
             <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-3">
               {t('credentials.addSite')}
             </p>
             <div className="space-y-3">
+              {/* URL detection */}
+              <div>
+                <label className="block text-xs text-vault-text-muted mb-1">
+                  {t('credentials.urlDetect')}
+                </label>
+                <div className="flex gap-2">
+                  <input
+                    type="text"
+                    value={urlInput}
+                    onChange={(e) => setUrlInput(e.target.value)}
+                    onKeyDown={(e) => e.key === 'Enter' && handleDetect()}
+                    placeholder={t('credentials.urlPlaceholder')}
+                    className={`${inputClass} flex-1`}
+                  />
+                  <button
+                    onClick={handleDetect}
+                    disabled={detecting || !urlInput.trim()}
+                    className={btnSecondary}
+                  >
+                    {detecting ? t('credentials.detecting') : <Search size={16} />}
+                  </button>
+                </div>
+                {detectedName && (
+                  <p className="text-xs text-green-400 mt-1">
+                    {t('credentials.detected', { site: detectedName })}
+                  </p>
+                )}
+              </div>
+
+              {/* Site name */}
               <div>
                 <label className="block text-xs text-vault-text-muted mb-1">
                   {t('credentials.siteName')}
                 </label>
                 <input
                   type="text"
-                  list="site-presets"
-                  value={genericSiteName}
-                  onChange={(e) => setGenericSiteName(e.target.value)}
+                  value={sourceName}
+                  onChange={(e) => setSourceName(e.target.value)}
                   placeholder={t('credentials.siteNamePlaceholder')}
                   className={inputClass}
                 />
-                <datalist id="site-presets">
-                  {PRESET_SITE_NAMES.map((name) => (
-                    <option key={name} value={name} />
-                  ))}
-                </datalist>
+                <p className="text-xs text-vault-text-muted mt-1">
+                  {t('credentials.orTypeManually')}
+                </p>
               </div>
 
-              {suggestedKeys && (
-                <div className="bg-vault-input border border-vault-border rounded-lg px-3 py-2">
-                  <p className="text-xs text-vault-text-muted mb-1">
-                    {t('credentials.suggestedKeys')}:
-                  </p>
-                  <div className="flex flex-wrap gap-1.5">
-                    {suggestedKeys.map((k) => (
-                      <button
-                        key={k}
-                        type="button"
-                        onClick={() => {
-                          setGenericCookiesText((prev) => {
-                            const lines = prev.split('\n').filter((l) => l.trim())
-                            const alreadyHas = lines.some((l) => l.startsWith(`${k}=`))
-                            if (alreadyHas) return prev
-                            return prev ? `${prev}\n${k}=` : `${k}=`
-                          })
-                        }}
-                        className="text-xs bg-vault-card border border-vault-border rounded px-2 py-0.5 text-vault-text-secondary hover:text-vault-accent hover:border-vault-accent/50 transition-colors font-mono"
-                      >
-                        {k}
-                      </button>
-                    ))}
+              {/* Tab switcher */}
+              <div className="flex bg-vault-input border border-vault-border rounded overflow-hidden">
+                <button
+                  onClick={() => setActiveTab('cookies')}
+                  className={`flex-1 px-3 py-2 text-sm transition-colors ${activeTab === 'cookies' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
+                >
+                  {t('credentials.tabCookies')}
+                </button>
+                <button
+                  onClick={() => setActiveTab('userpass')}
+                  className={`flex-1 px-3 py-2 text-sm transition-colors ${activeTab === 'userpass' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
+                >
+                  {t('credentials.tabUserPass')}
+                </button>
+              </div>
+
+              {/* Tab content */}
+              {activeTab === 'cookies' ? (
+                <div>
+                  <label className="block text-xs text-vault-text-muted mb-1">
+                    {t('credentials.cookies')}
+                  </label>
+                  <textarea
+                    value={cookiesText}
+                    onChange={(e) => setCookiesText(e.target.value)}
+                    placeholder={t('credentials.cookiesMultiFormat')}
+                    rows={4}
+                    className={`${inputClass} resize-none font-mono text-xs leading-relaxed`}
+                  />
+                </div>
+              ) : (
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-vault-text-muted mb-1">
+                      {t('credentials.username')}
+                    </label>
+                    <input
+                      type="text"
+                      value={username}
+                      onChange={(e) => setUsername(e.target.value)}
+                      placeholder={t('credentials.usernamePlaceholder')}
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-vault-text-muted mb-1">
+                      {t('credentials.password')}
+                    </label>
+                    <input
+                      type="password"
+                      value={password}
+                      onChange={(e) => setPassword(e.target.value)}
+                      placeholder={t('credentials.passwordPlaceholder')}
+                      className={inputClass}
+                    />
                   </div>
                 </div>
               )}
 
-              <div>
-                <label className="block text-xs text-vault-text-muted mb-1">
-                  {t('credentials.cookies')}
-                </label>
-                <textarea
-                  value={genericCookiesText}
-                  onChange={(e) => setGenericCookiesText(e.target.value)}
-                  placeholder={t('credentials.cookiesPlaceholder')}
-                  rows={4}
-                  className={`${inputClass} resize-none font-mono text-xs leading-relaxed`}
-                />
-                <p className="text-xs text-vault-text-muted mt-1">
-                  {t('credentials.cookiesHint')}
-                </p>
-              </div>
-
               <button
-                onClick={handleGenericSave}
-                disabled={
-                  genericSaving || !genericSiteName.trim() || !genericCookiesText.trim()
-                }
+                onClick={handleSave}
+                disabled={saving || !canSave}
                 className={btnPrimary}
               >
-                {genericSaving ? t('credentials.saving') : t('credentials.save')}
+                {saving ? t('credentials.saving') : t('credentials.save')}
               </button>
             </div>
           </div>
@@ -924,7 +981,7 @@ export default function CredentialsPage() {
           ))}
 
           {/* Generic cookie section (gallery-dl sites + others) */}
-          <GenericCookieSection
+          <SiteCredentialSection
             credentials={credentials}
             credLoading={credLoading}
             onCredentialsChange={setCredentials}

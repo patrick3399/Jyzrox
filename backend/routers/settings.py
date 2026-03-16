@@ -71,6 +71,13 @@ class GenericCookieRequest(BaseModel):
     cookies: dict[str, str]
 
 
+class SiteCredentialRequest(BaseModel):
+    source: str
+    cookies: str | None = None
+    username: str | None = None
+    password: str | None = None
+
+
 # ── Credentials ──────────────────────────────────────────────────────
 
 
@@ -391,6 +398,51 @@ async def set_generic_cookie(
         raise HTTPException(status_code=400, detail="At least one cookie is required")
     await set_credential(req.source.strip().lower(), json.dumps(req.cookies), "cookie")
     return {"status": "ok", "source": req.source.strip().lower()}
+
+
+@router.post("/credentials/site")
+async def set_site_credential(req: SiteCredentialRequest, _: dict = Depends(_admin)):
+    """Save credentials for any gallery-dl site as a config fragment."""
+    source = req.source.strip().lower()
+    if not source:
+        raise HTTPException(status_code=400, detail="Source name is required")
+
+    fragment: dict = {}
+    if req.cookies:
+        from plugins.builtin.gallery_dl._credentials import parse_cookie_input
+
+        parsed = parse_cookie_input(req.cookies)
+        if not parsed:
+            raise HTTPException(status_code=400, detail="Could not parse cookies")
+        fragment["cookies"] = parsed
+    if req.username:
+        fragment["username"] = req.username
+        if req.password:
+            fragment["password"] = req.password
+    if not fragment:
+        raise HTTPException(status_code=400, detail="Cookies or username is required")
+
+    await set_credential(source, json.dumps(fragment), "gdl_fragment")
+    return {"status": "ok", "source": source}
+
+
+@router.get("/credentials/detect")
+async def detect_site_from_url(url: str = Query(...), _: dict = Depends(_admin)):
+    """Detect gallery-dl site from a URL."""
+    try:
+        from gallery_dl import extractor as gdl_extractor
+
+        ex = gdl_extractor.find(url)
+        if not ex or not getattr(ex, "category", None):
+            return {"detected": False}
+        category = ex.category
+        from plugins.builtin.gallery_dl._sites import get_site_config
+
+        cfg = get_site_config(category)
+        display_name = cfg.name if cfg.source_id != "gallery_dl" else category.capitalize()
+        return {"detected": True, "source": category, "site_name": display_name}
+    except Exception:
+        return {"detected": False}
 
 
 @router.delete("/credentials/{source}")

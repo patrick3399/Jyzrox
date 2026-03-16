@@ -573,6 +573,17 @@ const settings = {
   deleteCredential: (source: string) =>
     apiFetch<{ status: string }>(`/api/settings/credentials/${source}`, { method: 'DELETE' }),
 
+  detectSite: (url: string) =>
+    apiFetch<{ detected: boolean; source?: string; site_name?: string }>(
+      `/api/settings/credentials/detect?url=${encodeURIComponent(url)}`
+    ),
+
+  setSiteCredential: (source: string, data: { cookies?: string; username?: string; password?: string }) =>
+    apiFetch<{ status: string; source: string }>('/api/settings/credentials/site', {
+      method: 'POST',
+      body: JSON.stringify({ source, ...data }),
+    }),
+
   getEhSite: () =>
     apiFetch<{ use_ex: boolean }>('/api/settings/eh-site'),
 

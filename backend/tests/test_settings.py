@@ -9,6 +9,7 @@ Note: Credential endpoints that require live HTTP calls (EH login, Pixiv OAuth)
 are NOT tested here. Rate-limit, alerts, and API token CRUD are covered.
 """
 
+import json
 import uuid
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -556,6 +557,106 @@ class TestFeatureTogglesNumeric:
                 json={"value": 999},
             )
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# Site Credential Endpoint Tests
+# ---------------------------------------------------------------------------
+
+
+class TestSiteCredentialEndpoint:
+    """POST /api/settings/credentials/site — generic credential injection."""
+
+    async def test_set_site_credential_cookies_browser_format(self, client):
+        """POST /credentials/site with browser cookie format."""
+        with patch("routers.settings.set_credential", new_callable=AsyncMock) as mock_set:
+            resp = await client.post(
+                "/api/settings/credentials/site",
+                json={"source": "twitter", "cookies": "auth_token=abc; ct0=xyz"},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["source"] == "twitter"
+        mock_set.assert_called_once()
+        # Verify the stored value is a fragment with cookies dict
+        stored = json.loads(mock_set.call_args[0][1])
+        assert "cookies" in stored
+        assert stored["cookies"]["auth_token"] == "abc"
+
+    async def test_set_site_credential_username_password(self, client):
+        """POST /credentials/site with username/password."""
+        with patch("routers.settings.set_credential", new_callable=AsyncMock) as mock_set:
+            resp = await client.post(
+                "/api/settings/credentials/site",
+                json={"source": "danbooru", "username": "user1", "password": "pass1"},
+            )
+        assert resp.status_code == 200
+        stored = json.loads(mock_set.call_args[0][1])
+        assert stored["username"] == "user1"
+        assert stored["password"] == "pass1"
+
+    async def test_set_site_credential_empty_source_400(self, client):
+        """POST /credentials/site with empty source returns 400."""
+        resp = await client.post(
+            "/api/settings/credentials/site",
+            json={"source": "", "cookies": "a=1"},
+        )
+        assert resp.status_code == 400
+
+    async def test_set_site_credential_no_data_400(self, client):
+        """POST /credentials/site with no cookies or username returns 400."""
+        resp = await client.post(
+            "/api/settings/credentials/site",
+            json={"source": "twitter"},
+        )
+        assert resp.status_code == 400
+
+    async def test_set_site_credential_bad_cookies_400(self, client):
+        """POST /credentials/site with unparseable cookies returns 400."""
+        resp = await client.post(
+            "/api/settings/credentials/site",
+            json={"source": "twitter", "cookies": "no-equals-here"},
+        )
+        assert resp.status_code == 400
+
+    async def test_set_site_credential_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.post(
+            "/api/settings/credentials/site",
+            json={"source": "twitter", "cookies": "auth_token=abc"},
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Detect Site from URL Endpoint Tests
+# ---------------------------------------------------------------------------
+
+
+class TestDetectSiteEndpoint:
+    """GET /api/settings/credentials/detect — detect gallery-dl site from URL."""
+
+    async def test_detect_site_unknown_url(self, client):
+        """GET /credentials/detect returns detected=False for unknown URL.
+
+        gallery_dl may not be installed in the test environment — the endpoint
+        catches all exceptions and returns detected=False.
+        """
+        resp = await client.get(
+            "/api/settings/credentials/detect",
+            params={"url": "https://totally-unknown-site.example.com/"},
+        )
+        data = resp.json()
+        assert data["detected"] is False
+
+    async def test_detect_site_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get(
+            "/api/settings/credentials/detect",
+            params={"url": "https://x.com/user/status/123"},
+        )
+        assert resp.status_code == 401
 
     async def test_patch_subscription_enqueue_delay_valid(self, client, mock_redis):
         """subscription_enqueue_delay_ms >= 100 should succeed."""

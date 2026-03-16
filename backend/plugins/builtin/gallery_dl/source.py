@@ -61,6 +61,28 @@ def _source_to_extractor(source: str) -> str:
     return cfg.extractor or cfg.source_id
 
 
+FRAGMENT_KEYS = {"cookies", "username", "password", "refresh-token", "api-key"}
+
+
+def _try_parse_fragment(cred_val: str) -> dict | None:
+    """Try to parse a credential value as a gallery-dl config fragment (new format).
+
+    Returns the parsed dict if it's a fragment, None otherwise.
+    """
+    try:
+        parsed = json.loads(cred_val)
+        if isinstance(parsed, dict) and (FRAGMENT_KEYS & parsed.keys()):
+            return parsed
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return None
+
+
+def _is_fragment(cred_val: str) -> bool:
+    """Check if a credential value is a gallery-dl config fragment (new format)."""
+    return _try_parse_fragment(cred_val) is not None
+
+
 async def _build_gallery_dl_config(credentials: dict) -> None:
     """Write source-specific credentials and tuning params into the gallery-dl config file.
 
@@ -92,17 +114,26 @@ async def _build_gallery_dl_config(credentials: dict) -> None:
         cfg = get_site_config(src)
         ext = cfg.extractor or cfg.source_id
 
-        if cfg.credential_type == "refresh_token":
-            config["extractor"].setdefault(ext, {})["refresh-token"] = cred_val
-        elif cfg.credential_type == "cookies":
-            try:
-                cookies = json.loads(cred_val)
-                config["extractor"].setdefault(ext, {})["cookies"] = cookies
+        fragment = _try_parse_fragment(cred_val)
+        if fragment is not None:
+            # New format: merge gallery-dl config fragment directly
+            config["extractor"].setdefault(ext, {}).update(fragment)
+            if "cookies" in fragment:
                 for extra in cfg.extra_extractors:
-                    config["extractor"].setdefault(extra, {})["cookies"] = cookies
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
-        # credential_type == "none" → skip
+                    config["extractor"].setdefault(extra, {})["cookies"] = fragment["cookies"]
+        else:
+            # Legacy format: existing 3-way branch (EH cookies, Pixiv token, etc.)
+            if cfg.credential_type == "refresh_token":
+                config["extractor"].setdefault(ext, {})["refresh-token"] = cred_val
+            elif cfg.credential_type == "cookies":
+                try:
+                    cookies = json.loads(cred_val)
+                    config["extractor"].setdefault(ext, {})["cookies"] = cookies
+                    for extra in cfg.extra_extractors:
+                        config["extractor"].setdefault(extra, {})["cookies"] = cookies
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
+            # credential_type == "none" → skip
 
     config_path = Path(settings.gallery_dl_config)
     tmp_path = config_path.with_suffix(".tmp")
