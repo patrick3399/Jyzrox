@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS galleries (
     rating          SMALLINT DEFAULT 0,
     favorited       BOOLEAN DEFAULT false,
     uploader        TEXT,
-    parent_id       BIGINT REFERENCES galleries(id),
     download_status TEXT DEFAULT 'proxy_only',
     import_mode     TEXT,
     tags_array      TEXT[] DEFAULT '{}',
