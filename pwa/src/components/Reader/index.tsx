@@ -1157,7 +1157,7 @@ function ThumbnailStrip({
                 thumbSrc = `/api/eh/thumb-proxy?url=${encodeURIComponent(previewRaw)}`
               }
             } else if (img.isLocal) {
-              thumbSrc = img.url
+              thumbSrc = img.thumbUrl || img.url
             }
 
             return (
@@ -1492,6 +1492,7 @@ export default function Reader({
       height: img.height ?? undefined,
       mediaType: img.media_type,
       duration: img.duration ?? undefined,
+      thumbUrl: img.thumb_path?.replace('/data/', '/media/') ?? undefined,
     }))
 
   const {
