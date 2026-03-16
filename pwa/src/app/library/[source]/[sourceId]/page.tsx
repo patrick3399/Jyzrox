@@ -8,12 +8,15 @@ import useSWR from 'swr'
 import { useLibraryGallery, useGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { api } from '@/lib/api'
+import type { GalleryImage } from '@/lib/types'
+import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
+import { useLongPress } from '@/hooks/useLongPress'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { t, formatDate } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
 import { TagAutocomplete } from '@/components/TagAutocomplete'
-import { Pencil } from 'lucide-react'
+import { Pencil, Heart } from 'lucide-react'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
   character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
@@ -109,6 +112,32 @@ export default function GalleryDetailPage() {
   const [excludedBlobs, setExcludedBlobs] = useState<Array<{ blob_sha256: string; excluded_at: string | null }>>([])
   const [showExcluded, setShowExcluded] = useState(false)
   const [restoringHash, setRestoringHash] = useState<string | null>(null)
+
+  // Image context menu state
+  const [imageMenu, setImageMenu] = useState<{
+    open: boolean
+    position: { x: number; y: number }
+    imageUrl: string
+    imageName: string
+    imageId: number
+    pageNum: number
+  } | null>(null)
+
+  const activeImageRef = useRef<GalleryImage | null>(null)
+
+  // Track favorited image IDs from API response + optimistic overrides
+  const [localFavOverrides, setLocalFavOverrides] = useState<Map<number, boolean>>(new Map())
+
+  const favoritedImageIds = useMemo(() => {
+    const set = new Set(imagesData?.favorited_image_ids ?? [])
+    for (const [id, fav] of localFavOverrides) {
+      if (fav) set.add(id)
+      else set.delete(id)
+    }
+    return set
+  }, [imagesData?.favorited_image_ids, localFavOverrides])
+
+  const isFavorited = useCallback((imageId: number) => favoritedImageIds.has(imageId), [favoritedImageIds])
 
   // Inline-edit state
   const [editingTitle, setEditingTitle] = useState(false)
@@ -396,6 +425,79 @@ export default function GalleryDetailPage() {
       setRestoringHash(null)
     }
   }
+
+  // Long-press handler to open image context menu (non-select mode)
+  const handleImageLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    const img = activeImageRef.current
+    if (!img) return
+    const pos = 'touches' in e
+      ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      : { x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY }
+    setImageMenu({
+      open: true,
+      position: pos,
+      imageUrl: img.file_path || img.thumb_path || '',
+      imageName: img.filename || `page_${img.page_num}`,
+      imageId: img.id,
+      pageNum: img.page_num,
+    })
+  }, [])
+
+  const { onTouchStart: lpStart, onTouchMove: lpMove, onTouchEnd: lpEnd, onContextMenu: lpCtx } = useLongPress({ onLongPress: handleImageLongPress })
+
+  const handleImageToggleFavorite = useCallback(async () => {
+    if (!imageMenu) return
+    const { imageId } = imageMenu
+    const wasFavorited = isFavorited(imageId)
+    setImageMenu(null)
+
+    // Optimistic update
+    setLocalFavOverrides(prev => new Map(prev).set(imageId, !wasFavorited))
+
+    try {
+      if (wasFavorited) {
+        await api.library.unfavoriteImage(imageId)
+      } else {
+        await api.library.favoriteImage(imageId)
+      }
+      toast.success(wasFavorited ? t('reader.imageUnfavorited') : t('reader.imageFavorited'))
+      mutateImages(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          favorited_image_ids: wasFavorited
+            ? (prev.favorited_image_ids ?? []).filter((id: number) => id !== imageId)
+            : [...(prev.favorited_image_ids ?? []), imageId],
+        }
+      }, { revalidate: false })
+    } catch {
+      // Revert optimistic update
+      setLocalFavOverrides(prev => {
+        const next = new Map(prev)
+        next.delete(imageId)
+        return next
+      })
+      toast.error(t('reader.favoriteFailed'))
+    }
+  }, [imageMenu, isFavorited, mutateImages])
+
+  const handleImageHide = useCallback(async () => {
+    if (!imageMenu || !source || !sourceId) return
+    const { pageNum } = imageMenu
+    setImageMenu(null)
+
+    if (!window.confirm(t('reader.hideImageConfirm'))) return
+
+    try {
+      await api.library.deleteImage(source, sourceId, pageNum)
+      toast.success(t('reader.imageHidden'))
+      mutateGallery()
+      mutateImages()
+      fetchExcluded()
+    } catch {
+      toast.error(t('common.error'))
+    }
+  }, [imageMenu, source, sourceId, mutateGallery, mutateImages, fetchExcluded])
 
   const manualTagSet = useMemo(() => new Set(
     tagData.filter((td) => td.source === 'manual').map((td) => `${td.namespace}:${td.name}`)
@@ -872,10 +974,17 @@ export default function GalleryDetailPage() {
                   )
                 }
                 return (
-                  <Link
+                  <div
                     key={image.id}
-                    href={`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`}
-                    className="group"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => router.push(`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`) }}
+                    onTouchStart={(e) => { activeImageRef.current = image; lpStart(e) }}
+                    onTouchMove={lpMove}
+                    onTouchEnd={lpEnd}
+                    onContextMenu={(e) => { activeImageRef.current = image; lpCtx(e) }}
+                    className="group relative cursor-pointer select-none [-webkit-touch-callout:none]"
                   >
                     {image.thumb_path ? (
                       <img
@@ -889,7 +998,15 @@ export default function GalleryDetailPage() {
                         {image.page_num}
                       </div>
                     )}
-                  </Link>
+                    {isFavorited(image.id) && (
+                      <div className="absolute top-1 right-1">
+                        <Heart className="w-4 h-4 fill-current text-red-400 drop-shadow" />
+                      </div>
+                    )}
+                    {imageMenu?.imageId === image.id && (
+                      <div className="absolute inset-0 rounded border-2 border-vault-accent pointer-events-none" />
+                    )}
+                  </div>
                 )
               })}
 
@@ -942,6 +1059,19 @@ export default function GalleryDetailPage() {
             </div>
           )}
         </div>
+
+      {imageMenu?.open && (
+        <ImageContextMenu
+          open={true}
+          onClose={() => setImageMenu(null)}
+          position={imageMenu.position}
+          imageUrl={imageMenu.imageUrl}
+          imageName={imageMenu.imageName}
+          onHide={handleImageHide}
+          isFavorited={isFavorited(imageMenu.imageId)}
+          onToggleFavorite={handleImageToggleFavorite}
+        />
+      )}
     </div>
   )
 }

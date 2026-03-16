@@ -66,9 +66,12 @@ export function useLongPress({ threshold = 500, moveThreshold = 10, onLongPress 
       // already fired via the timer, so just suppress it.
       e.preventDefault()
       if (!firedRef.current) {
-        firedRef.current = true
         onLongPress(e)
       }
+      // Reset so the next gesture can fire again (firedRef is only set
+      // to true in onTouchStart→timer path; on desktop contextmenu is
+      // the sole trigger, so we must clear it here).
+      firedRef.current = false
     },
     [onLongPress],
   )
