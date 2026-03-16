@@ -312,7 +312,8 @@ _SQLITE_SCHEMA = [
         visibility TEXT DEFAULT 'public',
         created_by_user_id INTEGER REFERENCES users(id),
         source_url TEXT,
-        deleted_at TIMESTAMP
+        deleted_at TIMESTAMP,
+        metadata_updated_at TIMESTAMP
     )
     """,
     """
