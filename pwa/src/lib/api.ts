@@ -798,17 +798,6 @@ const tokens = {
 // ── Import ────────────────────────────────────────────────────────────
 
 const import_ = {
-  browse: (path = '', library = '') => {
-    const params = new URLSearchParams()
-    if (path) params.set('path', path)
-    if (library) params.set('library', library)
-    return apiFetch<{
-      path: string
-      base: string
-      entries: Array<{ name: string; type: 'dir' | 'file'; file_count?: number; size?: number; imported?: boolean }>
-    }>(`/api/import/browse?${params}`)
-  },
-
   batchScan: (rootDir: string, pattern: string) =>
     apiFetch<{
       matches: Array<{ rel_path: string; abs_path: string; artist: string | null; title: string; file_count: number }>
@@ -835,11 +824,6 @@ const import_ = {
   progress: (galleryId: number) =>
     apiFetch<{ gallery_id: number; processed: number; total: number; status: string }>(
       `/api/import/progress/${galleryId}`,
-    ),
-
-  recent: () =>
-    apiFetch<Array<{ id: number; title: string; pages: number; status: string; added_at: string }>>(
-      '/api/import/recent',
     ),
 
   rescan: () => apiFetch<{ status: string }>('/api/import/rescan', { method: 'POST' }),
@@ -894,20 +878,6 @@ const import_ = {
       method: 'POST',
       body: JSON.stringify({ enabled }),
     }),
-
-  scanSettings: () =>
-    apiFetch<{ enabled: boolean; interval_hours: number; last_run: string | null }>(
-      '/api/import/scan-settings',
-    ),
-
-  updateScanSettings: (settings: { enabled?: boolean; interval_hours?: number }) =>
-    apiFetch<{ enabled: boolean; interval_hours: number; last_run: string | null }>(
-      '/api/import/scan-settings',
-      {
-        method: 'PATCH',
-        body: JSON.stringify(settings),
-      },
-    ),
 
   browseFs: (path?: string) =>
     apiFetch<{ path: string; parent: string | null; entries: { name: string; type: string }[] }>(

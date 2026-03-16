@@ -4,17 +4,6 @@ import useSWR, { useSWRConfig } from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { api } from '@/lib/api'
 
-export function useBrowseDirectory(path: string, library = '') {
-  return useSWR(['import/browse', path, library], () => api.import_.browse(path, library))
-}
-
-export function useRecentImports() {
-  return useSWR('import/recent', () => api.import_.recent(), {
-    refreshInterval: 5000,
-    dedupingInterval: 3000,
-  })
-}
-
 export function useImportProgress(galleryId: number | null) {
   return useSWR(
     galleryId ? ['import/progress', galleryId] : null,
@@ -86,18 +75,6 @@ export function useRemoveLibrary() {
   return useSWRMutation(
     'import/removeLibrary',
     (_key: unknown, { arg }: { arg: number }) => api.import_.removeLibrary(arg),
-  )
-}
-
-export function useScanSettings() {
-  return useSWR('import/scan-settings', () => api.import_.scanSettings())
-}
-
-export function useUpdateScanSettings() {
-  return useSWRMutation(
-    'import/scan-settings',
-    (_key: unknown, { arg }: { arg: { enabled?: boolean; interval_hours?: number } }) =>
-      api.import_.updateScanSettings(arg),
   )
 }
 
