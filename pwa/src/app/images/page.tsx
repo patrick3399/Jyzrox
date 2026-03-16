@@ -264,6 +264,7 @@ function ImageBrowserInner() {
   const renderItem = useCallback((img: BrowseImage, geometry: { width: number; height: number }) => {
     const thumbhashUrl = thumbhashUrls.get(img.thumbhash || '') || null
     const favorited = isFavorited(img.id)
+    const isSelected = imageMenu?.imageId === img.id
 
     return (
       <button
@@ -303,11 +304,15 @@ function ImageBrowserInner() {
             <Heart className="w-4 h-4 fill-red-500 text-red-500 drop-shadow-md" />
           </div>
         )}
+        {/* Selection highlight */}
+        {isSelected && (
+          <div className="absolute inset-0 z-20 border-2 border-vault-accent rounded-sm" />
+        )}
         {/* Hover overlay */}
         <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
       </button>
     )
-  }, [handleImageClick, thumbhashUrls, lpStart, lpMove, lpEnd, lpMenu, isFavorited])
+  }, [handleImageClick, thumbhashUrls, lpStart, lpMove, lpEnd, lpMenu, isFavorited, imageMenu?.imageId])
 
   // Suppress the native viewport scrollbar: lock html/body overflow so the
   // only scroll surface is our wrapper div (which hides its own scrollbar).
