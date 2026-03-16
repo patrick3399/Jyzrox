@@ -53,7 +53,7 @@ from worker.thumbhash_backfill import thumbhash_backfill_job
 from worker.retry import retry_failed_downloads_job
 from worker.trash import trash_gc_job
 from worker.ehtag_sync import ehtag_sync_job
-from worker.helpers import _sha256
+from worker.helpers import _sha256, compute_arq_job_id, enqueue_download_job
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -119,7 +119,41 @@ async def startup(ctx: dict) -> None:
                     )
                 await session.commit()
                 logger.info("Fixed %d orphaned downloading galleries", len(stale_gallery_ids))
-            logger.info("Cleaned up %d stale running jobs from previous worker session", len(stale_count))
+            logger.info("Cleaned up %d stale running jobs from previous worker session", len(stale_rows))
+
+        # Re-enqueue stale "queued" jobs that survived a crash
+        stale_queued = (await session.execute(
+            select(DownloadJob).where(DownloadJob.status == "queued")
+        )).scalars().all()
+        if stale_queued:
+            arq_pool = ctx["redis"]
+            for job in stale_queued:
+                arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                try:
+                    await enqueue_download_job(arq_pool, job, arq_job_id)
+                    logger.info("Re-enqueued stale queued job %s", job.id)
+                except Exception as exc:
+                    job.status = "failed"
+                    job.error = f"Re-enqueue failed on startup: {exc}"
+                    job.finished_at = datetime.now(UTC)
+                    logger.error("Failed to re-enqueue job %s: %s", job.id, exc)
+            await session.commit()
+            logger.info("Processed %d stale queued jobs", len(stale_queued))
+
+        # Mark stale "paused" jobs as failed (coroutine is dead after restart)
+        stale_paused = (await session.execute(
+            update(DownloadJob)
+            .where(DownloadJob.status == "paused")
+            .values(
+                status="failed",
+                error="Worker restarted — paused job cannot resume",
+                finished_at=datetime.now(UTC),
+            )
+            .returning(DownloadJob.id)
+        )).fetchall()
+        if stale_paused:
+            await session.commit()
+            logger.info("Marked %d stale paused jobs as failed", len(stale_paused))
 
     # Start file system watcher.
     # Honour the runtime override stored by toggle_monitor; fall back to the
@@ -381,4 +415,6 @@ __all__ = [
     "_build_gallery",
     "_upsert_tags",
     "_sha256",
+    "compute_arq_job_id",
+    "enqueue_download_job",
 ]

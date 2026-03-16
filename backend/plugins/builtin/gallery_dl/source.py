@@ -17,6 +17,7 @@ from pathlib import Path
 
 from core.config import settings
 from plugins.base import SourcePlugin
+from plugins.builtin.gallery_dl._metadata import _resolve_source_id
 from plugins.models import (
     CredentialFlow,
     CredentialStatus,
@@ -251,12 +252,13 @@ class GalleryDlPlugin(SourcePlugin):
                 logger.warning("[gallery_dl] pid_callback failed: %s", exc)
 
         downloaded = 0
+        skipped_count = 0
         last_progress_update = asyncio.get_event_loop().time()
         started_at = asyncio.get_event_loop().time()
         total_paused = 0.0  # track pause duration to exclude from timeout
 
         async def _read_stdout() -> None:
-            nonlocal downloaded, last_progress_update, total_paused
+            nonlocal downloaded, skipped_count, last_progress_update, total_paused
             assert proc.stdout is not None
             pending_file: Path | None = None
 
@@ -306,16 +308,21 @@ class GalleryDlPlugin(SourcePlugin):
                     else:
                         pending_file = None
 
-                    downloaded += 1
+                    if skipped:
+                        skipped_count += 1
+                    else:
+                        downloaded += 1
+
+                    total_seen = downloaded + skipped_count
                     now = asyncio.get_event_loop().time()
                     if (
-                        downloaded % _PROGRESS_EVERY_N == 0
+                        total_seen % _PROGRESS_EVERY_N == 0
                         or (now - last_progress_update) >= _PROGRESS_EVERY_S
                     ):
                         last_progress_update = now
                         if on_progress is not None:
                             try:
-                                await on_progress(downloaded, 0)  # total unknown for gallery-dl
+                                await on_progress(total_seen, 0)  # total unknown for gallery-dl
                             except Exception:
                                 pass
 
@@ -369,21 +376,21 @@ class GalleryDlPlugin(SourcePlugin):
                 return DownloadResult(
                     status="partial",
                     downloaded=downloaded,
-                    total=downloaded,
+                    total=downloaded + skipped_count,
                     error=err,
                 )
             return DownloadResult(
                 status="failed",
                 downloaded=downloaded,
-                total=downloaded,
+                total=downloaded + skipped_count,
                 error=err,
             )
 
-        logger.info("[gallery_dl] done: %s (files=%d)", url, downloaded)
+        logger.info("[gallery_dl] done: %s (downloaded=%d, skipped=%d)", url, downloaded, skipped_count)
         return DownloadResult(
             status="done",
             downloaded=downloaded,
-            total=downloaded,
+            total=downloaded + skipped_count,
         )
 
     def resolve_output_dir(self, url: str, base_path: Path) -> Path:
@@ -428,12 +435,7 @@ class GalleryDlPlugin(SourcePlugin):
                     tags = list(tags)  # don't mutate original
                     tags.append(f"rating:{rating}")
 
-                source_id = dest_dir.name
-                for field in cfg.source_id_fields:
-                    val = raw.get(field)
-                    if val:
-                        source_id = str(val)
-                        break
+                source_id = _resolve_source_id(raw, cfg, dest_dir.name)
 
                 return GalleryMetadata(
                     source=source,

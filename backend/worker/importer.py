@@ -61,12 +61,8 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
     _cfg = _get_site_config(raw_source)
     source = _cfg.source_id
-    source_id = gallery_path.name
-    for _field in _cfg.source_id_fields:
-        _val = metadata.get(_field)
-        if _val:
-            source_id = str(_val)
-            break
+    from plugins.builtin.gallery_dl._metadata import _resolve_source_id
+    source_id = _resolve_source_id(metadata, _cfg, gallery_path.name)
 
     tags = _normalize_tags(_extract_tags(gallery_path, metadata), source)
     media_files_raw = [f for f in gallery_path.rglob('*') if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]

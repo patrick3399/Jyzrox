@@ -4,7 +4,9 @@ from __future__ import annotations
 
 import json
 import logging
+import re
 from datetime import UTC, datetime
+from functools import lru_cache
 from pathlib import Path
 
 from plugins.models import GalleryImportData
@@ -19,6 +21,57 @@ NAMESPACE_MAP = {
     "character": "character",
     "species": "species",
 }
+
+
+_DIR_FMT_FIELD_RE = re.compile(r"\{(\w+)(?:\[(\w+)\])?\}")
+
+
+@lru_cache(maxsize=64)
+def _get_identity_field(category: str) -> tuple[str, str | None] | None:
+    """Extract the identity field from gallery-dl's directory_fmt for a category.
+
+    Returns (field, subfield) or None if no extractor found.
+    E.g. kemono → ("user", None), twitter → ("user", "name")
+    """
+    try:
+        from gallery_dl import extractor
+        classes = [e for e in extractor._list_classes() if getattr(e, "category", None) == category]
+        if not classes:
+            return None
+        fmt = classes[0].directory_fmt
+        if not fmt or len(fmt) < 2:
+            return None  # flat structure — no meaningful identity
+        last = fmt[-1]
+        m = _DIR_FMT_FIELD_RE.search(last)
+        if m:
+            return (m.group(1), m.group(2))  # (field, subfield_or_None)
+    except (ImportError, AttributeError, IndexError, TypeError):
+        pass
+    return None
+
+
+def _resolve_source_id(meta: dict, cfg, dest_dir_name: str) -> str:
+    """Resolve source_id from metadata, using gallery-dl directory_fmt when available."""
+    category = meta.get("category", "")
+
+    # Try gallery-dl's directory_fmt first
+    identity = _get_identity_field(category)
+    if identity is not None:
+        field, subfield = identity
+        val = meta.get(field)
+        if val is not None:
+            if subfield and isinstance(val, dict):
+                val = val.get(subfield)
+            if val is not None and isinstance(val, (str, int)):
+                return str(val)
+
+    # Fallback: existing source_id_fields logic
+    for f in cfg.source_id_fields:
+        val = meta.get(f)
+        if val:
+            return str(val)
+
+    return dest_dir_name
 
 
 def _extract_title(source: str, meta: dict, source_id: str) -> str:
@@ -75,12 +128,7 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fal
     from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
     _cfg = _get_site_config(raw_source)
     source = _cfg.source_id
-    source_id = dest_dir.name
-    for _field in _cfg.source_id_fields:
-        _val = meta.get(_field)
-        if _val:
-            source_id = str(_val)
-            break
+    source_id = _resolve_source_id(meta, _cfg, dest_dir.name)
 
     # Tag extraction and normalization
     tags = _extract_tags(dest_dir, meta, source=source)

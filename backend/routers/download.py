@@ -15,6 +15,7 @@ from sqlalchemy import delete, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth, require_role
+from worker.helpers import compute_arq_job_id, enqueue_download_job
 from core.config import settings as app_settings
 from core.errors import api_error, parse_accept_language
 from core.database import get_db
@@ -464,18 +465,46 @@ async def pause_resume_job(
         # job.status == "running" — valid transition
         await redis.set(pause_key, b"1", ex=86400)  # 24h TTL as safety net
         job.status = "paused"
+        await db.commit()
+        return {"status": job.status}
     else:  # resume
         if job.status in terminal_statuses:
             raise HTTPException(status_code=409, detail=f"Job already {job.status}")
         if job.status == "running":
             # Already in the desired state — no-op, return current status
             return {"status": job.status}
-        # job.status == "paused" — valid transition
+        # job.status == "paused" or "queued" — valid transition
         await redis.delete(pause_key)
-        job.status = "running"
 
-    await db.commit()
-    return {"status": job.status}
+        # Check if the ARQ coroutine is still alive.
+        # ARQ writes arq:result:{job_id} when a job finishes (success or failure).
+        arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+        arq_result = await redis.get(f"arq:result:{arq_job_id}")
+
+        if arq_result is not None:
+            # Coroutine is dead — re-enqueue as a new ARQ job.
+            # Prepare re-enqueue before committing DB changes to avoid orphaning
+            # the job in "queued" state if the enqueue fails after commit.
+            new_retry_count = job.retry_count + 1
+            new_arq_id = compute_arq_job_id(job.id, new_retry_count)
+            arq_pool: ArqRedis = request.app.state.arq
+
+            try:
+                await enqueue_download_job(arq_pool, job, new_arq_id)
+            except Exception:
+                raise HTTPException(status_code=503, detail="Failed to re-enqueue job")
+
+            job.retry_count = new_retry_count
+            job.status = "queued"
+            job.error = None
+            job.finished_at = None
+            await db.commit()
+            return {"status": "queued", "restarted": True}
+        else:
+            # Coroutine still alive — just flip the flag
+            job.status = "running"
+            await db.commit()
+            return {"status": job.status}
 
 
 @router.delete("/jobs/{job_id}")
@@ -562,18 +591,10 @@ async def retry_job(
 
     await db.commit()
 
-    arq_job_id = f"retry:{job.id}:{job.retry_count}"
+    arq_job_id = compute_arq_job_id(job.id, job.retry_count)
     try:
         arq: ArqRedis = request.app.state.arq
-        await arq.enqueue_job(
-            "download_job",
-            job.url,
-            job.source or "",
-            None,
-            str(job.id),
-            job.progress.get("total") if job.progress else None,
-            _job_id=arq_job_id,
-        )
+        await enqueue_download_job(arq, job, arq_job_id)
     except Exception as exc:
         logger.error("[retry] manual retry enqueue failed for %s: %s", job_id, exc)
         job.retry_count -= 1
