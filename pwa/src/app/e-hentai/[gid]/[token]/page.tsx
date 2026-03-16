@@ -2,15 +2,15 @@
 
 import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { useEhGallery, useEhGalleryPreviews } from '@/hooks/useGalleries'
+import { useEhGallery, useEhGalleryPreviews, useEhGalleryComments } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { ChevronDown, ChevronUp } from 'lucide-react'
+import DOMPurify from 'dompurify'
 import { BackButton } from '@/components/BackButton'
-import type { EhComment } from '@/lib/types'
 
 // ── Preview grid with scaled sprite offsets ─────────────────────────────
 
@@ -221,6 +221,12 @@ export default function EhGalleryDetailPage() {
 
   const { data: gallery, error: galleryError } = useEhGallery(gid, token)
   const { data: previewData } = useEhGalleryPreviews(gid, token)
+
+  // Comments state
+  const [showComments, setShowComments] = useState(false)
+  const [showAllComments, setShowAllComments] = useState(false)
+  const { data: commentsData, isLoading: commentsLoading } = useEhGalleryComments(gid, token, showComments)
+  const comments = commentsData?.comments
 
   // Favorite state
   const [showFavPicker, setShowFavPicker] = useState(false)
@@ -622,6 +628,79 @@ export default function EhGalleryDetailPage() {
               )
             })}
           </div>
+        </div>
+
+        {/* ── Comments ── */}
+        <div className="space-y-3">
+          {!showComments ? (
+            <button
+              onClick={() => setShowComments(true)}
+              className="w-full py-2.5 rounded-lg border border-vault-border text-vault-text-secondary text-sm
+                         hover:bg-vault-hover hover:text-vault-text transition-colors"
+            >
+              {t('browse.showComments')}
+            </button>
+          ) : (
+            <>
+              <div className="flex items-center justify-between">
+                <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
+                  {t('browse.comments')}
+                </h2>
+                <button
+                  onClick={() => { setShowComments(false); setShowAllComments(false) }}
+                  className="text-xs text-vault-text-muted hover:text-vault-text transition-colors"
+                >
+                  {t('browse.hideComments')}
+                </button>
+              </div>
+              {commentsLoading ? (
+                <div className="flex justify-center py-4">
+                  <LoadingSpinner />
+                </div>
+              ) : !comments || comments.length === 0 ? (
+                <p className="text-sm text-vault-text-muted py-2">{t('browse.noComments')}</p>
+              ) : (
+                <>
+                  <div className="space-y-3">
+                    {(showAllComments ? comments : comments.slice(0, 3)).map((comment, i) => (
+                      <div key={i} className="rounded-lg border border-vault-border bg-vault-card p-3 space-y-2">
+                        <div className="flex items-center justify-between text-xs">
+                          <div className="flex items-center gap-2">
+                            <span className="font-medium text-vault-text">{comment.poster}</span>
+                            <span className="text-vault-text-muted">{comment.posted_at}</span>
+                          </div>
+                          {comment.score !== null && (
+                            <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
+                              comment.score > 0
+                                ? 'bg-green-900/30 text-green-400 border border-green-700'
+                                : comment.score < 0
+                                  ? 'bg-red-900/30 text-red-400 border border-red-700'
+                                  : 'bg-gray-800 text-gray-400 border border-gray-600'
+                            }`}>
+                              {comment.score > 0 ? '+' : ''}{comment.score}
+                            </span>
+                          )}
+                        </div>
+                        <div
+                          className="text-sm text-vault-text-secondary break-words [&_a]:text-blue-400 [&_a]:underline"
+                          dangerouslySetInnerHTML={{ __html: DOMPurify.sanitize(comment.text) }}
+                        />
+                      </div>
+                    ))}
+                  </div>
+                  {!showAllComments && comments.length > 3 && (
+                    <button
+                      onClick={() => setShowAllComments(true)}
+                      className="w-full py-2.5 rounded-lg border border-vault-border text-vault-text-secondary text-sm
+                                 hover:bg-vault-hover hover:text-vault-text transition-colors"
+                    >
+                      {t('browse.showAllComments', { count: String(comments.length) })}
+                    </button>
+                  )}
+                </>
+              )}
+            </>
+          )}
         </div>
 
         {/* ── Preview thumbnails ── */}

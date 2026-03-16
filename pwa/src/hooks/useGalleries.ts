@@ -181,6 +181,14 @@ export function useEhGalleryPreviews(gid: number | null, token: string | null) {
   )
 }
 
+export function useEhGalleryComments(gid: number | null, token: string | null, enabled = false) {
+  return useSWR(
+    enabled && gid && token ? ['eh/comments', gid, token] : null,
+    () => api.eh.getComments(gid!, token!),
+    { revalidateOnFocus: false },
+  )
+}
+
 /**
  * Paginated EH image token loader.
  *

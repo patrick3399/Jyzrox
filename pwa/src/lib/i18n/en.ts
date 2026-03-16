@@ -355,6 +355,9 @@ const en: Record<string, string> = {
   'settings.rateLimitsPaginationDelay': 'Pagination Delay',
   'settings.rateLimitsIllustDelay': 'Between Illustrations',
   'settings.rateLimitsManagedInternally': 'Managed internally by gallery-dl',
+  'settings.storage': 'Storage',
+  'settings.storageUsed': 'Used',
+  'settings.storageFree': 'Free',
 
   // ── TagInput ──
   'tagInput.aliasPlaceholder': 'e.g. character:reimu — press Enter',
@@ -653,6 +656,7 @@ const en: Record<string, string> = {
   'browse.showComments': 'Show Comments',
   'browse.hideComments': 'Hide Comments',
   'browse.noComments': 'No comments yet.',
+  'browse.showAllComments': 'Show All ({count})',
   'browse.commentScore': 'Score',
   'browse.minRating': 'Minimum Rating',
   'browse.anyRating': 'Any',
