@@ -25,6 +25,7 @@ from core.config import settings
 from core.database import get_db
 from core.redis_client import get_redis
 from core.source_display import get_display_config
+from plugins.builtin.gallery_dl._sites import get_site_config as _get_gdl_site_config
 from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserImageFavorite, UserRating
 from services.cas import cas_url, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, safe_source_id, thumb_dir, thumb_url as cas_thumb_url
 from plugins.builtin.ehentai.browse import _make_client as _make_eh_client
@@ -287,7 +288,9 @@ async def list_gallery_sources(
             if not modes:
                 sources.append({"value": "local", "label": "local"})
         else:
-            sources.append({"value": src, "label": src})
+            cfg = _get_gdl_site_config(src)
+            label = cfg.name if cfg.source_id == src else src
+            sources.append({"value": src, "label": label})
 
     await r.set(_SOURCES_CACHE_KEY, json.dumps(sources), ex=_SOURCES_CACHE_TTL)
     return sources

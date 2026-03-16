@@ -3,7 +3,7 @@
 import { useState, useCallback, Suspense, useEffect } from 'react'
 import { useRouter } from 'next/navigation'
 import { BookOpen, Plus, Minus, X, ChevronDown, LayoutGrid, List } from 'lucide-react'
-import { useInfiniteLibraryGalleries, useGalleryCategories } from '@/hooks/useGalleries'
+import { useInfiniteLibraryGalleries, useGalleryCategories, useLibrarySources } from '@/hooks/useGalleries'
 import type { Gallery } from '@/lib/types'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
@@ -24,14 +24,6 @@ const SORT_OPTIONS = [
   { value: 'rating', label: () => t('library.rating') },
   { value: 'pages', label: () => t('library.pagesSort') },
 ] as const
-
-const SOURCE_OPTIONS = [
-  { value: '', label: () => t('library.allSources') },
-  { value: 'ehentai', label: () => 'E-Hentai' },
-  { value: 'pixiv', label: () => 'Pixiv' },
-  { value: 'local:link', label: () => t('library.monitored') },
-  { value: 'local:copy', label: () => t('library.imported') },
-]
 
 const PAGE_SIZE = 24
 
@@ -60,6 +52,7 @@ function LibraryContent() {
   } = state
 
   const { data: categoriesData } = useGalleryCategories()
+  const { data: sourcesData } = useLibrarySources()
 
   const [colCount, setColCount] = useState(4)
   const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
@@ -317,9 +310,14 @@ function LibraryContent() {
                     }}
                     className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
                   >
-                    {SOURCE_OPTIONS.map((opt) => (
+                    <option value="">{t('library.allSources')}</option>
+                    {(sourcesData ?? []).map((opt) => (
                       <option key={opt.value} value={opt.value}>
-                        {opt.label()}
+                        {opt.value === 'local:link'
+                          ? t('library.monitored')
+                          : opt.value === 'local:copy'
+                            ? t('library.imported')
+                            : opt.label}
                       </option>
                     ))}
                   </select>
