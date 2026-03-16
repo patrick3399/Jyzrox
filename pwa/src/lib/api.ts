@@ -52,6 +52,12 @@ import type {
   StorageInfo,
 } from './types'
 
+// ── Local types ───────────────────────────────────────────────────────
+
+export type ReconcileStatus =
+  | { status: 'never_run' }
+  | { status: string; completed_at: string; removed_images: number; removed_galleries: number; orphan_blobs_cleaned: number }
+
 // ── Base fetch ───────────────────────────────────────────────────────
 
 function getCookie(name: string): string | undefined {
@@ -667,6 +673,8 @@ const system = {
   clearCache: () => apiFetch<{ deleted_keys: number }>('/api/system/cache', { method: 'DELETE' }),
   clearCacheCategory: (category: string) =>
     apiFetch<{ deleted_keys: number }>(`/api/system/cache/${category}`, { method: 'DELETE' }),
+  startReconcile: () => apiFetch<{ status: string }>('/api/system/reconcile', { method: 'POST' }),
+  getReconcileStatus: () => apiFetch<ReconcileStatus>('/api/system/reconcile'),
 }
 
 // ── Tags ─────────────────────────────────────────────────────────────
@@ -737,6 +745,24 @@ const tags = {
 
   importEhtag: () =>
     apiFetch<{ status: string; count: number }>('/api/tags/import-ehtag', { method: 'POST' }),
+
+  updateGalleryTags: (galleryId: number, body: { tags: string[]; action: 'add' | 'remove' }) =>
+    apiFetch<{ status: string; affected: number }>(`/api/tags/gallery/${galleryId}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  upsertTranslation: (body: { namespace: string; name: string; language: string; translation: string }) =>
+    apiFetch<{ status: string }>('/api/tags/translations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  batchImportTranslations: (translations: Array<{ namespace: string; name: string; language: string; translation: string }>) =>
+    apiFetch<{ status: string; count: number }>('/api/tags/translations/batch', {
+      method: 'POST',
+      body: JSON.stringify({ translations }),
+    }),
 }
 
 // ── API Tokens ───────────────────────────────────────────────────────

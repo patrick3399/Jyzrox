@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -12,6 +12,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { t, formatDate } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
+import { TagAutocomplete } from '@/components/TagAutocomplete'
+import { Pencil } from 'lucide-react'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
   character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
@@ -98,6 +100,7 @@ export default function GalleryDetailPage() {
   const [isRetagging, setIsRetagging] = useState(false)
   const [tagData, setTagData] = useState<Array<{ namespace: string; name: string; confidence: number; source: string }>>([])
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.35)
+  const [editingTags, setEditingTags] = useState(false)
 
   // Image multi-select & exclusion state
   const [selectMode, setSelectMode] = useState(false)
@@ -190,10 +193,24 @@ export default function GalleryDetailPage() {
       })
   }, [gallery, featureSettings, mutateGallery])
 
-  useEffect(() => {
+  const refetchTagData = useCallback(() => {
     if (!source || !sourceId) return
     api.library.getGalleryTags(source, sourceId).then((res) => setTagData(res.tags)).catch(() => {})
   }, [source, sourceId])
+
+  useEffect(() => { refetchTagData() }, [refetchTagData])
+
+  const handleUpdateTag = useCallback(async (tagStr: string, action: 'add' | 'remove') => {
+    if (!gallery) return
+    try {
+      await api.tags.updateGalleryTags(gallery.id, { tags: [tagStr], action })
+      toast.success(t(action === 'add' ? 'library.tagAdded' : 'library.tagRemoved'))
+      mutateGallery()
+      refetchTagData()
+    } catch {
+      toast.error(t(action === 'add' ? 'library.tagAddFailed' : 'library.tagRemoveFailed'))
+    }
+  }, [gallery, mutateGallery, refetchTagData])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -409,6 +426,9 @@ export default function GalleryDetailPage() {
 
   const tagGroups = groupTagsByNamespace(gallery.tags_array)
   const aiTags = tagData.filter((tag) => tag.source === 'ai' && tag.confidence >= confidenceThreshold)
+  const manualTagSet = useMemo(() => new Set(
+    tagData.filter((td) => td.source === 'manual').map((td) => `${td.namespace}:${td.name}`)
+  ), [tagData])
   const images = imagesData?.images ?? []
   const statusInfo =
     DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
@@ -649,9 +669,31 @@ export default function GalleryDetailPage() {
 
         {/* Tags */}
         <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
-          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide mb-3">
-            {t('common.tags')}
-          </h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
+              {t('common.tags')}
+            </h2>
+            <button
+              onClick={() => setEditingTags(!editingTags)}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
+                editingTags
+                  ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
+                  : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
+              }`}
+            >
+              <Pencil size={12} />
+              {editingTags ? t('library.doneEditingTags') : t('library.editTags')}
+            </button>
+          </div>
+          {editingTags && (
+            <div className="mb-3">
+              <TagAutocomplete
+                onSelect={(tag) => handleUpdateTag(tag, 'add')}
+                clearOnSelect={true}
+                placeholder={t('library.addTagPlaceholder')}
+              />
+            </div>
+          )}
           {Object.keys(tagGroups).length === 0 ? (
             <p className="text-sm text-vault-text-muted">{t('library.noTags')}</p>
           ) : (
@@ -665,13 +707,24 @@ export default function GalleryDetailPage() {
                     {values.map((value) => {
                       const fullTag = namespace === 'general' ? value : `${namespace}:${value}`
                       const translation = tagTranslations?.[fullTag]
+                      const isManual = manualTagSet.has(fullTag)
                       return (
                         <span
                           key={value}
-                          className={`px-2 py-0.5 rounded border text-xs ${getTagColor(fullTag)}`}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs ${getTagColor(fullTag)}`}
                           title={translation || undefined}
                         >
                           {value}
+                          {editingTags && isManual && (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateTag(fullTag, 'remove')}
+                              className="ml-0.5 opacity-60 hover:opacity-100 leading-none"
+                              aria-label={t('common.removeTag', { tag: fullTag })}
+                            >
+                              ×
+                            </button>
+                          )}
                         </span>
                       )
                     })}

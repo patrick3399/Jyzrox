@@ -1,6 +1,6 @@
 'use client'
-import { useState, useCallback } from 'react'
-import { Tags, ChevronLeft, ChevronRight, Plus, Trash2 } from 'lucide-react'
+import { useState, useEffect, useCallback } from 'react'
+import { Tags, ChevronLeft, ChevronRight, Plus, Trash2, Pencil } from 'lucide-react'
 import { toast } from 'sonner'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
@@ -90,6 +90,43 @@ export default function TagsPage() {
     },
     [mutateAliases],
   )
+
+  // Translation state
+  const [transLang, setTransLang] = useState('zh')
+  const [editingTranslation, setEditingTranslation] = useState(false)
+  const [translationValue, setTranslationValue] = useState('')
+
+  const { data: currentTranslation, mutate: mutateTranslation } = useSWR(
+    selectedTag ? ['tag-translation', selectedTag.id, transLang] : null,
+    async () => {
+      if (!selectedTag) return null
+      const fullTag = `${selectedTag.namespace}:${selectedTag.name}`
+      const result = await api.tags.getTranslations([fullTag], transLang)
+      return result[fullTag] ?? null
+    },
+  )
+
+  useEffect(() => {
+    setEditingTranslation(false)
+    setTranslationValue('')
+  }, [selectedTag?.id])
+
+  const handleSaveTranslation = useCallback(async () => {
+    if (!selectedTag || !translationValue.trim()) return
+    try {
+      await api.tags.upsertTranslation({
+        namespace: selectedTag.namespace,
+        name: selectedTag.name,
+        language: transLang,
+        translation: translationValue.trim(),
+      })
+      toast.success(t('tags.translationSaved'))
+      setEditingTranslation(false)
+      mutateTranslation()
+    } catch {
+      toast.error(t('tags.translationFailed'))
+    }
+  }, [selectedTag, translationValue, transLang, mutateTranslation])
 
   const [implTargetId, setImplTargetId] = useState('')
   const [implDirection, setImplDirection] = useState<'implies' | 'implied_by'>('implies')
@@ -367,6 +404,60 @@ export default function TagsPage() {
                     <Plus size={14} /> {t('tags.add')}
                   </button>
                 </div>
+              </div>
+
+              {/* Translations */}
+              <div className="bg-vault-card border border-vault-border rounded-xl p-4">
+                <h3 className="text-md font-semibold mb-3">{t('tags.translations')}</h3>
+
+                <div className="flex items-center gap-2 mb-3">
+                  <label className="text-xs text-vault-text-muted">{t('tags.translationLanguage')}:</label>
+                  <select
+                    value={transLang}
+                    onChange={(e) => { setTransLang(e.target.value); setEditingTranslation(false) }}
+                    className="p-1.5 bg-vault-input border border-vault-border rounded text-sm outline-none text-vault-text"
+                  >
+                    <option value="zh">中文</option>
+                    <option value="ja">日本語</option>
+                    <option value="ko">한국어</option>
+                  </select>
+                </div>
+
+                {editingTranslation ? (
+                  <div className="flex gap-2">
+                    <input
+                      type="text"
+                      value={translationValue}
+                      onChange={(e) => setTranslationValue(e.target.value)}
+                      onKeyDown={(e) => e.key === 'Enter' && handleSaveTranslation()}
+                      placeholder={t('tags.translationPlaceholder')}
+                      className="p-2 flex-1 bg-vault-input border border-vault-border rounded text-sm outline-none text-vault-text"
+                      autoFocus
+                    />
+                    <button
+                      onClick={handleSaveTranslation}
+                      className="px-3 py-2 bg-vault-accent hover:bg-vault-accent/90 rounded text-white text-sm font-medium transition-colors"
+                    >
+                      {t('tags.saveTranslation')}
+                    </button>
+                  </div>
+                ) : (
+                  <div className="flex items-center justify-between">
+                    <span className={`text-sm ${currentTranslation ? 'text-vault-text' : 'text-vault-text-muted italic'}`}>
+                      {currentTranslation ?? t('tags.noTranslation')}
+                    </span>
+                    <button
+                      onClick={() => {
+                        setTranslationValue(currentTranslation ?? '')
+                        setEditingTranslation(true)
+                      }}
+                      className="flex items-center gap-1 px-2 py-1 text-xs text-vault-text-secondary hover:text-vault-accent transition-colors"
+                    >
+                      <Pencil size={12} />
+                      {t('tags.editTranslation')}
+                    </button>
+                  </div>
+                )}
               </div>
             </div>
           )}

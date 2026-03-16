@@ -478,6 +478,13 @@ const en: Record<string, string> = {
   'library.metadataPagesChanged': 'Pages changed: {old} → {new}',
   'library.statusOutdated': 'Outdated',
   'library.checkingMetadata': 'Checking for updates...',
+  'library.editTags': 'Edit Tags',
+  'library.doneEditingTags': 'Done',
+  'library.addTagPlaceholder': 'Search tags to add...',
+  'library.tagAdded': 'Tag added',
+  'library.tagRemoved': 'Tag removed',
+  'library.tagAddFailed': 'Failed to add tag',
+  'library.tagRemoveFailed': 'Failed to remove tag',
 
   // ── Artists ──
   'artists.title': 'Artists',
@@ -719,6 +726,13 @@ const en: Record<string, string> = {
 
   // ── Tag Translations ──
   'tags.translations': 'Tag Translations',
+  'tags.noTranslation': 'No translation set',
+  'tags.editTranslation': 'Edit',
+  'tags.saveTranslation': 'Save',
+  'tags.translationPlaceholder': 'Enter translation...',
+  'tags.translationSaved': 'Translation saved',
+  'tags.translationFailed': 'Failed to save translation',
+  'tags.translationLanguage': 'Language',
 
   // ── Settings extra ──
   'settings.aiTaggingDesc': 'Auto-tag all galleries using the WD14 model',
@@ -759,6 +773,17 @@ const en: Record<string, string> = {
   'settings.tagBlockAddFailed': 'Failed to block tag',
   'settings.tagBlockRemoved': 'Tag unblocked',
   'settings.tagBlockRemoveFailed': 'Failed to unblock tag',
+  'settings.reconciliation': 'Data Reconciliation',
+  'settings.reconcileRun': 'Run Reconciliation',
+  'settings.reconcileRunning': 'Running...',
+  'settings.reconcileConfirm': 'Run data reconciliation? This will clean up orphaned records.',
+  'settings.reconcileStarted': 'Reconciliation job enqueued',
+  'settings.reconcileFailed': 'Failed to start reconciliation',
+  'settings.reconcileNeverRun': 'Reconciliation has never been run.',
+  'settings.reconcileLastRun': 'Last run: {time}',
+  'settings.reconcileRemovedImages': 'Removed images',
+  'settings.reconcileRemovedGalleries': 'Removed galleries',
+  'settings.reconcileOrphanBlobs': 'Orphan blobs cleaned',
 
   // ── Import ──
   'import.zoneA.title': 'Monitored Folders',

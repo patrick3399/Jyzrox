@@ -6,7 +6,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { SUPPORTED_LOCALES, type Locale, formatBytes } from '@/lib/i18n'
 import { ChevronUp, ChevronDown, Shield, Monitor, CalendarClock, Key } from 'lucide-react'
 import { toast } from 'sonner'
-import { api } from '@/lib/api'
+import { api, type ReconcileStatus } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
@@ -1089,6 +1089,10 @@ export default function SettingsPage() {
   // Storage info
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
 
+  // Reconcile
+  const [reconcileStatus, setReconcileStatus] = useState<ReconcileStatus | null>(null)
+  const [reconcileRunning, setReconcileRunning] = useState(false)
+
   // Blocked Tags
   const [blockedTags, setBlockedTags] = useState<BlockedTag[]>([])
   const [blockedTagsLoaded, setBlockedTagsLoaded] = useState(false)
@@ -1145,21 +1149,36 @@ export default function SettingsPage() {
   const handleLoadSystem = useCallback(async () => {
     setSystemLoading(true)
     try {
-      const [h, i, cs, st] = await Promise.all([
+      const [h, i, cs, st, rc] = await Promise.all([
         api.system.health(),
         api.system.info(),
         api.system.getCache(),
         api.system.getStorage().catch(() => null),
+        api.system.getReconcileStatus().catch(() => null),
       ])
       setHealth(h)
       setSystemInfo(i)
       setCacheStats(cs)
       setStorageInfo(st)
+      setReconcileStatus(rc)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.systemLoadFailed'))
     } finally {
       setSystemLoading(false)
       setSystemLoaded(true)
+    }
+  }, [])
+
+  const handleReconcile = useCallback(async () => {
+    if (!confirm(t('settings.reconcileConfirm'))) return
+    setReconcileRunning(true)
+    try {
+      await api.system.startReconcile()
+      toast.success(t('settings.reconcileStarted'))
+    } catch {
+      toast.error(t('settings.reconcileFailed'))
+    } finally {
+      setReconcileRunning(false)
     }
   }, [])
 
@@ -1780,6 +1799,33 @@ export default function SettingsPage() {
                           </button>
                         </div>
                       )}
+                    </div>
+
+                    {/* Data Reconciliation */}
+                    <div className="pt-4 border-t border-vault-border">
+                      <h3 className="text-sm font-medium text-vault-text mb-2">
+                        {t('settings.reconciliation')}
+                      </h3>
+                      {reconcileStatus && reconcileStatus.status !== 'never_run' && 'completed_at' in reconcileStatus && (
+                        <div className="text-xs text-vault-text-muted space-y-1 mb-3">
+                          <p>{t('settings.reconcileLastRun', { time: new Date(reconcileStatus.completed_at).toLocaleString() })}</p>
+                          <div className="flex gap-4">
+                            <span>{t('settings.reconcileRemovedImages')}: {reconcileStatus.removed_images}</span>
+                            <span>{t('settings.reconcileRemovedGalleries')}: {reconcileStatus.removed_galleries}</span>
+                            <span>{t('settings.reconcileOrphanBlobs')}: {reconcileStatus.orphan_blobs_cleaned}</span>
+                          </div>
+                        </div>
+                      )}
+                      {reconcileStatus?.status === 'never_run' && (
+                        <p className="text-xs text-vault-text-muted mb-3">{t('settings.reconcileNeverRun')}</p>
+                      )}
+                      <button
+                        onClick={handleReconcile}
+                        disabled={reconcileRunning}
+                        className="px-3 py-1.5 bg-vault-accent/20 border border-vault-accent/30 text-vault-accent rounded text-sm hover:bg-vault-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {reconcileRunning ? t('settings.reconcileRunning') : t('settings.reconcileRun')}
+                      </button>
                     </div>
 
                     <button
