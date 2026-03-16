@@ -274,6 +274,19 @@ export interface SystemInfo {
   }
 }
 
+export interface StorageMount {
+  label: string
+  path: string
+  total: number
+  used: number
+  free: number
+  percent: number
+}
+
+export interface StorageInfo {
+  mounts: StorageMount[]
+}
+
 // ── EH Comments ──────────────────────────────────────────────────────
 
 export interface EhComment {

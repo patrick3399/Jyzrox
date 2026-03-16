@@ -15,6 +15,7 @@ from core.auth import require_auth, require_role
 from core.config import get_all_library_paths, settings
 from core.database import async_session
 from core.redis_client import get_redis
+from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
 from db.models import Gallery, LibraryPath
 
 router = APIRouter(tags=["import"])
@@ -314,22 +315,11 @@ async def list_mount_points(_: dict = Depends(_member)):
     """
     import psutil
 
-    # Filesystem types to exclude (virtual/system)
-    exclude_fs = {
-        'proc', 'sysfs', 'devpts', 'tmpfs', 'cgroup', 'cgroup2', 'overlay',
-        'mqueue', 'devtmpfs', 'hugetlbfs', 'securityfs', 'pstore',
-        'debugfs', 'tracefs', 'fusectl', 'configfs', 'nsfs',
-        'autofs', 'binfmt_misc', 'efivarfs',
-    }
-    # Mount points to exclude
-    exclude_paths = {'/', '/proc', '/sys', '/dev', '/run', '/tmp',
-                     '/etc/resolv.conf', '/etc/hostname', '/etc/hosts'}
-
     mounts = []
     for p in psutil.disk_partitions(all=True):
-        if p.fstype in exclude_fs:
+        if p.fstype in MOUNT_EXCLUDE_FS:
             continue
-        if p.mountpoint in exclude_paths:
+        if p.mountpoint in MOUNT_EXCLUDE_PATHS:
             continue
         # Skip /dev/* mounts
         if p.mountpoint.startswith('/dev/'):

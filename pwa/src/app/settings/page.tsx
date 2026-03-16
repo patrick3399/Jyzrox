@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react'
 import Link from 'next/link'
 import { useLocale } from '@/components/LocaleProvider'
-import { SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
+import { SUPPORTED_LOCALES, type Locale, formatBytes } from '@/lib/i18n'
 import { ChevronUp, ChevronDown, Shield, Monitor, CalendarClock, Key } from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
@@ -27,6 +27,7 @@ import type {
   CacheStats,
   RateLimitSettings,
   SiteRateConfig,
+  StorageInfo,
 } from '@/lib/types'
 
 type SectionKey =
@@ -1085,6 +1086,9 @@ export default function SettingsPage() {
   const [cacheClearingAll, setCacheClearingAll] = useState(false)
   const [cacheClearingCategory, setCacheClearingCategory] = useState<string | null>(null)
 
+  // Storage info
+  const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
+
   // Blocked Tags
   const [blockedTags, setBlockedTags] = useState<BlockedTag[]>([])
   const [blockedTagsLoaded, setBlockedTagsLoaded] = useState(false)
@@ -1137,18 +1141,20 @@ export default function SettingsPage() {
     })
   }, [])
 
-  // System: Load health + info + cache
+  // System: Load health + info + cache + storage
   const handleLoadSystem = useCallback(async () => {
     setSystemLoading(true)
     try {
-      const [h, i, cs] = await Promise.all([
+      const [h, i, cs, st] = await Promise.all([
         api.system.health(),
         api.system.info(),
         api.system.getCache(),
+        api.system.getStorage().catch(() => null),
       ])
       setHealth(h)
       setSystemInfo(i)
       setCacheStats(cs)
+      setStorageInfo(st)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.systemLoadFailed'))
     } finally {
@@ -1650,6 +1656,49 @@ export default function SettingsPage() {
                         ))}
                       </div>
                     </div>
+
+                    {/* Storage */}
+                    {storageInfo && storageInfo.mounts.length > 0 && (
+                      <div>
+                        <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                          {t('settings.storage')}
+                        </p>
+                        <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
+                          {storageInfo.mounts.map((mount) => {
+                            const barColor =
+                              mount.percent > 90
+                                ? 'bg-red-500'
+                                : mount.percent > 70
+                                  ? 'bg-yellow-500'
+                                  : 'bg-green-500'
+                            return (
+                              <div key={mount.path} className="px-3 py-2.5">
+                                <div className="flex justify-between items-center mb-1.5">
+                                  <span className="text-sm text-vault-text">{mount.label}</span>
+                                  <span className="text-xs text-vault-text-muted font-mono">
+                                    {formatBytes(mount.used)} / {formatBytes(mount.total)}
+                                  </span>
+                                </div>
+                                <div className="w-full h-2 bg-vault-bg rounded-full overflow-hidden">
+                                  <div
+                                    className={`h-full rounded-full transition-all ${barColor}`}
+                                    style={{ width: `${Math.min(mount.percent, 100)}%` }}
+                                  />
+                                </div>
+                                <div className="flex justify-between mt-1">
+                                  <span className="text-xs text-vault-text-muted">
+                                    {mount.percent}% {t('settings.storageUsed').toLowerCase()}
+                                  </span>
+                                  <span className="text-xs text-vault-text-muted">
+                                    {formatBytes(mount.free)} {t('settings.storageFree').toLowerCase()}
+                                  </span>
+                                </div>
+                              </div>
+                            )
+                          })}
+                        </div>
+                      </div>
+                    )}
 
                     {/* Cache Management */}
                     <div>

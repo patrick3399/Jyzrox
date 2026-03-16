@@ -641,3 +641,237 @@ async def test_get_tagger_info_returns_json_on_200():
         result = await _get_tagger_info()
 
     assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# Tests — storage
+# ---------------------------------------------------------------------------
+
+
+async def test_system_storage_returns_mounts_deduplicated_by_device(client):
+    """GET /api/system/storage deduplicates paths on the same filesystem device."""
+    fake_stat = MagicMock()
+    fake_stat.st_dev = 42  # same device for both paths
+
+    fake_usage = MagicMock()
+    fake_usage.total = 1_000_000_000_000
+    fake_usage.used = 600_000_000_000
+    fake_usage.free = 400_000_000_000
+
+    with (
+        patch("routers.system._get_real_mounts", return_value=[
+            ("Gallery Data", "/data/gallery"),
+            ("CAS (Content-Addressed)", "/data/cas"),
+        ]),
+        patch("os.stat", return_value=fake_stat),
+        patch("shutil.disk_usage", return_value=fake_usage),
+    ):
+        resp = await client.get("/api/system/storage")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert "mounts" in data
+    # Same st_dev → deduplicated to 1
+    assert len(data["mounts"]) == 1
+    mount = data["mounts"][0]
+    assert mount["label"] == "Gallery Data"
+    assert mount["total"] == 1_000_000_000_000
+    assert mount["used"] == 600_000_000_000
+    assert mount["free"] == 400_000_000_000
+    assert mount["percent"] == 60.0
+
+
+async def test_system_storage_shows_both_mounts_when_different_devices(client):
+    """GET /api/system/storage shows both mounts when on different devices."""
+    fake_usage = MagicMock()
+    fake_usage.total = 1_000_000_000_000
+    fake_usage.used = 600_000_000_000
+    fake_usage.free = 400_000_000_000
+
+    call_count = 0
+
+    def fake_stat(path):
+        nonlocal call_count
+        call_count += 1
+        m = MagicMock()
+        m.st_dev = call_count  # different device per call
+        return m
+
+    with (
+        patch("routers.system._get_real_mounts", return_value=[
+            ("Gallery Data", "/data/gallery"),
+            ("CAS (Content-Addressed)", "/data/cas"),
+        ]),
+        patch("os.stat", side_effect=fake_stat),
+        patch("shutil.disk_usage", return_value=fake_usage),
+    ):
+        resp = await client.get("/api/system/storage")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert len(data["mounts"]) == 2
+
+
+async def test_system_storage_handles_oserror_gracefully(client):
+    """GET /api/system/storage returns empty mounts when paths don't exist."""
+    with (
+        patch("routers.system._get_real_mounts", return_value=[
+            ("Gallery Data", "/data/gallery"),
+        ]),
+        patch("os.stat", side_effect=OSError("not found")),
+    ):
+        resp = await client.get("/api/system/storage")
+
+    assert resp.status_code == 200
+    assert resp.json()["mounts"] == []
+
+
+async def test_system_storage_includes_external_mounts(client):
+    """GET /api/system/storage shows dynamically detected external mounts."""
+    call_count = 0
+
+    def fake_stat(path):
+        nonlocal call_count
+        call_count += 1
+        m = MagicMock()
+        m.st_dev = call_count
+        return m
+
+    fake_usage = MagicMock()
+    fake_usage.total = 2_000_000_000_000
+    fake_usage.used = 1_000_000_000_000
+    fake_usage.free = 1_000_000_000_000
+
+    with (
+        patch("routers.system._get_real_mounts", return_value=[
+            ("Gallery Data", "/data/gallery"),
+            ("CAS (Content-Addressed)", "/data/cas"),
+            ("nas1", "/mnt/nas1"),
+        ]),
+        patch("os.stat", side_effect=fake_stat),
+        patch("shutil.disk_usage", return_value=fake_usage),
+    ):
+        resp = await client.get("/api/system/storage")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # gallery + cas + nas1 = 3 (all different st_dev)
+    assert len(data["mounts"]) == 3
+    labels = [m["label"] for m in data["mounts"]]
+    assert "nas1" in labels
+
+
+async def test_system_storage_no_external_mounts_when_none_detected(client):
+    """No external mounts shown when _get_real_mounts returns only known data paths."""
+    fake_stat = MagicMock()
+    fake_stat.st_dev = 1
+
+    fake_usage = MagicMock()
+    fake_usage.total = 1_000_000_000_000
+    fake_usage.used = 500_000_000_000
+    fake_usage.free = 500_000_000_000
+
+    with (
+        patch("routers.system._get_real_mounts", return_value=[
+            ("Gallery Data", "/data/gallery"),
+            ("CAS (Content-Addressed)", "/data/cas"),
+        ]),
+        patch("os.stat", return_value=fake_stat),
+        patch("shutil.disk_usage", return_value=fake_usage),
+    ):
+        resp = await client.get("/api/system/storage")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    # Same device → deduplicated to 1, no externals
+    assert len(data["mounts"]) == 1
+
+
+# -- _get_real_mounts unit tests -----------------------------------------------
+
+
+def test_get_real_mounts_returns_known_paths_and_real_partitions():
+    """_get_real_mounts includes known data paths and psutil-detected partitions."""
+    from routers.system import _get_real_mounts
+
+    fake_partition = MagicMock()
+    fake_partition.fstype = "ext4"
+    fake_partition.mountpoint = "/mnt/nas1"
+
+    with patch("psutil.disk_partitions", return_value=[fake_partition]):
+        result = _get_real_mounts()
+
+    labels = [r[0] for r in result]
+    paths = [r[1] for r in result]
+    assert "Gallery Data" in labels
+    assert "CAS (Content-Addressed)" in labels
+    assert "nas1" in labels
+    assert "/mnt/nas1" in paths
+
+
+def test_get_real_mounts_filters_virtual_filesystems():
+    """_get_real_mounts excludes virtual fs types like proc, sysfs, tmpfs."""
+    from routers.system import _get_real_mounts
+
+    partitions = []
+    for fs in ["proc", "sysfs", "tmpfs", "overlay", "cgroup2"]:
+        p = MagicMock()
+        p.fstype = fs
+        p.mountpoint = f"/{fs}"
+        partitions.append(p)
+
+    with patch("psutil.disk_partitions", return_value=partitions):
+        result = _get_real_mounts()
+
+    # Should only have the known paths (gallery + cas), no virtual fs
+    paths = [r[1] for r in result]
+    for fs in ["proc", "sysfs", "tmpfs", "overlay", "cgroup2"]:
+        assert f"/{fs}" not in paths
+
+
+def test_get_real_mounts_filters_system_paths():
+    """_get_real_mounts excludes system mount paths like /, /proc, /sys."""
+    from routers.system import _get_real_mounts
+
+    partitions = []
+    for path in ["/", "/proc", "/sys", "/dev", "/tmp"]:
+        p = MagicMock()
+        p.fstype = "ext4"
+        p.mountpoint = path
+        partitions.append(p)
+
+    with patch("psutil.disk_partitions", return_value=partitions):
+        result = _get_real_mounts()
+
+    paths = [r[1] for r in result]
+    for sys_path in ["/", "/proc", "/sys", "/dev", "/tmp"]:
+        assert sys_path not in paths
+
+
+def test_get_real_mounts_labels_known_paths_correctly():
+    """_get_real_mounts uses KNOWN_LABELS for data_gallery_path and data_cas_path."""
+    from routers.system import _get_real_mounts
+
+    with patch("psutil.disk_partitions", return_value=[]):
+        result = _get_real_mounts()
+
+    label_map = {path: label for label, path in result}
+    # Check that known paths get their special labels
+    from core.config import settings
+    assert label_map.get(settings.data_gallery_path) == "Gallery Data"
+    assert label_map.get(settings.data_cas_path) == "CAS (Content-Addressed)"
+
+
+def test_get_real_mounts_uses_dirname_as_label_for_unknown_paths():
+    """_get_real_mounts uses the last directory component as label for unknown mount points."""
+    from routers.system import _get_real_mounts
+
+    fake_partition = MagicMock()
+    fake_partition.fstype = "nfs"
+    fake_partition.mountpoint = "/pool100"
+
+    with patch("psutil.disk_partitions", return_value=[fake_partition]):
+        result = _get_real_mounts()
+
+    label_map = {path: label for label, path in result}
+    assert label_map.get("/pool100") == "pool100"

@@ -13,6 +13,7 @@ select = [
     "UP",  # pyupgrade
     "B",   # flake8-bugbear
     "SIM", # flake8-simplify
+    "S",   # flake8-bandit (security)
 ]
 ignore = [
     "E501",   # line too long — handled by formatter
@@ -24,6 +25,28 @@ ignore = [
     "SIM105", # use contextlib.suppress — too opinionated for existing code
     "SIM108", # use ternary operator — too opinionated
     "SIM117", # combine `with` statements — conflicts with async context managers
+    "S101",   # assert used — pytest needs assert
+    "S104",   # binding to 0.0.0.0 — normal inside Docker containers
+    "S108",   # hardcoded /tmp path — normal inside containers
+    "S110",   # try-except-pass — intentional in startup/best-effort paths (logged where it matters)
+    "S324",   # MD5 use — only for Gravatar URLs and Redis cache keys, not cryptographic security
+    "S603",   # subprocess call — all calls use static hardcoded command lists (git, ffprobe, ffmpeg)
+    "S607",   # partial executable path — same static hardcoded commands, no user input involved
+    "S608",   # SQL injection — dynamic fragments are built from validated allowlists or integer indexes; values always parameterized
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/**" = [
+    "S105",   # hardcoded passwords — test fixture strings, not real secrets
+    "S106",   # hardcoded passwords in function args — test fixture values
+    "S107",   # hardcoded passwords in function defaults — test helper defaults
+    "S314",   # XML parsing — test code parses known-safe test XML, not user input
+]
+"core/config.py" = [
+    "S105",   # pixiv_client_secret — documented public Android app credentials, not a real secret
+]
+"services/pixiv_client.py" = [
+    "S105",   # _TOKEN_KEY = "pixiv:access_token" — Redis key name, not a password
 ]
 
 [tool.ruff.lint.isort]

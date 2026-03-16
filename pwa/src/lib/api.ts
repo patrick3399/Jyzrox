@@ -49,6 +49,7 @@ import type {
   RateLimitSettings,
   SiteRateConfig,
   DownloadPreview,
+  StorageInfo,
 } from './types'
 
 // ── Base fetch ───────────────────────────────────────────────────────
@@ -662,6 +663,7 @@ const system = {
   health: () => apiFetch<SystemHealth>('/api/system/health'),
   info: () => apiFetch<SystemInfo>('/api/system/info'),
   getCache: () => apiFetch<CacheStats>('/api/system/cache'),
+  getStorage: () => apiFetch<StorageInfo>('/api/system/storage'),
   clearCache: () => apiFetch<{ deleted_keys: number }>('/api/system/cache', { method: 'DELETE' }),
   clearCacheCategory: (category: string) =>
     apiFetch<{ deleted_keys: number }>(`/api/system/cache/${category}`, { method: 'DELETE' }),

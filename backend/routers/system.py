@@ -1,8 +1,12 @@
 import asyncio
 import json
 import logging
+import os
+import shutil
 import subprocess
 import sys
+
+import psutil
 
 import fastapi
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -12,6 +16,7 @@ from core.auth import require_auth, require_role
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.redis_client import get_redis
+from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
@@ -184,6 +189,82 @@ async def system_info(_: dict = Depends(require_auth)):
         },
         "tagger": tagger_info,
     }
+
+
+def _get_real_mounts() -> list[tuple[str, str]]:
+    """Return (label, path) for all real disk mount points.
+
+    Uses psutil.disk_partitions() and filters out virtual/system filesystems.
+    """
+    KNOWN_LABELS = {
+        settings.data_gallery_path: "Gallery Data",
+        settings.data_cas_path: "CAS (Content-Addressed)",
+    }
+
+    result: list[tuple[str, str]] = []
+    seen_paths: set[str] = set()
+
+    # Always include known data paths (they may share a mount with /data)
+    for path, label in KNOWN_LABELS.items():
+        result.append((label, path))
+        seen_paths.add(path)
+
+    for p in psutil.disk_partitions(all=True):
+        if p.fstype in MOUNT_EXCLUDE_FS:
+            continue
+        if p.mountpoint in MOUNT_EXCLUDE_PATHS:
+            continue
+        if p.mountpoint.startswith('/dev/'):
+            continue
+        if p.mountpoint in seen_paths:
+            continue
+        label = KNOWN_LABELS.get(p.mountpoint, p.mountpoint.rstrip("/").rsplit("/", 1)[-1] or p.mountpoint)
+        result.append((label, p.mountpoint))
+        seen_paths.add(p.mountpoint)
+
+    return result
+
+
+@router.get("/storage")
+async def system_storage(_: dict = Depends(_admin)):
+    """Return disk usage for configured data paths and detected mounts."""
+    mount_list = await asyncio.to_thread(_get_real_mounts)
+
+    # Gather all stat results in parallel
+    stat_results = await asyncio.gather(
+        *(asyncio.to_thread(os.stat, path) for _, path in mount_list),
+        return_exceptions=True,
+    )
+
+    # Deduplicate by device ID, then gather disk_usage in parallel
+    seen_devs: set[int] = set()
+    usage_tasks: list = []
+    valid_mounts: list[tuple[str, str]] = []
+    for (label, path), stat in zip(mount_list, stat_results):
+        if isinstance(stat, Exception):
+            continue
+        if stat.st_dev in seen_devs:
+            continue
+        seen_devs.add(stat.st_dev)
+        usage_tasks.append(asyncio.to_thread(shutil.disk_usage, path))
+        valid_mounts.append((label, path))
+
+    usage_results = await asyncio.gather(*usage_tasks, return_exceptions=True)
+
+    mounts = []
+    for (label, path), usage in zip(valid_mounts, usage_results):
+        if isinstance(usage, Exception):
+            continue
+        percent = round(usage.used / usage.total * 100, 1) if usage.total else 0.0
+        mounts.append({
+            "label": label,
+            "path": path,
+            "total": usage.total,
+            "used": usage.used,
+            "free": usage.free,
+            "percent": percent,
+        })
+    return {"mounts": mounts}
 
 
 # ── Cache management ──────────────────────────────────────────────────
