@@ -31,7 +31,6 @@ CREATE TABLE IF NOT EXISTS galleries (
     rating          SMALLINT DEFAULT 0,
     favorited       BOOLEAN DEFAULT false,
     uploader        TEXT,
-    parent_id       BIGINT REFERENCES galleries(id),
     download_status TEXT DEFAULT 'proxy_only',
     import_mode     TEXT,
     tags_array      TEXT[] DEFAULT '{}',
@@ -162,8 +161,6 @@ CREATE INDEX IF NOT EXISTS idx_galleries_title_jpn_trgm ON galleries USING GIN (
 
 CREATE INDEX IF NOT EXISTS idx_galleries_source    ON galleries (source, source_id);
 CREATE INDEX IF NOT EXISTS idx_galleries_added_at  ON galleries (added_at DESC);
-CREATE INDEX IF NOT EXISTS idx_galleries_rating    ON galleries (rating);
-CREATE INDEX IF NOT EXISTS idx_galleries_favorited ON galleries (favorited) WHERE favorited = true;
 CREATE INDEX IF NOT EXISTS idx_images_gallery      ON images (gallery_id, page_num);
 CREATE INDEX IF NOT EXISTS idx_images_blob         ON images (blob_sha256);
 
@@ -259,10 +256,6 @@ ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_q0 SMALLINT;
 ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_q1 SMALLINT;
 ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_q2 SMALLINT;
 ALTER TABLE blobs ADD COLUMN IF NOT EXISTS phash_q3 SMALLINT;
-CREATE INDEX IF NOT EXISTS idx_blobs_phash_q0 ON blobs(phash_q0) WHERE phash_q0 IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_blobs_phash_q1 ON blobs(phash_q1) WHERE phash_q1 IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_blobs_phash_q2 ON blobs(phash_q2) WHERE phash_q2 IS NOT NULL;
-CREATE INDEX IF NOT EXISTS idx_blobs_phash_q3 ON blobs(phash_q3) WHERE phash_q3 IS NOT NULL;
 
 CREATE INDEX IF NOT EXISTS idx_galleries_library_path ON galleries (library_path);
 CREATE INDEX IF NOT EXISTS idx_galleries_last_scanned ON galleries (last_scanned_at NULLS FIRST);
