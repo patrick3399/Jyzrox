@@ -110,7 +110,7 @@ class PluginRegistry:
     # ------------------------------------------------------------------
 
     def detect_source(self, url: str) -> str | None:
-        """Detect source_id from URL using site index."""
+        """Detect source_id from URL using site index, with gallery-dl fallback."""
         import urllib.parse
         try:
             netloc = urllib.parse.urlparse(url).netloc.lower()
@@ -118,13 +118,30 @@ class PluginRegistry:
             return None
         if not netloc:
             return None
+
+        # Primary: domain lookup from registered plugins
         for domain, site in self._site_index.items():
             if netloc == domain or netloc.endswith("." + domain):
                 return site.source_id
+
+        # Fallback: use gallery-dl extractor to detect category
+        try:
+            from gallery_dl import extractor as gdl_extractor
+            from plugins.builtin.gallery_dl._sites import get_site_config
+            ex = gdl_extractor.find(url)
+            if ex and ex.category:
+                cfg = get_site_config(ex.category)
+                if cfg.source_id != "gallery_dl":
+                    return cfg.source_id
+                # Unregistered site: use gallery-dl's category directly
+                return ex.category
+        except Exception:
+            pass
+
         return None
 
     def detect_source_info(self, url: str) -> SiteInfo | None:
-        """Return SiteInfo for the given URL."""
+        """Return SiteInfo for the given URL, with gallery-dl fallback."""
         import urllib.parse
         try:
             netloc = urllib.parse.urlparse(url).netloc.lower()
@@ -132,9 +149,39 @@ class PluginRegistry:
             return None
         if not netloc:
             return None
+
+        # Primary: domain lookup from registered plugins
         for domain, site in self._site_index.items():
             if netloc == domain or netloc.endswith("." + domain):
                 return site
+
+        # Fallback: use gallery-dl extractor to detect category
+        try:
+            from gallery_dl import extractor as gdl_extractor
+            from plugins.builtin.gallery_dl._sites import get_site_config
+            ex = gdl_extractor.find(url)
+            if ex and ex.category:
+                cfg = get_site_config(ex.category)
+                if cfg.source_id != "gallery_dl":
+                    # Known site in _sites.py: build SiteInfo from GdlSiteConfig
+                    return SiteInfo(
+                        domain=cfg.domain,
+                        name=cfg.name,
+                        source_id=cfg.source_id,
+                        category=cfg.category,
+                        has_tags=cfg.has_tags,
+                    )
+                # Unregistered site: build minimal SiteInfo using gallery-dl category
+                return SiteInfo(
+                    domain=netloc,
+                    name=ex.category.capitalize(),
+                    source_id=ex.category,
+                    category="other",
+                    has_tags=False,
+                )
+        except Exception:
+            pass
+
         return None
 
     def get_all_sites(self) -> list[SiteInfo]:
