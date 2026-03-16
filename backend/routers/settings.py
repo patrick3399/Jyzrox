@@ -535,6 +535,8 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "subscription_enqueue_delay_ms": await _get_int_setting("setting:subscription_enqueue_delay_ms", 500),
         "subscription_batch_max": await _get_int_setting("setting:subscription_batch_max", 0),
         "gallery_update_check_days": await _get_int_setting("setting:gallery_update_check_days", -1),
+        "trash_enabled": await _get_toggle("setting:trash_enabled", True),
+        "trash_retention_days": await _get_int_setting("setting:trash_retention_days", 30),
     }
 
 
@@ -566,6 +568,8 @@ async def patch_feature_toggle(
         "subscription_enqueue_delay_ms": "setting:subscription_enqueue_delay_ms",
         "subscription_batch_max": "setting:subscription_batch_max",
         "gallery_update_check_days": "setting:gallery_update_check_days",
+        "trash_enabled": "setting:trash_enabled",
+        "trash_retention_days": "setting:trash_retention_days",
     }
     if feature not in ALLOWED:
         raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
@@ -627,6 +631,15 @@ async def patch_feature_toggle(
         if val < -1:
             raise HTTPException(status_code=400, detail="gallery_update_check_days must be >= -1")
         await get_redis().set("setting:gallery_update_check_days", str(val))
+        return {"feature": feature, "value": val}
+
+    if feature == "trash_retention_days":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for trash_retention_days")
+        val = int(req.value)
+        if not (1 <= val <= 365):
+            raise HTTPException(status_code=400, detail="trash_retention_days must be between 1 and 365")
+        await get_redis().set("setting:trash_retention_days", str(val))
         return {"feature": feature, "value": val}
 
     if req.enabled is None:

@@ -1864,6 +1864,16 @@ async def delete_gallery(
     if active_job:
         raise HTTPException(status_code=409, detail="Cannot delete gallery with active download job. Cancel the download first.")
 
+    # Check if trash is enabled
+    from routers.settings import _get_toggle
+    trash_enabled = await _get_toggle("setting:trash_enabled", True)
+
+    if not trash_enabled:
+        # Hard-delete immediately when trash is disabled
+        result = await _hard_delete_galleries(db, [g])
+        await _invalidate_sources_cache()
+        return {"status": "ok", **result}
+
     g.deleted_at = datetime.now(UTC)
     await db.commit()
     await _invalidate_sources_cache()

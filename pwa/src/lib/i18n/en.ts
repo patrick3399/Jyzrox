@@ -268,6 +268,12 @@ const en: Record<string, string> = {
   'settings.downloadPixivDesc': 'Allow downloading from Pixiv.',
   'settings.downloadGalleryDl': 'gallery-dl (Fallback)',
   'settings.downloadGalleryDlDesc': 'Allow downloading from other sites via gallery-dl.',
+  'settings.trashSection': 'Trash',
+  'settings.trashEnabled': 'Enable Trash',
+  'settings.trashEnabledDesc': 'Deleted galleries are moved to trash instead of being permanently deleted',
+  'settings.trashRetentionDays': 'Retention Days',
+  'settings.trashRetentionDaysDesc': 'Galleries in trash are automatically deleted after this many days',
+  'settings.trashDisableConfirm': 'Disabling trash will permanently delete all galleries currently in trash. This cannot be undone. Continue?',
   'settings.rateLimiting': 'Rate Limiting',
   'settings.rateLimitDesc': 'Protect login and API endpoints',
   'settings.refresh': 'Refresh',
@@ -1491,6 +1497,8 @@ const en: Record<string, string> = {
   'trash.empty': 'Trash is empty',
   'trash.permanentlyDeleted': 'Permanently deleted',
   'trash.deletedAt': 'Deleted {time}',
+  'trash.disabled': 'Trash is disabled',
+  'trash.disabledDesc': 'Enable trash in Settings to use this feature',
 
   // ── Pull to Refresh ──
   'pullToRefresh.pull': 'Pull to refresh',

@@ -1080,6 +1080,10 @@ export default function SettingsPage() {
   const [features, setFeatures] = useState<Record<string, boolean>>({})
   const [featuresLoading, setFeaturesLoading] = useState(true)
 
+  // Trash retention
+  const [trashRetentionDays, setTrashRetentionDays] = useState(30)
+  const trashRetentionDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
   // Cache stats
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [cacheLoading, setCacheLoading] = useState(false)
@@ -1188,6 +1192,7 @@ export default function SettingsPage() {
     try {
       const data = await api.settings.getFeatures()
       setFeatures(data as unknown as Record<string, boolean>)
+      setTrashRetentionDays(data.trash_retention_days ?? 30)
     } catch {
       // silently fail — toggles will use defaults
     } finally {
@@ -1204,6 +1209,24 @@ export default function SettingsPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
     }
+  }, [])
+
+  const handleTrashToggle = useCallback(async (enabled: boolean) => {
+    if (!enabled) {
+      if (!confirm(t('settings.trashDisableConfirm'))) return
+    }
+    await handleFeatureToggle('trash_enabled', enabled)
+  }, [handleFeatureToggle])
+
+  const handleTrashRetentionChange = useCallback((v: number) => {
+    setTrashRetentionDays(v)
+    clearTimeout(trashRetentionDebounce.current)
+    trashRetentionDebounce.current = setTimeout(async () => {
+      try {
+        await api.settings.setFeatureValue('trash_retention_days', Math.max(1, Math.min(365, v)))
+        toast.success(t('common.saved'))
+      } catch { toast.error(t('common.failedToSave')) }
+    }, 500)
   }, [])
 
   // Cache: Refresh stats only
@@ -1908,6 +1931,36 @@ export default function SettingsPage() {
                     onChange={(v) => handleFeatureToggle('tag_translation_enabled', v)}
                     disabled={featuresLoading}
                   />
+                </div>
+
+                {/* Trash */}
+                <h3 className="text-xs text-vault-text-muted uppercase tracking-wide mt-5 mb-2">
+                  {t('settings.trashSection')}
+                </h3>
+                <div className="space-y-1 divide-y divide-vault-border">
+                  <ToggleRow
+                    label={t('settings.trashEnabled')}
+                    description={t('settings.trashEnabledDesc')}
+                    checked={features.trash_enabled ?? true}
+                    onChange={handleTrashToggle}
+                    disabled={featuresLoading}
+                  />
+                  {(features.trash_enabled ?? true) && (
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <p className="text-sm text-vault-text">{t('settings.trashRetentionDays')}</p>
+                        <p className="text-xs text-vault-text-muted">{t('settings.trashRetentionDaysDesc')}</p>
+                      </div>
+                      <input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={trashRetentionDays}
+                        onChange={(e) => handleTrashRetentionChange(Number(e.target.value))}
+                        className="w-20 text-right rounded-lg border border-vault-border bg-vault-input px-2 py-1.5 text-sm text-vault-text"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Download Sources */}

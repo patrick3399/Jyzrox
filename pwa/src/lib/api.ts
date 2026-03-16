@@ -600,6 +600,8 @@ const settings = {
       dedup_opencv_enabled: boolean
       dedup_opencv_threshold: number
       tag_translation_enabled: boolean
+      trash_enabled: boolean
+      trash_retention_days: number
     }>('/api/settings/features'),
 
   setFeature: (feature: string, enabled: boolean) =>
