@@ -252,10 +252,10 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         category="gallery", has_tags=True, artist_from="tag",
     ),
     GdlSiteConfig(
-        domain="kemono.su", source_id="kemono", name="Kemono",
+        domain="kemono.cr", source_id="kemono", name="Kemono",
         category="gallery", has_tags=True,
         subscribe_id_key="id",
-        subscribe_url_tpl="https://kemono.su/{}/",
+        subscribe_url_tpl="https://kemono.cr/{}/",
         subscribe_id_pattern=r"/(\w+)/user/(\d+)",
         subscribe_id_format="{1}:{2}",
         retries=5, http_timeout=60,
