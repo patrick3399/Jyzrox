@@ -1467,6 +1467,8 @@ const en: Record<string, string> = {
   'contextMenu.read': 'Read',
   'contextMenu.download': 'Download',
   'contextMenu.favorite': 'Favorite',
+  'contextMenu.unfavorite': 'Unfavorite',
+  'contextMenu.delete': 'Delete',
   'contextMenu.openDetail': 'Open Detail',
 
   // ── Library filter panel ──

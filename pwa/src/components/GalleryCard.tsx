@@ -1,7 +1,7 @@
 'use client'
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, ExternalLink, Heart, Download } from 'lucide-react'
+import { BookOpen, ExternalLink, Heart, Download, Trash2 } from 'lucide-react'
 import type { Gallery, EhGallery } from '@/lib/types'
 import { RatingStars } from './RatingStars'
 import { ContextMenu } from './ContextMenu'
@@ -95,7 +95,7 @@ export function EhGalleryCard({ gallery, onClick }: EhCardProps) {
         onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
         {...longPressHandlers}
         className={`
-          relative flex flex-col select-none
+          relative flex flex-col select-none [-webkit-touch-callout:none]
           bg-vault-card border border-vault-border rounded-lg overflow-hidden
           transition-all duration-200 cursor-pointer
           hover:scale-[1.02] hover:border-vault-accent hover:shadow-lg hover:shadow-vault-accent/20 hover:brightness-105
@@ -155,6 +155,7 @@ interface LibraryCardProps {
   selected?: boolean
   selectMode?: boolean
   onFavoriteToggle?: (gallery: Gallery) => void
+  onDelete?: (gallery: Gallery) => void
   onDownload?: (gallery: Gallery) => void
 }
 
@@ -165,6 +166,7 @@ export function LibraryGalleryCard({
   selected,
   selectMode,
   onFavoriteToggle,
+  onDelete,
   onDownload,
 }: LibraryCardProps) {
   const colors = getCategoryColors(gallery.category)
@@ -200,7 +202,7 @@ export function LibraryGalleryCard({
     ...(onFavoriteToggle
       ? [
           {
-            label: t('contextMenu.favorite'),
+            label: gallery.is_favorited ? t('contextMenu.unfavorite') : t('contextMenu.favorite'),
             icon: Heart,
             onClick: () => onFavoriteToggle(gallery),
           },
@@ -215,6 +217,16 @@ export function LibraryGalleryCard({
           },
         ]
       : []),
+    ...(onDelete
+      ? [
+          {
+            label: t('contextMenu.delete'),
+            icon: Trash2,
+            className: 'text-red-400',
+            onClick: () => onDelete(gallery),
+          },
+        ]
+      : []),
   ]
 
   return (
@@ -226,12 +238,12 @@ export function LibraryGalleryCard({
         onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
         {...longPressHandlers}
         className={`
-          relative flex flex-col select-none
+          relative flex flex-col select-none [-webkit-touch-callout:none]
           bg-vault-card rounded-lg overflow-hidden
           transition-all duration-200 cursor-pointer
           hover:scale-[1.02] hover:shadow-lg hover:shadow-vault-accent/20 hover:brightness-105
           focus:outline-none focus:ring-2 focus:ring-vault-accent
-          ${selected ? 'border-2 border-vault-accent' : 'border border-vault-border hover:border-vault-accent'}
+          ${(selected || menuOpen) ? 'border-2 border-vault-accent' : 'border border-vault-border hover:border-vault-accent'}
         `}
       >
         {/* Select-mode checkbox overlay */}

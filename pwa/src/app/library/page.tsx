@@ -1,10 +1,10 @@
 'use client'
 
 import { useState, useCallback, Suspense, useEffect } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
 import { BookOpen, Plus, Minus, X, ChevronDown, LayoutGrid, List } from 'lucide-react'
 import { useInfiniteLibraryGalleries, useGalleryCategories } from '@/hooks/useGalleries'
+import type { Gallery } from '@/lib/types'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { useCollections } from '@/hooks/useCollections'
@@ -121,7 +121,7 @@ function LibraryContent() {
     [dispatch],
   )
 
-  const { galleries, total, isLoading, error, isLoadingMore, isReachingEnd, loadMore } =
+  const { galleries, total, isLoading, error, isLoadingMore, isReachingEnd, loadMore, mutate } =
     useInfiniteLibraryGalleries({
       q: searchQuery || undefined,
       tags: includeTags.length > 0 ? includeTags : undefined,
@@ -136,6 +136,29 @@ function LibraryContent() {
       collection: collectionFilter,
       category: categoryFilter || undefined,
     })
+
+  const handleFavoriteToggle = useCallback(async (gallery: Gallery) => {
+    try {
+      await api.library.updateGallery(gallery.source, gallery.source_id, {
+        favorited: !gallery.is_favorited,
+      })
+      toast.success(gallery.is_favorited ? t('library.unfavorited') : t('library.favorited'))
+      mutate()
+    } catch {
+      toast.error(t('library.updateFailed'))
+    }
+  }, [mutate])
+
+  const handleDelete = useCallback(async (gallery: Gallery) => {
+    if (!window.confirm(t('library.deleteConfirm', { title: gallery.title }))) return
+    try {
+      await api.library.deleteGallery(gallery.source, gallery.source_id)
+      toast.success(t('library.deleted'))
+      mutate()
+    } catch {
+      toast.error(t('library.updateFailed'))
+    }
+  }, [mutate])
 
   // ── Scroll restoration ──────────────────────────────────
   const { saveScroll } = useScrollRestore('library_scrollY', galleries.length > 0)
@@ -469,20 +492,27 @@ function LibraryContent() {
                   onClick={() => {
                     dispatch({ type: 'TOGGLE_SELECTED_ID', payload: gallery.id })
                   }}
+                  onContextMenu={(e) => e.preventDefault()}
                 >
                   <Card
                     gallery={gallery}
                     thumbUrl={gallery.cover_thumb ?? undefined}
                     selected={isSelected}
                     selectMode={true}
+                    onFavoriteToggle={handleFavoriteToggle}
+                    onDelete={handleDelete}
                   />
                 </div>
               )
             }
             return (
-              <Link href={`/library/${gallery.source}/${gallery.source_id}`} onClick={() => saveScroll()}>
-                <Card gallery={gallery} thumbUrl={gallery.cover_thumb ?? undefined} />
-              </Link>
+              <Card
+                gallery={gallery}
+                thumbUrl={gallery.cover_thumb ?? undefined}
+                onClick={() => { saveScroll(); router.push(`/library/${gallery.source}/${gallery.source_id}`) }}
+                onFavoriteToggle={handleFavoriteToggle}
+                onDelete={handleDelete}
+              />
             )
           }}
           onLoadMore={loadMore}

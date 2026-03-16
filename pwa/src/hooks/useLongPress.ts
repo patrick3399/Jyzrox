@@ -48,7 +48,12 @@ export function useLongPress({ threshold = 500, moveThreshold = 10, onLongPress 
   )
 
   const onTouchEnd = useCallback(
-    (_e: React.TouchEvent) => {
+    (e: React.TouchEvent) => {
+      if (firedRef.current) {
+        // Prevent the browser from generating a synthetic click event
+        // after a successful long-press, which would trigger onClick.
+        e.preventDefault()
+      }
       cancel()
     },
     [cancel],
