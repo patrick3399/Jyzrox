@@ -1439,6 +1439,11 @@ const en: Record<string, string> = {
   'reader.hideImageConfirm': "Hide this image? It won't appear in future re-imports.",
   'reader.imageHidden': 'Image hidden',
   'reader.hideImageFailed': 'Failed to hide image',
+  'reader.favoriteImage': 'Favorite Image',
+  'reader.unfavoriteImage': 'Unfavorite Image',
+  'reader.imageFavorited': 'Image added to favorites',
+  'reader.imageUnfavorited': 'Image removed from favorites',
+  'reader.favoriteFailed': 'Failed to update favorite',
   'reader.toggleControls': 'Toggle controls',
   'reader.videoSeek': 'Seek',
   'library.clearArtistFilter': 'Clear artist filter',
@@ -1456,6 +1461,7 @@ const en: Record<string, string> = {
   'images.noResults': 'No images found.',
   'images.filterByTags': 'Filter by tags...',
   'images.scrubberLabel': 'Timeline scrubber',
+  'images.favoritesOnly': 'Favorites Only',
 
   // ── Context Menu ──
   'contextMenu.read': 'Read',

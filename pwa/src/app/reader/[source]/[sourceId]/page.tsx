@@ -11,6 +11,7 @@ interface LoadedData {
   gallery: Gallery
   images: GalleryImage[]
   progress: ReadProgress | null
+  favoritedImageIds: number[]
 }
 
 export default function ReaderPage() {
@@ -43,6 +44,7 @@ export default function ReaderPage() {
             gallery,
             images: imagesResp.images,
             progress,
+            favoritedImageIds: imagesResp.favorited_image_ids ?? [],
           })
 
           // Record browse history — fire and forget
@@ -87,7 +89,7 @@ export default function ReaderPage() {
           api.library.getImages(source, sourceId),
         ])
         if (!cancelled) {
-          setData((prev) => prev ? { ...prev, gallery, images: imagesResp.images } : prev)
+          setData((prev) => prev ? { ...prev, gallery, images: imagesResp.images, favoritedImageIds: imagesResp.favorited_image_ids ?? [] } : prev)
         }
       } catch {
         // silently ignore revalidation errors
@@ -150,6 +152,7 @@ export default function ReaderPage() {
         images={images}
         totalPages={gallery.download_status === 'downloading' ? Math.max(gallery.pages, images.length) : gallery.pages}
         initialPage={initialPage}
+        initialFavoritedImageIds={data.favoritedImageIds}
       />
     </ErrorBoundary>
   )

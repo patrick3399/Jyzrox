@@ -10,6 +10,7 @@ interface UseImageBrowserParams {
   gallery_id?: number
   source?: string
   category?: string
+  favorited?: boolean
   limit?: number
   jumpAt?: string
 }

@@ -419,3 +419,12 @@ ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS last_job_id UUID REFERENCES d
 -- Soft delete support
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS deleted_at TIMESTAMPTZ;
 CREATE INDEX IF NOT EXISTS idx_galleries_deleted_at ON galleries (deleted_at) WHERE deleted_at IS NOT NULL;
+
+-- ── User Image Favorites ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_image_favorites (
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    image_id    BIGINT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, image_id)
+);
+CREATE INDEX IF NOT EXISTS idx_uif_image ON user_image_favorites (image_id);

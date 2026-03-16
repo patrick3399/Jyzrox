@@ -2,7 +2,7 @@
 
 import { useEffect, useRef } from 'react'
 import { createPortal } from 'react-dom'
-import { Download, Copy, Share2, EyeOff } from 'lucide-react'
+import { Download, Copy, Share2, EyeOff, Heart, type LucideIcon } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
 interface ImageContextMenuProps {
@@ -12,9 +12,11 @@ interface ImageContextMenuProps {
   imageUrl: string
   imageName?: string
   onHide?: () => void
+  isFavorited?: boolean
+  onToggleFavorite?: () => void
 }
 
-export function ImageContextMenu({ open, onClose, position, imageUrl, imageName, onHide }: ImageContextMenuProps) {
+export function ImageContextMenu({ open, onClose, position, imageUrl, imageName, onHide, isFavorited, onToggleFavorite }: ImageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
 
   // Auto-dismiss on click outside or Escape
@@ -83,7 +85,7 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
   const ITEM_HEIGHT = 48
   const SEPARATOR_HEIGHT = 1
   const hasShare = typeof navigator !== 'undefined' && !!navigator.share
-  const baseItems = hasShare ? 3 : 2
+  const baseItems = (hasShare ? 3 : 2) + (onToggleFavorite ? 1 : 0)
   const MENU_HEIGHT = baseItems * ITEM_HEIGHT + (onHide ? SEPARATOR_HEIGHT + ITEM_HEIGHT : 0)
 
   const x = Math.min(position.x, window.innerWidth - MENU_WIDTH - 8)
@@ -91,7 +93,13 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
   const adjustedX = Math.max(8, x)
   const adjustedY = Math.max(8, y)
 
-  const items = [
+  const items: { label: string; icon: LucideIcon; onClick: () => void; iconClassName?: string }[] = [
+    ...(onToggleFavorite ? [{
+      label: isFavorited ? t('reader.unfavoriteImage') : t('reader.favoriteImage'),
+      icon: Heart,
+      onClick: () => { onToggleFavorite(); onClose() },
+      iconClassName: isFavorited ? 'fill-current text-red-400' : 'text-white/70',
+    }] : []),
     { label: t('reader.saveImage'), icon: Download, onClick: handleSave },
     { label: t('reader.copyImage'), icon: Copy, onClick: handleCopy },
     ...(hasShare ? [{ label: t('reader.shareImage'), icon: Share2, onClick: handleShare }] : []),
@@ -111,13 +119,13 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
         style={{ left: adjustedX, top: adjustedY, width: MENU_WIDTH }}
         onClick={(e) => e.stopPropagation()}
       >
-        {items.map(({ label, icon: Icon, onClick }) => (
+        {items.map(({ label, icon: Icon, onClick, iconClassName }) => (
           <button
             key={label}
             onClick={onClick}
             className="w-full px-4 py-3 text-sm text-white/90 hover:bg-white/10 flex items-center gap-3 transition-colors text-left"
           >
-            <Icon className="w-4 h-4 shrink-0 text-white/70" />
+            <Icon className={`w-4 h-4 shrink-0 ${iconClassName || 'text-white/70'}`} />
             <span>{label}</span>
           </button>
         ))}

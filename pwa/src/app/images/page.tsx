@@ -46,6 +46,7 @@ function ImageBrowserInner() {
 
   const [sourceFilter, setSourceFilter] = useState(sourceParam)
   const [categoryFilter, setCategoryFilter] = useState(categoryParam)
+  const [favoritedFilter, setFavoritedFilter] = useState(false)
   const [tagInput, setTagInput] = useState('')
   const [jumpAt, setJumpAt] = useState<string | undefined>(undefined)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -88,14 +89,15 @@ function ImageBrowserInner() {
   // Reset jumpAt when filters change
   useEffect(() => {
     setJumpAt(undefined)
-  }, [sourceFilter, categoryFilter, tags, excludeTags])
+  }, [sourceFilter, categoryFilter, tags, excludeTags, favoritedFilter])
 
   const filterParams = useMemo(() => ({
     tags: tags.length > 0 ? tags : undefined,
     exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
     source: sourceFilter || undefined,
     category: categoryFilter || undefined,
-  }), [tags, excludeTags, sourceFilter, categoryFilter])
+    favorited: favoritedFilter || undefined,
+  }), [tags, excludeTags, sourceFilter, categoryFilter, favoritedFilter])
 
   const { minAt, maxAt } = useTimeRange(filterParams)
   const { percentiles } = useTimelinePercentiles(filterParams)
@@ -254,6 +256,15 @@ function ImageBrowserInner() {
               </select>
             </div>
           )}
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input
+              type="checkbox"
+              checked={favoritedFilter}
+              onChange={(e) => setFavoritedFilter(e.target.checked)}
+              className="w-4 h-4 accent-yellow-500"
+            />
+            <span className="text-sm text-vault-text-secondary">{t('images.favoritesOnly')}</span>
+          </label>
           <div className="flex items-center gap-2">
             <input
               type="text"

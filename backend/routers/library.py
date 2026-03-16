@@ -13,7 +13,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import ARRAY, Text, and_, asc, case as sql_case, cast, delete as sa_delete, desc, func, not_, or_, select, tuple_
+from sqlalchemy import ARRAY, Text, and_, asc, case as sql_case, cast, delete as sa_delete, desc, exists, func, not_, or_, select, tuple_
 from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import text as sql_text
@@ -25,7 +25,7 @@ from core.config import settings
 from core.database import get_db
 from core.redis_client import get_redis
 from core.source_display import get_display_config
-from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserRating
+from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserImageFavorite, UserRating
 from services.cas import cas_url, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, safe_source_id, thumb_dir, thumb_url as cas_thumb_url
 from plugins.builtin.ehentai.browse import _make_client as _make_eh_client
 
@@ -115,6 +115,19 @@ async def _get_favorite_set(db: AsyncSession, user_id: int, gallery_ids: list[in
         select(UserFavorite.gallery_id).where(
             UserFavorite.user_id == user_id,
             UserFavorite.gallery_id.in_(gallery_ids),
+        )
+    )
+    return {row[0] for row in result}
+
+
+async def _get_image_favorite_set(db: AsyncSession, user_id: int, image_ids: list[int]) -> set[int]:
+    """Return set of image_ids that are favorited by this user."""
+    if not image_ids:
+        return set()
+    result = await db.execute(
+        select(UserImageFavorite.image_id).where(
+            UserImageFavorite.user_id == user_id,
+            UserImageFavorite.image_id.in_(image_ids),
         )
     )
     return {row[0] for row in result}
@@ -526,7 +539,7 @@ def _i_browse(img: Image) -> dict:
 # ── Image browser ─────────────────────────────────────────────────────
 
 
-async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, auth, db, category=None):
+async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, auth, db, category=None, favorited=None):
     """Apply common image browser filters (tags, source, category, blocked tags, gallery access)."""
     stmt = stmt.where(gallery_access_filter(auth))
 
@@ -558,6 +571,16 @@ async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, 
         blocked_patterns = [f"{ns}:{name}" for ns, name in blocked_rows]
         stmt = stmt.where(not_(Image.tags_array.overlap(cast(blocked_patterns, ARRAY(Text)))))
 
+    if favorited:
+        stmt = stmt.where(
+            exists(
+                select(UserImageFavorite.image_id).where(
+                    UserImageFavorite.user_id == auth["user_id"],
+                    UserImageFavorite.image_id == Image.id,
+                )
+            )
+        )
+
     return stmt
 
 
@@ -568,6 +591,7 @@ async def image_timeline_percentiles(
     source: str | None = Query(default=None),
     category: str | None = Query(default=None),
     gallery_id: int | None = None,
+    favorited: bool | None = Query(default=None),
     buckets: int = Query(default=100, le=200),
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(require_auth),
@@ -583,6 +607,7 @@ async def image_timeline_percentiles(
     base = await _apply_image_filters(
         base, tags=tags, exclude_tags=exclude_tags, source=source,
         gallery_id=gallery_id, auth=auth, db=db, category=category,
+        favorited=favorited,
     )
     base = base.where(Image.added_at.isnot(None))
 
@@ -611,6 +636,7 @@ async def image_time_range(
     source: str | None = Query(default=None),
     category: str | None = Query(default=None),
     gallery_id: int | None = None,
+    favorited: bool | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(require_auth),
 ):
@@ -622,6 +648,7 @@ async def image_time_range(
     stmt = await _apply_image_filters(
         stmt, tags=tags, exclude_tags=exclude_tags, source=source,
         gallery_id=gallery_id, auth=auth, db=db, category=category,
+        favorited=favorited,
     )
     row = (await db.execute(stmt)).one()
     return {
@@ -641,6 +668,7 @@ async def browse_images(
     gallery_id: int | None = None,
     source: str | None = Query(default=None),
     category: str | None = Query(default=None),
+    favorited: bool | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(require_auth),
 ):
@@ -656,6 +684,7 @@ async def browse_images(
     stmt = await _apply_image_filters(
         stmt, tags=tags, exclude_tags=exclude_tags, source=source,
         gallery_id=gallery_id, auth=auth, db=db, category=category,
+        favorited=favorited,
     )
 
     # jump_at: seek to a specific timestamp anchor
@@ -1653,17 +1682,60 @@ async def get_gallery_images(
         stmt = stmt.offset((p - 1) * limit).limit(limit)
         images = (await db.execute(stmt)).scalars().all()
 
+        fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images])
         return {
             "gallery_id": gallery_id,
             "images": [_i(img) for img in images],
             "total": total,
             "page": p,
             "has_next": (p * limit) < total,
+            "favorited_image_ids": sorted(fav_ids),
         }
 
     # Default: return all images (backward compatible for Reader)
     images = (await db.execute(stmt)).scalars().all()
-    return {"gallery_id": gallery_id, "images": [_i(img) for img in images]}
+    fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images])
+    return {"gallery_id": gallery_id, "images": [_i(img) for img in images], "favorited_image_ids": sorted(fav_ids)}
+
+
+@router.post("/images/{image_id}/favorite")
+async def favorite_image(
+    image_id: int,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add an image to the user's favorites."""
+    img = (await db.execute(
+        select(Image)
+        .join(Gallery, Image.gallery_id == Gallery.id)
+        .where(Image.id == image_id, gallery_access_filter(auth))
+    )).scalar_one_or_none()
+    if not img:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    stmt = pg_insert(UserImageFavorite).values(
+        user_id=auth["user_id"], image_id=image_id,
+    ).on_conflict_do_nothing()
+    await db.execute(stmt)
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/images/{image_id}/favorite")
+async def unfavorite_image(
+    image_id: int,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove an image from the user's favorites."""
+    await db.execute(
+        sa_delete(UserImageFavorite).where(
+            UserImageFavorite.user_id == auth["user_id"],
+            UserImageFavorite.image_id == image_id,
+        )
+    )
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/galleries/{source}/{source_id}/tags")
