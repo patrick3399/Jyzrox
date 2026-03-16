@@ -52,7 +52,6 @@ class Gallery(Base):
     rating: Mapped[int] = mapped_column(SmallInteger, default=0)
     favorited: Mapped[bool] = mapped_column(Boolean, default=False)
     uploader: Mapped[str | None] = mapped_column(Text)
-    parent_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("galleries.id"))
     download_status: Mapped[str] = mapped_column(Text, default="proxy_only")
     import_mode: Mapped[str | None] = mapped_column(Text)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)

@@ -302,7 +302,6 @@ _SQLITE_SCHEMA = [
         rating INTEGER DEFAULT 0,
         favorited BOOLEAN DEFAULT 0,
         uploader TEXT,
-        parent_id INTEGER REFERENCES galleries(id),
         download_status TEXT DEFAULT 'proxy_only',
         import_mode TEXT,
         tags_array TEXT DEFAULT '[]',

@@ -57,8 +57,6 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
                 Blob.phash_int,
                 Blob.phash_q0,
                 Blob.phash_q1,
-                Blob.phash_q2,
-                Blob.phash_q3,
             )
             .where(Blob.phash_int.isnot(None))
             .order_by(Blob.sha256)
