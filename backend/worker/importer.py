@@ -6,7 +6,9 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
-from sqlalchemy import func, text
+from collections import Counter
+
+from sqlalchemy import func, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
@@ -187,8 +189,24 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
             for page_num, (img_file, sha256) in enumerate(allowed_pairs, start=1)
         ]
         if image_values:
-            img_stmt = pg_insert(Image).values(image_values).on_conflict_do_nothing()
-            await session.execute(img_stmt)
+            img_stmt = (
+                pg_insert(Image)
+                .values(image_values)
+                .on_conflict_do_nothing()
+                .returning(Image.id, Image.blob_sha256)
+            )
+            result = await session.execute(img_stmt)
+            inserted_rows = result.all()
+
+            if inserted_rows:
+                # Only increment ref_count for blobs that got a new Image row.
+                sha_counts = Counter(row.blob_sha256 for row in inserted_rows)
+                for sha, count in sha_counts.items():
+                    await session.execute(
+                        update(Blob)
+                        .where(Blob.sha256 == sha)
+                        .values(ref_count=Blob.ref_count + count)
+                    )
 
         # Upsert tags + gallery_tags
         await _upsert_tags(session, gallery_id, tags)
@@ -360,7 +378,8 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         return {"status": "failed", "error": "no supported files found"}
 
     total = len(files)
-    processed = 0
+    processed = 0   # actual new Image rows inserted (used for gallery.pages)
+    attempted = 0   # files attempted regardless of conflict (used for progress display)
     r = ctx["redis"]
 
     # Load gallery to get source/source_id for library symlink creation
@@ -399,20 +418,35 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             # Flush blob upsert before inserting image (FK constraint)
             await session.flush()
 
-            stmt = pg_insert(Image).values(
-                gallery_id=gallery_id,
-                page_num=idx + 1,
-                filename=f.name,
-                blob_sha256=sha256,
-                added_at=datetime.now(UTC),
-            ).on_conflict_do_nothing()
-            await session.execute(stmt)
+            stmt = (
+                pg_insert(Image)
+                .values(
+                    gallery_id=gallery_id,
+                    page_num=idx + 1,
+                    filename=f.name,
+                    blob_sha256=sha256,
+                    added_at=datetime.now(UTC),
+                )
+                .on_conflict_do_nothing()
+                .returning(Image.id)
+            )
+            result = await session.execute(stmt)
+            inserted = result.scalar_one_or_none()
 
-            processed += 1
+            if inserted is not None:
+                # New Image row created — increment blob ref_count.
+                await session.execute(
+                    update(Blob)
+                    .where(Blob.sha256 == sha256)
+                    .values(ref_count=Blob.ref_count + 1)
+                )
+                processed += 1
+
+            attempted += 1
 
             # Update progress every 5 files or proportionally for small batches
             update_every = max(1, min(5, total // 10))
-            if processed % update_every == 0 or processed == total:
+            if attempted % update_every == 0 or attempted == total:
                 await r.setex(
                     f"import:progress:{gallery_id}",
                     3600,

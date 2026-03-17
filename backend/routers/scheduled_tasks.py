@@ -1,6 +1,7 @@
 """Scheduled tasks management endpoints (Immich-style cron UI)."""
 
 import logging
+import uuid
 
 from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -149,7 +150,7 @@ async def run_scheduled_task(
 
     try:
         arq: ArqRedis = request.app.state.arq
-        await arq.enqueue_job(job_name, _job_id=f"manual:{task_id}")
+        await arq.enqueue_job(job_name, _job_id=f"manual:{task_id}:{uuid.uuid4().hex[:8]}")
     except Exception as exc:
         logger.error("Failed to enqueue %s: %s", job_name, exc)
         raise HTTPException(status_code=500, detail=str(exc))

@@ -11,7 +11,7 @@ from sqlalchemy.sql import select
 
 from core.config import settings
 from core.database import AsyncSessionLocal
-from db.models import Blob, Gallery, Image
+from db.models import Gallery, Image
 from services.cas import cas_path, thumb_dir
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run
@@ -252,23 +252,26 @@ async def reconciliation_job(ctx: dict) -> dict:
     _BLOB_CHUNK = 1000
 
     async with AsyncSessionLocal() as session:
-        # Single query: join blobs with actual image ref count
-        # Fetches only blobs where ref_count <= 0, with real count for safety
+        # Single query: join blobs with actual image ref count.
+        # Scan ALL blobs (not just ref_count <= 0) so that inflated ref_counts
+        # caused by the former store_blob() bug are also detected and corrected.
         gc_rows = (await session.execute(
             text("""
                 SELECT b.sha256, b.extension, b.storage, b.external_path,
+                       b.ref_count,
                        COUNT(i.id) AS actual_refs
                 FROM blobs b
                 LEFT JOIN images i ON i.blob_sha256 = b.sha256
-                WHERE b.ref_count <= 0
-                GROUP BY b.sha256, b.extension, b.storage, b.external_path
+                GROUP BY b.sha256, b.extension, b.storage, b.external_path, b.ref_count
+                HAVING b.ref_count != COUNT(i.id)
             """)
         )).all()
 
         total_gc = len(gc_rows)
         logger.info("[reconcile] Phase 3: %d candidate blobs to GC", total_gc)
 
-        # Separate into: truly orphaned vs ref_count-drifted
+        # Separate into: truly orphaned (no Image rows) vs ref_count-drifted
+        # (actual_refs > 0 but ref_count doesn't match, including inflated counts).
         truly_orphaned = [r for r in gc_rows if r.actual_refs == 0]
         drifted = [r for r in gc_rows if r.actual_refs > 0]
 

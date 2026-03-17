@@ -98,7 +98,10 @@ async def store_blob(
                 import shutil
                 shutil.copy2(str(file_path), str(dest))
 
-    # Upsert blob record
+    # Upsert blob record.
+    # ref_count starts at 0 here; callers must increment it only when a new
+    # Image row is actually inserted (on_conflict_do_nothing means duplicate
+    # re-downloads must NOT inflate ref_count).
     stmt = (
         pg_insert(Blob)
         .values(
@@ -108,11 +111,13 @@ async def store_blob(
             extension=ext,
             storage=storage,
             external_path=external_path,
-            ref_count=1,
+            ref_count=0,
         )
         .on_conflict_do_update(
             index_elements=["sha256"],
-            set_={"ref_count": Blob.ref_count + 1},
+            # No-op update so that RETURNING still returns the existing row
+            # without touching ref_count.
+            set_={"sha256": pg_insert(Blob).excluded.sha256},
         )
         .returning(Blob)
     )

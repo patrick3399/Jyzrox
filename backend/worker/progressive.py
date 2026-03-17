@@ -5,6 +5,7 @@ import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 
+from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
@@ -297,8 +298,18 @@ class ProgressiveImporter:
                         added_at=datetime.now(UTC),
                     )
                     .on_conflict_do_nothing()
+                    .returning(Image.id)
                 )
-                await session.execute(img_stmt)
+                result = await session.execute(img_stmt)
+                inserted = result.scalar_one_or_none()
+
+                if inserted is not None:
+                    # New Image row was created — increment blob ref_count now.
+                    await session.execute(
+                        update(Blob)
+                        .where(Blob.sha256 == sha256)
+                        .values(ref_count=Blob.ref_count + 1)
+                    )
 
                 # Create library symlink before closing session (need blob data)
                 await create_library_symlink(self.source, self.source_id, file_path.name, blob)

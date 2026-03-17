@@ -26,7 +26,7 @@ from core.database import get_db
 from core.redis_client import get_redis
 from core.source_display import get_display_config
 from plugins.builtin.gallery_dl._sites import get_site_config as _get_gdl_site_config
-from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserImageFavorite, UserRating, UserReadingList
+from db.models import Blob, BlockedTag, ExcludedBlob, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserImageFavorite, UserRating, UserReadingList
 from services.cas import cas_url, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, safe_source_id, thumb_dir, thumb_url as cas_thumb_url
 from plugins.builtin.ehentai.browse import _make_client as _make_eh_client
 
@@ -1720,9 +1720,16 @@ async def get_gallery_images(
     gallery_id = g.id
     display_cfg = get_display_config(g.source or "")
     page_order = desc(Image.page_num) if display_cfg.image_order == "desc" else asc(Image.page_num)
+    excluded_sq = (
+        select(ExcludedBlob.blob_sha256)
+        .where(ExcludedBlob.gallery_id == gallery_id)
+        .correlate(Image)
+        .where(ExcludedBlob.blob_sha256 == Image.blob_sha256)
+    )
     stmt = (
         select(Image)
         .where(Image.gallery_id == gallery_id)
+        .where(~exists(excluded_sq))
         .order_by(page_order)
         .options(selectinload(Image.blob))
     )
@@ -1731,7 +1738,10 @@ async def get_gallery_images(
     if limit is not None:
         p = page or 1
         total_stmt = select(func.count()).select_from(
-            select(Image.id).where(Image.gallery_id == gallery_id).subquery()
+            select(Image.id)
+            .where(Image.gallery_id == gallery_id)
+            .where(~exists(excluded_sq))
+            .subquery()
         )
         total = (await db.execute(total_stmt)).scalar_one()
 
