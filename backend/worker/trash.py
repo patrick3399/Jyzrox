@@ -53,9 +53,6 @@ async def trash_gc_job(ctx: dict) -> dict:
         result = await _hard_delete_galleries(session, galleries)
 
     logger.info("[trash_gc] Permanently deleted %d expired galleries", result.get("affected", 0))
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.TRASH_CLEANED, resource_type="system", deleted=result.get("affected", 0))
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.TRASH_CLEANED, resource_type="system", deleted=result.get("affected", 0))
     return {"status": "ok", **result}

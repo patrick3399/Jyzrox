@@ -175,11 +175,8 @@ async def enqueue_download(
     if req.filesize_max:
         merged_options["filesize_max"] = req.filesize_max
     result = await _enqueue(req.url, request.app.state.arq, db, options=merged_options or None, total=req.total, user_id=auth["user_id"])
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.DOWNLOAD_ENQUEUED, actor_user_id=auth["user_id"], resource_type="download_job", resource_id=result.get("job_id"))
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.DOWNLOAD_ENQUEUED, actor_user_id=auth["user_id"], resource_type="download_job", resource_id=result.get("job_id"))
     return result
 
 
@@ -556,11 +553,8 @@ async def cancel_job(
 
     job.status = "cancelled"
     await db.commit()
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.DOWNLOAD_CANCELLED, actor_user_id=auth["user_id"], resource_type="download_job", resource_id=str(job_id))
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.DOWNLOAD_CANCELLED, actor_user_id=auth["user_id"], resource_type="download_job", resource_id=str(job_id))
     return {"status": "cancelled"}
 
 

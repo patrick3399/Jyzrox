@@ -232,11 +232,8 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
         logger.info("OpenCV disabled — skipping tier 3")
         await progress.finish()
 
-        try:
-            from core.events import EventType, emit
-            await emit(EventType.DEDUP_SCAN_COMPLETED, resource_type="system", mode=mode)
-        except Exception:
-            pass
+        from core.events import EventType, emit_safe
+        await emit_safe(EventType.DEDUP_SCAN_COMPLETED, resource_type="system", mode=mode)
 
         return {"status": "ok", "tier1_inserted": total_inserted, "tier2_processed": t2_processed}
 
@@ -341,11 +338,8 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
     await progress.finish()
     logger.info("Tier 3 done, processed: %d", t3_processed)
 
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.DEDUP_SCAN_COMPLETED, resource_type="system", mode=mode)
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.DEDUP_SCAN_COMPLETED, resource_type="system", mode=mode)
 
     return {
         "status": "ok",

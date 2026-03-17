@@ -216,10 +216,7 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
 
     logger.info("[tag] gallery_id=%d: %d images tagged", gallery_id, tagged)
 
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.GALLERY_TAGGED, resource_type="gallery", resource_id=gallery_id, tags_count=count)
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.GALLERY_TAGGED, resource_type="gallery", resource_id=gallery_id, tags_count=count)
 
     return {"status": "done", "tagged": tagged}

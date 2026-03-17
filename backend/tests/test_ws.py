@@ -198,7 +198,7 @@ class TestPubsubListener:
             "actor_user_id": 1,
             "resource_type": "download_job",
             "resource_id": "abc123",
-            "data": {"_legacy_type": "job_update", "job_id": "abc123", "status": "done", "progress": None},
+            "data": {"job_id": "abc123", "status": "done", "progress": None},
         })
         pubsub = _make_pubsub_mock(messages=[
             {"type": "message", "data": event.encode()},
@@ -262,7 +262,7 @@ class TestPubsubListener:
         other_user_event = json.dumps({
             "event_type": "download.started",
             "actor_user_id": 99,
-            "data": {"_legacy_type": "job_update", "status": "running"},
+            "data": {"status": "running"},
         })
         pubsub = _make_pubsub_mock(messages=[
             {"type": "message", "data": other_user_event.encode()},
@@ -282,7 +282,7 @@ class TestPubsubListener:
         own_event = json.dumps({
             "event_type": "download.started",
             "actor_user_id": 1,
-            "data": {"_legacy_type": "job_update", "status": "running"},
+            "data": {"status": "running"},
         })
         pubsub = _make_pubsub_mock(messages=[
             {"type": "message", "data": own_event.encode()},
@@ -322,7 +322,7 @@ class TestPubsubListener:
         other_event = json.dumps({
             "event_type": "download.started",
             "actor_user_id": 42,
-            "data": {"_legacy_type": "job_update", "status": "running"},
+            "data": {"status": "running"},
         })
         pubsub = _make_pubsub_mock(messages=[
             {"type": "message", "data": other_event.encode()},
@@ -395,7 +395,7 @@ class TestPubsubListener:
         pubsub.subscribe.assert_called_once_with("events:all")
 
     async def test_pubsub_listener_translates_job_update_to_legacy_format(self):
-        """Event with _legacy_type='job_update' is translated to legacy WS format."""
+        """Download event with resource_type=download_job is translated to legacy WS format."""
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
@@ -405,8 +405,6 @@ class TestPubsubListener:
             "resource_type": "download_job",
             "resource_id": "job-xyz",
             "data": {
-                "_legacy_type": "job_update",
-                "job_id": "job-xyz",
                 "status": "done",
                 "progress": {"current": 10, "total": 10},
             },
@@ -428,7 +426,7 @@ class TestPubsubListener:
         assert sent["user_id"] == 3
 
     async def test_pubsub_listener_translates_subscription_checked_to_legacy_format(self):
-        """Event with _legacy_type='subscription_checked' is translated to legacy WS format."""
+        """subscription.checked event is translated to legacy WS format."""
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
@@ -438,8 +436,6 @@ class TestPubsubListener:
             "resource_type": "subscription",
             "resource_id": "sub-42",
             "data": {
-                "_legacy_type": "subscription_checked",
-                "sub_id": "sub-42",
                 "status": "completed",
                 "job_id": "job-999",
                 "new_works": 5,
@@ -463,7 +459,7 @@ class TestPubsubListener:
         assert sent["user_id"] == 2
 
     async def test_pubsub_listener_passes_through_new_event_types(self):
-        """Events without _legacy_type are forwarded with event_type field intact."""
+        """New event types are forwarded with event_type field intact."""
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()

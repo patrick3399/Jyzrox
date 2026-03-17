@@ -119,7 +119,7 @@ async def test_event_bus_emit_publishes_to_channels():
 
 
 async def test_event_bus_emit_stores_in_recent_list():
-    """EventBus.emit() must call lpush and ltrim to maintain the recent events list."""
+    """EventBus.emit() must call lpush to maintain the recent events list."""
     mock_redis, mock_pipe = _make_mock_redis()
 
     with patch("core.redis_client.get_redis", return_value=mock_redis):
@@ -130,11 +130,10 @@ async def test_event_bus_emit_stores_in_recent_list():
     mock_pipe.lpush.assert_called_once()
     lpush_args = mock_pipe.lpush.call_args.args
     assert lpush_args[0] == EventBus.RECENT_KEY
-    # The second arg must be valid JSON with the correct event_type
     payload = json.loads(lpush_args[1])
     assert payload["event_type"] == "gallery.tagged"
-
-    mock_pipe.ltrim.assert_called_once_with(EventBus.RECENT_KEY, 0, EventBus.RECENT_MAX - 1)
+    # ltrim is amortized — not called on every emit, only every 50th
+    assert mock_pipe.ltrim.call_count == 0
 
 
 async def test_event_bus_emit_swallows_redis_errors():

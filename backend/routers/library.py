@@ -1648,11 +1648,8 @@ async def restore_gallery(
     _check_write_access(auth, g)
     g.deleted_at = None
     await db.commit()
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.GALLERY_RESTORED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=g.id)
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.GALLERY_RESTORED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=g.id)
     return {"status": "ok"}
 
 
@@ -1900,11 +1897,8 @@ async def update_gallery(
     if patch.category is not None:
         g.category = patch.category
     await db.commit()
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.GALLERY_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.GALLERY_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
     # Fetch updated per-user state to return accurate response
     is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], gallery_id)
     return _g(g, is_favorited=is_fav, my_rating=my_rating, in_reading_list=in_rl)
@@ -1952,11 +1946,8 @@ async def delete_gallery(
     g.deleted_at = datetime.now(UTC)
     await db.commit()
     await _invalidate_sources_cache()
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.GALLERY_DELETED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=g.id)
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.GALLERY_DELETED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=g.id)
     return {"status": "ok", "deleted_files": 0}
 
 

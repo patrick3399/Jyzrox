@@ -131,11 +131,8 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
         status_msg = f"retried={retried}, skipped={skipped}, stale_reaped={stale_count}"
         await _cron_record(ctx, "retry_downloads", "ok" if retried > 0 or stale_count > 0 else "idle", None)
         logger.info("[retry] done: %s", status_msg)
-        try:
-            from core.events import EventType, emit
-            await emit(EventType.RETRY_PROCESSED, resource_type="system", retried=retried, skipped=skipped, stale_reaped=stale_count)
-        except Exception:
-            pass
+        from core.events import EventType, emit_safe
+        await emit_safe(EventType.RETRY_PROCESSED, resource_type="system", retried=retried, skipped=skipped, stale_reaped=stale_count)
         return {"status": "ok", "retried": retried, "skipped": skipped, "stale_reaped": stale_count}
 
     except Exception as exc:

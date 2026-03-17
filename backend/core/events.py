@@ -93,6 +93,8 @@ class EventBus:
     RECENT_KEY = "events:recent"
     RECENT_MAX = 200
 
+    _trim_counter: int = 0
+
     async def emit(self, event: Event) -> None:
         """Publish event to Redis channels and store in recent list."""
         try:
@@ -103,7 +105,11 @@ class EventBus:
             pipe.publish(f"events:{event.event_type.value}", payload)
             pipe.publish("events:all", payload)
             pipe.lpush(self.RECENT_KEY, payload)
-            pipe.ltrim(self.RECENT_KEY, 0, self.RECENT_MAX - 1)
+            # Amortize ltrim: only trim every 50 emits instead of every emit
+            self._trim_counter += 1
+            if self._trim_counter >= 50:
+                pipe.ltrim(self.RECENT_KEY, 0, self.RECENT_MAX - 1)
+                self._trim_counter = 0
             await pipe.execute()
         except Exception as exc:
             logger.warning("EventBus.emit failed: %s", exc)
@@ -149,3 +155,24 @@ async def emit(
         data=data,
     )
     await event_bus.emit(event)
+
+
+async def emit_safe(
+    event_type: EventType,
+    *,
+    actor_user_id: int | None = None,
+    resource_type: str | None = None,
+    resource_id: int | str | None = None,
+    **data: Any,
+) -> None:
+    """Fire-and-forget emit — swallows all errors so callers are never interrupted."""
+    try:
+        await emit(
+            event_type,
+            actor_user_id=actor_user_id,
+            resource_type=resource_type,
+            resource_id=resource_id,
+            **data,
+        )
+    except Exception:
+        pass

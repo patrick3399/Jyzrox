@@ -28,11 +28,8 @@ async def ehtag_sync_job(ctx: dict) -> dict:
         count = await import_ehtag_translations()
         logger.info("[ehtag_sync] Imported %d translations", count)
         await _cron_record(ctx, task_id, "ok")
-        try:
-            from core.events import EventType, emit
-            await emit(EventType.EHTAG_SYNC_COMPLETED, resource_type="system", count=count)
-        except Exception:
-            pass
+        from core.events import EventType, emit_safe
+        await emit_safe(EventType.EHTAG_SYNC_COMPLETED, resource_type="system", count=count)
         return {"status": "ok", "count": count}
     except Exception as exc:
         logger.error("[ehtag_sync] Failed: %s", exc)

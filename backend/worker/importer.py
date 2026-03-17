@@ -216,11 +216,8 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     if settings.tag_model_enabled:
         await ctx["redis"].enqueue_job("tag_job", gallery_id)
 
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=len(allowed_pairs), source=source)
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=len(allowed_pairs), source=source)
 
     return {"status": "done", "gallery_id": gallery_id}
 
@@ -447,11 +444,8 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     if settings.tag_model_enabled:
         await ctx["redis"].enqueue_job("tag_job", gallery_id)
 
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=processed, source="local")
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=processed, source="local")
 
     return {"status": "done", "processed": processed}
 
@@ -533,10 +527,7 @@ async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[
 
     logger.info("[batch_import] batch_id=%s: %d completed, %d failed", batch_id, completed, failed)
 
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.IMPORT_COMPLETED, resource_type="system", completed=completed, failed=failed, batch_id=batch_id)
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.IMPORT_COMPLETED, resource_type="system", completed=completed, failed=failed, batch_id=batch_id)
 
     return {"status": "done", "completed": completed, "failed": failed}

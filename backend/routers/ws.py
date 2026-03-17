@@ -39,47 +39,43 @@ async def _validate_ws_session(ws: WebSocket) -> tuple[str, str] | None:
 def _event_to_ws_message(event_data: dict) -> str:
     """Translate EventBus event format to legacy WebSocket message format.
 
-    New event format:
-        {"event_type": "download.completed", "actor_user_id": 1, "resource_type": "download_job",
-         "resource_id": "abc", "data": {"status": "done", "progress": {...}, "job_id": "abc",
-         "_legacy_type": "job_update"}}
-
-    Legacy WS format:
-        {"type": "job_update", "job_id": "abc", "status": "done", "progress": {...}, "user_id": 1}
+    Derives the legacy message type from event_type + resource_type rather than
+    requiring callers to tag events with internal hints.
     """
     data = event_data.get("data", {})
-    legacy_type = data.get("_legacy_type")
     actor = event_data.get("actor_user_id")
+    event_type = event_data.get("event_type", "")
+    resource_type = event_data.get("resource_type")
+    resource_id = event_data.get("resource_id")
 
-    if legacy_type == "job_update":
+    if resource_type == "download_job" and event_type.startswith("download."):
         return json.dumps({
             "type": "job_update",
-            "job_id": data.get("job_id") or event_data.get("resource_id"),
+            "job_id": resource_id,
             "status": data.get("status", ""),
             "progress": data.get("progress"),
             "user_id": actor,
         })
-    elif legacy_type == "subscription_checked":
+    elif event_type == "subscription.checked":
         return json.dumps({
             "type": "subscription_checked",
-            "sub_id": data.get("sub_id") or event_data.get("resource_id"),
+            "sub_id": resource_id,
             "status": data.get("status", ""),
             "job_id": data.get("job_id"),
             "new_works": data.get("new_works", 0),
             "user_id": actor,
         })
-    elif event_data.get("event_type", "").startswith("system."):
+    elif event_type.startswith("system."):
         return json.dumps({
             "type": "alert",
             "message": data.get("message", ""),
         })
     else:
-        # New event types — pass through with event_type field
         return json.dumps({
-            "type": event_data.get("event_type", "unknown"),
-            "event_type": event_data.get("event_type"),
-            "resource_type": event_data.get("resource_type"),
-            "resource_id": event_data.get("resource_id"),
+            "type": event_type or "unknown",
+            "event_type": event_type,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
             "data": data,
             "user_id": actor,
         })

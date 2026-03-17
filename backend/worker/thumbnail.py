@@ -193,10 +193,7 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
 
     logger.info("[thumbnail] gallery_id=%d: %d done", gallery_id, processed)
 
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.THUMBNAILS_GENERATED, resource_type="gallery", resource_id=gallery_id, count=processed)
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.THUMBNAILS_GENERATED, resource_type="gallery", resource_id=gallery_id, count=processed)
 
     return {"status": "done", "processed": processed}

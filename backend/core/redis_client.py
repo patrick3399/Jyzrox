@@ -199,7 +199,6 @@ async def publish_job_event(event: dict) -> None:
 
         if event_type_str == "job_update":
             status = event.get("status", "")
-            # Map job status to EventType
             status_map = {
                 "queued": EventType.DOWNLOAD_ENQUEUED,
                 "running": EventType.DOWNLOAD_STARTED,
@@ -209,7 +208,11 @@ async def publish_job_event(event: dict) -> None:
                 "paused": EventType.DOWNLOAD_PAUSED,
                 "partial": EventType.DOWNLOAD_FAILED,
             }
-            et = status_map.get(status, EventType.DOWNLOAD_PROGRESS)
+            et = status_map.get(status)
+            if et is None:
+                import logging as _log
+                _log.getLogger(__name__).warning("publish_job_event: unknown status %r, using DOWNLOAD_PROGRESS", status)
+                et = EventType.DOWNLOAD_PROGRESS
             await emit(
                 et,
                 actor_user_id=user_id,
@@ -217,9 +220,6 @@ async def publish_job_event(event: dict) -> None:
                 resource_id=event.get("job_id"),
                 status=status,
                 progress=event.get("progress"),
-                job_id=event.get("job_id"),
-                # Include legacy fields for WS backward compat
-                _legacy_type="job_update",
             )
         elif event_type_str == "subscription_checked":
             await emit(
@@ -227,10 +227,8 @@ async def publish_job_event(event: dict) -> None:
                 actor_user_id=user_id,
                 resource_type="subscription",
                 resource_id=event.get("sub_id"),
-                sub_id=event.get("sub_id"),
                 status=event.get("status"),
-                job_id=event.get("job_id"),
-                _legacy_type="subscription_checked",
+                new_works=event.get("new_works", 0),
             )
         else:
             # Unknown type — publish directly to old channel as fallback

@@ -671,11 +671,8 @@ async def manual_tag_gallery(
 
         await rebuild_gallery_tags_array(session, gallery_id)
         await session.commit()
-        try:
-            from core.events import EventType, emit
-            await emit(EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
-        except Exception:
-            pass
+        from core.events import EventType, emit_safe
+        await emit_safe(EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
         return {"status": "ok", "affected": len(tag_ids)}
 
     else:  # remove
@@ -742,11 +739,8 @@ async def manual_tag_gallery(
 
         await rebuild_gallery_tags_array(session, gallery_id)
         await session.commit()
-        try:
-            from core.events import EventType, emit
-            await emit(EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
-        except Exception:
-            pass
+        from core.events import EventType, emit_safe
+        await emit_safe(EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
         return {"status": "ok", "affected": removed}
 
 

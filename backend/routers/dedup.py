@@ -204,11 +204,8 @@ async def keep_blob(
         )
         await session.commit()
 
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.DEDUP_PAIR_RESOLVED, actor_user_id=_["user_id"], resource_type="dedup")
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.DEDUP_PAIR_RESOLVED, actor_user_id=_["user_id"], resource_type="dedup")
     return {"status": "ok"}
 
 
@@ -289,11 +286,8 @@ async def start_scan(
 
     arq: ArqRedis = request.app.state.arq
     await arq.enqueue_job("dedup_scan_job", req.mode, _job_id="dedup_scan:singleton")
-    try:
-        from core.events import EventType, emit
-        await emit(EventType.DEDUP_SCAN_STARTED, actor_user_id=_["user_id"], resource_type="system")
-    except Exception:
-        pass
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.DEDUP_SCAN_STARTED, actor_user_id=_["user_id"], resource_type="system")
     return {"status": "queued"}
 
 

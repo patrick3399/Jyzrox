@@ -247,10 +247,10 @@ async def test_publish_job_event_delegates_job_update_to_event_bus():
     assert "events:download.completed" in channels
     assert "events:all" in channels
 
-    # Verify the payload includes the job_id
+    # Verify the payload includes the job_id as resource_id
     payloads = [json.loads(call.args[1]) for call in publish_calls]
-    job_ids = [p.get("data", {}).get("job_id") for p in payloads]
-    assert "abc123" in job_ids
+    resource_ids = [p.get("resource_id") for p in payloads]
+    assert "abc123" in resource_ids
 
 
 async def test_publish_job_event_unknown_type_falls_back_to_download_events_channel():
