@@ -244,6 +244,15 @@ function ImageBrowserInner() {
     }
   }, [imageMenu, isFavorited, mutate])
 
+  const handleViewGallery = useCallback(() => {
+    if (!imageMenu) return
+    const { source, sourceId } = imageMenu
+    if (source && sourceId) {
+      router.push(`/library/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`)
+    }
+    setImageMenu(null)
+  }, [imageMenu, router])
+
   const handleHideImage = useCallback(async () => {
     if (!imageMenu) return
     const { source, sourceId, pageNum } = imageMenu
@@ -467,6 +476,7 @@ function ImageBrowserInner() {
           onHide={imageMenu.source ? handleHideImage : undefined}
           isFavorited={isFavorited(imageMenu.imageId)}
           onToggleFavorite={handleToggleFavorite}
+          onViewGallery={imageMenu.source && imageMenu.sourceId ? handleViewGallery : undefined}
         />
       )}
     </div>

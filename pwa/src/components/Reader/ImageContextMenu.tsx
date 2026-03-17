@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Download, Copy, Share2, EyeOff, Heart, type LucideIcon } from 'lucide-react'
+import { Download, Copy, Share2, EyeOff, Heart, ExternalLink, type LucideIcon } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
 interface ImageContextMenuProps {
@@ -14,9 +14,10 @@ interface ImageContextMenuProps {
   onHide?: () => void
   isFavorited?: boolean
   onToggleFavorite?: () => void
+  onViewGallery?: () => void
 }
 
-export function ImageContextMenu({ open, onClose, position, imageUrl, imageName, onHide, isFavorited, onToggleFavorite }: ImageContextMenuProps) {
+export function ImageContextMenu({ open, onClose, position, imageUrl, imageName, onHide, isFavorited, onToggleFavorite, onViewGallery }: ImageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
 
   // ── Phantom-click guard ──────────────────────────────────────────────
@@ -110,7 +111,7 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
   const ITEM_HEIGHT = 48
   const SEPARATOR_HEIGHT = 1
   const hasShare = typeof navigator !== 'undefined' && !!navigator.share
-  const baseItems = (hasShare ? 3 : 2) + (onToggleFavorite ? 1 : 0)
+  const baseItems = (hasShare ? 3 : 2) + (onToggleFavorite ? 1 : 0) + (onViewGallery ? 1 : 0)
   const MENU_HEIGHT = baseItems * ITEM_HEIGHT + (onHide ? SEPARATOR_HEIGHT + ITEM_HEIGHT : 0)
 
   const x = Math.min(position.x, window.innerWidth - MENU_WIDTH - 8)
@@ -119,6 +120,11 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
   const adjustedY = Math.max(8, y)
 
   const items: { label: string; icon: LucideIcon; onClick: () => void; iconClassName?: string }[] = [
+    ...(onViewGallery ? [{
+      label: t('reader.viewGallery'),
+      icon: ExternalLink,
+      onClick: () => { onViewGallery(); onClose() },
+    }] : []),
     ...(onToggleFavorite ? [{
       label: isFavorited ? t('reader.unfavoriteImage') : t('reader.favoriteImage'),
       icon: Heart,

@@ -1859,6 +1859,11 @@ export default function Reader({
     }
   }, [imageMenu, source, sourceId, rawImages, hiddenPages, state.currentPage, setPage, router, onHideImage])
 
+  const handleViewGallery = useCallback(() => {
+    router.push(`/library/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`)
+    setImageMenu(null)
+  }, [source, sourceId, router])
+
   const handleToggleFavorite = useCallback(async () => {
     if (!imageMenu) return
     const img = rawImages.find(i => i.page_num === imageMenu.pageNum)
@@ -2045,6 +2050,7 @@ export default function Reader({
           }
           isFavorited={canFavoriteContextImg ? favImageIds.has(contextMenuImg!.id) : undefined}
           onToggleFavorite={canFavoriteContextImg ? handleToggleFavorite : undefined}
+          onViewGallery={handleViewGallery}
         />
       )}
     </div>
