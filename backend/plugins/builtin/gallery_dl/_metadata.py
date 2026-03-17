@@ -52,9 +52,19 @@ def _get_identity_field(category: str) -> tuple[str, str | None] | None:
 
 def _resolve_source_id(meta: dict, cfg, dest_dir_name: str) -> str:
     """Resolve source_id from metadata, using gallery-dl directory_fmt when available."""
+    _DEFAULT_SID_FIELDS = ("gallery_id", "id")
+
+    # If source has explicit (non-default) source_id_fields, prioritize them
+    # to avoid auto-detection returning wrong fields (e.g. Facebook's {title})
+    if cfg.source_id_fields != _DEFAULT_SID_FIELDS:
+        for f in cfg.source_id_fields:
+            val = meta.get(f)
+            if val:
+                return str(val)
+
     category = meta.get("category", "")
 
-    # Try gallery-dl's directory_fmt first
+    # Try gallery-dl's directory_fmt identity field
     identity = _get_identity_field(category)
     if identity is not None:
         field, subfield = identity
@@ -65,7 +75,7 @@ def _resolve_source_id(meta: dict, cfg, dest_dir_name: str) -> str:
             if val is not None and isinstance(val, (str, int)):
                 return str(val)
 
-    # Fallback: existing source_id_fields logic
+    # Fallback: default source_id_fields
     for f in cfg.source_id_fields:
         val = meta.get(f)
         if val:
@@ -159,7 +169,7 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fal
         tags=tags,
         artist_id=artist_id,
         posted_at=posted_at,
-        uploader=meta.get("uploader", ""),
+        uploader=meta.get("uploader") or meta.get("username") or "",
         extra={},
     )
 
@@ -253,7 +263,7 @@ def _extract_artist(source: str, meta: dict, tags: list[str]) -> str | None:
             if tag.startswith("artist:"):
                 return f"{source}:{tag[7:]}"
     elif strategy == "uploader":
-        uploader = meta.get("uploader", "")
+        uploader = meta.get("uploader") or meta.get("username") or ""
         if uploader:
             return f"{source}:{uploader}"
     # strategy == "none" or no match

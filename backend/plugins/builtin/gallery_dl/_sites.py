@@ -147,6 +147,8 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         credential_requirement="recommended",
         sleep_request=(2.0, 4.0),
         retries=5, http_timeout=45,
+        source_id_fields=("set_id", "user_id", "id"),
+        artist_from="uploader",
     ),
     GdlSiteConfig(
         domain="bsky.app", source_id="bluesky", name="Bluesky",
