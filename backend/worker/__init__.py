@@ -67,11 +67,48 @@ logger = logging.getLogger("worker")
 _watcher = LibraryWatcher()
 
 
+async def _log_level_subscriber(ctx: dict) -> None:
+    """Subscribe to log_level:changed pub/sub and apply new level when source==worker."""
+    from core.log_handler import LOG_LEVEL_CHANNEL
+    from core.redis_client import get_pubsub
+    pubsub = get_pubsub()
+    try:
+        await pubsub.subscribe(LOG_LEVEL_CHANNEL)
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                try:
+                    data = message["data"]
+                    if isinstance(data, bytes):
+                        data = data.decode()
+                    payload = json.loads(data)
+                    if payload.get("source") == "worker":
+                        level = payload.get("level", "INFO").upper()
+                        logging.getLogger().setLevel(level)
+                        logger.info("[log_level_subscriber] Level changed to %s", level)
+                except Exception as exc:
+                    logger.warning("[log_level_subscriber] Failed to process message: %s", exc)
+    except asyncio.CancelledError:
+        pass
+    except Exception as exc:
+        logger.warning("[log_level_subscriber] Subscriber exited with error: %s", exc)
+    finally:
+        try:
+            await pubsub.unsubscribe(LOG_LEVEL_CHANNEL)
+            await pubsub.aclose()
+        except Exception:
+            pass
+
+
 async def startup(ctx: dict) -> None:
     logger.info("ARQ Worker started — Jyzrox")
     await init_redis()
+    from core.log_handler import install_log_handler, apply_log_level_from_redis
+    install_log_handler("worker")
+    await apply_log_level_from_redis("worker")
     from plugins import init_plugins
     await init_plugins()
+    # Start log level subscriber background task
+    ctx["_log_level_task"] = asyncio.ensure_future(_log_level_subscriber(ctx))
     r = ctx["redis"]
     # Clean up ALL download semaphore keys (including dynamic gallery_dl:{domain} ones)
     sem_keys = [k async for k in r.scan_iter(match="download:sem:*")]
@@ -186,6 +223,14 @@ async def startup(ctx: dict) -> None:
 async def shutdown(ctx: dict) -> None:
     logger.info("ARQ Worker shutting down")
     _watcher.stop()
+    # Cancel log level subscriber
+    log_level_task = ctx.get("_log_level_task")
+    if log_level_task is not None and not log_level_task.done():
+        log_level_task.cancel()
+        try:
+            await log_level_task
+        except asyncio.CancelledError:
+            pass
     r = ctx["redis"]
     await r.delete("watcher:status")
     await close_redis()
@@ -286,6 +331,63 @@ async def rate_limit_schedule_job(ctx: dict) -> dict:
         return {"status": "inactive", "hour": current_hour}
 
 
+# ── Log Cleanup ───────────────────────────────────────────────────────
+
+
+async def log_cleanup_job(ctx: dict) -> dict:
+    """Trim system_logs list: remove entries older than retention_days and cap at max_entries."""
+    from datetime import UTC, datetime, timedelta
+
+    from core.redis_client import get_redis
+
+    r = get_redis()
+
+    # Read settings
+    max_entries_val = await r.get("setting:log_max_entries")
+    retention_days_val = await r.get("setting:log_retention_days")
+
+    try:
+        max_entries = int(max_entries_val) if max_entries_val is not None else 10000
+    except (ValueError, TypeError):
+        max_entries = 10000
+
+    try:
+        retention_days = int(retention_days_val) if retention_days_val is not None else 7
+    except (ValueError, TypeError):
+        retention_days = 7
+
+    cutoff = datetime.now(UTC) - timedelta(days=retention_days)
+
+    raw_list = await r.lrange("system_logs", 0, -1)
+    kept = []
+    removed = 0
+    for raw in raw_list:
+        try:
+            entry = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
+            ts_str = entry.get("timestamp", "")
+            ts = datetime.fromisoformat(ts_str)
+            if ts >= cutoff:
+                kept.append(raw)
+            else:
+                removed += 1
+        except Exception:
+            kept.append(raw)
+
+    # Rebuild list if any entries were removed
+    if removed > 0:
+        pipe = r.pipeline(transaction=False)
+        pipe.delete("system_logs")
+        for item in kept:
+            pipe.rpush("system_logs", item)
+        await pipe.execute()
+
+    # Cap to max_entries
+    await r.ltrim("system_logs", 0, max_entries - 1)
+
+    logger.info("[log_cleanup_job] Removed %d stale entries, capped to %d", removed, max_entries)
+    return {"removed": removed, "max_entries": max_entries}
+
+
 # ── ARQ Worker Settings ──────────────────────────────────────────────
 
 
@@ -317,6 +419,7 @@ class WorkerSettings:
         retry_failed_downloads_job,
         trash_gc_job,
         ehtag_sync_job,
+        log_cleanup_job,
     ]
     cron_jobs = [
         cron(
@@ -372,6 +475,13 @@ class WorkerSettings:
             unique=True,
             timeout=300,
         ),
+        cron(
+            log_cleanup_job,
+            hour=3,
+            minute=30,
+            unique=True,
+            timeout=300,
+        ),
     ]
     on_startup = startup
     on_shutdown = shutdown
@@ -406,6 +516,7 @@ __all__ = [
     "retry_failed_downloads_job",
     "trash_gc_job",
     "ehtag_sync_job",
+    "log_cleanup_job",
     "startup",
     "shutdown",
     "WorkerSettings",

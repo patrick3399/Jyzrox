@@ -62,6 +62,9 @@ class EventType(str, Enum):
     # System alerts
     SYSTEM_ALERT = "system.alert"
 
+    # System config
+    LOG_LEVEL_CHANGED = "system.log_level_changed"
+
 
 @dataclass
 class Event:

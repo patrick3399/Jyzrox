@@ -29,6 +29,7 @@ from routers import (
     history,
     import_router,
     library,
+    logs as logs_router,
     opds,
     plugins as plugins_router,
     rss,
@@ -53,6 +54,10 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting Jyzrox API rev 2.0...")
     await init_redis()
+    from core.log_handler import install_log_handler, apply_log_level_from_redis
+    install_log_handler("api", extra_loggers=["uvicorn", "uvicorn.access"])
+    level = await apply_log_level_from_redis("api")
+    logger.info("Log handler installed, level=%s", level)
     app.state.arq = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     logger.info("Redis + ARQ pool ready")
     from plugins import init_plugins
@@ -132,6 +137,7 @@ app.include_router(subscriptions.router, prefix="/api/subscriptions")
 app.include_router(dedup_router.router, prefix="/api/dedup")
 app.include_router(users_router.router, prefix="/api/users")
 app.include_router(rss.router, prefix="/api/rss")
+app.include_router(logs_router.router, prefix="/api/logs")
 
 
 @app.get("/api/health")

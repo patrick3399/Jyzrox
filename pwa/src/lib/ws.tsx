@@ -1,6 +1,6 @@
 'use client'
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import type { WsMessage } from './types'
+import type { WsMessage, LogEntry } from './types'
 
 export interface JobUpdateEvent {
   job_id: string
@@ -22,6 +22,7 @@ interface WsContextValue {
   lastJobUpdate: JobUpdateEvent | null
   lastSubCheck: SubCheckEvent | null
   lastEvent: WsMessage | null
+  lastLogEntry: LogEntry | null
 }
 
 const WsContext = createContext<WsContextValue>({
@@ -31,6 +32,7 @@ const WsContext = createContext<WsContextValue>({
   lastJobUpdate: null,
   lastSubCheck: null,
   lastEvent: null,
+  lastLogEntry: null,
 })
 
 export function WsProvider({ children }: { children: React.ReactNode }) {
@@ -39,6 +41,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   const [lastJobUpdate, setLastJobUpdate] = useState<JobUpdateEvent | null>(null)
   const [lastSubCheck, setLastSubCheck] = useState<SubCheckEvent | null>(null)
   const [lastEvent, setLastEvent] = useState<WsMessage | null>(null)
+  const [lastLogEntry, setLastLogEntry] = useState<LogEntry | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const mountedRef = useRef(true)
@@ -70,6 +73,8 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             new_works: msg.new_works ?? 0,
             job_id: msg.job_id ?? null,
           })
+        } else if (msg.type === 'log_entry' && msg.log) {
+          setLastLogEntry(msg.log as LogEntry)
         } else if (msg.type !== 'ping') {
           // New event types from EventBus — store in lastEvent
           setLastEvent(msg)
@@ -109,7 +114,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <WsContext.Provider value={{ alerts, connected, dismissAlert, lastJobUpdate, lastSubCheck, lastEvent }}>
+    <WsContext.Provider value={{ alerts, connected, dismissAlert, lastJobUpdate, lastSubCheck, lastEvent, lastLogEntry }}>
       {children}
     </WsContext.Provider>
   )

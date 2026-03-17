@@ -31,6 +31,7 @@ import {
   Images,
   Trash2,
   BookMarked,
+  ScrollText,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
@@ -78,6 +79,7 @@ const navSections = [
       { href: '/dedup', label: () => t('nav.dedup'), icon: ScanSearch, minRole: 'admin' as UserRole },
       { href: '/credentials', label: () => t('nav.credentials'), icon: Key, minRole: 'admin' as UserRole },
       { href: '/plugins', label: () => t('nav.plugins'), icon: Puzzle, minRole: 'admin' as UserRole },
+      { href: '/logs', label: () => t('nav.logs'), icon: ScrollText, minRole: 'admin' as UserRole },
       { href: '/admin/users', label: () => t('nav.users'), icon: ShieldCheck, minRole: 'admin' as UserRole },
     ],
   },

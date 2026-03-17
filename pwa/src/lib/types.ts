@@ -356,6 +356,21 @@ export interface WsMessage {
   resource_type?: string
   resource_id?: number | string
   data?: Record<string, unknown>
+  // Log entry payload
+  log?: unknown
+}
+
+export interface LogEntry {
+  level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
+  source: string
+  logger: string
+  message: string
+  timestamp: string
+  traceback?: string | null
+}
+
+export interface LogLevelConfig {
+  levels: Record<string, string>
 }
 
 // ── Pagination responses ──────────────────────────────────────────────

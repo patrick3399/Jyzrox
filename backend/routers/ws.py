@@ -150,6 +150,25 @@ async def _ws_receiver(ws: WebSocket) -> None:
         raise
 
 
+async def _log_stream_listener(ws: WebSocket) -> None:
+    """Subscribe to logs:stream, forward log entries to admin WS clients."""
+    pubsub = get_pubsub()
+    try:
+        await pubsub.subscribe("logs:stream")
+        async for message in pubsub.listen():
+            if message["type"] == "message":
+                data = message["data"]
+                if isinstance(data, bytes):
+                    data = data.decode()
+                await ws.send_text(json.dumps({"type": "log_entry", "log": json.loads(data)}))
+    except (WebSocketDisconnect, asyncio.CancelledError):
+        raise
+    finally:
+        with contextlib.suppress(Exception):
+            await pubsub.unsubscribe("logs:stream")
+            await pubsub.aclose()
+
+
 @router.websocket("/ws")
 async def websocket_endpoint(ws: WebSocket):
     """
@@ -176,6 +195,8 @@ async def websocket_endpoint(ws: WebSocket):
         asyncio.create_task(_ping_loop(ws)),
         asyncio.create_task(_ws_receiver(ws)),
     ]
+    if role == "admin":
+        tasks.append(asyncio.create_task(_log_stream_listener(ws)))
     try:
         done, pending = await asyncio.wait(tasks, return_when=asyncio.FIRST_COMPLETED)
         # Retrieve exceptions from finished tasks to prevent "never retrieved" warnings

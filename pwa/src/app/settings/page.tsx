@@ -45,6 +45,7 @@ type SectionKey =
   | 'aiTagging'
   | 'schedule'
   | 'browserCache'
+  | 'logLevels'
 
 const VERSION_LABELS: Record<string, string> = {
   jyzrox: 'Jyzrox',
@@ -1084,6 +1085,10 @@ export default function SettingsPage() {
   const [trashRetentionDays, setTrashRetentionDays] = useState(30)
   const trashRetentionDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
+  // Log levels
+  const [logLevels, setLogLevels] = useState<Record<string, string>>({})
+  const logLevelsFetched = useRef(false)
+
   // Cache stats
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [cacheLoading, setCacheLoading] = useState(false)
@@ -1535,6 +1540,10 @@ export default function SettingsPage() {
     }
     if ((openSections.has('security') || openSections.has('features')) && featuresLoading && Object.keys(features).length === 0) {
       handleLoadFeatures()
+    }
+    if (openSections.has('logLevels') && !logLevelsFetched.current) {
+      logLevelsFetched.current = true
+      api.logs.getLevels().then(d => setLogLevels(d.levels)).catch(() => {})
     }
   }, [
     openSections,
@@ -1990,6 +1999,43 @@ export default function SettingsPage() {
                     disabled={featuresLoading}
                   />
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Log Levels ── */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            <SectionHeader title={t('settings.logLevels')} sectionKey="logLevels" openSections={openSections} onToggle={toggleSection} />
+            {openSections.has('logLevels') && (
+              <div className="px-5 pb-5 border-t border-vault-border space-y-4">
+                <p className="text-xs text-vault-text-muted mt-4">{t('settings.logLevelDesc')}</p>
+                {[
+                  { key: 'api', label: t('settings.logLevelApi') },
+                  { key: 'worker', label: t('settings.logLevelWorker') },
+                ].map(({ key, label }) => (
+                  <div key={key} className="flex items-center justify-between py-2">
+                    <span className="text-sm text-vault-text">{label}</span>
+                    <select
+                      value={logLevels[key] ?? 'INFO'}
+                      onChange={async (e) => {
+                        const level = e.target.value
+                        try {
+                          await api.logs.setLevel(key, level)
+                          setLogLevels(prev => ({ ...prev, [key]: level }))
+                          toast.success(t('settings.logLevelUpdated'))
+                        } catch {
+                          toast.error(t('common.error'))
+                        }
+                      }}
+                      className="px-3 py-1.5 text-sm bg-vault-input border border-vault-border rounded text-vault-text"
+                    >
+                      {['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'].map(lvl => (
+                        <option key={lvl} value={lvl}>{lvl}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+                <p className="text-[10px] text-vault-text-muted italic">{t('settings.logLevelNginxHint')}</p>
               </div>
             )}
           </div>
