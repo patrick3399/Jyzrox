@@ -27,7 +27,7 @@ class LogLevelPatch(BaseModel):
 
 
 class LogRetentionPatch(BaseModel):
-    max_entries: int = Field(ge=1000, le=50000)
+    max_entries: int = Field(ge=500, le=20000)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────

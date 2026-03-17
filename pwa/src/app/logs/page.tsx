@@ -113,8 +113,8 @@ function RetentionSettings() {
             <label className="text-xs text-vault-text-muted w-28 shrink-0">{t('logs.maxEntries')}</label>
             <input
               type="number"
-              min={1000}
-              max={50000}
+              min={500}
+              max={20000}
               step={1000}
               value={maxEntries}
               onChange={e => setMaxEntries(Number(e.target.value))}
