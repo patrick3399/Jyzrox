@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, ExternalLink, Heart, Download, Check, Trash2 } from 'lucide-react'
+import { BookOpen, ExternalLink, Heart, Download, Check, Trash2, Bookmark, BookmarkCheck } from 'lucide-react'
 import type { Gallery } from '@/lib/types'
 import { RatingStars } from '@/components/RatingStars'
 import { ContextMenu } from '@/components/ContextMenu'
@@ -19,6 +19,7 @@ interface GalleryListCardProps {
   selected?: boolean
   selectMode?: boolean
   onFavoriteToggle?: (gallery: Gallery) => void
+  onReadingListToggle?: (gallery: Gallery) => void
   onDelete?: (gallery: Gallery) => void
   onDownload?: (gallery: Gallery) => void
 }
@@ -32,6 +33,7 @@ export function GalleryListCard({
   selected,
   selectMode,
   onFavoriteToggle,
+  onReadingListToggle,
   onDelete,
   onDownload,
 }: GalleryListCardProps) {
@@ -70,6 +72,17 @@ export function GalleryListCard({
             label: gallery.is_favorited ? t('contextMenu.unfavorite') : t('contextMenu.favorite'),
             icon: Heart,
             onClick: () => onFavoriteToggle(gallery),
+          },
+        ]
+      : []),
+    ...(onReadingListToggle
+      ? [
+          {
+            label: gallery.in_reading_list
+              ? t('contextMenu.removeFromReadingList')
+              : t('contextMenu.addToReadingList'),
+            icon: gallery.in_reading_list ? BookmarkCheck : Bookmark,
+            onClick: () => onReadingListToggle(gallery),
           },
         ]
       : []),

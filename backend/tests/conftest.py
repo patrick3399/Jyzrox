@@ -582,6 +582,14 @@ _SQLITE_SCHEMA = [
         PRIMARY KEY (user_id, gallery_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS user_reading_list (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, gallery_id)
+    )
+    """,
 ]
 
 # ---------------------------------------------------------------------------

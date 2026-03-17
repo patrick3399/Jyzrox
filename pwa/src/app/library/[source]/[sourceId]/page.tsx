@@ -16,7 +16,7 @@ import { RatingStars } from '@/components/RatingStars'
 import { t, formatDate } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
 import { TagAutocomplete } from '@/components/TagAutocomplete'
-import { Pencil, Heart } from 'lucide-react'
+import { Pencil, Heart, Bookmark, BookmarkCheck } from 'lucide-react'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
   character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
@@ -731,6 +731,29 @@ export default function GalleryDetailPage() {
                   }`}
                 >
                   {gallery.is_favorited ? t('library.favorited') : t('library.unfavorited')}
+                </button>
+                <button
+                  onClick={async () => {
+                    try {
+                      const updated = await api.library.updateGallery(source!, sourceId!, { in_reading_list: !gallery.in_reading_list })
+                      mutateGallery(updated, false)
+                      toast.success(gallery.in_reading_list ? t('contextMenu.removeFromReadingList') : t('contextMenu.addToReadingList'))
+                    } catch {
+                      toast.error(t('common.failedToLoad'))
+                    }
+                  }}
+                  disabled={isUpdating}
+                  title={gallery.in_reading_list ? t('library.inReadingList') : t('library.readLater')}
+                  className={`px-4 py-2 rounded text-sm font-medium border transition-colors flex items-center gap-1.5 ${
+                    gallery.in_reading_list
+                      ? 'bg-blue-900/40 border-blue-600 text-blue-400 hover:bg-blue-900/60'
+                      : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-blue-600 hover:text-blue-400'
+                  }`}
+                >
+                  {gallery.in_reading_list
+                    ? <><BookmarkCheck size={16} />{t('library.inReadingList')}</>
+                    : <><Bookmark size={16} />{t('library.readLater')}</>
+                  }
                 </button>
                 <button
                   onClick={handleDelete}

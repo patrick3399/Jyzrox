@@ -421,3 +421,12 @@ CREATE TABLE IF NOT EXISTS user_image_favorites (
     PRIMARY KEY (user_id, image_id)
 );
 CREATE INDEX IF NOT EXISTS idx_uif_image ON user_image_favorites (image_id);
+
+-- ── User Reading List ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS user_reading_list (
+    user_id     BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    gallery_id  BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    added_at    TIMESTAMPTZ DEFAULT now(),
+    PRIMARY KEY (user_id, gallery_id)
+);
+CREATE INDEX IF NOT EXISTS idx_user_reading_list_gallery ON user_reading_list (gallery_id);

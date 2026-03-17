@@ -319,13 +319,13 @@ const library = {
     }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/images${qs ? `?${qs}` : ''}`)
   },
 
-  updateGallery: (source: string, sourceId: string, patch: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string }) =>
+  updateGallery: (source: string, sourceId: string, patch: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string; in_reading_list?: boolean }) =>
     apiFetch<Gallery>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
 
-  batchGalleries: (body: { action: 'delete' | 'favorite' | 'unfavorite' | 'rate' | 'add_to_collection' | 'add_tags' | 'remove_tags'; gallery_ids: number[]; rating?: number; collection_id?: number; tags?: string[] }) =>
+  batchGalleries: (body: { action: 'delete' | 'favorite' | 'unfavorite' | 'rate' | 'add_to_collection' | 'add_tags' | 'remove_tags' | 'add_to_reading_list' | 'remove_from_reading_list'; gallery_ids: number[]; rating?: number; collection_id?: number; tags?: string[] }) =>
     apiFetch<{ status: string; affected: number; deleted_dirs?: number }>('/api/library/galleries/batch', {
       method: 'POST',
       body: JSON.stringify(body),

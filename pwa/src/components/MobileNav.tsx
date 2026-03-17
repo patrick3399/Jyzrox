@@ -30,6 +30,7 @@ import {
   ShieldCheck,
   Images,
   Trash2,
+  BookMarked,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
@@ -52,6 +53,7 @@ const navSections = [
       { href: '/e-hentai', label: () => t('nav.ehentai'), icon: Compass, minRole: 'viewer' as UserRole },
       { href: '/pixiv', label: () => t('nav.pixiv'), icon: Palette, minRole: 'viewer' as UserRole },
       { href: '/library', label: () => t('nav.library'), icon: BookOpen, minRole: 'viewer' as UserRole },
+      { href: '/reading-list', label: () => t('nav.readingList'), icon: BookMarked, minRole: 'viewer' as UserRole },
       { href: '/trash', label: () => t('nav.trash'), icon: Trash2, minRole: 'viewer' as UserRole },
       { href: '/images', label: () => t('nav.images'), icon: Images, minRole: 'viewer' as UserRole },
       { href: '/explorer', label: () => t('nav.explorer'), icon: FolderTree, minRole: 'viewer' as UserRole },

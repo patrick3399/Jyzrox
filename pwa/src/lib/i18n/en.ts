@@ -19,6 +19,7 @@ const en: Record<string, string> = {
   'nav.logout': 'Logout',
   'nav.users': 'Users',
   'nav.images': 'Images',
+  'nav.readingList': 'Reading List',
   'nav.sectionBrowse': 'Browse',
   'nav.sectionManage': 'Manage',
   'nav.sectionAdmin': 'Admin',
@@ -34,6 +35,7 @@ const en: Record<string, string> = {
   'dashboard.total': 'total',
   'dashboard.quickLinks.ehentaiDesc': 'Browse E-Hentai galleries',
   'dashboard.quickLinks.libraryDesc': 'Browse your local collection',
+  'dashboard.quickLinks.readingListDesc': 'Galleries saved for later',
   'dashboard.quickLinks.queueDesc': 'Manage active downloads',
   'dashboard.quickLinks.tagsDesc': 'Manage tags, aliases & implications',
   'dashboard.quickLinks.pixivDesc': 'Browse Pixiv illustrations',
@@ -89,6 +91,11 @@ const en: Record<string, string> = {
   'library.source': 'Source',
   'library.sort': 'Sort',
   'library.favoritesOnly': 'Favorites only',
+  'library.readingListOnly': 'Reading list only',
+  'library.batchAddToReadingList': 'Read Later',
+  'library.batchRemoveFromReadingList': 'Remove from List',
+  'library.inReadingList': 'In Reading List',
+  'library.readLater': 'Read Later',
   'library.allSources': 'All',
   'library.monitored': 'Monitored',
   'library.imported': 'Imported',
@@ -1264,12 +1271,20 @@ const en: Record<string, string> = {
   'contextMenu.unfavorite': 'Unfavorite',
   'contextMenu.delete': 'Delete',
   'contextMenu.openDetail': 'Open Detail',
+  'contextMenu.addToReadingList': 'Read Later',
+  'contextMenu.removeFromReadingList': 'Remove from Reading List',
 
   // ── Library filter panel ──
   'library.showFilters': 'Show Filters',
   'library.hideFilters': 'Hide Filters',
   'library.filterCategory': 'Category',
   'library.allCategories': 'All Categories',
+
+  // ── Reading List ──
+  'readingList.title': 'Reading List',
+  'readingList.empty': 'Your reading list is empty',
+  'readingList.emptyDescription': 'Add galleries from the library to read later',
+  'readingList.remove': 'Remove',
 
   // ── Trash ──
   'nav.trash': 'Trash',

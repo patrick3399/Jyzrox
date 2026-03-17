@@ -26,6 +26,7 @@ export interface Gallery {
   favorited: boolean // legacy, always false now
   is_favorited: boolean // per-user favorite status
   my_rating: number | null // per-user rating, null if not rated
+  in_reading_list: boolean
   uploader: string
   artist_id: string | null
   download_status: 'proxy_only' | 'partial' | 'complete' | 'downloading'
@@ -675,6 +676,7 @@ export interface GallerySearchParams {
   sort?: 'added_at' | 'rating' | 'pages'
   collection?: number
   category?: string
+  in_reading_list?: boolean
 }
 
 export interface EhSearchParams {
