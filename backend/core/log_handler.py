@@ -24,7 +24,7 @@ class RedisLogHandler(logging.Handler):
 
     LIST_KEY = "system_logs"
 
-    def __init__(self, source: str, max_entries: int = 10_000) -> None:
+    def __init__(self, source: str, max_entries: int = 2_000) -> None:
         super().__init__()
         self.source = source
         self.max_entries = max_entries

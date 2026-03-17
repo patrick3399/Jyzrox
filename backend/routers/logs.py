@@ -27,8 +27,7 @@ class LogLevelPatch(BaseModel):
 
 
 class LogRetentionPatch(BaseModel):
-    max_entries: int | None = Field(None, ge=1000, le=50000)
-    retention_days: int | None = Field(None, ge=1, le=30)
+    max_entries: int = Field(ge=1000, le=50000)
 
 
 # ── Helpers ───────────────────────────────────────────────────────────
@@ -89,8 +88,8 @@ async def get_logs(
     """Return filtered log entries from Redis with pagination."""
     r = get_redis()
 
-    # Fetch up to 10 000 most recent entries
-    raw_list = await r.lrange("system_logs", 0, 9999)
+    max_entries = await _get_int_setting("setting:log_max_entries", 2000)
+    raw_list = await r.lrange("system_logs", 0, max_entries - 1)
 
     # Normalise filter sets
     level_filter = {lv.upper() for lv in level if lv}
@@ -138,8 +137,7 @@ async def clear_logs(_: dict = Depends(_admin)):
 async def get_retention(_: dict = Depends(_admin)):
     """Return current log retention settings."""
     return {
-        "max_entries": await _get_int_setting("setting:log_max_entries", 10000),
-        "retention_days": await _get_int_setting("setting:log_retention_days", 7),
+        "max_entries": await _get_int_setting("setting:log_max_entries", 2000),
     }
 
 
@@ -147,11 +145,7 @@ async def get_retention(_: dict = Depends(_admin)):
 async def patch_retention(req: LogRetentionPatch, _: dict = Depends(_admin)):
     """Update log retention settings."""
     r = get_redis()
-    if req.max_entries is not None:
-        await r.set("setting:log_max_entries", str(req.max_entries))
-    if req.retention_days is not None:
-        await r.set("setting:log_retention_days", str(req.retention_days))
+    await r.set("setting:log_max_entries", str(req.max_entries))
     return {
-        "max_entries": await _get_int_setting("setting:log_max_entries", 10000),
-        "retention_days": await _get_int_setting("setting:log_retention_days", 7),
+        "max_entries": await _get_int_setting("setting:log_max_entries", 2000),
     }

@@ -58,4 +58,4 @@ RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 # No USER directive — entrypoint.sh handles privilege drop via gosu
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]

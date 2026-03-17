@@ -188,7 +188,9 @@ async def websocket_endpoint(ws: WebSocket):
     user_id, role = session_info
 
     await ws.accept()
-    logger.info("WebSocket client connected: %s", ws.client)
+    _ws_ip = (ws.headers.get("x-forwarded-for", "").split(",")[0].strip()
+              or (ws.client.host if ws.client else "unknown"))
+    logger.info("WebSocket client connected: %s", _ws_ip)
 
     tasks = [
         asyncio.create_task(_pubsub_listener(ws, user_id, role)),
@@ -208,4 +210,4 @@ async def websocket_endpoint(ws: WebSocket):
             with contextlib.suppress(asyncio.CancelledError):
                 await t
     finally:
-        logger.info("WebSocket client disconnected: %s", ws.client)
+        logger.info("WebSocket client disconnected: %s", _ws_ip)

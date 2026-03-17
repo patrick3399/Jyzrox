@@ -73,8 +73,7 @@ function LogRow({ entry }: { entry: LogEntry }) {
 }
 
 function RetentionSettings() {
-  const [maxEntries, setMaxEntries] = useState(10000)
-  const [retentionDays, setRetentionDays] = useState(7)
+  const [maxEntries, setMaxEntries] = useState(2000)
   const [open, setOpen] = useState(false)
   const loaded = useRef(false)
 
@@ -83,14 +82,13 @@ function RetentionSettings() {
       loaded.current = true
       api.logs.getRetention().then(d => {
         setMaxEntries(d.max_entries)
-        setRetentionDays(d.retention_days)
       }).catch(() => {})
     }
   }, [open])
 
   const save = async () => {
     try {
-      await api.logs.setRetention({ max_entries: maxEntries, retention_days: retentionDays })
+      await api.logs.setRetention({ max_entries: maxEntries })
       toast.success(t('logs.retentionSaved'))
     } catch {
       toast.error(t('common.error'))
@@ -120,17 +118,6 @@ function RetentionSettings() {
               step={1000}
               value={maxEntries}
               onChange={e => setMaxEntries(Number(e.target.value))}
-              className="w-24 px-2 py-1 text-sm bg-vault-input border border-vault-border rounded text-vault-text"
-            />
-          </div>
-          <div className="flex items-center gap-4">
-            <label className="text-xs text-vault-text-muted w-28 shrink-0">{t('logs.retentionDays')}</label>
-            <input
-              type="number"
-              min={1}
-              max={30}
-              value={retentionDays}
-              onChange={e => setRetentionDays(Number(e.target.value))}
               className="w-24 px-2 py-1 text-sm bg-vault-input border border-vault-border rounded text-vault-text"
             />
           </div>

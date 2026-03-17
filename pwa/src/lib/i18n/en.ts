@@ -1329,7 +1329,6 @@ const en: Record<string, string> = {
   'logs.traceback': 'Traceback',
   'logs.retention': 'Retention',
   'logs.maxEntries': 'Max entries',
-  'logs.retentionDays': 'Retention days',
   'logs.retentionSaved': 'Retention settings saved',
   'logs.allSources': 'All sources',
   'logs.entries': '{count} entries',

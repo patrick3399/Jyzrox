@@ -1216,9 +1216,9 @@ const logs = {
       method: 'PATCH',
       body: JSON.stringify({ source, level }),
     }),
-  getRetention: () => apiFetch<{ max_entries: number; retention_days: number }>('/api/logs/retention'),
-  setRetention: (data: { max_entries?: number; retention_days?: number }) =>
-    apiFetch<{ max_entries: number; retention_days: number }>('/api/logs/retention', {
+  getRetention: () => apiFetch<{ max_entries: number }>('/api/logs/retention'),
+  setRetention: (data: { max_entries: number }) =>
+    apiFetch<{ max_entries: number }>('/api/logs/retention', {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
