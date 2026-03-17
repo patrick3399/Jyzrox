@@ -3,7 +3,6 @@
 import { useRef, useEffect, useState, useMemo } from 'react'
 import { useWindowVirtualizer } from '@tanstack/react-virtual'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import { FastScroller } from '@/components/FastScroller'
 
 // Map of Tailwind breakpoints to column counts (px)
 export interface ColumnConfig {
@@ -238,8 +237,6 @@ export function VirtualGrid<T>({
           )
         })}
       </div>
-
-      <FastScroller totalHeight={totalHeight} visible={items.length > 0} />
 
       {/* Loading / end indicator */}
       {(isLoading || hasMore) && (

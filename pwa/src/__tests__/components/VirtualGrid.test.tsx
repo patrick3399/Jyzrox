@@ -13,7 +13,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
-import React from 'react'
 import { render, screen } from '@testing-library/react'
 
 // ── Mock @tanstack/react-virtual ──────────────────────────────────────
@@ -46,10 +45,6 @@ vi.stubGlobal('ResizeObserver', MockResizeObserver)
 
 vi.mock('@/components/LoadingSpinner', () => ({
   LoadingSpinner: () => <div data-testid="loading-spinner" />,
-}))
-
-vi.mock('@/components/FastScroller', () => ({
-  FastScroller: () => null,
 }))
 
 // ── Subject under test ────────────────────────────────────────────────
