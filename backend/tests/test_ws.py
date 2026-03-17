@@ -381,6 +381,72 @@ class TestPubsubListener:
 
         ws.send_text.assert_called_once_with("not-json")
 
+    async def test_pubsub_listener_filters_new_event_type_by_actor_user_id(self):
+        """Non-admin user does not receive new-format events from other users."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "gallery.updated",
+            "actor_user_id": 99,
+            "resource_type": "gallery",
+            "resource_id": 42,
+            "data": {},
+        })
+        pubsub = _make_pubsub_mock(messages=[
+            {"type": "message", "data": event},
+        ])
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(asyncio.CancelledError):
+                await _pubsub_listener(ws, user_id="1", role="member")
+
+        ws.send_text.assert_not_called()
+
+    async def test_pubsub_listener_allows_new_event_broadcast_for_non_admin(self):
+        """New-format events with actor_user_id=None are broadcast to all users."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "rescan.completed",
+            "actor_user_id": None,
+            "resource_type": "system",
+            "resource_id": None,
+            "data": {},
+        })
+        pubsub = _make_pubsub_mock(messages=[
+            {"type": "message", "data": event},
+        ])
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(asyncio.CancelledError):
+                await _pubsub_listener(ws, user_id="2", role="viewer")
+
+        ws.send_text.assert_called_once()
+
+    async def test_pubsub_listener_non_admin_receives_own_new_event(self):
+        """Non-admin user receives new-format events where actor_user_id matches."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "collection.updated",
+            "actor_user_id": 5,
+            "resource_type": "collection",
+            "resource_id": 12,
+            "data": {},
+        })
+        pubsub = _make_pubsub_mock(messages=[
+            {"type": "message", "data": event},
+        ])
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(asyncio.CancelledError):
+                await _pubsub_listener(ws, user_id="5", role="member")
+
+        ws.send_text.assert_called_once()
+
     async def test_pubsub_listener_subscribes_to_events_all(self):
         """pubsub.subscribe is called with 'events:all' channel."""
         from routers.ws import _pubsub_listener

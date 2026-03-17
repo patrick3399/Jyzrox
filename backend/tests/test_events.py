@@ -243,3 +243,63 @@ async def test_emit_passes_kwargs_as_data_dict():
     assert published.data["percent"] == 75
     assert published.data["current"] == 75
     assert published.data["total"] == 100
+
+
+# ---------------------------------------------------------------------------
+# emit_safe() convenience function
+# ---------------------------------------------------------------------------
+
+
+async def test_emit_safe_calls_emit_successfully():
+    """emit_safe() delegates to emit() and completes without error."""
+    from core.events import emit_safe
+
+    with patch("core.events.emit", new_callable=AsyncMock) as mock_emit:
+        await emit_safe(
+            EventType.GALLERY_UPDATED,
+            actor_user_id=3,
+            resource_type="gallery",
+            resource_id=7,
+        )
+
+    mock_emit.assert_awaited_once()
+    call_kwargs = mock_emit.call_args
+    assert call_kwargs.args[0] == EventType.GALLERY_UPDATED
+    assert call_kwargs.kwargs["actor_user_id"] == 3
+    assert call_kwargs.kwargs["resource_type"] == "gallery"
+    assert call_kwargs.kwargs["resource_id"] == 7
+
+
+async def test_emit_safe_swallows_exceptions():
+    """emit_safe() catches exceptions from emit() and does not re-raise."""
+    from core.events import emit_safe
+
+    with patch("core.events.emit", new_callable=AsyncMock) as mock_emit:
+        mock_emit.side_effect = RuntimeError("Redis connection refused")
+        # Must not raise — emit_safe swallows all errors
+        await emit_safe(EventType.SYSTEM_ALERT)
+
+    mock_emit.assert_awaited_once()
+
+
+async def test_emit_safe_passes_all_kwargs():
+    """emit_safe() forwards all keyword arguments to emit()."""
+    from core.events import emit_safe
+
+    with patch("core.events.emit", new_callable=AsyncMock) as mock_emit:
+        await emit_safe(
+            EventType.DOWNLOAD_PROGRESS,
+            actor_user_id=5,
+            resource_id="job-abc",
+            percent=50,
+            current=50,
+            total=100,
+        )
+
+    mock_emit.assert_awaited_once()
+    call_kwargs = mock_emit.call_args
+    assert call_kwargs.args[0] == EventType.DOWNLOAD_PROGRESS
+    assert call_kwargs.kwargs["actor_user_id"] == 5
+    assert call_kwargs.kwargs["resource_id"] == "job-abc"
+    assert call_kwargs.kwargs["percent"] == 50
+    assert call_kwargs.kwargs["total"] == 100
