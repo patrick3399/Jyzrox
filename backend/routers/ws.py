@@ -36,27 +36,84 @@ async def _validate_ws_session(ws: WebSocket) -> tuple[str, str] | None:
         return None
 
 
+def _event_to_ws_message(event_data: dict) -> str:
+    """Translate EventBus event format to legacy WebSocket message format.
+
+    New event format:
+        {"event_type": "download.completed", "actor_user_id": 1, "resource_type": "download_job",
+         "resource_id": "abc", "data": {"status": "done", "progress": {...}, "job_id": "abc",
+         "_legacy_type": "job_update"}}
+
+    Legacy WS format:
+        {"type": "job_update", "job_id": "abc", "status": "done", "progress": {...}, "user_id": 1}
+    """
+    data = event_data.get("data", {})
+    legacy_type = data.get("_legacy_type")
+    actor = event_data.get("actor_user_id")
+
+    if legacy_type == "job_update":
+        return json.dumps({
+            "type": "job_update",
+            "job_id": data.get("job_id") or event_data.get("resource_id"),
+            "status": data.get("status", ""),
+            "progress": data.get("progress"),
+            "user_id": actor,
+        })
+    elif legacy_type == "subscription_checked":
+        return json.dumps({
+            "type": "subscription_checked",
+            "sub_id": data.get("sub_id") or event_data.get("resource_id"),
+            "status": data.get("status", ""),
+            "job_id": data.get("job_id"),
+            "new_works": data.get("new_works", 0),
+            "user_id": actor,
+        })
+    elif event_data.get("event_type", "").startswith("system."):
+        return json.dumps({
+            "type": "alert",
+            "message": data.get("message", ""),
+        })
+    else:
+        # New event types — pass through with event_type field
+        return json.dumps({
+            "type": event_data.get("event_type", "unknown"),
+            "event_type": event_data.get("event_type"),
+            "resource_type": event_data.get("resource_type"),
+            "resource_id": event_data.get("resource_id"),
+            "data": data,
+            "user_id": actor,
+        })
+
+
 async def _pubsub_listener(ws: WebSocket, user_id: str, role: str) -> None:
-    """Subscribe to download:events and forward messages to the WebSocket client."""
+    """Subscribe to events:all and forward messages to the WebSocket client."""
     pubsub = get_pubsub()
     try:
-        await pubsub.subscribe("download:events")
+        await pubsub.subscribe("events:all")
         async for message in pubsub.listen():
             if message["type"] == "message":
                 data = message["data"]
                 if isinstance(data, bytes):
                     data = data.decode()
-                # Filter: admin sees all, others see only their own jobs.
-                # Events with user_id=None are broadcast to everyone (e.g. subscription-triggered jobs).
+
+                # Parse event for filtering
+                try:
+                    event_data = json.loads(data)
+                except (json.JSONDecodeError, TypeError):
+                    # Non-JSON data — forward as-is (backward compat)
+                    if role == "admin":
+                        await ws.send_text(data)
+                    continue
+
+                # Filter: admin sees all, others see only their own events or broadcasts
+                actor_user_id = event_data.get("actor_user_id")
                 if role != "admin":
-                    try:
-                        event = json.loads(data)
-                        event_user_id = event.get("user_id")
-                        if event_user_id is not None and str(event_user_id) != user_id:
-                            continue
-                    except (json.JSONDecodeError, TypeError):
-                        pass
-                await ws.send_text(data)
+                    if actor_user_id is not None and str(actor_user_id) != user_id:
+                        continue
+
+                # Translate to legacy WS format
+                ws_message = _event_to_ws_message(event_data)
+                await ws.send_text(ws_message)
     except (WebSocketDisconnect, asyncio.CancelledError):
         raise
     except Exception as exc:
@@ -64,7 +121,7 @@ async def _pubsub_listener(ws: WebSocket, user_id: str, role: str) -> None:
         raise
     finally:
         with contextlib.suppress(Exception):
-            await pubsub.unsubscribe("download:events")
+            await pubsub.unsubscribe("events:all")
         with contextlib.suppress(Exception):
             await pubsub.aclose()
 

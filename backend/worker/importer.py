@@ -61,8 +61,12 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
     _cfg = _get_site_config(raw_source)
     source = _cfg.source_id
-    from plugins.builtin.gallery_dl._metadata import _resolve_source_id
-    source_id = _resolve_source_id(metadata, _cfg, gallery_path.name)
+    source_id = gallery_path.name
+    for _field in _cfg.source_id_fields:
+        _val = metadata.get(_field)
+        if _val:
+            source_id = str(_val)
+            break
 
     tags = _normalize_tags(_extract_tags(gallery_path, metadata), source)
     media_files_raw = [f for f in gallery_path.rglob('*') if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
@@ -211,6 +215,13 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     await ctx["redis"].enqueue_job("thumbnail_job", gallery_id)
     if settings.tag_model_enabled:
         await ctx["redis"].enqueue_job("tag_job", gallery_id)
+
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=len(allowed_pairs), source=source)
+    except Exception:
+        pass
+
     return {"status": "done", "gallery_id": gallery_id}
 
 
@@ -436,6 +447,12 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     if settings.tag_model_enabled:
         await ctx["redis"].enqueue_job("tag_job", gallery_id)
 
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=processed, source="local")
+    except Exception:
+        pass
+
     return {"status": "done", "processed": processed}
 
 
@@ -515,4 +532,11 @@ async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[
     )
 
     logger.info("[batch_import] batch_id=%s: %d completed, %d failed", batch_id, completed, failed)
+
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.IMPORT_COMPLETED, resource_type="system", completed=completed, failed=failed, batch_id=batch_id)
+    except Exception:
+        pass
+
     return {"status": "done", "completed": completed, "failed": failed}

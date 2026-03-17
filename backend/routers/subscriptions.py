@@ -134,6 +134,11 @@ async def create_subscription(
         row = result.fetchone()
         await session.commit()
 
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.SUBSCRIPTION_CREATED, actor_user_id=auth["user_id"], resource_type="subscription", resource_id=row.id if row else None)
+    except Exception:
+        pass
     return {"status": "ok", "id": row.id if row else None, "source": source}
 
 
@@ -297,6 +302,11 @@ async def delete_subscription(
         for job_id in cancelled_jobs:
             await redis.setex(f"download:cancel:{job_id}", 3600, "1")
 
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.SUBSCRIPTION_DELETED, actor_user_id=auth["user_id"], resource_type="subscription", resource_id=sub_id)
+    except Exception:
+        pass
     return {"status": "ok", "cancelled_jobs": len(cancelled_jobs)}
 
 

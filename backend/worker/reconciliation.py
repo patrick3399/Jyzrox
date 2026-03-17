@@ -332,4 +332,11 @@ async def reconciliation_job(ctx: dict) -> dict:
     }))
 
     logger.info("[reconcile] done: %s", stats)
+
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.RECONCILIATION_COMPLETED, resource_type="system", **stats)
+    except Exception:
+        pass
+
     return {"status": "done", **stats}

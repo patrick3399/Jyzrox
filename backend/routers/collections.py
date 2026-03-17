@@ -117,6 +117,11 @@ async def create_collection(
     db.add(collection)
     await db.commit()
     await db.refresh(collection)
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.COLLECTION_UPDATED, actor_user_id=auth["user_id"], resource_type="collection", resource_id=collection.id)
+    except Exception:
+        pass
     return {
         "id": collection.id,
         "name": collection.name,
@@ -237,6 +242,11 @@ async def update_collection(
 
     collection.updated_at = datetime.now(UTC)
     await db.commit()
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.COLLECTION_UPDATED, actor_user_id=auth["user_id"], resource_type="collection", resource_id=collection_id)
+    except Exception:
+        pass
     return {"status": "ok"}
 
 
@@ -252,6 +262,11 @@ async def delete_collection(
         raise HTTPException(status_code=404, detail="Collection not found")
     await db.delete(collection)
     await db.commit()
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.COLLECTION_UPDATED, actor_user_id=auth["user_id"], resource_type="collection", resource_id=collection_id)
+    except Exception:
+        pass
     return {"status": "ok"}
 
 
@@ -313,6 +328,11 @@ async def add_galleries_to_collection(
 
     collection.updated_at = datetime.now(UTC)
     await db.commit()
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.COLLECTION_UPDATED, actor_user_id=auth["user_id"], resource_type="collection", resource_id=collection_id)
+    except Exception:
+        pass
     return {"status": "ok", "added": added, "denied": denied}
 
 

@@ -57,6 +57,8 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
                 Blob.phash_int,
                 Blob.phash_q0,
                 Blob.phash_q1,
+                Blob.phash_q2,
+                Blob.phash_q3,
             )
             .where(Blob.phash_int.isnot(None))
             .order_by(Blob.sha256)
@@ -229,6 +231,13 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
     if not opencv_enabled:
         logger.info("OpenCV disabled — skipping tier 3")
         await progress.finish()
+
+        try:
+            from core.events import EventType, emit
+            await emit(EventType.DEDUP_SCAN_COMPLETED, resource_type="system", mode=mode)
+        except Exception:
+            pass
+
         return {"status": "ok", "tier1_inserted": total_inserted, "tier2_processed": t2_processed}
 
     import asyncio
@@ -331,6 +340,13 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
 
     await progress.finish()
     logger.info("Tier 3 done, processed: %d", t3_processed)
+
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.DEDUP_SCAN_COMPLETED, resource_type="system", mode=mode)
+    except Exception:
+        pass
+
     return {
         "status": "ok",
         "tier1_inserted": total_inserted,

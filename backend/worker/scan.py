@@ -228,6 +228,13 @@ async def rescan_library_job(ctx: dict) -> dict:
             _json.dumps({"processed": total, "total": total, "status": "done"}),
         )
         logger.info("[rescan_library] completed, %d galleries processed", total)
+
+        try:
+            from core.events import EventType, emit
+            await emit(EventType.RESCAN_COMPLETED, resource_type="system", total=total)
+        except Exception:
+            pass
+
     return {"status": "cancelled" if cancelled else "done", "total": total}
 
 
@@ -473,6 +480,13 @@ async def auto_discover_job(ctx: dict) -> dict:
         await session.commit()
 
     logger.info("[auto_discover] Discovered %d new galleries", discovered)
+
+    try:
+        from core.events import EventType, emit
+        await emit(EventType.GALLERY_DISCOVERED, resource_type="gallery", discovered=discovered)
+    except Exception:
+        pass
+
     return {"discovered": discovered}
 
 

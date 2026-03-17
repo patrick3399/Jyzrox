@@ -21,6 +21,7 @@ interface WsContextValue {
   dismissAlert: (index: number) => void
   lastJobUpdate: JobUpdateEvent | null
   lastSubCheck: SubCheckEvent | null
+  lastEvent: WsMessage | null
 }
 
 const WsContext = createContext<WsContextValue>({
@@ -29,6 +30,7 @@ const WsContext = createContext<WsContextValue>({
   dismissAlert: () => {},
   lastJobUpdate: null,
   lastSubCheck: null,
+  lastEvent: null,
 })
 
 export function WsProvider({ children }: { children: React.ReactNode }) {
@@ -36,6 +38,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   const [connected, setConnected] = useState(false)
   const [lastJobUpdate, setLastJobUpdate] = useState<JobUpdateEvent | null>(null)
   const [lastSubCheck, setLastSubCheck] = useState<SubCheckEvent | null>(null)
+  const [lastEvent, setLastEvent] = useState<WsMessage | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const mountedRef = useRef(true)
@@ -67,6 +70,9 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
             new_works: msg.new_works ?? 0,
             job_id: msg.job_id ?? null,
           })
+        } else if (msg.type !== 'ping') {
+          // New event types from EventBus — store in lastEvent
+          setLastEvent(msg)
         }
       } catch {
         /* ignore malformed */
@@ -103,7 +109,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <WsContext.Provider value={{ alerts, connected, dismissAlert, lastJobUpdate, lastSubCheck }}>
+    <WsContext.Provider value={{ alerts, connected, dismissAlert, lastJobUpdate, lastSubCheck, lastEvent }}>
       {children}
     </WsContext.Provider>
   )

@@ -7,7 +7,7 @@ Covers:
 - init_redis() creates a Redis connection via aioredis.from_url
 - close_redis() calls aclose() on the current Redis instance
 - get_typed_download_delay() reads per-source typed delay; returns 0 when boosted
-- publish_job_event() publishes JSON to the download:events channel
+- publish_job_event() delegates to EventBus for known types; falls back to legacy channel for unknown types
 - get_pubsub() returns a PubSub object from the Redis instance
 
 Note: is_rate_limit_boosted(), get_download_delay(), get_image_concurrency(),
@@ -22,9 +22,10 @@ Implementation note on init_redis / close_redis:
   patches so subsequent tests are unaffected.
 """
 
+import json
 import sys
 from contextlib import contextmanager
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -222,9 +223,39 @@ async def test_get_typed_download_delay_falls_back_to_default_on_invalid_value()
 # ---------------------------------------------------------------------------
 
 
-async def test_publish_job_event_publishes_json_to_download_events_channel():
-    """publish_job_event() must serialize the dict as JSON and publish to download:events."""
-    import json
+async def test_publish_job_event_delegates_job_update_to_event_bus():
+    """publish_job_event() with type=job_update must delegate to EventBus pipeline,
+    publishing to events:download.completed and events:all channels."""
+    from unittest.mock import MagicMock
+    from core.redis_client import publish_job_event
+
+    mock_redis = AsyncMock()
+    mock_pipe = AsyncMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+    mock_pipe.publish = MagicMock(return_value=mock_pipe)
+    mock_pipe.lpush = MagicMock(return_value=mock_pipe)
+    mock_pipe.ltrim = MagicMock(return_value=mock_pipe)
+    mock_pipe.execute = AsyncMock(return_value=[1, 1, 1, True])
+
+    with patch("core.redis_client.get_redis", return_value=mock_redis):
+        await publish_job_event({"type": "job_update", "job_id": "abc123", "status": "done"})
+
+    # EventBus uses a pipeline — verify publish calls were made
+    mock_redis.pipeline.assert_called_once_with(transaction=False)
+    publish_calls = mock_pipe.publish.call_args_list
+    channels = [call.args[0] for call in publish_calls]
+    assert "events:download.completed" in channels
+    assert "events:all" in channels
+
+    # Verify the payload includes the job_id
+    payloads = [json.loads(call.args[1]) for call in publish_calls]
+    job_ids = [p.get("data", {}).get("job_id") for p in payloads]
+    assert "abc123" in job_ids
+
+
+async def test_publish_job_event_unknown_type_falls_back_to_download_events_channel():
+    """publish_job_event() with an unknown type must fall back to publishing directly
+    to the legacy download:events channel."""
     from core.redis_client import publish_job_event
 
     mock_redis = AsyncMock()
@@ -242,15 +273,16 @@ async def test_publish_job_event_publishes_json_to_download_events_channel():
 
 
 async def test_publish_job_event_does_not_raise_when_redis_errors():
-    """publish_job_event() must silently swallow exceptions from Redis publish."""
+    """publish_job_event() must silently swallow exceptions from Redis pipeline failure."""
     from core.redis_client import publish_job_event
 
     mock_redis = AsyncMock()
+    mock_redis.pipeline = MagicMock(side_effect=ConnectionError("Redis down"))
     mock_redis.publish = AsyncMock(side_effect=ConnectionError("Redis down"))
 
     with patch("core.redis_client.get_redis", return_value=mock_redis):
         # Should not raise
-        await publish_job_event({"job_id": "xyz"})
+        await publish_job_event({"type": "job_update", "job_id": "xyz", "status": "running"})
 
 
 # ---------------------------------------------------------------------------
