@@ -31,40 +31,80 @@ function makeGallery(source: string, import_mode: string | null = null): Gallery
 }
 
 describe('getSourceStyle', () => {
-  it('test_getSourceStyle_ehentai_returns_ehentai_label_and_purple_class', () => {
+  it('test_getSourceStyle_ehentai_returns_ehentai_label_and_palette_color', () => {
     const result = getSourceStyle(makeGallery('ehentai'))
     expect(result.label).toBe('E-Hentai')
-    expect(result.className).toContain('purple')
+    expect(result.className).toMatch(/bg-\w+-900\/50/)
+    expect(result.className).not.toContain('vault')
   })
 
-  it('test_getSourceStyle_pixiv_returns_pixiv_label_and_blue_class', () => {
+  it('test_getSourceStyle_pixiv_returns_pixiv_label_and_palette_color', () => {
     const result = getSourceStyle(makeGallery('pixiv'))
     expect(result.label).toBe('Pixiv')
-    expect(result.className).toContain('blue')
+    expect(result.className).toMatch(/bg-\w+-900\/50/)
+    expect(result.className).not.toContain('vault')
   })
 
-  it('test_getSourceStyle_local_link_returns_monitored_i18n_key_and_teal_class', () => {
+  it('test_getSourceStyle_local_link_returns_monitored_i18n_key_and_palette_color', () => {
     const result = getSourceStyle(makeGallery('local', 'link'))
     expect(result.label).toBe('library.monitored')
-    expect(result.className).toContain('teal')
+    expect(result.className).toMatch(/bg-\w+-900\/50/)
+    expect(result.className).not.toContain('vault')
   })
 
-  it('test_getSourceStyle_local_copy_returns_imported_i18n_key_and_amber_class', () => {
+  it('test_getSourceStyle_local_copy_returns_imported_i18n_key_and_palette_color', () => {
     const result = getSourceStyle(makeGallery('local', 'copy'))
     expect(result.label).toBe('library.imported')
-    expect(result.className).toContain('amber')
+    expect(result.className).toMatch(/bg-\w+-900\/50/)
+    expect(result.className).not.toContain('vault')
   })
 
-  it('test_getSourceStyle_local_no_import_mode_returns_local_label_and_green_class', () => {
+  it('test_getSourceStyle_local_no_import_mode_returns_local_label_and_palette_color', () => {
     const result = getSourceStyle(makeGallery('local', null))
     expect(result.label).toBe('Local')
-    expect(result.className).toContain('green')
+    expect(result.className).toMatch(/bg-\w+-900\/50/)
+    expect(result.className).not.toContain('vault')
   })
 
-  it('test_getSourceStyle_unknown_source_returns_capitalised_label_and_vault_class', () => {
+  it('test_getSourceStyle_unknown_source_returns_capitalised_label_and_palette_color_not_vault', () => {
     const result = getSourceStyle(makeGallery('twitter'))
     expect(result.label).toBe('Twitter')
-    expect(result.className).toContain('vault')
+    // Must use a palette color, not the old generic vault-card fallback
+    expect(result.className).not.toContain('vault')
+    // Must match the Tailwind color pattern used by the palette (bg-{color}-900/50)
+    expect(result.className).toMatch(/bg-\w+-900\/50/)
+  })
+
+  it('test_getSourceStyle_all_sources_are_deterministic', () => {
+    // Same input must always yield the same output
+    for (const source of ['ehentai', 'pixiv', 'danbooru', 'kemono']) {
+      expect(getSourceStyle(makeGallery(source)).className).toBe(
+        getSourceStyle(makeGallery(source)).className,
+      )
+    }
+    expect(getSourceStyle(makeGallery('local', 'link')).className).toBe(
+      getSourceStyle(makeGallery('local', 'link')).className,
+    )
+  })
+
+  it('test_getSourceStyle_local_variants_get_different_colors_from_each_other', () => {
+    const colorNone = getSourceStyle(makeGallery('local', null)).className
+    const colorLink = getSourceStyle(makeGallery('local', 'link')).className
+    const colorCopy = getSourceStyle(makeGallery('local', 'copy')).className
+    // All three keys ("local", "local:link", "local:copy") must hash to distinct palette entries
+    expect(colorNone).not.toBe(colorLink)
+    expect(colorNone).not.toBe(colorCopy)
+    expect(colorLink).not.toBe(colorCopy)
+  })
+
+  it('test_getSourceStyle_palette_covers_multiple_distinct_sources', () => {
+    const sources = ['danbooru', 'gelbooru', 'kemono', 'twitter', 'facebook', 'instagram']
+    const classNames = sources.map((s) => getSourceStyle(makeGallery(s)).className)
+    // All must be valid palette entries (not vault-card)
+    for (const cls of classNames) {
+      expect(cls).not.toContain('vault')
+      expect(cls).toMatch(/bg-\w+-900\/50/)
+    }
   })
 })
 
