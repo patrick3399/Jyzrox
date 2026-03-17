@@ -138,10 +138,18 @@ export default function ReaderPage() {
     )
   }
 
+  // During download, gallery.pages is 0 (only updated at finalize).
+  // Use the highest imported page_num as the ceiling so ?page=N doesn't clamp to 0.
+  const pageCeiling = gallery.download_status === 'downloading' && images.length > 0
+    ? images.reduce((max, img) => Math.max(max, img.page_num), gallery.pages)
+    : gallery.pages
+
   // URL ?page= takes priority over saved progress
-  const initialPage = urlPage > 0
-    ? Math.min(urlPage, gallery.pages)
-    : progress?.last_page && progress.last_page > 0 ? Math.min(progress.last_page, gallery.pages) : 1
+  let initialPage = urlPage > 0
+    ? (pageCeiling > 0 ? Math.min(urlPage, pageCeiling) : 1)
+    : progress?.last_page && progress.last_page > 0
+      ? (pageCeiling > 0 ? Math.min(progress.last_page, pageCeiling) : 1)
+      : 1
 
   return (
     <ErrorBoundary>
