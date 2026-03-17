@@ -26,6 +26,7 @@ export interface Gallery {
   favorited: boolean // legacy, always false now
   is_favorited: boolean // per-user favorite status
   my_rating: number | null // per-user rating, null if not rated
+  in_reading_list: boolean
   uploader: string
   artist_id: string | null
   download_status: 'proxy_only' | 'partial' | 'complete' | 'downloading'
@@ -73,6 +74,7 @@ export interface ImageBrowserResponse {
   images: BrowseImage[]
   next_cursor: string | null
   has_next: boolean
+  favorited_image_ids: number[]
 }
 
 export interface ImageTimeRangeResponse {
@@ -669,6 +671,7 @@ export interface GallerySearchParams {
   tags?: string[]
   exclude_tags?: string[]
   favorited?: boolean
+  in_reading_list?: boolean
   min_rating?: number
   source?: string
   artist?: string
