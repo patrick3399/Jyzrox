@@ -11,6 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from core.auth import require_auth
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
+from core.utils import normalize_subscription_url
 from db.models import Subscription
 
 logger = logging.getLogger(__name__)
@@ -92,7 +93,7 @@ async def follow_artist(
 ):
     """Follow an artist (creates a subscription)."""
     user_id = auth["user_id"]
-    url = _artist_url(req.source, req.artist_id)
+    url = normalize_subscription_url(_artist_url(req.source, req.artist_id))
 
     async with async_session() as session:
         stmt = pg_insert(Subscription).values(
@@ -104,7 +105,7 @@ async def follow_artist(
             avatar_url=req.artist_avatar,
             auto_download=req.auto_download,
         ).on_conflict_do_update(
-            constraint="uq_subscription_user_url",
+            constraint="subscriptions_user_id_url_key",
             set_={
                 "name": req.artist_name,
                 "avatar_url": req.artist_avatar,

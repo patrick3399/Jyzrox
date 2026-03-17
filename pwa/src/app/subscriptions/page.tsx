@@ -1,7 +1,7 @@
 'use client'
 
 import { useState, useEffect, useMemo } from 'react'
-import { Rss, Plus, X, RefreshCw, Trash2, ExternalLink, Download, CheckCircle, AlertCircle, List } from 'lucide-react'
+import { Rss, Plus, X, RefreshCw, Trash2, ExternalLink, Download, CheckCircle, AlertCircle, List, Search } from 'lucide-react'
 import { toast } from 'sonner'
 import Link from 'next/link'
 import { t } from '@/lib/i18n'
@@ -352,6 +352,25 @@ export default function SubscriptionsPage() {
     }
   }, [lastJobUpdate, mutateJobs])
 
+  const [searchInput, setSearchInput] = useState('')
+  const [debouncedSearch, setDebouncedSearch] = useState('')
+
+  useEffect(() => {
+    const timer = setTimeout(() => setDebouncedSearch(searchInput), 300)
+    return () => clearTimeout(timer)
+  }, [searchInput])
+
+  const filteredSubscriptions = useMemo(() => {
+    const subs = data?.subscriptions ?? []
+    if (!debouncedSearch.trim()) return subs
+    const q = debouncedSearch.toLowerCase()
+    return subs.filter(s =>
+      s.name?.toLowerCase().includes(q) ||
+      s.url.toLowerCase().includes(q) ||
+      s.source?.toLowerCase().includes(q)
+    )
+  }, [data?.subscriptions, debouncedSearch])
+
   const [showAdd, setShowAdd] = useState(false)
   const [showBatch, setShowBatch] = useState(false)
   const [url, setUrl] = useState('')
@@ -368,8 +387,12 @@ export default function SubscriptionsPage() {
   const handleAdd = async () => {
     if (!url.trim()) return
     try {
-      await createSub({ url: url.trim(), name: name.trim() || undefined, auto_download: autoDownload, cron_expr: cronExpr })
-      toast.success(t('subscriptions.added'))
+      const result = await createSub({ url: url.trim(), name: name.trim() || undefined, auto_download: autoDownload, cron_expr: cronExpr })
+      if (result?.duplicate) {
+        toast.info(t('subscriptions.duplicateUpdated'))
+      } else {
+        toast.success(t('subscriptions.added'))
+      }
       setUrl('')
       setName('')
       setAutoDownload(true)
@@ -698,6 +721,28 @@ export default function SubscriptionsPage() {
         </div>
       )}
 
+      {/* Search */}
+      {(data?.subscriptions?.length ?? 0) > 0 && (
+        <div className="relative mb-4">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-vault-text-muted" />
+          <input
+            type="text"
+            value={searchInput}
+            onChange={(e) => setSearchInput(e.target.value)}
+            placeholder={t('subscriptions.searchPlaceholder')}
+            className="w-full pl-9 pr-8 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text placeholder-vault-text-muted"
+          />
+          {searchInput && (
+            <button
+              onClick={() => { setSearchInput(''); setDebouncedSearch('') }}
+              className="absolute right-3 top-1/2 -translate-y-1/2 text-vault-text-muted hover:text-vault-text"
+            >
+              <X size={14} />
+            </button>
+          )}
+        </div>
+      )}
+
       {/* List */}
       {isLoading ? (
         <div className="flex justify-center py-12"><LoadingSpinner /></div>
@@ -707,9 +752,14 @@ export default function SubscriptionsPage() {
           <p className="text-sm text-vault-text-muted">{t('subscriptions.noSubscriptions')}</p>
           <p className="text-xs text-vault-text-muted mt-1">{t('subscriptions.noSubscriptionsHint')}</p>
         </div>
+      ) : filteredSubscriptions.length === 0 ? (
+        <div className="text-center py-12">
+          <Search size={40} className="mx-auto text-vault-text-muted mb-3" />
+          <p className="text-sm text-vault-text-muted">{t('subscriptions.noResults')}</p>
+        </div>
       ) : (
         <div className="space-y-2">
-          {data.subscriptions.map((sub) => (
+          {filteredSubscriptions.map((sub) => (
             <SubscriptionCard
               key={sub.id}
               sub={sub}

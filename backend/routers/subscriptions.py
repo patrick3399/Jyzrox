@@ -12,7 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth, require_role
 from core.database import async_session
-from core.utils import detect_source
+from core.utils import detect_source, normalize_subscription_url
 from db.models import Subscription
 
 logger = logging.getLogger(__name__)
@@ -96,7 +96,8 @@ async def create_subscription(
 ):
     """Create a new subscription."""
     user_id = auth["user_id"]
-    source: str | None = detect_source(req.url)
+    normalized_url = normalize_subscription_url(req.url)
+    source: str | None = detect_source(normalized_url)
     if source == "unknown":
         source = None
 
@@ -111,9 +112,16 @@ async def create_subscription(
     next_check = croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
 
     async with async_session() as session:
+        existing = (await session.execute(
+            select(Subscription.id).where(
+                Subscription.user_id == user_id,
+                Subscription.url == normalized_url,
+            )
+        )).scalar_one_or_none()
+
         stmt = pg_insert(Subscription).values(
             user_id=user_id,
-            url=req.url,
+            url=normalized_url,
             name=req.name,
             source=source,
             source_id=None,
@@ -136,7 +144,7 @@ async def create_subscription(
 
     from core.events import EventType, emit_safe
     await emit_safe(EventType.SUBSCRIPTION_CREATED, actor_user_id=auth["user_id"], resource_type="subscription", resource_id=row.id if row else None)
-    return {"status": "ok", "id": row.id if row else None, "source": source}
+    return {"status": "ok", "id": row.id if row else None, "source": source, "duplicate": existing is not None}
 
 
 @router.get("/{sub_id}")

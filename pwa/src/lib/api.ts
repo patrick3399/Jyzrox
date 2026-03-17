@@ -1112,7 +1112,7 @@ const subscriptions = {
     ),
 
   create: (data: { url: string; name?: string; cron_expr?: string; auto_download?: boolean }) =>
-    apiFetch<{ status: string; id: number; source: string | null }>('/api/subscriptions/', {
+    apiFetch<{ status: string; id: number; source: string | null; duplicate?: boolean }>('/api/subscriptions/', {
       method: 'POST',
       body: JSON.stringify(data),
     }),

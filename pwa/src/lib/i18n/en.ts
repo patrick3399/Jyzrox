@@ -799,6 +799,9 @@ const en: Record<string, string> = {
   'subscriptions.deleteAllFailed': '{failed} deletion(s) failed',
   'subscriptions.autoDownloadOn': 'Auto download enabled — cron will download new content',
   'subscriptions.autoDownloadOff': 'Auto download disabled — manual only',
+  'subscriptions.duplicateUpdated': 'This URL already exists — subscription settings updated',
+  'subscriptions.searchPlaceholder': 'Search subscriptions...',
+  'subscriptions.noResults': 'No subscriptions match your search',
 
   // ── RSS ──
   'rss.copyUrl': 'Copy RSS URL',
