@@ -41,12 +41,12 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
             now = datetime.now(UTC)
 
             # ── Stale reaper: detect zombie jobs ──────────────────────────
-            # Running jobs with no progress update for 60+ minutes
+            # Running jobs created 60+ minutes ago with no completion (no finished_at)
             stale_running_result = await session.execute(
                 update(DownloadJob)
                 .where(
                     DownloadJob.status == "running",
-                    DownloadJob.updated_at < now - timedelta(hours=1),
+                    DownloadJob.created_at < now - timedelta(hours=1),
                 )
                 .values(
                     status="failed",
@@ -65,7 +65,6 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 .where(
                     DownloadJob.status == "queued",
                     DownloadJob.created_at < now - timedelta(minutes=30),
-                    DownloadJob.updated_at < now - timedelta(minutes=30),
                 )
                 .values(
                     status="failed",

@@ -2455,6 +2455,9 @@ class TestReadingList:
         )
         await db_session.commit()
 
+        # Enable FK enforcement for this session so ON DELETE CASCADE is honoured by SQLite.
+        await db_session.execute(text("PRAGMA foreign_keys = ON"))
+
         # Hard delete the gallery row
         await db_session.execute(
             text("DELETE FROM galleries WHERE id = :gid"),

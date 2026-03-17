@@ -574,6 +574,14 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS user_image_favorites (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, image_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS user_ratings (
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
