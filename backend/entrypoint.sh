@@ -18,9 +18,10 @@ if [ "$(id -u appuser)" != "$PUID" ] || [ "$(id -g appgroup)" != "$PGID" ]; then
 fi
 
 # Create and fix ownership of bind-mounted data directories.
-for dir in /data/gallery /data/thumbs /data/training /data/avatars /data/cas /data/library /data/archive /app/config; do
-    mkdir -p "$dir"
-    chown "$PUID:$PGID" "$dir"
+# Skip read-only mounts (e.g. /opt/gallery-dl:ro on the API container).
+for dir in /data/gallery /data/thumbs /data/training /data/avatars /data/cas /data/library /data/archive /app/config /opt/gallery-dl; do
+    mkdir -p "$dir" 2>/dev/null || true
+    chown "$PUID:$PGID" "$dir" 2>/dev/null || true
 done
 
 exec gosu appuser "$@"

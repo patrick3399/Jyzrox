@@ -219,9 +219,12 @@ async def download_job(
 
     try:
         # Build heartbeat callback + inject into options
-        async def _sem_heartbeat():
-            if not await sem.heartbeat(job_id_str):
-                logger.warning("[download] heartbeat lost for %s", job_id_str)
+        async def _sem_heartbeat() -> bool:
+            """Return True if heartbeat succeeded, False if evicted."""
+            alive = await sem.heartbeat(job_id_str)
+            if not alive:
+                logger.warning("[download] heartbeat lost (evicted) for %s", job_id_str)
+            return alive
 
         # Inject semaphore heartbeat and config isolation into options
         from urllib.parse import urlparse as _urlparse_opts

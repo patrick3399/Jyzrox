@@ -227,22 +227,31 @@ async def _read_stderr(
     async for raw_line in proc.stderr:
         state.last_activity = asyncio.get_event_loop().time()
         line = raw_line.decode("utf-8", errors="replace").rstrip()
-        if line and len(state.stderr_lines) <= _MAX_STDERR_LINES:
+        if line and len(state.stderr_lines) < _MAX_STDERR_LINES:
             state.stderr_lines.append(line)
 
 
 async def _heartbeat_loop(
     state: _DownloadState,
-    callback: Callable[[], Awaitable[None]],
+    proc: asyncio.subprocess.Process,
+    callback: Callable[[], Awaitable[bool]],
     interval: float = 30.0,
-) -> None:
-    """Periodically call semaphore heartbeat."""
+) -> str:
+    """Periodically call semaphore heartbeat. Returns 'evicted' if slot lost."""
     while True:
         await asyncio.sleep(interval)
         if state.cancelled:
-            return
+            return "cancelled"
         try:
-            await callback()
+            alive = await callback()
+            if not alive:
+                logger.error("[gallery_dl] semaphore eviction — killing process")
+                state.cancelled = True
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+                return "evicted"
         except Exception as exc:
             logger.warning("[gallery_dl] heartbeat callback error: %s", exc)
 
@@ -371,8 +380,10 @@ class GalleryDlPlugin(SourcePlugin):
             config_id=options.get("config_id") if options else None,
         )
 
+        from worker.gallery_dl_venv import get_gdl_bin
+
         cmd = [
-            "gallery-dl",
+            get_gdl_bin(),
             "--config-ignore",
             "--config",
             str(config_path),
@@ -454,13 +465,13 @@ class GalleryDlPlugin(SourcePlugin):
         sentinel_tasks: list[asyncio.Task] = [proc_wait_task, inactivity_task]
 
         sem_heartbeat = (options or {}).get("sem_heartbeat")
+        heartbeat_task: asyncio.Task | None = None
         if sem_heartbeat:
-            bg_tasks.append(asyncio.create_task(_heartbeat_loop(state, sem_heartbeat)))
+            heartbeat_task = asyncio.create_task(_heartbeat_loop(state, proc, sem_heartbeat))
+            sentinel_tasks.append(heartbeat_task)
 
         if cancel_check or pause_check:
-            sentinel_tasks.append(
-                asyncio.create_task(_pause_cancel_watcher(state, proc, cancel_check, pause_check))
-            )
+            sentinel_tasks.append(asyncio.create_task(_pause_cancel_watcher(state, proc, cancel_check, pause_check)))
 
         all_tasks = bg_tasks + sentinel_tasks
         try:
@@ -486,6 +497,17 @@ class GalleryDlPlugin(SourcePlugin):
                         inactivity_killed = True
                 except Exception:
                     pass
+
+        evicted = False
+        if heartbeat_task is not None:
+            for t in done:
+                if t is heartbeat_task:
+                    try:
+                        result = t.result()
+                        if result == "evicted":
+                            evicted = True
+                    except Exception:
+                        pass
 
         # Cancel all remaining tasks (sentinels + background)
         remaining = pending | {t for t in bg_tasks if not t.done()}
@@ -526,6 +548,16 @@ class GalleryDlPlugin(SourcePlugin):
                     error=err,
                 )
             return DownloadResult(status="failed", downloaded=0, total=0, error=err)
+
+        if evicted:
+            err = "Semaphore eviction — heartbeat lost"
+            logger.error("[gallery_dl] %s: %s", err, url)
+            return DownloadResult(
+                status="failed",
+                downloaded=state.downloaded,
+                total=state.downloaded + state.skipped_count,
+                error=err,
+            )
 
         stderr_text = "\n".join(state.stderr_lines)
 

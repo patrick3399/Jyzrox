@@ -49,6 +49,7 @@ services:
       - app_data:/data
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - ./mnt:/mnt:ro
+      - gallery_dl_venv:/opt/gallery-dl:ro
     depends_on:
       postgres:
         condition: service_healthy
@@ -93,6 +94,7 @@ services:
       # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - ./mnt:/mnt:ro
+      - gallery_dl_venv:/opt/gallery-dl
     depends_on:
       postgres:
         condition: service_healthy
@@ -252,6 +254,7 @@ volumes:
   postgres_data:
   redis_data:
   tagger_models:
+  gallery_dl_venv:
 
 networks:
   frontend:

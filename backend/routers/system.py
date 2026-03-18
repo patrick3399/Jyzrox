@@ -6,9 +6,8 @@ import shutil
 import subprocess
 import sys
 
-import psutil
-
 import fastapi
+import psutil
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
 
@@ -26,6 +25,7 @@ _admin = require_role("admin")
 
 # ── Static version detection (executed once at import time) ───────────
 
+
 def _detect_jyzrox_version() -> str:
     """Return output of `git describe --tags --always`, fallback 'dev'."""
     try:
@@ -41,26 +41,6 @@ def _detect_jyzrox_version() -> str:
         return "dev"
 
 
-def _detect_gallery_dl_version() -> str | None:
-    """Return gallery-dl version, or None on failure."""
-    try:
-        import gallery_dl  # type: ignore
-        return gallery_dl.version.__version__
-    except Exception:
-        pass
-    try:
-        result = subprocess.run(
-            ["gallery-dl", "--version"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        ver = result.stdout.strip()
-        return ver if ver else None
-    except Exception:
-        return None
-
-
 def _detect_python_version() -> str:
     """Return Python version string (major.minor.micro)."""
     v = sys.version_info
@@ -71,11 +51,11 @@ _STATIC_VERSIONS: dict[str, str | None] = {
     "jyzrox": _detect_jyzrox_version(),
     "python": _detect_python_version(),
     "fastapi": fastapi.__version__,
-    "gallery_dl": _detect_gallery_dl_version(),
 }
 
 
 # ── Dynamic version helpers (queried per request) ─────────────────────
+
 
 async def _get_postgresql_version() -> str | None:
     """Query PostgreSQL server version via SELECT version()."""
@@ -129,7 +109,10 @@ async def system_health():
     # Inode check
     try:
         proc = await asyncio.create_subprocess_exec(
-            "df", "-i", "--output=ipcent", settings.data_cas_path,
+            "df",
+            "-i",
+            "--output=ipcent",
+            settings.data_cas_path,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -156,6 +139,7 @@ async def _get_tagger_info() -> dict | None:
     """Fetch tagger service health info, or None if offline."""
     try:
         import httpx
+
         async with httpx.AsyncClient() as client:
             resp = await client.get(f"{settings.tagger_url}/health", timeout=5)
             if resp.status_code == 200:
@@ -168,10 +152,13 @@ async def _get_tagger_info() -> dict | None:
 @router.get("/info")
 async def system_info(_: dict = Depends(require_auth)):
     """Return non-sensitive runtime configuration including component versions."""
-    pg_ver, redis_ver, tagger_info = await asyncio.gather(
+    from worker.gallery_dl_venv import get_current_version
+
+    pg_ver, redis_ver, tagger_info, gdl_version = await asyncio.gather(
         _get_postgresql_version(),
         _get_redis_version(),
         _get_tagger_info(),
+        get_current_version(),
     )
     jyzrox_ver = _STATIC_VERSIONS["jyzrox"]
     return {
@@ -182,7 +169,7 @@ async def system_info(_: dict = Depends(require_auth)):
             "jyzrox": jyzrox_ver,
             "python": _STATIC_VERSIONS["python"],
             "fastapi": _STATIC_VERSIONS["fastapi"],
-            "gallery_dl": _STATIC_VERSIONS["gallery_dl"],
+            "gallery_dl": gdl_version,
             "postgresql": pg_ver,
             "redis": redis_ver,
             "onnxruntime": tagger_info.get("onnxruntime_version") if tagger_info else None,
@@ -214,7 +201,7 @@ def _get_real_mounts() -> list[tuple[str, str]]:
             continue
         if p.mountpoint in MOUNT_EXCLUDE_PATHS:
             continue
-        if p.mountpoint.startswith('/dev/'):
+        if p.mountpoint.startswith("/dev/"):
             continue
         if p.mountpoint in seen_paths:
             continue
@@ -240,7 +227,7 @@ async def system_storage(_: dict = Depends(_admin)):
     seen_devs: set[int] = set()
     usage_tasks: list = []
     valid_mounts: list[tuple[str, str]] = []
-    for (label, path), stat in zip(mount_list, stat_results):
+    for (label, path), stat in zip(mount_list, stat_results, strict=False):
         if isinstance(stat, Exception):
             continue
         if stat.st_dev in seen_devs:
@@ -252,18 +239,20 @@ async def system_storage(_: dict = Depends(_admin)):
     usage_results = await asyncio.gather(*usage_tasks, return_exceptions=True)
 
     mounts = []
-    for (label, path), usage in zip(valid_mounts, usage_results):
+    for (label, path), usage in zip(valid_mounts, usage_results, strict=False):
         if isinstance(usage, Exception):
             continue
         percent = round(usage.used / usage.total * 100, 1) if usage.total else 0.0
-        mounts.append({
-            "label": label,
-            "path": path,
-            "total": usage.total,
-            "used": usage.used,
-            "free": usage.free,
-            "percent": percent,
-        })
+        mounts.append(
+            {
+                "label": label,
+                "path": path,
+                "total": usage.total,
+                "used": usage.used,
+                "free": usage.free,
+                "percent": percent,
+            }
+        )
     return {"mounts": mounts}
 
 
@@ -395,5 +384,6 @@ async def get_recent_events(
 ):
     """Return recent system events from the EventBus. Admin only."""
     from core.events import event_bus
+
     events = await event_bus.get_recent(limit)
     return {"events": events, "count": len(events)}

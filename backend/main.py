@@ -3,6 +3,7 @@ import os
 from contextlib import asynccontextmanager
 
 from core.compat import patch_asyncio_for_314
+
 patch_asyncio_for_314()
 
 from arq import create_pool
@@ -15,33 +16,42 @@ from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
 from core.csrf import CSRFMiddleware
-from core.rate_limit import RateLimitMiddleware
 from core.database import engine
+from core.rate_limit import RateLimitMiddleware
 from core.redis_client import close_redis, init_redis
 from routers import (
     artists,
     auth,
     collections,
-    dedup as dedup_router,
     download,
     export,
     external,
+    gallery_dl_admin,
     history,
     import_router,
     library,
-    logs as logs_router,
     opds,
-    plugins as plugins_router,
     rss,
     scheduled_tasks,
     search,
     subscriptions,
     system,
     tag,
-    users as users_router,
     ws,
 )
+from routers import (
+    dedup as dedup_router,
+)
+from routers import (
+    logs as logs_router,
+)
+from routers import (
+    plugins as plugins_router,
+)
 from routers import settings as settings_router
+from routers import (
+    users as users_router,
+)
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -54,17 +64,20 @@ logger = logging.getLogger(__name__)
 async def lifespan(app: FastAPI):
     logger.info("Starting Jyzrox API rev 2.0...")
     await init_redis()
-    from core.log_handler import install_log_handler, apply_log_level_from_redis
+    from core.log_handler import apply_log_level_from_redis, install_log_handler
+
     install_log_handler("api", extra_loggers=["uvicorn", "uvicorn.access"])
     level = await apply_log_level_from_redis("api")
     logger.info("Log handler installed, level=%s", level)
     app.state.arq = await create_pool(RedisSettings.from_dsn(settings.redis_url))
     logger.info("Redis + ARQ pool ready")
     from plugins import init_plugins
+
     await init_plugins()
     logger.info("Plugins initialized")
     # Mount browse routers dynamically from plugins
     from plugins.registry import plugin_registry
+
     _BROWSE_PREFIX_MAP = {"ehentai": "/api/eh", "pixiv": "/api/pixiv"}
     for sid, router in plugin_registry.get_browse_routers():
         prefix = _BROWSE_PREFIX_MAP.get(sid, f"/api/browse/{sid}")
@@ -90,6 +103,7 @@ app = FastAPI(
 # Mount swagger-ui static assets
 app.mount("/api/docs/static", StaticFiles(directory="/app/static/swagger-ui"), name="swagger-static")
 
+
 @app.get("/api/docs", include_in_schema=False)
 async def custom_swagger_ui() -> HTMLResponse:
     return get_swagger_ui_html(
@@ -98,6 +112,7 @@ async def custom_swagger_ui() -> HTMLResponse:
         swagger_js_url="/api/docs/static/swagger-ui-bundle.js",
         swagger_css_url="/api/docs/static/swagger-ui.css",
     )
+
 
 # CORS: restrict to configured origin, or same-origin only
 _cors_origins: list[str] = []
@@ -138,6 +153,7 @@ app.include_router(dedup_router.router, prefix="/api/dedup")
 app.include_router(users_router.router, prefix="/api/users")
 app.include_router(rss.router, prefix="/api/rss")
 app.include_router(logs_router.router, prefix="/api/logs")
+app.include_router(gallery_dl_admin.router, prefix="/api/admin/gallery-dl")
 
 
 @app.get("/api/health")

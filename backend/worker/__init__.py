@@ -28,6 +28,9 @@ from worker.dedup_tier2 import dedup_tier2_job
 from worker.dedup_tier3 import dedup_tier3_job
 from worker.download import download_job as _download_job
 from worker.ehtag_sync import ehtag_sync_job
+from worker.gallery_dl_venv import ensure_venv
+from worker.gallery_dl_venv import rollback_job as gdl_rollback_job
+from worker.gallery_dl_venv import upgrade_job as gdl_upgrade_job
 from worker.helpers import _sha256, compute_arq_job_id, enqueue_download_job
 from worker.importer import (
     _build_gallery,
@@ -112,6 +115,11 @@ async def startup(ctx: dict) -> None:
     from plugins import init_plugins
 
     await init_plugins()
+    # Initialize gallery-dl venv (before recovery — downloads need it)
+    try:
+        await ensure_venv()
+    except Exception as exc:
+        logger.error("gallery-dl venv initialization failed: %s", exc)
     # Start log level subscriber background task
     ctx["_log_level_task"] = asyncio.ensure_future(_log_level_subscriber(ctx))
     r = ctx["redis"]
@@ -459,6 +467,8 @@ class WorkerSettings:
         trash_gc_job,
         ehtag_sync_job,
         log_cleanup_job,
+        arq_func(gdl_upgrade_job, name="gdl_upgrade_job", max_tries=1),
+        arq_func(gdl_rollback_job, name="gdl_rollback_job", max_tries=1),
     ]
     cron_jobs = [
         cron(
@@ -556,6 +566,8 @@ __all__ = [
     "trash_gc_job",
     "ehtag_sync_job",
     "log_cleanup_job",
+    "gdl_upgrade_job",
+    "gdl_rollback_job",
     "startup",
     "shutdown",
     "WorkerSettings",

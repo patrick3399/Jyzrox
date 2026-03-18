@@ -12,6 +12,7 @@ logger = logging.getLogger(__name__)
 
 class EventType(str, Enum):
     """All system event types."""
+
     # Download
     DOWNLOAD_ENQUEUED = "download.enqueued"
     DOWNLOAD_STARTED = "download.started"
@@ -58,6 +59,7 @@ class EventType(str, Enum):
     RETRY_PROCESSED = "retry.processed"
     EHTAG_SYNC_COMPLETED = "ehtag.sync_completed"
     RECONCILIATION_COMPLETED = "reconciliation.completed"
+    SYSTEM_GDL_UPGRADED = "system.gdl_upgraded"
 
     # System alerts
     SYSTEM_ALERT = "system.alert"
@@ -69,6 +71,7 @@ class EventType(str, Enum):
 @dataclass
 class Event:
     """Structured event payload."""
+
     event_type: EventType
     timestamp: str = field(default_factory=lambda: datetime.now(UTC).isoformat())
     actor_user_id: int | None = None
@@ -102,6 +105,7 @@ class EventBus:
         """Publish event to Redis channels and store in recent list."""
         try:
             from core.redis_client import get_redis
+
             r = get_redis()
             payload = event.to_json()
             pipe = r.pipeline(transaction=False)
@@ -121,6 +125,7 @@ class EventBus:
         """Return recent events from Redis list."""
         try:
             from core.redis_client import get_redis
+
             r = get_redis()
             raw_list = await r.lrange(self.RECENT_KEY, 0, limit - 1)
             events = []
