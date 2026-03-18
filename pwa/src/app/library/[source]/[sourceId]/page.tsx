@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect, useRef, useCallback } from 'react'
+import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
@@ -8,10 +8,15 @@ import useSWR from 'swr'
 import { useLibraryGallery, useGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { api } from '@/lib/api'
+import type { GalleryImage } from '@/lib/types'
+import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
+import { useLongPress } from '@/hooks/useLongPress'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { t, formatDate } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
+import { TagAutocomplete } from '@/components/TagAutocomplete'
+import { Pencil, Heart, Bookmark, BookmarkCheck } from 'lucide-react'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
   character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
@@ -98,6 +103,7 @@ export default function GalleryDetailPage() {
   const [isRetagging, setIsRetagging] = useState(false)
   const [tagData, setTagData] = useState<Array<{ namespace: string; name: string; confidence: number; source: string }>>([])
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.35)
+  const [editingTags, setEditingTags] = useState(false)
 
   // Image multi-select & exclusion state
   const [selectMode, setSelectMode] = useState(false)
@@ -106,6 +112,32 @@ export default function GalleryDetailPage() {
   const [excludedBlobs, setExcludedBlobs] = useState<Array<{ blob_sha256: string; excluded_at: string | null }>>([])
   const [showExcluded, setShowExcluded] = useState(false)
   const [restoringHash, setRestoringHash] = useState<string | null>(null)
+
+  // Image context menu state
+  const [imageMenu, setImageMenu] = useState<{
+    open: boolean
+    position: { x: number; y: number }
+    imageUrl: string
+    imageName: string
+    imageId: number
+    pageNum: number
+  } | null>(null)
+
+  const activeImageRef = useRef<GalleryImage | null>(null)
+
+  // Track favorited image IDs from API response + optimistic overrides
+  const [localFavOverrides, setLocalFavOverrides] = useState<Map<number, boolean>>(new Map())
+
+  const favoritedImageIds = useMemo(() => {
+    const set = new Set(imagesData?.favorited_image_ids ?? [])
+    for (const [id, fav] of localFavOverrides) {
+      if (fav) set.add(id)
+      else set.delete(id)
+    }
+    return set
+  }, [imagesData?.favorited_image_ids, localFavOverrides])
+
+  const isFavorited = useCallback((imageId: number) => favoritedImageIds.has(imageId), [favoritedImageIds])
 
   // Inline-edit state
   const [editingTitle, setEditingTitle] = useState(false)
@@ -190,10 +222,24 @@ export default function GalleryDetailPage() {
       })
   }, [gallery, featureSettings, mutateGallery])
 
-  useEffect(() => {
+  const refetchTagData = useCallback(() => {
     if (!source || !sourceId) return
     api.library.getGalleryTags(source, sourceId).then((res) => setTagData(res.tags)).catch(() => {})
   }, [source, sourceId])
+
+  useEffect(() => { refetchTagData() }, [refetchTagData])
+
+  const handleUpdateTag = useCallback(async (tagStr: string, action: 'add' | 'remove') => {
+    if (!gallery) return
+    try {
+      await api.tags.updateGalleryTags(gallery.id, { tags: [tagStr], action })
+      toast.success(t(action === 'add' ? 'library.tagAdded' : 'library.tagRemoved'))
+      mutateGallery()
+      refetchTagData()
+    } catch {
+      toast.error(t(action === 'add' ? 'library.tagAddFailed' : 'library.tagRemoveFailed'))
+    }
+  }, [gallery, mutateGallery, refetchTagData])
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -379,6 +425,83 @@ export default function GalleryDetailPage() {
       setRestoringHash(null)
     }
   }
+
+  // Long-press handler to open image context menu (non-select mode)
+  const handleImageLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    const img = activeImageRef.current
+    if (!img) return
+    const pos = 'touches' in e
+      ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+      : { x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY }
+    setImageMenu({
+      open: true,
+      position: pos,
+      imageUrl: img.file_path || img.thumb_path || '',
+      imageName: img.filename || `page_${img.page_num}`,
+      imageId: img.id,
+      pageNum: img.page_num,
+    })
+  }, [])
+
+  const { onTouchStart: lpStart, onTouchMove: lpMove, onTouchEnd: lpEnd, onContextMenu: lpCtx } = useLongPress({ onLongPress: handleImageLongPress })
+
+  const handleImageToggleFavorite = useCallback(async () => {
+    if (!imageMenu) return
+    const { imageId } = imageMenu
+    const wasFavorited = isFavorited(imageId)
+    setImageMenu(null)
+
+    // Optimistic update
+    setLocalFavOverrides(prev => new Map(prev).set(imageId, !wasFavorited))
+
+    try {
+      if (wasFavorited) {
+        await api.library.unfavoriteImage(imageId)
+      } else {
+        await api.library.favoriteImage(imageId)
+      }
+      toast.success(wasFavorited ? t('reader.imageUnfavorited') : t('reader.imageFavorited'))
+      mutateImages(prev => {
+        if (!prev) return prev
+        return {
+          ...prev,
+          favorited_image_ids: wasFavorited
+            ? (prev.favorited_image_ids ?? []).filter((id: number) => id !== imageId)
+            : [...(prev.favorited_image_ids ?? []), imageId],
+        }
+      }, { revalidate: false })
+    } catch {
+      // Revert optimistic update
+      setLocalFavOverrides(prev => {
+        const next = new Map(prev)
+        next.delete(imageId)
+        return next
+      })
+      toast.error(t('reader.favoriteFailed'))
+    }
+  }, [imageMenu, isFavorited, mutateImages])
+
+  const handleImageHide = useCallback(async () => {
+    if (!imageMenu || !source || !sourceId) return
+    const { pageNum } = imageMenu
+    setImageMenu(null)
+
+    if (!window.confirm(t('reader.hideImageConfirm'))) return
+
+    try {
+      await api.library.deleteImage(source, sourceId, pageNum)
+      toast.success(t('reader.imageHidden'))
+      mutateGallery()
+      mutateImages()
+      fetchExcluded()
+    } catch {
+      toast.error(t('common.error'))
+    }
+  }, [imageMenu, source, sourceId, mutateGallery, mutateImages, fetchExcluded])
+
+  const manualTagSet = useMemo(() => new Set(
+    tagData.filter((td) => td.source === 'manual').map((td) => `${td.namespace}:${td.name}`)
+  ), [tagData])
 
   if (galleryLoading) {
     return (
@@ -610,6 +733,29 @@ export default function GalleryDetailPage() {
                   {gallery.is_favorited ? t('library.favorited') : t('library.unfavorited')}
                 </button>
                 <button
+                  onClick={async () => {
+                    try {
+                      const updated = await api.library.updateGallery(source!, sourceId!, { in_reading_list: !gallery.in_reading_list })
+                      mutateGallery(updated, false)
+                      toast.success(gallery.in_reading_list ? t('contextMenu.removeFromReadingList') : t('contextMenu.addToReadingList'))
+                    } catch {
+                      toast.error(t('common.failedToLoad'))
+                    }
+                  }}
+                  disabled={isUpdating}
+                  title={gallery.in_reading_list ? t('library.inReadingList') : t('library.readLater')}
+                  className={`px-4 py-2 rounded text-sm font-medium border transition-colors flex items-center gap-1.5 ${
+                    gallery.in_reading_list
+                      ? 'bg-blue-900/40 border-blue-600 text-blue-400 hover:bg-blue-900/60'
+                      : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-blue-600 hover:text-blue-400'
+                  }`}
+                >
+                  {gallery.in_reading_list
+                    ? <><BookmarkCheck size={16} />{t('library.inReadingList')}</>
+                    : <><Bookmark size={16} />{t('library.readLater')}</>
+                  }
+                </button>
+                <button
                   onClick={handleDelete}
                   disabled={isDeleting}
                   className="px-4 py-2 rounded text-sm font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
@@ -649,9 +795,31 @@ export default function GalleryDetailPage() {
 
         {/* Tags */}
         <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
-          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide mb-3">
-            {t('common.tags')}
-          </h2>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
+              {t('common.tags')}
+            </h2>
+            <button
+              onClick={() => setEditingTags(!editingTags)}
+              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
+                editingTags
+                  ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
+                  : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
+              }`}
+            >
+              <Pencil size={12} />
+              {editingTags ? t('library.doneEditingTags') : t('library.editTags')}
+            </button>
+          </div>
+          {editingTags && (
+            <div className="mb-3">
+              <TagAutocomplete
+                onSelect={(tag) => handleUpdateTag(tag, 'add')}
+                clearOnSelect={true}
+                placeholder={t('library.addTagPlaceholder')}
+              />
+            </div>
+          )}
           {Object.keys(tagGroups).length === 0 ? (
             <p className="text-sm text-vault-text-muted">{t('library.noTags')}</p>
           ) : (
@@ -665,13 +833,24 @@ export default function GalleryDetailPage() {
                     {values.map((value) => {
                       const fullTag = namespace === 'general' ? value : `${namespace}:${value}`
                       const translation = tagTranslations?.[fullTag]
+                      const isManual = manualTagSet.has(fullTag)
                       return (
                         <span
                           key={value}
-                          className={`px-2 py-0.5 rounded border text-xs ${getTagColor(fullTag)}`}
-                          title={translation || undefined}
+                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs ${getTagColor(fullTag)}`}
+                          title={translation ? `${namespace}:${value}` : undefined}
                         >
-                          {value}
+                          {translation || value}
+                          {editingTags && isManual && (
+                            <button
+                              type="button"
+                              onClick={() => handleUpdateTag(fullTag, 'remove')}
+                              className="ml-0.5 opacity-60 hover:opacity-100 leading-none"
+                              aria-label={t('common.removeTag', { tag: fullTag })}
+                            >
+                              ×
+                            </button>
+                          )}
                         </span>
                       )
                     })}
@@ -818,10 +997,17 @@ export default function GalleryDetailPage() {
                   )
                 }
                 return (
-                  <Link
+                  <div
                     key={image.id}
-                    href={`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`}
-                    className="group"
+                    role="button"
+                    tabIndex={0}
+                    onClick={() => router.push(`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`)}
+                    onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`) }}
+                    onTouchStart={(e) => { activeImageRef.current = image; lpStart(e) }}
+                    onTouchMove={lpMove}
+                    onTouchEnd={lpEnd}
+                    onContextMenu={(e) => { activeImageRef.current = image; lpCtx(e) }}
+                    className="group relative cursor-pointer select-none [-webkit-touch-callout:none]"
                   >
                     {image.thumb_path ? (
                       <img
@@ -835,7 +1021,15 @@ export default function GalleryDetailPage() {
                         {image.page_num}
                       </div>
                     )}
-                  </Link>
+                    {isFavorited(image.id) && (
+                      <div className="absolute top-1 right-1">
+                        <Heart className="w-4 h-4 fill-current text-red-400 drop-shadow" />
+                      </div>
+                    )}
+                    {imageMenu?.imageId === image.id && (
+                      <div className="absolute inset-0 rounded border-2 border-vault-accent pointer-events-none" />
+                    )}
+                  </div>
                 )
               })}
 
@@ -888,6 +1082,19 @@ export default function GalleryDetailPage() {
             </div>
           )}
         </div>
+
+      {imageMenu?.open && (
+        <ImageContextMenu
+          open={true}
+          onClose={() => setImageMenu(null)}
+          position={imageMenu.position}
+          imageUrl={imageMenu.imageUrl}
+          imageName={imageMenu.imageName}
+          onHide={handleImageHide}
+          isFavorited={isFavorited(imageMenu.imageId)}
+          onToggleFavorite={handleImageToggleFavorite}
+        />
+      )}
     </div>
   )
 }

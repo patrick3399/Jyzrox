@@ -147,6 +147,8 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         credential_requirement="recommended",
         sleep_request=(2.0, 4.0),
         retries=5, http_timeout=45,
+        source_id_fields=("set_id", "user_id", "id"),
+        artist_from="uploader",
     ),
     GdlSiteConfig(
         domain="bsky.app", source_id="bluesky", name="Bluesky",
@@ -252,10 +254,10 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         category="gallery", has_tags=True, artist_from="tag",
     ),
     GdlSiteConfig(
-        domain="kemono.su", source_id="kemono", name="Kemono",
+        domain="kemono.cr", source_id="kemono", name="Kemono",
         category="gallery", has_tags=True,
         subscribe_id_key="id",
-        subscribe_url_tpl="https://kemono.su/{}/",
+        subscribe_url_tpl="https://kemono.cr/{}/",
         subscribe_id_pattern=r"/(\w+)/user/(\d+)",
         subscribe_id_format="{1}:{2}",
         retries=5, http_timeout=60,

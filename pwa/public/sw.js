@@ -1,4 +1,4 @@
-const CACHE_NAME = 'jyzrox-static-f6fcbce2';
+const CACHE_NAME = 'jyzrox-static-78fbf156';
 const OFFLINE_URL = '/offline.html';
 const MEDIA_CACHE_NAME = 'jyzrox-media';
 const PAGE_CACHE_NAME = 'jyzrox-pages';

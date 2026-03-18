@@ -83,6 +83,7 @@ function makeGallery(overrides: Partial<Gallery> = {}): Gallery {
     favorited: false,
     is_favorited: false,
     my_rating: null,
+    in_reading_list: false,
     uploader: '',
     artist_id: null,
     download_status: 'complete',

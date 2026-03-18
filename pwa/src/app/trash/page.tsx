@@ -11,9 +11,9 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import type { Gallery } from '@/lib/types'
 
-function daysRemaining(deletedAt: string): number {
+function daysRemaining(deletedAt: string, retentionDays: number = 30): number {
   const deleted = new Date(deletedAt)
-  const expiry = new Date(deleted.getTime() + 30 * 24 * 60 * 60 * 1000)
+  const expiry = new Date(deleted.getTime() + retentionDays * 24 * 60 * 60 * 1000)
   const remaining = Math.ceil((expiry.getTime() - Date.now()) / (24 * 60 * 60 * 1000))
   return Math.max(0, remaining)
 }
@@ -33,6 +33,9 @@ function timeAgo(iso: string | null): string {
 export default function TrashPage() {
   useLocale()
   const { data, isLoading, mutate } = useSWR('trash-list', () => api.library.trashList({ limit: 200 }))
+  const { data: featuresData } = useSWR('settings/features', () => api.settings.getFeatures())
+  const trashEnabled = featuresData?.trash_enabled ?? true
+  const retentionDays = featuresData?.trash_retention_days ?? 30
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
   const handleRestore = useCallback(async (g: Gallery) => {
@@ -86,7 +89,7 @@ export default function TrashPage() {
           <h1 className="text-xl font-bold text-vault-text">{t('trash.title')}</h1>
           {data && <span className="text-sm text-vault-text-muted">({data.total})</span>}
         </div>
-        {galleries.length > 0 && (
+        {trashEnabled && galleries.length > 0 && (
           <button
             onClick={handleEmptyTrash}
             disabled={actionInProgress === 'empty'}
@@ -102,11 +105,15 @@ export default function TrashPage() {
         <div className="flex justify-center py-12"><LoadingSpinner /></div>
       )}
 
-      {!isLoading && galleries.length === 0 && (
+      {!isLoading && !trashEnabled && (
+        <EmptyState icon={Trash2} title={t('trash.disabled')} description={t('trash.disabledDesc')} />
+      )}
+
+      {!isLoading && trashEnabled && galleries.length === 0 && (
         <EmptyState icon={Trash2} title={t('trash.empty')} />
       )}
 
-      {!isLoading && galleries.length > 0 && (
+      {!isLoading && trashEnabled && galleries.length > 0 && (
         <div className="space-y-2">
           {galleries.map((g) => (
             <div key={g.id} className="bg-vault-card border border-vault-border rounded-lg p-3 flex items-center gap-3">
@@ -125,7 +132,7 @@ export default function TrashPage() {
                   {g.deleted_at && (
                     <>
                       <span>{t('trash.deletedAt', { time: timeAgo(g.deleted_at) })}</span>
-                      <span className="text-orange-400">{t('trash.daysRemaining', { days: String(daysRemaining(g.deleted_at)) })}</span>
+                      <span className="text-orange-400">{t('trash.daysRemaining', { days: String(daysRemaining(g.deleted_at, retentionDays)) })}</span>
                     </>
                   )}
                 </div>

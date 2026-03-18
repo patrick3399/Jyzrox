@@ -189,34 +189,55 @@ class TestPubsubListener:
     """Direct unit tests for _pubsub_listener."""
 
     async def test_pubsub_listener_forwards_message_bytes(self):
-        """Bytes payload → decoded to str and sent to WebSocket."""
+        """Bytes payload in new Event format → decoded, translated, and sent to WebSocket."""
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "download.completed",
+            "actor_user_id": 1,
+            "resource_type": "download_job",
+            "resource_id": "abc123",
+            "data": {"job_id": "abc123", "status": "done", "progress": None},
+        })
         pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": b'{"type":"job_update"}'},
+            {"type": "message", "data": event.encode()},
         ])
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
                 await _pubsub_listener(ws, user_id="1", role="admin")
 
-        ws.send_text.assert_called_once_with('{"type":"job_update"}')
+        ws.send_text.assert_called_once()
+        sent = json.loads(ws.send_text.call_args[0][0])
+        assert sent["type"] == "job_update"
+        assert sent["job_id"] == "abc123"
+        assert sent["status"] == "done"
 
     async def test_pubsub_listener_forwards_message_str(self):
-        """String payload → sent as-is to WebSocket."""
+        """String payload in new Event format → translated and sent to WebSocket."""
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "gallery.updated",
+            "actor_user_id": 1,
+            "resource_type": "gallery",
+            "resource_id": 5,
+            "data": {},
+        })
         pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": '{"type":"ping"}'},
+            {"type": "message", "data": event},
         ])
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
                 await _pubsub_listener(ws, user_id="1", role="admin")
 
-        ws.send_text.assert_called_once_with('{"type":"ping"}')
+        ws.send_text.assert_called_once()
+        sent = json.loads(ws.send_text.call_args[0][0])
+        assert sent["type"] == "gallery.updated"
+        assert sent["event_type"] == "gallery.updated"
 
     async def test_pubsub_listener_skips_non_message_type(self):
         """subscribe-type messages → not forwarded to WebSocket."""
@@ -224,7 +245,7 @@ class TestPubsubListener:
 
         ws = AsyncMock()
         pubsub = _make_pubsub_mock(messages=[
-            {"type": "subscribe", "data": b"download:events"},
+            {"type": "subscribe", "data": b"events:all"},
         ])
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
@@ -238,7 +259,11 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        other_user_event = json.dumps({"type": "job_update", "user_id": 99})
+        other_user_event = json.dumps({
+            "event_type": "download.started",
+            "actor_user_id": 99,
+            "data": {"status": "running"},
+        })
         pubsub = _make_pubsub_mock(messages=[
             {"type": "message", "data": other_user_event.encode()},
         ])
@@ -250,11 +275,15 @@ class TestPubsubListener:
         ws.send_text.assert_not_called()
 
     async def test_pubsub_listener_allows_own_events_for_non_admin(self):
-        """Non-admin user → events for their own user_id pass through."""
+        """Non-admin user → events for their own actor_user_id pass through."""
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        own_event = json.dumps({"type": "job_update", "user_id": 1})
+        own_event = json.dumps({
+            "event_type": "download.started",
+            "actor_user_id": 1,
+            "data": {"status": "running"},
+        })
         pubsub = _make_pubsub_mock(messages=[
             {"type": "message", "data": own_event.encode()},
         ])
@@ -266,11 +295,15 @@ class TestPubsubListener:
         ws.send_text.assert_called_once()
 
     async def test_pubsub_listener_allows_null_user_id_broadcast_for_non_admin(self):
-        """Events with user_id=None are broadcast to all users, including non-admin."""
+        """Events with actor_user_id=None are broadcast to all users, including non-admin."""
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        broadcast_event = json.dumps({"type": "job_update", "user_id": None})
+        broadcast_event = json.dumps({
+            "event_type": "gallery.updated",
+            "actor_user_id": None,
+            "data": {},
+        })
         pubsub = _make_pubsub_mock(messages=[
             {"type": "message", "data": broadcast_event.encode()},
         ])
@@ -282,11 +315,15 @@ class TestPubsubListener:
         ws.send_text.assert_called_once()
 
     async def test_pubsub_listener_admin_receives_all_events(self):
-        """Admin role → receives events for any user_id."""
+        """Admin role → receives events for any actor_user_id."""
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        other_event = json.dumps({"type": "job_update", "user_id": 42})
+        other_event = json.dumps({
+            "event_type": "download.started",
+            "actor_user_id": 42,
+            "data": {"status": "running"},
+        })
         pubsub = _make_pubsub_mock(messages=[
             {"type": "message", "data": other_event.encode()},
         ])
@@ -308,15 +345,16 @@ class TestPubsubListener:
             with pytest.raises(asyncio.CancelledError):
                 await _pubsub_listener(ws, user_id="1", role="admin")
 
-        pubsub.unsubscribe.assert_called_once_with("download:events")
+        pubsub.unsubscribe.assert_called_once_with("events:all")
         pubsub.aclose.assert_called_once()
 
     async def test_pubsub_listener_ignores_malformed_json_in_filter(self):
-        """Non-JSON event data while filtering → silently forwarded (not dropped)."""
+        """Non-JSON event data for non-admin → dropped (cannot parse actor_user_id)."""
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        # Non-JSON data: the except block in the filter passes through the message.
+        # Non-JSON data: the except block drops the message for non-admin users
+        # because it cannot verify ownership.
         pubsub = _make_pubsub_mock(messages=[
             {"type": "message", "data": b"not-json"},
         ])
@@ -325,11 +363,92 @@ class TestPubsubListener:
             with pytest.raises(asyncio.CancelledError):
                 await _pubsub_listener(ws, user_id="1", role="member")
 
-        # Malformed JSON → cannot parse user_id → send_text is called (pass-through)
+        # Non-JSON + non-admin → dropped (only admin receives non-JSON as-is)
+        ws.send_text.assert_not_called()
+
+    async def test_pubsub_listener_admin_receives_malformed_json_as_is(self):
+        """Non-JSON event data for admin → forwarded as-is (backward compat)."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+        pubsub = _make_pubsub_mock(messages=[
+            {"type": "message", "data": b"not-json"},
+        ])
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(asyncio.CancelledError):
+                await _pubsub_listener(ws, user_id="1", role="admin")
+
         ws.send_text.assert_called_once_with("not-json")
 
-    async def test_pubsub_listener_subscribes_to_download_events(self):
-        """pubsub.subscribe is called with 'download:events' channel."""
+    async def test_pubsub_listener_filters_new_event_type_by_actor_user_id(self):
+        """Non-admin user does not receive new-format events from other users."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "gallery.updated",
+            "actor_user_id": 99,
+            "resource_type": "gallery",
+            "resource_id": 42,
+            "data": {},
+        })
+        pubsub = _make_pubsub_mock(messages=[
+            {"type": "message", "data": event},
+        ])
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(asyncio.CancelledError):
+                await _pubsub_listener(ws, user_id="1", role="member")
+
+        ws.send_text.assert_not_called()
+
+    async def test_pubsub_listener_allows_new_event_broadcast_for_non_admin(self):
+        """New-format events with actor_user_id=None are broadcast to all users."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "rescan.completed",
+            "actor_user_id": None,
+            "resource_type": "system",
+            "resource_id": None,
+            "data": {},
+        })
+        pubsub = _make_pubsub_mock(messages=[
+            {"type": "message", "data": event},
+        ])
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(asyncio.CancelledError):
+                await _pubsub_listener(ws, user_id="2", role="viewer")
+
+        ws.send_text.assert_called_once()
+
+    async def test_pubsub_listener_non_admin_receives_own_new_event(self):
+        """Non-admin user receives new-format events where actor_user_id matches."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "collection.updated",
+            "actor_user_id": 5,
+            "resource_type": "collection",
+            "resource_id": 12,
+            "data": {},
+        })
+        pubsub = _make_pubsub_mock(messages=[
+            {"type": "message", "data": event},
+        ])
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(asyncio.CancelledError):
+                await _pubsub_listener(ws, user_id="5", role="member")
+
+        ws.send_text.assert_called_once()
+
+    async def test_pubsub_listener_subscribes_to_events_all(self):
+        """pubsub.subscribe is called with 'events:all' channel."""
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
@@ -339,7 +458,99 @@ class TestPubsubListener:
             with pytest.raises(asyncio.CancelledError):
                 await _pubsub_listener(ws, user_id="1", role="admin")
 
-        pubsub.subscribe.assert_called_once_with("download:events")
+        pubsub.subscribe.assert_called_once_with("events:all")
+
+    async def test_pubsub_listener_translates_job_update_to_legacy_format(self):
+        """Download event with resource_type=download_job is translated to legacy WS format."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "download.completed",
+            "actor_user_id": 3,
+            "resource_type": "download_job",
+            "resource_id": "job-xyz",
+            "data": {
+                "status": "done",
+                "progress": {"current": 10, "total": 10},
+            },
+        })
+        pubsub = _make_pubsub_mock(messages=[
+            {"type": "message", "data": event.encode()},
+        ])
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(asyncio.CancelledError):
+                await _pubsub_listener(ws, user_id="3", role="member")
+
+        ws.send_text.assert_called_once()
+        sent = json.loads(ws.send_text.call_args[0][0])
+        assert sent["type"] == "job_update"
+        assert sent["job_id"] == "job-xyz"
+        assert sent["status"] == "done"
+        assert sent["progress"] == {"current": 10, "total": 10}
+        assert sent["user_id"] == 3
+
+    async def test_pubsub_listener_translates_subscription_checked_to_legacy_format(self):
+        """subscription.checked event is translated to legacy WS format."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "subscription.checked",
+            "actor_user_id": 2,
+            "resource_type": "subscription",
+            "resource_id": "sub-42",
+            "data": {
+                "status": "completed",
+                "job_id": "job-999",
+                "new_works": 5,
+            },
+        })
+        pubsub = _make_pubsub_mock(messages=[
+            {"type": "message", "data": event.encode()},
+        ])
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(asyncio.CancelledError):
+                await _pubsub_listener(ws, user_id="2", role="member")
+
+        ws.send_text.assert_called_once()
+        sent = json.loads(ws.send_text.call_args[0][0])
+        assert sent["type"] == "subscription_checked"
+        assert sent["sub_id"] == "sub-42"
+        assert sent["status"] == "completed"
+        assert sent["job_id"] == "job-999"
+        assert sent["new_works"] == 5
+        assert sent["user_id"] == 2
+
+    async def test_pubsub_listener_passes_through_new_event_types(self):
+        """New event types are forwarded with event_type field intact."""
+        from routers.ws import _pubsub_listener
+
+        ws = AsyncMock()
+        event = json.dumps({
+            "event_type": "gallery.tagged",
+            "actor_user_id": 1,
+            "resource_type": "gallery",
+            "resource_id": 99,
+            "data": {"tags": ["artist:foo", "parody:bar"]},
+        })
+        pubsub = _make_pubsub_mock(messages=[
+            {"type": "message", "data": event.encode()},
+        ])
+
+        with patch("routers.ws.get_pubsub", return_value=pubsub):
+            with pytest.raises(asyncio.CancelledError):
+                await _pubsub_listener(ws, user_id="1", role="admin")
+
+        ws.send_text.assert_called_once()
+        sent = json.loads(ws.send_text.call_args[0][0])
+        assert sent["type"] == "gallery.tagged"
+        assert sent["event_type"] == "gallery.tagged"
+        assert sent["resource_type"] == "gallery"
+        assert sent["resource_id"] == 99
+        assert sent["data"] == {"tags": ["artist:foo", "parody:bar"]}
 
 
 # ---------------------------------------------------------------------------
@@ -725,7 +936,7 @@ class TestPubsubListenerErrorPath:
                 await _pubsub_listener(ws, user_id="1", role="admin")
 
         # Cleanup is still called even on generic exception
-        pubsub.unsubscribe.assert_called_once_with("download:events")
+        pubsub.unsubscribe.assert_called_once_with("events:all")
         pubsub.aclose.assert_called_once()
 
     async def test_pubsub_listener_reraises_os_error(self):

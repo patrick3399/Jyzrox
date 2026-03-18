@@ -11,6 +11,7 @@ interface LoadedData {
   gallery: Gallery
   images: GalleryImage[]
   progress: ReadProgress | null
+  favoritedImageIds: number[]
 }
 
 export default function ReaderPage() {
@@ -43,6 +44,7 @@ export default function ReaderPage() {
             gallery,
             images: imagesResp.images,
             progress,
+            favoritedImageIds: imagesResp.favorited_image_ids ?? [],
           })
 
           // Record browse history — fire and forget
@@ -87,7 +89,7 @@ export default function ReaderPage() {
           api.library.getImages(source, sourceId),
         ])
         if (!cancelled) {
-          setData((prev) => prev ? { ...prev, gallery, images: imagesResp.images } : prev)
+          setData((prev) => prev ? { ...prev, gallery, images: imagesResp.images, favoritedImageIds: imagesResp.favorited_image_ids ?? [] } : prev)
         }
       } catch {
         // silently ignore revalidation errors
@@ -136,10 +138,18 @@ export default function ReaderPage() {
     )
   }
 
+  // During download, gallery.pages is 0 (only updated at finalize).
+  // Use the highest imported page_num as the ceiling so ?page=N doesn't clamp to 0.
+  const pageCeiling = gallery.download_status === 'downloading' && images.length > 0
+    ? images.reduce((max, img) => Math.max(max, img.page_num), gallery.pages)
+    : gallery.pages
+
   // URL ?page= takes priority over saved progress
-  const initialPage = urlPage > 0
-    ? Math.min(urlPage, gallery.pages)
-    : progress?.last_page && progress.last_page > 0 ? Math.min(progress.last_page, gallery.pages) : 1
+  let initialPage = urlPage > 0
+    ? (pageCeiling > 0 ? Math.min(urlPage, pageCeiling) : 1)
+    : progress?.last_page && progress.last_page > 0
+      ? (pageCeiling > 0 ? Math.min(progress.last_page, pageCeiling) : 1)
+      : 1
 
   return (
     <ErrorBoundary>
@@ -150,6 +160,7 @@ export default function ReaderPage() {
         images={images}
         totalPages={gallery.download_status === 'downloading' ? Math.max(gallery.pages, images.length) : gallery.pages}
         initialPage={initialPage}
+        initialFavoritedImageIds={data.favoritedImageIds}
       />
     </ErrorBoundary>
   )

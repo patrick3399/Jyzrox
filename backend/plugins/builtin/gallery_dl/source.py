@@ -17,6 +17,7 @@ from pathlib import Path
 
 from core.config import settings
 from plugins.base import SourcePlugin
+from plugins.builtin.gallery_dl._metadata import _resolve_source_id
 from plugins.models import (
     CredentialFlow,
     CredentialStatus,
@@ -61,6 +62,28 @@ def _source_to_extractor(source: str) -> str:
     return cfg.extractor or cfg.source_id
 
 
+FRAGMENT_KEYS = {"cookies", "username", "password", "refresh-token", "api-key"}
+
+
+def _try_parse_fragment(cred_val: str) -> dict | None:
+    """Try to parse a credential value as a gallery-dl config fragment (new format).
+
+    Returns the parsed dict if it's a fragment, None otherwise.
+    """
+    try:
+        parsed = json.loads(cred_val)
+        if isinstance(parsed, dict) and (FRAGMENT_KEYS & parsed.keys()):
+            return parsed
+    except (json.JSONDecodeError, TypeError):
+        pass
+    return None
+
+
+def _is_fragment(cred_val: str) -> bool:
+    """Check if a credential value is a gallery-dl config fragment (new format)."""
+    return _try_parse_fragment(cred_val) is not None
+
+
 async def _build_gallery_dl_config(credentials: dict) -> None:
     """Write source-specific credentials and tuning params into the gallery-dl config file.
 
@@ -92,17 +115,26 @@ async def _build_gallery_dl_config(credentials: dict) -> None:
         cfg = get_site_config(src)
         ext = cfg.extractor or cfg.source_id
 
-        if cfg.credential_type == "refresh_token":
-            config["extractor"].setdefault(ext, {})["refresh-token"] = cred_val
-        elif cfg.credential_type == "cookies":
-            try:
-                cookies = json.loads(cred_val)
-                config["extractor"].setdefault(ext, {})["cookies"] = cookies
+        fragment = _try_parse_fragment(cred_val)
+        if fragment is not None:
+            # New format: merge gallery-dl config fragment directly
+            config["extractor"].setdefault(ext, {}).update(fragment)
+            if "cookies" in fragment:
                 for extra in cfg.extra_extractors:
-                    config["extractor"].setdefault(extra, {})["cookies"] = cookies
-            except (json.JSONDecodeError, TypeError):
-                logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
-        # credential_type == "none" → skip
+                    config["extractor"].setdefault(extra, {})["cookies"] = fragment["cookies"]
+        else:
+            # Legacy format: existing 3-way branch (EH cookies, Pixiv token, etc.)
+            if cfg.credential_type == "refresh_token":
+                config["extractor"].setdefault(ext, {})["refresh-token"] = cred_val
+            elif cfg.credential_type == "cookies":
+                try:
+                    cookies = json.loads(cred_val)
+                    config["extractor"].setdefault(ext, {})["cookies"] = cookies
+                    for extra in cfg.extra_extractors:
+                        config["extractor"].setdefault(extra, {})["cookies"] = cookies
+                except (json.JSONDecodeError, TypeError):
+                    logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
+            # credential_type == "none" → skip
 
     config_path = Path(settings.gallery_dl_config)
     tmp_path = config_path.with_suffix(".tmp")
@@ -220,12 +252,13 @@ class GalleryDlPlugin(SourcePlugin):
                 logger.warning("[gallery_dl] pid_callback failed: %s", exc)
 
         downloaded = 0
+        skipped_count = 0
         last_progress_update = asyncio.get_event_loop().time()
         started_at = asyncio.get_event_loop().time()
         total_paused = 0.0  # track pause duration to exclude from timeout
 
         async def _read_stdout() -> None:
-            nonlocal downloaded, last_progress_update, total_paused
+            nonlocal downloaded, skipped_count, last_progress_update, total_paused
             assert proc.stdout is not None
             pending_file: Path | None = None
 
@@ -275,16 +308,21 @@ class GalleryDlPlugin(SourcePlugin):
                     else:
                         pending_file = None
 
-                    downloaded += 1
+                    if skipped:
+                        skipped_count += 1
+                    else:
+                        downloaded += 1
+
+                    total_seen = downloaded + skipped_count
                     now = asyncio.get_event_loop().time()
                     if (
-                        downloaded % _PROGRESS_EVERY_N == 0
+                        total_seen % _PROGRESS_EVERY_N == 0
                         or (now - last_progress_update) >= _PROGRESS_EVERY_S
                     ):
                         last_progress_update = now
                         if on_progress is not None:
                             try:
-                                await on_progress(downloaded, 0)  # total unknown for gallery-dl
+                                await on_progress(total_seen, 0)  # total unknown for gallery-dl
                             except Exception:
                                 pass
 
@@ -338,21 +376,21 @@ class GalleryDlPlugin(SourcePlugin):
                 return DownloadResult(
                     status="partial",
                     downloaded=downloaded,
-                    total=downloaded,
+                    total=downloaded + skipped_count,
                     error=err,
                 )
             return DownloadResult(
                 status="failed",
                 downloaded=downloaded,
-                total=downloaded,
+                total=downloaded + skipped_count,
                 error=err,
             )
 
-        logger.info("[gallery_dl] done: %s (files=%d)", url, downloaded)
+        logger.info("[gallery_dl] done: %s (downloaded=%d, skipped=%d)", url, downloaded, skipped_count)
         return DownloadResult(
             status="done",
             downloaded=downloaded,
-            total=downloaded,
+            total=downloaded + skipped_count,
         )
 
     def resolve_output_dir(self, url: str, base_path: Path) -> Path:
@@ -397,12 +435,7 @@ class GalleryDlPlugin(SourcePlugin):
                     tags = list(tags)  # don't mutate original
                     tags.append(f"rating:{rating}")
 
-                source_id = dest_dir.name
-                for field in cfg.source_id_fields:
-                    val = raw.get(field)
-                    if val:
-                        source_id = str(val)
-                        break
+                source_id = _resolve_source_id(raw, cfg, dest_dir.name)
 
                 return GalleryMetadata(
                     source=source,

@@ -87,12 +87,18 @@ describe('useWs default context (outside provider)', () => {
     expect(result.current.lastJobUpdate).toBeNull()
   })
 
+  it('test_useWs_outsideProvider_lastEventIsNull', () => {
+    const { result } = renderHook(() => useWs())
+    expect(result.current.lastEvent).toBeNull()
+  })
+
   it('test_useWebSocket_isAliasForUseWs_returnsSameShape', () => {
     const { result } = renderHook(() => useWebSocket())
     expect(result.current).toHaveProperty('connected')
     expect(result.current).toHaveProperty('alerts')
     expect(result.current).toHaveProperty('lastJobUpdate')
     expect(result.current).toHaveProperty('lastSubCheck')
+    expect(result.current).toHaveProperty('lastEvent')
   })
 })
 
@@ -171,6 +177,56 @@ describe('WsProvider', () => {
     // State remains at defaults
     expect(result.current.lastJobUpdate).toBeNull()
     expect(result.current.alerts).toEqual([])
+  })
+
+  it('test_WsProvider_onmessageNewEventType_setsLastEvent', async () => {
+    const { result } = renderHook(() => useWs(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({
+        data: JSON.stringify({
+          type: 'gallery.deleted',
+          event_type: 'gallery.deleted',
+          resource_type: 'gallery',
+          resource_id: 42,
+          data: {},
+        }),
+      })
+    })
+
+    expect(result.current.lastEvent).toBeTruthy()
+    expect(result.current.lastEvent?.type).toBe('gallery.deleted')
+    expect(result.current.lastEvent?.resource_id).toBe(42)
+  })
+
+  it('test_WsProvider_onmessagePing_doesNotSetLastEvent', async () => {
+    const { result } = renderHook(() => useWs(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({
+        data: JSON.stringify({ type: 'ping', ts: '2024-01-01T00:00:00Z' }),
+      })
+    })
+
+    expect(result.current.lastEvent).toBeNull()
+  })
+
+  it('test_WsProvider_onmessageJobUpdate_doesNotSetLastEvent', async () => {
+    const { result } = renderHook(() => useWs(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({
+        data: JSON.stringify({
+          type: 'job_update',
+          job_id: 'j1',
+          status: 'done',
+        }),
+      })
+    })
+
+    // lastJobUpdate should be set, but lastEvent should NOT
+    expect(result.current.lastJobUpdate).toBeTruthy()
+    expect(result.current.lastEvent).toBeNull()
   })
 
   it('test_WsProvider_dismissAlert_removesAlertAtIndex', async () => {

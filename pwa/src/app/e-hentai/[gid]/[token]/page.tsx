@@ -11,6 +11,7 @@ import { t } from '@/lib/i18n'
 import { ChevronDown, ChevronUp } from 'lucide-react'
 import DOMPurify from 'dompurify'
 import { BackButton } from '@/components/BackButton'
+import { useTagTranslations } from '@/hooks/useTagTranslations'
 
 // ── Preview grid with scaled sprite offsets ─────────────────────────────
 
@@ -329,6 +330,8 @@ export default function EhGalleryDetailPage() {
     })
   }, [gallery])
 
+  const { data: tagTranslations } = useTagTranslations(gallery?.tags ?? [])
+
   // Build preview thumbnails from all available preview data
   const previewThumbs = useMemo(() => {
     if (!previewData?.previews || !gallery) return []
@@ -619,9 +622,9 @@ export default function EhGalleryDetailPage() {
                       className={`text-xs px-2 py-1 rounded border transition-all cursor-pointer
                                   ${style.bg} ${style.border} ${style.text}
                                   hover:brightness-125 hover:scale-[1.02] active:scale-[0.98]`}
-                      title={`Search for ${ns}:${name}`}
+                      title={tagTranslations?.[`${ns}:${name}`] ? `${ns}:${name}` : `Search for ${ns}:${name}`}
                     >
-                      {name}
+                      {tagTranslations?.[`${ns}:${name}`] || name}
                     </button>
                   ))}
                 </div>

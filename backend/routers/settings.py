@@ -71,6 +71,13 @@ class GenericCookieRequest(BaseModel):
     cookies: dict[str, str]
 
 
+class SiteCredentialRequest(BaseModel):
+    source: str
+    cookies: str | None = None
+    username: str | None = None
+    password: str | None = None
+
+
 # ── Credentials ──────────────────────────────────────────────────────
 
 
@@ -393,6 +400,51 @@ async def set_generic_cookie(
     return {"status": "ok", "source": req.source.strip().lower()}
 
 
+@router.post("/credentials/site")
+async def set_site_credential(req: SiteCredentialRequest, _: dict = Depends(_admin)):
+    """Save credentials for any gallery-dl site as a config fragment."""
+    source = req.source.strip().lower()
+    if not source:
+        raise HTTPException(status_code=400, detail="Source name is required")
+
+    fragment: dict = {}
+    if req.cookies:
+        from plugins.builtin.gallery_dl._credentials import parse_cookie_input
+
+        parsed = parse_cookie_input(req.cookies)
+        if not parsed:
+            raise HTTPException(status_code=400, detail="Could not parse cookies")
+        fragment["cookies"] = parsed
+    if req.username:
+        fragment["username"] = req.username
+        if req.password:
+            fragment["password"] = req.password
+    if not fragment:
+        raise HTTPException(status_code=400, detail="Cookies or username is required")
+
+    await set_credential(source, json.dumps(fragment), "gdl_fragment")
+    return {"status": "ok", "source": source}
+
+
+@router.get("/credentials/detect")
+async def detect_site_from_url(url: str = Query(...), _: dict = Depends(_admin)):
+    """Detect gallery-dl site from a URL."""
+    try:
+        from gallery_dl import extractor as gdl_extractor
+
+        ex = gdl_extractor.find(url)
+        if not ex or not getattr(ex, "category", None):
+            return {"detected": False}
+        category = ex.category
+        from plugins.builtin.gallery_dl._sites import get_site_config
+
+        cfg = get_site_config(category)
+        display_name = cfg.name if cfg.source_id != "gallery_dl" else category.capitalize()
+        return {"detected": True, "source": category, "site_name": display_name}
+    except Exception:
+        return {"detected": False}
+
+
 @router.delete("/credentials/{source}")
 async def delete_credential_endpoint(
     source: str,
@@ -520,6 +572,7 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "opds_enabled": await _get_toggle("setting:opds_enabled", app_settings.opds_enabled),
         "external_api_enabled": await _get_toggle("setting:external_api_enabled", app_settings.external_api_enabled),
         "ai_tagging_enabled": await _get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled),
+        "tag_translation_enabled": await _get_toggle("setting:tag_translation_enabled", True),
         "download_eh_enabled": await _get_toggle("setting:download_eh_enabled", app_settings.download_eh_enabled),
         "download_pixiv_enabled": await _get_toggle("setting:download_pixiv_enabled", app_settings.download_pixiv_enabled),
         "download_gallery_dl_enabled": await _get_toggle("setting:download_gallery_dl_enabled", app_settings.download_gallery_dl_enabled),
@@ -534,6 +587,8 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "subscription_enqueue_delay_ms": await _get_int_setting("setting:subscription_enqueue_delay_ms", 500),
         "subscription_batch_max": await _get_int_setting("setting:subscription_batch_max", 0),
         "gallery_update_check_days": await _get_int_setting("setting:gallery_update_check_days", -1),
+        "trash_enabled": await _get_toggle("setting:trash_enabled", True),
+        "trash_retention_days": await _get_int_setting("setting:trash_retention_days", 30),
     }
 
 
@@ -550,6 +605,7 @@ async def patch_feature_toggle(
         "opds_enabled": "setting:opds_enabled",
         "external_api_enabled": "setting:external_api_enabled",
         "ai_tagging_enabled": "setting:ai_tagging_enabled",
+        "tag_translation_enabled": "setting:tag_translation_enabled",
         "download_eh_enabled": "setting:download_eh_enabled",
         "download_pixiv_enabled": "setting:download_pixiv_enabled",
         "download_gallery_dl_enabled": "setting:download_gallery_dl_enabled",
@@ -564,6 +620,8 @@ async def patch_feature_toggle(
         "subscription_enqueue_delay_ms": "setting:subscription_enqueue_delay_ms",
         "subscription_batch_max": "setting:subscription_batch_max",
         "gallery_update_check_days": "setting:gallery_update_check_days",
+        "trash_enabled": "setting:trash_enabled",
+        "trash_retention_days": "setting:trash_retention_days",
     }
     if feature not in ALLOWED:
         raise HTTPException(status_code=400, detail=f"Unknown feature: {feature}")
@@ -625,6 +683,15 @@ async def patch_feature_toggle(
         if val < -1:
             raise HTTPException(status_code=400, detail="gallery_update_check_days must be >= -1")
         await get_redis().set("setting:gallery_update_check_days", str(val))
+        return {"feature": feature, "value": val}
+
+    if feature == "trash_retention_days":
+        if req.value is None:
+            raise HTTPException(status_code=400, detail="value required for trash_retention_days")
+        val = int(req.value)
+        if not (1 <= val <= 365):
+            raise HTTPException(status_code=400, detail="trash_retention_days must be between 1 and 365")
+        await get_redis().set("setting:trash_retention_days", str(val))
         return {"feature": feature, "value": val}
 
     if req.enabled is None:

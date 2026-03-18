@@ -6,7 +6,7 @@ import os
 from datetime import UTC, datetime, timezone
 from pathlib import Path
 
-from sqlalchemy import text
+from sqlalchemy import text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
@@ -228,6 +228,10 @@ async def rescan_library_job(ctx: dict) -> dict:
             _json.dumps({"processed": total, "total": total, "status": "done"}),
         )
         logger.info("[rescan_library] completed, %d galleries processed", total)
+
+        from core.events import EventType, emit_safe
+        await emit_safe(EventType.RESCAN_COMPLETED, resource_type="system", total=total)
+
     return {"status": "cancelled" if cancelled else "done", "total": total}
 
 
@@ -338,13 +342,27 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 await create_library_symlink(gallery.source, gallery.source_id, fpath.name, blob)
                 await session.flush()
                 max_page += 1
-                stmt = pg_insert_local(Image).values(
-                    gallery_id=gallery_id,
-                    page_num=max_page,
-                    filename=fpath.name,
-                    blob_sha256=file_hash,
-                ).on_conflict_do_nothing()
-                await session.execute(stmt)
+                stmt = (
+                    pg_insert_local(Image)
+                    .values(
+                        gallery_id=gallery_id,
+                        page_num=max_page,
+                        filename=fpath.name,
+                        blob_sha256=file_hash,
+                    )
+                    .on_conflict_do_nothing()
+                    .returning(Image.id)
+                )
+                result = await session.execute(stmt)
+                inserted = result.scalar_one_or_none()
+
+                if inserted is not None:
+                    # New Image row created — increment blob ref_count.
+                    await session.execute(
+                        update(Blob)
+                        .where(Blob.sha256 == file_hash)
+                        .values(ref_count=Blob.ref_count + 1)
+                    )
                 new_files_added += 1
                 missing_thumb = True  # New file needs a thumbnail.
                 known_sha256s.add(file_hash)
@@ -473,6 +491,10 @@ async def auto_discover_job(ctx: dict) -> dict:
         await session.commit()
 
     logger.info("[auto_discover] Discovered %d new galleries", discovered)
+
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.GALLERY_DISCOVERED, resource_type="gallery", discovered=discovered)
+
     return {"discovered": discovered}
 
 

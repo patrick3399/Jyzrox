@@ -9,7 +9,7 @@ import sys
 import psutil
 
 import fastapi
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
 
 from core.auth import require_auth, require_role
@@ -386,3 +386,14 @@ async def get_reconcile_status(_: dict = Depends(require_auth)):
     if not result:
         return {"status": "never_run"}
     return json.loads(result)
+
+
+@router.get("/events")
+async def get_recent_events(
+    limit: int = Query(50, ge=1, le=200),
+    _: dict = Depends(_admin),
+):
+    """Return recent system events from the EventBus. Admin only."""
+    from core.events import event_bus
+    events = await event_bus.get_recent(limit)
+    return {"events": events, "count": len(events)}

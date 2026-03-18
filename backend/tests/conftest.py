@@ -302,7 +302,6 @@ _SQLITE_SCHEMA = [
         rating INTEGER DEFAULT 0,
         favorited BOOLEAN DEFAULT 0,
         uploader TEXT,
-        parent_id INTEGER REFERENCES galleries(id),
         download_status TEXT DEFAULT 'proxy_only',
         import_mode TEXT,
         tags_array TEXT DEFAULT '[]',
@@ -312,7 +311,8 @@ _SQLITE_SCHEMA = [
         visibility TEXT DEFAULT 'public',
         created_by_user_id INTEGER REFERENCES users(id),
         source_url TEXT,
-        deleted_at TIMESTAMP
+        deleted_at TIMESTAMP,
+        metadata_updated_at TIMESTAMP
     )
     """,
     """
@@ -574,11 +574,27 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS user_image_favorites (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, image_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS user_ratings (
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
         rating INTEGER NOT NULL,
         rated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, gallery_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS user_reading_list (
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (user_id, gallery_id)
     )
     """,
@@ -703,6 +719,7 @@ async def client(db_session, db_session_factory, mock_redis):
         patch("routers.users.get_redis", return_value=mock_redis),
         patch("routers.system.get_redis", return_value=mock_redis),
         patch("routers.scheduled_tasks.get_redis", return_value=mock_redis),
+        patch("routers.logs.get_redis", return_value=mock_redis),
     ]
     with ExitStack() as stack:
         for p in _patches:
@@ -908,7 +925,7 @@ def make_client(db_session, db_session_factory, mock_redis):
             return_value=MagicMock(job_id=f"test-job-{user_id}")
         )
 
-        with (
+        _make_patches = [
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("core.rate_limit.get_redis", return_value=mock_redis),
             patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
@@ -928,7 +945,11 @@ def make_client(db_session, db_session_factory, mock_redis):
             patch("plugins.builtin.ehentai.browse.async_session", db_session_factory),
             patch("plugins.builtin.ehentai.browse.get_redis", return_value=mock_redis),
             patch("routers.settings.get_redis", return_value=mock_redis),
-        ):
+            patch("routers.logs.get_redis", return_value=mock_redis),
+        ]
+        with ExitStack() as stack:
+            for p in _make_patches:
+                stack.enter_context(p)
             transport = ASGITransport(app=_app, raise_app_exceptions=False)
             async with AsyncClient(
                 transport=transport,

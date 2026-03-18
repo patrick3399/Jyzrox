@@ -6,6 +6,7 @@ import type { LucideIcon } from 'lucide-react'
 export interface ContextMenuItem {
   label: string
   icon?: LucideIcon
+  className?: string
   onClick: () => void
 }
 
@@ -63,7 +64,7 @@ export function ContextMenu({ open, onClose, position, items }: ContextMenuProps
       <div
         className="fixed inset-0 z-[9998]"
         aria-hidden="true"
-        onPointerDown={onClose}
+        onPointerDown={(e) => { e.stopPropagation(); onClose() }}
       />
 
       <div
@@ -80,13 +81,14 @@ export function ContextMenu({ open, onClose, position, items }: ContextMenuProps
             <button
               key={idx}
               role="menuitem"
-              className="flex w-full items-center gap-2 px-3 py-2 text-sm text-vault-text hover:bg-vault-card-hover focus:bg-vault-card-hover outline-none transition-colors duration-100"
-              onClick={() => {
+              className={`flex w-full items-center gap-2 px-3 py-2 text-sm hover:bg-vault-card-hover focus:bg-vault-card-hover outline-none transition-colors duration-100 ${item.className ?? 'text-vault-text'}`}
+              onClick={(e) => {
+                e.stopPropagation()
                 item.onClick()
                 onClose()
               }}
             >
-              {Icon && <Icon size={15} className="shrink-0 text-vault-text-muted" />}
+              {Icon && <Icon size={15} className={`shrink-0 ${item.className ?? 'text-vault-text-muted'}`} />}
               {item.label}
             </button>
           )

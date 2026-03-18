@@ -12,6 +12,7 @@ export interface ReaderImage {
   height?: number
   mediaType: 'image' | 'video' | 'gif'
   duration?: number
+  thumbUrl?: string | null // pre-generated thumbnail URL for videos
 }
 
 export interface ReaderState {

@@ -17,6 +17,7 @@ and the `unauthed_opds_client` fixture (real require_opds_auth logic runs).
 
 import base64
 import xml.etree.ElementTree as ET
+from unittest.mock import AsyncMock
 
 import bcrypt
 import pytest
@@ -110,6 +111,48 @@ async def _insert_user(db_session, username: str = "testuser", password: str = "
             "INSERT INTO users (username, password_hash) VALUES (:uname, :phash)"
         ),
         {"uname": username, "phash": pw_hash},
+    )
+    await db_session.commit()
+    result = await db_session.execute(text("SELECT last_insert_rowid()"))
+    return result.scalar()
+
+
+async def _insert_blob(
+    db_session,
+    sha256: str = "abcd1234" * 8,
+    extension: str = ".jpg",
+    media_type: str = "image",
+    file_size: int = 1000,
+) -> str:
+    """Insert a blob record; return its sha256."""
+    await db_session.execute(
+        text(
+            "INSERT INTO blobs (sha256, extension, media_type, file_size) "
+            "VALUES (:sha, :ext, :mt, :fs)"
+        ),
+        {"sha": sha256, "ext": extension, "mt": media_type, "fs": file_size},
+    )
+    await db_session.commit()
+    return sha256
+
+
+async def _insert_image_with_blob(
+    db_session,
+    gallery_id: int,
+    page_num: int = 1,
+    filename: str = "001.jpg",
+    sha256: str = "abcd1234" * 8,
+    extension: str = ".jpg",
+    media_type: str = "image",
+) -> int:
+    """Insert a blob + image linked to that blob; return image id."""
+    await _insert_blob(db_session, sha256=sha256, extension=extension, media_type=media_type)
+    await db_session.execute(
+        text(
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
+            "VALUES (:gid, :pnum, :fn, :sha)"
+        ),
+        {"gid": gallery_id, "pnum": page_num, "fn": filename, "sha": sha256},
     )
     await db_session.commit()
     result = await db_session.execute(text("SELECT last_insert_rowid()"))
@@ -634,3 +677,250 @@ class TestOPDSAuth:
         """Auth check should apply to /opds/gallery/{source}/{source_id} endpoint."""
         resp = await unauthed_opds_client.get("/opds/gallery/test/1")
         assert resp.status_code == 401
+
+
+# ── Feature toggle ─────────────────────────────────────────────────────────────
+
+
+class TestOPDSFeatureToggle:
+    async def test_opds_disabled_returns_404(self, opds_client, mock_redis):
+        """When OPDS is disabled via Redis, all endpoints should return 404."""
+        original_get = mock_redis.get
+
+        async def _get_opds_disabled(key):
+            if key == "setting:opds_enabled":
+                return b"0"
+            return await original_get(key)
+
+        mock_redis.get = AsyncMock(side_effect=_get_opds_disabled)
+
+        resp = await opds_client.get("/opds/")
+        assert resp.status_code == 404
+
+    async def test_opds_enabled_returns_200(self, opds_client, mock_redis):
+        """When OPDS is explicitly enabled via Redis, endpoints should return 200."""
+        original_get = mock_redis.get
+
+        async def _get_opds_enabled(key):
+            if key == "setting:opds_enabled":
+                return b"1"
+            return await original_get(key)
+
+        mock_redis.get = AsyncMock(side_effect=_get_opds_enabled)
+
+        resp = await opds_client.get("/opds/")
+        assert resp.status_code == 200
+
+
+# ── Soft-delete filtering ──────────────────────────────────────────────────────
+
+
+class TestOPDSSoftDelete:
+    async def test_soft_deleted_gallery_excluded_from_all(self, opds_client, db_session):
+        """Galleries with deleted_at set should not appear in /opds/all."""
+        await _insert_gallery(db_session, source_id="del1", title="Visible")
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, pages, favorited, deleted_at) "
+                "VALUES ('test', 'del2', 'Deleted One', 5, 0, '2025-01-01T00:00:00+00:00')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await opds_client.get("/opds/all")
+        entries = _entries(_parse(resp))
+        titles = {e.findtext(f"{ATOM}title") for e in entries}
+        assert "Visible" in titles
+        assert "Deleted One" not in titles
+
+    async def test_soft_deleted_gallery_excluded_from_recent(self, opds_client, db_session):
+        """Soft-deleted galleries should not appear in /opds/recent."""
+        await _insert_gallery(db_session, source_id="del3", title="Active")
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, pages, favorited, deleted_at) "
+                "VALUES ('test', 'del4', 'Trashed', 5, 0, '2025-01-01T00:00:00+00:00')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await opds_client.get("/opds/recent")
+        titles = {e.findtext(f"{ATOM}title") for e in _entries(_parse(resp))}
+        assert "Active" in titles
+        assert "Trashed" not in titles
+
+    async def test_soft_deleted_gallery_excluded_from_search(self, opds_client, db_session):
+        """Soft-deleted galleries should not appear in /opds/search results."""
+        await _insert_gallery(db_session, source_id="del5", title="FindMe Alive")
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, pages, favorited, deleted_at) "
+                "VALUES ('test', 'del6', 'FindMe Dead', 5, 0, '2025-01-01T00:00:00+00:00')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await opds_client.get("/opds/search?q=FindMe")
+        titles = {e.findtext(f"{ATOM}title") for e in _entries(_parse(resp))}
+        assert "FindMe Alive" in titles
+        assert "FindMe Dead" not in titles
+
+    async def test_soft_deleted_gallery_detail_returns_404(self, opds_client, db_session):
+        """GET /opds/gallery/{source}/{source_id} for a soft-deleted gallery should return 404."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, pages, favorited, deleted_at) "
+                "VALUES ('test', 'del7', 'Gone', 5, 0, '2025-01-01T00:00:00+00:00')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await opds_client.get("/opds/gallery/test/del7")
+        assert resp.status_code == 404
+
+
+# ── Gallery detail image/thumbnail links ──────────────────────────────────────
+
+
+class TestOPDSGalleryDetailImageLinks:
+    """Tests for image/thumbnail links in gallery detail entries."""
+
+    async def test_image_entry_has_image_link(self, opds_client, db_session):
+        """Each image entry with a blob should have an opds:image link."""
+        gid = await _insert_gallery(db_session, source="test", source_id="il1")
+        sha = "a" * 64
+        await _insert_image_with_blob(db_session, gid, page_num=1, sha256=sha, extension=".jpg")
+
+        resp = await opds_client.get("/opds/gallery/test/il1")
+        entries = _entries(_parse(resp))
+        assert len(entries) == 1
+        links = entries[0].findall(f"{ATOM}link")
+        image_links = [l for l in links if l.get("rel") == "http://opds-spec.org/image"]
+        assert len(image_links) == 1
+        assert image_links[0].get("type") == "image/jpeg"
+        assert sha[:2] in image_links[0].get("href", "")
+
+    async def test_image_entry_has_thumbnail_link(self, opds_client, db_session):
+        """Each image entry with a blob should have an opds:image/thumbnail link."""
+        gid = await _insert_gallery(db_session, source="test", source_id="il2")
+        sha = "b" * 64
+        await _insert_image_with_blob(db_session, gid, page_num=1, sha256=sha, extension=".png")
+
+        resp = await opds_client.get("/opds/gallery/test/il2")
+        entries = _entries(_parse(resp))
+        links = entries[0].findall(f"{ATOM}link")
+        thumb_links = [l for l in links if l.get("rel") == "http://opds-spec.org/image/thumbnail"]
+        assert len(thumb_links) == 1
+        assert thumb_links[0].get("type") == "image/webp"
+        assert "thumb_160" in thumb_links[0].get("href", "")
+
+    async def test_png_image_content_type(self, opds_client, db_session):
+        """PNG image should have content type image/png."""
+        gid = await _insert_gallery(db_session, source="test", source_id="il3")
+        sha = "c" * 64
+        await _insert_image_with_blob(db_session, gid, page_num=1, sha256=sha, extension=".png")
+
+        resp = await opds_client.get("/opds/gallery/test/il3")
+        entries = _entries(_parse(resp))
+        links = entries[0].findall(f"{ATOM}link")
+        image_links = [l for l in links if l.get("rel") == "http://opds-spec.org/image"]
+        assert image_links[0].get("type") == "image/png"
+
+    async def test_video_file_content_type_falls_back_to_jpeg(self, opds_client, db_session):
+        """Video files (.mp4) are not in the ext_map and fall back to image/jpeg content type.
+
+        This documents current behaviour — e-readers may not handle video entries correctly.
+        """
+        gid = await _insert_gallery(db_session, source="test", source_id="il4")
+        sha = "d" * 64
+        await _insert_image_with_blob(
+            db_session, gid, page_num=1, filename="video.mp4",
+            sha256=sha, extension=".mp4", media_type="video",
+        )
+
+        resp = await opds_client.get("/opds/gallery/test/il4")
+        entries = _entries(_parse(resp))
+        links = entries[0].findall(f"{ATOM}link")
+        image_links = [l for l in links if l.get("rel") == "http://opds-spec.org/image"]
+        # Current behaviour: .mp4 not in ext_map → falls back to image/jpeg
+        assert image_links[0].get("type") == "image/jpeg"
+
+    async def test_webp_image_content_type(self, opds_client, db_session):
+        """WebP image should have content type image/webp."""
+        gid = await _insert_gallery(db_session, source="test", source_id="il5")
+        sha = "e" * 64
+        await _insert_image_with_blob(db_session, gid, page_num=1, sha256=sha, extension=".webp")
+
+        resp = await opds_client.get("/opds/gallery/test/il5")
+        entries = _entries(_parse(resp))
+        links = entries[0].findall(f"{ATOM}link")
+        image_links = [l for l in links if l.get("rel") == "http://opds-spec.org/image"]
+        assert image_links[0].get("type") == "image/webp"
+
+
+# ── Cover thumbnail selection ─────────────────────────────────────────────────
+
+
+class TestOPDSCoverThumb:
+    """Tests for cover thumbnail link on gallery entries in acquisition feeds."""
+
+    async def test_gallery_entry_has_cover_thumbnail_link(self, opds_client, db_session):
+        """Gallery entry with a page-1 image should have a thumbnail link."""
+        gid = await _insert_gallery(db_session, source="test", source_id="ct1")
+        sha = "f" * 64
+        await _insert_image_with_blob(db_session, gid, page_num=1, sha256=sha)
+
+        resp = await opds_client.get("/opds/all")
+        entries = _entries(_parse(resp))
+        assert len(entries) == 1
+        links = entries[0].findall(f"{ATOM}link")
+        thumb_links = [l for l in links if l.get("rel") == "http://opds-spec.org/image/thumbnail"]
+        assert len(thumb_links) == 1
+        assert "thumb_160" in thumb_links[0].get("href", "")
+
+    async def test_gallery_entry_without_images_has_no_cover_thumbnail(self, opds_client, db_session):
+        """Gallery entry with no images should not have a thumbnail link."""
+        await _insert_gallery(db_session, source_id="ct2")
+
+        resp = await opds_client.get("/opds/all")
+        entries = _entries(_parse(resp))
+        assert len(entries) == 1
+        links = entries[0].findall(f"{ATOM}link")
+        thumb_links = [l for l in links if l.get("rel") == "http://opds-spec.org/image/thumbnail"]
+        assert thumb_links == []
+
+
+# ── Search LIKE wildcard behaviour ────────────────────────────────────────────
+
+
+class TestOPDSSearchWildcards:
+    """Document behaviour of LIKE wildcards in search queries."""
+
+    async def test_search_percent_wildcard_matches_all(self, opds_client, db_session):
+        """A literal '%' in the search query acts as a LIKE wildcard and matches all titles.
+
+        This documents current behaviour — the query parameter is not escaped for LIKE.
+        """
+        await _insert_gallery(db_session, source_id="wc1", title="Alpha")
+        await _insert_gallery(db_session, source_id="wc2", title="Beta")
+
+        resp = await opds_client.get("/opds/search?q=%25")  # %25 = URL-encoded '%'
+        entries = _entries(_parse(resp))
+        # '%' acts as LIKE wildcard → matches everything
+        assert len(entries) == 2
+
+    async def test_search_underscore_wildcard_matches_single_char(self, opds_client, db_session):
+        """A literal '_' in the search query acts as a single-char LIKE wildcard.
+
+        This documents current behaviour — the query parameter is not escaped for LIKE.
+        """
+        await _insert_gallery(db_session, source_id="wc3", title="AB")
+        await _insert_gallery(db_session, source_id="wc4", title="ABC")
+        await _insert_gallery(db_session, source_id="wc5", title="ABCD")
+
+        # Search for "A_C" — '_' matches any single char → matches "ABC" (A + any + C)
+        resp = await opds_client.get("/opds/search?q=A_C")
+        entries = _entries(_parse(resp))
+        titles = {e.findtext(f"{ATOM}title") for e in entries}
+        assert "ABC" in titles
+        # "AB" doesn't match (too short), "ABCD" might match depending on wrapping

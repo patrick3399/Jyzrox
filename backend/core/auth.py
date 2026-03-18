@@ -15,6 +15,7 @@ from sqlalchemy import text
 from core.config import settings
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
+from core.rate_limit import get_client_ip
 from core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
@@ -102,18 +103,26 @@ async def require_auth(
             # #17: Warn (but do not reject) on IP/UA mismatch to detect session hijacking
             stored_ip = meta.get("ip")
             stored_ua = meta.get("user_agent", "")
-            current_ip = request.client.host if request.client else None
+            current_ip = get_client_ip(request)
             current_ua = request.headers.get("user-agent", "")
+            _session_changed = False
             if stored_ip and current_ip and stored_ip != current_ip:
                 logger.warning(
-                    "Session IP mismatch for user %s: stored=%s current=%s",
+                    "Session IP changed for user %s: %s -> %s",
                     user_id_str, stored_ip, current_ip,
                 )
+                meta["ip"] = current_ip
+                _session_changed = True
             if stored_ua and current_ua and stored_ua != current_ua[:256]:
                 logger.warning(
-                    "Session UA mismatch for user %s",
+                    "Session UA changed for user %s",
                     user_id_str,
                 )
+                meta["user_agent"] = current_ua[:256]
+                _session_changed = True
+            if _session_changed:
+                redis = get_redis()
+                await redis.set(redis_key, _sign_session(json.dumps(meta)), keepttl=True)
     except (json.JSONDecodeError, TypeError, UnicodeDecodeError) as e:
         logger.warning("Corrupted session data for %s: %s", redis_key, e)
         raise api_error(status.HTTP_401_UNAUTHORIZED, "session_invalid", locale)

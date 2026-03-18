@@ -26,6 +26,7 @@ export interface Gallery {
   favorited: boolean // legacy, always false now
   is_favorited: boolean // per-user favorite status
   my_rating: number | null // per-user rating, null if not rated
+  in_reading_list: boolean
   uploader: string
   artist_id: string | null
   download_status: 'proxy_only' | 'partial' | 'complete' | 'downloading'
@@ -73,6 +74,7 @@ export interface ImageBrowserResponse {
   images: BrowseImage[]
   next_cursor: string | null
   has_next: boolean
+  favorited_image_ids: number[]
 }
 
 export interface ImageTimeRangeResponse {
@@ -338,7 +340,7 @@ export interface CacheStats {
 // ── WebSocket ────────────────────────────────────────────────────────
 
 export interface WsMessage {
-  type: 'alert' | 'ping' | 'job_update' | 'subscription_checked'
+  type: 'alert' | 'ping' | 'job_update' | 'subscription_checked' | string
   message?: string
   ts?: string
   // job_update fields:
@@ -349,6 +351,26 @@ export interface WsMessage {
   sub_id?: number
   new_works?: number
   user_id?: number
+  // New EventBus fields:
+  event_type?: string
+  resource_type?: string
+  resource_id?: number | string
+  data?: Record<string, unknown>
+  // Log entry payload
+  log?: unknown
+}
+
+export interface LogEntry {
+  level: 'DEBUG' | 'INFO' | 'WARNING' | 'ERROR' | 'CRITICAL'
+  source: string
+  logger: string
+  message: string
+  timestamp: string
+  traceback?: string | null
+}
+
+export interface LogLevelConfig {
+  levels: Record<string, string>
 }
 
 // ── Pagination responses ──────────────────────────────────────────────
@@ -664,6 +686,7 @@ export interface GallerySearchParams {
   tags?: string[]
   exclude_tags?: string[]
   favorited?: boolean
+  in_reading_list?: boolean
   min_rating?: number
   source?: string
   artist?: string

@@ -1363,6 +1363,73 @@ class TestPauseResumeJobBranches:
         if resp.status_code == 200:
             assert resp.json()["status"] == "running"
 
+    async def test_resume_paused_job_with_dead_coroutine_re_enqueues(
+        self, member_client, db_session, mock_redis
+    ):
+        """Resume with dead ARQ coroutine (arq:result key exists) should re-enqueue the job."""
+        job_id = await _insert_job(db_session, status="paused", user_id=1, retry_count=0)
+
+        async def redis_get_side_effect(key):
+            if key == f"arq:result:{job_id}":
+                return b'{"success": true}'  # ARQ result exists = dead coroutine
+            return None
+
+        mock_redis.get = AsyncMock(side_effect=redis_get_side_effect)
+
+        with patch("routers.download.get_redis", return_value=mock_redis):
+            resp = await member_client.patch(
+                f"/api/download/jobs/{job_id}",
+                json={"action": "resume"},
+            )
+        assert resp.status_code in (200, 404)
+        if resp.status_code == 200:
+            data = resp.json()
+            assert data["status"] == "queued"
+            assert data.get("restarted") is True
+
+    async def test_resume_paused_job_with_dead_coroutine_and_retries_re_enqueues(
+        self, member_client, db_session, mock_redis
+    ):
+        """Resume with dead ARQ coroutine for a retried job uses retry-prefixed arq key."""
+        job_id = await _insert_job(db_session, status="paused", user_id=1, retry_count=2)
+
+        async def redis_get_side_effect(key):
+            if key == f"arq:result:retry:{job_id}:2":
+                return b'{"success": true}'  # dead coroutine for the retried job
+            return None
+
+        mock_redis.get = AsyncMock(side_effect=redis_get_side_effect)
+
+        with patch("routers.download.get_redis", return_value=mock_redis):
+            resp = await member_client.patch(
+                f"/api/download/jobs/{job_id}",
+                json={"action": "resume"},
+            )
+        assert resp.status_code in (200, 404)
+        if resp.status_code == 200:
+            data = resp.json()
+            assert data["status"] == "queued"
+            assert data.get("restarted") is True
+
+    async def test_resume_paused_job_with_alive_coroutine_transitions_to_running(
+        self, member_client, db_session, mock_redis
+    ):
+        """Resume when ARQ coroutine is still alive (no arq:result key) should flip to running."""
+        job_id = await _insert_job(db_session, status="paused", user_id=1, retry_count=0)
+        # mock_redis.get returns None by default — coroutine alive
+        mock_redis.get = AsyncMock(return_value=None)
+
+        with patch("routers.download.get_redis", return_value=mock_redis):
+            resp = await member_client.patch(
+                f"/api/download/jobs/{job_id}",
+                json={"action": "resume"},
+            )
+        assert resp.status_code in (200, 404)
+        if resp.status_code == 200:
+            data = resp.json()
+            assert data["status"] == "running"
+            assert "restarted" not in data
+
     async def test_pause_resume_other_users_job_returns_403(self, make_client, db_session, mock_redis):
         """Member cannot pause/resume another user's job."""
         job_id = await _insert_job(db_session, status="running", user_id=99)

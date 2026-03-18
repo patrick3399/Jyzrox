@@ -52,7 +52,6 @@ class Gallery(Base):
     rating: Mapped[int] = mapped_column(SmallInteger, default=0)
     favorited: Mapped[bool] = mapped_column(Boolean, default=False)
     uploader: Mapped[str | None] = mapped_column(Text)
-    parent_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("galleries.id"))
     download_status: Mapped[str] = mapped_column(Text, default="proxy_only")
     import_mode: Mapped[str | None] = mapped_column(Text)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
@@ -374,9 +373,23 @@ class UserFavorite(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class UserImageFavorite(Base):
+    __tablename__ = "user_image_favorites"
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    image_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True)
+    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class UserRating(Base):
     __tablename__ = "user_ratings"
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
     rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     rated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class UserReadingList(Base):
+    __tablename__ = "user_reading_list"
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

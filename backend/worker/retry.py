@@ -3,11 +3,11 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
+from sqlalchemy import select, update
 
 from core.database import AsyncSessionLocal
 from db.models import DownloadJob
-from worker.helpers import _cron_record, _cron_should_run
+from worker.helpers import _cron_record, _cron_should_run, compute_arq_job_id, enqueue_download_job
 
 logger = logging.getLogger("worker")
 
@@ -39,6 +39,50 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
     try:
         async with AsyncSessionLocal() as session:
             now = datetime.now(UTC)
+
+            # ── Stale reaper: detect zombie jobs ──────────────────────────
+            # Running jobs created 60+ minutes ago with no completion (no finished_at)
+            stale_running_result = await session.execute(
+                update(DownloadJob)
+                .where(
+                    DownloadJob.status == "running",
+                    DownloadJob.created_at < now - timedelta(hours=1),
+                )
+                .values(
+                    status="failed",
+                    error="Stale: no progress for 60+ minutes",
+                    finished_at=now,
+                )
+                .returning(DownloadJob.id)
+            )
+            stale_running_ids = stale_running_result.scalars().all()
+            for sid in stale_running_ids:
+                logger.warning("[stale-reaper] marked running job %s as failed (no progress update)", sid)
+
+            # Stale reaper: queued jobs stuck for 30+ minutes
+            stale_queued_result = await session.execute(
+                update(DownloadJob)
+                .where(
+                    DownloadJob.status == "queued",
+                    DownloadJob.created_at < now - timedelta(minutes=30),
+                )
+                .values(
+                    status="failed",
+                    error="Stale: queued for 30+ minutes without starting",
+                    finished_at=now,
+                )
+                .returning(DownloadJob.id)
+            )
+            stale_queued_ids = stale_queued_result.scalars().all()
+            for sid in stale_queued_ids:
+                logger.warning("[stale-reaper] marked queued job %s as failed (stuck in queue)", sid)
+
+            stale_count = len(stale_running_ids) + len(stale_queued_ids)
+            if stale_count > 0:
+                await session.flush()
+                logger.info("[stale-reaper] marked %d stale jobs as failed", stale_count)
+
+            # ── Retry: re-enqueue failed/partial jobs ──────────────────────────
             stmt = (
                 select(DownloadJob)
                 .where(
@@ -65,18 +109,9 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 backoff_minutes = min(base_delay * (2 ** job.retry_count), _MAX_BACKOFF_MINUTES)
                 job.next_retry_at = now + timedelta(minutes=backoff_minutes)
 
-                # Enqueue ARQ job with unique ID to avoid cache conflicts
-                arq_job_id = f"retry:{job.id}:{job.retry_count}"
+                arq_job_id = compute_arq_job_id(job.id, job.retry_count)
                 try:
-                    await r.enqueue_job(
-                        "download_job",
-                        job.url,
-                        job.source or "",
-                        None,  # options
-                        str(job.id),
-                        job.progress.get("total") if job.progress else None,
-                        _job_id=arq_job_id,
-                    )
+                    await enqueue_download_job(r, job, arq_job_id)
                     retried += 1
                     logger.info(
                         "[retry] re-queued job %s (attempt %d/%d)",
@@ -92,10 +127,12 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
 
             await session.commit()
 
-        status_msg = f"retried={retried}, skipped={skipped}"
-        await _cron_record(ctx, "retry_downloads", "ok" if retried > 0 else "idle", None)
+        status_msg = f"retried={retried}, skipped={skipped}, stale_reaped={stale_count}"
+        await _cron_record(ctx, "retry_downloads", "ok" if retried > 0 or stale_count > 0 else "idle", None)
         logger.info("[retry] done: %s", status_msg)
-        return {"status": "ok", "retried": retried, "skipped": skipped}
+        from core.events import EventType, emit_safe
+        await emit_safe(EventType.RETRY_PROCESSED, resource_type="system", retried=retried, skipped=skipped, stale_reaped=stale_count)
+        return {"status": "ok", "retried": retried, "skipped": skipped, "stale_reaped": stale_count}
 
     except Exception as exc:
         logger.error("[retry] cron error: %s", exc, exc_info=True)

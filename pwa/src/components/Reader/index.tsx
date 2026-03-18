@@ -175,6 +175,8 @@ interface ReaderProps {
   onSeekToPage?: (page: number) => Promise<void>
   /** Custom hide handler — used by artist reader where images span multiple galleries */
   onHideImage?: (pageNum: number) => Promise<void>
+  /** Pre-fetched favorited image IDs from the parent page (avoids duplicate fetch) */
+  initialFavoritedImageIds?: number[]
 }
 
 // ── SinglePageView ────────────────────────────────────────────────────
@@ -1155,7 +1157,7 @@ function ThumbnailStrip({
                 thumbSrc = `/api/eh/thumb-proxy?url=${encodeURIComponent(previewRaw)}`
               }
             } else if (img.isLocal) {
-              thumbSrc = img.url
+              thumbSrc = img.thumbUrl || img.url
             }
 
             return (
@@ -1470,11 +1472,15 @@ export default function Reader({
   onPageChange,
   onSeekToPage,
   onHideImage,
+  initialFavoritedImageIds,
 }: ReaderProps) {
   const router = useRouter()
   const isProxyMode = downloadStatus === 'proxy_only'
 
   const [hiddenPages, setHiddenPages] = useState<Set<number>>(new Set())
+  const [favImageIds, setFavImageIds] = useState<Set<number>>(
+    () => new Set(initialFavoritedImageIds ?? [])
+  )
 
   const images: ReaderImage[] = rawImages
     .filter((img) => !hiddenPages.has(img.page_num))
@@ -1486,6 +1492,7 @@ export default function Reader({
       height: img.height ?? undefined,
       mediaType: img.media_type,
       duration: img.duration ?? undefined,
+      thumbUrl: img.thumb_path?.replace('/data/', '/media/') ?? undefined,
     }))
 
   const {
@@ -1852,6 +1859,34 @@ export default function Reader({
     }
   }, [imageMenu, source, sourceId, rawImages, hiddenPages, state.currentPage, setPage, router, onHideImage])
 
+  const handleViewGallery = useCallback(() => {
+    router.push(`/library/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`)
+    setImageMenu(null)
+  }, [source, sourceId, router])
+
+  const handleToggleFavorite = useCallback(async () => {
+    if (!imageMenu) return
+    const img = rawImages.find(i => i.page_num === imageMenu.pageNum)
+    if (!img?.id) return
+
+    const isFav = favImageIds.has(img.id)
+    setImageMenu(null) // close menu first
+
+    try {
+      if (isFav) {
+        await api.library.unfavoriteImage(img.id)
+        setFavImageIds(prev => { const next = new Set(prev); next.delete(img.id); return next })
+        toast.success(t('reader.imageUnfavorited'))
+      } else {
+        await api.library.favoriteImage(img.id)
+        setFavImageIds(prev => new Set(prev).add(img.id))
+        toast.success(t('reader.imageFavorited'))
+      }
+    } catch {
+      toast.error(t('reader.favoriteFailed'))
+    }
+  }, [imageMenu, rawImages, favImageIds])
+
   const handleAutoAdvanceToggle = useCallback(() => {
     const next = !autoAdvanceEnabled
     setAutoAdvanceEnabled(next)
@@ -1869,6 +1904,10 @@ export default function Reader({
   // When downloading progressively, the current page may not have been imported yet.
   const isDownloading = downloadStatus === 'downloading'
   const pageNotReady = !currentImage && isDownloading && images.length > 0
+
+  // Compute favorite eligibility for current context menu image
+  const contextMenuImg = imageMenu ? rawImages.find(i => i.page_num === imageMenu.pageNum) : undefined
+  const canFavoriteContextImg = !isProxyMode && contextMenuImg?.id != null && contextMenuImg?.file_path != null
 
   return (
     <div ref={containerRef} className="reader-container flex flex-col bg-black">
@@ -2009,6 +2048,9 @@ export default function Reader({
               ? handleHideImage
               : undefined
           }
+          isFavorited={canFavoriteContextImg ? favImageIds.has(contextMenuImg!.id) : undefined}
+          onToggleFavorite={canFavoriteContextImg ? handleToggleFavorite : undefined}
+          onViewGallery={handleViewGallery}
         />
       )}
     </div>

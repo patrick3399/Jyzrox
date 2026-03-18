@@ -130,27 +130,6 @@ html {
   }
 }
 
-/* ── Fast Scroller ─────────────────────────────────────────────────── */
-.fast-scroller-thumb {
-  width: 6px;
-  border-radius: 3px;
-  background: var(--color-text-secondary);
-  opacity: 0.4;
-  transition: opacity 0.2s, width 0.15s;
-  touch-action: none;
-}
-.fast-scroller-thumb.dragging {
-  width: 10px;
-  opacity: 0.8;
-}
-.fast-scroller-thumb.visible {
-  opacity: 0.4;
-}
-.fast-scroller-thumb.hidden {
-  opacity: 0;
-  pointer-events: none;
-}
-
 /* ── Skeleton shimmer ──────────────────────────────────────────────── */
 .animate-shimmer {
   position: relative;
@@ -186,15 +165,6 @@ html {
   background: transparent;
 }
 
-/* Hide scrollbar without changing overflow behavior */
-.no-scrollbar {
-  scrollbar-width: none;
-  -ms-overflow-style: none;
-}
-.no-scrollbar::-webkit-scrollbar {
-  display: none;
-}
-
 /* ── Timeline Scrubber ────────────────────────────────────────────── */
 .timeline-scrubber {
   position: fixed;
@@ -212,6 +182,15 @@ html {
   .timeline-scrubber {
     bottom: calc(5rem + env(safe-area-inset-bottom, 0px));
   }
+}
+
+/* Hide scrollbar without changing overflow behavior (used by Sidebar / MobileNav) */
+.no-scrollbar {
+  scrollbar-width: none;
+  -ms-overflow-style: none;
+}
+.no-scrollbar::-webkit-scrollbar {
+  display: none;
 }
 
 .timeline-scrubber__track {
@@ -232,14 +211,6 @@ html {
   }
 }
 
-.timeline-scrubber__track::after {
-  content: '';
-  width: 3px;
-  background: var(--color-vault-border);
-  border-radius: 1.5px;
-  margin: 8px 0;
-  opacity: 0.5;
-}
 
 .timeline-scrubber__indicator {
   position: absolute;

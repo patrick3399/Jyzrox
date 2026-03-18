@@ -6,8 +6,8 @@ RUN pip install --no-cache-dir --upgrade pip
 
 WORKDIR /install
 
-COPY requirements.txt .
-RUN pip install --no-cache-dir --prefix=/install/pkgs -r requirements.txt && \
+COPY requirements.lock .
+RUN pip install --no-cache-dir --prefix=/install/pkgs -r requirements.lock && \
     pip install --no-cache-dir --prefix=/install/pkgs gallery-dl && \
     pip install --no-cache-dir --no-deps --prefix=/install/pkgs thumbhash-python==1.0.1
 
@@ -58,4 +58,4 @@ RUN sed -i 's/\r$//' /entrypoint.sh && chmod +x /entrypoint.sh
 
 # No USER directive — entrypoint.sh handles privilege drop via gosu
 ENTRYPOINT ["/entrypoint.sh"]
-CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000"]
+CMD ["uvicorn", "main:app", "--host", "0.0.0.0", "--port", "8000", "--proxy-headers", "--forwarded-allow-ips=*"]

@@ -13,7 +13,7 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import ARRAY, Text, and_, asc, case as sql_case, cast, delete as sa_delete, desc, func, not_, or_, select, tuple_
+from sqlalchemy import ARRAY, Text, and_, asc, case as sql_case, cast, delete as sa_delete, desc, exists, func, not_, or_, select, tuple_
 from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import text as sql_text
@@ -25,7 +25,8 @@ from core.config import settings
 from core.database import get_db
 from core.redis_client import get_redis
 from core.source_display import get_display_config
-from db.models import Blob, BlockedTag, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserRating
+from plugins.builtin.gallery_dl._sites import get_site_config as _get_gdl_site_config
+from db.models import Blob, BlockedTag, ExcludedBlob, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserImageFavorite, UserRating, UserReadingList
 from services.cas import cas_url, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, safe_source_id, thumb_dir, thumb_url as cas_thumb_url
 from plugins.builtin.ehentai.browse import _make_client as _make_eh_client
 
@@ -115,6 +116,32 @@ async def _get_favorite_set(db: AsyncSession, user_id: int, gallery_ids: list[in
         select(UserFavorite.gallery_id).where(
             UserFavorite.user_id == user_id,
             UserFavorite.gallery_id.in_(gallery_ids),
+        )
+    )
+    return {row[0] for row in result}
+
+
+async def _get_reading_list_set(db: AsyncSession, user_id: int, gallery_ids: list[int]) -> set[int]:
+    """Return set of gallery_ids that are in this user's reading list."""
+    if not gallery_ids:
+        return set()
+    result = await db.execute(
+        select(UserReadingList.gallery_id).where(
+            UserReadingList.user_id == user_id,
+            UserReadingList.gallery_id.in_(gallery_ids),
+        )
+    )
+    return {row[0] for row in result}
+
+
+async def _get_image_favorite_set(db: AsyncSession, user_id: int, image_ids: list[int]) -> set[int]:
+    """Return set of image_ids that are favorited by this user."""
+    if not image_ids:
+        return set()
+    result = await db.execute(
+        select(UserImageFavorite.image_id).where(
+            UserImageFavorite.user_id == user_id,
+            UserImageFavorite.image_id.in_(image_ids),
         )
     )
     return {row[0] for row in result}
@@ -211,8 +238,8 @@ async def _single_cover_thumb(db: AsyncSession, gallery_id: int, source: str) ->
     return cover_map.get(gallery_id)
 
 
-async def _user_gallery_state(db: AsyncSession, user_id: int, gallery_id: int) -> tuple[bool, int | None]:
-    """Return (is_favorited, my_rating) for a user+gallery pair."""
+async def _user_gallery_state(db: AsyncSession, user_id: int, gallery_id: int) -> tuple[bool, int | None, bool]:
+    """Return (is_favorited, my_rating, in_reading_list) for a user+gallery pair."""
     fav_row = await db.execute(
         select(UserFavorite).where(
             UserFavorite.user_id == user_id,
@@ -225,7 +252,13 @@ async def _user_gallery_state(db: AsyncSession, user_id: int, gallery_id: int) -
             UserRating.gallery_id == gallery_id,
         )
     )
-    return (fav_row.scalar_one_or_none() is not None, rating_row.scalar_one_or_none())
+    rl_row = await db.execute(
+        select(UserReadingList).where(
+            UserReadingList.user_id == user_id,
+            UserReadingList.gallery_id == gallery_id,
+        )
+    )
+    return (fav_row.scalar_one_or_none() is not None, rating_row.scalar_one_or_none(), rl_row.scalar_one_or_none() is not None)
 
 
 _SOURCES_CACHE_KEY = "library:sources"
@@ -274,7 +307,9 @@ async def list_gallery_sources(
             if not modes:
                 sources.append({"value": "local", "label": "local"})
         else:
-            sources.append({"value": src, "label": src})
+            cfg = _get_gdl_site_config(src)
+            label = cfg.name if cfg.source_id == src else src
+            sources.append({"value": src, "label": label})
 
     await r.set(_SOURCES_CACHE_KEY, json.dumps(sources), ex=_SOURCES_CACHE_TTL)
     return sources
@@ -301,6 +336,7 @@ async def list_galleries(
     tags: list[str] = Query(default=[]),
     exclude_tags: list[str] = Query(default=[]),
     favorited: bool | None = Query(default=None),
+    in_reading_list: bool | None = Query(default=None),
     min_rating: int | None = Query(default=None, ge=0, le=5),
     source: str | None = Query(default=None),
     artist: str | None = Query(default=None),
@@ -340,6 +376,13 @@ async def list_galleries(
             stmt = stmt.where(
                 Gallery.id.in_(
                     select(UserFavorite.gallery_id).where(UserFavorite.user_id == auth["user_id"])
+                )
+            )
+    if in_reading_list is not None:
+        if in_reading_list:
+            stmt = stmt.where(
+                Gallery.id.in_(
+                    select(UserReadingList.gallery_id).where(UserReadingList.user_id == auth["user_id"])
                 )
             )
     if min_rating is not None:
@@ -442,10 +485,11 @@ async def list_galleries(
 
         fav_set = await _get_favorite_set(db, auth["user_id"], gallery_ids)
         rating_map = await _get_rating_map(db, auth["user_id"], gallery_ids)
+        rl_set = await _get_reading_list_set(db, auth["user_id"], gallery_ids)
 
         return {
             "galleries": [
-                _g(g, cover_thumb=cover_map.get(g.id), is_favorited=(g.id in fav_set), my_rating=rating_map.get(g.id))
+                _g(g, cover_thumb=cover_map.get(g.id), is_favorited=(g.id in fav_set), my_rating=rating_map.get(g.id), in_reading_list=(g.id in rl_set))
                 for g in rows
             ],
             "next_cursor": next_cursor,
@@ -468,12 +512,13 @@ async def list_galleries(
 
         fav_set = await _get_favorite_set(db, auth["user_id"], gallery_ids)
         rating_map = await _get_rating_map(db, auth["user_id"], gallery_ids)
+        rl_set = await _get_reading_list_set(db, auth["user_id"], gallery_ids)
 
         return {
             "total": total,
             "page": page,
             "galleries": [
-                _g(g, cover_thumb=cover_map.get(g.id), is_favorited=(g.id in fav_set), my_rating=rating_map.get(g.id))
+                _g(g, cover_thumb=cover_map.get(g.id), is_favorited=(g.id in fav_set), my_rating=rating_map.get(g.id), in_reading_list=(g.id in rl_set))
                 for g in galleries
             ],
         }
@@ -526,7 +571,7 @@ def _i_browse(img: Image) -> dict:
 # ── Image browser ─────────────────────────────────────────────────────
 
 
-async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, auth, db, category=None):
+async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, auth, db, category=None, favorited=None):
     """Apply common image browser filters (tags, source, category, blocked tags, gallery access)."""
     stmt = stmt.where(gallery_access_filter(auth))
 
@@ -558,6 +603,16 @@ async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, 
         blocked_patterns = [f"{ns}:{name}" for ns, name in blocked_rows]
         stmt = stmt.where(not_(Image.tags_array.overlap(cast(blocked_patterns, ARRAY(Text)))))
 
+    if favorited:
+        stmt = stmt.where(
+            exists(
+                select(UserImageFavorite.image_id).where(
+                    UserImageFavorite.user_id == auth["user_id"],
+                    UserImageFavorite.image_id == Image.id,
+                )
+            )
+        )
+
     return stmt
 
 
@@ -568,6 +623,7 @@ async def image_timeline_percentiles(
     source: str | None = Query(default=None),
     category: str | None = Query(default=None),
     gallery_id: int | None = None,
+    favorited: bool | None = Query(default=None),
     buckets: int = Query(default=100, le=200),
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(require_auth),
@@ -583,6 +639,7 @@ async def image_timeline_percentiles(
     base = await _apply_image_filters(
         base, tags=tags, exclude_tags=exclude_tags, source=source,
         gallery_id=gallery_id, auth=auth, db=db, category=category,
+        favorited=favorited,
     )
     base = base.where(Image.added_at.isnot(None))
 
@@ -611,6 +668,7 @@ async def image_time_range(
     source: str | None = Query(default=None),
     category: str | None = Query(default=None),
     gallery_id: int | None = None,
+    favorited: bool | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(require_auth),
 ):
@@ -622,6 +680,7 @@ async def image_time_range(
     stmt = await _apply_image_filters(
         stmt, tags=tags, exclude_tags=exclude_tags, source=source,
         gallery_id=gallery_id, auth=auth, db=db, category=category,
+        favorited=favorited,
     )
     row = (await db.execute(stmt)).one()
     return {
@@ -641,6 +700,7 @@ async def browse_images(
     gallery_id: int | None = None,
     source: str | None = Query(default=None),
     category: str | None = Query(default=None),
+    favorited: bool | None = Query(default=None),
     db: AsyncSession = Depends(get_db),
     auth: dict = Depends(require_auth),
 ):
@@ -656,6 +716,7 @@ async def browse_images(
     stmt = await _apply_image_filters(
         stmt, tags=tags, exclude_tags=exclude_tags, source=source,
         gallery_id=gallery_id, auth=auth, db=db, category=category,
+        favorited=favorited,
     )
 
     # jump_at: seek to a specific timestamp anchor
@@ -715,10 +776,13 @@ async def browse_images(
         last = images_out[-1]
         next_cursor = _encode_image_cursor(last)
 
+    fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images_out])
+
     return {
         "images": [_i_browse(img) for img in images_out],
         "next_cursor": next_cursor,
         "has_next": has_next,
+        "favorited_image_ids": sorted(fav_ids),
     }
 
 
@@ -1168,7 +1232,7 @@ async def list_gallery_files(
 
 
 class BatchAction(BaseModel):
-    action: Literal["delete", "favorite", "unfavorite", "rate", "add_to_collection", "add_tags", "remove_tags"]
+    action: Literal["delete", "favorite", "unfavorite", "rate", "add_to_collection", "add_tags", "remove_tags", "add_to_reading_list", "remove_from_reading_list"]
     gallery_ids: list[int]  # max 100
     rating: int | None = None  # required when action=rate
     collection_id: int | None = None  # required when action=add_to_collection
@@ -1203,6 +1267,25 @@ async def batch_galleries(
             sa_delete(UserFavorite).where(
                 UserFavorite.user_id == auth["user_id"],
                 UserFavorite.gallery_id.in_(body.gallery_ids),
+            )
+        )
+        await db.commit()
+        return {"status": "ok", "affected": result.rowcount}
+
+    elif body.action == "add_to_reading_list":
+        for gid in body.gallery_ids:
+            stmt = pg_insert(UserReadingList).values(
+                user_id=auth["user_id"], gallery_id=gid,
+            ).on_conflict_do_nothing()
+            await db.execute(stmt)
+        await db.commit()
+        return {"status": "ok", "affected": len(body.gallery_ids)}
+
+    elif body.action == "remove_from_reading_list":
+        result = await db.execute(
+            sa_delete(UserReadingList).where(
+                UserReadingList.user_id == auth["user_id"],
+                UserReadingList.gallery_id.in_(body.gallery_ids),
             )
         )
         await db.commit()
@@ -1565,6 +1648,8 @@ async def restore_gallery(
     _check_write_access(auth, g)
     g.deleted_at = None
     await db.commit()
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.GALLERY_RESTORED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=g.id)
     return {"status": "ok"}
 
 
@@ -1618,8 +1703,8 @@ async def get_gallery(
 ):
     g = await _get_or_404_by_source(db, source, source_id, auth)
     cover_thumb = await _single_cover_thumb(db, g.id, g.source or "")
-    is_fav, my_rating = await _user_gallery_state(db, auth["user_id"], g.id)
-    return _g(g, cover_thumb=cover_thumb, is_favorited=is_fav, my_rating=my_rating)
+    is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], g.id)
+    return _g(g, cover_thumb=cover_thumb, is_favorited=is_fav, my_rating=my_rating, in_reading_list=in_rl)
 
 
 @router.get("/galleries/{source}/{source_id}/images")
@@ -1635,9 +1720,16 @@ async def get_gallery_images(
     gallery_id = g.id
     display_cfg = get_display_config(g.source or "")
     page_order = desc(Image.page_num) if display_cfg.image_order == "desc" else asc(Image.page_num)
+    excluded_sq = (
+        select(ExcludedBlob.blob_sha256)
+        .where(ExcludedBlob.gallery_id == gallery_id)
+        .correlate(Image)
+        .where(ExcludedBlob.blob_sha256 == Image.blob_sha256)
+    )
     stmt = (
         select(Image)
         .where(Image.gallery_id == gallery_id)
+        .where(~exists(excluded_sq))
         .order_by(page_order)
         .options(selectinload(Image.blob))
     )
@@ -1646,24 +1738,70 @@ async def get_gallery_images(
     if limit is not None:
         p = page or 1
         total_stmt = select(func.count()).select_from(
-            select(Image.id).where(Image.gallery_id == gallery_id).subquery()
+            select(Image.id)
+            .where(Image.gallery_id == gallery_id)
+            .where(~exists(excluded_sq))
+            .subquery()
         )
         total = (await db.execute(total_stmt)).scalar_one()
 
         stmt = stmt.offset((p - 1) * limit).limit(limit)
         images = (await db.execute(stmt)).scalars().all()
 
+        fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images])
         return {
             "gallery_id": gallery_id,
             "images": [_i(img) for img in images],
             "total": total,
             "page": p,
             "has_next": (p * limit) < total,
+            "favorited_image_ids": sorted(fav_ids),
         }
 
     # Default: return all images (backward compatible for Reader)
     images = (await db.execute(stmt)).scalars().all()
-    return {"gallery_id": gallery_id, "images": [_i(img) for img in images]}
+    fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images])
+    return {"gallery_id": gallery_id, "images": [_i(img) for img in images], "favorited_image_ids": sorted(fav_ids)}
+
+
+@router.post("/images/{image_id}/favorite")
+async def favorite_image(
+    image_id: int,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Add an image to the user's favorites."""
+    img = (await db.execute(
+        select(Image)
+        .join(Gallery, Image.gallery_id == Gallery.id)
+        .where(Image.id == image_id, gallery_access_filter(auth))
+    )).scalar_one_or_none()
+    if not img:
+        raise HTTPException(status_code=404, detail="Image not found")
+
+    stmt = pg_insert(UserImageFavorite).values(
+        user_id=auth["user_id"], image_id=image_id,
+    ).on_conflict_do_nothing()
+    await db.execute(stmt)
+    await db.commit()
+    return {"status": "ok"}
+
+
+@router.delete("/images/{image_id}/favorite")
+async def unfavorite_image(
+    image_id: int,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove an image from the user's favorites."""
+    await db.execute(
+        sa_delete(UserImageFavorite).where(
+            UserImageFavorite.user_id == auth["user_id"],
+            UserImageFavorite.image_id == image_id,
+        )
+    )
+    await db.commit()
+    return {"status": "ok"}
 
 
 @router.get("/galleries/{source}/{source_id}/tags")
@@ -1703,6 +1841,7 @@ async def get_gallery_tags(
 class GalleryPatch(BaseModel):
     favorited: bool | None = None
     rating: int | None = None
+    in_reading_list: bool | None = None
     title: str | None = None
     title_jpn: str | None = None
     category: str | None = None
@@ -1748,6 +1887,19 @@ async def update_gallery(
                 set_={"rating": patch.rating, "rated_at": func.now()},
             )
             await db.execute(stmt)
+    if patch.in_reading_list is not None:
+        if patch.in_reading_list:
+            stmt = pg_insert(UserReadingList).values(
+                user_id=auth["user_id"], gallery_id=gallery_id,
+            ).on_conflict_do_nothing()
+            await db.execute(stmt)
+        else:
+            await db.execute(
+                sa_delete(UserReadingList).where(
+                    UserReadingList.user_id == auth["user_id"],
+                    UserReadingList.gallery_id == gallery_id,
+                )
+            )
     if patch.title is not None:
         g.title = patch.title
     if patch.title_jpn is not None:
@@ -1755,9 +1907,11 @@ async def update_gallery(
     if patch.category is not None:
         g.category = patch.category
     await db.commit()
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.GALLERY_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
     # Fetch updated per-user state to return accurate response
-    is_fav, my_rating = await _user_gallery_state(db, auth["user_id"], gallery_id)
-    return _g(g, is_favorited=is_fav, my_rating=my_rating)
+    is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], gallery_id)
+    return _g(g, is_favorited=is_fav, my_rating=my_rating, in_reading_list=in_rl)
 
 
 @router.delete("/galleries/{source}/{source_id}")
@@ -1789,9 +1943,21 @@ async def delete_gallery(
     if active_job:
         raise HTTPException(status_code=409, detail="Cannot delete gallery with active download job. Cancel the download first.")
 
+    # Check if trash is enabled
+    from routers.settings import _get_toggle
+    trash_enabled = await _get_toggle("setting:trash_enabled", True)
+
+    if not trash_enabled:
+        # Hard-delete immediately when trash is disabled
+        result = await _hard_delete_galleries(db, [g])
+        await _invalidate_sources_cache()
+        return {"status": "ok", **result}
+
     g.deleted_at = datetime.now(UTC)
     await db.commit()
     await _invalidate_sources_cache()
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.GALLERY_DELETED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=g.id)
     return {"status": "ok", "deleted_files": 0}
 
 
@@ -2253,10 +2419,10 @@ async def check_gallery_update(
 
     # Build response with updated gallery
     cover_thumb = await _single_cover_thumb(db, g.id, g.source or "")
-    is_fav, my_rating = await _user_gallery_state(db, auth["user_id"], g.id)
+    is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], g.id)
     return {
         "status": "updated",
-        "gallery": _g(g, cover_thumb, is_fav, my_rating),
+        "gallery": _g(g, cover_thumb, is_fav, my_rating, in_reading_list=in_rl),
         "changed_fields": changed_fields,
         "pages_diff": pages_diff,
     }
@@ -2314,7 +2480,7 @@ def _check_write_access(auth: dict, gallery: Gallery) -> None:
     raise HTTPException(status_code=403, detail="You do not have permission to modify this gallery")
 
 
-def _g(g: Gallery, cover_thumb: str | None = None, is_favorited: bool = False, my_rating: int | None = None) -> dict:
+def _g(g: Gallery, cover_thumb: str | None = None, is_favorited: bool = False, my_rating: int | None = None, in_reading_list: bool = False) -> dict:
     display_cfg = get_display_config(g.source or "")
     return {
         "id": g.id,
@@ -2331,6 +2497,7 @@ def _g(g: Gallery, cover_thumb: str | None = None, is_favorited: bool = False, m
         "favorited": False,
         "is_favorited": is_favorited,
         "my_rating": my_rating,
+        "in_reading_list": in_reading_list,
         "uploader": g.uploader,
         "artist_id": g.artist_id,
         "download_status": g.download_status,

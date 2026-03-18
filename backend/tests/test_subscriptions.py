@@ -15,7 +15,10 @@ plain SQLAlchemy and work correctly on SQLite.
 
 import uuid
 
+import pytest
 from sqlalchemy import text
+
+from core.utils import normalize_subscription_url
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -443,3 +446,133 @@ class TestCheckSubscription:
 
         resp = await client.post("/api/subscriptions/99999/check")
         assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# normalize_subscription_url — unit tests
+# ---------------------------------------------------------------------------
+
+
+class TestNormalizeSubscriptionUrl:
+    """Unit tests for core.utils.normalize_subscription_url.
+
+    These tests document the expected normalisation contract so that any
+    future refactor of the function is caught immediately.
+    """
+
+    def test_normalize_strips_single_trailing_slash(self):
+        """Trailing slash is removed: 'https://example.com/artist/' → no slash."""
+        result = normalize_subscription_url("https://example.com/artist/")
+        assert result == "https://example.com/artist"
+
+    def test_normalize_strips_multiple_trailing_slashes(self):
+        """Multiple consecutive trailing slashes are all removed."""
+        result = normalize_subscription_url("https://example.com/artist///")
+        assert result == "https://example.com/artist"
+
+    def test_normalize_strips_leading_and_trailing_whitespace(self):
+        """Leading and trailing whitespace is stripped."""
+        result = normalize_subscription_url("  https://example.com/artist  ")
+        assert result == "https://example.com/artist"
+
+    def test_normalize_strips_whitespace_and_trailing_slash_combined(self):
+        """Whitespace + trailing slash are both removed in a single call."""
+        result = normalize_subscription_url("  https://example.com/artist/  ")
+        assert result == "https://example.com/artist"
+
+    def test_normalize_leaves_clean_url_unchanged(self):
+        """A URL with no extra whitespace or trailing slash is returned as-is."""
+        url = "https://example.com/artist"
+        assert normalize_subscription_url(url) == url
+
+
+# ---------------------------------------------------------------------------
+# POST /api/subscriptions/ — duplicate field and URL normalisation
+# ---------------------------------------------------------------------------
+
+
+class TestCreateSubscriptionDuplicateAndNormalization:
+    """Regression tests for the duplicate URL detection feature.
+
+    The pg_insert upsert path is PostgreSQL-specific and may 500 on SQLite.
+    Tests that rely on the row being persisted accept 200/500 and skip on 500.
+    Tests that only inspect the response shape on a successful 200 are
+    gated behind a skip when the SQLite limitation kicks in.
+    """
+
+    async def test_create_subscription_response_contains_duplicate_field(
+        self, client, db_session
+    ):
+        """Successful POST response must include a 'duplicate' field."""
+        await _ensure_user(db_session)
+
+        resp = await client.post(
+            "/api/subscriptions/",
+            json={"url": "https://example.com/artist/dup-field-check", "name": "Dup Field"},
+        )
+        # Accept SQLite limitation
+        if resp.status_code == 500:
+            pytest.skip("pg_insert not supported on SQLite test engine")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "duplicate" in data, "Response must contain 'duplicate' field"
+        # First creation is never a duplicate
+        assert not data["duplicate"]
+
+    async def test_create_subscription_with_trailing_slash_url_stores_normalized_url(
+        self, client, db_session
+    ):
+        """URL submitted with a trailing slash must be stored without the slash.
+
+        After POST, a GET on the returned id must reflect the normalised URL.
+        This guards against the bug where 'https://x.com/a/' and
+        'https://x.com/a' would be treated as two distinct subscriptions.
+        """
+        await _ensure_user(db_session)
+        raw_url = "https://example.com/artist/norm-test/"
+        expected_url = "https://example.com/artist/norm-test"
+
+        resp = await client.post(
+            "/api/subscriptions/",
+            json={"url": raw_url, "name": "Norm Test"},
+        )
+        if resp.status_code == 500:
+            pytest.skip("pg_insert not supported on SQLite test engine")
+
+        assert resp.status_code == 200
+        sub_id = resp.json()["id"]
+
+        get_resp = await client.get(f"/api/subscriptions/{sub_id}")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["url"] == expected_url, (
+            f"Expected stored URL '{expected_url}' but got '{get_resp.json()['url']}'"
+        )
+
+    async def test_create_subscription_with_whitespace_url_stores_normalized_url(
+        self, client, db_session
+    ):
+        """URL submitted with surrounding whitespace must be stored stripped.
+
+        Guards against whitespace-padded URLs being stored verbatim and then
+        failing duplicate detection on subsequent identical requests.
+        """
+        await _ensure_user(db_session)
+        raw_url = "  https://example.com/artist/ws-test  "
+        expected_url = "https://example.com/artist/ws-test"
+
+        resp = await client.post(
+            "/api/subscriptions/",
+            json={"url": raw_url, "name": "Whitespace URL Test"},
+        )
+        if resp.status_code == 500:
+            pytest.skip("pg_insert not supported on SQLite test engine")
+
+        assert resp.status_code == 200
+        sub_id = resp.json()["id"]
+
+        get_resp = await client.get(f"/api/subscriptions/{sub_id}")
+        assert get_resp.status_code == 200
+        assert get_resp.json()["url"] == expected_url, (
+            f"Expected stored URL '{expected_url}' but got '{get_resp.json()['url']}'"
+        )

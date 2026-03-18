@@ -204,6 +204,8 @@ async def keep_blob(
         )
         await session.commit()
 
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.DEDUP_PAIR_RESOLVED, actor_user_id=_["user_id"], resource_type="dedup")
     return {"status": "ok"}
 
 
@@ -284,6 +286,8 @@ async def start_scan(
 
     arq: ArqRedis = request.app.state.arq
     await arq.enqueue_job("dedup_scan_job", req.mode, _job_id="dedup_scan:singleton")
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.DEDUP_SCAN_STARTED, actor_user_id=_["user_id"], resource_type="system")
     return {"status": "queued"}
 
 

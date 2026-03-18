@@ -77,6 +77,8 @@ class TestTrashGcJob:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
+            patch("routers.settings._get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             result = await trash_gc_job({})
 
@@ -96,6 +98,8 @@ class TestTrashGcJob:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
+            patch("routers.settings._get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             result = await trash_gc_job({})
 
@@ -112,6 +116,8 @@ class TestTrashGcJob:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
+            patch("routers.settings._get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
             patch(
                 "routers.library._hard_delete_galleries",
                 new_callable=AsyncMock,
@@ -136,6 +142,8 @@ class TestTrashGcJob:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
+            patch("routers.settings._get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
             patch(
                 "routers.library._hard_delete_galleries",
                 new_callable=AsyncMock,
@@ -161,6 +169,8 @@ class TestTrashGcJob:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
+            patch("routers.settings._get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
             patch(
                 "routers.library._hard_delete_galleries",
                 new_callable=AsyncMock,

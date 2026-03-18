@@ -32,7 +32,7 @@ const {
 } = vi.hoisted(() => ({
   mockUsePathname: vi.fn(() => '/'),
   mockLogout: vi.fn(),
-  mockUseProfile: vi.fn(() => ({ data: null })),
+  mockUseProfile: vi.fn(() => ({ data: null as Record<string, unknown> | null })),
   mockUseDownloadStats: vi.fn(() => ({ data: null })),
   mockUseTheme: vi.fn(() => ({ theme: 'dark', setTheme: vi.fn() })),
   mockUseLocale: vi.fn(() => ({})),

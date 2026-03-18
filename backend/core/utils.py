@@ -1,5 +1,9 @@
 """Shared utility functions used across routers and workers."""
-import urllib.parse
+
+
+def normalize_subscription_url(url: str) -> str:
+    """Strip whitespace and trailing slashes for consistent duplicate detection."""
+    return url.strip().rstrip("/")
 
 
 def detect_source(url: str) -> str:

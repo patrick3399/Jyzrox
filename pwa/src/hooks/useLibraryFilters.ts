@@ -14,6 +14,7 @@ export interface FilterState {
   excludeInput: string
   minRating: number | undefined
   onlyFavorited: boolean
+  inReadingList: boolean
   sourceFilter: string
   artistFilter: string
   sort: SortValue
@@ -34,6 +35,7 @@ export type FilterAction =
   | { type: 'SET_EXCLUDE_INPUT'; payload: string }
   | { type: 'SET_MIN_RATING'; payload: number | undefined }
   | { type: 'SET_ONLY_FAVORITED'; payload: boolean }
+  | { type: 'SET_IN_READING_LIST'; payload: boolean }
   | { type: 'SET_SOURCE_FILTER'; payload: string }
   | { type: 'SET_ARTIST_FILTER'; payload: string }
   | { type: 'SET_SORT'; payload: SortValue }
@@ -76,6 +78,8 @@ export function filterReducer(state: FilterState, action: FilterAction): FilterS
       return { ...state, minRating: action.payload }
     case 'SET_ONLY_FAVORITED':
       return { ...state, onlyFavorited: action.payload }
+    case 'SET_IN_READING_LIST':
+      return { ...state, inReadingList: action.payload }
     case 'SET_SOURCE_FILTER':
       return { ...state, sourceFilter: action.payload }
     case 'SET_ARTIST_FILTER':
@@ -116,6 +120,7 @@ export function initFilterState(searchParams: URLSearchParams): FilterState {
     excludeInput: '',
     minRating: searchParams.get('rating') ? Number(searchParams.get('rating')) : undefined,
     onlyFavorited: searchParams.get('fav') === '1',
+    inReadingList: searchParams.get('rl') === '1',
     sourceFilter: searchParams.get('source') ?? '',
     artistFilter: searchParams.get('artist') ?? '',
     sort: (searchParams.get('sort') as SortValue) ?? 'added_at',
@@ -147,6 +152,7 @@ export function useLibraryFilters() {
       if (state.sort !== 'added_at') params.set('sort', state.sort)
       if (state.minRating !== undefined) params.set('rating', String(state.minRating))
       if (state.onlyFavorited) params.set('fav', '1')
+      if (state.inReadingList) params.set('rl', '1')
       if (state.artistFilter) params.set('artist', state.artistFilter)
       if (state.categoryFilter) params.set('category', state.categoryFilter)
       if (state.includeTags.length > 0) params.set('tags', state.includeTags.join(','))
@@ -166,6 +172,7 @@ export function useLibraryFilters() {
     state.sort,
     state.minRating,
     state.onlyFavorited,
+    state.inReadingList,
     state.artistFilter,
     state.categoryFilter,
     state.includeTags,

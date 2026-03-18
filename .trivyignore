@@ -1,0 +1,6 @@
+# Debian base image CVEs — no fix available, not used by application
+CVE-2026-0861    # glibc — fix exists but not yet in python:3.13-slim upstream
+CVE-2024-36600   # libcdio — CD/ISO parsing, not used
+CVE-2026-25210   # libexpat — no fix available
+CVE-2026-1837    # libjxl — JPEG XL, not used
+CVE-2026-3731    # libssh — SFTP, not used

@@ -6,7 +6,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { SUPPORTED_LOCALES, type Locale, formatBytes } from '@/lib/i18n'
 import { ChevronUp, ChevronDown, Shield, Monitor, CalendarClock, Key } from 'lucide-react'
 import { toast } from 'sonner'
-import { api } from '@/lib/api'
+import { api, type ReconcileStatus } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
@@ -45,6 +45,7 @@ type SectionKey =
   | 'aiTagging'
   | 'schedule'
   | 'browserCache'
+  | 'logLevels'
 
 const VERSION_LABELS: Record<string, string> = {
   jyzrox: 'Jyzrox',
@@ -1080,6 +1081,14 @@ export default function SettingsPage() {
   const [features, setFeatures] = useState<Record<string, boolean>>({})
   const [featuresLoading, setFeaturesLoading] = useState(true)
 
+  // Trash retention
+  const [trashRetentionDays, setTrashRetentionDays] = useState(30)
+  const trashRetentionDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  // Log levels
+  const [logLevels, setLogLevels] = useState<Record<string, string>>({})
+  const logLevelsFetched = useRef(false)
+
   // Cache stats
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [cacheLoading, setCacheLoading] = useState(false)
@@ -1088,6 +1097,10 @@ export default function SettingsPage() {
 
   // Storage info
   const [storageInfo, setStorageInfo] = useState<StorageInfo | null>(null)
+
+  // Reconcile
+  const [reconcileStatus, setReconcileStatus] = useState<ReconcileStatus | null>(null)
+  const [reconcileRunning, setReconcileRunning] = useState(false)
 
   // Blocked Tags
   const [blockedTags, setBlockedTags] = useState<BlockedTag[]>([])
@@ -1145,21 +1158,36 @@ export default function SettingsPage() {
   const handleLoadSystem = useCallback(async () => {
     setSystemLoading(true)
     try {
-      const [h, i, cs, st] = await Promise.all([
+      const [h, i, cs, st, rc] = await Promise.all([
         api.system.health(),
         api.system.info(),
         api.system.getCache(),
         api.system.getStorage().catch(() => null),
+        api.system.getReconcileStatus().catch(() => null),
       ])
       setHealth(h)
       setSystemInfo(i)
       setCacheStats(cs)
       setStorageInfo(st)
+      setReconcileStatus(rc)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('settings.systemLoadFailed'))
     } finally {
       setSystemLoading(false)
       setSystemLoaded(true)
+    }
+  }, [])
+
+  const handleReconcile = useCallback(async () => {
+    if (!confirm(t('settings.reconcileConfirm'))) return
+    setReconcileRunning(true)
+    try {
+      await api.system.startReconcile()
+      toast.success(t('settings.reconcileStarted'))
+    } catch {
+      toast.error(t('settings.reconcileFailed'))
+    } finally {
+      setReconcileRunning(false)
     }
   }, [])
 
@@ -1169,6 +1197,7 @@ export default function SettingsPage() {
     try {
       const data = await api.settings.getFeatures()
       setFeatures(data as unknown as Record<string, boolean>)
+      setTrashRetentionDays(data.trash_retention_days ?? 30)
     } catch {
       // silently fail — toggles will use defaults
     } finally {
@@ -1185,6 +1214,24 @@ export default function SettingsPage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
     }
+  }, [])
+
+  const handleTrashToggle = useCallback(async (enabled: boolean) => {
+    if (!enabled) {
+      if (!confirm(t('settings.trashDisableConfirm'))) return
+    }
+    await handleFeatureToggle('trash_enabled', enabled)
+  }, [handleFeatureToggle])
+
+  const handleTrashRetentionChange = useCallback((v: number) => {
+    setTrashRetentionDays(v)
+    clearTimeout(trashRetentionDebounce.current)
+    trashRetentionDebounce.current = setTimeout(async () => {
+      try {
+        await api.settings.setFeatureValue('trash_retention_days', Math.max(1, Math.min(365, v)))
+        toast.success(t('common.saved'))
+      } catch { toast.error(t('common.failedToSave')) }
+    }, 500)
   }, [])
 
   // Cache: Refresh stats only
@@ -1494,6 +1541,10 @@ export default function SettingsPage() {
     if ((openSections.has('security') || openSections.has('features')) && featuresLoading && Object.keys(features).length === 0) {
       handleLoadFeatures()
     }
+    if (openSections.has('logLevels') && !logLevelsFetched.current) {
+      logLevelsFetched.current = true
+      api.logs.getLevels().then(d => setLogLevels(d.levels)).catch(() => {})
+    }
   }, [
     openSections,
     systemLoaded,
@@ -1782,6 +1833,33 @@ export default function SettingsPage() {
                       )}
                     </div>
 
+                    {/* Data Reconciliation */}
+                    <div className="pt-4 border-t border-vault-border">
+                      <h3 className="text-sm font-medium text-vault-text mb-2">
+                        {t('settings.reconciliation')}
+                      </h3>
+                      {reconcileStatus && reconcileStatus.status !== 'never_run' && 'completed_at' in reconcileStatus && (
+                        <div className="text-xs text-vault-text-muted space-y-1 mb-3">
+                          <p>{t('settings.reconcileLastRun', { time: new Date(reconcileStatus.completed_at).toLocaleString() })}</p>
+                          <div className="flex gap-4">
+                            <span>{t('settings.reconcileRemovedImages')}: {reconcileStatus.removed_images}</span>
+                            <span>{t('settings.reconcileRemovedGalleries')}: {reconcileStatus.removed_galleries}</span>
+                            <span>{t('settings.reconcileOrphanBlobs')}: {reconcileStatus.orphan_blobs_cleaned}</span>
+                          </div>
+                        </div>
+                      )}
+                      {reconcileStatus?.status === 'never_run' && (
+                        <p className="text-xs text-vault-text-muted mb-3">{t('settings.reconcileNeverRun')}</p>
+                      )}
+                      <button
+                        onClick={handleReconcile}
+                        disabled={reconcileRunning}
+                        className="px-3 py-1.5 bg-vault-accent/20 border border-vault-accent/30 text-vault-accent rounded text-sm hover:bg-vault-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                      >
+                        {reconcileRunning ? t('settings.reconcileRunning') : t('settings.reconcileRun')}
+                      </button>
+                    </div>
+
                     <button
                       onClick={handleLoadSystem}
                       className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
@@ -1855,6 +1933,43 @@ export default function SettingsPage() {
                     onChange={(v) => handleFeatureToggle('ai_tagging_enabled', v)}
                     disabled={featuresLoading}
                   />
+                  <ToggleRow
+                    label={t('settings.tagTranslation')}
+                    description={t('settings.tagTranslationDesc')}
+                    checked={features.tag_translation_enabled ?? true}
+                    onChange={(v) => handleFeatureToggle('tag_translation_enabled', v)}
+                    disabled={featuresLoading}
+                  />
+                </div>
+
+                {/* Trash */}
+                <h3 className="text-xs text-vault-text-muted uppercase tracking-wide mt-5 mb-2">
+                  {t('settings.trashSection')}
+                </h3>
+                <div className="space-y-1 divide-y divide-vault-border">
+                  <ToggleRow
+                    label={t('settings.trashEnabled')}
+                    description={t('settings.trashEnabledDesc')}
+                    checked={features.trash_enabled ?? true}
+                    onChange={handleTrashToggle}
+                    disabled={featuresLoading}
+                  />
+                  {(features.trash_enabled ?? true) && (
+                    <div className="flex items-center justify-between py-2">
+                      <div>
+                        <p className="text-sm text-vault-text">{t('settings.trashRetentionDays')}</p>
+                        <p className="text-xs text-vault-text-muted">{t('settings.trashRetentionDaysDesc')}</p>
+                      </div>
+                      <input
+                        type="number"
+                        min={1}
+                        max={365}
+                        value={trashRetentionDays}
+                        onChange={(e) => handleTrashRetentionChange(Number(e.target.value))}
+                        className="w-20 text-right rounded-lg border border-vault-border bg-vault-input px-2 py-1.5 text-sm text-vault-text"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Download Sources */}
@@ -1884,6 +1999,43 @@ export default function SettingsPage() {
                     disabled={featuresLoading}
                   />
                 </div>
+              </div>
+            )}
+          </div>
+
+          {/* ── Log Levels ── */}
+          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+            <SectionHeader title={t('settings.logLevels')} sectionKey="logLevels" openSections={openSections} onToggle={toggleSection} />
+            {openSections.has('logLevels') && (
+              <div className="px-5 pb-5 border-t border-vault-border space-y-4">
+                <p className="text-xs text-vault-text-muted mt-4">{t('settings.logLevelDesc')}</p>
+                {[
+                  { key: 'api', label: t('settings.logLevelApi') },
+                  { key: 'worker', label: t('settings.logLevelWorker') },
+                ].map(({ key, label }) => (
+                  <div key={key} className="flex items-center justify-between py-2">
+                    <span className="text-sm text-vault-text">{label}</span>
+                    <select
+                      value={logLevels[key] ?? 'INFO'}
+                      onChange={async (e) => {
+                        const level = e.target.value
+                        try {
+                          await api.logs.setLevel(key, level)
+                          setLogLevels(prev => ({ ...prev, [key]: level }))
+                          toast.success(t('settings.logLevelUpdated'))
+                        } catch {
+                          toast.error(t('common.error'))
+                        }
+                      }}
+                      className="px-3 py-1.5 text-sm bg-vault-input border border-vault-border rounded text-vault-text"
+                    >
+                      {['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'].map(lvl => (
+                        <option key={lvl} value={lvl}>{lvl}</option>
+                      ))}
+                    </select>
+                  </div>
+                ))}
+                <p className="text-[10px] text-vault-text-muted italic">{t('settings.logLevelNginxHint')}</p>
               </div>
             )}
           </div>

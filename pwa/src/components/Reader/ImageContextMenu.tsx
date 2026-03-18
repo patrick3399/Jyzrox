@@ -1,8 +1,8 @@
 'use client'
 
-import { useEffect, useRef } from 'react'
+import { useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Download, Copy, Share2, EyeOff } from 'lucide-react'
+import { Download, Copy, Share2, EyeOff, Heart, ExternalLink, type LucideIcon } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
 interface ImageContextMenuProps {
@@ -12,33 +12,61 @@ interface ImageContextMenuProps {
   imageUrl: string
   imageName?: string
   onHide?: () => void
+  isFavorited?: boolean
+  onToggleFavorite?: () => void
+  onViewGallery?: () => void
 }
 
-export function ImageContextMenu({ open, onClose, position, imageUrl, imageName, onHide }: ImageContextMenuProps) {
+export function ImageContextMenu({ open, onClose, position, imageUrl, imageName, onHide, isFavorited, onToggleFavorite, onViewGallery }: ImageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
 
-  // Auto-dismiss on click outside or Escape
+  // ── Phantom-click guard ──────────────────────────────────────────────
+  // On mobile, after a long-press the browser generates a synthetic click
+  // at the finger coordinates.  Because the context menu portal renders
+  // directly under the finger, the Favorite button receives a click that
+  // was never preceded by a pointerdown on the menu.  A *real* tap always
+  // produces pointerdown → click on the same element.  We exploit this:
+  // set a flag on pointerdown inside the menu, and only honour onClick
+  // when the flag is set.  Reset it on every click so it's one-shot.
+  const hadPointerDownRef = useRef(false)
+
+  const handleMenuPointerDown = useCallback(() => {
+    hadPointerDownRef.current = true
+  }, [])
+
+  // Wraps every item action: only fires if preceded by a real pointerdown.
+  const guardedClick = useCallback((action: () => void) => {
+    return (e: React.MouseEvent) => {
+      e.stopPropagation()
+      if (!hadPointerDownRef.current) return   // phantom click — ignore
+      hadPointerDownRef.current = false
+      action()
+    }
+  }, [])
+
+  // Reset guard whenever the menu opens/closes.
+  useEffect(() => {
+    hadPointerDownRef.current = false
+  }, [open])
+
+  // ── Dismiss on outside-click or Escape ───────────────────────────────
+  const handleKeyDown = useCallback(
+    (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() },
+    [onClose],
+  )
+
   useEffect(() => {
     if (!open) return
-
-    const handleKeyDown = (e: KeyboardEvent) => {
-      if (e.key === 'Escape') onClose()
-    }
-
-    const handlePointerDown = (e: PointerEvent) => {
-      if (menuRef.current && !menuRef.current.contains(e.target as Node)) {
-        onClose()
-      }
-    }
-
     document.addEventListener('keydown', handleKeyDown)
-    // Use capture so we get the event before anything else
-    document.addEventListener('pointerdown', handlePointerDown, true)
-    return () => {
-      document.removeEventListener('keydown', handleKeyDown)
-      document.removeEventListener('pointerdown', handlePointerDown, true)
+    return () => document.removeEventListener('keydown', handleKeyDown)
+  }, [open, handleKeyDown])
+
+  // Focus the menu container when it opens so keyboard users can interact.
+  useEffect(() => {
+    if (open) {
+      requestAnimationFrame(() => menuRef.current?.focus())
     }
-  }, [open, onClose])
+  }, [open])
 
   // 1. Save Image — download the image
   const handleSave = () => {
@@ -83,7 +111,7 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
   const ITEM_HEIGHT = 48
   const SEPARATOR_HEIGHT = 1
   const hasShare = typeof navigator !== 'undefined' && !!navigator.share
-  const baseItems = hasShare ? 3 : 2
+  const baseItems = (hasShare ? 3 : 2) + (onToggleFavorite ? 1 : 0) + (onViewGallery ? 1 : 0)
   const MENU_HEIGHT = baseItems * ITEM_HEIGHT + (onHide ? SEPARATOR_HEIGHT + ITEM_HEIGHT : 0)
 
   const x = Math.min(position.x, window.innerWidth - MENU_WIDTH - 8)
@@ -91,7 +119,18 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
   const adjustedX = Math.max(8, x)
   const adjustedY = Math.max(8, y)
 
-  const items = [
+  const items: { label: string; icon: LucideIcon; onClick: () => void; iconClassName?: string }[] = [
+    ...(onViewGallery ? [{
+      label: t('reader.viewGallery'),
+      icon: ExternalLink,
+      onClick: () => { onViewGallery(); onClose() },
+    }] : []),
+    ...(onToggleFavorite ? [{
+      label: isFavorited ? t('reader.unfavoriteImage') : t('reader.favoriteImage'),
+      icon: Heart,
+      onClick: () => { onToggleFavorite(); onClose() },
+      iconClassName: isFavorited ? 'fill-current text-red-400' : 'text-white/70',
+    }] : []),
     { label: t('reader.saveImage'), icon: Download, onClick: handleSave },
     { label: t('reader.copyImage'), icon: Copy, onClick: handleCopy },
     ...(hasShare ? [{ label: t('reader.shareImage'), icon: Share2, onClick: handleShare }] : []),
@@ -102,22 +141,28 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
       {/* Invisible full-screen backdrop to catch outside clicks */}
       <div
         className="fixed inset-0 z-[199]"
-        onClick={onClose}
+        aria-hidden="true"
+        onPointerDown={(e) => { e.stopPropagation(); onClose() }}
         onContextMenu={(e) => { e.preventDefault(); onClose() }}
       />
       <div
         ref={menuRef}
-        className="fixed z-[200] bg-neutral-900/95 backdrop-blur-sm border border-white/10 rounded-xl shadow-2xl overflow-hidden"
+        role="menu"
+        aria-label="Image context menu"
+        tabIndex={-1}
+        className="fixed z-[200] bg-neutral-900/95 backdrop-blur-sm border border-white/10 rounded-xl shadow-2xl overflow-hidden outline-none"
         style={{ left: adjustedX, top: adjustedY, width: MENU_WIDTH }}
+        onPointerDown={handleMenuPointerDown}
         onClick={(e) => e.stopPropagation()}
       >
-        {items.map(({ label, icon: Icon, onClick }) => (
+        {items.map(({ label, icon: Icon, onClick, iconClassName }) => (
           <button
             key={label}
-            onClick={onClick}
+            role="menuitem"
+            onClick={guardedClick(onClick)}
             className="w-full px-4 py-3 text-sm text-white/90 hover:bg-white/10 flex items-center gap-3 transition-colors text-left"
           >
-            <Icon className="w-4 h-4 shrink-0 text-white/70" />
+            <Icon className={`w-4 h-4 shrink-0 ${iconClassName || 'text-white/70'}`} />
             <span>{label}</span>
           </button>
         ))}
@@ -125,7 +170,8 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
           <>
             <div className="border-t border-white/10" />
             <button
-              onClick={onHide}
+              role="menuitem"
+              onClick={guardedClick(() => { onHide(); onClose() })}
               className="w-full px-4 py-3 text-sm text-red-400 hover:bg-white/10 flex items-center gap-3 transition-colors text-left"
             >
               <EyeOff className="w-4 h-4 shrink-0 text-red-400/70" />

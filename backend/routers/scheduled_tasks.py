@@ -1,6 +1,7 @@
 """Scheduled tasks management endpoints (Immich-style cron UI)."""
 
 import logging
+import uuid
 
 from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -63,6 +64,13 @@ TASK_DEFS = {
         "default_cron": "*/15 * * * *",
         "default_enabled": True,
         "job": "retry_failed_downloads_job",
+    },
+    "ehtag_sync": {
+        "name": "EhTag Translation Sync",
+        "description": "Sync tag translations from EhTagTranslation database (CDN)",
+        "default_cron": "0 4 * * 0",
+        "default_enabled": True,
+        "job": "ehtag_sync_job",
     },
 }
 
@@ -142,7 +150,7 @@ async def run_scheduled_task(
 
     try:
         arq: ArqRedis = request.app.state.arq
-        await arq.enqueue_job(job_name, _job_id=f"manual:{task_id}")
+        await arq.enqueue_job(job_name, _job_id=f"manual:{task_id}:{uuid.uuid4().hex[:8]}")
     except Exception as exc:
         logger.error("Failed to enqueue %s: %s", job_name, exc)
         raise HTTPException(status_code=500, detail=str(exc))

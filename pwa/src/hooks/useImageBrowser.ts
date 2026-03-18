@@ -10,6 +10,7 @@ interface UseImageBrowserParams {
   gallery_id?: number
   source?: string
   category?: string
+  favorited?: boolean
   limit?: number
   jumpAt?: string
 }
@@ -28,7 +29,7 @@ export function useImageBrowser(params: UseImageBrowserParams = {}) {
     return null
   }
 
-  const { data, error, size, setSize, isLoading } = useSWRInfinite<ImageBrowserResponse>(
+  const { data, error, size, setSize, isLoading, mutate } = useSWRInfinite<ImageBrowserResponse>(
     getKey,
     ([, fetchParams]: [string, UseImageBrowserParams & { cursor?: string; jump_at?: string }]) =>
       api.library.browseImages(fetchParams),
@@ -39,6 +40,19 @@ export function useImageBrowser(params: UseImageBrowserParams = {}) {
     () => (data ? data.flatMap((page) => page.images) : []),
     [data],
   )
+
+  const favoritedImageIds = useMemo(() => {
+    const set = new Set<number>()
+    if (data) {
+      for (const page of data) {
+        if (page.favorited_image_ids) {
+          for (const id of page.favorited_image_ids) set.add(id)
+        }
+      }
+    }
+    return set
+  }, [data])
+
   const isLoadingMore = isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
   const isEmpty = data?.[0]?.images.length === 0
   const lastPage = data?.[data.length - 1]
@@ -46,6 +60,7 @@ export function useImageBrowser(params: UseImageBrowserParams = {}) {
 
   return {
     images,
+    favoritedImageIds,
     error,
     isLoading,
     isLoadingMore,
@@ -53,5 +68,6 @@ export function useImageBrowser(params: UseImageBrowserParams = {}) {
     size,
     setSize,
     loadMore: () => setSize(size + 1),
+    mutate,
   }
 }

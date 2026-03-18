@@ -185,9 +185,54 @@ class DownloadSemaphore:
 
 
 async def publish_job_event(event: dict) -> None:
-    """Publish a job event to the download:events channel."""
+    """Publish a job event — delegates to EventBus while maintaining backward compatibility.
+
+    Existing callers pass dicts like:
+      {"type": "job_update", "job_id": "...", "status": "...", "progress": {...}, "user_id": ...}
+      {"type": "subscription_checked", "sub_id": ..., "status": "...", "job_id": ..., "user_id": ...}
+    """
     try:
-        await get_redis().publish("download:events", json.dumps(event))
+        from core.events import EventType, emit
+
+        event_type_str = event.get("type", "")
+        user_id = event.get("user_id")
+
+        if event_type_str == "job_update":
+            status = event.get("status", "")
+            status_map = {
+                "queued": EventType.DOWNLOAD_ENQUEUED,
+                "running": EventType.DOWNLOAD_STARTED,
+                "done": EventType.DOWNLOAD_COMPLETED,
+                "failed": EventType.DOWNLOAD_FAILED,
+                "cancelled": EventType.DOWNLOAD_CANCELLED,
+                "paused": EventType.DOWNLOAD_PAUSED,
+                "partial": EventType.DOWNLOAD_FAILED,
+            }
+            et = status_map.get(status)
+            if et is None:
+                import logging as _log
+                _log.getLogger(__name__).warning("publish_job_event: unknown status %r, using DOWNLOAD_PROGRESS", status)
+                et = EventType.DOWNLOAD_PROGRESS
+            await emit(
+                et,
+                actor_user_id=user_id,
+                resource_type="download_job",
+                resource_id=event.get("job_id"),
+                status=status,
+                progress=event.get("progress"),
+            )
+        elif event_type_str == "subscription_checked":
+            await emit(
+                EventType.SUBSCRIPTION_CHECKED,
+                actor_user_id=user_id,
+                resource_type="subscription",
+                resource_id=event.get("sub_id"),
+                status=event.get("status"),
+                new_works=event.get("new_works", 0),
+            )
+        else:
+            # Unknown type — publish directly to old channel as fallback
+            await get_redis().publish("download:events", json.dumps(event))
     except Exception as exc:
         import logging
         logging.getLogger(__name__).warning("publish_job_event failed: %s", exc)

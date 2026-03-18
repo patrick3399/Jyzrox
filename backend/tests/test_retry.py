@@ -81,9 +81,15 @@ class TestRetryFailedDownloadsJob:
         mock_job = _make_mock_job(status="failed", retry_count=0)
 
         mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [mock_job]
-        mock_session.execute = AsyncMock(return_value=mock_result)
+        # execute() is called 3 times:
+        #   1. UPDATE stale running jobs  → empty result
+        #   2. UPDATE stale queued jobs   → empty result
+        #   3. SELECT retry jobs          → [mock_job]
+        mock_stale_result = MagicMock()
+        mock_stale_result.scalars.return_value.all.return_value = []
+        mock_retry_result = MagicMock()
+        mock_retry_result.scalars.return_value.all.return_value = [mock_job]
+        mock_session.execute = AsyncMock(side_effect=[mock_stale_result, mock_stale_result, mock_retry_result])
         mock_session.commit = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
@@ -92,6 +98,7 @@ class TestRetryFailedDownloadsJob:
             patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.retry._cron_record", new_callable=AsyncMock),
             patch("worker.retry.AsyncSessionLocal", return_value=mock_session),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             from worker.retry import retry_failed_downloads_job
 
@@ -99,6 +106,7 @@ class TestRetryFailedDownloadsJob:
 
         assert result["status"] == "ok"
         assert result["retried"] == 1
+        assert result["stale_reaped"] == 0
         assert mock_job.retry_count == 1
         assert mock_job.status == "queued"
         assert mock_job.finished_at is None
@@ -114,9 +122,11 @@ class TestRetryFailedDownloadsJob:
         mock_job = _make_mock_job(status="partial", retry_count=1, progress={"failed_pages": [3, 7]})
 
         mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [mock_job]
-        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_stale_result = MagicMock()
+        mock_stale_result.scalars.return_value.all.return_value = []
+        mock_retry_result = MagicMock()
+        mock_retry_result.scalars.return_value.all.return_value = [mock_job]
+        mock_session.execute = AsyncMock(side_effect=[mock_stale_result, mock_stale_result, mock_retry_result])
         mock_session.commit = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
@@ -125,6 +135,7 @@ class TestRetryFailedDownloadsJob:
             patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.retry._cron_record", new_callable=AsyncMock),
             patch("worker.retry.AsyncSessionLocal", return_value=mock_session),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             from worker.retry import retry_failed_downloads_job
 
@@ -142,9 +153,11 @@ class TestRetryFailedDownloadsJob:
         mock_job = _make_mock_job(status="failed", retry_count=0)
 
         mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [mock_job]
-        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_stale_result = MagicMock()
+        mock_stale_result.scalars.return_value.all.return_value = []
+        mock_retry_result = MagicMock()
+        mock_retry_result.scalars.return_value.all.return_value = [mock_job]
+        mock_session.execute = AsyncMock(side_effect=[mock_stale_result, mock_stale_result, mock_retry_result])
         mock_session.commit = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
@@ -153,6 +166,7 @@ class TestRetryFailedDownloadsJob:
             patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.retry._cron_record", new_callable=AsyncMock),
             patch("worker.retry.AsyncSessionLocal", return_value=mock_session),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             from worker.retry import retry_failed_downloads_job
 
@@ -171,9 +185,9 @@ class TestRetryFailedDownloadsJob:
         mock_redis.get = AsyncMock(return_value=None)
 
         mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = []
-        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_empty_result = MagicMock()
+        mock_empty_result.scalars.return_value.all.return_value = []
+        mock_session.execute = AsyncMock(side_effect=[mock_empty_result, mock_empty_result, mock_empty_result])
         mock_session.commit = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
@@ -182,6 +196,7 @@ class TestRetryFailedDownloadsJob:
             patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.retry._cron_record", new_callable=AsyncMock),
             patch("worker.retry.AsyncSessionLocal", return_value=mock_session),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             from worker.retry import retry_failed_downloads_job
 
@@ -189,6 +204,7 @@ class TestRetryFailedDownloadsJob:
 
         assert result["status"] == "ok"
         assert result["retried"] == 0
+        assert result["stale_reaped"] == 0
 
     async def test_enqueue_failure_reverts_job(self):
         """If ARQ enqueue fails, job should be reverted to failed status."""
@@ -199,9 +215,11 @@ class TestRetryFailedDownloadsJob:
         mock_job = _make_mock_job(status="failed", retry_count=0)
 
         mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [mock_job]
-        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_stale_result = MagicMock()
+        mock_stale_result.scalars.return_value.all.return_value = []
+        mock_retry_result = MagicMock()
+        mock_retry_result.scalars.return_value.all.return_value = [mock_job]
+        mock_session.execute = AsyncMock(side_effect=[mock_stale_result, mock_stale_result, mock_retry_result])
         mock_session.commit = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
@@ -210,6 +228,7 @@ class TestRetryFailedDownloadsJob:
             patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.retry._cron_record", new_callable=AsyncMock),
             patch("worker.retry.AsyncSessionLocal", return_value=mock_session),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             from worker.retry import retry_failed_downloads_job
 
@@ -241,9 +260,11 @@ class TestRetryFailedDownloadsJob:
         mock_job = _make_mock_job(status="failed", retry_count=0, max_retries=5)
 
         mock_session = AsyncMock()
-        mock_result = MagicMock()
-        mock_result.scalars.return_value.all.return_value = [mock_job]
-        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_stale_result = MagicMock()
+        mock_stale_result.scalars.return_value.all.return_value = []
+        mock_retry_result = MagicMock()
+        mock_retry_result.scalars.return_value.all.return_value = [mock_job]
+        mock_session.execute = AsyncMock(side_effect=[mock_stale_result, mock_stale_result, mock_retry_result])
         mock_session.commit = AsyncMock()
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
@@ -252,6 +273,7 @@ class TestRetryFailedDownloadsJob:
             patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.retry._cron_record", new_callable=AsyncMock),
             patch("worker.retry.AsyncSessionLocal", return_value=mock_session),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             from worker.retry import retry_failed_downloads_job
 

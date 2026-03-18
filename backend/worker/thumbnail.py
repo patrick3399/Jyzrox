@@ -192,4 +192,8 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
         await session.commit()
 
     logger.info("[thumbnail] gallery_id=%d: %d done", gallery_id, processed)
+
+    from core.events import EventType, emit_safe
+    await emit_safe(EventType.THUMBNAILS_GENERATED, resource_type="gallery", resource_id=gallery_id, count=processed)
+
     return {"status": "done", "processed": processed}

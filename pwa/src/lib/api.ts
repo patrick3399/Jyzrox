@@ -50,7 +50,15 @@ import type {
   SiteRateConfig,
   DownloadPreview,
   StorageInfo,
+  LogEntry,
+  LogLevelConfig,
 } from './types'
+
+// ── Local types ───────────────────────────────────────────────────────
+
+export type ReconcileStatus =
+  | { status: 'never_run' }
+  | { status: string; completed_at: string; removed_images: number; removed_galleries: number; orphan_blobs_cleaned: number }
 
 // ── Base fetch ───────────────────────────────────────────────────────
 
@@ -309,16 +317,17 @@ const library = {
       total?: number
       page?: number
       has_next?: boolean
+      favorited_image_ids?: number[]
     }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/images${qs ? `?${qs}` : ''}`)
   },
 
-  updateGallery: (source: string, sourceId: string, patch: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string }) =>
+  updateGallery: (source: string, sourceId: string, patch: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string; in_reading_list?: boolean }) =>
     apiFetch<Gallery>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
     }),
 
-  batchGalleries: (body: { action: 'delete' | 'favorite' | 'unfavorite' | 'rate' | 'add_to_collection' | 'add_tags' | 'remove_tags'; gallery_ids: number[]; rating?: number; collection_id?: number; tags?: string[] }) =>
+  batchGalleries: (body: { action: 'delete' | 'favorite' | 'unfavorite' | 'rate' | 'add_to_collection' | 'add_tags' | 'remove_tags' | 'add_to_reading_list' | 'remove_from_reading_list'; gallery_ids: number[]; rating?: number; collection_id?: number; tags?: string[] }) =>
     apiFetch<{ status: string; affected: number; deleted_dirs?: number }>('/api/library/galleries/batch', {
       method: 'POST',
       body: JSON.stringify(body),
@@ -391,13 +400,19 @@ const library = {
       { method: 'DELETE' }
     ),
 
-  browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number; source?: string; category?: string; jump_at?: string } = {}) =>
+  favoriteImage: (imageId: number) =>
+    apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, { method: 'POST' }),
+
+  unfavoriteImage: (imageId: number) =>
+    apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, { method: 'DELETE' }),
+
+  browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number; source?: string; category?: string; jump_at?: string; favorited?: boolean } = {}) =>
     apiFetch<import('./types').ImageBrowserResponse>(`/api/library/images${qs(params as Record<string, unknown>)}`),
 
-  imageTimeRange: (params: { tags?: string[]; exclude_tags?: string[]; source?: string; category?: string; gallery_id?: number } = {}) =>
+  imageTimeRange: (params: { tags?: string[]; exclude_tags?: string[]; source?: string; category?: string; gallery_id?: number; favorited?: boolean } = {}) =>
     apiFetch<import('./types').ImageTimeRangeResponse>(`/api/library/images/time_range${qs(params as Record<string, unknown>)}`),
 
-  imageTimelinePercentiles: (params: { tags?: string[]; exclude_tags?: string[]; source?: string; category?: string; gallery_id?: number; buckets?: number } = {}) =>
+  imageTimelinePercentiles: (params: { tags?: string[]; exclude_tags?: string[]; source?: string; category?: string; gallery_id?: number; buckets?: number; favorited?: boolean } = {}) =>
     apiFetch<import('./types').TimelinePercentilesResponse>(`/api/library/images/timeline_percentiles${qs(params as Record<string, unknown>)}`),
 
   trashList: (params: { limit?: number; offset?: number } = {}) =>
@@ -560,6 +575,17 @@ const settings = {
   deleteCredential: (source: string) =>
     apiFetch<{ status: string }>(`/api/settings/credentials/${source}`, { method: 'DELETE' }),
 
+  detectSite: (url: string) =>
+    apiFetch<{ detected: boolean; source?: string; site_name?: string }>(
+      `/api/settings/credentials/detect?url=${encodeURIComponent(url)}`
+    ),
+
+  setSiteCredential: (source: string, data: { cookies?: string; username?: string; password?: string }) =>
+    apiFetch<{ status: string; source: string }>('/api/settings/credentials/site', {
+      method: 'POST',
+      body: JSON.stringify({ source, ...data }),
+    }),
+
   getEhSite: () =>
     apiFetch<{ use_ex: boolean }>('/api/settings/eh-site'),
 
@@ -586,6 +612,9 @@ const settings = {
       dedup_heuristic_enabled: boolean
       dedup_opencv_enabled: boolean
       dedup_opencv_threshold: number
+      tag_translation_enabled: boolean
+      trash_enabled: boolean
+      trash_retention_days: number
     }>('/api/settings/features'),
 
   setFeature: (feature: string, enabled: boolean) =>
@@ -667,6 +696,8 @@ const system = {
   clearCache: () => apiFetch<{ deleted_keys: number }>('/api/system/cache', { method: 'DELETE' }),
   clearCacheCategory: (category: string) =>
     apiFetch<{ deleted_keys: number }>(`/api/system/cache/${category}`, { method: 'DELETE' }),
+  startReconcile: () => apiFetch<{ status: string }>('/api/system/reconcile', { method: 'POST' }),
+  getReconcileStatus: () => apiFetch<ReconcileStatus>('/api/system/reconcile'),
 }
 
 // ── Tags ─────────────────────────────────────────────────────────────
@@ -737,6 +768,24 @@ const tags = {
 
   importEhtag: () =>
     apiFetch<{ status: string; count: number }>('/api/tags/import-ehtag', { method: 'POST' }),
+
+  updateGalleryTags: (galleryId: number, body: { tags: string[]; action: 'add' | 'remove' }) =>
+    apiFetch<{ status: string; affected: number }>(`/api/tags/gallery/${galleryId}`, {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  upsertTranslation: (body: { namespace: string; name: string; language: string; translation: string }) =>
+    apiFetch<{ status: string }>('/api/tags/translations', {
+      method: 'POST',
+      body: JSON.stringify(body),
+    }),
+
+  batchImportTranslations: (translations: Array<{ namespace: string; name: string; language: string; translation: string }>) =>
+    apiFetch<{ status: string; count: number }>('/api/tags/translations/batch', {
+      method: 'POST',
+      body: JSON.stringify({ translations }),
+    }),
 }
 
 // ── API Tokens ───────────────────────────────────────────────────────
@@ -764,17 +813,6 @@ const tokens = {
 // ── Import ────────────────────────────────────────────────────────────
 
 const import_ = {
-  browse: (path = '', library = '') => {
-    const params = new URLSearchParams()
-    if (path) params.set('path', path)
-    if (library) params.set('library', library)
-    return apiFetch<{
-      path: string
-      base: string
-      entries: Array<{ name: string; type: 'dir' | 'file'; file_count?: number; size?: number; imported?: boolean }>
-    }>(`/api/import/browse?${params}`)
-  },
-
   batchScan: (rootDir: string, pattern: string) =>
     apiFetch<{
       matches: Array<{ rel_path: string; abs_path: string; artist: string | null; title: string; file_count: number }>
@@ -801,11 +839,6 @@ const import_ = {
   progress: (galleryId: number) =>
     apiFetch<{ gallery_id: number; processed: number; total: number; status: string }>(
       `/api/import/progress/${galleryId}`,
-    ),
-
-  recent: () =>
-    apiFetch<Array<{ id: number; title: string; pages: number; status: string; added_at: string }>>(
-      '/api/import/recent',
     ),
 
   rescan: () => apiFetch<{ status: string }>('/api/import/rescan', { method: 'POST' }),
@@ -860,20 +893,6 @@ const import_ = {
       method: 'POST',
       body: JSON.stringify({ enabled }),
     }),
-
-  scanSettings: () =>
-    apiFetch<{ enabled: boolean; interval_hours: number; last_run: string | null }>(
-      '/api/import/scan-settings',
-    ),
-
-  updateScanSettings: (settings: { enabled?: boolean; interval_hours?: number }) =>
-    apiFetch<{ enabled: boolean; interval_hours: number; last_run: string | null }>(
-      '/api/import/scan-settings',
-      {
-        method: 'PATCH',
-        body: JSON.stringify(settings),
-      },
-    ),
 
   browseFs: (path?: string) =>
     apiFetch<{ path: string; parent: string | null; entries: { name: string; type: string }[] }>(
@@ -1095,7 +1114,7 @@ const subscriptions = {
     ),
 
   create: (data: { url: string; name?: string; cron_expr?: string; auto_download?: boolean }) =>
-    apiFetch<{ status: string; id: number; source: string | null }>('/api/subscriptions/', {
+    apiFetch<{ status: string; id: number; source: string | null; duplicate?: boolean }>('/api/subscriptions/', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -1177,6 +1196,34 @@ const users = {
     apiFetch<{ status: string }>(`/api/users/${id}`, { method: 'DELETE' }),
 }
 
+// ── Logs ──────────────────────────────────────────────────────────────
+
+const logs = {
+  list: (params?: { level?: string[]; source?: string; search?: string; limit?: number; offset?: number }) => {
+    const sp = new URLSearchParams()
+    if (params?.level) params.level.forEach(l => sp.append('level', l))
+    if (params?.source) sp.set('source', params.source)
+    if (params?.search) sp.set('search', params.search)
+    if (params?.limit) sp.set('limit', String(params.limit))
+    if (params?.offset) sp.set('offset', String(params.offset))
+    const qs = sp.toString()
+    return apiFetch<{ logs: LogEntry[]; total: number; has_more: boolean }>(`/api/logs/${qs ? `?${qs}` : ''}`)
+  },
+  clear: () => apiFetch<{ status: string; deleted: number }>('/api/logs/', { method: 'DELETE' }),
+  getLevels: () => apiFetch<LogLevelConfig>('/api/logs/levels'),
+  setLevel: (source: string, level: string) =>
+    apiFetch<{ source: string; level: string }>('/api/logs/levels', {
+      method: 'PATCH',
+      body: JSON.stringify({ source, level }),
+    }),
+  getRetention: () => apiFetch<{ max_entries: number }>('/api/logs/retention'),
+  setRetention: (data: { max_entries: number }) =>
+    apiFetch<{ max_entries: number }>('/api/logs/retention', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
 export const api = {
@@ -1200,4 +1247,5 @@ export const api = {
   subscriptions,
   dedup,
   users,
+  logs,
 }

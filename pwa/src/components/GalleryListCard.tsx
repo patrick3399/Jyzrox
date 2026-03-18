@@ -2,7 +2,7 @@
 
 import { useCallback, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, ExternalLink, Heart, Download, Check } from 'lucide-react'
+import { BookOpen, ExternalLink, Heart, Download, Check, Trash2, Bookmark, BookmarkCheck } from 'lucide-react'
 import type { Gallery } from '@/lib/types'
 import { RatingStars } from '@/components/RatingStars'
 import { ContextMenu } from '@/components/ContextMenu'
@@ -19,6 +19,8 @@ interface GalleryListCardProps {
   selected?: boolean
   selectMode?: boolean
   onFavoriteToggle?: (gallery: Gallery) => void
+  onReadingListToggle?: (gallery: Gallery) => void
+  onDelete?: (gallery: Gallery) => void
   onDownload?: (gallery: Gallery) => void
 }
 
@@ -31,6 +33,8 @@ export function GalleryListCard({
   selected,
   selectMode,
   onFavoriteToggle,
+  onReadingListToggle,
+  onDelete,
   onDownload,
 }: GalleryListCardProps) {
   const router = useRouter()
@@ -65,9 +69,20 @@ export function GalleryListCard({
     ...(onFavoriteToggle
       ? [
           {
-            label: t('contextMenu.favorite'),
+            label: gallery.is_favorited ? t('contextMenu.unfavorite') : t('contextMenu.favorite'),
             icon: Heart,
             onClick: () => onFavoriteToggle(gallery),
+          },
+        ]
+      : []),
+    ...(onReadingListToggle
+      ? [
+          {
+            label: gallery.in_reading_list
+              ? t('contextMenu.removeFromReadingList')
+              : t('contextMenu.addToReadingList'),
+            icon: gallery.in_reading_list ? BookmarkCheck : Bookmark,
+            onClick: () => onReadingListToggle(gallery),
           },
         ]
       : []),
@@ -77,6 +92,16 @@ export function GalleryListCard({
             label: t('contextMenu.download'),
             icon: Download,
             onClick: () => onDownload(gallery),
+          },
+        ]
+      : []),
+    ...(onDelete
+      ? [
+          {
+            label: t('contextMenu.delete'),
+            icon: Trash2,
+            className: 'text-red-400',
+            onClick: () => onDelete(gallery),
           },
         ]
       : []),
@@ -95,12 +120,12 @@ export function GalleryListCard({
         onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
         {...longPressHandlers}
         className={`
-          relative flex gap-3 p-3 select-none
+          relative flex gap-3 p-3 select-none [-webkit-touch-callout:none]
           bg-vault-card rounded-lg overflow-hidden
           transition-all duration-150 cursor-pointer
           hover:bg-vault-card-hover hover:border-vault-accent
           focus:outline-none focus:ring-2 focus:ring-vault-accent
-          ${selected ? 'border-2 border-vault-accent' : 'border border-vault-border'}
+          ${(selected || menuOpen) ? 'border-2 border-vault-accent' : 'border border-vault-border'}
         `}
       >
         {/* Select-mode checkbox overlay */}

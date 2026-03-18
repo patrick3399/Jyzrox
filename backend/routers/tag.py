@@ -11,9 +11,13 @@ from sqlalchemy import case as sql_case, delete, desc, func, literal as sql_lite
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from opencc import OpenCC
+
 from core.auth import require_auth, require_role
 from core.database import async_session, get_db
 from db.models import BlockedTag, Gallery, GalleryTag, Tag, TagAlias, TagImplication, TagTranslation
+
+_s2twp = OpenCC('s2twp')
 
 router = APIRouter(tags=["tags"])
 
@@ -444,6 +448,8 @@ async def get_translations(
     if not tag_pairs:
         return {}
 
+    db_language = "zh" if language == "zh-TW" else language
+
     async with async_session() as session:
         # Fetch all matching translations in one query
         from sqlalchemy import tuple_
@@ -451,7 +457,7 @@ async def get_translations(
         rows = (
             await session.execute(
                 select(TagTranslation).where(
-                    TagTranslation.language == language,
+                    TagTranslation.language == db_language,
                     tuple_(TagTranslation.namespace, TagTranslation.name).in_(tag_pairs),
                 )
             )
@@ -460,6 +466,10 @@ async def get_translations(
     result = {}
     for r in rows:
         result[f"{r.namespace}:{r.name}"] = r.translation
+
+    if language == "zh-TW":
+        result = {k: _s2twp.convert(v) for k, v in result.items()}
+
     return result
 
 
@@ -661,6 +671,8 @@ async def manual_tag_gallery(
 
         await rebuild_gallery_tags_array(session, gallery_id)
         await session.commit()
+        from core.events import EventType, emit_safe
+        await emit_safe(EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
         return {"status": "ok", "affected": len(tag_ids)}
 
     else:  # remove
@@ -727,6 +739,8 @@ async def manual_tag_gallery(
 
         await rebuild_gallery_tags_array(session, gallery_id)
         await session.commit()
+        from core.events import EventType, emit_safe
+        await emit_safe(EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
         return {"status": "ok", "affected": removed}
 
 

@@ -2,8 +2,6 @@
  * useImport — Vitest test suite
  *
  * Covers:
- *   useBrowseDirectory  — passes key ['import/browse', path, library] and calls api
- *   useRecentImports    — passes key 'import/recent' with refreshInterval: 5000
  *   useImportProgress   — null galleryId passes null key; valid id passes array key
  *   useBatchScan        — trigger calls api.import_.batchScan with rootDir and pattern
  *   useBatchStart       — trigger calls api.import_.batchStart with galleries
@@ -15,8 +13,6 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 // ── Hoisted mock helpers ──────────────────────────────────────────────
 
 const {
-  mockBrowse,
-  mockRecent,
   mockProgress,
   mockBatchScan,
   mockBatchStart,
@@ -28,15 +24,11 @@ const {
   mockMonitorStatus,
   mockAddLibrary,
   mockRemoveLibrary,
-  mockScanSettings,
-  mockUpdateScanSettings,
   mockRescanCancel,
   mockBrowseFs,
   mockMountPoints,
   mockToggleMonitor,
 } = vi.hoisted(() => ({
-  mockBrowse: vi.fn(),
-  mockRecent: vi.fn(),
   mockProgress: vi.fn(),
   mockBatchScan: vi.fn(),
   mockBatchStart: vi.fn(),
@@ -48,8 +40,6 @@ const {
   mockMonitorStatus: vi.fn(),
   mockAddLibrary: vi.fn(),
   mockRemoveLibrary: vi.fn(),
-  mockScanSettings: vi.fn(),
-  mockUpdateScanSettings: vi.fn(),
   mockRescanCancel: vi.fn(),
   mockBrowseFs: vi.fn(),
   mockMountPoints: vi.fn(),
@@ -61,8 +51,6 @@ const {
 vi.mock('@/lib/api', () => ({
   api: {
     import_: {
-      browse: mockBrowse,
-      recent: mockRecent,
       progress: mockProgress,
       batchScan: mockBatchScan,
       batchStart: mockBatchStart,
@@ -74,8 +62,6 @@ vi.mock('@/lib/api', () => ({
       monitorStatus: mockMonitorStatus,
       addLibrary: mockAddLibrary,
       removeLibrary: mockRemoveLibrary,
-      scanSettings: mockScanSettings,
-      updateScanSettings: mockUpdateScanSettings,
       rescanCancel: mockRescanCancel,
       browseFs: mockBrowseFs,
       mountPoints: mockMountPoints,
@@ -123,8 +109,6 @@ vi.mock('swr/mutation', () => ({
 // ── Import hooks after mocks ──────────────────────────────────────────
 
 import {
-  useBrowseDirectory,
-  useRecentImports,
   useImportProgress,
   useBatchScan,
   useBatchStart,
@@ -136,8 +120,6 @@ import {
 beforeEach(() => {
   vi.clearAllMocks()
   swrCalls.length = 0
-  mockBrowse.mockResolvedValue({ entries: [] })
-  mockRecent.mockResolvedValue({ items: [] })
   mockProgress.mockResolvedValue({ status: 'idle' })
   mockBatchScan.mockResolvedValue({ galleries: [] })
   mockBatchStart.mockResolvedValue({ batch_id: 'abc' })
@@ -153,40 +135,6 @@ function lastSwrCall(): SwrCall {
 }
 
 // ── Tests ─────────────────────────────────────────────────────────────
-
-describe('useBrowseDirectory', () => {
-  it('test_useBrowseDirectory_key_isArrayWithBrowsePath', () => {
-    useBrowseDirectory('/mnt/gallery', 'default')
-    const { key } = lastSwrCall()
-    expect(Array.isArray(key)).toBe(true)
-    expect((key as unknown[])[0]).toBe('import/browse')
-    expect((key as unknown[])[1]).toBe('/mnt/gallery')
-  })
-
-  it('test_useBrowseDirectory_fetcher_callsApiBrowseWithPathAndLibrary', async () => {
-    useBrowseDirectory('/mnt/art', 'lib1')
-    await lastSwrCall().fetcher!()
-    expect(mockBrowse).toHaveBeenCalledWith('/mnt/art', 'lib1')
-  })
-})
-
-describe('useRecentImports', () => {
-  it('test_useRecentImports_key_isImportRecentString', () => {
-    useRecentImports()
-    expect(lastSwrCall().key).toBe('import/recent')
-  })
-
-  it('test_useRecentImports_options_setsRefreshInterval5000', () => {
-    useRecentImports()
-    expect(lastSwrCall().options.refreshInterval).toBe(5000)
-  })
-
-  it('test_useRecentImports_fetcher_callsApiImportRecent', async () => {
-    useRecentImports()
-    await lastSwrCall().fetcher!()
-    expect(mockRecent).toHaveBeenCalledOnce()
-  })
-})
 
 describe('useImportProgress', () => {
   it('test_useImportProgress_nullGalleryId_passesNullKeyToSwr', () => {

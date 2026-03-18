@@ -297,13 +297,15 @@ async def download_job(
     await _set_job_progress(db_job_id, final_progress)
 
     # ── 15. Finalize ────────────────────────────────────────────────
-    if target_dir.exists():
+    if target_dir.exists() and result.downloaded > 0:
         if importer.gallery_id:
             gallery_id = await importer.finalize(target_dir, partial=bool(all_failed) or result.status in ("failed", "partial"))
             logger.info("[download] progressive import finalized: gallery_id=%s", gallery_id)
         else:
             # Safety fallback: no progressive import occurred (should be rare)
             await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id, import_user_id, url)
+    elif result.downloaded == 0:
+        logger.info("[download] no new files downloaded (all skipped by archive), skipping import: %s", url)
 
     is_partial = bool(all_failed) or result.status in ("failed", "partial")
     if is_partial:

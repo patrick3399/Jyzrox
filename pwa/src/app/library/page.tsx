@@ -1,10 +1,10 @@
 'use client'
 
 import { useState, useCallback, Suspense, useEffect } from 'react'
-import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { BookOpen, Plus, Minus, X, ChevronDown, LayoutGrid, List } from 'lucide-react'
-import { useInfiniteLibraryGalleries, useGalleryCategories } from '@/hooks/useGalleries'
+import { BookOpen, Plus, Minus, X, ChevronDown, LayoutGrid, List, Bookmark, BookmarkCheck } from 'lucide-react'
+import { useInfiniteLibraryGalleries, useGalleryCategories, useLibrarySources } from '@/hooks/useGalleries'
+import type { Gallery } from '@/lib/types'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { useCollections } from '@/hooks/useCollections'
@@ -25,14 +25,6 @@ const SORT_OPTIONS = [
   { value: 'pages', label: () => t('library.pagesSort') },
 ] as const
 
-const SOURCE_OPTIONS = [
-  { value: '', label: () => t('library.allSources') },
-  { value: 'ehentai', label: () => 'E-Hentai' },
-  { value: 'pixiv', label: () => 'Pixiv' },
-  { value: 'local:link', label: () => t('library.monitored') },
-  { value: 'local:copy', label: () => t('library.imported') },
-]
-
 const PAGE_SIZE = 24
 
 function LibraryContent() {
@@ -50,6 +42,7 @@ function LibraryContent() {
     excludeInput,
     minRating,
     onlyFavorited,
+    inReadingList,
     sourceFilter,
     artistFilter,
     sort,
@@ -60,6 +53,7 @@ function LibraryContent() {
   } = state
 
   const { data: categoriesData } = useGalleryCategories()
+  const { data: sourcesData } = useLibrarySources()
 
   const [colCount, setColCount] = useState(4)
   const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
@@ -121,13 +115,14 @@ function LibraryContent() {
     [dispatch],
   )
 
-  const { galleries, total, isLoading, error, isLoadingMore, isReachingEnd, loadMore } =
+  const { galleries, total, isLoading, error, isLoadingMore, isReachingEnd, loadMore, mutate } =
     useInfiniteLibraryGalleries({
       q: searchQuery || undefined,
       tags: includeTags.length > 0 ? includeTags : undefined,
       exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
       min_rating: minRating,
       favorited: onlyFavorited || undefined,
+      in_reading_list: inReadingList || undefined,
       source: parsedSource,
       import_mode: parsedImportMode,
       artist: artistFilter || undefined,
@@ -136,6 +131,39 @@ function LibraryContent() {
       collection: collectionFilter,
       category: categoryFilter || undefined,
     })
+
+  const handleFavoriteToggle = useCallback(async (gallery: Gallery) => {
+    try {
+      await api.library.updateGallery(gallery.source, gallery.source_id, {
+        favorited: !gallery.is_favorited,
+      })
+      toast.success(gallery.is_favorited ? t('library.unfavorited') : t('library.favorited'))
+      mutate()
+    } catch {
+      toast.error(t('library.updateFailed'))
+    }
+  }, [mutate])
+
+  const handleDelete = useCallback(async (gallery: Gallery) => {
+    if (!window.confirm(t('library.deleteConfirm', { title: gallery.title }))) return
+    try {
+      await api.library.deleteGallery(gallery.source, gallery.source_id)
+      toast.success(t('library.deleted'))
+      mutate()
+    } catch {
+      toast.error(t('library.updateFailed'))
+    }
+  }, [mutate])
+
+  const handleReadingListToggle = useCallback(async (g: Gallery) => {
+    try {
+      await api.library.updateGallery(g.source, g.source_id, { in_reading_list: !g.in_reading_list })
+      globalMutate((key: unknown) => typeof key === 'string' && key.startsWith('library-galleries'))
+      toast.success(g.in_reading_list ? t('contextMenu.removeFromReadingList') : t('contextMenu.addToReadingList'))
+    } catch {
+      toast.error(t('common.failedToLoad'))
+    }
+  }, [globalMutate])
 
   // ── Scroll restoration ──────────────────────────────────
   const { saveScroll } = useScrollRestore('library_scrollY', galleries.length > 0)
@@ -294,9 +322,14 @@ function LibraryContent() {
                     }}
                     className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
                   >
-                    {SOURCE_OPTIONS.map((opt) => (
+                    <option value="">{t('library.allSources')}</option>
+                    {(sourcesData ?? []).map((opt) => (
                       <option key={opt.value} value={opt.value}>
-                        {opt.label()}
+                        {opt.value === 'local:link'
+                          ? t('library.monitored')
+                          : opt.value === 'local:copy'
+                            ? t('library.imported')
+                            : opt.label}
                       </option>
                     ))}
                   </select>
@@ -379,6 +412,16 @@ function LibraryContent() {
                     className="w-4 h-4 accent-yellow-500"
                   />
                   <span className="text-sm text-vault-text-secondary">{t('library.favoritesOnly')}</span>
+                </label>
+
+                <label className="flex items-center gap-2 text-sm text-vault-text-secondary cursor-pointer whitespace-nowrap">
+                  <input
+                    type="checkbox"
+                    checked={inReadingList}
+                    onChange={(e) => dispatch({ type: 'SET_IN_READING_LIST', payload: e.target.checked })}
+                    className="rounded border-vault-border"
+                  />
+                  {t('library.readingListOnly')}
                 </label>
 
                 <button
@@ -469,20 +512,29 @@ function LibraryContent() {
                   onClick={() => {
                     dispatch({ type: 'TOGGLE_SELECTED_ID', payload: gallery.id })
                   }}
+                  onContextMenu={(e) => e.preventDefault()}
                 >
                   <Card
                     gallery={gallery}
                     thumbUrl={gallery.cover_thumb ?? undefined}
                     selected={isSelected}
                     selectMode={true}
+                    onFavoriteToggle={handleFavoriteToggle}
+                    onReadingListToggle={handleReadingListToggle}
+                    onDelete={handleDelete}
                   />
                 </div>
               )
             }
             return (
-              <Link href={`/library/${gallery.source}/${gallery.source_id}`} onClick={() => saveScroll()}>
-                <Card gallery={gallery} thumbUrl={gallery.cover_thumb ?? undefined} />
-              </Link>
+              <Card
+                gallery={gallery}
+                thumbUrl={gallery.cover_thumb ?? undefined}
+                onClick={() => { saveScroll(); router.push(`/library/${gallery.source}/${gallery.source_id}`) }}
+                onFavoriteToggle={handleFavoriteToggle}
+                onReadingListToggle={handleReadingListToggle}
+                onDelete={handleDelete}
+              />
             )
           }}
           onLoadMore={loadMore}
@@ -550,6 +602,44 @@ function LibraryContent() {
               className="px-3 py-1.5 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors"
             >
               {t('library.batchUnfavorite')}
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await api.library.batchGalleries({
+                    action: 'add_to_reading_list',
+                    gallery_ids: [...selectedIds],
+                  })
+                  toast.success(t('library.batchSuccess', { count: String(res.affected) }))
+                  globalMutate(() => true)
+                  dispatch({ type: 'CLEAR_SELECTION' })
+                } catch {
+                  toast.error(t('library.updateFailed'))
+                }
+              }}
+              className="px-3 py-1.5 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm transition-colors flex items-center gap-1.5"
+            >
+              <Bookmark size={14} />
+              {t('library.batchAddToReadingList')}
+            </button>
+            <button
+              onClick={async () => {
+                try {
+                  const res = await api.library.batchGalleries({
+                    action: 'remove_from_reading_list',
+                    gallery_ids: [...selectedIds],
+                  })
+                  toast.success(t('library.batchSuccess', { count: String(res.affected) }))
+                  globalMutate(() => true)
+                  dispatch({ type: 'CLEAR_SELECTION' })
+                } catch {
+                  toast.error(t('library.updateFailed'))
+                }
+              }}
+              className="px-3 py-1.5 bg-vault-input border border-vault-border hover:border-vault-border-hover rounded text-vault-text-secondary text-sm transition-colors flex items-center gap-1.5"
+            >
+              <BookmarkCheck size={14} />
+              {t('library.batchRemoveFromReadingList')}
             </button>
             <select
               defaultValue=""
