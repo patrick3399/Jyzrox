@@ -32,12 +32,18 @@ mnt/
 .playwright-mcp/
 docker-compose.override.yml
 
-# IDE
+# IDE & local dev tools
 .vscode/
+pyrightconfig.json
+.editorconfig
+Makefile
 
 # Claude Code
 .claude/
 CLAUDE.md
+
+# Refer specs
+docs/ref/
 
 # Project meta (not needed for build)
 TODO.md
