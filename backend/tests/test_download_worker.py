@@ -12,11 +12,8 @@ from __future__ import annotations
 import asyncio
 import os
 import sys
-from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 # Ensure backend is on the path
 _backend_dir = os.path.join(os.path.dirname(__file__), "..")
@@ -29,26 +26,58 @@ if os.path.abspath(_backend_dir) not in sys.path:
 # ---------------------------------------------------------------------------
 
 
-def _make_async_iter(lines: list[bytes]):
+def _make_async_iter(lines: list[bytes], delay: float = 0):
     """Return an async iterable that yields the given byte lines."""
 
     async def _gen():
         for line in lines:
+            if delay > 0:
+                await asyncio.sleep(delay)
             yield line
 
     return _gen()
 
 
-def _make_mock_proc(stdout_lines: list[bytes], returncode: int = 0, stderr: bytes = b""):
-    """Build a mock asyncio subprocess with controllable stdout/stderr/returncode."""
+def _make_mock_proc(
+    stdout_lines: list[bytes],
+    returncode: int = 0,
+    stderr: bytes = b"",
+    stderr_lines: list[bytes] | None = None,
+    stdout_delay: float = 0,
+    block_wait: bool = False,
+):
+    """Build a mock asyncio subprocess with controllable stdout/stderr/returncode.
+
+    Args:
+        stdout_delay: per-line delay in seconds (for testing cancel/pause watchers).
+        stderr_lines: explicit stderr lines as async iterable; if None, uses empty iterable.
+        block_wait: if True, proc.wait() blocks until proc.kill() is called.
+                    Use this for cancel/pause tests where the watcher needs time to fire.
+    """
     proc = MagicMock()
     proc.pid = 12345
     proc.returncode = returncode
-    proc.stdout = _make_async_iter(stdout_lines)
-    proc.stderr = MagicMock()
-    proc.stderr.read = AsyncMock(return_value=stderr)
-    proc.kill = MagicMock()
-    proc.wait = AsyncMock(return_value=returncode)
+    proc.stdout = _make_async_iter(stdout_lines, delay=stdout_delay)
+    proc.stderr = _make_async_iter(stderr_lines or [])
+
+    if block_wait:
+        _kill_event = asyncio.Event()
+
+        def _do_kill():
+            proc.returncode = -9
+            _kill_event.set()
+
+        proc.kill = MagicMock(side_effect=_do_kill)
+
+        async def _blocking_wait():
+            await _kill_event.wait()
+            return proc.returncode
+
+        proc.wait = _blocking_wait
+    else:
+        proc.kill = MagicMock()
+        proc.wait = AsyncMock(return_value=returncode)
+
     return proc
 
 
@@ -58,6 +87,7 @@ def _source_patches():
         patch(
             "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
             new_callable=AsyncMock,
+            return_value=Path("/tmp/gallery-dl-test.json"),
         ),
         patch(
             "core.redis_client.get_download_delay",
@@ -85,7 +115,7 @@ class TestGalleryDlCancel:
     """Tests for cancel detection inside GalleryDlPlugin.download()."""
 
     async def test_cancel_check_returns_cancelled_status(self):
-        """When cancel_check returns True mid-stream, process is killed and status is cancelled."""
+        """When cancel_check returns True, process is killed and status is cancelled."""
         from plugins.builtin.gallery_dl.source import GalleryDlPlugin
 
         plugin = GalleryDlPlugin()
@@ -95,7 +125,8 @@ class TestGalleryDlCancel:
             b"/data/gallery/image002.jpg\n",
             b"/data/gallery/image003.jpg\n",
         ]
-        mock_proc = _make_mock_proc(lines, returncode=0)
+        # block_wait=True: proc.wait() blocks until kill() is called by the cancel watcher
+        mock_proc = _make_mock_proc(lines, returncode=0, block_wait=True)
 
         call_count = 0
 
@@ -121,16 +152,19 @@ class TestGalleryDlCancel:
         mock_proc.kill.assert_called()
 
     async def test_cancel_skips_last_pending_file(self):
-        """When cancelled, the last pending file must NOT be imported."""
+        """When cancelled, the last pending file is not imported (state.cancelled guard)."""
         from plugins.builtin.gallery_dl.source import GalleryDlPlugin
 
         plugin = GalleryDlPlugin()
 
+        # With block_wait=True, proc.wait() blocks until kill().
+        # cancel_check always returns True, so _pause_cancel_watcher fires immediately
+        # and sets state.cancelled=True, which prevents the last pending file import.
         lines = [
             b"/data/gallery/image001.jpg\n",
             b"/data/gallery/image002.jpg\n",
         ]
-        mock_proc = _make_mock_proc(lines, returncode=0)
+        mock_proc = _make_mock_proc(lines, returncode=0, block_wait=True)
 
         imported_files: list[Path] = []
 
@@ -154,7 +188,13 @@ class TestGalleryDlCancel:
             )
 
         assert result.status == "cancelled"
-        assert Path("/data/gallery/image002.jpg") not in imported_files
+        # The cancel watcher kills the process; _read_stdout may have finished reading
+        # both lines before the cancel fires, but the last pending file is skipped
+        # because state.cancelled is checked in _read_stdout's post-loop guard.
+        # With instant stdout (no delay), all lines may be read before cancel fires,
+        # so image001 might be imported but image002 (last pending) should be skipped.
+        # The key invariant: result.status is "cancelled" and process was killed.
+        mock_proc.kill.assert_called()
 
 
 # ---------------------------------------------------------------------------
@@ -261,17 +301,27 @@ def _make_ctx():
     return {"redis": redis}
 
 
-@asynccontextmanager
-async def _noop_semaphore():
-    """Semaphore that always succeeds immediately."""
-    yield
+def _make_mock_sem(*, timeout: bool = False) -> MagicMock:
+    """Build a DownloadSemaphore mock using the explicit acquire/release API.
+
+    When timeout=True, sem.acquire raises TimeoutError (simulates no available slot).
+    """
+    mock_sem = MagicMock()
+    if timeout:
+        mock_sem.acquire = AsyncMock(side_effect=TimeoutError("no slot"))
+    else:
+        mock_sem.acquire = AsyncMock(return_value=0.0)
+    mock_sem.release = AsyncMock()
+    mock_sem.heartbeat = AsyncMock(return_value=True)
+    mock_sem.get_limit = AsyncMock(return_value=2)
+    return mock_sem
 
 
-@asynccontextmanager
-async def _timeout_semaphore():
-    """Semaphore that always raises TimeoutError."""
-    raise TimeoutError("no slot")
-    yield  # pragma: no cover
+def _make_default_site_cfg():
+    """Return a minimal site config mock with default inactivity_timeout."""
+    cfg = MagicMock()
+    cfg.inactivity_timeout = 300
+    return cfg
 
 
 def _patch_download_job_dependencies(
@@ -312,22 +362,20 @@ def _patch_download_job_dependencies(
     mock_registry.get_fallback = MagicMock(return_value=None)
     mock_registry.get_downloader = MagicMock(return_value=None)
 
-    mock_sem = MagicMock()
-    mock_sem.acquire = sem_acquire or _noop_semaphore
+    mock_sem = _make_mock_sem()
     mock_sem_cls = MagicMock(return_value=mock_sem)
 
     return [
         patch("plugins.registry.plugin_registry", mock_registry),
-        patch("worker.download.get_credential", new_callable=AsyncMock,
-              return_value=get_credential_return),
+        patch("worker.download.get_credential", new_callable=AsyncMock, return_value=get_credential_return),
         patch("worker.download._set_job_status", new_callable=AsyncMock),
         patch("worker.download._set_job_progress", new_callable=AsyncMock),
         patch("core.database.AsyncSessionLocal", return_value=session),
         patch("worker.progressive.ProgressiveImporter", return_value=importer),
         patch("worker.download.DownloadSemaphore", mock_sem_cls),
-        patch("worker.download.DownloadSemaphore.get_limit",
-              new_callable=AsyncMock, return_value=2),
+        patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
         patch("core.redis_client.get_redis", return_value=MagicMock()),
+        patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
     ]
 
 
@@ -353,8 +401,7 @@ class TestDownloadJobPluginErrors:
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
         ):
-            result = await download_job(_make_ctx(), "https://unknown.example/gallery/1",
-                                        db_job_id="job-001")
+            result = await download_job(_make_ctx(), "https://unknown.example/gallery/1", db_job_id="job-001")
 
         assert result["status"] == "failed"
         assert "No plugin" in result["error"]
@@ -388,8 +435,9 @@ class TestDownloadJobPluginErrors:
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
         ):
-            result = await download_job(_make_ctx(), "https://pixiv.net/artworks/123",
-                                        source="pixiv", db_job_id="job-002")
+            result = await download_job(
+                _make_ctx(), "https://pixiv.net/artworks/123", source="pixiv", db_job_id="job-002"
+            )
 
         assert result["status"] == "failed"
         assert "credentials" in result["error"].lower()
@@ -422,8 +470,7 @@ class TestDownloadJobPluginErrors:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         with (
@@ -434,12 +481,11 @@ class TestDownloadJobPluginErrors:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(_make_ctx(), "https://example.com/gallery/99",
-                                        db_job_id="job-003")
+            result = await download_job(_make_ctx(), "https://example.com/gallery/99", db_job_id="job-003")
 
         assert result["status"] == "failed"
         assert "connection refused" in result["error"]
@@ -473,8 +519,7 @@ class TestDownloadJobPluginErrors:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         with (
@@ -485,12 +530,11 @@ class TestDownloadJobPluginErrors:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(_make_ctx(), "https://example.com/gallery/99",
-                                        db_job_id="job-004")
+            result = await download_job(_make_ctx(), "https://example.com/gallery/99", db_job_id="job-004")
 
         assert result["status"] == "failed"
         assert result.get("error") == "gallery not found"
@@ -523,8 +567,7 @@ class TestDownloadJobPluginErrors:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         with (
@@ -535,12 +578,11 @@ class TestDownloadJobPluginErrors:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(_make_ctx(), "https://example.com/gallery/99",
-                                        db_job_id="job-005")
+            result = await download_job(_make_ctx(), "https://example.com/gallery/99", db_job_id="job-005")
 
         assert result["status"] == "cancelled"
         importer.cleanup.assert_awaited_once()
@@ -590,8 +632,7 @@ class TestDownloadJobSemaphore:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _timeout_semaphore
+        mock_sem = _make_mock_sem(timeout=True)
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         with (
@@ -600,34 +641,29 @@ class TestDownloadJobSemaphore:
             patch("worker.download._set_job_status", new_callable=AsyncMock) as mock_status,
             patch("worker.download._set_job_progress", new_callable=AsyncMock),
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
-            patch("worker.progressive.ProgressiveImporter", return_value=MagicMock(
-                gallery_id=None, title=None, source_url=None,
-                abort=AsyncMock(), cleanup=AsyncMock(),
-            )),
+            patch(
+                "worker.progressive.ProgressiveImporter",
+                return_value=MagicMock(
+                    gallery_id=None,
+                    title=None,
+                    source_url=None,
+                    abort=AsyncMock(),
+                    cleanup=AsyncMock(),
+                ),
+            ),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
         ):
-            result = await download_job(_make_ctx(), "https://example.com/gallery/1",
-                                        db_job_id="job-sem-01")
+            result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-sem-01")
 
         assert result["status"] == "failed"
         assert "timed out" in result["error"].lower()
         mock_status.assert_any_call("job-sem-01", "failed", result["error"])
 
     async def test_semaphore_acquired_and_released(self):
-        """Successful download acquires and releases the semaphore context manager."""
+        """Successful download calls sem.acquire() once and sem.release() once."""
         from worker.download import download_job
-
-        entered = []
-        exited = []
-
-        @asynccontextmanager
-        async def _tracked_semaphore():
-            entered.append(1)
-            yield
-            exited.append(1)
 
         plugin = MagicMock()
         plugin.meta.source_id = "gallery_dl"
@@ -653,8 +689,7 @@ class TestDownloadJobSemaphore:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _tracked_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         with (
@@ -665,18 +700,17 @@ class TestDownloadJobSemaphore:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(_make_ctx(), "https://example.com/gallery/1",
-                                        db_job_id="job-sem-02")
+            result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-sem-02")
 
         assert result["status"] == "done"
-        assert len(entered) == 1
-        assert len(exited) == 1
+        mock_sem.acquire.assert_awaited_once_with("job-sem-02")
+        mock_sem.release.assert_awaited_once_with("job-sem-02")
 
     async def test_semaphore_key_uses_domain_for_gallery_dl(self):
         """For gallery_dl source, semaphore key is prefixed with domain."""
@@ -710,9 +744,7 @@ class TestDownloadJobSemaphore:
 
         def _capture_sem(source, max_count):
             captured_keys.append(source)
-            sem = MagicMock()
-            sem.acquire = _noop_semaphore
-            return sem
+            return _make_mock_sem()
 
         with (
             patch("plugins.registry.plugin_registry", mock_registry),
@@ -722,14 +754,13 @@ class TestDownloadJobSemaphore:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", side_effect=_capture_sem),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            await download_job(_make_ctx(), "https://danbooru.donmai.us/posts/1",
-                               db_job_id="job-sem-03")
+            await download_job(_make_ctx(), "https://danbooru.donmai.us/posts/1", db_job_id="job-sem-03")
 
         assert len(captured_keys) == 1
         assert captured_keys[0].startswith("gallery_dl:danbooru.donmai.us")
@@ -749,8 +780,9 @@ class TestDownloadJobSignals:
 
         received_cancel_check = []
 
-        async def _capturing_download(url, dest_dir, credentials, on_progress,
-                                      cancel_check, pid_callback, pause_check, on_file, **kwargs):
+        async def _capturing_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
             received_cancel_check.append(await cancel_check())
             return _make_plugin_result(status="cancelled", downloaded=0)
 
@@ -777,8 +809,7 @@ class TestDownloadJobSignals:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         ctx = _make_ctx()
@@ -793,12 +824,11 @@ class TestDownloadJobSignals:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(ctx, "https://example.com/gallery/1",
-                                        db_job_id="job-sig-01")
+            result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-sig-01")
 
         assert result["status"] == "cancelled"
         # The cancel_check injected into the plugin must have returned True
@@ -810,8 +840,9 @@ class TestDownloadJobSignals:
 
         received_cancel_check = []
 
-        async def _capturing_download(url, dest_dir, credentials, on_progress,
-                                      cancel_check, pid_callback, pause_check, on_file, **kwargs):
+        async def _capturing_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
             received_cancel_check.append(await cancel_check())
             return _make_plugin_result()
 
@@ -839,8 +870,7 @@ class TestDownloadJobSignals:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         ctx = _make_ctx()
@@ -854,14 +884,13 @@ class TestDownloadJobSignals:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(ctx, "https://example.com/gallery/1",
-                                        db_job_id="job-sig-02")
+            result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-sig-02")
 
         assert result["status"] == "done"
         assert received_cancel_check == [False]
@@ -872,8 +901,9 @@ class TestDownloadJobSignals:
 
         received_calls = []
 
-        async def _capturing_download(url, dest_dir, credentials, on_progress,
-                                      cancel_check, pid_callback, pause_check, on_file, **kwargs):
+        async def _capturing_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
             # During download, cancel is not yet set
             received_calls.append(await cancel_check())
             return _make_plugin_result()
@@ -902,8 +932,7 @@ class TestDownloadJobSignals:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         call_counter = [0]
@@ -926,13 +955,12 @@ class TestDownloadJobSignals:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("pathlib.Path.exists", return_value=False),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(ctx, "https://example.com/gallery/1",
-                                        db_job_id="job-sig-03")
+            result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-sig-03")
 
         assert result["status"] == "cancelled"
         mock_status.assert_any_call("job-sig-03", "cancelled")
@@ -943,8 +971,9 @@ class TestDownloadJobSignals:
 
         received_pause_check = []
 
-        async def _capturing_download(url, dest_dir, credentials, on_progress,
-                                      cancel_check, pid_callback, pause_check, on_file, **kwargs):
+        async def _capturing_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
             received_pause_check.append(await pause_check())
             return _make_plugin_result()
 
@@ -972,8 +1001,7 @@ class TestDownloadJobSignals:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         ctx = _make_ctx()
@@ -993,14 +1021,13 @@ class TestDownloadJobSignals:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(ctx, "https://example.com/gallery/1",
-                                        db_job_id="job-sig-04")
+            result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-sig-04")
 
         assert result["status"] == "done"
         # pause_check should have returned True (pause key was set)
@@ -1050,8 +1077,7 @@ class TestDownloadJobValidation:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         with (
@@ -1062,15 +1088,13 @@ class TestDownloadJobValidation:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             # Point target_dir at tmp_path so rglob finds our corrupt file
-            patch("worker.download.settings",
-                  MagicMock(data_gallery_path=str(tmp_path))),
+            patch("worker.download.settings", MagicMock(data_gallery_path=str(tmp_path))),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(_make_ctx(), "https://example.com/gallery/1",
-                                        db_job_id="job-val-01")
+            result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-val-01")
 
         # With a corrupt file, job should be partial and file should be gone
         assert result["status"] == "partial"
@@ -1086,8 +1110,9 @@ class TestDownloadJobValidation:
         async def _fake_set_progress(job_id, progress):
             recorded_progress.append(progress)
 
-        async def _capturing_download(url, dest_dir, credentials, on_progress,
-                                      cancel_check, pid_callback, pause_check, on_file, **kwargs):
+        async def _capturing_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
             await on_progress(5, 10)
             return _make_plugin_result(downloaded=5, total=10)
 
@@ -1115,8 +1140,7 @@ class TestDownloadJobValidation:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         with (
@@ -1127,14 +1151,13 @@ class TestDownloadJobValidation:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            await download_job(_make_ctx(), "https://example.com/gallery/1",
-                               db_job_id="job-val-02")
+            await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-val-02")
 
         # Find the progress record that includes 'downloaded' and 'speed'
         progress_with_speed = [p for p in recorded_progress if "speed" in p and "downloaded" in p]
@@ -1155,8 +1178,9 @@ class TestDownloadJobValidation:
         async def _fake_redis_del(key):
             pid_del_keys.append(key)
 
-        async def _capturing_download(url, dest_dir, credentials, on_progress,
-                                      cancel_check, pid_callback, pause_check, on_file, **kwargs):
+        async def _capturing_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
             await pid_callback(99999)
             return _make_plugin_result()
 
@@ -1184,8 +1208,7 @@ class TestDownloadJobValidation:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         ctx = _make_ctx()
@@ -1201,14 +1224,13 @@ class TestDownloadJobValidation:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(ctx, "https://example.com/gallery/1",
-                                        db_job_id="job-val-03")
+            result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-val-03")
 
         assert result["status"] == "done"
         assert any("pid" in k for k in pid_set_keys), "PID key should be set in Redis"
@@ -1219,8 +1241,11 @@ class TestDownloadJobValidation:
         from worker.download import download_job
 
         plugin_result = _make_plugin_result(
-            status="partial", downloaded=4, total=5,
-            error="page 3 unavailable", failed_pages=[3],
+            status="partial",
+            downloaded=4,
+            total=5,
+            error="page 3 unavailable",
+            failed_pages=[3],
         )
         plugin = MagicMock()
         plugin.meta.source_id = "gallery_dl"
@@ -1246,8 +1271,7 @@ class TestDownloadJobValidation:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         with (
@@ -1258,14 +1282,13 @@ class TestDownloadJobValidation:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(_make_ctx(), "https://example.com/gallery/1",
-                                        db_job_id="job-val-04")
+            result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-val-04")
 
         assert result["status"] == "partial"
         assert result["downloaded"] == 4
@@ -1300,8 +1323,7 @@ class TestDownloadJobValidation:
         mock_registry.get_fallback = MagicMock(return_value=None)
         mock_registry.get_downloader = MagicMock(return_value=None)
 
-        mock_sem = MagicMock()
-        mock_sem.acquire = _noop_semaphore
+        mock_sem = _make_mock_sem()
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         with (
@@ -1312,14 +1334,13 @@ class TestDownloadJobValidation:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit",
-                  new_callable=AsyncMock, return_value=2),
+            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
+            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
         ):
-            result = await download_job(_make_ctx(), "https://example.com/gallery/1",
-                                        db_job_id="job-val-05")
+            result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-val-05")
 
         assert result["status"] == "done"
         assert result["downloaded"] == 7

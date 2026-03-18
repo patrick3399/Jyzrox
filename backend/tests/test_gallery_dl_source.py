@@ -6,20 +6,28 @@ Tests cover: download happy path, error handling, cancellation, timeout,
 partial success, can_handle, resolve_output_dir, parse_metadata.
 """
 
+import asyncio
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
 
 
-def _make_fake_process(stdout_lines: list[bytes], returncode: int = 0, stderr: bytes = b""):
-    """Build a mock asyncio.subprocess.Process."""
+def _make_fake_process(
+    stdout_lines: list[bytes],
+    returncode: int = 0,
+    stderr: bytes = b"",
+    block_wait: bool = False,
+):
+    """Build a mock asyncio.subprocess.Process.
+
+    Args:
+        block_wait: if True, proc.wait() blocks until kill() is called.
+                    Use this for cancel/pause tests.
+    """
     proc = MagicMock()
     proc.pid = 12345
     proc.returncode = returncode
@@ -30,10 +38,34 @@ def _make_fake_process(stdout_lines: list[bytes], returncode: int = 0, stderr: b
             yield line
 
     proc.stdout = _async_iter_lines()
-    proc.stderr = AsyncMock()
-    proc.stderr.read = AsyncMock(return_value=stderr)
-    proc.wait = AsyncMock()
-    proc.kill = MagicMock()
+
+    # stderr: async iterator over lines (split from bytes)
+    stderr_lines = [l + b"\n" for l in stderr.split(b"\n") if l] if stderr else []
+
+    async def _async_iter_stderr():
+        for line in stderr_lines:
+            yield line
+
+    proc.stderr = _async_iter_stderr()
+
+    if block_wait:
+        _kill_event = asyncio.Event()
+
+        def _do_kill():
+            proc.returncode = -9
+            _kill_event.set()
+
+        proc.kill = MagicMock(side_effect=_do_kill)
+
+        async def _blocking_wait():
+            await _kill_event.wait()
+            return proc.returncode
+
+        proc.wait = _blocking_wait
+    else:
+        proc.wait = AsyncMock(return_value=returncode)
+        proc.kill = MagicMock()
+
     return proc
 
 
@@ -100,7 +132,11 @@ class TestGalleryDlDownloadHappyPath:
 
         with (
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc),
-            patch("plugins.builtin.gallery_dl.source._build_gallery_dl_config", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
             patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
@@ -126,7 +162,11 @@ class TestGalleryDlDownloadHappyPath:
 
         with (
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc),
-            patch("plugins.builtin.gallery_dl.source._build_gallery_dl_config", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
             patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
@@ -154,7 +194,11 @@ class TestGalleryDlDownloadHappyPath:
 
         with (
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc),
-            patch("plugins.builtin.gallery_dl.source._build_gallery_dl_config", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
             patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
@@ -184,7 +228,11 @@ class TestGalleryDlDownloadErrors:
         """If gallery-dl binary is not found, OSError → status=failed."""
         with (
             patch("asyncio.create_subprocess_exec", side_effect=OSError("No such file")),
-            patch("plugins.builtin.gallery_dl.source._build_gallery_dl_config", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
             patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
@@ -206,7 +254,11 @@ class TestGalleryDlDownloadErrors:
 
         with (
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc),
-            patch("plugins.builtin.gallery_dl.source._build_gallery_dl_config", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
             patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
@@ -230,7 +282,11 @@ class TestGalleryDlDownloadErrors:
 
         with (
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc),
-            patch("plugins.builtin.gallery_dl.source._build_gallery_dl_config", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
             patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
@@ -250,14 +306,18 @@ class TestGalleryDlDownloadErrors:
         """When cancel_check immediately returns True, status=cancelled."""
         # Provide one line so the loop runs at least once
         lines = [b"/data/img001.jpg\n"]
-        proc = _make_fake_process(lines, returncode=0)
+        proc = _make_fake_process(lines, returncode=0, block_wait=True)
 
         async def _always_cancel():
             return True
 
         with (
             patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc),
-            patch("plugins.builtin.gallery_dl.source._build_gallery_dl_config", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
             patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
@@ -284,7 +344,11 @@ class TestGalleryDlDownloadErrors:
 
         with (
             patch("asyncio.create_subprocess_exec", side_effect=_capture_exec),
-            patch("plugins.builtin.gallery_dl.source._build_gallery_dl_config", new_callable=AsyncMock),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
             patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=2.5),
             patch("pathlib.Path.mkdir"),
         ):

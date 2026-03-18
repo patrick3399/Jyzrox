@@ -10,50 +10,52 @@ import logging
 import os
 
 from core.compat import patch_asyncio_for_314
+
 patch_asyncio_for_314()
+
+from datetime import UTC
 
 from arq.connections import RedisSettings
 from arq.cron import cron
+from arq.worker import func as arq_func
 
 from core.config import get_all_library_paths, settings
 from core.redis_client import close_redis, init_redis
 from core.watcher import LibraryWatcher
-
-from arq.worker import func as arq_func
+from worker.dedup_scan import dedup_scan_job
+from worker.dedup_tier1 import dedup_tier1_job
+from worker.dedup_tier2 import dedup_tier2_job
+from worker.dedup_tier3 import dedup_tier3_job
 from worker.download import download_job as _download_job
+from worker.ehtag_sync import ehtag_sync_job
+from worker.helpers import _sha256, compute_arq_job_id, enqueue_download_job
 from worker.importer import (
-    import_job,
-    local_import_job,
-    batch_import_job,
+    _build_gallery,
     _extract_tags,
     _normalize_tags,
-    _build_gallery,
     _upsert_tags,
+    batch_import_job,
+    import_job,
+    local_import_job,
 )
+from worker.reconciliation import reconciliation_job
+from worker.retry import retry_failed_downloads_job
 from worker.scan import (
-    rescan_library_job,
-    rescan_gallery_job,
-    rescan_by_path_job,
-    rescan_library_path_job,
     auto_discover_job,
+    rescan_by_path_job,
+    rescan_gallery_job,
+    rescan_library_job,
+    rescan_library_path_job,
     scheduled_scan_job,
 )
-from worker.thumbnail import thumbnail_job
-from worker.reconciliation import reconciliation_job
-from worker.tagging import tag_job
 from worker.subscription import (
     check_followed_artists,
     check_single_subscription,
 )
-from worker.dedup_tier1 import dedup_tier1_job
-from worker.dedup_tier2 import dedup_tier2_job
-from worker.dedup_tier3 import dedup_tier3_job
-from worker.dedup_scan import dedup_scan_job
+from worker.tagging import tag_job
 from worker.thumbhash_backfill import thumbhash_backfill_job
-from worker.retry import retry_failed_downloads_job
+from worker.thumbnail import thumbnail_job
 from worker.trash import trash_gc_job
-from worker.ehtag_sync import ehtag_sync_job
-from worker.helpers import _sha256, compute_arq_job_id, enqueue_download_job
 
 logging.basicConfig(
     level=os.environ.get("LOG_LEVEL", "INFO").upper(),
@@ -71,6 +73,7 @@ async def _log_level_subscriber(ctx: dict) -> None:
     """Subscribe to log_level:changed pub/sub and apply new level when source==worker."""
     from core.log_handler import LOG_LEVEL_CHANNEL
     from core.redis_client import get_pubsub
+
     pubsub = get_pubsub()
     try:
         await pubsub.subscribe(LOG_LEVEL_CHANNEL)
@@ -102,10 +105,12 @@ async def _log_level_subscriber(ctx: dict) -> None:
 async def startup(ctx: dict) -> None:
     logger.info("ARQ Worker started — Jyzrox")
     await init_redis()
-    from core.log_handler import install_log_handler, apply_log_level_from_redis
+    from core.log_handler import apply_log_level_from_redis, install_log_handler
+
     install_log_handler("worker")
     await apply_log_level_from_redis("worker")
     from plugins import init_plugins
+
     await init_plugins()
     # Start log level subscriber background task
     ctx["_log_level_task"] = asyncio.ensure_future(_log_level_subscriber(ctx))
@@ -116,52 +121,81 @@ async def startup(ctx: dict) -> None:
         await r.delete(*sem_keys)
     # Clean up stale scan progress from previous runs
     await r.delete(
-        "rescan:progress", "rescan:cancel",
-        "dedup:progress:status", "dedup:progress:signal",
-        "dedup:progress:current", "dedup:progress:total",
-        "dedup:progress:tier", "dedup:progress:mode",
+        "rescan:progress",
+        "rescan:cancel",
+        "dedup:progress:status",
+        "dedup:progress:signal",
+        "dedup:progress:current",
+        "dedup:progress:total",
+        "dedup:progress:tier",
+        "dedup:progress:mode",
     )
 
-    # Clean up stale "running" jobs from previous worker crash
+    # Clean orphaned cancel/PID Redis keys (stale from previous session)
+    cancel_keys = [k async for k in r.scan_iter(match="download:cancel:*")]
+    if cancel_keys:
+        await r.delete(*cancel_keys)
+    pid_keys = [k async for k in r.scan_iter(match="download:pid:*")]
+    if pid_keys:
+        await r.delete(*pid_keys)
+    # NOTE: do NOT delete download:pause:* — paused jobs are preserved
+
+    from datetime import UTC, datetime
+
+    from sqlalchemy import func, select, update
+
     from core.database import AsyncSessionLocal
     from db.models import DownloadJob, Gallery
-    from sqlalchemy import select, update
-    from datetime import UTC, datetime
+
     async with AsyncSessionLocal() as session:
-        stale_rows = (await session.execute(
-            update(DownloadJob)
-            .where(DownloadJob.status == "running")
-            .values(
-                status="failed",
-                error="Worker restarted — job did not complete",
-                finished_at=datetime.now(UTC),
-            )
-            .returning(DownloadJob.id, DownloadJob.gallery_id)
-        )).fetchall()
-        if stale_rows:
+        # Recovery: running → queued (re-enqueue, not fail)
+        running_jobs = (
+            (await session.execute(select(DownloadJob).where(DownloadJob.status == "running"))).scalars().all()
+        )
+        if running_jobs:
+            arq_pool = ctx["redis"]
+            for job in running_jobs:
+                job.status = "queued"
+                job.error = None
+                job.finished_at = None
+                job.retry_count = (job.retry_count or 0) + 1
             await session.commit()
+
             # Fix orphaned galleries stuck in "downloading" status
-            stale_gallery_ids = [row[1] for row in stale_rows if row[1] is not None]
-            if stale_gallery_ids:
-                from sqlalchemy import func
-                from db.models import Image
-                for gid in stale_gallery_ids:
-                    img_count = (await session.execute(
-                        select(func.count()).where(Image.gallery_id == gid)
-                    )).scalar_one()
+            from db.models import Image
+
+            gallery_ids = [job.gallery_id for job in running_jobs if job.gallery_id is not None]
+            if gallery_ids:
+                for gid in gallery_ids:
+                    img_count = (
+                        await session.execute(select(func.count()).where(Image.gallery_id == gid))
+                    ).scalar_one()
                     await session.execute(
                         update(Gallery)
                         .where(Gallery.id == gid, Gallery.download_status == "downloading")
                         .values(download_status="partial", pages=img_count)
                     )
                 await session.commit()
-                logger.info("Fixed %d orphaned downloading galleries", len(stale_gallery_ids))
-            logger.info("Cleaned up %d stale running jobs from previous worker session", len(stale_rows))
+                logger.info("Fixed %d orphaned downloading galleries", len(gallery_ids))
+
+            # Re-enqueue recovered jobs
+            for job in running_jobs:
+                arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                try:
+                    await enqueue_download_job(arq_pool, job, arq_job_id)
+                    logger.info("Re-enqueued recovered running job %s (retry=%d)", job.id, job.retry_count)
+                except Exception as exc:
+                    job.status = "failed"
+                    job.error = f"Re-enqueue failed on startup: {exc}"
+                    job.finished_at = datetime.now(UTC)
+                    logger.error("Failed to re-enqueue job %s: %s", job.id, exc)
+            await session.commit()
+            logger.info("Recovered %d stale running jobs from previous worker session", len(running_jobs))
 
         # Re-enqueue stale "queued" jobs that survived a crash
-        stale_queued = (await session.execute(
-            select(DownloadJob).where(DownloadJob.status == "queued")
-        )).scalars().all()
+        stale_queued = (
+            (await session.execute(select(DownloadJob).where(DownloadJob.status == "queued"))).scalars().all()
+        )
         if stale_queued:
             arq_pool = ctx["redis"]
             for job in stale_queued:
@@ -177,20 +211,24 @@ async def startup(ctx: dict) -> None:
             await session.commit()
             logger.info("Processed %d stale queued jobs", len(stale_queued))
 
-        # Mark stale "paused" jobs as failed (coroutine is dead after restart)
-        stale_paused = (await session.execute(
-            update(DownloadJob)
-            .where(DownloadJob.status == "paused")
-            .values(
-                status="failed",
-                error="Worker restarted — paused job cannot resume",
-                finished_at=datetime.now(UTC),
-            )
-            .returning(DownloadJob.id)
-        )).fetchall()
-        if stale_paused:
-            await session.commit()
-            logger.info("Marked %d stale paused jobs as failed", len(stale_paused))
+        # Paused jobs: preserve (do NOT mark as failed)
+        paused_count = (
+            await session.execute(select(func.count()).select_from(DownloadJob).where(DownloadJob.status == "paused"))
+        ).scalar_one()
+        if paused_count:
+            logger.info("Preserved %d paused jobs from previous session", paused_count)
+
+    # Clean up orphaned per-job config files
+    import glob as _glob
+
+    orphan_configs = _glob.glob("/app/config/gallery-dl-*.json")
+    if orphan_configs:
+        for cfg_path in orphan_configs:
+            try:
+                os.remove(cfg_path)
+            except OSError:
+                pass
+        logger.info("Cleaned up %d orphaned gallery-dl config files", len(orphan_configs))
 
     # Start file system watcher.
     # Honour the runtime override stored by toggle_monitor; fall back to the
@@ -209,9 +247,7 @@ async def startup(ctx: dict) -> None:
         arq_pool = ctx["redis"]
 
         def enqueue_sync(job_name: str, *args):
-            asyncio.run_coroutine_threadsafe(
-                arq_pool.enqueue_job(job_name, *args), loop
-            )
+            asyncio.run_coroutine_threadsafe(arq_pool.enqueue_job(job_name, *args), loop)
 
         _watcher.start(paths, enqueue_sync)
         await r.set(
@@ -266,9 +302,7 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
         arq_pool = ctx["redis"]
 
         def enqueue_sync(job_name: str, *args):
-            asyncio.run_coroutine_threadsafe(
-                arq_pool.enqueue_job(job_name, *args), loop
-            )
+            asyncio.run_coroutine_threadsafe(arq_pool.enqueue_job(job_name, *args), loop)
 
         _watcher.start(paths, enqueue_sync)
         await r.set("watcher:status", json.dumps({"running": True, "paths": paths}))
@@ -315,7 +349,7 @@ async def rate_limit_schedule_job(ctx: dict) -> dict:
     except (ValueError, TypeError):
         end_hour = 6
 
-    current_hour = datetime.now(timezone.utc).hour
+    current_hour = datetime.now(UTC).hour
 
     if start_hour <= end_hour:
         in_window = start_hour <= current_hour < end_hour
@@ -424,15 +458,15 @@ class WorkerSettings:
     cron_jobs = [
         cron(
             scheduled_scan_job,
-            hour=None,   # every hour
-            minute=0,    # at :00
+            hour=None,  # every hour
+            minute=0,  # at :00
             run_at_startup=False,
             unique=True,
             timeout=7200,
         ),
         cron(
             reconciliation_job,
-            weekday=0,   # Monday
+            weekday=0,  # Monday
             hour=3,
             minute=0,
             unique=True,
@@ -471,7 +505,7 @@ class WorkerSettings:
             ehtag_sync_job,
             hour=4,
             minute=30,
-            run_at_startup=True,   # ensures first-boot import
+            run_at_startup=True,  # ensures first-boot import
             unique=True,
             timeout=300,
         ),
@@ -491,7 +525,7 @@ class WorkerSettings:
 
 
 __all__ = [
-    "download_job",
+    "_download_job",
     "import_job",
     "local_import_job",
     "batch_import_job",

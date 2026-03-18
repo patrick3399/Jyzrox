@@ -132,9 +132,10 @@ eh_semaphore = EhSemaphore()
 
 
 class DownloadSemaphore:
-    """
-    Redis-based per-source download concurrency limiter.
-    Uses INCR/DECR + polling, same pattern as EhSemaphore.
+    """Redis-based per-source download concurrency limiter.
+
+    Uses a sorted set where member=job_id, score=last_heartbeat_time.
+    Stale entries (no heartbeat for >timeout seconds) are auto-evicted on acquire.
     """
 
     _LIMITS: dict[str, int] = {
@@ -143,10 +144,38 @@ class DownloadSemaphore:
         "gallery_dl": 2,
     }
 
+    # Lua: atomic evict-stale + check-capacity + add
+    _ACQUIRE_LUA = """
+    local key = KEYS[1]
+    local max = tonumber(ARGV[1])
+    local job_id = ARGV[2]
+    local now = tonumber(ARGV[3])
+    local stale = now - tonumber(ARGV[4])
+    redis.call('ZREMRANGEBYSCORE', key, '-inf', stale)
+    if redis.call('ZCARD', key) < max then
+        redis.call('ZADD', key, now, job_id)
+        return 1
+    end
+    return 0
+    """
+
+    # Lua: atomic check-exists + update-score
+    _HEARTBEAT_LUA = """
+    local key = KEYS[1]
+    local job_id = ARGV[1]
+    local now = tonumber(ARGV[2])
+    if redis.call('ZSCORE', key, job_id) then
+        redis.call('ZADD', key, now, job_id)
+        return 1
+    end
+    return 0
+    """
+
     def __init__(self, source: str, acquire_timeout: int = 300, max_count: int | None = None) -> None:
         self._key = f"download:sem:{source}"
         self.max_count = max_count if max_count is not None else self._LIMITS.get(source, 2)
         self.acquire_timeout = acquire_timeout
+        self._stale_threshold = 300  # evict entries with no heartbeat for 5 min
 
     @classmethod
     async def get_limit(cls, source: str, default: int = 2) -> int:
@@ -161,27 +190,60 @@ class DownloadSemaphore:
         base = source.split(":")[0] if ":" in source else source
         return cls._LIMITS.get(source, cls._LIMITS.get(base, default))
 
-    @asynccontextmanager
-    async def acquire(self):
+    async def acquire(self, job_id: str, timeout: int | None = None) -> float:
+        """Try to acquire a slot. Polls until acquired or timeout.
+
+        Returns the total seconds spent waiting.
+        Raises TimeoutError if slot not acquired within timeout.
+        """
+        import time
+
         r = get_redis()
+        _timeout = timeout if timeout is not None else self.acquire_timeout
         loop = asyncio.get_event_loop()
-        deadline = loop.time() + self.acquire_timeout
+        deadline = loop.time() + _timeout
+        wait_start = loop.time()
 
         while True:
-            count = await r.incr(self._key)
-            # Set TTL as safety net — if worker crashes, counter auto-expires
-            await r.expire(self._key, 7200)
-            if count <= self.max_count:
-                try:
-                    yield
-                finally:
-                    await r.decr(self._key)
-                return
+            now = time.time()
+            acquired = await r.eval(
+                self._ACQUIRE_LUA,
+                1,
+                self._key,
+                str(self.max_count),
+                job_id,
+                str(now),
+                str(self._stale_threshold),
+            )
+            if acquired:
+                return loop.time() - wait_start
 
-            await r.decr(self._key)
             if loop.time() >= deadline:
-                raise TimeoutError(f"Download semaphore [{self._key}]: could not acquire slot within {self.acquire_timeout}s")
+                raise TimeoutError(f"Download semaphore [{self._key}]: could not acquire slot within {_timeout}s")
             await asyncio.sleep(0.5)
+
+    async def release(self, job_id: str) -> None:
+        """Release a slot by removing the job from the sorted set."""
+        r = get_redis()
+        await r.zrem(self._key, job_id)
+
+    async def heartbeat(self, job_id: str) -> bool:
+        """Update heartbeat timestamp. Returns False if job was evicted (not in set)."""
+        import time
+
+        r = get_redis()
+        now = time.time()
+        result = await r.eval(self._HEARTBEAT_LUA, 1, self._key, job_id, str(now))
+        return bool(result)
+
+    @asynccontextmanager
+    async def acquire_ctx(self, job_id: str):
+        """Backward-compatible context manager wrapper."""
+        await self.acquire(job_id)
+        try:
+            yield
+        finally:
+            await self.release(job_id)
 
 
 async def publish_job_event(event: dict) -> None:
@@ -211,7 +273,10 @@ async def publish_job_event(event: dict) -> None:
             et = status_map.get(status)
             if et is None:
                 import logging as _log
-                _log.getLogger(__name__).warning("publish_job_event: unknown status %r, using DOWNLOAD_PROGRESS", status)
+
+                _log.getLogger(__name__).warning(
+                    "publish_job_event: unknown status %r, using DOWNLOAD_PROGRESS", status
+                )
                 et = EventType.DOWNLOAD_PROGRESS
             await emit(
                 et,
@@ -235,6 +300,7 @@ async def publish_job_event(event: dict) -> None:
             await get_redis().publish("download:events", json.dumps(event))
     except Exception as exc:
         import logging
+
         logging.getLogger(__name__).warning("publish_job_event failed: %s", exc)
 
 

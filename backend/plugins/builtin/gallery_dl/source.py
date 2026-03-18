@@ -13,6 +13,7 @@ import logging
 import os
 import re
 from collections.abc import Awaitable, Callable
+from dataclasses import dataclass, field
 from pathlib import Path
 
 from core.config import settings
@@ -22,7 +23,6 @@ from plugins.models import (
     CredentialFlow,
     CredentialStatus,
     DownloadResult,
-    FieldDef,
     GalleryImportData,
     GalleryMetadata,
     PluginMeta,
@@ -84,12 +84,17 @@ def _is_fragment(cred_val: str) -> bool:
     return _try_parse_fragment(cred_val) is not None
 
 
-async def _build_gallery_dl_config(credentials: dict) -> None:
+async def _build_gallery_dl_config(credentials: dict, config_id: str | None = None) -> Path:
     """Write source-specific credentials and tuning params into the gallery-dl config file.
 
     Args:
         credentials: Dict mapping source name -> credential value string.
                      e.g. {"ehentai": '{"ipb_member_id": ...}', "pixiv": "token..."}
+        config_id: When provided, writes to /app/config/gallery-dl-{config_id}.json
+                   instead of the shared config file. Enables per-job config isolation.
+
+    Returns:
+        Path to the config file written.
     """
     from plugins.builtin.gallery_dl._sites import GDL_SITES, get_site_config
 
@@ -106,7 +111,9 @@ async def _build_gallery_dl_config(credentials: dict) -> None:
             continue
         ext = site_cfg.extractor or site_cfg.source_id
         entry = config["extractor"].setdefault(ext, {})
-        entry["sleep-request"] = list(site_cfg.sleep_request) if isinstance(site_cfg.sleep_request, tuple) else site_cfg.sleep_request
+        entry["sleep-request"] = (
+            list(site_cfg.sleep_request) if isinstance(site_cfg.sleep_request, tuple) else site_cfg.sleep_request
+        )
 
     # Merge credentials on top
     for src, cred_val in credentials.items():
@@ -136,10 +143,181 @@ async def _build_gallery_dl_config(credentials: dict) -> None:
                     logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
             # credential_type == "none" → skip
 
-    config_path = Path(settings.gallery_dl_config)
+    config_path = Path(f"/app/config/gallery-dl-{config_id}.json") if config_id else Path(settings.gallery_dl_config)
     tmp_path = config_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(config, indent=2))
     os.rename(tmp_path, config_path)
+    return config_path
+
+
+@dataclass
+class _DownloadState:
+    """Shared mutable state for the download task group."""
+
+    downloaded: int = 0
+    skipped_count: int = 0
+    last_activity: float = 0.0
+    total_paused: float = 0.0
+    cancelled: bool = False
+    last_progress_update: float = 0.0
+    stderr_lines: list[str] = field(default_factory=list)
+    pending_file: Path | None = None
+
+
+async def _read_stdout(
+    proc: asyncio.subprocess.Process,
+    state: _DownloadState,
+    on_file: Callable[[Path], Awaitable[None]] | None,
+    on_progress: Callable[[int, int], Awaitable[None]] | None,
+) -> None:
+    """Parse stdout lines — file detection and progress reporting only."""
+    assert proc.stdout is not None
+
+    async for raw_line in proc.stdout:
+        state.last_activity = asyncio.get_event_loop().time()
+        line = raw_line.decode("utf-8", errors="replace").rstrip()
+
+        skipped = line.startswith("# ")
+        path_match = _FILE_PATH_EXTRACT_RE.search(line)
+
+        if path_match or _FILE_PATH_RE.search(line) or _IMAGE_EXT_RE.search(line):
+            # Process the PREVIOUS pending file
+            if state.pending_file is not None and on_file:
+                try:
+                    await on_file(state.pending_file)
+                except Exception as exc:
+                    logger.warning("[gallery_dl] progressive import error: %s", exc)
+
+            # Track the new pending file
+            if path_match and not skipped:
+                state.pending_file = Path(path_match.group(1))
+            else:
+                state.pending_file = None
+
+            if skipped:
+                state.skipped_count += 1
+            else:
+                state.downloaded += 1
+
+            total_seen = state.downloaded + state.skipped_count
+            now = asyncio.get_event_loop().time()
+            if total_seen % _PROGRESS_EVERY_N == 0 or (now - state.last_progress_update) >= _PROGRESS_EVERY_S:
+                state.last_progress_update = now
+                if on_progress is not None:
+                    try:
+                        await on_progress(total_seen, 0)
+                    except Exception:
+                        pass
+
+    # Process the last pending file after loop ends — only if not cancelled
+    if state.pending_file is not None and on_file and not state.cancelled:
+        try:
+            await on_file(state.pending_file)
+        except Exception as exc:
+            logger.warning("[gallery_dl] progressive import error (last file): %s", exc)
+
+
+async def _read_stderr(
+    proc: asyncio.subprocess.Process,
+    state: _DownloadState,
+) -> None:
+    """Accumulate stderr lines (prepared for future adaptive logic)."""
+    assert proc.stderr is not None
+    async for raw_line in proc.stderr:
+        state.last_activity = asyncio.get_event_loop().time()
+        line = raw_line.decode("utf-8", errors="replace").rstrip()
+        if line:
+            state.stderr_lines.append(line)
+
+
+async def _heartbeat_loop(
+    state: _DownloadState,
+    callback: Callable[[], Awaitable[None]],
+    interval: float = 30.0,
+) -> None:
+    """Periodically call semaphore heartbeat."""
+    while True:
+        await asyncio.sleep(interval)
+        if state.cancelled:
+            return
+        try:
+            await callback()
+        except Exception as exc:
+            logger.warning("[gallery_dl] heartbeat callback error: %s", exc)
+
+
+async def _inactivity_watchdog(
+    state: _DownloadState,
+    timeout: int,
+    proc: asyncio.subprocess.Process,
+) -> str:
+    """Kill the process if no stdout/stderr activity for `timeout` seconds."""
+    while True:
+        await asyncio.sleep(10)
+        if state.cancelled:
+            return "cancelled"
+        elapsed = asyncio.get_event_loop().time() - state.last_activity
+        if elapsed >= timeout:
+            logger.error("[gallery_dl] inactivity timeout (%ds) — killing process", timeout)
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            return "inactivity_timeout"
+    return "ok"  # pragma: no cover
+
+
+async def _pause_cancel_watcher(
+    state: _DownloadState,
+    proc: asyncio.subprocess.Process,
+    cancel_check: Callable[[], Awaitable[bool]] | None,
+    pause_check: Callable[[], Awaitable[bool]] | None,
+) -> str:
+    """Poll for cancel/pause signals at high frequency."""
+    while True:
+        await asyncio.sleep(0.5)
+
+        # Cancel check
+        if cancel_check is not None and await cancel_check():
+            state.cancelled = True
+            logger.info("[gallery_dl] cancel detected, killing process")
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+            return "cancelled"
+
+        # Pause: suspend reading by sending SIGSTOP, resume with SIGCONT
+        if pause_check is not None and await pause_check():
+            import signal
+
+            pause_start = asyncio.get_event_loop().time()
+            logger.info("[gallery_dl] pausing process")
+            try:
+                proc.send_signal(signal.SIGSTOP)
+            except (ProcessLookupError, OSError):
+                pass
+
+            while await pause_check():
+                if cancel_check is not None and await cancel_check():
+                    state.cancelled = True
+                    try:
+                        proc.send_signal(signal.SIGCONT)
+                        proc.kill()
+                    except (ProcessLookupError, OSError):
+                        pass
+                    return "cancelled"
+                await asyncio.sleep(0.5)
+
+            # Resume
+            paused_duration = asyncio.get_event_loop().time() - pause_start
+            state.total_paused += paused_duration
+            state.last_activity = asyncio.get_event_loop().time()  # reset inactivity after resume
+            logger.info("[gallery_dl] resumed after %.1fs", paused_duration)
+            try:
+                proc.send_signal(signal.SIGCONT)
+            except (ProcessLookupError, OSError):
+                pass
 
 
 class GalleryDlPlugin(SourcePlugin):
@@ -188,13 +366,16 @@ class GalleryDlPlugin(SourcePlugin):
         if credentials is None:
             credentials = {}
 
-        await _build_gallery_dl_config(credentials)
+        config_path = await _build_gallery_dl_config(
+            credentials,
+            config_id=options.get("config_id") if options else None,
+        )
 
         cmd = [
             "gallery-dl",
             "--config-ignore",
             "--config",
-            settings.gallery_dl_config,
+            str(config_path),
             "--write-metadata",
             "--write-tags",
             "--directory",
@@ -208,13 +389,16 @@ class GalleryDlPlugin(SourcePlugin):
         # Download archive — skip already-downloaded URLs (unless skip_archive requested)
         if not (options and options.get("skip_archive")):
             from pathlib import Path as _Path
+
             archive_dir = _Path(settings.data_archive_path)
             archive_dir.mkdir(parents=True, exist_ok=True)
             cmd += ["--download-archive", str(archive_dir / "gallery-dl.db")]
 
         # Per-site download tuning
         from urllib.parse import urlparse as _urlparse
+
         from plugins.builtin.gallery_dl._sites import get_site_by_domain
+
         _domain = _urlparse(url).netloc.removeprefix("www.")
         _site_cfg = get_site_by_domain(_domain)
         if _site_cfg.retries != 4:  # only add if non-default
@@ -233,6 +417,9 @@ class GalleryDlPlugin(SourcePlugin):
 
         cmd.append(url)
 
+        # Resolve inactivity timeout: options override, then site config, then default
+        inactivity_timeout: int = (options or {}).get("inactivity_timeout", _site_cfg.inactivity_timeout)
+
         try:
             proc = await asyncio.create_subprocess_exec(
                 *cmd,
@@ -242,6 +429,8 @@ class GalleryDlPlugin(SourcePlugin):
         except OSError as exc:
             err = f"Failed to start gallery-dl: {exc}"
             logger.error("[gallery_dl] %s", err)
+            if config_path != Path(settings.gallery_dl_config):
+                config_path.unlink(missing_ok=True)
             return DownloadResult(status="failed", downloaded=0, total=0, error=err)
 
         # Report PID for pause/resume support
@@ -251,147 +440,131 @@ class GalleryDlPlugin(SourcePlugin):
             except Exception as exc:
                 logger.warning("[gallery_dl] pid_callback failed: %s", exc)
 
-        downloaded = 0
-        skipped_count = 0
-        last_progress_update = asyncio.get_event_loop().time()
-        started_at = asyncio.get_event_loop().time()
-        total_paused = 0.0  # track pause duration to exclude from timeout
-
-        async def _read_stdout() -> None:
-            nonlocal downloaded, skipped_count, last_progress_update, total_paused
-            assert proc.stdout is not None
-            pending_file: Path | None = None
-
-            async for raw_line in proc.stdout:
-                # Check for cancellation at the top of every iteration
-                if cancel_check is not None and await cancel_check():
-                    logger.info("[gallery_dl] cancel detected in stdout loop, killing process: %s", url)
-                    try:
-                        proc.kill()
-                    except ProcessLookupError:
-                        pass
-                    break
-
-                # Soft-pause: stop reading stdout → pipe buffer fills → gallery-dl blocks
-                if pause_check is not None:
-                    pause_start = None
-                    while await pause_check():
-                        if pause_start is None:
-                            pause_start = asyncio.get_event_loop().time()
-                            logger.info("[gallery_dl] paused: %s", url)
-                        if cancel_check is not None and await cancel_check():
-                            break
-                        await asyncio.sleep(0.5)
-                    if pause_start is not None:
-                        paused_duration = asyncio.get_event_loop().time() - pause_start
-                        total_paused += paused_duration
-                        logger.info("[gallery_dl] resumed after %.1fs: %s", paused_duration, url)
-
-                line = raw_line.decode("utf-8", errors="replace").rstrip()
-
-                # Lines starting with "# " are archive-skipped files — count but don't import
-                skipped = line.startswith("# ")
-
-                path_match = _FILE_PATH_EXTRACT_RE.search(line)
-                if path_match or _FILE_PATH_RE.search(line) or _IMAGE_EXT_RE.search(line):
-                    # Process the PREVIOUS pending file (guaranteed complete now that the next
-                    # file line has appeared)
-                    if pending_file is not None and on_file:
-                        try:
-                            await on_file(pending_file)
-                        except Exception as exc:
-                            logger.warning("[gallery_dl] progressive import error: %s", exc)
-
-                    # Track the new pending file (only if actually downloaded, not skipped)
-                    if path_match and not skipped:
-                        pending_file = Path(path_match.group(1))
-                    else:
-                        pending_file = None
-
-                    if skipped:
-                        skipped_count += 1
-                    else:
-                        downloaded += 1
-
-                    total_seen = downloaded + skipped_count
-                    now = asyncio.get_event_loop().time()
-                    if (
-                        total_seen % _PROGRESS_EVERY_N == 0
-                        or (now - last_progress_update) >= _PROGRESS_EVERY_S
-                    ):
-                        last_progress_update = now
-                        if on_progress is not None:
-                            try:
-                                await on_progress(total_seen, 0)  # total unknown for gallery-dl
-                            except Exception:
-                                pass
-
-            # Process the last pending file after the loop ends — but only if not cancelled
-            if pending_file is not None and on_file:
-                if cancel_check is None or not await cancel_check():
-                    try:
-                        await on_file(pending_file)
-                    except Exception as exc:
-                        logger.warning("[gallery_dl] progressive import error (last file): %s", exc)
+        state = _DownloadState(
+            last_activity=asyncio.get_event_loop().time(),
+            last_progress_update=asyncio.get_event_loop().time(),
+        )
 
         try:
-            await asyncio.wait_for(
-                asyncio.gather(_read_stdout(), proc.wait()),
-                timeout=3600,
-            )
-        except TimeoutError:
+            # Background reader tasks (these finish when the process's pipes close)
+            stdout_task = asyncio.create_task(_read_stdout(proc, state, on_file, on_progress))
+            stderr_task = asyncio.create_task(_read_stderr(proc, state))
+            bg_tasks: list[asyncio.Task] = [stdout_task, stderr_task]
+
+            # Sentinel tasks — any of these finishing first triggers cleanup
+            proc_wait_task = asyncio.create_task(proc.wait())
+            inactivity_task = asyncio.create_task(_inactivity_watchdog(state, inactivity_timeout, proc))
+            sentinel_tasks: list[asyncio.Task] = [proc_wait_task, inactivity_task]
+
+            sem_heartbeat = (options or {}).get("sem_heartbeat")
+            heartbeat_task = None
+            if sem_heartbeat:
+                heartbeat_task = asyncio.create_task(_heartbeat_loop(state, sem_heartbeat))
+                bg_tasks.append(heartbeat_task)
+
+            cancel_task = None
+            if cancel_check or pause_check:
+                cancel_task = asyncio.create_task(_pause_cancel_watcher(state, proc, cancel_check, pause_check))
+                sentinel_tasks.append(cancel_task)
+
+            all_tasks = bg_tasks + sentinel_tasks
             try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            logger.error("[gallery_dl] timeout downloading: %s", url)
-            return DownloadResult(
-                status="failed",
-                downloaded=downloaded,
-                total=downloaded,
-                error="download timeout after 3600s",
-            )
-
-        # Check if download was cancelled (covers both the break-from-loop path and
-        # the race where SIGTERM was sent externally before _read_stdout detected it)
-        if cancel_check is not None and await cancel_check():
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
-            logger.info("[gallery_dl] cancelled: %s (files downloaded before cancel=%d)", url, downloaded)
-            return DownloadResult(status="cancelled", downloaded=downloaded, total=downloaded)
-
-        stderr_bytes = await proc.stderr.read() if proc.stderr else b""
-        stderr_text = stderr_bytes.decode("utf-8", errors="replace")
-
-        if proc.returncode != 0:
-            err = stderr_text[:500]
-            logger.error("[gallery_dl] non-zero exit:\n%s", stderr_text)
-            if downloaded > 0:
-                # Some files were downloaded before the error — treat as partial success
-                logger.warning(
-                    "[gallery_dl] %d file(s) downloaded before failure — returning partial", downloaded
+                done, pending = await asyncio.wait(
+                    sentinel_tasks,
+                    timeout=86400,
+                    return_when=asyncio.FIRST_COMPLETED,
                 )
+            except Exception:
+                for t in all_tasks:
+                    t.cancel()
+                raise
+
+            # Determine what finished first
+            timed_out = len(done) == 0  # asyncio.wait timeout
+            inactivity_killed = False
+
+            for t in done:
+                if t is inactivity_task:
+                    try:
+                        result = t.result()
+                        if result == "inactivity_timeout":
+                            inactivity_killed = True
+                    except Exception:
+                        pass
+
+            # Cancel all remaining tasks (sentinels + background)
+            remaining = pending | {t for t in bg_tasks if not t.done()}
+            for t in remaining:
+                t.cancel()
+            if remaining:
+                await asyncio.wait(remaining, timeout=5)
+
+            # Wait for process to actually finish
+            try:
+                await asyncio.wait_for(proc.wait(), timeout=10)
+            except TimeoutError:
+                try:
+                    proc.kill()
+                except ProcessLookupError:
+                    pass
+
+            # Result mapping
+            if state.cancelled:
+                logger.info("[gallery_dl] cancelled: %s (downloaded=%d)", url, state.downloaded)
+                return DownloadResult(status="cancelled", downloaded=state.downloaded, total=state.downloaded)
+
+            if timed_out:
                 return DownloadResult(
-                    status="partial",
-                    downloaded=downloaded,
-                    total=downloaded + skipped_count,
+                    status="failed",
+                    downloaded=state.downloaded,
+                    total=state.downloaded,
+                    error="download timeout after 86400s",
+                )
+
+            if inactivity_killed:
+                err = f"No output for {inactivity_timeout}s — process killed"
+                if state.downloaded > 0:
+                    return DownloadResult(
+                        status="partial",
+                        downloaded=state.downloaded,
+                        total=state.downloaded + state.skipped_count,
+                        error=err,
+                    )
+                return DownloadResult(status="failed", downloaded=0, total=0, error=err)
+
+            stderr_text = "\n".join(state.stderr_lines)
+
+            if proc.returncode != 0:
+                err = stderr_text[:500]
+                logger.error("[gallery_dl] non-zero exit:\n%s", stderr_text)
+                if state.downloaded > 0:
+                    logger.warning(
+                        "[gallery_dl] %d file(s) downloaded before failure — returning partial",
+                        state.downloaded,
+                    )
+                    return DownloadResult(
+                        status="partial",
+                        downloaded=state.downloaded,
+                        total=state.downloaded + state.skipped_count,
+                        error=err,
+                    )
+                return DownloadResult(
+                    status="failed",
+                    downloaded=state.downloaded,
+                    total=state.downloaded + state.skipped_count,
                     error=err,
                 )
+
+            logger.info("[gallery_dl] done: %s (downloaded=%d, skipped=%d)", url, state.downloaded, state.skipped_count)
             return DownloadResult(
-                status="failed",
-                downloaded=downloaded,
-                total=downloaded + skipped_count,
-                error=err,
+                status="done",
+                downloaded=state.downloaded,
+                total=state.downloaded + state.skipped_count,
             )
 
-        logger.info("[gallery_dl] done: %s (downloaded=%d, skipped=%d)", url, downloaded, skipped_count)
-        return DownloadResult(
-            status="done",
-            downloaded=downloaded,
-            total=downloaded + skipped_count,
-        )
+        finally:
+            if config_path != Path(settings.gallery_dl_config):
+                config_path.unlink(missing_ok=True)
 
     def resolve_output_dir(self, url: str, base_path: Path) -> Path:
         """gallery-dl uses a generic directory — no URL-specific routing."""
