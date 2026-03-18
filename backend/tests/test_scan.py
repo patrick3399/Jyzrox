@@ -106,8 +106,7 @@ def _make_session(
 
     # Default: cycle through (ids, images, galleries) — tests can override
     session.execute = AsyncMock(
-        side_effect=[_ids_result, _imgs_result, _gals_result]
-        + [_imgs_result] * 10  # enough for repeated calls
+        side_effect=[_ids_result, _imgs_result, _gals_result] + [_imgs_result] * 10  # enough for repeated calls
     )
 
     session.flush = AsyncMock()
@@ -191,10 +190,7 @@ class TestRescanLibraryJob:
         # Confirm at least one execute call used a DELETE statement (batch image removal).
         # The batch delete is issued via sqlalchemy text(); check via the raw SQL string.
         all_executed = session.execute.call_args_list
-        delete_calls = [
-            c for c in all_executed
-            if c.args and "DELETE" in str(c.args[0]).upper()
-        ]
+        delete_calls = [c for c in all_executed if c.args and "DELETE" in str(c.args[0]).upper()]
         assert delete_calls, "Expected a batch DELETE execute call for missing images"
 
     async def test_gallery_with_zero_pages_marked_missing(self):
@@ -353,6 +349,7 @@ class TestRescanLibraryJob:
         ):
             # Patch the import inside the function
             import core.watcher as _cw
+
             original = _cw.watcher_instance
             _cw.watcher_instance = mock_watcher
             try:
@@ -449,10 +446,14 @@ class TestRescanGalleryJob:
         session.__aexit__ = AsyncMock(return_value=False)
 
         # execute returns: excluded_blobs, images (step1), surviving_images, final_images
-        excl_res = MagicMock(); excl_res.scalars.return_value.all.return_value = []
-        imgs_res = MagicMock(); imgs_res.scalars.return_value.all.return_value = [img]
-        surv_res = MagicMock(); surv_res.scalars.return_value.all.return_value = []
-        final_res = MagicMock(); final_res.scalars.return_value.all.return_value = []
+        excl_res = MagicMock()
+        excl_res.scalars.return_value.all.return_value = []
+        imgs_res = MagicMock()
+        imgs_res.scalars.return_value.all.return_value = [img]
+        surv_res = MagicMock()
+        surv_res.scalars.return_value.all.return_value = []
+        final_res = MagicMock()
+        final_res.scalars.return_value.all.return_value = []
 
         session.execute = AsyncMock(side_effect=[excl_res, imgs_res, surv_res, final_res])
 
@@ -490,25 +491,31 @@ class TestRescanGalleryJob:
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=False)
 
-        excl_res = MagicMock(); excl_res.scalars.return_value.all.return_value = []
-        imgs_res = MagicMock(); imgs_res.scalars.return_value.all.return_value = []  # no existing images
-        surv_res = MagicMock(); surv_res.scalars.return_value.all.return_value = []
+        excl_res = MagicMock()
+        excl_res.scalars.return_value.all.return_value = []
+        imgs_res = MagicMock()
+        imgs_res.scalars.return_value.all.return_value = []  # no existing images
+        surv_res = MagicMock()
+        surv_res.scalars.return_value.all.return_value = []
         final_res = MagicMock()
         # final count after insert
         final_img = _make_image(image_id=20, gallery_id=200)
         final_res.scalars.return_value.all.return_value = [final_img]
 
-        # pg_insert result (on_conflict_do_nothing)
+        # pg_insert result (on_conflict_do_nothing) — scalar_one_or_none returns
+        # a row, triggering an UPDATE for the blob's ref_count
         insert_exec_res = MagicMock()
+        update_ref_res = MagicMock()
 
         session.execute = AsyncMock(
-            side_effect=[excl_res, imgs_res, surv_res, insert_exec_res, final_res]
+            side_effect=[excl_res, imgs_res, surv_res, insert_exec_res, update_ref_res, final_res]
         )
 
         r = _make_redis()
 
         # Create a real temp file to iterate over
         import tempfile, pathlib
+
         with tempfile.TemporaryDirectory() as tmpdir:
             new_file = pathlib.Path(tmpdir) / "001.jpg"
             new_file.write_bytes(b"fake_image_data")
@@ -548,15 +555,19 @@ class TestRescanGalleryJob:
 
         excl_res = MagicMock()
         excl_res.scalars.return_value.all.return_value = ["excludedsha"]
-        imgs_res = MagicMock(); imgs_res.scalars.return_value.all.return_value = []
-        surv_res = MagicMock(); surv_res.scalars.return_value.all.return_value = []
-        final_res = MagicMock(); final_res.scalars.return_value.all.return_value = []
+        imgs_res = MagicMock()
+        imgs_res.scalars.return_value.all.return_value = []
+        surv_res = MagicMock()
+        surv_res.scalars.return_value.all.return_value = []
+        final_res = MagicMock()
+        final_res.scalars.return_value.all.return_value = []
 
         session.execute = AsyncMock(side_effect=[excl_res, imgs_res, surv_res, final_res])
 
         r = _make_redis()
 
         import tempfile, pathlib
+
         with tempfile.TemporaryDirectory() as tmpdir:
             excl_file = pathlib.Path(tmpdir) / "excluded.jpg"
             excl_file.write_bytes(b"data")
@@ -597,10 +608,14 @@ class TestRescanGalleryJob:
         blob = _make_blob(sha="foundsha")
         existing_img = _make_image(image_id=30, gallery_id=400, blob=blob)
 
-        excl_res = MagicMock(); excl_res.scalars.return_value.all.return_value = []
-        imgs_res = MagicMock(); imgs_res.scalars.return_value.all.return_value = [existing_img]
-        surv_res = MagicMock(); surv_res.scalars.return_value.all.return_value = [existing_img]
-        final_res = MagicMock(); final_res.scalars.return_value.all.return_value = [existing_img]
+        excl_res = MagicMock()
+        excl_res.scalars.return_value.all.return_value = []
+        imgs_res = MagicMock()
+        imgs_res.scalars.return_value.all.return_value = [existing_img]
+        surv_res = MagicMock()
+        surv_res.scalars.return_value.all.return_value = [existing_img]
+        final_res = MagicMock()
+        final_res.scalars.return_value.all.return_value = [existing_img]
 
         session.execute = AsyncMock(side_effect=[excl_res, imgs_res, surv_res, final_res])
 
@@ -648,10 +663,14 @@ class TestRescanGalleryJob:
         blob = _make_blob(sha="lostsha")
         img = _make_image(image_id=40, gallery_id=500, blob=blob)
 
-        excl_res = MagicMock(); excl_res.scalars.return_value.all.return_value = []
-        imgs_res = MagicMock(); imgs_res.scalars.return_value.all.return_value = [img]
-        surv_res = MagicMock(); surv_res.scalars.return_value.all.return_value = []
-        final_res = MagicMock(); final_res.scalars.return_value.all.return_value = []
+        excl_res = MagicMock()
+        excl_res.scalars.return_value.all.return_value = []
+        imgs_res = MagicMock()
+        imgs_res.scalars.return_value.all.return_value = [img]
+        surv_res = MagicMock()
+        surv_res.scalars.return_value.all.return_value = []
+        final_res = MagicMock()
+        final_res.scalars.return_value.all.return_value = []
 
         session.execute = AsyncMock(side_effect=[excl_res, imgs_res, surv_res, final_res])
 
@@ -694,7 +713,8 @@ class TestAutoDiscoverJob:
         session.commit = AsyncMock()
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=False)
-        existing_res = MagicMock(); existing_res.all.return_value = []
+        existing_res = MagicMock()
+        existing_res.all.return_value = []
         session.execute = AsyncMock(return_value=existing_res)
 
         r = _make_redis()
@@ -715,12 +735,14 @@ class TestAutoDiscoverJob:
         session.commit = AsyncMock()
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=False)
-        existing_res = MagicMock(); existing_res.all.return_value = []
+        existing_res = MagicMock()
+        existing_res.all.return_value = []
         session.execute = AsyncMock(return_value=existing_res)
 
         r = _make_redis()
 
         import tempfile, pathlib
+
         with tempfile.TemporaryDirectory() as tmpdir:
             hidden_dir = pathlib.Path(tmpdir) / ".hidden_gallery"
             hidden_dir.mkdir()
@@ -746,6 +768,7 @@ class TestAutoDiscoverJob:
         r = _make_redis()
 
         import tempfile, pathlib
+
         with tempfile.TemporaryDirectory() as tmpdir:
             gallery_dir = pathlib.Path(tmpdir) / "my_gallery"
             gallery_dir.mkdir()
@@ -779,15 +802,18 @@ class TestAutoDiscoverJob:
         r = _make_redis()
 
         import tempfile, pathlib
+
         with tempfile.TemporaryDirectory() as tmpdir:
             gallery_dir = pathlib.Path(tmpdir) / "new_gallery"
             gallery_dir.mkdir()
             (gallery_dir / "image.jpg").write_bytes(b"data")
 
             # No existing galleries
-            existing_res = MagicMock(); existing_res.all.return_value = []
+            existing_res = MagicMock()
+            existing_res.all.return_value = []
             # INSERT RETURNING id result
-            insert_res = MagicMock(); insert_res.scalar_one_or_none.return_value = 99
+            insert_res = MagicMock()
+            insert_res.scalar_one_or_none.return_value = 99
 
             session.execute = AsyncMock(side_effect=[existing_res, insert_res])
 
@@ -811,12 +837,14 @@ class TestAutoDiscoverJob:
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=False)
 
-        existing_res = MagicMock(); existing_res.all.return_value = []
+        existing_res = MagicMock()
+        existing_res.all.return_value = []
         session.execute = AsyncMock(return_value=existing_res)
 
         r = _make_redis()
 
         import tempfile, pathlib
+
         with tempfile.TemporaryDirectory() as tmpdir:
             gallery_dir = pathlib.Path(tmpdir) / "text_only"
             gallery_dir.mkdir()
@@ -883,7 +911,9 @@ class TestScheduledScanJob:
             patch("worker.scan._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.scan._cron_record", cron_record_mock),
             patch("worker.scan.auto_discover_job", new_callable=AsyncMock, return_value={"discovered": 0}),
-            patch("worker.scan.rescan_library_job", new_callable=AsyncMock, return_value={"status": "done", "total": 0}),
+            patch(
+                "worker.scan.rescan_library_job", new_callable=AsyncMock, return_value={"status": "done", "total": 0}
+            ),
         ):
             await scheduled_scan_job({"redis": r})
 
@@ -909,7 +939,8 @@ class TestRescanByPathJob:
         session = AsyncMock()
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=False)
-        none_res = MagicMock(); none_res.scalar_one_or_none.return_value = None
+        none_res = MagicMock()
+        none_res.scalar_one_or_none.return_value = None
         session.execute = AsyncMock(return_value=none_res)
 
         r = _make_redis()
@@ -931,7 +962,8 @@ class TestRescanByPathJob:
         session = AsyncMock()
         session.__aenter__ = AsyncMock(return_value=session)
         session.__aexit__ = AsyncMock(return_value=False)
-        found_res = MagicMock(); found_res.scalar_one_or_none.return_value = 77
+        found_res = MagicMock()
+        found_res.scalar_one_or_none.return_value = 77
         session.execute = AsyncMock(return_value=found_res)
 
         r = _make_redis()

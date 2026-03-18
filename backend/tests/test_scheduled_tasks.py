@@ -22,10 +22,7 @@ from sqlalchemy import text
 
 async def _insert_user(db_session):
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-            "VALUES (1, 'admin', 'hash', 'admin')"
-        )
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'admin', 'hash', 'admin')")
     )
     await db_session.commit()
 
@@ -47,9 +44,7 @@ async def test_scheduled_tasks_list_returns_task_list(client, mock_redis):
     assert len(data["tasks"]) > 0
 
 
-async def test_scheduled_tasks_list_each_task_has_expected_fields(
-    client, mock_redis
-):
+async def test_scheduled_tasks_list_each_task_has_expected_fields(client, mock_redis):
     mock_redis.get = AsyncMock(return_value=None)
 
     resp = await client.get("/api/scheduled-tasks/")
@@ -109,9 +104,7 @@ async def test_scheduled_tasks_update_cron_expr_returns_200(client, mock_redis):
     data = resp.json()
     assert data["status"] == "ok"
     assert data["task_id"] == "reconciliation"
-    mock_redis.set.assert_called_with(
-        "cron:reconciliation:cron_expr", "0 4 * * 0"
-    )
+    mock_redis.set.assert_called_with("cron:reconciliation:cron_expr", "0 4 * * 0")
 
 
 async def test_scheduled_tasks_update_invalid_cron_returns_400(client, mock_redis):
@@ -145,9 +138,11 @@ async def test_scheduled_tasks_run_enqueues_job(client):
     assert data["job"] == "scheduled_scan_job"
 
     from main import app
-    app.state.arq.enqueue_job.assert_called_with(
-        "scheduled_scan_job", _job_id="manual:library_scan"
-    )
+
+    app.state.arq.enqueue_job.assert_called_once()
+    call_args = app.state.arq.enqueue_job.call_args
+    assert call_args.args[0] == "scheduled_scan_job"
+    assert call_args.kwargs["_job_id"].startswith("manual:library_scan:")
 
 
 async def test_scheduled_tasks_run_unknown_task_returns_404(client):

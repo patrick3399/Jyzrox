@@ -193,16 +193,20 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        event = json.dumps({
-            "event_type": "download.completed",
-            "actor_user_id": 1,
-            "resource_type": "download_job",
-            "resource_id": "abc123",
-            "data": {"job_id": "abc123", "status": "done", "progress": None},
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": event.encode()},
-        ])
+        event = json.dumps(
+            {
+                "event_type": "download.completed",
+                "actor_user_id": 1,
+                "resource_type": "download_job",
+                "resource_id": "abc123",
+                "data": {"job_id": "abc123", "status": "done", "progress": None},
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": event.encode()},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -219,16 +223,20 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        event = json.dumps({
-            "event_type": "gallery.updated",
-            "actor_user_id": 1,
-            "resource_type": "gallery",
-            "resource_id": 5,
-            "data": {},
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": event},
-        ])
+        event = json.dumps(
+            {
+                "event_type": "gallery.updated",
+                "actor_user_id": 1,
+                "resource_type": "gallery",
+                "resource_id": 5,
+                "data": {},
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": event},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -244,9 +252,11 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "subscribe", "data": b"events:all"},
-        ])
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "subscribe", "data": b"events:all"},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -259,14 +269,18 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        other_user_event = json.dumps({
-            "event_type": "download.started",
-            "actor_user_id": 99,
-            "data": {"status": "running"},
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": other_user_event.encode()},
-        ])
+        other_user_event = json.dumps(
+            {
+                "event_type": "download.started",
+                "actor_user_id": 99,
+                "data": {"status": "running"},
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": other_user_event.encode()},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -279,14 +293,18 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        own_event = json.dumps({
-            "event_type": "download.started",
-            "actor_user_id": 1,
-            "data": {"status": "running"},
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": own_event.encode()},
-        ])
+        own_event = json.dumps(
+            {
+                "event_type": "download.started",
+                "actor_user_id": 1,
+                "data": {"status": "running"},
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": own_event.encode()},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -299,14 +317,18 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        broadcast_event = json.dumps({
-            "event_type": "gallery.updated",
-            "actor_user_id": None,
-            "data": {},
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": broadcast_event.encode()},
-        ])
+        broadcast_event = json.dumps(
+            {
+                "event_type": "gallery.updated",
+                "actor_user_id": None,
+                "data": {},
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": broadcast_event.encode()},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -319,14 +341,18 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        other_event = json.dumps({
-            "event_type": "download.started",
-            "actor_user_id": 42,
-            "data": {"status": "running"},
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": other_event.encode()},
-        ])
+        other_event = json.dumps(
+            {
+                "event_type": "download.started",
+                "actor_user_id": 42,
+                "data": {"status": "running"},
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": other_event.encode()},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -355,9 +381,11 @@ class TestPubsubListener:
         ws = AsyncMock()
         # Non-JSON data: the except block drops the message for non-admin users
         # because it cannot verify ownership.
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": b"not-json"},
-        ])
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": b"not-json"},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -371,9 +399,11 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": b"not-json"},
-        ])
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": b"not-json"},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -386,16 +416,20 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        event = json.dumps({
-            "event_type": "gallery.updated",
-            "actor_user_id": 99,
-            "resource_type": "gallery",
-            "resource_id": 42,
-            "data": {},
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": event},
-        ])
+        event = json.dumps(
+            {
+                "event_type": "gallery.updated",
+                "actor_user_id": 99,
+                "resource_type": "gallery",
+                "resource_id": 42,
+                "data": {},
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": event},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -408,16 +442,20 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        event = json.dumps({
-            "event_type": "rescan.completed",
-            "actor_user_id": None,
-            "resource_type": "system",
-            "resource_id": None,
-            "data": {},
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": event},
-        ])
+        event = json.dumps(
+            {
+                "event_type": "rescan.completed",
+                "actor_user_id": None,
+                "resource_type": "system",
+                "resource_id": None,
+                "data": {},
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": event},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -430,16 +468,20 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        event = json.dumps({
-            "event_type": "collection.updated",
-            "actor_user_id": 5,
-            "resource_type": "collection",
-            "resource_id": 12,
-            "data": {},
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": event},
-        ])
+        event = json.dumps(
+            {
+                "event_type": "collection.updated",
+                "actor_user_id": 5,
+                "resource_type": "collection",
+                "resource_id": 12,
+                "data": {},
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": event},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -465,19 +507,23 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        event = json.dumps({
-            "event_type": "download.completed",
-            "actor_user_id": 3,
-            "resource_type": "download_job",
-            "resource_id": "job-xyz",
-            "data": {
-                "status": "done",
-                "progress": {"current": 10, "total": 10},
-            },
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": event.encode()},
-        ])
+        event = json.dumps(
+            {
+                "event_type": "download.completed",
+                "actor_user_id": 3,
+                "resource_type": "download_job",
+                "resource_id": "job-xyz",
+                "data": {
+                    "status": "done",
+                    "progress": {"current": 10, "total": 10},
+                },
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": event.encode()},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -496,20 +542,24 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        event = json.dumps({
-            "event_type": "subscription.checked",
-            "actor_user_id": 2,
-            "resource_type": "subscription",
-            "resource_id": "sub-42",
-            "data": {
-                "status": "completed",
-                "job_id": "job-999",
-                "new_works": 5,
-            },
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": event.encode()},
-        ])
+        event = json.dumps(
+            {
+                "event_type": "subscription.checked",
+                "actor_user_id": 2,
+                "resource_type": "subscription",
+                "resource_id": "sub-42",
+                "data": {
+                    "status": "completed",
+                    "job_id": "job-999",
+                    "new_works": 5,
+                },
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": event.encode()},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -529,16 +579,20 @@ class TestPubsubListener:
         from routers.ws import _pubsub_listener
 
         ws = AsyncMock()
-        event = json.dumps({
-            "event_type": "gallery.tagged",
-            "actor_user_id": 1,
-            "resource_type": "gallery",
-            "resource_id": 99,
-            "data": {"tags": ["artist:foo", "parody:bar"]},
-        })
-        pubsub = _make_pubsub_mock(messages=[
-            {"type": "message", "data": event.encode()},
-        ])
+        event = json.dumps(
+            {
+                "event_type": "gallery.tagged",
+                "actor_user_id": 1,
+                "resource_type": "gallery",
+                "resource_id": 99,
+                "data": {"tags": ["artist:foo", "parody:bar"]},
+            }
+        )
+        pubsub = _make_pubsub_mock(
+            messages=[
+                {"type": "message", "data": event.encode()},
+            ]
+        )
 
         with patch("routers.ws.get_pubsub", return_value=pubsub):
             with pytest.raises(asyncio.CancelledError):
@@ -742,15 +796,18 @@ class TestWebsocketEndpoint:
     def _get_app(self):
         """Fetch _app from the already-initialised conftest module."""
         import tests.conftest as _conftest
+
         # conftest exposes _app at module level after all patches are applied.
         self._app = _conftest._app
 
     def _make_client(self):
         from starlette.testclient import TestClient
+
         return TestClient(self._app, raise_server_exceptions=False)
 
     def _make_pubsub_blocking(self):
         """Pubsub that never yields — stays blocked until the connection closes."""
+
         async def _listen_never():
             await asyncio.sleep(10)
             # Unreachable; makes it an async generator
@@ -788,9 +845,7 @@ class TestWebsocketEndpoint:
         ):
             client = self._make_client()
             with pytest.raises(Exception):
-                with client.websocket_connect(
-                    "/api/ws", cookies={"vault_session": "1:badtoken"}
-                ) as ws:
+                with client.websocket_connect("/api/ws", cookies={"vault_session": "1:badtoken"}) as ws:
                     ws.receive_json()
 
     def test_ws_connect_authed_admin_receives_ping(self):
@@ -807,9 +862,7 @@ class TestWebsocketEndpoint:
             patch("routers.ws.clear_system_alerts", new_callable=AsyncMock),
         ):
             client = self._make_client()
-            with client.websocket_connect(
-                "/api/ws", cookies={"vault_session": "1:validtoken"}
-            ) as ws:
+            with client.websocket_connect("/api/ws", cookies={"vault_session": "1:validtoken"}) as ws:
                 msg = ws.receive_json()
 
         assert msg["type"] == "ping"
@@ -829,9 +882,7 @@ class TestWebsocketEndpoint:
             patch("routers.ws.clear_system_alerts", new_callable=AsyncMock),
         ):
             client = self._make_client()
-            with client.websocket_connect(
-                "/api/ws", cookies={"vault_session": "2:membertoken"}
-            ) as ws:
+            with client.websocket_connect("/api/ws", cookies={"vault_session": "2:membertoken"}) as ws:
                 msg = ws.receive_json()
 
         assert msg["type"] == "ping"
@@ -850,9 +901,7 @@ class TestWebsocketEndpoint:
             patch("routers.ws.clear_system_alerts", new_callable=AsyncMock),
         ):
             client = self._make_client()
-            with client.websocket_connect(
-                "/api/ws", cookies={"vault_session": "3:viewertoken"}
-            ) as ws:
+            with client.websocket_connect("/api/ws", cookies={"vault_session": "3:viewertoken"}) as ws:
                 msg = ws.receive_json()
 
         assert msg["type"] == "ping"
@@ -871,9 +920,7 @@ class TestWebsocketEndpoint:
             patch("routers.ws.clear_system_alerts", new_callable=AsyncMock),
         ):
             client = self._make_client()
-            with client.websocket_connect(
-                "/api/ws", cookies={"vault_session": "1:validtoken"}
-            ) as ws:
+            with client.websocket_connect("/api/ws", cookies={"vault_session": "1:validtoken"}) as ws:
                 alert_msg = ws.receive_json()
                 ping_msg = ws.receive_json()
 
@@ -895,9 +942,7 @@ class TestWebsocketEndpoint:
             patch("routers.ws.clear_system_alerts", new_callable=AsyncMock),
         ):
             client = self._make_client()
-            with client.websocket_connect(
-                "/api/ws", cookies={"vault_session": "1:validtoken"}
-            ) as ws:
+            with client.websocket_connect("/api/ws", cookies={"vault_session": "1:validtoken"}) as ws:
                 msgs = [ws.receive_json() for _ in range(4)]
 
         assert msgs[0] == {"type": "alert", "message": "alert one"}
@@ -1039,7 +1084,8 @@ class TestWebsocketEndpointTaskCleanup:
 
         ws = AsyncMock()
         ws.cookies = {"vault_session": "1:tok"}
-        ws.client = "127.0.0.1:9999"
+        ws.headers = {"x-forwarded-for": "127.0.0.1"}
+        ws.client = MagicMock(host="127.0.0.1")
         ws.accept = AsyncMock()
         ws.receive = AsyncMock(side_effect=WebSocketDisconnect(code=1000))
 

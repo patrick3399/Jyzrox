@@ -7,6 +7,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 # ── Log Levels ──────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_log_levels_defaults(client, mock_redis):
     """GET /api/logs/levels returns INFO for both when no Redis keys set."""
@@ -21,12 +22,14 @@ async def test_get_log_levels_defaults(client, mock_redis):
 @pytest.mark.asyncio
 async def test_get_log_levels_from_redis(client, mock_redis):
     """GET /api/logs/levels reads stored levels from Redis."""
+
     async def fake_get(key):
         if key == "log_level:api":
             return b"DEBUG"
         if key == "log_level:worker":
             return b"ERROR"
         return None
+
     mock_redis.get = AsyncMock(side_effect=fake_get)
     resp = await client.get("/api/logs/levels")
     assert resp.status_code == 200
@@ -69,6 +72,7 @@ async def test_set_log_level_invalid_returns_422(client, mock_redis):
 
 # ── Log Entries ─────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_get_logs_empty(client, mock_redis):
     """GET /api/logs with empty list returns empty response."""
@@ -85,8 +89,24 @@ async def test_get_logs_empty(client, mock_redis):
 async def test_get_logs_with_entries(client, mock_redis):
     """GET /api/logs returns entries from Redis."""
     entries = [
-        json.dumps({"level": "INFO", "source": "api", "logger": "main", "message": "Hello", "timestamp": "2026-03-17T10:00:00+00:00"}).encode(),
-        json.dumps({"level": "ERROR", "source": "worker", "logger": "worker", "message": "Oops", "timestamp": "2026-03-17T10:01:00+00:00"}).encode(),
+        json.dumps(
+            {
+                "level": "INFO",
+                "source": "api",
+                "logger": "main",
+                "message": "Hello",
+                "timestamp": "2026-03-17T10:00:00+00:00",
+            }
+        ).encode(),
+        json.dumps(
+            {
+                "level": "ERROR",
+                "source": "worker",
+                "logger": "worker",
+                "message": "Oops",
+                "timestamp": "2026-03-17T10:01:00+00:00",
+            }
+        ).encode(),
     ]
     mock_redis.lrange = AsyncMock(return_value=entries)
     resp = await client.get("/api/logs/")
@@ -101,9 +121,33 @@ async def test_get_logs_with_entries(client, mock_redis):
 async def test_get_logs_level_filter(client, mock_redis):
     """Level filter returns only matching entries."""
     entries = [
-        json.dumps({"level": "INFO", "source": "api", "logger": "a", "message": "info msg", "timestamp": "2026-03-17T10:00:00+00:00"}).encode(),
-        json.dumps({"level": "ERROR", "source": "api", "logger": "b", "message": "error msg", "timestamp": "2026-03-17T10:01:00+00:00"}).encode(),
-        json.dumps({"level": "DEBUG", "source": "api", "logger": "c", "message": "debug msg", "timestamp": "2026-03-17T10:02:00+00:00"}).encode(),
+        json.dumps(
+            {
+                "level": "INFO",
+                "source": "api",
+                "logger": "a",
+                "message": "info msg",
+                "timestamp": "2026-03-17T10:00:00+00:00",
+            }
+        ).encode(),
+        json.dumps(
+            {
+                "level": "ERROR",
+                "source": "api",
+                "logger": "b",
+                "message": "error msg",
+                "timestamp": "2026-03-17T10:01:00+00:00",
+            }
+        ).encode(),
+        json.dumps(
+            {
+                "level": "DEBUG",
+                "source": "api",
+                "logger": "c",
+                "message": "debug msg",
+                "timestamp": "2026-03-17T10:02:00+00:00",
+            }
+        ).encode(),
     ]
     mock_redis.lrange = AsyncMock(return_value=entries)
     resp = await client.get("/api/logs/?level=ERROR")
@@ -116,8 +160,24 @@ async def test_get_logs_level_filter(client, mock_redis):
 async def test_get_logs_source_filter(client, mock_redis):
     """Source filter returns only matching entries."""
     entries = [
-        json.dumps({"level": "INFO", "source": "api", "logger": "a", "message": "api msg", "timestamp": "2026-03-17T10:00:00+00:00"}).encode(),
-        json.dumps({"level": "INFO", "source": "worker", "logger": "b", "message": "worker msg", "timestamp": "2026-03-17T10:01:00+00:00"}).encode(),
+        json.dumps(
+            {
+                "level": "INFO",
+                "source": "api",
+                "logger": "a",
+                "message": "api msg",
+                "timestamp": "2026-03-17T10:00:00+00:00",
+            }
+        ).encode(),
+        json.dumps(
+            {
+                "level": "INFO",
+                "source": "worker",
+                "logger": "b",
+                "message": "worker msg",
+                "timestamp": "2026-03-17T10:01:00+00:00",
+            }
+        ).encode(),
     ]
     mock_redis.lrange = AsyncMock(return_value=entries)
     resp = await client.get("/api/logs/?source=worker")
@@ -130,8 +190,24 @@ async def test_get_logs_source_filter(client, mock_redis):
 async def test_get_logs_keyword_search(client, mock_redis):
     """Search filter matches message content."""
     entries = [
-        json.dumps({"level": "INFO", "source": "api", "logger": "a", "message": "User logged in", "timestamp": "2026-03-17T10:00:00+00:00"}).encode(),
-        json.dumps({"level": "ERROR", "source": "api", "logger": "b", "message": "Connection failed", "timestamp": "2026-03-17T10:01:00+00:00"}).encode(),
+        json.dumps(
+            {
+                "level": "INFO",
+                "source": "api",
+                "logger": "a",
+                "message": "User logged in",
+                "timestamp": "2026-03-17T10:00:00+00:00",
+            }
+        ).encode(),
+        json.dumps(
+            {
+                "level": "ERROR",
+                "source": "api",
+                "logger": "b",
+                "message": "Connection failed",
+                "timestamp": "2026-03-17T10:01:00+00:00",
+            }
+        ).encode(),
     ]
     mock_redis.lrange = AsyncMock(return_value=entries)
     resp = await client.get("/api/logs/?search=connection")
@@ -144,7 +220,15 @@ async def test_get_logs_keyword_search(client, mock_redis):
 async def test_get_logs_pagination(client, mock_redis):
     """Limit and offset work correctly."""
     entries = [
-        json.dumps({"level": "INFO", "source": "api", "logger": "a", "message": f"msg {i}", "timestamp": f"2026-03-17T10:{i:02d}:00+00:00"}).encode()
+        json.dumps(
+            {
+                "level": "INFO",
+                "source": "api",
+                "logger": "a",
+                "message": f"msg {i}",
+                "timestamp": f"2026-03-17T10:{i:02d}:00+00:00",
+            }
+        ).encode()
         for i in range(5)
     ]
     mock_redis.lrange = AsyncMock(return_value=entries)
@@ -184,6 +268,7 @@ async def test_logs_requires_admin(make_client):
 
 # ── Retention ───────────────────────────────────────────────────────
 
+
 @pytest.mark.asyncio
 async def test_log_retention_get_defaults(client, mock_redis):
     """GET /api/logs/retention returns defaults when no Redis keys set."""
@@ -191,8 +276,7 @@ async def test_log_retention_get_defaults(client, mock_redis):
     resp = await client.get("/api/logs/retention")
     assert resp.status_code == 200
     data = resp.json()
-    assert data["max_entries"] == 10000
-    assert data["retention_days"] == 7
+    assert data["max_entries"] == 2000
 
 
 @pytest.mark.asyncio
@@ -201,12 +285,11 @@ async def test_log_retention_patch(client, mock_redis):
     mock_redis.set = AsyncMock(return_value=True)
     # After PATCH, _get_int_setting reads back from Redis; return None so defaults apply
     mock_redis.get = AsyncMock(return_value=None)
-    resp = await client.patch("/api/logs/retention", json={"max_entries": 5000, "retention_days": 14})
+    resp = await client.patch("/api/logs/retention", json={"max_entries": 5000})
     assert resp.status_code == 200
-    # Verify set was called for both keys
+    # Verify set was called for the max_entries key
     set_keys = [str(c) for c in mock_redis.set.call_args_list]
     assert any("log_max_entries" in k for k in set_keys)
-    assert any("log_retention_days" in k for k in set_keys)
 
 
 @pytest.mark.asyncio
@@ -223,6 +306,7 @@ async def test_log_retention_patch_partial(client, mock_redis):
 
 
 # ── RedisLogHandler unit ────────────────────────────────────────────
+
 
 @pytest.mark.asyncio
 async def test_redis_log_handler_emit(mock_redis):
@@ -241,13 +325,15 @@ async def test_redis_log_handler_emit(mock_redis):
     mock_redis.pipeline = MagicMock(return_value=mock_pipe)
 
     with patch("core.redis_client.get_redis", return_value=mock_redis):
-        payload = json.dumps({
-            "level": "INFO",
-            "source": "api",
-            "logger": "test",
-            "message": "hello",
-            "timestamp": "2026-03-17T10:00:00",
-        })
+        payload = json.dumps(
+            {
+                "level": "INFO",
+                "source": "api",
+                "logger": "test",
+                "message": "hello",
+                "timestamp": "2026-03-17T10:00:00",
+            }
+        )
         await handler._async_emit(payload)
 
     mock_pipe.lpush.assert_called_once()
@@ -276,13 +362,15 @@ async def test_redis_log_handler_emit_trimming(mock_redis):
     mock_redis.pipeline = MagicMock(return_value=mock_pipe)
 
     with patch("core.redis_client.get_redis", return_value=mock_redis):
-        payload = json.dumps({
-            "level": "DEBUG",
-            "source": "api",
-            "logger": "test",
-            "message": "trim test",
-            "timestamp": "2026-03-17T10:00:00",
-        })
+        payload = json.dumps(
+            {
+                "level": "DEBUG",
+                "source": "api",
+                "logger": "test",
+                "message": "trim test",
+                "timestamp": "2026-03-17T10:00:00",
+            }
+        )
         await handler._async_emit(payload)
 
     mock_pipe.ltrim.assert_called_once()
@@ -290,6 +378,7 @@ async def test_redis_log_handler_emit_trimming(mock_redis):
 
 
 # ── install_log_handler extra_loggers ───────────────────────────────
+
 
 def test_install_log_handler_attaches_to_extra_loggers():
     """install_log_handler attaches RedisLogHandler to each name in extra_loggers."""
@@ -345,9 +434,7 @@ def test_non_propagating_logger_reaches_handler():
         # The handler is attached directly to the non-propagating logger,
         # so records emitted on it will reach the handler regardless of propagate.
         new_handlers = [h for h in noprop.handlers[noprop_before:] if isinstance(h, RedisLogHandler)]
-        assert len(new_handlers) == 1, (
-            "RedisLogHandler must be directly attached to a non-propagating logger"
-        )
+        assert len(new_handlers) == 1, "RedisLogHandler must be directly attached to a non-propagating logger"
         # Confirm propagate is still False — the direct attachment is what matters.
         assert noprop.propagate is False
 
