@@ -14,6 +14,7 @@ vi.mock('lucide-react', () => {
     Compass: stub,
     Palette: stub,
     BookOpen: stub,
+    BookMarked: stub,
     Download: stub,
     Menu: stub,
     LayoutDashboard: stub,
@@ -64,10 +65,7 @@ describe('loadTabConfig', () => {
 
   it('test_loadTabConfig_wrong_array_length_returns_default_tabs', () => {
     // Only 3 items instead of the required 4
-    localStorage.setItem(
-      BOTTOM_TAB_CONFIG_KEY,
-      JSON.stringify(['/e-hentai', '/pixiv', '/library']),
-    )
+    localStorage.setItem(BOTTOM_TAB_CONFIG_KEY, JSON.stringify(['/e-hentai', '/pixiv', '/library']))
     const result = loadTabConfig()
     expect(result.map((t) => t.href)).toEqual(DEFAULT_TAB_HREFS)
   })

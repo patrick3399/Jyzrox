@@ -197,11 +197,13 @@ const en: Record<string, string> = {
   'settings.features': 'Features',
   'settings.downloadSources': 'Download Sources',
   'settings.csrfProtection': 'CSRF Protection',
-  'settings.csrfDesc': 'Protects against cross-site request forgery attacks. Disable only for development.',
+  'settings.csrfDesc':
+    'Protects against cross-site request forgery attacks. Disable only for development.',
   'settings.opdsServer': 'OPDS Server',
   'settings.opdsDesc': 'Enables OPDS catalog feed for external readers (Panels, KOReader, etc.).',
   'settings.externalApi': 'External API',
-  'settings.externalApiDesc': 'Enables the token-authenticated external API for third-party integrations.',
+  'settings.externalApiDesc':
+    'Enables the token-authenticated external API for third-party integrations.',
   'settings.aiTaggingToggleDesc': 'Enable WD14 AI-based tag predictions for imported galleries.',
   'settings.tagTranslation': 'Tag Translation (Chinese Only)',
   'settings.tagTranslationDesc': 'Display tags in Chinese instead of original English',
@@ -213,10 +215,13 @@ const en: Record<string, string> = {
   'settings.downloadGalleryDlDesc': 'Allow downloading from other sites via gallery-dl.',
   'settings.trashSection': 'Trash',
   'settings.trashEnabled': 'Enable Trash',
-  'settings.trashEnabledDesc': 'Deleted galleries are moved to trash instead of being permanently deleted',
+  'settings.trashEnabledDesc':
+    'Deleted galleries are moved to trash instead of being permanently deleted',
   'settings.trashRetentionDays': 'Retention Days',
-  'settings.trashRetentionDaysDesc': 'Galleries in trash are automatically deleted after this many days',
-  'settings.trashDisableConfirm': 'Disabling trash will permanently delete all galleries currently in trash. This cannot be undone. Continue?',
+  'settings.trashRetentionDaysDesc':
+    'Galleries in trash are automatically deleted after this many days',
+  'settings.trashDisableConfirm':
+    'Disabling trash will permanently delete all galleries currently in trash. This cannot be undone. Continue?',
   'settings.rateLimiting': 'Rate Limiting',
   'settings.rateLimitDesc': 'Protect login and API endpoints',
   'settings.refresh': 'Refresh',
@@ -363,7 +368,9 @@ const en: Record<string, string> = {
   'library.delete.link.button': 'Remove from Library',
   'library.delete.link.confirm': 'Remove "{title}" from library? Source files will NOT be deleted.',
   'library.delete.copy.confirm': 'Delete "{title}"? Copied files will be permanently deleted.',
-  'library.delete.download.confirm': 'Delete "{title}"? All downloaded files will be permanently deleted.',
+  'library.delete.download.confirm':
+    'Delete "{title}"? All downloaded files will be permanently deleted.',
+  'library.deleteConfirm': 'Delete "{title}"? This action cannot be undone.',
   'library.deleted': 'Gallery deleted',
   'library.deleteFailed': 'Delete failed',
   'library.deleting': 'Deleting...',
@@ -380,7 +387,8 @@ const en: Record<string, string> = {
   'library.selectImages': 'Select',
   'library.cancelSelect': 'Cancel',
   'library.hideSelected': 'Exclude ({count})',
-  'library.hideSelectedConfirm': 'Exclude {count} selected image(s)? They will be deleted and blocked from re-imports.',
+  'library.hideSelectedConfirm':
+    'Exclude {count} selected image(s)? They will be deleted and blocked from re-imports.',
   'library.hidingImages': 'Excluding...',
   'library.imagesHidden': '{count} image(s) excluded',
   'library.hideImageFailed': 'Failed to exclude image',
@@ -456,7 +464,8 @@ const en: Record<string, string> = {
   'explorer.deleteFilesConfirm': 'Delete {count} file(s)? This cannot be undone.',
   'explorer.filesDeleted': '{count} file(s) deleted',
   'explorer.deleteFileFailed': 'Failed to delete file',
-  'explorer.deleteGalleriesConfirm': 'Delete {count} gallery/galleries and all their files? This cannot be undone.',
+  'explorer.deleteGalleriesConfirm':
+    'Delete {count} gallery/galleries and all their files? This cannot be undone.',
   'explorer.galleryDeleted': 'Gallery deleted',
   'explorer.galleriesDeleted': '{count} gallery/galleries deleted',
   'explorer.galleriesDeleteSkipped': '({count} skipped)',
@@ -697,7 +706,8 @@ const en: Record<string, string> = {
   'import.dir.empty': 'No supported files found',
   'import.gallery.title': 'Gallery Title',
   'settings.media.rescan': 'Rescan All Libraries',
-  'settings.media.rescan.desc': 'Verify files, update page counts, and regenerate missing thumbnails',
+  'settings.media.rescan.desc':
+    'Verify files, update page counts, and regenerate missing thumbnails',
   'settings.media.rescan.running': 'Scanning: {processed}/{total} galleries',
   'settings.media.rescan.cancel': 'Stop Scan',
   'settings.media.rescan.cancelling': 'Stopping...',
@@ -776,7 +786,8 @@ const en: Record<string, string> = {
   'subscriptions.updateFailed': 'Failed to update subscription',
   'subscriptions.checkFailed': 'Failed to check subscription',
   'subscriptions.noSubscriptions': 'No subscriptions yet.',
-  'subscriptions.noSubscriptionsHint': 'Add a Pixiv user or Twitter account URL to monitor for new works.',
+  'subscriptions.noSubscriptionsHint':
+    'Add a Pixiv user or Twitter account URL to monitor for new works.',
   'subscriptions.lastChecked': 'Last checked',
   'subscriptions.sourceOther': 'Other',
   'subscriptions.disabled': 'Disabled',
@@ -787,7 +798,8 @@ const en: Record<string, string> = {
   'subscriptions.viewGallery': 'View Gallery',
   'subscriptions.queued': 'Queued',
   'subscriptions.batchImport': 'Batch Import',
-  'subscriptions.batchPlaceholder': 'One URL per line\nhttps://x.com/user1\nhttps://x.com/user2\nhttps://www.pixiv.net/users/12345',
+  'subscriptions.batchPlaceholder':
+    'One URL per line\nhttps://x.com/user1\nhttps://x.com/user2\nhttps://www.pixiv.net/users/12345',
   'subscriptions.batchImporting': 'Importing {done}/{total}...',
   'subscriptions.batchDone': 'Batch import done: {success} added, {failed} failed',
   'subscriptions.batchEmpty': 'No valid URLs found',
@@ -815,7 +827,8 @@ const en: Record<string, string> = {
   'settings.subscriptionEnqueue': 'Subscription Enqueue',
   'settings.subscriptionEnqueueDelay': 'Enqueue Delay',
   'settings.subscriptionBatchMax': 'Batch Max (0 = no limit)',
-  'settings.subscriptionEnqueueDesc': 'Throttle subscription auto-downloads. Delay is the pause between each enqueue; batch max limits items per check.',
+  'settings.subscriptionEnqueueDesc':
+    'Throttle subscription auto-downloads. Delay is the pause between each enqueue; batch max limits items per check.',
 
   // ── Cache Management ──
   'settings.cache': 'Cache',
@@ -834,7 +847,8 @@ const en: Record<string, string> = {
   'settings.mediaCacheTTL': 'Media Cache TTL',
   'settings.mediaCacheTTLDesc': 'How long to keep cached images and thumbnails',
   'settings.mediaCacheSizeLimit': 'Media Cache Size Limit',
-  'settings.mediaCacheSizeLimitDesc': 'Maximum storage for cached media (oldest entries evicted first)',
+  'settings.mediaCacheSizeLimitDesc':
+    'Maximum storage for cached media (oldest entries evicted first)',
   'settings.pageCacheTTL': 'Page Cache TTL',
   'settings.pageCacheTTLDesc': 'How long to keep cached page responses for offline use',
   'settings.clearBrowserCache': 'Clear Browser Cache',
@@ -885,12 +899,15 @@ const en: Record<string, string> = {
   'settings.pixivOauthSteps': 'Steps:',
   'settings.pixivOauthStep1': '1. Click the button below to open the Pixiv login page',
   'settings.pixivOauthStep2': '2. Log in with your Pixiv account',
-  'settings.pixivOauthStep3': '3. After login, the page will redirect. Quickly copy the URL from the address bar during the redirect.',
+  'settings.pixivOauthStep3':
+    '3. After login, the page will redirect. Quickly copy the URL from the address bar during the redirect.',
   'settings.pixivOauthHint': 'Hint: The URL format is',
-  'settings.pixivOauthHint2': 'If you missed it, press F12 to open DevTools → Network tab, find the callback request and copy the URL',
+  'settings.pixivOauthHint2':
+    'If you missed it, press F12 to open DevTools → Network tab, find the callback request and copy the URL',
   'settings.pixivOauthStep4': '4. Paste the copied URL or the value after code= here:',
   'settings.pixivCookieTitle': 'Using Session Cookie:',
-  'settings.pixivCookieDesc': 'If the Web Login redirect is too fast to copy the URL, use this method instead.',
+  'settings.pixivCookieDesc':
+    'If the Web Login redirect is too fast to copy the URL, use this method instead.',
   'settings.pixivCookieStep1': 'Open and log in to Pixiv (https://www.pixiv.net) in your browser',
   'settings.pixivCookieStep2': 'Press F12 to open DevTools → Application (or Storage)',
   'settings.pixivCookieStep3': 'Find the following cookie under Cookies:',
@@ -916,9 +933,11 @@ const en: Record<string, string> = {
   'credentials.ehSiteDesc': 'ExHentai has more content but requires igneous cookie',
   'credentials.ehSiteEh': 'E-Hentai',
   'credentials.ehSiteEx': 'ExHentai',
-  'credentials.ehCookieOnlyHint': 'Enter your E-Hentai cookies manually. You can find them in your browser DevTools (F12) → Application → Cookies → e-hentai.org',
+  'credentials.ehCookieOnlyHint':
+    'Enter your E-Hentai cookies manually. You can find them in your browser DevTools (F12) → Application → Cookies → e-hentai.org',
   'credentials.genericCookies': 'Site Cookies',
-  'credentials.genericCookiesDesc': 'Add cookies for sites that require authentication (Twitter, Instagram, etc.)',
+  'credentials.genericCookiesDesc':
+    'Add cookies for sites that require authentication (Twitter, Instagram, etc.)',
   'credentials.configuredSites': 'Configured Sites',
   'credentials.noGenericCookies': 'No site cookies configured yet.',
   'credentials.addSite': 'Add Site',
@@ -958,7 +977,8 @@ const en: Record<string, string> = {
   'credentials.password': 'Password / API Key',
   'credentials.usernamePlaceholder': 'Enter username',
   'credentials.passwordPlaceholder': 'Enter password or API key',
-  'credentials.cookiesMultiFormat': 'Paste from browser DevTools, or enter as key=value per line, or JSON',
+  'credentials.cookiesMultiFormat':
+    'Paste from browser DevTools, or enter as key=value per line, or JSON',
   'credentials.savedSite': 'Credentials saved for {source}',
   'credentials.orTypeManually': 'Or type the site name manually',
 
@@ -977,7 +997,8 @@ const en: Record<string, string> = {
   'plugins.emptyHint': 'Plugins extend download support for additional sites.',
 
   // ── Credential UX ──
-  'credential.ehRecommended': 'Downloading without E-Hentai credentials — bandwidth may be limited.',
+  'credential.ehRecommended':
+    'Downloading without E-Hentai credentials — bandwidth may be limited.',
   'credential.pixivRequired': 'Pixiv credentials required. Go to Settings → Credentials to set up.',
   'credential.banner.limited': 'Browsing as guest — some features are limited.',
   'credential.banner.configure': 'Configure credentials',
@@ -1079,15 +1100,22 @@ const en: Record<string, string> = {
   'error.setup_completed': 'Setup already completed',
   'error.gallery_not_found': 'Gallery not found',
   'error.image_not_found': 'Image not found',
-  'error.eh_cookie_invalid': 'E-Hentai cookie invalid or expired. Update in Settings → Credentials.',
-  'error.eh_access_denied': 'ExHentai access denied (Sad Panda). Configure credentials in Settings → Credentials.',
-  'error.eh_bandwidth_exceeded': 'E-Hentai bandwidth limit exceeded. Configure credentials for higher limits.',
+  'error.eh_cookie_invalid':
+    'E-Hentai cookie invalid or expired. Update in Settings → Credentials.',
+  'error.eh_access_denied':
+    'ExHentai access denied (Sad Panda). Configure credentials in Settings → Credentials.',
+  'error.eh_bandwidth_exceeded':
+    'E-Hentai bandwidth limit exceeded. Configure credentials for higher limits.',
   'error.eh_request_failed': 'E-Hentai request failed',
-  'error.eh_not_configured': 'E-Hentai credentials not configured. Set up in Settings → Credentials.',
+  'error.eh_not_configured':
+    'E-Hentai credentials not configured. Set up in Settings → Credentials.',
   'error.eh_credentials_recommended': 'Downloading without credentials — bandwidth may be limited.',
-  'error.pixiv_token_invalid': 'Pixiv token invalid or expired. Re-authenticate in Settings → Credentials.',
-  'error.pixiv_not_configured': 'Pixiv credentials not configured. Set up in Settings → Credentials.',
-  'error.pixiv_credentials_required': 'Pixiv credentials required for downloads. Set up in Settings → Credentials.',
+  'error.pixiv_token_invalid':
+    'Pixiv token invalid or expired. Re-authenticate in Settings → Credentials.',
+  'error.pixiv_not_configured':
+    'Pixiv credentials not configured. Set up in Settings → Credentials.',
+  'error.pixiv_credentials_required':
+    'Pixiv credentials required for downloads. Set up in Settings → Credentials.',
   'error.pixiv_request_failed': 'Pixiv request failed',
   'error.download_source_disabled': 'This download source is disabled',
   'error.credential_not_found': 'Credential not found',
@@ -1226,7 +1254,8 @@ const en: Record<string, string> = {
 
   // ── Forbidden page ──
   'forbidden.title': 'Access Denied',
-  'forbidden.description': 'You do not have permission to access this page. Contact an administrator if you believe this is an error.',
+  'forbidden.description':
+    'You do not have permission to access this page. Contact an administrator if you believe this is an error.',
   'forbidden.backHome': 'Back to Home',
 
   // ── Accessibility / aria-labels ──
@@ -1296,9 +1325,11 @@ const en: Record<string, string> = {
   'trash.title': 'Trash',
   'trash.restore': 'Restore',
   'trash.permanentDelete': 'Delete Permanently',
-  'trash.permanentDeleteConfirm': 'This will permanently delete this gallery. This cannot be undone. Continue?',
+  'trash.permanentDeleteConfirm':
+    'This will permanently delete this gallery. This cannot be undone. Continue?',
   'trash.emptyTrash': 'Empty Trash',
-  'trash.emptyTrashConfirm': 'This will permanently delete all galleries in trash. This cannot be undone. Continue?',
+  'trash.emptyTrashConfirm':
+    'This will permanently delete all galleries in trash. This cannot be undone. Continue?',
   'trash.daysRemaining': '{days} days remaining',
   'trash.movedToTrash': 'Moved to trash',
   'trash.restored': 'Gallery restored',

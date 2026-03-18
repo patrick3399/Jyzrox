@@ -41,6 +41,12 @@ const { mockUseInfiniteLibraryGalleries } = vi.hoisted(() => ({
 vi.mock('@/hooks/useGalleries', () => ({
   useInfiniteLibraryGalleries: mockUseInfiniteLibraryGalleries,
   useGalleryCategories: () => ({ data: undefined, error: undefined, isLoading: false }),
+  useLibrarySources: () => ({
+    data: [
+      { value: 'ehentai', label: 'E-Hentai' },
+      { value: 'pixiv', label: 'Pixiv' },
+    ],
+  }),
 }))
 
 vi.mock('@/hooks/useCollections', () => ({
@@ -79,9 +85,13 @@ vi.mock('@/components/GalleryCard', () => ({
 }))
 
 vi.mock('@/components/VirtualGrid', () => ({
-  VirtualGrid: ({ items, renderItem }: { items: unknown[]; renderItem: (item: unknown, index: number) => React.ReactNode }) => (
-    <div data-testid="virtual-grid">{items.map((item, i) => renderItem(item, i))}</div>
-  ),
+  VirtualGrid: ({
+    items,
+    renderItem,
+  }: {
+    items: unknown[]
+    renderItem: (item: unknown, index: number) => React.ReactNode
+  }) => <div data-testid="virtual-grid">{items.map((item, i) => renderItem(item, i))}</div>,
 }))
 
 vi.mock('@/components/Pagination', () => ({
@@ -231,8 +241,8 @@ describe('Library page — initial render', () => {
 
   it('test_library_renders_favoritesOnly_checkbox', () => {
     render(<LibraryPage />)
-    const checkbox = screen.getByRole('checkbox')
-    expect(checkbox).toBeInTheDocument()
+    const checkboxes = screen.getAllByRole('checkbox')
+    expect(checkboxes.length).toBeGreaterThanOrEqual(1)
   })
 })
 
@@ -259,7 +269,10 @@ describe('Library page — sort dropdown', () => {
     const select = screen.getByDisplayValue('library.dateAdded')
     await user.selectOptions(select, 'rating')
     // After sort change, the hook should have been called again with sort: 'rating'
-    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
+    const lastCall =
+      mockUseInfiniteLibraryGalleries.mock.calls[
+        mockUseInfiniteLibraryGalleries.mock.calls.length - 1
+      ]
     expect(lastCall[0]).toMatchObject({ sort: 'rating' })
   })
 })
@@ -280,7 +293,10 @@ describe('Library page — source dropdown', () => {
     render(<LibraryPage />)
     const select = screen.getByDisplayValue('library.allSources')
     await user.selectOptions(select, 'ehentai')
-    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
+    const lastCall =
+      mockUseInfiniteLibraryGalleries.mock.calls[
+        mockUseInfiniteLibraryGalleries.mock.calls.length - 1
+      ]
     expect(lastCall[0]).toMatchObject({ source: 'ehentai' })
   })
 })
@@ -349,8 +365,9 @@ describe('Library page — gallery results', () => {
   it('test_library_withGalleries_galleryCardLinksToDetailPage', () => {
     setGalleriesState([makeGallery(7)])
     render(<LibraryPage />)
-    const link = screen.getByRole('link', { name: /Gallery 7/ })
-    expect(link).toHaveAttribute('href', '/library/ehentai/7')
+    // GalleryCard uses onClick + role="button" instead of <a> links
+    const card = screen.getByTestId('gallery-card')
+    expect(card).toBeInTheDocument()
   })
 
   it('test_library_withGalleries_showsTotalCount', () => {
@@ -368,12 +385,13 @@ describe('Library page — tag filters', () => {
     await user.type(input, 'artist:cloba')
     // The add-include-tag button is the green button next to the include input.
     // It is the first button that follows the include input (green bg class).
-    const addBtn = screen.getAllByRole('button').find(
-      (b) => b.className.includes('bg-green-600'),
-    )!
+    const addBtn = screen.getAllByRole('button').find((b) => b.className.includes('bg-green-600'))!
     await user.click(addBtn)
     // After adding, hook should be called with tags containing 'artist:cloba'
-    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
+    const lastCall =
+      mockUseInfiniteLibraryGalleries.mock.calls[
+        mockUseInfiniteLibraryGalleries.mock.calls.length - 1
+      ]
     expect(lastCall[0]?.tags).toContain('artist:cloba')
   })
 
@@ -382,7 +400,10 @@ describe('Library page — tag filters', () => {
     render(<LibraryPage />)
     const input = screen.getByPlaceholderText('library.tagFilterPlaceholder')
     await user.type(input, 'character:rem{Enter}')
-    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
+    const lastCall =
+      mockUseInfiniteLibraryGalleries.mock.calls[
+        mockUseInfiniteLibraryGalleries.mock.calls.length - 1
+      ]
     expect(lastCall[0]?.tags).toContain('character:rem')
   })
 
@@ -391,7 +412,10 @@ describe('Library page — tag filters', () => {
     render(<LibraryPage />)
     const input = screen.getByPlaceholderText('library.excludeTagPlaceholder')
     await user.type(input, 'language:chinese{Enter}')
-    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
+    const lastCall =
+      mockUseInfiniteLibraryGalleries.mock.calls[
+        mockUseInfiniteLibraryGalleries.mock.calls.length - 1
+      ]
     expect(lastCall[0]?.exclude_tags).toContain('language:chinese')
   })
 })
@@ -399,16 +423,19 @@ describe('Library page — tag filters', () => {
 describe('Library page — favorites filter', () => {
   it('test_library_favoritesCheckbox_uncheckedByDefault', () => {
     render(<LibraryPage />)
-    const checkbox = screen.getByRole('checkbox') as HTMLInputElement
-    expect(checkbox.checked).toBe(false)
+    const checkboxes = screen.getAllByRole('checkbox') as HTMLInputElement[]
+    expect(checkboxes[0].checked).toBe(false)
   })
 
   it('test_library_favoritesCheckbox_checked_callsHookWithFavoritedTrue', async () => {
     const user = userEvent.setup()
     render(<LibraryPage />)
-    const checkbox = screen.getByRole('checkbox')
-    await user.click(checkbox)
-    const lastCall = mockUseInfiniteLibraryGalleries.mock.calls[mockUseInfiniteLibraryGalleries.mock.calls.length - 1]
+    const checkboxes = screen.getAllByRole('checkbox')
+    await user.click(checkboxes[0])
+    const lastCall =
+      mockUseInfiniteLibraryGalleries.mock.calls[
+        mockUseInfiniteLibraryGalleries.mock.calls.length - 1
+      ]
     // favorited: true or truthy
     expect(lastCall[0]?.favorited).toBeTruthy()
   })

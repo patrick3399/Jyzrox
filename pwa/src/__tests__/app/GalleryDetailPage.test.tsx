@@ -54,7 +54,11 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('next/link', () => ({
-  default: ({ href, children, ...rest }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
+  default: ({
+    href,
+    children,
+    ...rest
+  }: React.AnchorHTMLAttributes<HTMLAnchorElement> & { href: string }) => (
     <a href={href} {...rest}>
       {children}
     </a>
@@ -327,9 +331,9 @@ describe('GalleryDetailPage', () => {
 
       // Tags section heading
       expect(screen.getByText('common.tags')).toBeInTheDocument()
-      // Tag values (without namespace prefix) are rendered as individual spans
-      expect(screen.getByText('test-artist')).toBeInTheDocument()
-      expect(screen.getByText('hero')).toBeInTheDocument()
+      // Tags are rendered with translation text when translations are available
+      expect(screen.getByText('Test Artist')).toBeInTheDocument()
+      expect(screen.getByText('Hero')).toBeInTheDocument()
     })
 
     it('test_GalleryDetailPage_galleryWithNoTags_rendersNoTagsMessage', () => {

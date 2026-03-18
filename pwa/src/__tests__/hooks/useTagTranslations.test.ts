@@ -106,7 +106,7 @@ describe('useTagTranslations — SWR key derivation', () => {
 
   it('should use the derived language as the second element of the key', () => {
     useTagTranslations(['artist:bob'])
-    expect((lastCall().key as [string, string, string])[1]).toBe('zh')
+    expect((lastCall().key as [string, string, string])[1]).toBe('zh-TW')
   })
 
   it('should join sorted tags with "," as the third element of the key', () => {
@@ -138,7 +138,7 @@ describe('useTagTranslations — fetcher', () => {
     await lastCall().fetcher!()
 
     expect(mockGetTranslations).toHaveBeenCalledOnce()
-    expect(mockGetTranslations).toHaveBeenCalledWith(tags, 'zh')
+    expect(mockGetTranslations).toHaveBeenCalledWith(tags, 'zh-TW')
   })
 
   it('should not invoke api.tags.getTranslations when tags array is empty', () => {
@@ -173,6 +173,9 @@ describe('useTagTranslations — return value', () => {
 
   it('should pass through resolved translation data from SWR', () => {
     const translations = { 'artist:bob': 'Bob', 'parody:foo': 'Foo' }
+    // useTagTranslations calls useSWR twice: first for 'settings/features', then for translations.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    mockUseSWR.mockReturnValueOnce(MOCK_SWR_RETURN as any)
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockUseSWR.mockReturnValueOnce({
       data: translations,

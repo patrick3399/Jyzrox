@@ -16,36 +16,36 @@
     "format:check": "prettier --check \"src/**/*.{ts,tsx,js,json,css}\""
   },
   "dependencies": {
-    "@tanstack/react-virtual": "^3.13.21",
+    "@tanstack/react-virtual": "^3.13.23",
     "dompurify": "^3.3.3",
     "justified-layout": "^4.1.0",
     "lucide-react": "^0.577.0",
-    "next": "^16.0.0",
+    "next": "^16.1.7",
     "next-themes": "^0.4.6",
-    "react": "^19.0.0",
-    "react-dom": "^19.0.0",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
     "sonner": "^2.0.7",
-    "swr": "^2.3.0"
+    "swr": "^2.4.1"
   },
   "devDependencies": {
-    "@tailwindcss/postcss": "^4.0.0",
+    "@tailwindcss/postcss": "^4.2.1",
     "@testing-library/jest-dom": "^6.9.1",
-    "@testing-library/react": "^16.0.0",
+    "@testing-library/react": "^16.3.2",
     "@testing-library/user-event": "^14.6.1",
-    "@types/dompurify": "^3.0.5",
+    "@types/dompurify": "^3.2.0",
     "@types/justified-layout": "^4.1.4",
     "@types/node": "^22",
     "@types/react": "^19",
     "@types/react-dom": "^19",
     "@vitest/coverage-v8": "^4.1.0",
     "eslint": "^9.39.4",
-    "eslint-config-next": "^16.1.6",
+    "eslint-config-next": "^16.1.7",
     "eslint-config-prettier": "^10.1.8",
     "jsdom": "^25.0.0",
-    "postcss": "^8.5.0",
+    "postcss": "^8.5.8",
     "prettier": "^3.8.1",
-    "tailwindcss": "^4.0.0",
+    "tailwindcss": "^4.2.1",
     "typescript": "5.9.3",
-    "vitest": "^4.0.0"
+    "vitest": "^4.1.0"
   }
 }
