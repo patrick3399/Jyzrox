@@ -531,6 +531,7 @@ class TestRequireAuthEdgeCases:
     async def test_valid_signed_session_accepted(self, unauthed_client, mock_redis):
         """Session stored as signed JSON should be accepted and role extracted."""
         import json as _json
+
         from core.auth import _sign_session
 
         data = _json.dumps({"role": "admin", "user_id": 1})
@@ -561,6 +562,7 @@ class TestRequireAuthEdgeCases:
     async def test_tampered_session_returns_401(self, unauthed_client, mock_redis):
         """HMAC mismatch in session data should return 401 on protected endpoints."""
         from unittest.mock import patch
+
         from core.auth import _sign_session
 
         data = '{"role":"admin","user_id":1}'
@@ -580,6 +582,7 @@ class TestRequireAuthEdgeCases:
     async def test_corrupted_json_session_returns_401(self, unauthed_client, mock_redis):
         """Session data that is not valid JSON (after signature stripping) returns 401."""
         from unittest.mock import patch
+
         from core.auth import _sign_session
 
         # Sign something that is valid for HMAC check but not JSON
@@ -598,6 +601,7 @@ class TestRequireAuthEdgeCases:
     async def test_session_role_defaults_to_viewer_for_non_dict_json(self, unauthed_client, mock_redis):
         """If JSON session is not a dict, role defaults to viewer and auth succeeds."""
         import json as _json
+
         from core.auth import _sign_session
 
         # A JSON array — valid JSON but not a dict
@@ -617,6 +621,7 @@ class TestRequireAuthEdgeCases:
         """Session with different IP than stored should log a warning but still succeed (lines 107-111)."""
         import json as _json
         from unittest.mock import patch
+
         from core.auth import _sign_session
 
         # Session stores IP "1.2.3.4"; request arrives from the default test IP (127.0.0.1)
@@ -636,15 +641,18 @@ class TestRequireAuthEdgeCases:
         """Session with different User-Agent than stored should log a warning but still succeed (lines 112-116)."""
         import json as _json
         from unittest.mock import patch
+
         from core.auth import _sign_session
 
         # Session stores a specific UA; the test client sends no/different UA
-        data = _json.dumps({
-            "role": "admin",
-            "user_id": 1,
-            "ip": "",
-            "user_agent": "OldBrowser/1.0",
-        })
+        data = _json.dumps(
+            {
+                "role": "admin",
+                "user_id": 1,
+                "ip": "",
+                "user_agent": "OldBrowser/1.0",
+            }
+        )
         signed = _sign_session(data)
         mock_redis.get = AsyncMock_returning(signed.encode())
 
@@ -661,19 +669,21 @@ class TestRequireAuthEdgeCases:
         """Both IP and UA mismatches together: both warnings emitted, request still succeeds (lines 107-116)."""
         import json as _json
         from unittest.mock import patch
+
         from core.auth import _sign_session
 
-        data = _json.dumps({
-            "role": "admin",
-            "user_id": 1,
-            "ip": "10.0.0.1",
-            "user_agent": "OriginalBrowser/1.0",
-        })
+        data = _json.dumps(
+            {
+                "role": "admin",
+                "user_id": 1,
+                "ip": "10.0.0.1",
+                "user_agent": "OriginalBrowser/1.0",
+            }
+        )
         signed = _sign_session(data)
         mock_redis.get = AsyncMock_returning(signed.encode())
 
-        with patch("core.auth.get_redis", return_value=mock_redis), \
-             patch("core.auth.logger") as mock_logger:
+        with patch("core.auth.get_redis", return_value=mock_redis), patch("core.auth.logger") as mock_logger:
             resp = await unauthed_client.get(
                 "/api/auth/sessions",
                 cookies={"vault_session": "1:sometoken"},
@@ -682,8 +692,8 @@ class TestRequireAuthEdgeCases:
 
         # Both warnings should have been logged
         warning_calls = [str(c) for c in mock_logger.warning.call_args_list]
-        ip_warned = any("mismatch" in c.lower() and ("ip" in c.lower() or "stored=" in c.lower()) for c in warning_calls)
-        ua_warned = any("ua mismatch" in c.lower() for c in warning_calls)
+        ip_warned = any(("ip changed" in c.lower() or "ip mismatch" in c.lower()) for c in warning_calls)
+        ua_warned = any(("ua changed" in c.lower() or "ua mismatch" in c.lower()) for c in warning_calls)
         assert ip_warned, f"Expected IP mismatch warning, got: {warning_calls}"
         assert ua_warned, f"Expected UA mismatch warning, got: {warning_calls}"
 
@@ -694,6 +704,7 @@ class TestRequireAuthEdgeCases:
         """require_auth return value (line 121) includes correct user_id (int) and role (lines 100-121)."""
         import json as _json
         from unittest.mock import patch
+
         from core.auth import _sign_session
 
         data = _json.dumps({"role": "member", "user_id": 42})

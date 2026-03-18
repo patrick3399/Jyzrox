@@ -1,5 +1,5 @@
 fastapi==0.135.1
-uvicorn[standard]==0.41.0
+uvicorn[standard]==0.42.0
 sqlalchemy[asyncio]==2.0.48
 asyncpg==0.31.0
 alembic==1.18.4
@@ -9,14 +9,14 @@ httpx==0.28.1
 pillow==12.1.1
 cryptography==46.0.5
 pixivpy3==3.7.5
-pydantic-settings==2.7.0
+pydantic-settings==2.13.1
 python-multipart==0.0.22
-beautifulsoup4==4.12.3
-lxml==6.0.1
+beautifulsoup4==4.14.3
+lxml==6.0.2
 bcrypt==4.2.1
 psutil==6.1.1
-imagehash==4.3.1
+imagehash==4.3.2
 watchdog==6.0.0
 croniter==3.0.3
-opencv-python-headless==4.11.0.86
+opencv-python-headless==4.13.0.92
 opencc-python-reimplemented==0.1.7
