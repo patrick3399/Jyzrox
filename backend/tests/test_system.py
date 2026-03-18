@@ -20,10 +20,7 @@ from sqlalchemy import text
 
 async def _insert_user(db_session):
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-            "VALUES (1, 'admin', 'hash', 'admin')"
-        )
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'admin', 'hash', 'admin')")
     )
     await db_session.commit()
 
@@ -63,9 +60,7 @@ async def test_system_health_returns_ok_status(client, db_session_factory, mock_
 # ---------------------------------------------------------------------------
 
 
-async def test_system_info_returns_version_fields(
-    client, db_session_factory, mock_redis
-):
+async def test_system_info_returns_version_fields(client, db_session_factory, mock_redis):
     mock_redis.info = AsyncMock(return_value={"redis_version": "7.0.0"})
     with (
         patch("routers.system.AsyncSessionLocal", db_session_factory),
@@ -83,9 +78,7 @@ async def test_system_info_returns_version_fields(
     assert "fastapi" in versions
 
 
-async def test_system_info_versions_field_has_expected_keys(
-    client, db_session_factory, mock_redis
-):
+async def test_system_info_versions_field_has_expected_keys(client, db_session_factory, mock_redis):
     mock_redis.info = AsyncMock(return_value={"redis_version": "7.0.0"})
     with (
         patch("routers.system.AsyncSessionLocal", db_session_factory),
@@ -105,9 +98,7 @@ async def test_system_info_versions_field_has_expected_keys(
 
 
 async def test_system_cache_returns_stats_structure(client, mock_redis):
-    mock_redis.info = AsyncMock(
-        return_value={"used_memory": 1024, "used_memory_human": "1.00K"}
-    )
+    mock_redis.info = AsyncMock(return_value={"used_memory": 1024, "used_memory_human": "1.00K"})
     mock_redis.dbsize = AsyncMock(return_value=42)
     mock_redis.scan = AsyncMock(return_value=(0, []))
 
@@ -162,12 +153,11 @@ async def test_system_reconcile_trigger_enqueues_job(client):
     assert resp.status_code == 200
     assert resp.json()["status"] == "enqueued"
     from main import app
+
     app.state.arq.enqueue_job.assert_called_with("reconciliation_job")
 
 
-async def test_system_reconcile_result_when_never_run_returns_never_run(
-    client, mock_redis
-):
+async def test_system_reconcile_result_when_never_run_returns_never_run(client, mock_redis):
     mock_redis.get = AsyncMock(return_value=None)
 
     resp = await client.get("/api/system/reconcile")
@@ -176,9 +166,7 @@ async def test_system_reconcile_result_when_never_run_returns_never_run(
     assert resp.json()["status"] == "never_run"
 
 
-async def test_system_reconcile_result_when_result_exists_returns_parsed_json(
-    client, mock_redis
-):
+async def test_system_reconcile_result_when_result_exists_returns_parsed_json(client, mock_redis):
     payload = {"status": "ok", "deleted_orphans": 3, "galleries_checked": 100}
     mock_redis.get = AsyncMock(return_value=json.dumps(payload).encode())
 
@@ -238,76 +226,36 @@ def test_detect_jyzrox_version_returns_dev_on_exception():
 # -- _detect_gallery_dl_version (lines 43, 53-54) ----------------------------
 
 
-def test_detect_gallery_dl_version_from_module_import():
-    """_detect_gallery_dl_version reads gallery_dl.version.__version__ when import succeeds (line 43)."""
-    import types
-
-    from routers.system import _detect_gallery_dl_version
-
-    fake_version_mod = types.ModuleType("gallery_dl.version")
-    fake_version_mod.__version__ = "1.26.0"
-    fake_gdl = types.ModuleType("gallery_dl")
-    fake_gdl.version = fake_version_mod
-
-    # Patch importlib.import_module-style: replace sys.modules entry temporarily
-    import sys
-    original = sys.modules.get("gallery_dl")
-    try:
-        sys.modules["gallery_dl"] = fake_gdl
-        version = _detect_gallery_dl_version()
-    finally:
-        if original is None:
-            sys.modules.pop("gallery_dl", None)
-        else:
-            sys.modules["gallery_dl"] = original
-
-    assert version == "1.26.0"
-
-
-def test_detect_gallery_dl_version_from_subprocess_fallback():
-    """_detect_gallery_dl_version falls back to subprocess when import fails (lines 53-54)."""
-    from routers.system import _detect_gallery_dl_version
-
-    fake_result = MagicMock()
-    fake_result.stdout = "1.25.5\n"
-
+@pytest.mark.asyncio
+async def test_system_info_includes_dynamic_gallery_dl_version(client):
+    """system_info fetches gallery-dl version dynamically via get_current_version()."""
     with (
-        patch("builtins.__import__", side_effect=ImportError("no module")),
-        patch("subprocess.run", return_value=fake_result),
+        patch("worker.gallery_dl_venv.get_current_version", new_callable=AsyncMock, return_value="1.28.0"),
+        patch("routers.system._get_postgresql_version", new_callable=AsyncMock, return_value="16.1"),
+        patch("routers.system._get_redis_version", new_callable=AsyncMock, return_value="7.2.0"),
+        patch("routers.system._get_tagger_info", new_callable=AsyncMock, return_value=None),
     ):
-        version = _detect_gallery_dl_version()
+        resp = await client.get("/api/system/info")
 
-    # If import fails and subprocess succeeds we should get the version string.
-    # The function may also raise ImportError through the built-in import path;
-    # accept either a version string or None (subprocess fallback path varies
-    # depending on what gallery_dl is actually installed).
-    assert version is None or isinstance(version, str)
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["versions"]["gallery_dl"] == "1.28.0"
 
 
-def test_detect_gallery_dl_version_subprocess_fallback_empty_stdout():
-    """_detect_gallery_dl_version returns None when subprocess stdout is empty."""
-    import sys
-    import types
+@pytest.mark.asyncio
+async def test_system_info_gallery_dl_version_none_when_unavailable(client):
+    """system_info returns null gallery-dl version when venv is missing."""
+    with (
+        patch("worker.gallery_dl_venv.get_current_version", new_callable=AsyncMock, return_value=None),
+        patch("routers.system._get_postgresql_version", new_callable=AsyncMock, return_value="16.1"),
+        patch("routers.system._get_redis_version", new_callable=AsyncMock, return_value="7.2.0"),
+        patch("routers.system._get_tagger_info", new_callable=AsyncMock, return_value=None),
+    ):
+        resp = await client.get("/api/system/info")
 
-    from routers.system import _detect_gallery_dl_version
-
-    # Force import to fail by temporarily removing gallery_dl from sys.modules
-    original = sys.modules.get("gallery_dl")
-    sys.modules["gallery_dl"] = None  # type: ignore[assignment]
-
-    fake_result = MagicMock()
-    fake_result.stdout = ""
-
-    try:
-        with patch("subprocess.run", return_value=fake_result):
-            version = _detect_gallery_dl_version()
-    finally:
-        if original is None:
-            sys.modules.pop("gallery_dl", None)
-        else:
-            sys.modules["gallery_dl"] = original
-
-    assert version is None
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["versions"]["gallery_dl"] is None
 
 
 # -- _get_postgresql_version (lines 80-86) ------------------------------------
@@ -319,9 +267,7 @@ async def test_get_postgresql_version_parses_standard_banner(db_session_factory)
 
     # Mock the session to return a full PostgreSQL version banner
     mock_row = MagicMock()
-    mock_row.scalar_one = MagicMock(
-        return_value="PostgreSQL 15.3 on x86_64-pc-linux-gnu, compiled by gcc"
-    )
+    mock_row.scalar_one = MagicMock(return_value="PostgreSQL 15.3 on x86_64-pc-linux-gnu, compiled by gcc")
 
     mock_result = MagicMock()
     mock_result.scalar_one = mock_row.scalar_one
@@ -412,9 +358,7 @@ async def test_get_redis_version_returns_none_when_key_missing(mock_redis):
 # -- health: Redis error path (lines 112-122) ---------------------------------
 
 
-async def test_system_health_returns_503_when_redis_unavailable(
-    client, db_session_factory, mock_redis
-):
+async def test_system_health_returns_503_when_redis_unavailable(client, db_session_factory, mock_redis):
     """Health check returns 503 with detail when Redis ping raises (lines 116-122)."""
     mock_redis.ping = AsyncMock(side_effect=ConnectionError("redis refused"))
 
@@ -436,9 +380,7 @@ async def test_system_health_returns_503_when_redis_unavailable(
     assert data["detail"]["redis"].startswith("error:")
 
 
-async def test_system_health_returns_503_when_postgres_unavailable(
-    client, mock_redis
-):
+async def test_system_health_returns_503_when_postgres_unavailable(client, mock_redis):
     """Health check returns 503 with detail when PostgreSQL is unreachable (lines 112-114)."""
     mock_redis.ping = AsyncMock(return_value=True)
 
@@ -470,9 +412,7 @@ async def test_system_health_returns_503_when_postgres_unavailable(
 # -- health: inode warning / unknown (lines 136-142) -------------------------
 
 
-async def test_system_health_warns_when_inode_usage_above_90(
-    client, db_session_factory, mock_redis
-):
+async def test_system_health_warns_when_inode_usage_above_90(client, db_session_factory, mock_redis):
     """Health check records an inode warning when usage exceeds 90% (lines 135-136)."""
     mock_redis.ping = AsyncMock(return_value=True)
 
@@ -494,9 +434,7 @@ async def test_system_health_warns_when_inode_usage_above_90(
     assert "warning" in services["inodes"]
 
 
-async def test_system_health_records_unknown_when_df_output_malformed(
-    client, db_session_factory, mock_redis
-):
+async def test_system_health_records_unknown_when_df_output_malformed(client, db_session_factory, mock_redis):
     """Health check records 'unknown' for inodes when df output has fewer than 2 lines (line 140)."""
     mock_redis.ping = AsyncMock(return_value=True)
 
@@ -517,9 +455,7 @@ async def test_system_health_records_unknown_when_df_output_malformed(
     assert services["inodes"] == "unknown"
 
 
-async def test_system_health_records_unknown_when_df_raises(
-    client, db_session_factory, mock_redis
-):
+async def test_system_health_records_unknown_when_df_raises(client, db_session_factory, mock_redis):
     """Health check records 'unknown' for inodes when the subprocess raises (line 142)."""
     mock_redis.ping = AsyncMock(return_value=True)
 
@@ -538,9 +474,7 @@ async def test_system_health_records_unknown_when_df_raises(
 # -- _get_tagger_info (lines 150-160) / system_info with tagger ---------------
 
 
-async def test_system_info_with_tagger_online_includes_onnxruntime_version(
-    client, db_session_factory, mock_redis
-):
+async def test_system_info_with_tagger_online_includes_onnxruntime_version(client, db_session_factory, mock_redis):
     """system_info populates onnxruntime version when tagger is online (lines 150-160, 183)."""
     mock_redis.info = AsyncMock(return_value={"redis_version": "7.0.0"})
 
@@ -562,9 +496,7 @@ async def test_system_info_with_tagger_online_includes_onnxruntime_version(
     assert data["tagger"] == tagger_payload
 
 
-async def test_system_info_with_tagger_offline_has_none_onnxruntime(
-    client, db_session_factory, mock_redis
-):
+async def test_system_info_with_tagger_offline_has_none_onnxruntime(client, db_session_factory, mock_redis):
     """system_info sets onnxruntime to None when tagger is offline (line 183)."""
     mock_redis.info = AsyncMock(return_value={"redis_version": "7.0.0"})
 
@@ -659,10 +591,13 @@ async def test_system_storage_returns_mounts_deduplicated_by_device(client):
     fake_usage.free = 400_000_000_000
 
     with (
-        patch("routers.system._get_real_mounts", return_value=[
-            ("Gallery Data", "/data/gallery"),
-            ("CAS (Content-Addressed)", "/data/cas"),
-        ]),
+        patch(
+            "routers.system._get_real_mounts",
+            return_value=[
+                ("Gallery Data", "/data/gallery"),
+                ("CAS (Content-Addressed)", "/data/cas"),
+            ],
+        ),
         patch("os.stat", return_value=fake_stat),
         patch("shutil.disk_usage", return_value=fake_usage),
     ):
@@ -698,10 +633,13 @@ async def test_system_storage_shows_both_mounts_when_different_devices(client):
         return m
 
     with (
-        patch("routers.system._get_real_mounts", return_value=[
-            ("Gallery Data", "/data/gallery"),
-            ("CAS (Content-Addressed)", "/data/cas"),
-        ]),
+        patch(
+            "routers.system._get_real_mounts",
+            return_value=[
+                ("Gallery Data", "/data/gallery"),
+                ("CAS (Content-Addressed)", "/data/cas"),
+            ],
+        ),
         patch("os.stat", side_effect=fake_stat),
         patch("shutil.disk_usage", return_value=fake_usage),
     ):
@@ -715,9 +653,12 @@ async def test_system_storage_shows_both_mounts_when_different_devices(client):
 async def test_system_storage_handles_oserror_gracefully(client):
     """GET /api/system/storage returns empty mounts when paths don't exist."""
     with (
-        patch("routers.system._get_real_mounts", return_value=[
-            ("Gallery Data", "/data/gallery"),
-        ]),
+        patch(
+            "routers.system._get_real_mounts",
+            return_value=[
+                ("Gallery Data", "/data/gallery"),
+            ],
+        ),
         patch("os.stat", side_effect=OSError("not found")),
     ):
         resp = await client.get("/api/system/storage")
@@ -743,11 +684,14 @@ async def test_system_storage_includes_external_mounts(client):
     fake_usage.free = 1_000_000_000_000
 
     with (
-        patch("routers.system._get_real_mounts", return_value=[
-            ("Gallery Data", "/data/gallery"),
-            ("CAS (Content-Addressed)", "/data/cas"),
-            ("nas1", "/mnt/nas1"),
-        ]),
+        patch(
+            "routers.system._get_real_mounts",
+            return_value=[
+                ("Gallery Data", "/data/gallery"),
+                ("CAS (Content-Addressed)", "/data/cas"),
+                ("nas1", "/mnt/nas1"),
+            ],
+        ),
         patch("os.stat", side_effect=fake_stat),
         patch("shutil.disk_usage", return_value=fake_usage),
     ):
@@ -772,10 +716,13 @@ async def test_system_storage_no_external_mounts_when_none_detected(client):
     fake_usage.free = 500_000_000_000
 
     with (
-        patch("routers.system._get_real_mounts", return_value=[
-            ("Gallery Data", "/data/gallery"),
-            ("CAS (Content-Addressed)", "/data/cas"),
-        ]),
+        patch(
+            "routers.system._get_real_mounts",
+            return_value=[
+                ("Gallery Data", "/data/gallery"),
+                ("CAS (Content-Addressed)", "/data/cas"),
+            ],
+        ),
         patch("os.stat", return_value=fake_stat),
         patch("shutil.disk_usage", return_value=fake_usage),
     ):
@@ -858,6 +805,7 @@ def test_get_real_mounts_labels_known_paths_correctly():
     label_map = {path: label for label, path in result}
     # Check that known paths get their special labels
     from core.config import settings
+
     assert label_map.get(settings.data_gallery_path) == "Gallery Data"
     assert label_map.get(settings.data_cas_path) == "CAS (Content-Addressed)"
 
