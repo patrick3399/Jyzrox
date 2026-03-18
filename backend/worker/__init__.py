@@ -154,35 +154,40 @@ async def startup(ctx: dict) -> None:
         )
         if running_jobs:
             arq_pool = ctx["redis"]
-            for job in running_jobs:
-                job.status = "queued"
-                job.error = None
-                job.finished_at = None
-                job.retry_count = (job.retry_count or 0) + 1
-            await session.commit()
 
-            # Fix orphaned galleries stuck in "downloading" status
+            # Fix orphaned galleries stuck in "downloading" status (batch query)
             from db.models import Image
 
             gallery_ids = [job.gallery_id for job in running_jobs if job.gallery_id is not None]
             if gallery_ids:
+                counts = {
+                    row[0]: row[1]
+                    for row in (
+                        await session.execute(
+                            select(Image.gallery_id, func.count())
+                            .where(Image.gallery_id.in_(gallery_ids))
+                            .group_by(Image.gallery_id)
+                        )
+                    ).all()
+                }
                 for gid in gallery_ids:
-                    img_count = (
-                        await session.execute(select(func.count()).where(Image.gallery_id == gid))
-                    ).scalar_one()
                     await session.execute(
                         update(Gallery)
                         .where(Gallery.id == gid, Gallery.download_status == "downloading")
-                        .values(download_status="partial", pages=img_count)
+                        .values(download_status="partial", pages=counts.get(gid, 0))
                     )
                 await session.commit()
                 logger.info("Fixed %d orphaned downloading galleries", len(gallery_ids))
 
-            # Re-enqueue recovered jobs
+            # Re-enqueue recovered jobs (set status + enqueue atomically per job)
             for job in running_jobs:
+                job.retry_count = (job.retry_count or 0) + 1
                 arq_job_id = compute_arq_job_id(job.id, job.retry_count)
                 try:
                     await enqueue_download_job(arq_pool, job, arq_job_id)
+                    job.status = "queued"
+                    job.error = None
+                    job.finished_at = None
                     logger.info("Re-enqueued recovered running job %s (retry=%d)", job.id, job.retry_count)
                 except Exception as exc:
                     job.status = "failed"

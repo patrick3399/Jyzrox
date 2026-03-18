@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+import uuid
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
@@ -204,9 +205,7 @@ async def download_job(
         await importer.import_file(file_path)
 
     # ── 11. Execute download ────────────────────────────────────────
-    import uuid as _uuid
-
-    job_id_str = db_job_id or str(_uuid.uuid4())
+    job_id_str = db_job_id or str(uuid.uuid4())
 
     try:
         wait_secs = await sem.acquire(job_id_str)

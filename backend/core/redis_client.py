@@ -1,5 +1,6 @@
 import asyncio
 import json
+import time
 from contextlib import asynccontextmanager
 
 import redis.asyncio as aioredis
@@ -196,8 +197,6 @@ class DownloadSemaphore:
         Returns the total seconds spent waiting.
         Raises TimeoutError if slot not acquired within timeout.
         """
-        import time
-
         r = get_redis()
         _timeout = timeout if timeout is not None else self.acquire_timeout
         loop = asyncio.get_event_loop()
@@ -229,8 +228,6 @@ class DownloadSemaphore:
 
     async def heartbeat(self, job_id: str) -> bool:
         """Update heartbeat timestamp. Returns False if job was evicted (not in set)."""
-        import time
-
         r = get_redis()
         now = time.time()
         result = await r.eval(self._HEARTBEAT_LUA, 1, self._key, job_id, str(now))

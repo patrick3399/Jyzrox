@@ -36,6 +36,7 @@ _FILE_PATH_EXTRACT_RE = re.compile(r"(/data/.+\.\w+)")
 _IMAGE_EXT_RE = re.compile(r"\.(jpe?g|png|gif|webp|avif|heic|mp4|webm)$", re.IGNORECASE)
 _PROGRESS_EVERY_N = 5
 _PROGRESS_EVERY_S = 10.0
+_MAX_STDERR_LINES = 10000
 
 
 def _build_supported_sites() -> list[SiteInfo]:
@@ -226,7 +227,7 @@ async def _read_stderr(
     async for raw_line in proc.stderr:
         state.last_activity = asyncio.get_event_loop().time()
         line = raw_line.decode("utf-8", errors="replace").rstrip()
-        if line:
+        if line and len(state.stderr_lines) <= _MAX_STDERR_LINES:
             state.stderr_lines.append(line)
 
 
@@ -264,7 +265,6 @@ async def _inactivity_watchdog(
             except ProcessLookupError:
                 pass
             return "inactivity_timeout"
-    return "ok"  # pragma: no cover
 
 
 async def _pause_cancel_watcher(
@@ -429,8 +429,6 @@ class GalleryDlPlugin(SourcePlugin):
         except OSError as exc:
             err = f"Failed to start gallery-dl: {exc}"
             logger.error("[gallery_dl] %s", err)
-            if config_path != Path(settings.gallery_dl_config):
-                config_path.unlink(missing_ok=True)
             return DownloadResult(status="failed", downloaded=0, total=0, error=err)
 
         # Report PID for pause/resume support
@@ -445,126 +443,119 @@ class GalleryDlPlugin(SourcePlugin):
             last_progress_update=asyncio.get_event_loop().time(),
         )
 
+        # Background reader tasks (these finish when the process's pipes close)
+        stdout_task = asyncio.create_task(_read_stdout(proc, state, on_file, on_progress))
+        stderr_task = asyncio.create_task(_read_stderr(proc, state))
+        bg_tasks: list[asyncio.Task] = [stdout_task, stderr_task]
+
+        # Sentinel tasks — any of these finishing first triggers cleanup
+        proc_wait_task = asyncio.create_task(proc.wait())
+        inactivity_task = asyncio.create_task(_inactivity_watchdog(state, inactivity_timeout, proc))
+        sentinel_tasks: list[asyncio.Task] = [proc_wait_task, inactivity_task]
+
+        sem_heartbeat = (options or {}).get("sem_heartbeat")
+        if sem_heartbeat:
+            bg_tasks.append(asyncio.create_task(_heartbeat_loop(state, sem_heartbeat)))
+
+        if cancel_check or pause_check:
+            sentinel_tasks.append(
+                asyncio.create_task(_pause_cancel_watcher(state, proc, cancel_check, pause_check))
+            )
+
+        all_tasks = bg_tasks + sentinel_tasks
         try:
-            # Background reader tasks (these finish when the process's pipes close)
-            stdout_task = asyncio.create_task(_read_stdout(proc, state, on_file, on_progress))
-            stderr_task = asyncio.create_task(_read_stderr(proc, state))
-            bg_tasks: list[asyncio.Task] = [stdout_task, stderr_task]
-
-            # Sentinel tasks — any of these finishing first triggers cleanup
-            proc_wait_task = asyncio.create_task(proc.wait())
-            inactivity_task = asyncio.create_task(_inactivity_watchdog(state, inactivity_timeout, proc))
-            sentinel_tasks: list[asyncio.Task] = [proc_wait_task, inactivity_task]
-
-            sem_heartbeat = (options or {}).get("sem_heartbeat")
-            heartbeat_task = None
-            if sem_heartbeat:
-                heartbeat_task = asyncio.create_task(_heartbeat_loop(state, sem_heartbeat))
-                bg_tasks.append(heartbeat_task)
-
-            cancel_task = None
-            if cancel_check or pause_check:
-                cancel_task = asyncio.create_task(_pause_cancel_watcher(state, proc, cancel_check, pause_check))
-                sentinel_tasks.append(cancel_task)
-
-            all_tasks = bg_tasks + sentinel_tasks
-            try:
-                done, pending = await asyncio.wait(
-                    sentinel_tasks,
-                    timeout=86400,
-                    return_when=asyncio.FIRST_COMPLETED,
-                )
-            except Exception:
-                for t in all_tasks:
-                    t.cancel()
-                raise
-
-            # Determine what finished first
-            timed_out = len(done) == 0  # asyncio.wait timeout
-            inactivity_killed = False
-
-            for t in done:
-                if t is inactivity_task:
-                    try:
-                        result = t.result()
-                        if result == "inactivity_timeout":
-                            inactivity_killed = True
-                    except Exception:
-                        pass
-
-            # Cancel all remaining tasks (sentinels + background)
-            remaining = pending | {t for t in bg_tasks if not t.done()}
-            for t in remaining:
+            done, pending = await asyncio.wait(
+                sentinel_tasks,
+                timeout=86400,
+                return_when=asyncio.FIRST_COMPLETED,
+            )
+        except Exception:
+            for t in all_tasks:
                 t.cancel()
-            if remaining:
-                await asyncio.wait(remaining, timeout=5)
+            raise
 
-            # Wait for process to actually finish
-            try:
-                await asyncio.wait_for(proc.wait(), timeout=10)
-            except TimeoutError:
+        # Determine what finished first
+        timed_out = len(done) == 0  # asyncio.wait timeout
+        inactivity_killed = False
+
+        for t in done:
+            if t is inactivity_task:
                 try:
-                    proc.kill()
-                except ProcessLookupError:
+                    result = t.result()
+                    if result == "inactivity_timeout":
+                        inactivity_killed = True
+                except Exception:
                     pass
 
-            # Result mapping
-            if state.cancelled:
-                logger.info("[gallery_dl] cancelled: %s (downloaded=%d)", url, state.downloaded)
-                return DownloadResult(status="cancelled", downloaded=state.downloaded, total=state.downloaded)
+        # Cancel all remaining tasks (sentinels + background)
+        remaining = pending | {t for t in bg_tasks if not t.done()}
+        for t in remaining:
+            t.cancel()
+        if remaining:
+            await asyncio.wait(remaining, timeout=5)
 
-            if timed_out:
+        # Wait for process to actually finish
+        try:
+            await asyncio.wait_for(proc.wait(), timeout=10)
+        except TimeoutError:
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+
+        # Result mapping
+        if state.cancelled:
+            logger.info("[gallery_dl] cancelled: %s (downloaded=%d)", url, state.downloaded)
+            return DownloadResult(status="cancelled", downloaded=state.downloaded, total=state.downloaded)
+
+        if timed_out:
+            return DownloadResult(
+                status="failed",
+                downloaded=state.downloaded,
+                total=state.downloaded,
+                error="download timeout after 86400s",
+            )
+
+        if inactivity_killed:
+            err = f"No output for {inactivity_timeout}s — process killed"
+            if state.downloaded > 0:
                 return DownloadResult(
-                    status="failed",
-                    downloaded=state.downloaded,
-                    total=state.downloaded,
-                    error="download timeout after 86400s",
-                )
-
-            if inactivity_killed:
-                err = f"No output for {inactivity_timeout}s — process killed"
-                if state.downloaded > 0:
-                    return DownloadResult(
-                        status="partial",
-                        downloaded=state.downloaded,
-                        total=state.downloaded + state.skipped_count,
-                        error=err,
-                    )
-                return DownloadResult(status="failed", downloaded=0, total=0, error=err)
-
-            stderr_text = "\n".join(state.stderr_lines)
-
-            if proc.returncode != 0:
-                err = stderr_text[:500]
-                logger.error("[gallery_dl] non-zero exit:\n%s", stderr_text)
-                if state.downloaded > 0:
-                    logger.warning(
-                        "[gallery_dl] %d file(s) downloaded before failure — returning partial",
-                        state.downloaded,
-                    )
-                    return DownloadResult(
-                        status="partial",
-                        downloaded=state.downloaded,
-                        total=state.downloaded + state.skipped_count,
-                        error=err,
-                    )
-                return DownloadResult(
-                    status="failed",
+                    status="partial",
                     downloaded=state.downloaded,
                     total=state.downloaded + state.skipped_count,
                     error=err,
                 )
+            return DownloadResult(status="failed", downloaded=0, total=0, error=err)
 
-            logger.info("[gallery_dl] done: %s (downloaded=%d, skipped=%d)", url, state.downloaded, state.skipped_count)
+        stderr_text = "\n".join(state.stderr_lines)
+
+        if proc.returncode != 0:
+            err = stderr_text[:500]
+            logger.error("[gallery_dl] non-zero exit:\n%s", stderr_text)
+            if state.downloaded > 0:
+                logger.warning(
+                    "[gallery_dl] %d file(s) downloaded before failure — returning partial",
+                    state.downloaded,
+                )
+                return DownloadResult(
+                    status="partial",
+                    downloaded=state.downloaded,
+                    total=state.downloaded + state.skipped_count,
+                    error=err,
+                )
             return DownloadResult(
-                status="done",
+                status="failed",
                 downloaded=state.downloaded,
                 total=state.downloaded + state.skipped_count,
+                error=err,
             )
 
-        finally:
-            if config_path != Path(settings.gallery_dl_config):
-                config_path.unlink(missing_ok=True)
+        logger.info("[gallery_dl] done: %s (downloaded=%d, skipped=%d)", url, state.downloaded, state.skipped_count)
+        return DownloadResult(
+            status="done",
+            downloaded=state.downloaded,
+            total=state.downloaded + state.skipped_count,
+        )
 
     def resolve_output_dir(self, url: str, base_path: Path) -> Path:
         """gallery-dl uses a generic directory — no URL-specific routing."""
