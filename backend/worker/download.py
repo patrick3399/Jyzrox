@@ -139,6 +139,9 @@ async def download_job(
             logger.warning("[download] resolve_metadata failed (non-fatal): %s", exc)
 
     # ── 8. Progress callback ────────────────────────────────────────
+    # Mutable container so the closure can observe updates made after acquire.
+    timing_ctx: dict = {"semaphore_wait_ms": 0}
+
     async def on_progress(downloaded: int, total_pages: int) -> None:
         elapsed = (datetime.now(UTC) - started_at).total_seconds()
         speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
@@ -156,6 +159,17 @@ async def download_job(
             progress["title"] = importer.title
         if importer.gallery_id:
             progress["gallery_id"] = importer.gallery_id
+        timing = {
+            "semaphore_wait_ms": timing_ctx.get("semaphore_wait_ms", 0),
+            "total_pause_ms": timing_ctx.get("total_pause_ms", 0),
+            "avg_page_ms": round(elapsed * 1000 / downloaded) if downloaded > 0 else 0,
+            "last_page_ms": timing_ctx.get("last_page_ms", 0),
+            "idle_ms": timing_ctx.get("idle_ms", 0),
+            "idle_timeout_ms": _dl_params.inactivity_timeout * 1000,
+            "started_at": started_at.isoformat(),
+            "elapsed_ms": round(elapsed * 1000),
+        }
+        progress["timing"] = timing
         await _set_job_progress(db_job_id, progress)
 
     # ── 9. Cancel / Pause / PID callbacks ───────────────────────────
@@ -238,6 +252,7 @@ async def download_job(
 
     try:
         wait_secs = await sem.acquire(job_id_str)
+        timing_ctx["semaphore_wait_ms"] = round(wait_secs * 1000)
         if wait_secs > 0:
             logger.info("[download] acquired slot after %.1fs wait", wait_secs)
     except TimeoutError:
@@ -260,6 +275,7 @@ async def download_job(
         opts["config_id"] = db_job_id
         opts["sem_heartbeat"] = _sem_heartbeat
         opts["inactivity_timeout"] = _dl_params.inactivity_timeout
+        opts["timing_ctx"] = timing_ctx
 
         try:
             result = await plugin.download(

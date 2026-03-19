@@ -31,6 +31,7 @@ import {
   BookMarked,
   ScrollText,
   Globe,
+  Activity,
 } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
@@ -125,6 +126,12 @@ const navLinks = [
     href: '/admin/sites',
     label: () => t('nav.siteConfig'),
     icon: Globe,
+    minRole: 'admin' as UserRole,
+  },
+  {
+    href: '/admin/dashboard',
+    label: () => t('nav.downloadDashboard'),
+    icon: Activity,
     minRole: 'admin' as UserRole,
   },
 ]

@@ -8,26 +8,26 @@ import urllib.parse
 import uuid
 
 from arq.connections import ArqRedis
-
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete, desc, func, select, text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import require_auth, require_role
-from worker.helpers import compute_arq_job_id, enqueue_download_job
 from core.config import settings as app_settings
-from core.errors import api_error, parse_accept_language
 from core.database import get_db
+from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites
 from db.models import DownloadJob, Gallery
 from services.credential import get_credential
+from worker.helpers import compute_arq_job_id, enqueue_download_job
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["download"])
 
 _member = require_role("member")
+_admin = require_role("admin")
 
 
 class DownloadRequest(BaseModel):
@@ -65,6 +65,7 @@ async def _credential_warning(source: str) -> str | None:
     Raises HTTPException for sources that strictly require credentials (e.g. Pixiv).
     """
     from plugins.builtin.gallery_dl._sites import get_site_config
+
     cfg = get_site_config(source)
     if cfg.credential_requirement == "none":
         return None
@@ -82,6 +83,7 @@ async def _credential_warning(source: str) -> str | None:
 async def _check_source_enabled(source: str) -> None:
     """Raise 400 if the download source is disabled."""
     from plugins.builtin.gallery_dl._sites import get_site_config
+
     cfg = get_site_config(source)
     if cfg.feature_toggle_key and cfg.feature_toggle_attr:
         default = getattr(app_settings, cfg.feature_toggle_attr, True)
@@ -113,14 +115,23 @@ async def _enqueue(
     Returns a dict suitable for use as the HTTP response body.
     """
     # Duplicate guard: return existing job if same URL + same user is already active
-    existing_stmt = select(DownloadJob).where(
-        DownloadJob.url == url,
-        DownloadJob.user_id == user_id,
-        DownloadJob.status.in_(["queued", "running"]),
-    ).limit(1)
+    existing_stmt = (
+        select(DownloadJob)
+        .where(
+            DownloadJob.url == url,
+            DownloadJob.user_id == user_id,
+            DownloadJob.status.in_(["queued", "running"]),
+        )
+        .limit(1)
+    )
     existing_job = (await db.execute(existing_stmt)).scalar_one_or_none()
     if existing_job:
-        return {"job_id": str(existing_job.id), "status": existing_job.status, "source": existing_job.source, "warning": None}
+        return {
+            "job_id": str(existing_job.id),
+            "status": existing_job.status,
+            "source": existing_job.source,
+            "warning": None,
+        }
 
     job_id = uuid.uuid4()
     source = detect_source(url)
@@ -131,7 +142,9 @@ async def _enqueue(
 
     # 1. Persist DB record first so the worker always finds a matching row.
     try:
-        job = DownloadJob(id=job_id, url=url, source=source, status="queued", progress=initial_progress or {}, user_id=user_id)
+        job = DownloadJob(
+            id=job_id, url=url, source=source, status="queued", progress=initial_progress or {}, user_id=user_id
+        )
         db.add(job)
         await db.commit()
     except Exception as exc:
@@ -174,9 +187,17 @@ async def enqueue_download(
         merged_options["filesize_min"] = req.filesize_min
     if req.filesize_max:
         merged_options["filesize_max"] = req.filesize_max
-    result = await _enqueue(req.url, request.app.state.arq, db, options=merged_options or None, total=req.total, user_id=auth["user_id"])
+    result = await _enqueue(
+        req.url, request.app.state.arq, db, options=merged_options or None, total=req.total, user_id=auth["user_id"]
+    )
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.DOWNLOAD_ENQUEUED, actor_user_id=auth["user_id"], resource_type="download_job", resource_id=result.get("job_id"))
+
+    await emit_safe(
+        EventType.DOWNLOAD_ENQUEUED,
+        actor_user_id=auth["user_id"],
+        resource_type="download_job",
+        resource_id=result.get("job_id"),
+    )
     return result
 
 
@@ -217,9 +238,11 @@ async def list_jobs(
     else:
         if is_admin and not base_filter:
             # Fast estimated count for unfiltered admin queries
-            total = (await db.execute(
-                text("SELECT n_live_tup::bigint FROM pg_stat_user_tables WHERE relname = 'download_jobs'")
-            )).scalar_one_or_none() or 0
+            total = (
+                await db.execute(
+                    text("SELECT n_live_tup::bigint FROM pg_stat_user_tables WHERE relname = 'download_jobs'")
+                )
+            ).scalar_one_or_none() or 0
             stmt = select(DownloadJob).order_by(desc(DownloadJob.created_at)).offset(page * limit).limit(limit)
         else:
             stmt_filtered = select(DownloadJob).where(*base_filter)
@@ -342,8 +365,9 @@ async def preview_url(
         token = eh_match.group(2)
         try:
             import json as _json
-            from core.redis_client import get_redis as _get_redis
+
             from core.config import settings as _cfg
+            from core.redis_client import get_redis as _get_redis
             from services.credential import get_credential as _get_cred
             from services.eh_client import EhClient as _EhClient
 
@@ -554,7 +578,13 @@ async def cancel_job(
     job.status = "cancelled"
     await db.commit()
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.DOWNLOAD_CANCELLED, actor_user_id=auth["user_id"], resource_type="download_job", resource_id=str(job_id))
+
+    await emit_safe(
+        EventType.DOWNLOAD_CANCELLED,
+        actor_user_id=auth["user_id"],
+        resource_type="download_job",
+        resource_id=str(job_id),
+    )
     return {"status": "cancelled"}
 
 
@@ -580,6 +610,7 @@ async def retry_job(
         raise HTTPException(status_code=400, detail="Max retries reached")
 
     from datetime import UTC, datetime, timedelta
+
     now = datetime.now(UTC)
 
     job.retry_count += 1
@@ -591,7 +622,7 @@ async def retry_job(
     redis = get_redis()
     base_delay_raw = await redis.get("setting:retry_base_delay_minutes")
     base_delay = int(base_delay_raw) if base_delay_raw else 5
-    backoff_minutes = min(base_delay * (2 ** job.retry_count), 1440)
+    backoff_minutes = min(base_delay * (2**job.retry_count), 1440)
     job.next_retry_at = now + timedelta(minutes=backoff_minutes)
 
     await db.commit()
@@ -609,6 +640,135 @@ async def retry_job(
         raise HTTPException(status_code=503, detail="Failed to enqueue retry job")
 
     return {"status": "queued", "retry_count": job.retry_count, "max_retries": job.max_retries}
+
+
+@router.get("/dashboard")
+async def get_dashboard(auth: dict = Depends(_admin), db: AsyncSession = Depends(get_db)):
+    """Live download dashboard snapshot (admin only)."""
+    import asyncio
+    import json as _json
+    from datetime import UTC, datetime
+
+    from core.adaptive import AdaptiveState, adaptive_engine
+    from core.redis_client import DownloadSemaphore, is_rate_limit_boosted
+    from core.site_config import site_config_service
+    from worker.constants import DISK_LOW_KEY
+    from worker.helpers import check_disk_space
+
+    r = get_redis()
+
+    # Check cache first (3s TTL)
+    cached = await r.get("dashboard:snapshot")
+    if cached:
+        raw = cached.decode() if isinstance(cached, bytes) else cached
+        return _json.loads(raw)
+
+    # DB queries (sequential — same session cannot run concurrent queries)
+    today_start = datetime.now(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
+    active_stmt = select(DownloadJob).where(DownloadJob.status == "running").order_by(DownloadJob.created_at)
+    queued_stmt = (
+        select(DownloadJob).where(DownloadJob.status.in_(["queued"])).order_by(DownloadJob.created_at).limit(50)
+    )
+    today_stmt = select(func.count()).where(DownloadJob.created_at >= today_start)
+    # Combined: per-source counts + global running/queued totals in one query
+    source_counts_stmt = (
+        select(DownloadJob.source, DownloadJob.status, func.count())
+        .where(DownloadJob.status.in_(["running", "queued"]))
+        .group_by(DownloadJob.source, DownloadJob.status)
+    )
+
+    active_jobs = (await db.execute(active_stmt)).scalars().all()
+    queued_jobs = (await db.execute(queued_stmt)).scalars().all()
+    total_today = (await db.execute(today_stmt)).scalar_one()
+    source_counts = (await db.execute(source_counts_stmt)).all()
+
+    # Redis calls (parallel)
+    sem_data, boost, all_params = await asyncio.gather(
+        DownloadSemaphore.get_all_active(),
+        is_rate_limit_boosted(),
+        site_config_service.get_all_download_params(),
+    )
+
+    # Parse per-source running/queued counts + derive global totals
+    source_running: dict[str, int] = {}
+    source_queued: dict[str, int] = {}
+    total_running = 0
+    total_queued = 0
+    for src, st, cnt in source_counts:
+        if st == "running":
+            source_running[src] = cnt
+            total_running += cnt
+        else:
+            source_queued[src] = cnt
+            total_queued += cnt
+
+    # Compute avg speed from active jobs
+    source_speeds: dict[str, list[float]] = {}
+    for job in active_jobs:
+        if job.progress and isinstance(job.progress, dict):
+            speed = job.progress.get("speed", 0)
+            if speed:
+                source_speeds.setdefault(job.source, []).append(speed)
+
+    # Merge all known sources
+    all_sources = sorted(
+        set(sem_data.keys()) | set(all_params.keys()) | set(source_running.keys()) | set(source_queued.keys())
+    )
+    adaptive_states = await adaptive_engine.get_states_batch(all_sources)
+    site_stats: dict[str, dict] = {}
+    for src in all_sources:
+        sem_info = sem_data.get(src, {"used": 0, "max": 2})
+
+        adaptive_state = adaptive_states.get(src) or AdaptiveState()
+        params = all_params.get(src)
+        speeds = source_speeds.get(src, [])
+        avg_speed = round(sum(speeds) / len(speeds), 2) if speeds else 0
+
+        delay_ms = 0
+        if params and params.sleep_request is not None:
+            if isinstance(params.sleep_request, tuple):
+                delay_ms = round(params.sleep_request[0] * 1000 * adaptive_state.sleep_multiplier)
+            else:
+                delay_ms = round(params.sleep_request * 1000 * adaptive_state.sleep_multiplier)
+
+        site_stats[src] = {
+            "semaphore": sem_info,
+            "queued": source_queued.get(src, 0),
+            "running": source_running.get(src, 0),
+            "avg_speed": avg_speed,
+            "current_delay_ms": delay_ms,
+            "adaptive": {
+                "sleep_multiplier": adaptive_state.sleep_multiplier,
+                "last_429_at": adaptive_state.last_signal_at if adaptive_state.last_signal == "http_429" else None,
+            },
+        }
+
+    # Disk status
+    disk_low_val = await r.get(DISK_LOW_KEY)
+    if disk_low_val is not None:
+        free_gb = float(disk_low_val.decode() if isinstance(disk_low_val, bytes) else disk_low_val)
+        disk_ok = False
+    else:
+        disk_ok, free_gb = check_disk_space("/data")
+
+    result = {
+        "active_jobs": [_j(j) for j in active_jobs],
+        "queued_jobs": [_j(j) for j in queued_jobs],
+        "site_stats": site_stats,
+        "global": {
+            "boost_mode": boost,
+            "total_running": total_running,
+            "total_queued": total_queued,
+            "total_today": total_today,
+        },
+        "system": {
+            "disk_free_gb": free_gb,
+            "disk_ok": disk_ok,
+        },
+    }
+
+    await r.set("dashboard:snapshot", _json.dumps(result, default=str), ex=3)
+    return result
 
 
 def _j(j: DownloadJob, gallery: Gallery | None = None) -> dict:

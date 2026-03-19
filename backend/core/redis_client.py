@@ -38,9 +38,7 @@ async def is_rate_limit_boosted() -> bool:
         return True
     active = await r.get("rate_limit:schedule:active")
     mode = await r.get("rate_limit:schedule:mode")
-    if active in (b"1", "1") and (mode is None or mode in (b"full_speed", "full_speed")):
-        return True
-    return False
+    return active in (b"1", "1") and (mode is None or mode in (b"full_speed", "full_speed"))
 
 
 async def get_download_delay(source: str, default_ms: int = 0) -> float:
@@ -215,6 +213,9 @@ class DownloadSemaphore:
                 str(self._stale_threshold),
             )
             if acquired:
+                from core.events import EventType, emit_safe
+
+                await emit_safe(EventType.SEMAPHORE_CHANGED, source=self._key, action="acquire", job_id=job_id)
                 return loop.time() - wait_start
 
             if loop.time() >= deadline:
@@ -225,6 +226,9 @@ class DownloadSemaphore:
         """Release a slot by removing the job from the sorted set."""
         r = get_redis()
         await r.zrem(self._key, job_id)
+        from core.events import EventType, emit_safe
+
+        await emit_safe(EventType.SEMAPHORE_CHANGED, source=self._key, action="release", job_id=job_id)
 
     async def heartbeat(self, job_id: str) -> bool:
         """Update heartbeat timestamp. Returns False if job was evicted (not in set)."""
@@ -232,6 +236,48 @@ class DownloadSemaphore:
         now = time.time()
         result = await r.eval(self._HEARTBEAT_LUA, 1, self._key, job_id, str(now))
         return bool(result)
+
+    @classmethod
+    async def get_info(cls, source: str) -> dict:
+        """Return semaphore usage info for a single source."""
+        sem = cls(source)
+        r = get_redis()
+        used = await r.zcard(sem._key)
+        max_count = await cls.get_limit(source)
+        return {"used": used, "max": max_count}
+
+    @classmethod
+    async def get_all_active(cls) -> dict[str, dict]:
+        """Return semaphore info for all sources that have active semaphore keys."""
+        r = get_redis()
+        # Collect all keys first
+        all_keys: list[str] = []
+        cursor = 0
+        while True:
+            cursor, keys = await r.scan(cursor, match="download:sem:*", count=100)
+            for key in keys:
+                all_keys.append(key.decode() if isinstance(key, bytes) else key)
+            if cursor == 0:
+                break
+        if not all_keys:
+            return {}
+        # Pipeline: zcard + concurrency limit for each key
+        pipe = r.pipeline(transaction=False)
+        sources: list[str] = []
+        for key_str in all_keys:
+            source = key_str.removeprefix("download:sem:")
+            sources.append(source)
+            pipe.zcard(key_str)
+            pipe.get(f"rate_limit:config:{source}:concurrency")
+        raw = await pipe.execute()
+        result: dict[str, dict] = {}
+        for i, source in enumerate(sources):
+            used = raw[i * 2] or 0
+            limit_raw = raw[i * 2 + 1]
+            base = source.split(":")[0] if ":" in source else source
+            max_count = int(limit_raw) if limit_raw else cls._LIMITS.get(source, cls._LIMITS.get(base, 2))
+            result[source] = {"used": used, "max": max_count}
+        return result
 
     @asynccontextmanager
     async def acquire_ctx(self, job_id: str):

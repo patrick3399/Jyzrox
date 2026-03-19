@@ -236,6 +236,22 @@ return new_raw
 
         return AdaptiveState()
 
+    async def get_states_batch(self, source_ids: list[str]) -> dict[str, AdaptiveState]:
+        """Batch GET all source adaptive states in a single pipeline."""
+        if not source_ids:
+            return {}
+        from core.redis_client import get_redis
+
+        r = get_redis()
+        pipe = r.pipeline(transaction=False)
+        for sid in source_ids:
+            pipe.get(f"adaptive:{sid}")
+        raw_list = await pipe.execute()
+        return {
+            sid: self._parse_raw(raw) if raw else AdaptiveState()
+            for sid, raw in zip(source_ids, raw_list, strict=False)
+        }
+
     async def reset(self, source_id: str) -> None:
         """DEL key + SREM from dirty set."""
         from core.redis_client import get_redis

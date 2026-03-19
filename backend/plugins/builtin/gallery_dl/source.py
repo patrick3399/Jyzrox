@@ -199,6 +199,7 @@ class _DownloadState:
     html_response_count: int = 0
     source_id: str = ""
     pending_success_count: int = 0
+    last_page_time: float = 0.0
 
 
 async def _read_stdout(
@@ -206,12 +207,17 @@ async def _read_stdout(
     state: _DownloadState,
     on_file: Callable[[Path], Awaitable[None]] | None,
     on_progress: Callable[[int, int], Awaitable[None]] | None,
+    timing_ctx: dict | None = None,
 ) -> None:
     """Parse stdout lines — file detection and progress reporting only."""
     assert proc.stdout is not None
 
     async for raw_line in proc.stdout:
-        state.last_activity = asyncio.get_event_loop().time()
+        now = asyncio.get_event_loop().time()
+        if timing_ctx is not None:
+            timing_ctx["idle_ms"] = round((now - state.last_activity) * 1000) if state.last_activity > 0 else 0
+            timing_ctx["total_pause_ms"] = round(state.total_paused * 1000)
+        state.last_activity = now
         line = raw_line.decode("utf-8", errors="replace").rstrip()
 
         skipped = line.startswith("# ")
@@ -236,9 +242,12 @@ async def _read_stdout(
             else:
                 state.downloaded += 1
                 state.pending_success_count += 1
+                if timing_ctx is not None:
+                    if state.last_page_time > 0:
+                        timing_ctx["last_page_ms"] = round((now - state.last_page_time) * 1000)
+                    state.last_page_time = now
 
             total_seen = state.downloaded + state.skipped_count
-            now = asyncio.get_event_loop().time()
             if total_seen % _PROGRESS_EVERY_N == 0 or (now - state.last_progress_update) >= _PROGRESS_EVERY_S:
                 state.last_progress_update = now
                 if on_progress is not None:
@@ -604,7 +613,8 @@ class GalleryDlPlugin(SourcePlugin):
         )
 
         # Background reader tasks (these finish when the process's pipes close)
-        stdout_task = asyncio.create_task(_read_stdout(proc, state, on_file, on_progress))
+        timing_ctx = options.get("timing_ctx") if options else None
+        stdout_task = asyncio.create_task(_read_stdout(proc, state, on_file, on_progress, timing_ctx))
         stderr_task = asyncio.create_task(_read_stderr(proc, state))
         bg_tasks: list[asyncio.Task] = [stdout_task, stderr_task]
 

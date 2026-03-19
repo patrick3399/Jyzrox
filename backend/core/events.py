@@ -21,6 +21,7 @@ class EventType(str, Enum):
     DOWNLOAD_FAILED = "download.failed"
     DOWNLOAD_CANCELLED = "download.cancelled"
     DOWNLOAD_PAUSED = "download.paused"
+    SEMAPHORE_CHANGED = "semaphore.changed"
 
     # Gallery
     GALLERY_UPDATED = "gallery.updated"

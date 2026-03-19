@@ -55,6 +55,7 @@ import type {
   LogLevelConfig,
   SiteConfigItem,
   ProbeResult,
+  DashboardResponse,
 } from './types'
 
 // ── Local types ───────────────────────────────────────────────────────
@@ -628,6 +629,8 @@ const download = {
     }>('/api/download/supported-sites'),
 
   preview: (url: string) => apiFetch<DownloadPreview>(`/api/download/preview${qs({ url })}`),
+
+  getDashboard: () => apiFetch<DashboardResponse>('/api/download/dashboard'),
 }
 
 // ── Settings ──────────────────────────────────────────────────────────

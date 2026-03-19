@@ -793,3 +793,48 @@ export interface ProbeResult {
   suggested_mappings: ProbeFieldMapping[]
   detected_source?: string
 }
+
+// ── Download Dashboard ──────────────────────────────────────────────
+
+export interface DashboardTiming {
+  semaphore_wait_ms: number
+  total_pause_ms: number
+  avg_page_ms: number
+  last_page_ms: number
+  idle_ms: number
+  idle_timeout_ms: number
+  started_at: string
+  elapsed_ms: number
+}
+
+export interface DashboardSiteStats {
+  semaphore: { used: number; max: number }
+  queued: number
+  running: number
+  avg_speed: number
+  current_delay_ms: number
+  adaptive: {
+    sleep_multiplier: number
+    last_429_at: string | null
+  }
+}
+
+export interface DashboardGlobal {
+  boost_mode: boolean
+  total_running: number
+  total_queued: number
+  total_today: number
+}
+
+export interface DashboardSystem {
+  disk_free_gb: number
+  disk_ok: boolean
+}
+
+export interface DashboardResponse {
+  active_jobs: DownloadJob[]
+  queued_jobs: DownloadJob[]
+  site_stats: Record<string, DashboardSiteStats>
+  global: DashboardGlobal
+  system: DashboardSystem
+}

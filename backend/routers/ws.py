@@ -49,36 +49,53 @@ def _event_to_ws_message(event_data: dict) -> str:
     resource_id = event_data.get("resource_id")
 
     if resource_type == "download_job" and event_type.startswith("download."):
-        return json.dumps({
-            "type": "job_update",
-            "job_id": resource_id,
-            "status": data.get("status", ""),
-            "progress": data.get("progress"),
-            "user_id": actor,
-        })
+        return json.dumps(
+            {
+                "type": "job_update",
+                "job_id": resource_id,
+                "status": data.get("status", ""),
+                "progress": data.get("progress"),
+                "user_id": actor,
+            }
+        )
     elif event_type == "subscription.checked":
-        return json.dumps({
-            "type": "subscription_checked",
-            "sub_id": resource_id,
-            "status": data.get("status", ""),
-            "job_id": data.get("job_id"),
-            "new_works": data.get("new_works", 0),
-            "user_id": actor,
-        })
+        return json.dumps(
+            {
+                "type": "subscription_checked",
+                "sub_id": resource_id,
+                "status": data.get("status", ""),
+                "job_id": data.get("job_id"),
+                "new_works": data.get("new_works", 0),
+                "user_id": actor,
+            }
+        )
+    elif event_type == "semaphore.changed":
+        return json.dumps(
+            {
+                "type": "semaphore_changed",
+                "source": data.get("source", ""),
+                "action": data.get("action", ""),
+                "job_id": data.get("job_id", ""),
+            }
+        )
     elif event_type.startswith("system."):
-        return json.dumps({
-            "type": "alert",
-            "message": data.get("message", ""),
-        })
+        return json.dumps(
+            {
+                "type": "alert",
+                "message": data.get("message", ""),
+            }
+        )
     else:
-        return json.dumps({
-            "type": event_type or "unknown",
-            "event_type": event_type,
-            "resource_type": resource_type,
-            "resource_id": resource_id,
-            "data": data,
-            "user_id": actor,
-        })
+        return json.dumps(
+            {
+                "type": event_type or "unknown",
+                "event_type": event_type,
+                "resource_type": resource_type,
+                "resource_id": resource_id,
+                "data": data,
+                "user_id": actor,
+            }
+        )
 
 
 async def _pubsub_listener(ws: WebSocket, user_id: str, role: str) -> None:
@@ -132,7 +149,7 @@ async def _ping_loop(ws: WebSocket) -> None:
                     await ws.send_json({"type": "alert", "message": msg})
                 await clear_system_alerts()
 
-            await ws.send_json({"type": "ping", "ts": datetime.datetime.now(datetime.timezone.utc).isoformat()})
+            await ws.send_json({"type": "ping", "ts": datetime.datetime.now(datetime.UTC).isoformat()})
             await asyncio.sleep(2)
     except (WebSocketDisconnect, asyncio.CancelledError):
         raise
@@ -188,8 +205,7 @@ async def websocket_endpoint(ws: WebSocket):
     user_id, role = session_info
 
     await ws.accept()
-    _ws_ip = (ws.headers.get("x-forwarded-for", "").split(",")[0].strip()
-              or (ws.client.host if ws.client else "unknown"))
+    _ws_ip = ws.headers.get("x-forwarded-for", "").split(",")[0].strip() or (ws.client.host if ws.client else "unknown")
     logger.info("WebSocket client connected: %s", _ws_ip)
 
     tasks = [
