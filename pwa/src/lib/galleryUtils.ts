@@ -34,23 +34,35 @@ function hashSourceColor(source: string): number {
   return Math.abs(hash)
 }
 
-export function getSourceStyle(gallery: Gallery) {
+/**
+ * Returns the Tailwind class string for a given source key (e.g. "pixiv", "ehentai",
+ * "local:link"). Uses FNV-1a hash to deterministically pick from SOURCE_COLOR_PALETTE.
+ * Exported so consumers that only have a source string (e.g. artists page) can use it
+ * without constructing a full Gallery object.
+ */
+function getSourceColorClass(source: string): string {
+  return SOURCE_COLOR_PALETTE[hashSourceColor(source) % SOURCE_COLOR_PALETTE.length]
+}
+
+export function getSourceStyle(gallery: Pick<Gallery, 'source' | 'import_mode'>) {
   // Determine label
   let label: string
   if (gallery.source === 'ehentai') label = 'E-Hentai'
   else if (gallery.source === 'pixiv') label = 'Pixiv'
-  else if (gallery.source === 'local' && gallery.import_mode === 'link') label = t('library.monitored')
-  else if (gallery.source === 'local' && gallery.import_mode === 'copy') label = t('library.imported')
+  else if (gallery.source === 'local' && gallery.import_mode === 'link')
+    label = t('library.monitored')
+  else if (gallery.source === 'local' && gallery.import_mode === 'copy')
+    label = t('library.imported')
   else if (gallery.source === 'local') label = 'Local'
   else label = gallery.source.charAt(0).toUpperCase() + gallery.source.slice(1)
 
-  // Determine color — hash-based for all sources
-  // local variants use distinct keys so they get different palette entries
+  // Determine color — hash-based for all sources.
+  // local variants use distinct keys so they get different palette entries.
   const colorKey =
     gallery.source === 'local' && gallery.import_mode
       ? `local:${gallery.import_mode}`
       : gallery.source
-  const className = SOURCE_COLOR_PALETTE[hashSourceColor(colorKey) % SOURCE_COLOR_PALETTE.length]
+  const className = getSourceColorClass(colorKey)
 
   return { label, className }
 }

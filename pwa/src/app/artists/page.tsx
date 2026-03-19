@@ -10,23 +10,18 @@ import { useLocale } from '@/components/LocaleProvider'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-
-const SOURCE_COLORS: Record<string, string> = {
-  pixiv: 'bg-blue-500/20 text-blue-400',
-  ehentai: 'bg-orange-500/20 text-orange-400',
-  twitter: 'bg-sky-500/20 text-sky-400',
-}
+import { getSourceStyle } from '@/lib/galleryUtils'
 
 // Column count inferred from CSS breakpoints:
-// grid-cols-2 sm:3 md:4 lg:5 xl:6 2xl:7
+// grid-cols-2 sm:4 md:5 lg:7 xl:8 2xl:10
 function getColCount(): number {
   if (typeof window === 'undefined') return 2
   const w = window.innerWidth
-  if (w >= 1536) return 7
-  if (w >= 1280) return 6
-  if (w >= 1024) return 5
-  if (w >= 768) return 4
-  if (w >= 640) return 3
+  if (w >= 1536) return 10
+  if (w >= 1280) return 8
+  if (w >= 1024) return 7
+  if (w >= 768) return 5
+  if (w >= 640) return 4
   return 2
 }
 
@@ -120,7 +115,10 @@ function ArtistsPageInner() {
         />
         <select
           value={source}
-          onChange={(e) => { setSource(e.target.value); setPage(0) }}
+          onChange={(e) => {
+            setSource(e.target.value)
+            setPage(0)
+          }}
           className="px-3 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text focus:outline-none focus:ring-1 focus:ring-vault-accent"
         >
           <option value="">{t('common.all')}</option>
@@ -130,7 +128,10 @@ function ArtistsPageInner() {
         </select>
         <select
           value={sort}
-          onChange={(e) => { setSort(e.target.value as typeof sort); setPage(0) }}
+          onChange={(e) => {
+            setSort(e.target.value as typeof sort)
+            setPage(0)
+          }}
           className="px-3 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text focus:outline-none focus:ring-1 focus:ring-vault-accent"
         >
           <option value="latest">{t('artists.sortLatest')}</option>
@@ -145,7 +146,7 @@ function ArtistsPageInner() {
       ) : !artists.length ? (
         <div className="text-center py-12 text-vault-text-secondary">{t('artists.noArtists')}</div>
       ) : (
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 2xl:grid-cols-7 gap-4">
+        <div className="grid grid-cols-2 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-7 xl:grid-cols-8 2xl:grid-cols-10 gap-4">
           {artists.map((a, index) => (
             <button
               key={a.artist_id}
@@ -172,15 +173,22 @@ function ArtistsPageInner() {
                   </div>
                 )}
                 {/* Source badge */}
-                <span
-                  className={`absolute top-2 right-2 px-2 py-0.5 rounded-full text-[10px] font-bold uppercase ${SOURCE_COLORS[a.source] ?? 'bg-vault-text-secondary/20 text-vault-text-secondary'}`}
-                >
-                  {a.source}
-                </span>
+                {(() => {
+                  const s = getSourceStyle({ source: a.source, import_mode: null })
+                  return (
+                    <span
+                      className={`absolute top-2 right-2 px-1.5 py-0.5 rounded border text-[10px] font-bold uppercase backdrop-blur-sm ${s.className}`}
+                    >
+                      {s.label}
+                    </span>
+                  )
+                })()}
               </div>
               {/* Info */}
               <div className="p-3 space-y-1">
-                <p className="font-medium text-sm text-vault-text truncate">{a.artist_name || a.artist_id}</p>
+                <p className="font-medium text-sm text-vault-text truncate">
+                  {a.artist_name || a.artist_id}
+                </p>
                 <p className="text-xs text-vault-text-secondary">
                   {t('artists.galleryCount', { count: String(a.gallery_count) })}
                   {' · '}

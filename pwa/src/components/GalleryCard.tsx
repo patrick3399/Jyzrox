@@ -1,7 +1,15 @@
 'use client'
 import { useState, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, ExternalLink, Heart, Download, Trash2, Bookmark, BookmarkCheck } from 'lucide-react'
+import {
+  BookOpen,
+  ExternalLink,
+  Heart,
+  Download,
+  Trash2,
+  Bookmark,
+  BookmarkCheck,
+} from 'lucide-react'
 import type { Gallery, EhGallery } from '@/lib/types'
 import { RatingStars } from './RatingStars'
 import { ContextMenu } from './ContextMenu'
@@ -50,14 +58,11 @@ export function EhGalleryCard({ gallery, onClick }: EhCardProps) {
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
 
-  const handleLongPress = useCallback(
-    (e: React.TouchEvent | React.MouseEvent) => {
-      e.preventDefault()
-      setMenuPos(getEventPosition(e))
-      setMenuOpen(true)
-    },
-    [],
-  )
+  const handleLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault()
+    setMenuPos(getEventPosition(e))
+    setMenuOpen(true)
+  }, [])
 
   const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
 
@@ -105,7 +110,9 @@ export function EhGalleryCard({ gallery, onClick }: EhCardProps) {
         {/* Thumbnail */}
         <div className="relative aspect-[3/4] bg-vault-bg overflow-hidden">
           <img
-            src={gallery.thumb ? `/api/eh/thumb-proxy?url=${encodeURIComponent(gallery.thumb)}` : ''}
+            src={
+              gallery.thumb ? `/api/eh/thumb-proxy?url=${encodeURIComponent(gallery.thumb)}` : ''
+            }
             alt={gallery.title}
             className="w-full h-full object-cover"
             loading="lazy"
@@ -177,14 +184,11 @@ export function LibraryGalleryCard({
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
 
-  const handleLongPress = useCallback(
-    (e: React.TouchEvent | React.MouseEvent) => {
-      e.preventDefault()
-      setMenuPos(getEventPosition(e))
-      setMenuOpen(true)
-    },
-    [],
-  )
+  const handleLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault()
+    setMenuPos(getEventPosition(e))
+    setMenuOpen(true)
+  }, [])
 
   const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
 
@@ -256,15 +260,19 @@ export function LibraryGalleryCard({
           transition-all duration-200 cursor-pointer
           hover:scale-[1.02] hover:shadow-lg hover:shadow-vault-accent/20 hover:brightness-105
           focus:outline-none focus:ring-2 focus:ring-vault-accent
-          ${(selected || menuOpen) ? 'border-2 border-vault-accent' : 'border border-vault-border hover:border-vault-accent'}
+          ${selected || menuOpen ? 'border-2 border-vault-accent' : 'border border-vault-border hover:border-vault-accent'}
         `}
       >
         {/* Select-mode checkbox overlay */}
         {selectMode && (
           <div className="absolute top-1.5 left-1.5 z-10">
-            <div className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-              selected ? 'bg-vault-accent border-vault-accent text-white' : 'border-white/60 bg-black/30'
-            }`}>
+            <div
+              className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
+                selected
+                  ? 'bg-vault-accent border-vault-accent text-white'
+                  : 'border-white/60 bg-black/30'
+              }`}
+            >
               {selected && <span className="text-xs">✓</span>}
             </div>
           </div>
@@ -311,7 +319,9 @@ export function LibraryGalleryCard({
 
           {/* Source badge */}
           <div className="absolute bottom-1.5 left-1.5">
-            <span className={`inline-block px-1.5 py-0.5 rounded border text-xs font-medium ${sourceStyle.className}`}>
+            <span
+              className={`inline-block px-1.5 py-0.5 rounded border text-xs font-medium uppercase backdrop-blur-sm ${sourceStyle.className}`}
+            >
               {sourceStyle.label}
             </span>
           </div>
