@@ -161,6 +161,21 @@ async def startup(ctx: dict) -> None:
         await r.delete(*pid_keys)
     # NOTE: do NOT delete download:pause:* — paused jobs are preserved
 
+    running_strategy = ((await r.get("setting:recovery_running")) or b"auto_retry").decode()
+    paused_strategy = ((await r.get("setting:recovery_paused")) or b"keep_paused").decode()
+    if running_strategy not in ("auto_retry", "mark_failed"):
+        running_strategy = "auto_retry"
+    if paused_strategy not in ("keep_paused", "auto_retry", "mark_failed"):
+        paused_strategy = "keep_paused"
+    recovery_counts = {
+        "running_retried": 0,
+        "running_failed": 0,
+        "paused_kept": 0,
+        "paused_retried": 0,
+        "paused_failed": 0,
+        "queued_requeued": 0,
+    }
+
     from datetime import UTC, datetime
 
     from sqlalchemy import func, select, update
@@ -200,21 +215,29 @@ async def startup(ctx: dict) -> None:
                 await session.commit()
                 logger.info("Fixed %d orphaned downloading galleries", len(gallery_ids))
 
-            # Re-enqueue recovered jobs (set status + enqueue atomically per job)
+            # Re-enqueue or fail recovered jobs based on running_strategy
             for job in running_jobs:
-                job.retry_count = (job.retry_count or 0) + 1
-                arq_job_id = compute_arq_job_id(job.id, job.retry_count)
-                try:
-                    await enqueue_download_job(arq_pool, job, arq_job_id)
-                    job.status = "queued"
-                    job.error = None
-                    job.finished_at = None
-                    logger.info("Re-enqueued recovered running job %s (retry=%d)", job.id, job.retry_count)
-                except Exception as exc:
+                if running_strategy == "auto_retry":
+                    job.retry_count = (job.retry_count or 0) + 1
+                    arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                    try:
+                        await enqueue_download_job(arq_pool, job, arq_job_id)
+                        job.status = "queued"
+                        job.error = None
+                        job.finished_at = None
+                        recovery_counts["running_retried"] += 1
+                        logger.info("Re-enqueued recovered running job %s (retry=%d)", job.id, job.retry_count)
+                    except Exception as exc:
+                        job.status = "failed"
+                        job.error = f"Re-enqueue failed on startup: {exc}"
+                        job.finished_at = datetime.now(UTC)
+                        logger.error("Failed to re-enqueue job %s: %s", job.id, exc)
+                else:  # mark_failed
                     job.status = "failed"
-                    job.error = f"Re-enqueue failed on startup: {exc}"
+                    job.error = "Marked failed by recovery policy"
                     job.finished_at = datetime.now(UTC)
-                    logger.error("Failed to re-enqueue job %s: %s", job.id, exc)
+                    recovery_counts["running_failed"] += 1
+                    logger.info("Marked running job %s as failed (recovery policy=mark_failed)", job.id)
             await session.commit()
             logger.info("Recovered %d stale running jobs from previous worker session", len(running_jobs))
 
@@ -228,6 +251,7 @@ async def startup(ctx: dict) -> None:
                 arq_job_id = compute_arq_job_id(job.id, job.retry_count)
                 try:
                     await enqueue_download_job(arq_pool, job, arq_job_id)
+                    recovery_counts["queued_requeued"] += 1
                     logger.info("Re-enqueued stale queued job %s", job.id)
                 except Exception as exc:
                     job.status = "failed"
@@ -237,7 +261,8 @@ async def startup(ctx: dict) -> None:
             await session.commit()
             logger.info("Processed %d stale queued jobs", len(stale_queued))
 
-        # Paused jobs: re-enqueue so ARQ result is written (pause gate catches them)
+        # Paused jobs: apply paused_strategy (keep_paused / auto_retry / mark_failed)
+        # keep_paused: re-enqueue so ARQ result is written (pause gate catches them).
         # This ensures the resume endpoint can detect "coroutine dead" and re-enqueue properly.
         # Without this, resume after restart thinks the coroutine is alive and sets status
         # to "running" without re-enqueueing — leaving the job stuck forever.
@@ -245,13 +270,41 @@ async def startup(ctx: dict) -> None:
         if paused_jobs:
             arq_pool = ctx["redis"]
             for job in paused_jobs:
-                arq_job_id = compute_arq_job_id(job.id, job.retry_count)
-                try:
-                    await enqueue_download_job(arq_pool, job, arq_job_id)
-                    logger.info("Re-enqueued paused job %s (pause gate will catch it)", job.id)
-                except Exception as exc:
-                    logger.error("Failed to re-enqueue paused job %s: %s", job.id, exc)
-            logger.info("Re-enqueued %d paused jobs from previous session", len(paused_jobs))
+                if paused_strategy == "keep_paused":
+                    arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                    try:
+                        await enqueue_download_job(arq_pool, job, arq_job_id)
+                        recovery_counts["paused_kept"] += 1
+                        logger.info("Re-enqueued paused job %s (pause gate will catch it)", job.id)
+                    except Exception as exc:
+                        logger.error("Failed to re-enqueue paused job %s: %s", job.id, exc)
+                elif paused_strategy == "auto_retry":
+                    await r.delete(f"download:pause:{job.id}")
+                    job.retry_count = (job.retry_count or 0) + 1
+                    arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                    try:
+                        await enqueue_download_job(arq_pool, job, arq_job_id)
+                        job.status = "queued"
+                        job.error = None
+                        job.finished_at = None
+                        recovery_counts["paused_retried"] += 1
+                        logger.info("Re-enqueued paused job %s as retry (retry=%d)", job.id, job.retry_count)
+                    except Exception as exc:
+                        job.status = "failed"
+                        job.error = f"Re-enqueue failed on startup: {exc}"
+                        job.finished_at = datetime.now(UTC)
+                        logger.error("Failed to re-enqueue paused job %s: %s", job.id, exc)
+                else:  # mark_failed
+                    await r.delete(f"download:pause:{job.id}")
+                    job.status = "failed"
+                    job.error = "Marked failed by recovery policy"
+                    job.finished_at = datetime.now(UTC)
+                    recovery_counts["paused_failed"] += 1
+                    logger.info("Marked paused job %s as failed (recovery policy=mark_failed)", job.id)
+            await session.commit()
+            logger.info(
+                "Processed %d paused jobs from previous session (strategy=%s)", len(paused_jobs), paused_strategy
+            )
 
         # Reset stuck subscription groups from previous worker session
         from db.models import SubscriptionGroup
@@ -261,6 +314,16 @@ async def startup(ctx: dict) -> None:
         )
         await session.commit()
         logger.info("Reset stuck subscription groups to idle")
+
+    from core.events import EventType, emit_safe
+
+    await emit_safe(
+        EventType.SYSTEM_WORKER_RECOVERED,
+        resource_type="system",
+        running_strategy=running_strategy,
+        paused_strategy=paused_strategy,
+        **recovery_counts,
+    )
 
     # Clean up orphaned per-job config files
     import glob as _glob

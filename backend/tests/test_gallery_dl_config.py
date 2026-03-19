@@ -1,7 +1,7 @@
 """Tests for gallery-dl config generation and fragment detection."""
 
 import json
-from unittest.mock import patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -10,11 +10,20 @@ from plugins.builtin.gallery_dl.source import _is_fragment
 
 @pytest.fixture(autouse=True)
 def mock_site_config_service():
-    """Prevent _build_gallery_dl_config from querying the real DB."""
+    """Prevent _build_gallery_dl_config from querying the real DB or Redis."""
     from tests.helpers import make_mock_site_config_svc
 
     svc = make_mock_site_config_svc()
-    with patch("core.site_config.site_config_service", svc):
+    mock_pipeline = MagicMock()
+    mock_pipeline.get = MagicMock()
+    mock_pipeline.execute = AsyncMock(return_value=[])
+    mock_redis = MagicMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipeline)
+    mock_redis.get = AsyncMock(return_value=None)
+    with (
+        patch("core.site_config.site_config_service", svc),
+        patch("core.redis_client.get_redis", return_value=mock_redis),
+    ):
         yield svc
 
 

@@ -14,7 +14,12 @@ import { Copy, BookOpen, X, Plus, Tag, ScanLine } from 'lucide-react'
 import { useRescanLibrary, useRescanStatus, useCancelRescan } from '@/hooks/useImport'
 import { TaskList } from '@/components/ScheduledTasks/TaskList'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
-import { loadSWCacheConfig, saveSWCacheConfig, type SWCacheConfig, DEFAULT_SW_CACHE_CONFIG } from '@/lib/swCacheConfig'
+import {
+  loadSWCacheConfig,
+  saveSWCacheConfig,
+  type SWCacheConfig,
+  DEFAULT_SW_CACHE_CONFIG,
+} from '@/lib/swCacheConfig'
 import { BottomTabConfig } from '@/components/BottomTabConfig'
 import { DashboardLinksConfig } from '@/components/DashboardLinksConfig'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
@@ -46,6 +51,7 @@ type SectionKey =
   | 'schedule'
   | 'browserCache'
   | 'logLevels'
+  | 'workerRecovery'
 
 const VERSION_LABELS: Record<string, string> = {
   jyzrox: 'Jyzrox',
@@ -171,9 +177,7 @@ function AiTaggingSection() {
 
   return (
     <div className="px-5 pb-5 border-t border-vault-border">
-      <p className="text-xs text-vault-text-muted mt-4 mb-4">
-        {t('settings.aiTaggingDesc')}
-      </p>
+      <p className="text-xs text-vault-text-muted mt-4 mb-4">{t('settings.aiTaggingDesc')}</p>
       <div className="flex flex-wrap gap-3">
         <button
           onClick={handleRetagAll}
@@ -190,9 +194,7 @@ function AiTaggingSection() {
           >
             {isImporting ? t('settings.importingEhtag') : t('settings.importEhtag')}
           </button>
-          <p className="text-[10px] text-vault-text-muted mt-1">
-            {t('settings.importEhtagDesc')}
-          </p>
+          <p className="text-[10px] text-vault-text-muted mt-1">{t('settings.importEhtagDesc')}</p>
         </div>
       </div>
     </div>
@@ -281,11 +283,13 @@ function RateLimitsSection() {
   const [subBatchMax, setSubBatchMax] = useState(0)
 
   useEffect(() => {
-    api.settings.getRateLimits()
+    api.settings
+      .getRateLimits()
       .then(setData)
       .catch(() => toast.error(t('common.failedToLoad')))
       .finally(() => setLoading(false))
-    api.settings.getFeatures()
+    api.settings
+      .getFeatures()
       .then((f: any) => {
         setSubDelay(f.subscription_enqueue_delay_ms ?? 500)
         setSubBatchMax(f.subscription_batch_max ?? 0)
@@ -294,34 +298,37 @@ function RateLimitsSection() {
       .catch(() => {})
   }, [])
 
-  const debouncedPatch = useCallback((patch: Parameters<typeof api.settings.patchRateLimits>[0]) => {
-    if (patch.sites) {
-      pendingPatchRef.current.sites = pendingPatchRef.current.sites || {}
-      for (const [site, cfg] of Object.entries(patch.sites)) {
-        pendingPatchRef.current.sites[site] = {
-          ...(pendingPatchRef.current.sites[site] || {}),
-          ...cfg,
+  const debouncedPatch = useCallback(
+    (patch: Parameters<typeof api.settings.patchRateLimits>[0]) => {
+      if (patch.sites) {
+        pendingPatchRef.current.sites = pendingPatchRef.current.sites || {}
+        for (const [site, cfg] of Object.entries(patch.sites)) {
+          pendingPatchRef.current.sites[site] = {
+            ...(pendingPatchRef.current.sites[site] || {}),
+            ...cfg,
+          }
         }
       }
-    }
-    if (patch.schedule) {
-      pendingPatchRef.current.schedule = {
-        ...(pendingPatchRef.current.schedule || {}),
-        ...patch.schedule,
+      if (patch.schedule) {
+        pendingPatchRef.current.schedule = {
+          ...(pendingPatchRef.current.schedule || {}),
+          ...patch.schedule,
+        }
       }
-    }
-    clearTimeout(debounceRef.current)
-    debounceRef.current = setTimeout(async () => {
-      const merged = pendingPatchRef.current
-      pendingPatchRef.current = {}
-      try {
-        const updated = await api.settings.patchRateLimits(merged)
-        setData(updated)
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
-      }
-    }, 300)
-  }, [])
+      clearTimeout(debounceRef.current)
+      debounceRef.current = setTimeout(async () => {
+        const merged = pendingPatchRef.current
+        pendingPatchRef.current = {}
+        try {
+          const updated = await api.settings.patchRateLimits(merged)
+          setData(updated)
+        } catch (err) {
+          toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
+        }
+      }, 300)
+    },
+    [],
+  )
 
   const handleSiteChange = useCallback(
     (site: string, field: keyof SiteRateConfig, value: number) => {
@@ -362,7 +369,7 @@ function RateLimitsSection() {
     setOverrideLoading(true)
     try {
       await api.settings.setRateLimitOverride(unlocked)
-      setData((prev) => prev ? { ...prev, override_active: unlocked } : prev)
+      setData((prev) => (prev ? { ...prev, override_active: unlocked } : prev))
       toast.success(t('common.saved'))
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
@@ -384,7 +391,9 @@ function RateLimitsSection() {
       try {
         await api.settings.setFeatureValue('subscription_enqueue_delay_ms', Math.max(100, v))
         toast.success(t('common.saved'))
-      } catch { toast.error(t('common.failedToSave')) }
+      } catch {
+        toast.error(t('common.failedToSave'))
+      }
     }, 500)
   }, [])
 
@@ -395,7 +404,9 @@ function RateLimitsSection() {
       try {
         await api.settings.setFeatureValue('subscription_batch_max', Math.max(0, v))
         toast.success(t('common.saved'))
-      } catch { toast.error(t('common.failedToSave')) }
+      } catch {
+        toast.error(t('common.failedToSave'))
+      }
     }, 500)
   }, [])
 
@@ -406,7 +417,9 @@ function RateLimitsSection() {
       try {
         await api.settings.setFeatureValue('gallery_update_check_days', Math.max(-1, v))
         toast.success(t('common.saved'))
-      } catch { toast.error(t('common.failedToSave')) }
+      } catch {
+        toast.error(t('common.failedToSave'))
+      }
     }, 500)
   }, [])
 
@@ -485,7 +498,11 @@ function RateLimitsSection() {
                 </>
               ) : (
                 <DelayRow
-                  label={isGalleryDl ? t('settings.rateLimitsRequestDelay') : t('settings.rateLimitsPageDelay')}
+                  label={
+                    isGalleryDl
+                      ? t('settings.rateLimitsRequestDelay')
+                      : t('settings.rateLimitsPageDelay')
+                  }
                   suffix={t('settings.rateLimitsMs')}
                   value={cfg.delay_ms ?? 0}
                   onChange={(v) => handleSiteChange(site, 'delay_ms', v)}
@@ -511,7 +528,9 @@ function RateLimitsSection() {
         <div className="bg-vault-input border border-vault-border rounded-lg px-3 py-2 space-y-3">
           {/* Enable toggle */}
           <div className="flex items-center justify-between">
-            <span className="text-sm text-vault-text">{t('settings.rateLimitsScheduleEnable')}</span>
+            <span className="text-sm text-vault-text">
+              {t('settings.rateLimitsScheduleEnable')}
+            </span>
             <button
               onClick={() => handleScheduleChange('enabled', !data.schedule.enabled)}
               className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
@@ -528,7 +547,9 @@ function RateLimitsSection() {
 
           {/* Window */}
           <div className="flex items-center justify-between">
-            <span className="text-sm text-vault-text">{t('settings.rateLimitsScheduleWindow')}</span>
+            <span className="text-sm text-vault-text">
+              {t('settings.rateLimitsScheduleWindow')}
+            </span>
             <div className="flex items-center gap-2">
               <select
                 value={data.schedule.start_hour}
@@ -536,17 +557,23 @@ function RateLimitsSection() {
                 className="bg-vault-bg border border-vault-border rounded px-2 py-1 text-sm text-vault-text focus:outline-none focus:border-vault-accent"
               >
                 {Array.from({ length: 24 }, (_, i) => (
-                  <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
+                  <option key={i} value={i}>
+                    {String(i).padStart(2, '0')}
+                  </option>
                 ))}
               </select>
-              <span className="text-xs text-vault-text-muted">{t('settings.rateLimitsScheduleTo')}</span>
+              <span className="text-xs text-vault-text-muted">
+                {t('settings.rateLimitsScheduleTo')}
+              </span>
               <select
                 value={data.schedule.end_hour}
                 onChange={(e) => handleScheduleChange('end_hour', Number(e.target.value))}
                 className="bg-vault-bg border border-vault-border rounded px-2 py-1 text-sm text-vault-text focus:outline-none focus:border-vault-accent"
               >
                 {Array.from({ length: 24 }, (_, i) => (
-                  <option key={i} value={i}>{String(i).padStart(2, '0')}</option>
+                  <option key={i} value={i}>
+                    {String(i).padStart(2, '0')}
+                  </option>
                 ))}
               </select>
             </div>
@@ -557,7 +584,9 @@ function RateLimitsSection() {
             <span className="text-sm text-vault-text">{t('settings.rateLimitsScheduleMode')}</span>
             <select
               value={data.schedule.mode}
-              onChange={(e) => handleScheduleChange('mode', e.target.value as 'full_speed' | 'standard')}
+              onChange={(e) =>
+                handleScheduleChange('mode', e.target.value as 'full_speed' | 'standard')
+              }
               className="bg-vault-bg border border-vault-border rounded px-2 py-1 text-sm text-vault-text focus:outline-none focus:border-vault-accent"
             >
               <option value="full_speed">{t('settings.rateLimitsScheduleFullSpeed')}</option>
@@ -645,7 +674,9 @@ function RateLimitsSection() {
             onChange={handleSubDelayChange}
           />
           <div className="flex items-center justify-between py-2">
-            <span className="text-sm text-vault-text-muted">{t('settings.subscriptionBatchMax')}</span>
+            <span className="text-sm text-vault-text-muted">
+              {t('settings.subscriptionBatchMax')}
+            </span>
             <div className="flex items-center gap-2 shrink-0">
               <input
                 type="number"
@@ -660,7 +691,9 @@ function RateLimitsSection() {
             </div>
           </div>
         </div>
-        <p className="text-[10px] text-vault-text-muted mt-1">{t('settings.subscriptionEnqueueDesc')}</p>
+        <p className="text-[10px] text-vault-text-muted mt-1">
+          {t('settings.subscriptionEnqueueDesc')}
+        </p>
       </div>
 
       {/* Gallery Metadata Auto-Check */}
@@ -680,7 +713,9 @@ function RateLimitsSection() {
           />
           <span className="text-xs text-vault-text-muted">{t('common.days')}</span>
         </div>
-        <p className="text-[10px] text-vault-text-muted mt-1">{t('settings.galleryUpdateCheckDaysDesc')}</p>
+        <p className="text-[10px] text-vault-text-muted mt-1">
+          {t('settings.galleryUpdateCheckDaysDesc')}
+        </p>
       </div>
     </div>
   )
@@ -708,16 +743,16 @@ function ScheduledTasksSection() {
 
   return (
     <div className="px-5 pb-5 border-t border-vault-border">
-      <p className="text-xs text-vault-text-muted mt-4 mb-4">
-        {t('settings.tasks.desc')}
-      </p>
+      <p className="text-xs text-vault-text-muted mt-4 mb-4">{t('settings.tasks.desc')}</p>
 
       {/* Rescan Library button + progress */}
       <div className="mb-5 pb-4 border-b border-vault-border">
         <div className="flex items-center justify-between mb-2">
           <div>
             <p className="text-sm text-vault-text">{t('settings.media.rescan')}</p>
-            <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.media.rescan.desc')}</p>
+            <p className="text-xs text-vault-text-muted mt-0.5">
+              {t('settings.media.rescan.desc')}
+            </p>
           </div>
           {isRunning ? (
             <button
@@ -732,7 +767,9 @@ function ScheduledTasksSection() {
               disabled={cancelling}
               className="px-3 py-1.5 rounded text-xs font-medium bg-red-500/20 text-red-400 hover:bg-red-500/30 transition-colors"
             >
-              {cancelling ? t('settings.media.rescan.cancelling') : t('settings.media.rescan.cancel')}
+              {cancelling
+                ? t('settings.media.rescan.cancelling')
+                : t('settings.media.rescan.cancel')}
             </button>
           ) : (
             <button
@@ -754,7 +791,10 @@ function ScheduledTasksSection() {
               />
             </div>
             <p className="text-xs text-vault-text-muted">
-              {t('settings.media.rescan.running', { processed: String(processed), total: String(total) })}
+              {t('settings.media.rescan.running', {
+                processed: String(processed),
+                total: String(total),
+              })}
             </p>
           </div>
         )}
@@ -770,17 +810,17 @@ function ScheduledTasksSection() {
 
 function BrowseSettings() {
   const [historyEnabled, setHistoryEnabled] = useState(
-    () => typeof window !== 'undefined' && localStorage.getItem('eh_search_history_enabled') !== 'false',
-  )
-  const [loadMode, setLoadMode] = useState(
     () =>
-      typeof window !== 'undefined'
-        ? localStorage.getItem('browse_load_mode') || 'pagination'
-        : 'pagination',
+      typeof window !== 'undefined' &&
+      localStorage.getItem('eh_search_history_enabled') !== 'false',
   )
-  const [perPage, setPerPage] = useState(
-    () =>
-      typeof window !== 'undefined' ? localStorage.getItem('browse_per_page') || '25' : '25',
+  const [loadMode, setLoadMode] = useState(() =>
+    typeof window !== 'undefined'
+      ? localStorage.getItem('browse_load_mode') || 'pagination'
+      : 'pagination',
+  )
+  const [perPage, setPerPage] = useState(() =>
+    typeof window !== 'undefined' ? localStorage.getItem('browse_per_page') || '25' : '25',
   )
   const [browseHistoryEnabled, setBrowseHistoryEnabled] = useState(
     () => typeof window !== 'undefined' && localStorage.getItem('history_enabled') !== 'false',
@@ -1089,6 +1129,24 @@ export default function SettingsPage() {
   const [logLevels, setLogLevels] = useState<Record<string, string>>({})
   const logLevelsFetched = useRef(false)
 
+  // Worker recovery strategy
+  const [recoveryStrategy, setRecoveryStrategy] = useState({
+    running: 'auto_retry',
+    paused: 'keep_paused',
+  })
+  const recoveryFetched = useRef(false)
+
+  const handleRecoveryChange =
+    (field: 'running' | 'paused') => async (e: React.ChangeEvent<HTMLSelectElement>) => {
+      try {
+        const updated = await api.settings.patchRecoveryStrategy({ [field]: e.target.value })
+        setRecoveryStrategy(updated)
+        toast.success(t('settings.recoveryUpdated'))
+      } catch {
+        toast.error(t('common.error'))
+      }
+    }
+
   // Cache stats
   const [cacheStats, setCacheStats] = useState<CacheStats | null>(null)
   const [cacheLoading, setCacheLoading] = useState(false)
@@ -1216,12 +1274,15 @@ export default function SettingsPage() {
     }
   }, [])
 
-  const handleTrashToggle = useCallback(async (enabled: boolean) => {
-    if (!enabled) {
-      if (!confirm(t('settings.trashDisableConfirm'))) return
-    }
-    await handleFeatureToggle('trash_enabled', enabled)
-  }, [handleFeatureToggle])
+  const handleTrashToggle = useCallback(
+    async (enabled: boolean) => {
+      if (!enabled) {
+        if (!confirm(t('settings.trashDisableConfirm'))) return
+      }
+      await handleFeatureToggle('trash_enabled', enabled)
+    },
+    [handleFeatureToggle],
+  )
 
   const handleTrashRetentionChange = useCallback((v: number) => {
     setTrashRetentionDays(v)
@@ -1230,7 +1291,9 @@ export default function SettingsPage() {
       try {
         await api.settings.setFeatureValue('trash_retention_days', Math.max(1, Math.min(365, v)))
         toast.success(t('common.saved'))
-      } catch { toast.error(t('common.failedToSave')) }
+      } catch {
+        toast.error(t('common.failedToSave'))
+      }
     }, 500)
   }, [])
 
@@ -1325,21 +1388,18 @@ export default function SettingsPage() {
   }, [newBlockedTag, handleLoadBlockedTags])
 
   // Blocked Tags: Remove
-  const handleRemoveBlockedTag = useCallback(
-    async (id: number) => {
-      setRemovingBlockedTagId(id)
-      try {
-        await api.tags.removeBlocked(id)
-        toast.success(t('settings.tagBlockRemoved'))
-        setBlockedTags((prev) => prev.filter((bt) => bt.id !== id))
-      } catch (err) {
-        toast.error(err instanceof Error ? err.message : t('settings.tagBlockRemoveFailed'))
-      } finally {
-        setRemovingBlockedTagId(null)
-      }
-    },
-    [],
-  )
+  const handleRemoveBlockedTag = useCallback(async (id: number) => {
+    setRemovingBlockedTagId(id)
+    try {
+      await api.tags.removeBlocked(id)
+      toast.success(t('settings.tagBlockRemoved'))
+      setBlockedTags((prev) => prev.filter((bt) => bt.id !== id))
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('settings.tagBlockRemoveFailed'))
+    } finally {
+      setRemovingBlockedTagId(null)
+    }
+  }, [])
 
   const handleLoadProfile = useCallback(async () => {
     try {
@@ -1502,7 +1562,9 @@ export default function SettingsPage() {
     }
   }, [])
 
-  useEffect(() => { setSwCacheConfig(loadSWCacheConfig()) }, [])
+  useEffect(() => {
+    setSwCacheConfig(loadSWCacheConfig())
+  }, [])
 
   const handleSWCacheChange = useCallback((key: keyof SWCacheConfig, value: number) => {
     setSwCacheConfig((prev) => ({ ...prev, [key]: value }))
@@ -1538,12 +1600,26 @@ export default function SettingsPage() {
     if (openSections.has('blockedTags') && !blockedTagsLoaded && !blockedTagsLoading) {
       handleLoadBlockedTags()
     }
-    if ((openSections.has('security') || openSections.has('features')) && featuresLoading && Object.keys(features).length === 0) {
+    if (
+      (openSections.has('security') || openSections.has('features')) &&
+      featuresLoading &&
+      Object.keys(features).length === 0
+    ) {
       handleLoadFeatures()
     }
     if (openSections.has('logLevels') && !logLevelsFetched.current) {
       logLevelsFetched.current = true
-      api.logs.getLevels().then(d => setLogLevels(d.levels)).catch(() => {})
+      api.logs
+        .getLevels()
+        .then((d) => setLogLevels(d.levels))
+        .catch(() => {})
+    }
+    if (openSections.has('workerRecovery') && !recoveryFetched.current) {
+      recoveryFetched.current = true
+      api.settings
+        .getRecoveryStrategy()
+        .then(setRecoveryStrategy)
+        .catch(() => {})
     }
   }, [
     openSections,
@@ -1578,1262 +1654,1354 @@ export default function SettingsPage() {
 
   return (
     <div className="max-w-2xl">
-        <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settings.title')}</h1>
+      <h1 className="text-2xl font-bold mb-6 text-vault-text">{t('settings.title')}</h1>
 
-        {/* ── Credentials link ── */}
-        <Link
-          href="/credentials"
-          className="flex items-center gap-2 mb-4 px-4 py-2.5 bg-vault-card border border-vault-border rounded-xl text-sm text-vault-text-secondary hover:text-vault-accent hover:border-vault-accent/50 transition-colors w-full"
-        >
-          <Key size={16} />
-          <span>{t('credentials.manageCredentials')}</span>
-        </Link>
+      {/* ── Credentials link ── */}
+      <Link
+        href="/credentials"
+        className="flex items-center gap-2 mb-4 px-4 py-2.5 bg-vault-card border border-vault-border rounded-xl text-sm text-vault-text-secondary hover:text-vault-accent hover:border-vault-accent/50 transition-colors w-full"
+      >
+        <Key size={16} />
+        <span>{t('credentials.manageCredentials')}</span>
+      </Link>
 
-        <div className="space-y-3">
-          {/* ── Language ── */}
-          <div className="bg-vault-card rounded-xl border border-vault-border overflow-hidden">
-            <div className="px-5 py-4">
-              <h3 className="font-medium text-vault-text text-sm mb-3">{t('settings.language')}</h3>
-              <select
-                value={locale}
-                onChange={(e) => changeLocale(e.target.value as Locale)}
-                className="bg-vault-input text-vault-text text-sm rounded-lg px-3 py-2 border border-vault-border focus:outline-none focus:ring-1 focus:ring-vault-accent"
-              >
-                {SUPPORTED_LOCALES.map((loc: Locale) => (
-                  <option key={loc} value={loc}>
-                    {t(`common.locale.${loc}`)}
-                  </option>
-                ))}
-              </select>
-            </div>
+      <div className="space-y-3">
+        {/* ── Language ── */}
+        <div className="bg-vault-card rounded-xl border border-vault-border overflow-hidden">
+          <div className="px-5 py-4">
+            <h3 className="font-medium text-vault-text text-sm mb-3">{t('settings.language')}</h3>
+            <select
+              value={locale}
+              onChange={(e) => changeLocale(e.target.value as Locale)}
+              className="bg-vault-input text-vault-text text-sm rounded-lg px-3 py-2 border border-vault-border focus:outline-none focus:ring-1 focus:ring-vault-accent"
+            >
+              {SUPPORTED_LOCALES.map((loc: Locale) => (
+                <option key={loc} value={loc}>
+                  {t(`common.locale.${loc}`)}
+                </option>
+              ))}
+            </select>
           </div>
+        </div>
 
-          {/* ── System Info ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <SectionHeader
-              title={t('settings.system')}
-              sectionKey="system"
-              openSections={openSections}
-              onToggle={toggleSection}
-            />
+        {/* ── System Info ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.system')}
+            sectionKey="system"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
 
-            {openSections.has('system') && (
-              <div className="px-5 pb-5 border-t border-vault-border">
-                {systemLoading && (
-                  <div className="flex justify-center py-8">
-                    <LoadingSpinner />
-                  </div>
-                )}
-                {!systemLoading && health && systemInfo && (
-                  <div className="mt-4 space-y-4">
-                    {/* Health */}
-                    <div>
-                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                        {t('settings.serviceHealth')}
-                      </p>
-                      <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
-                        {[
-                          { label: t('settings.overall'), value: health.status },
-                          { label: 'PostgreSQL', value: health.services.postgres },
-                          { label: 'Redis', value: health.services.redis },
-                        ].map(({ label, value }) => (
-                          <div key={label} className="flex justify-between items-center px-3 py-2">
-                            <span className="text-sm text-vault-text-muted">{label}</span>
-                            <span className={`text-sm font-medium ${serviceStatusClass(value)}`}>
-                              {value}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Versions */}
-                    {systemInfo.versions && (
-                      <div>
-                        <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                          {t('settings.versions')}
-                        </p>
-                        <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
-                          {Object.entries({
-                            jyzrox: systemInfo.versions.jyzrox,
-                            python: systemInfo.versions.python,
-                            fastapi: systemInfo.versions.fastapi,
-                            nextjs: process.env.NEXT_PUBLIC_NEXTJS_VERSION ?? null,
-                            gallery_dl: systemInfo.versions.gallery_dl,
-                            postgresql: systemInfo.versions.postgresql,
-                            redis: systemInfo.versions.redis,
-                            onnxruntime: systemInfo.versions.onnxruntime,
-                          })
-                            .filter(([, v]) => v !== null)
-                            .map(([key, value]) => (
-                              <div key={key} className="flex justify-between items-center px-3 py-2">
-                                <span className="text-sm text-vault-text-muted">{versionLabel(key)}</span>
-                                <span className="text-sm font-mono text-vault-text-secondary">{value}</span>
-                              </div>
-                            ))}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Info */}
-                    <div>
-                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                        {t('settings.configuration')}
-                      </p>
-                      <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
-                        {[
-                          {
-                            label: t('settings.ehMaxConcurrency'),
-                            value: String(systemInfo.eh_max_concurrency),
-                          },
-                          {
-                            label: t('settings.aiTagging'),
-                            value: systemInfo.tag_model_enabled
-                              ? t('settings.enabled')
-                              : t('settings.disabled'),
-                            valueClass: systemInfo.tag_model_enabled
-                              ? 'text-green-400'
-                              : 'text-vault-text-muted',
-                          },
-                        ].map(({ label, value, valueClass }) => (
-                          <div key={label} className="flex justify-between items-center px-3 py-2">
-                            <span className="text-sm text-vault-text-muted">{label}</span>
-                            <span
-                              className={`text-sm font-medium ${valueClass ?? 'text-vault-text-secondary'}`}
-                            >
-                              {value}
-                            </span>
-                          </div>
-                        ))}
-                      </div>
-                    </div>
-
-                    {/* Storage */}
-                    {storageInfo && storageInfo.mounts.length > 0 && (
-                      <div>
-                        <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                          {t('settings.storage')}
-                        </p>
-                        <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
-                          {storageInfo.mounts.map((mount) => {
-                            const barColor =
-                              mount.percent > 90
-                                ? 'bg-red-500'
-                                : mount.percent > 70
-                                  ? 'bg-yellow-500'
-                                  : 'bg-green-500'
-                            return (
-                              <div key={mount.path} className="px-3 py-2.5">
-                                <div className="flex justify-between items-center mb-1.5">
-                                  <span className="text-sm text-vault-text">{mount.label}</span>
-                                  <span className="text-xs text-vault-text-muted font-mono">
-                                    {formatBytes(mount.used)} / {formatBytes(mount.total)}
-                                  </span>
-                                </div>
-                                <div className="w-full h-2 bg-vault-bg rounded-full overflow-hidden">
-                                  <div
-                                    className={`h-full rounded-full transition-all ${barColor}`}
-                                    style={{ width: `${Math.min(mount.percent, 100)}%` }}
-                                  />
-                                </div>
-                                <div className="flex justify-between mt-1">
-                                  <span className="text-xs text-vault-text-muted">
-                                    {mount.percent}% {t('settings.storageUsed').toLowerCase()}
-                                  </span>
-                                  <span className="text-xs text-vault-text-muted">
-                                    {formatBytes(mount.free)} {t('settings.storageFree').toLowerCase()}
-                                  </span>
-                                </div>
-                              </div>
-                            )
-                          })}
-                        </div>
-                      </div>
-                    )}
-
-                    {/* Cache Management */}
-                    <div>
-                      <div className="flex items-center justify-between mb-2">
-                        <p className="text-xs text-vault-text-muted uppercase tracking-wide">
-                          {t('settings.cache')}
-                        </p>
-                        <button
-                          onClick={handleRefreshCache}
-                          disabled={cacheLoading}
-                          className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
-                        >
-                          {cacheLoading ? t('settings.loading') : t('settings.cacheRefresh')}
-                        </button>
-                      </div>
-                      {cacheStats && (
-                        <div className="space-y-2">
-                          <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
-                            <div className="flex justify-between items-center px-3 py-2">
-                              <span className="text-sm text-vault-text-muted">
-                                {t('settings.cacheMemory')}
-                              </span>
-                              <span className="text-sm font-medium text-vault-text-secondary">
-                                {cacheStats.total_memory}
-                              </span>
-                            </div>
-                            <div className="flex justify-between items-center px-3 py-2">
-                              <span className="text-sm text-vault-text-muted">
-                                {t('settings.cacheKeys')}
-                              </span>
-                              <span className="text-sm font-medium text-vault-text-secondary">
-                                {cacheStats.total_keys}
-                              </span>
-                            </div>
-                          </div>
-
-                          {/* Breakdown by category */}
-                          {Object.keys(cacheStats.breakdown).length > 0 && (
-                            <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
-                              {Object.entries(cacheStats.breakdown).map(([cat, count]) => {
-                                const catLabels: Record<string, string> = {
-                                  eh_search: t('settings.cacheEhSearch'),
-                                  eh_gallery: t('settings.cacheEhGallery'),
-                                  eh_image: t('settings.cacheEhImage'),
-                                  thumbs: t('settings.cacheThumbs'),
-                                }
-                                return (
-                                  <div
-                                    key={cat}
-                                    className="flex items-center justify-between px-3 py-2 gap-2"
-                                  >
-                                    <span className="text-sm text-vault-text-muted flex-1">
-                                      {catLabels[cat] ?? cat}
-                                    </span>
-                                    <span className="text-sm text-vault-text-secondary tabular-nums">
-                                      {count}
-                                    </span>
-                                    <button
-                                      onClick={() => handleClearCacheCategory(cat)}
-                                      disabled={cacheClearingCategory === cat || cacheClearingAll}
-                                      className="text-xs text-red-400/70 hover:text-red-400 transition-colors px-2 py-0.5 disabled:opacity-40"
-                                    >
-                                      {cacheClearingCategory === cat
-                                        ? '...'
-                                        : t('settings.clearCategory')}
-                                    </button>
-                                  </div>
-                                )
-                              })}
-                            </div>
-                          )}
-
-                          <button
-                            onClick={handleClearAllCache}
-                            disabled={cacheClearingAll || cacheClearingCategory !== null}
-                            className="mt-1 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                          >
-                            {cacheClearingAll ? t('settings.clearing') : t('settings.clearCache')}
-                          </button>
-                        </div>
-                      )}
-                    </div>
-
-                    {/* Data Reconciliation */}
-                    <div className="pt-4 border-t border-vault-border">
-                      <h3 className="text-sm font-medium text-vault-text mb-2">
-                        {t('settings.reconciliation')}
-                      </h3>
-                      {reconcileStatus && reconcileStatus.status !== 'never_run' && 'completed_at' in reconcileStatus && (
-                        <div className="text-xs text-vault-text-muted space-y-1 mb-3">
-                          <p>{t('settings.reconcileLastRun', { time: new Date(reconcileStatus.completed_at).toLocaleString() })}</p>
-                          <div className="flex gap-4">
-                            <span>{t('settings.reconcileRemovedImages')}: {reconcileStatus.removed_images}</span>
-                            <span>{t('settings.reconcileRemovedGalleries')}: {reconcileStatus.removed_galleries}</span>
-                            <span>{t('settings.reconcileOrphanBlobs')}: {reconcileStatus.orphan_blobs_cleaned}</span>
-                          </div>
-                        </div>
-                      )}
-                      {reconcileStatus?.status === 'never_run' && (
-                        <p className="text-xs text-vault-text-muted mb-3">{t('settings.reconcileNeverRun')}</p>
-                      )}
-                      <button
-                        onClick={handleReconcile}
-                        disabled={reconcileRunning}
-                        className="px-3 py-1.5 bg-vault-accent/20 border border-vault-accent/30 text-vault-accent rounded text-sm hover:bg-vault-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
-                      >
-                        {reconcileRunning ? t('settings.reconcileRunning') : t('settings.reconcileRun')}
-                      </button>
-                    </div>
-
-                    <button
-                      onClick={handleLoadSystem}
-                      className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
-                    >
-                      {t('settings.refresh')}
-                    </button>
-                  </div>
-                )}
-              </div>
-            )}
-          </div>
-
-          {/* ── Security ── */}
-          <div className="bg-vault-card border border-vault-border rounded-lg overflow-hidden">
-            <SectionHeader
-              title={t('settings.security')}
-              sectionKey="security"
-              openSections={openSections}
-              onToggle={toggleSection}
-            />
-            {openSections.has('security') && (
-              <div className="px-5 pb-5 space-y-1 divide-y divide-vault-border">
-                <ToggleRow
-                  label={t('settings.csrfProtection')}
-                  description={t('settings.csrfDesc')}
-                  checked={features.csrf_enabled ?? true}
-                  onChange={(v) => handleFeatureToggle('csrf_enabled', v)}
-                  disabled={featuresLoading}
-                />
-                <ToggleRow
-                  label={t('settings.rateLimiting')}
-                  description={t('settings.rateLimitDesc')}
-                  checked={features.rate_limit_enabled ?? true}
-                  onChange={(v) => handleFeatureToggle('rate_limit_enabled', v)}
-                  disabled={featuresLoading}
-                />
-              </div>
-            )}
-          </div>
-
-          {/* ── Features ── */}
-          <div className="bg-vault-card border border-vault-border rounded-lg overflow-hidden">
-            <SectionHeader
-              title={t('settings.features')}
-              sectionKey="features"
-              openSections={openSections}
-              onToggle={toggleSection}
-            />
-            {openSections.has('features') && (
-              <div className="px-5 pb-5">
-                {/* Service Toggles */}
-                <div className="space-y-1 divide-y divide-vault-border">
-                  <ToggleRow
-                    label={t('settings.opdsServer')}
-                    description={t('settings.opdsDesc')}
-                    checked={features.opds_enabled ?? true}
-                    onChange={(v) => handleFeatureToggle('opds_enabled', v)}
-                    disabled={featuresLoading}
-                  />
-                  <ToggleRow
-                    label={t('settings.externalApi')}
-                    description={t('settings.externalApiDesc')}
-                    checked={features.external_api_enabled ?? true}
-                    onChange={(v) => handleFeatureToggle('external_api_enabled', v)}
-                    disabled={featuresLoading}
-                  />
-                  <ToggleRow
-                    label={t('settings.aiTagging')}
-                    description={t('settings.aiTaggingToggleDesc')}
-                    checked={features.ai_tagging_enabled ?? false}
-                    onChange={(v) => handleFeatureToggle('ai_tagging_enabled', v)}
-                    disabled={featuresLoading}
-                  />
-                  <ToggleRow
-                    label={t('settings.tagTranslation')}
-                    description={t('settings.tagTranslationDesc')}
-                    checked={features.tag_translation_enabled ?? true}
-                    onChange={(v) => handleFeatureToggle('tag_translation_enabled', v)}
-                    disabled={featuresLoading}
-                  />
+          {openSections.has('system') && (
+            <div className="px-5 pb-5 border-t border-vault-border">
+              {systemLoading && (
+                <div className="flex justify-center py-8">
+                  <LoadingSpinner />
                 </div>
+              )}
+              {!systemLoading && health && systemInfo && (
+                <div className="mt-4 space-y-4">
+                  {/* Health */}
+                  <div>
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                      {t('settings.serviceHealth')}
+                    </p>
+                    <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
+                      {[
+                        { label: t('settings.overall'), value: health.status },
+                        { label: 'PostgreSQL', value: health.services.postgres },
+                        { label: 'Redis', value: health.services.redis },
+                      ].map(({ label, value }) => (
+                        <div key={label} className="flex justify-between items-center px-3 py-2">
+                          <span className="text-sm text-vault-text-muted">{label}</span>
+                          <span className={`text-sm font-medium ${serviceStatusClass(value)}`}>
+                            {value}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
 
-                {/* Trash */}
-                <h3 className="text-xs text-vault-text-muted uppercase tracking-wide mt-5 mb-2">
-                  {t('settings.trashSection')}
-                </h3>
-                <div className="space-y-1 divide-y divide-vault-border">
-                  <ToggleRow
-                    label={t('settings.trashEnabled')}
-                    description={t('settings.trashEnabledDesc')}
-                    checked={features.trash_enabled ?? true}
-                    onChange={handleTrashToggle}
-                    disabled={featuresLoading}
-                  />
-                  {(features.trash_enabled ?? true) && (
-                    <div className="flex items-center justify-between py-2">
-                      <div>
-                        <p className="text-sm text-vault-text">{t('settings.trashRetentionDays')}</p>
-                        <p className="text-xs text-vault-text-muted">{t('settings.trashRetentionDaysDesc')}</p>
+                  {/* Versions */}
+                  {systemInfo.versions && (
+                    <div>
+                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                        {t('settings.versions')}
+                      </p>
+                      <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
+                        {Object.entries({
+                          jyzrox: systemInfo.versions.jyzrox,
+                          python: systemInfo.versions.python,
+                          fastapi: systemInfo.versions.fastapi,
+                          nextjs: process.env.NEXT_PUBLIC_NEXTJS_VERSION ?? null,
+                          gallery_dl: systemInfo.versions.gallery_dl,
+                          postgresql: systemInfo.versions.postgresql,
+                          redis: systemInfo.versions.redis,
+                          onnxruntime: systemInfo.versions.onnxruntime,
+                        })
+                          .filter(([, v]) => v !== null)
+                          .map(([key, value]) => (
+                            <div key={key} className="flex justify-between items-center px-3 py-2">
+                              <span className="text-sm text-vault-text-muted">
+                                {versionLabel(key)}
+                              </span>
+                              <span className="text-sm font-mono text-vault-text-secondary">
+                                {value}
+                              </span>
+                            </div>
+                          ))}
                       </div>
-                      <input
-                        type="number"
-                        min={1}
-                        max={365}
-                        value={trashRetentionDays}
-                        onChange={(e) => handleTrashRetentionChange(Number(e.target.value))}
-                        className="w-20 text-right rounded-lg border border-vault-border bg-vault-input px-2 py-1.5 text-sm text-vault-text"
-                      />
                     </div>
                   )}
-                </div>
 
-                {/* Download Sources */}
-                <h3 className="text-xs text-vault-text-muted uppercase tracking-wide mt-5 mb-2">
-                  {t('settings.downloadSources')}
-                </h3>
-                <div className="space-y-1 divide-y divide-vault-border">
-                  <ToggleRow
-                    label={t('settings.downloadEh')}
-                    description={t('settings.downloadEhDesc')}
-                    checked={features.download_eh_enabled ?? true}
-                    onChange={(v) => handleFeatureToggle('download_eh_enabled', v)}
-                    disabled={featuresLoading}
-                  />
-                  <ToggleRow
-                    label={t('settings.downloadPixiv')}
-                    description={t('settings.downloadPixivDesc')}
-                    checked={features.download_pixiv_enabled ?? true}
-                    onChange={(v) => handleFeatureToggle('download_pixiv_enabled', v)}
-                    disabled={featuresLoading}
-                  />
-                  <ToggleRow
-                    label={t('settings.downloadGalleryDl')}
-                    description={t('settings.downloadGalleryDlDesc')}
-                    checked={features.download_gallery_dl_enabled ?? true}
-                    onChange={(v) => handleFeatureToggle('download_gallery_dl_enabled', v)}
-                    disabled={featuresLoading}
-                  />
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── Log Levels ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <SectionHeader title={t('settings.logLevels')} sectionKey="logLevels" openSections={openSections} onToggle={toggleSection} />
-            {openSections.has('logLevels') && (
-              <div className="px-5 pb-5 border-t border-vault-border space-y-4">
-                <p className="text-xs text-vault-text-muted mt-4">{t('settings.logLevelDesc')}</p>
-                {[
-                  { key: 'api', label: t('settings.logLevelApi') },
-                  { key: 'worker', label: t('settings.logLevelWorker') },
-                ].map(({ key, label }) => (
-                  <div key={key} className="flex items-center justify-between py-2">
-                    <span className="text-sm text-vault-text">{label}</span>
-                    <select
-                      value={logLevels[key] ?? 'INFO'}
-                      onChange={async (e) => {
-                        const level = e.target.value
-                        try {
-                          await api.logs.setLevel(key, level)
-                          setLogLevels(prev => ({ ...prev, [key]: level }))
-                          toast.success(t('settings.logLevelUpdated'))
-                        } catch {
-                          toast.error(t('common.error'))
-                        }
-                      }}
-                      className="px-3 py-1.5 text-sm bg-vault-input border border-vault-border rounded text-vault-text"
-                    >
-                      {['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'].map(lvl => (
-                        <option key={lvl} value={lvl}>{lvl}</option>
+                  {/* Info */}
+                  <div>
+                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                      {t('settings.configuration')}
+                    </p>
+                    <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
+                      {[
+                        {
+                          label: t('settings.ehMaxConcurrency'),
+                          value: String(systemInfo.eh_max_concurrency),
+                        },
+                        {
+                          label: t('settings.aiTagging'),
+                          value: systemInfo.tag_model_enabled
+                            ? t('settings.enabled')
+                            : t('settings.disabled'),
+                          valueClass: systemInfo.tag_model_enabled
+                            ? 'text-green-400'
+                            : 'text-vault-text-muted',
+                        },
+                      ].map(({ label, value, valueClass }) => (
+                        <div key={label} className="flex justify-between items-center px-3 py-2">
+                          <span className="text-sm text-vault-text-muted">{label}</span>
+                          <span
+                            className={`text-sm font-medium ${valueClass ?? 'text-vault-text-secondary'}`}
+                          >
+                            {value}
+                          </span>
+                        </div>
                       ))}
-                    </select>
+                    </div>
                   </div>
-                ))}
-                <p className="text-[10px] text-vault-text-muted italic">{t('settings.logLevelNginxHint')}</p>
-              </div>
-            )}
-          </div>
 
-          {/* ── Rate Limits ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <SectionHeader
-              title={t('settings.rateLimits')}
-              sectionKey="rateLimits"
-              openSections={openSections}
-              onToggle={toggleSection}
-            />
-            {openSections.has('rateLimits') && <RateLimitsSection />}
-          </div>
+                  {/* Storage */}
+                  {storageInfo && storageInfo.mounts.length > 0 && (
+                    <div>
+                      <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                        {t('settings.storage')}
+                      </p>
+                      <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
+                        {storageInfo.mounts.map((mount) => {
+                          const barColor =
+                            mount.percent > 90
+                              ? 'bg-red-500'
+                              : mount.percent > 70
+                                ? 'bg-yellow-500'
+                                : 'bg-green-500'
+                          return (
+                            <div key={mount.path} className="px-3 py-2.5">
+                              <div className="flex justify-between items-center mb-1.5">
+                                <span className="text-sm text-vault-text">{mount.label}</span>
+                                <span className="text-xs text-vault-text-muted font-mono">
+                                  {formatBytes(mount.used)} / {formatBytes(mount.total)}
+                                </span>
+                              </div>
+                              <div className="w-full h-2 bg-vault-bg rounded-full overflow-hidden">
+                                <div
+                                  className={`h-full rounded-full transition-all ${barColor}`}
+                                  style={{ width: `${Math.min(mount.percent, 100)}%` }}
+                                />
+                              </div>
+                              <div className="flex justify-between mt-1">
+                                <span className="text-xs text-vault-text-muted">
+                                  {mount.percent}% {t('settings.storageUsed').toLowerCase()}
+                                </span>
+                                <span className="text-xs text-vault-text-muted">
+                                  {formatBytes(mount.free)}{' '}
+                                  {t('settings.storageFree').toLowerCase()}
+                                </span>
+                              </div>
+                            </div>
+                          )
+                        })}
+                      </div>
+                    </div>
+                  )}
 
-          {/* ── Browse Settings ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <SectionHeader
-              title={t('settings.browse')}
-              sectionKey="browse"
-              openSections={openSections}
-              onToggle={toggleSection}
-            />
-            {openSections.has('browse') && (
-              <BrowseSettings />
-            )}
-          </div>
+                  {/* Cache Management */}
+                  <div>
+                    <div className="flex items-center justify-between mb-2">
+                      <p className="text-xs text-vault-text-muted uppercase tracking-wide">
+                        {t('settings.cache')}
+                      </p>
+                      <button
+                        onClick={handleRefreshCache}
+                        disabled={cacheLoading}
+                        className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+                      >
+                        {cacheLoading ? t('settings.loading') : t('settings.cacheRefresh')}
+                      </button>
+                    </div>
+                    {cacheStats && (
+                      <div className="space-y-2">
+                        <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
+                          <div className="flex justify-between items-center px-3 py-2">
+                            <span className="text-sm text-vault-text-muted">
+                              {t('settings.cacheMemory')}
+                            </span>
+                            <span className="text-sm font-medium text-vault-text-secondary">
+                              {cacheStats.total_memory}
+                            </span>
+                          </div>
+                          <div className="flex justify-between items-center px-3 py-2">
+                            <span className="text-sm text-vault-text-muted">
+                              {t('settings.cacheKeys')}
+                            </span>
+                            <span className="text-sm font-medium text-vault-text-secondary">
+                              {cacheStats.total_keys}
+                            </span>
+                          </div>
+                        </div>
 
-          {/* ── Bottom Tab Bar ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <SectionHeader
-              title={t('settings.bottomTab')}
-              sectionKey="bottomTab"
-              openSections={openSections}
-              onToggle={toggleSection}
-            />
-            {openSections.has('bottomTab') && <BottomTabConfig />}
-          </div>
+                        {/* Breakdown by category */}
+                        {Object.keys(cacheStats.breakdown).length > 0 && (
+                          <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border">
+                            {Object.entries(cacheStats.breakdown).map(([cat, count]) => {
+                              const catLabels: Record<string, string> = {
+                                eh_search: t('settings.cacheEhSearch'),
+                                eh_gallery: t('settings.cacheEhGallery'),
+                                eh_image: t('settings.cacheEhImage'),
+                                thumbs: t('settings.cacheThumbs'),
+                              }
+                              return (
+                                <div
+                                  key={cat}
+                                  className="flex items-center justify-between px-3 py-2 gap-2"
+                                >
+                                  <span className="text-sm text-vault-text-muted flex-1">
+                                    {catLabels[cat] ?? cat}
+                                  </span>
+                                  <span className="text-sm text-vault-text-secondary tabular-nums">
+                                    {count}
+                                  </span>
+                                  <button
+                                    onClick={() => handleClearCacheCategory(cat)}
+                                    disabled={cacheClearingCategory === cat || cacheClearingAll}
+                                    className="text-xs text-red-400/70 hover:text-red-400 transition-colors px-2 py-0.5 disabled:opacity-40"
+                                  >
+                                    {cacheClearingCategory === cat
+                                      ? '...'
+                                      : t('settings.clearCategory')}
+                                  </button>
+                                </div>
+                              )
+                            })}
+                          </div>
+                        )}
 
-          {/* ── Dashboard Quick Links ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <SectionHeader
-              title={t('settings.dashboardLinks')}
-              sectionKey="dashboardLinks"
-              openSections={openSections}
-              onToggle={toggleSection}
-            />
-            {openSections.has('dashboardLinks') && <DashboardLinksConfig />}
-          </div>
+                        <button
+                          onClick={handleClearAllCache}
+                          disabled={cacheClearingAll || cacheClearingCategory !== null}
+                          className="mt-1 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                        >
+                          {cacheClearingAll ? t('settings.clearing') : t('settings.clearCache')}
+                        </button>
+                      </div>
+                    )}
+                  </div>
 
-          {/* ── Blocked Tags ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <SectionHeader
-                  title={t('settings.blockedTags')}
-                  sectionKey="blockedTags"
-                  openSections={openSections}
-                  onToggle={toggleSection}
-                />
-              </div>
-              {blockedTags.length > 0 && (
-                <div className="pr-5">
-                  <span className="inline-flex items-center gap-1 text-xs text-vault-text-muted">
-                    <Tag size={12} />
-                    {blockedTags.length}
-                  </span>
+                  {/* Data Reconciliation */}
+                  <div className="pt-4 border-t border-vault-border">
+                    <h3 className="text-sm font-medium text-vault-text mb-2">
+                      {t('settings.reconciliation')}
+                    </h3>
+                    {reconcileStatus &&
+                      reconcileStatus.status !== 'never_run' &&
+                      'completed_at' in reconcileStatus && (
+                        <div className="text-xs text-vault-text-muted space-y-1 mb-3">
+                          <p>
+                            {t('settings.reconcileLastRun', {
+                              time: new Date(reconcileStatus.completed_at).toLocaleString(),
+                            })}
+                          </p>
+                          <div className="flex gap-4">
+                            <span>
+                              {t('settings.reconcileRemovedImages')}:{' '}
+                              {reconcileStatus.removed_images}
+                            </span>
+                            <span>
+                              {t('settings.reconcileRemovedGalleries')}:{' '}
+                              {reconcileStatus.removed_galleries}
+                            </span>
+                            <span>
+                              {t('settings.reconcileOrphanBlobs')}:{' '}
+                              {reconcileStatus.orphan_blobs_cleaned}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                    {reconcileStatus?.status === 'never_run' && (
+                      <p className="text-xs text-vault-text-muted mb-3">
+                        {t('settings.reconcileNeverRun')}
+                      </p>
+                    )}
+                    <button
+                      onClick={handleReconcile}
+                      disabled={reconcileRunning}
+                      className="px-3 py-1.5 bg-vault-accent/20 border border-vault-accent/30 text-vault-accent rounded text-sm hover:bg-vault-accent/30 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+                    >
+                      {reconcileRunning
+                        ? t('settings.reconcileRunning')
+                        : t('settings.reconcileRun')}
+                    </button>
+                  </div>
+
+                  <button
+                    onClick={handleLoadSystem}
+                    className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+                  >
+                    {t('settings.refresh')}
+                  </button>
                 </div>
               )}
             </div>
+          )}
+        </div>
 
-            {openSections.has('blockedTags') && (
-              <div className="px-5 pb-5 border-t border-vault-border">
-                <p className="text-xs text-vault-text-muted mt-4 mb-3">
-                  {t('settings.tagBlockingDesc')}
-                </p>
+        {/* ── Security ── */}
+        <div className="bg-vault-card border border-vault-border rounded-lg overflow-hidden">
+          <SectionHeader
+            title={t('settings.security')}
+            sectionKey="security"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('security') && (
+            <div className="px-5 pb-5 space-y-1 divide-y divide-vault-border">
+              <ToggleRow
+                label={t('settings.csrfProtection')}
+                description={t('settings.csrfDesc')}
+                checked={features.csrf_enabled ?? true}
+                onChange={(v) => handleFeatureToggle('csrf_enabled', v)}
+                disabled={featuresLoading}
+              />
+              <ToggleRow
+                label={t('settings.rateLimiting')}
+                description={t('settings.rateLimitDesc')}
+                checked={features.rate_limit_enabled ?? true}
+                onChange={(v) => handleFeatureToggle('rate_limit_enabled', v)}
+                disabled={featuresLoading}
+              />
+            </div>
+          )}
+        </div>
 
-                {/* Add new blocked tag */}
-                <div className="flex gap-2">
-                  <input
-                    type="text"
-                    value={newBlockedTag}
-                    onChange={(e) => setNewBlockedTag(e.target.value)}
-                    onKeyDown={(e) => e.key === 'Enter' && handleAddBlockedTag()}
-                    placeholder={t('settings.blockedTagPlaceholder')}
-                    className={inputClass + ' flex-1'}
-                  />
-                  <button
-                    onClick={handleAddBlockedTag}
-                    disabled={blockingTag || !newBlockedTag.trim()}
-                    className={btnPrimary + ' flex items-center gap-1.5 shrink-0'}
+        {/* ── Features ── */}
+        <div className="bg-vault-card border border-vault-border rounded-lg overflow-hidden">
+          <SectionHeader
+            title={t('settings.features')}
+            sectionKey="features"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('features') && (
+            <div className="px-5 pb-5">
+              {/* Service Toggles */}
+              <div className="space-y-1 divide-y divide-vault-border">
+                <ToggleRow
+                  label={t('settings.opdsServer')}
+                  description={t('settings.opdsDesc')}
+                  checked={features.opds_enabled ?? true}
+                  onChange={(v) => handleFeatureToggle('opds_enabled', v)}
+                  disabled={featuresLoading}
+                />
+                <ToggleRow
+                  label={t('settings.externalApi')}
+                  description={t('settings.externalApiDesc')}
+                  checked={features.external_api_enabled ?? true}
+                  onChange={(v) => handleFeatureToggle('external_api_enabled', v)}
+                  disabled={featuresLoading}
+                />
+                <ToggleRow
+                  label={t('settings.aiTagging')}
+                  description={t('settings.aiTaggingToggleDesc')}
+                  checked={features.ai_tagging_enabled ?? false}
+                  onChange={(v) => handleFeatureToggle('ai_tagging_enabled', v)}
+                  disabled={featuresLoading}
+                />
+                <ToggleRow
+                  label={t('settings.tagTranslation')}
+                  description={t('settings.tagTranslationDesc')}
+                  checked={features.tag_translation_enabled ?? true}
+                  onChange={(v) => handleFeatureToggle('tag_translation_enabled', v)}
+                  disabled={featuresLoading}
+                />
+              </div>
+
+              {/* Trash */}
+              <h3 className="text-xs text-vault-text-muted uppercase tracking-wide mt-5 mb-2">
+                {t('settings.trashSection')}
+              </h3>
+              <div className="space-y-1 divide-y divide-vault-border">
+                <ToggleRow
+                  label={t('settings.trashEnabled')}
+                  description={t('settings.trashEnabledDesc')}
+                  checked={features.trash_enabled ?? true}
+                  onChange={handleTrashToggle}
+                  disabled={featuresLoading}
+                />
+                {(features.trash_enabled ?? true) && (
+                  <div className="flex items-center justify-between py-2">
+                    <div>
+                      <p className="text-sm text-vault-text">{t('settings.trashRetentionDays')}</p>
+                      <p className="text-xs text-vault-text-muted">
+                        {t('settings.trashRetentionDaysDesc')}
+                      </p>
+                    </div>
+                    <input
+                      type="number"
+                      min={1}
+                      max={365}
+                      value={trashRetentionDays}
+                      onChange={(e) => handleTrashRetentionChange(Number(e.target.value))}
+                      className="w-20 text-right rounded-lg border border-vault-border bg-vault-input px-2 py-1.5 text-sm text-vault-text"
+                    />
+                  </div>
+                )}
+              </div>
+
+              {/* Download Sources */}
+              <h3 className="text-xs text-vault-text-muted uppercase tracking-wide mt-5 mb-2">
+                {t('settings.downloadSources')}
+              </h3>
+              <div className="space-y-1 divide-y divide-vault-border">
+                <ToggleRow
+                  label={t('settings.downloadEh')}
+                  description={t('settings.downloadEhDesc')}
+                  checked={features.download_eh_enabled ?? true}
+                  onChange={(v) => handleFeatureToggle('download_eh_enabled', v)}
+                  disabled={featuresLoading}
+                />
+                <ToggleRow
+                  label={t('settings.downloadPixiv')}
+                  description={t('settings.downloadPixivDesc')}
+                  checked={features.download_pixiv_enabled ?? true}
+                  onChange={(v) => handleFeatureToggle('download_pixiv_enabled', v)}
+                  disabled={featuresLoading}
+                />
+                <ToggleRow
+                  label={t('settings.downloadGalleryDl')}
+                  description={t('settings.downloadGalleryDlDesc')}
+                  checked={features.download_gallery_dl_enabled ?? true}
+                  onChange={(v) => handleFeatureToggle('download_gallery_dl_enabled', v)}
+                  disabled={featuresLoading}
+                />
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Log Levels ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.logLevels')}
+            sectionKey="logLevels"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('logLevels') && (
+            <div className="px-5 pb-5 border-t border-vault-border space-y-4">
+              <p className="text-xs text-vault-text-muted mt-4">{t('settings.logLevelDesc')}</p>
+              {[
+                { key: 'api', label: t('settings.logLevelApi') },
+                { key: 'worker', label: t('settings.logLevelWorker') },
+              ].map(({ key, label }) => (
+                <div key={key} className="flex items-center justify-between py-2">
+                  <span className="text-sm text-vault-text">{label}</span>
+                  <select
+                    value={logLevels[key] ?? 'INFO'}
+                    onChange={async (e) => {
+                      const level = e.target.value
+                      try {
+                        await api.logs.setLevel(key, level)
+                        setLogLevels((prev) => ({ ...prev, [key]: level }))
+                        toast.success(t('settings.logLevelUpdated'))
+                      } catch {
+                        toast.error(t('common.error'))
+                      }
+                    }}
+                    className="px-3 py-1.5 text-sm bg-vault-input border border-vault-border rounded text-vault-text"
                   >
-                    <Plus size={14} />
-                    {blockingTag ? t('settings.saving') : t('settings.addBlockedTag')}
+                    {['DEBUG', 'INFO', 'WARNING', 'ERROR', 'CRITICAL'].map((lvl) => (
+                      <option key={lvl} value={lvl}>
+                        {lvl}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+              ))}
+              <p className="text-[10px] text-vault-text-muted italic">
+                {t('settings.logLevelNginxHint')}
+              </p>
+            </div>
+          )}
+        </div>
+
+        {/* ── Worker Recovery ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.workerRecovery')}
+            sectionKey="workerRecovery"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('workerRecovery') && (
+            <div className="px-5 pb-5 border-t border-vault-border space-y-4">
+              <p className="text-xs text-vault-text-muted mt-4">
+                {t('settings.workerRecoveryDesc')}
+              </p>
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 min-w-0 pr-4">
+                  <p className="text-sm text-vault-text">{t('settings.recoveryRunning')}</p>
+                  <p className="text-xs text-vault-text-muted mt-0.5">
+                    {t('settings.recoveryRunningDesc')}
+                  </p>
+                </div>
+                <select
+                  value={recoveryStrategy.running}
+                  onChange={handleRecoveryChange('running')}
+                  className="px-3 py-1.5 text-sm bg-vault-input border border-vault-border rounded text-vault-text"
+                >
+                  <option value="auto_retry">{t('settings.recoveryAutoRetry')}</option>
+                  <option value="mark_failed">{t('settings.recoveryMarkFailed')}</option>
+                </select>
+              </div>
+              <div className="flex items-center justify-between py-2">
+                <div className="flex-1 min-w-0 pr-4">
+                  <p className="text-sm text-vault-text">{t('settings.recoveryPaused')}</p>
+                  <p className="text-xs text-vault-text-muted mt-0.5">
+                    {t('settings.recoveryPausedDesc')}
+                  </p>
+                </div>
+                <select
+                  value={recoveryStrategy.paused}
+                  onChange={handleRecoveryChange('paused')}
+                  className="px-3 py-1.5 text-sm bg-vault-input border border-vault-border rounded text-vault-text"
+                >
+                  <option value="keep_paused">{t('settings.recoveryKeepPaused')}</option>
+                  <option value="auto_retry">{t('settings.recoveryAutoRetry')}</option>
+                  <option value="mark_failed">{t('settings.recoveryMarkFailed')}</option>
+                </select>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Rate Limits ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.rateLimits')}
+            sectionKey="rateLimits"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('rateLimits') && <RateLimitsSection />}
+        </div>
+
+        {/* ── Browse Settings ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.browse')}
+            sectionKey="browse"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('browse') && <BrowseSettings />}
+        </div>
+
+        {/* ── Bottom Tab Bar ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.bottomTab')}
+            sectionKey="bottomTab"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('bottomTab') && <BottomTabConfig />}
+        </div>
+
+        {/* ── Dashboard Quick Links ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.dashboardLinks')}
+            sectionKey="dashboardLinks"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('dashboardLinks') && <DashboardLinksConfig />}
+        </div>
+
+        {/* ── Blocked Tags ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <SectionHeader
+                title={t('settings.blockedTags')}
+                sectionKey="blockedTags"
+                openSections={openSections}
+                onToggle={toggleSection}
+              />
+            </div>
+            {blockedTags.length > 0 && (
+              <div className="pr-5">
+                <span className="inline-flex items-center gap-1 text-xs text-vault-text-muted">
+                  <Tag size={12} />
+                  {blockedTags.length}
+                </span>
+              </div>
+            )}
+          </div>
+
+          {openSections.has('blockedTags') && (
+            <div className="px-5 pb-5 border-t border-vault-border">
+              <p className="text-xs text-vault-text-muted mt-4 mb-3">
+                {t('settings.tagBlockingDesc')}
+              </p>
+
+              {/* Add new blocked tag */}
+              <div className="flex gap-2">
+                <input
+                  type="text"
+                  value={newBlockedTag}
+                  onChange={(e) => setNewBlockedTag(e.target.value)}
+                  onKeyDown={(e) => e.key === 'Enter' && handleAddBlockedTag()}
+                  placeholder={t('settings.blockedTagPlaceholder')}
+                  className={inputClass + ' flex-1'}
+                />
+                <button
+                  onClick={handleAddBlockedTag}
+                  disabled={blockingTag || !newBlockedTag.trim()}
+                  className={btnPrimary + ' flex items-center gap-1.5 shrink-0'}
+                >
+                  <Plus size={14} />
+                  {blockingTag ? t('settings.saving') : t('settings.addBlockedTag')}
+                </button>
+              </div>
+
+              {/* Blocked tag list */}
+              <div className="mt-4">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-vault-text-muted uppercase tracking-wide">
+                    {t('settings.blockedTags')}
+                  </p>
+                  <button
+                    onClick={handleLoadBlockedTags}
+                    disabled={blockedTagsLoading}
+                    className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+                  >
+                    {blockedTagsLoading ? t('settings.loading') : t('settings.refresh')}
                   </button>
                 </div>
 
-                {/* Blocked tag list */}
-                <div className="mt-4">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide">
-                      {t('settings.blockedTags')}
-                    </p>
-                    <button
-                      onClick={handleLoadBlockedTags}
-                      disabled={blockedTagsLoading}
-                      className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
-                    >
-                      {blockedTagsLoading ? t('settings.loading') : t('settings.refresh')}
-                    </button>
+                {blockedTagsLoading && blockedTags.length === 0 ? (
+                  <div className="flex justify-center py-4">
+                    <LoadingSpinner />
                   </div>
-
-                  {blockedTagsLoading && blockedTags.length === 0 ? (
-                    <div className="flex justify-center py-4">
-                      <LoadingSpinner />
-                    </div>
-                  ) : blockedTags.length === 0 ? (
-                    <p className="text-xs text-vault-text-muted py-2">
-                      {t('settings.noBlockedTags')}
-                    </p>
-                  ) : (
-                    <div className="flex flex-wrap gap-2">
-                      {blockedTags.map((bt) => (
-                        <div
-                          key={bt.id}
-                          className="inline-flex items-center gap-1.5 bg-vault-input border border-vault-border rounded-full px-3 py-1 text-sm text-vault-text"
-                        >
-                          <span className="text-vault-text-muted text-xs">{bt.namespace}:</span>
-                          <span>{bt.name}</span>
-                          <button
-                            onClick={() => handleRemoveBlockedTag(bt.id)}
-                            disabled={removingBlockedTagId === bt.id}
-                            className="ml-0.5 text-vault-text-muted hover:text-red-400 transition-colors disabled:opacity-40"
-                            title={t('settings.unblock')}
-                          >
-                            {removingBlockedTagId === bt.id ? (
-                              <span className="text-[10px]">...</span>
-                            ) : (
-                              <X size={12} />
-                            )}
-                          </button>
-                        </div>
-                      ))}
-                    </div>
-                  )}
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── AI Tagging ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <SectionHeader
-              title={t('settings.aiTaggingSection')}
-              sectionKey="aiTagging"
-              openSections={openSections}
-              onToggle={toggleSection}
-            />
-            {openSections.has('aiTagging') && (
-              <AiTaggingSection />
-            )}
-          </div>
-
-
-          {/* ── Schedule ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <SectionHeader
-                  title={t('settings.tasks')}
-                  sectionKey="schedule"
-                  openSections={openSections}
-                  onToggle={toggleSection}
-                />
-              </div>
-              <div className="pr-5">
-                <CalendarClock size={14} className="text-vault-text-muted" />
-              </div>
-            </div>
-            {openSections.has('schedule') && <ScheduledTasksSection />}
-          </div>
-
-          {/* ── Reader Settings ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <SectionHeader
-                  title={t('settings.reader')}
-                  sectionKey="reader"
-                  openSections={openSections}
-                  onToggle={toggleSection}
-                />
-              </div>
-              <div className="pr-5">
-                <BookOpen size={14} className="text-vault-text-muted" />
-              </div>
-            </div>
-            {openSections.has('reader') && (
-              <ReaderSettingsSection
-                onForceRerender={() => {
-                  setOpenSections((prev) => {
-                    const next = new Set(prev)
-                    next.delete('reader')
-                    return next
-                  })
-                  setTimeout(() => setOpenSections((prev) => new Set([...prev, 'reader'])), 0)
-                }}
-              />
-            )}
-          </div>
-
-          {/* ── Browser Cache ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <SectionHeader
-              title={t('settings.browserCache')}
-              sectionKey="browserCache"
-              openSections={openSections}
-              onToggle={toggleSection}
-            />
-            {openSections.has('browserCache') && (
-              <div className="px-5 pb-5 border-t border-vault-border">
-                <p className="text-xs text-vault-text-muted mt-4 mb-4">
-                  {t('settings.browserCacheDesc')}
-                </p>
-
-                <div className="space-y-4">
-                  {/* Media Cache TTL */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-vault-text">{t('settings.mediaCacheTTL')}</p>
-                      <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.mediaCacheTTLDesc')}</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={swCacheConfig.mediaCacheTTLHours}
-                        onChange={(e) => handleSWCacheChange('mediaCacheTTLHours', Number(e.target.value))}
-                        onBlur={handleSWCacheBlur}
-                        className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
-                      />
-                      <span className="text-xs text-vault-text-muted w-8">{t('settings.hours')}</span>
-                    </div>
-                  </div>
-
-                  {/* Media Cache Size */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-vault-text">{t('settings.mediaCacheSizeLimit')}</p>
-                      <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.mediaCacheSizeLimitDesc')}</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <input
-                        type="number"
-                        min={0}
-                        step={256}
-                        value={swCacheConfig.mediaCacheSizeMB}
-                        onChange={(e) => handleSWCacheChange('mediaCacheSizeMB', Number(e.target.value))}
-                        onBlur={handleSWCacheBlur}
-                        className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
-                      />
-                      <span className="text-xs text-vault-text-muted w-8">{t('settings.mb')}</span>
-                    </div>
-                  </div>
-
-                  {/* Page Cache TTL */}
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <p className="text-sm text-vault-text">{t('settings.pageCacheTTL')}</p>
-                      <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.pageCacheTTLDesc')}</p>
-                    </div>
-                    <div className="flex items-center gap-2 shrink-0">
-                      <input
-                        type="number"
-                        min={0}
-                        step={1}
-                        value={swCacheConfig.pageCacheTTLHours}
-                        onChange={(e) => handleSWCacheChange('pageCacheTTLHours', Number(e.target.value))}
-                        onBlur={handleSWCacheBlur}
-                        className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
-                      />
-                      <span className="text-xs text-vault-text-muted w-8">{t('settings.hours')}</span>
-                    </div>
-                  </div>
-
-                  {/* Clear browser cache */}
-                  <div className="pt-3 border-t border-vault-border/50">
-                    <button
-                      onClick={handleClearBrowserCache}
-                      className="px-4 py-2 bg-red-600/20 border border-red-500/30 text-red-400 hover:bg-red-600/30 rounded text-sm font-medium transition-colors"
-                    >
-                      {t('settings.clearBrowserCache')}
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </div>
-
-          {/* ── API Tokens ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <div className="flex items-center justify-between">
-              <div className="flex-1">
-                <SectionHeader
-                  title={t('settings.apiTokensSection')}
-                  sectionKey="apiTokens"
-                  openSections={openSections}
-                  onToggle={toggleSection}
-                />
-              </div>
-              <div className="pr-5">
-                <span className="inline-flex items-center gap-1 text-xs text-vault-text-muted">
-                  <Key size={12} />
-                  {apiTokens.length > 0
-                    ? `${apiTokens.length} token${apiTokens.length > 1 ? 's' : ''}`
-                    : ''}
-                </span>
-              </div>
-            </div>
-
-            {openSections.has('apiTokens') && (
-              <div className="px-5 pb-5 border-t border-vault-border">
-                {/* Create new token */}
-                <div className="mt-4">
-                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                    {t('settings.createToken')}
+                ) : blockedTags.length === 0 ? (
+                  <p className="text-xs text-vault-text-muted py-2">
+                    {t('settings.noBlockedTags')}
                   </p>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">{t('settings.tokenName')}</label>
-                      <input
-                        type="text"
-                        value={newTokenName}
-                        onChange={(e) => setNewTokenName(e.target.value)}
-                        placeholder={t('settings.tokenNamePlaceholder')}
-                        onKeyDown={(e) => e.key === 'Enter' && handleCreateToken()}
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">
-                        {t('settings.expiresIn')}
-                      </label>
-                      <select
-                        value={newTokenExpiry}
-                        onChange={(e) => setNewTokenExpiry(e.target.value)}
-                        className={inputClass}
+                ) : (
+                  <div className="flex flex-wrap gap-2">
+                    {blockedTags.map((bt) => (
+                      <div
+                        key={bt.id}
+                        className="inline-flex items-center gap-1.5 bg-vault-input border border-vault-border rounded-full px-3 py-1 text-sm text-vault-text"
                       >
-                        <option value="">{t('settings.never')}</option>
-                        <option value="7">{t('settings.days7')}</option>
-                        <option value="30">{t('settings.days30')}</option>
-                        <option value="90">{t('settings.days90')}</option>
-                        <option value="365">{t('settings.year1')}</option>
-                      </select>
-                    </div>
-                    <button
-                      onClick={handleCreateToken}
-                      disabled={tokenCreating || !newTokenName.trim()}
-                      className={btnPrimary}
-                    >
-                      {tokenCreating ? t('settings.creating') : t('settings.createToken')}
-                    </button>
+                        <span className="text-vault-text-muted text-xs">{bt.namespace}:</span>
+                        <span>{bt.name}</span>
+                        <button
+                          onClick={() => handleRemoveBlockedTag(bt.id)}
+                          disabled={removingBlockedTagId === bt.id}
+                          className="ml-0.5 text-vault-text-muted hover:text-red-400 transition-colors disabled:opacity-40"
+                          title={t('settings.unblock')}
+                        >
+                          {removingBlockedTagId === bt.id ? (
+                            <span className="text-[10px]">...</span>
+                          ) : (
+                            <X size={12} />
+                          )}
+                        </button>
+                      </div>
+                    ))}
                   </div>
-                </div>
+                )}
+              </div>
+            </div>
+          )}
+        </div>
 
-                {/* Token list */}
-                <div className="mt-5 pt-4 border-t border-vault-border">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide">
-                      {t('settings.activeTokens')}
+        {/* ── AI Tagging ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.aiTaggingSection')}
+            sectionKey="aiTagging"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('aiTagging') && <AiTaggingSection />}
+        </div>
+
+        {/* ── Schedule ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <SectionHeader
+                title={t('settings.tasks')}
+                sectionKey="schedule"
+                openSections={openSections}
+                onToggle={toggleSection}
+              />
+            </div>
+            <div className="pr-5">
+              <CalendarClock size={14} className="text-vault-text-muted" />
+            </div>
+          </div>
+          {openSections.has('schedule') && <ScheduledTasksSection />}
+        </div>
+
+        {/* ── Reader Settings ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <SectionHeader
+                title={t('settings.reader')}
+                sectionKey="reader"
+                openSections={openSections}
+                onToggle={toggleSection}
+              />
+            </div>
+            <div className="pr-5">
+              <BookOpen size={14} className="text-vault-text-muted" />
+            </div>
+          </div>
+          {openSections.has('reader') && (
+            <ReaderSettingsSection
+              onForceRerender={() => {
+                setOpenSections((prev) => {
+                  const next = new Set(prev)
+                  next.delete('reader')
+                  return next
+                })
+                setTimeout(() => setOpenSections((prev) => new Set([...prev, 'reader'])), 0)
+              }}
+            />
+          )}
+        </div>
+
+        {/* ── Browser Cache ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.browserCache')}
+            sectionKey="browserCache"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('browserCache') && (
+            <div className="px-5 pb-5 border-t border-vault-border">
+              <p className="text-xs text-vault-text-muted mt-4 mb-4">
+                {t('settings.browserCacheDesc')}
+              </p>
+
+              <div className="space-y-4">
+                {/* Media Cache TTL */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-vault-text">{t('settings.mediaCacheTTL')}</p>
+                    <p className="text-xs text-vault-text-muted mt-0.5">
+                      {t('settings.mediaCacheTTLDesc')}
                     </p>
-                    <button
-                      onClick={handleLoadApiTokens}
-                      disabled={apiTokensLoading}
-                      className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
-                    >
-                      {apiTokensLoading ? t('settings.loading') : t('settings.refresh')}
-                    </button>
                   </div>
-
-                  {apiTokensLoading && apiTokens.length === 0 ? (
-                    <div className="flex justify-center py-4">
-                      <LoadingSpinner />
-                    </div>
-                  ) : apiTokens.length === 0 ? (
-                    <p className="text-xs text-vault-text-muted py-3">{t('settings.noTokens')}</p>
-                  ) : (
-                    <div className="space-y-2">
-                      {apiTokens.map((tk) => {
-                        const isExpired = tk.expires_at && new Date(tk.expires_at) < new Date()
-                        return (
-                          <div
-                            key={tk.id}
-                            className={`bg-vault-input border rounded-lg px-3 py-2.5 ${
-                              isExpired ? 'border-red-700/50 opacity-60' : 'border-vault-border'
-                            }`}
-                          >
-                            <div className="flex items-start justify-between gap-2">
-                              <div className="min-w-0 flex-1">
-                                <div className="flex items-center gap-2">
-                                  <span className="text-sm text-vault-text font-medium">
-                                    {tk.name || t('settings.unnamed')}
-                                  </span>
-                                  {isExpired && (
-                                    <span className="text-[10px] bg-red-900/40 text-red-400 px-1.5 py-0.5 rounded">
-                                      {t('settings.tokenExpired')}
-                                    </span>
-                                  )}
-                                </div>
-                                {/* Token value — raw token after creation, prefix after list reload */}
-                                {(tk.token || tk.token_prefix) && (
-                                  <div className="flex items-center gap-1.5 mt-1.5">
-                                    <code className="flex-1 text-xs text-vault-text-secondary bg-black/20 rounded px-2 py-1 font-mono break-all select-all">
-                                      {tk.token ?? `${tk.token_prefix}...`}
-                                    </code>
-                                    {tk.token && (
-                                      <button
-                                        onClick={() => {
-                                          navigator.clipboard.writeText(tk.token!)
-                                          toast.success(t('settings.copied'))
-                                        }}
-                                        className="px-1.5 py-1 text-vault-text-muted hover:text-vault-text transition-colors shrink-0"
-                                        title="Copy"
-                                      >
-                                        <Copy size={12} />
-                                      </button>
-                                    )}
-                                  </div>
-                                )}
-                                <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-vault-text-muted">
-                                  {tk.created_at && (
-                                    <span>
-                                      Created {new Date(tk.created_at).toLocaleDateString()}
-                                    </span>
-                                  )}
-                                  {tk.last_used_at ? (
-                                    <span>
-                                      Last used {new Date(tk.last_used_at).toLocaleDateString()}
-                                    </span>
-                                  ) : (
-                                    <span>Never used</span>
-                                  )}
-                                  {tk.expires_at && (
-                                    <span>
-                                      {isExpired ? 'Expired' : 'Expires'}{' '}
-                                      {new Date(tk.expires_at).toLocaleDateString()}
-                                    </span>
-                                  )}
-                                  {!tk.expires_at && <span>No expiration</span>}
-                                </div>
-                              </div>
-                              <button
-                                onClick={() => handleDeleteToken(tk.id)}
-                                disabled={deletingTokenId === tk.id}
-                                className="text-xs text-red-400/70 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
-                              >
-                                {deletingTokenId === tk.id ? '...' : 'Revoke'}
-                              </button>
-                            </div>
-                          </div>
-                        )
-                      })}
-                    </div>
-                  )}
-                </div>
-
-                {/* RSS Feeds */}
-                <div className="mt-3 px-3 py-2 bg-vault-bg rounded border border-vault-border">
-                  <p className="text-xs text-vault-text-muted mb-1">{t('rss.recentFeed')}</p>
-                  <div className="flex items-center gap-2">
-                    <code className="text-xs text-vault-text-secondary flex-1 truncate">
-                      {typeof window !== 'undefined' ? window.location.origin : ''}/api/rss/recent?token=YOUR_TOKEN
-                    </code>
-                    <button
-                      onClick={() => {
-                        navigator.clipboard.writeText(
-                          `${window.location.origin}/api/rss/recent?token=YOUR_TOKEN`
-                        )
-                        toast.success(t('rss.copied'))
-                      }}
-                      className="p-1 rounded text-vault-text-muted hover:text-vault-accent transition-colors shrink-0"
-                      title={t('rss.copyUrl')}
-                    >
-                      <Copy size={14} />
-                    </button>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={swCacheConfig.mediaCacheTTLHours}
+                      onChange={(e) =>
+                        handleSWCacheChange('mediaCacheTTLHours', Number(e.target.value))
+                      }
+                      onBlur={handleSWCacheBlur}
+                      className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
+                    />
+                    <span className="text-xs text-vault-text-muted w-8">{t('settings.hours')}</span>
                   </div>
                 </div>
 
-                {/* API usage info */}
-                <div className="mt-5 pt-4 border-t border-vault-border">
-                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                    Usage
-                  </p>
-                  <div className="bg-vault-input border border-vault-border rounded-lg p-3">
-                    <p className="text-xs text-vault-text-secondary mb-2">
-                      Use the{' '}
-                      <code className="bg-black/30 px-1 py-0.5 rounded text-vault-text-muted">
-                        X-API-Token
-                      </code>{' '}
-                      header to authenticate external API requests.
+                {/* Media Cache Size */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-vault-text">{t('settings.mediaCacheSizeLimit')}</p>
+                    <p className="text-xs text-vault-text-muted mt-0.5">
+                      {t('settings.mediaCacheSizeLimitDesc')}
                     </p>
-                    <p className="text-xs text-vault-text-muted mb-1">Available endpoints:</p>
-                    <div className="space-y-0.5 font-mono text-[11px] text-vault-text-muted">
-                      <p>
-                        <span className="text-green-400">GET</span> /api/external/v1/status
-                      </p>
-                      <p>
-                        <span className="text-green-400">GET</span> /api/external/v1/galleries
-                      </p>
-                      <p>
-                        <span className="text-green-400">GET</span> /api/external/v1/galleries/:id
-                      </p>
-                      <p>
-                        <span className="text-green-400">GET</span>{' '}
-                        /api/external/v1/galleries/:id/images
-                      </p>
-                      <p>
-                        <span className="text-green-400">GET</span> /api/external/v1/tags
-                      </p>
-                      <p>
-                        <span className="text-blue-400">POST</span>{' '}
-                        /api/external/v1/download?url=...
-                      </p>
-                    </div>
                   </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="number"
+                      min={0}
+                      step={256}
+                      value={swCacheConfig.mediaCacheSizeMB}
+                      onChange={(e) =>
+                        handleSWCacheChange('mediaCacheSizeMB', Number(e.target.value))
+                      }
+                      onBlur={handleSWCacheBlur}
+                      className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
+                    />
+                    <span className="text-xs text-vault-text-muted w-8">{t('settings.mb')}</span>
+                  </div>
+                </div>
+
+                {/* Page Cache TTL */}
+                <div className="flex items-center justify-between">
+                  <div>
+                    <p className="text-sm text-vault-text">{t('settings.pageCacheTTL')}</p>
+                    <p className="text-xs text-vault-text-muted mt-0.5">
+                      {t('settings.pageCacheTTLDesc')}
+                    </p>
+                  </div>
+                  <div className="flex items-center gap-2 shrink-0">
+                    <input
+                      type="number"
+                      min={0}
+                      step={1}
+                      value={swCacheConfig.pageCacheTTLHours}
+                      onChange={(e) =>
+                        handleSWCacheChange('pageCacheTTLHours', Number(e.target.value))
+                      }
+                      onBlur={handleSWCacheBlur}
+                      className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none focus:border-vault-accent text-right"
+                    />
+                    <span className="text-xs text-vault-text-muted w-8">{t('settings.hours')}</span>
+                  </div>
+                </div>
+
+                {/* Clear browser cache */}
+                <div className="pt-3 border-t border-vault-border/50">
+                  <button
+                    onClick={handleClearBrowserCache}
+                    className="px-4 py-2 bg-red-600/20 border border-red-500/30 text-red-400 hover:bg-red-600/30 rounded text-sm font-medium transition-colors"
+                  >
+                    {t('settings.clearBrowserCache')}
+                  </button>
                 </div>
               </div>
-            )}
+            </div>
+          )}
+        </div>
+
+        {/* ── API Tokens ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <div className="flex items-center justify-between">
+            <div className="flex-1">
+              <SectionHeader
+                title={t('settings.apiTokensSection')}
+                sectionKey="apiTokens"
+                openSections={openSections}
+                onToggle={toggleSection}
+              />
+            </div>
+            <div className="pr-5">
+              <span className="inline-flex items-center gap-1 text-xs text-vault-text-muted">
+                <Key size={12} />
+                {apiTokens.length > 0
+                  ? `${apiTokens.length} token${apiTokens.length > 1 ? 's' : ''}`
+                  : ''}
+              </span>
+            </div>
           </div>
 
-          {/* ── Account / Logout ── */}
-          <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-            <SectionHeader
-              title={t('settings.account')}
-              sectionKey="account"
-              openSections={openSections}
-              onToggle={toggleSection}
-            />
-            {openSections.has('account') && (
-              <div className="px-5 pb-5 border-t border-vault-border">
-                {/* Avatar */}
-                {profileLoaded && (
-                  <div className="mt-4">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-3">
-                      {t('settings.avatar')}
-                    </p>
-                    <div className="flex items-start gap-4">
-                      {}
-                      <img
-                        src={avatarUrl}
-                        alt=""
-                        className="w-16 h-16 rounded-full object-cover bg-vault-input shrink-0 border border-vault-border"
-                      />
-                      <div className="flex-1 space-y-3">
-                        {/* Style toggle */}
-                        <div className="flex bg-vault-input border border-vault-border rounded overflow-hidden">
-                          <button
-                            onClick={() => handleAvatarStyleChange('gravatar')}
-                            className={`flex-1 px-3 py-1.5 text-xs transition-colors ${avatarStyle === 'gravatar' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-                          >
-                            {t('settings.avatarGravatar')}
-                          </button>
-                          <button
-                            onClick={() => handleAvatarStyleChange('manual')}
-                            className={`flex-1 px-3 py-1.5 text-xs transition-colors ${avatarStyle === 'manual' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-                          >
-                            {t('settings.avatarCustom')}
-                          </button>
-                        </div>
-
-                        {avatarStyle === 'gravatar' ? (
-                          <p className="text-xs text-vault-text-muted">
-                            {t('settings.avatarGravatarDesc')}
-                          </p>
-                        ) : (
-                          <div className="space-y-2">
-                            <div className="flex gap-2">
-                              <label
-                                className={`${btnSecondary} cursor-pointer inline-flex items-center`}
-                              >
-                                {avatarUploading
-                                  ? t('settings.avatarUploading')
-                                  : t('settings.avatarUpload')}
-                                <input
-                                  type="file"
-                                  accept="image/*"
-                                  className="hidden"
-                                  disabled={avatarUploading}
-                                  onChange={(e) => {
-                                    const f = e.target.files?.[0]
-                                    if (f) handleAvatarUpload(f)
-                                    e.target.value = ''
-                                  }}
-                                />
-                              </label>
-                              <button onClick={handleAvatarRemove} className={btnSecondary}>
-                                {t('settings.avatarRemove')}
-                              </button>
-                            </div>
-                            <p className="text-xs text-vault-text-muted">
-                              {t('settings.avatarMaxSize')}
-                            </p>
-                          </div>
-                        )}
-                      </div>
-                    </div>
+          {openSections.has('apiTokens') && (
+            <div className="px-5 pb-5 border-t border-vault-border">
+              {/* Create new token */}
+              <div className="mt-4">
+                <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                  {t('settings.createToken')}
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-vault-text-muted mb-1">
+                      {t('settings.tokenName')}
+                    </label>
+                    <input
+                      type="text"
+                      value={newTokenName}
+                      onChange={(e) => setNewTokenName(e.target.value)}
+                      placeholder={t('settings.tokenNamePlaceholder')}
+                      onKeyDown={(e) => e.key === 'Enter' && handleCreateToken()}
+                      className={inputClass}
+                    />
                   </div>
-                )}
-
-                {/* Profile */}
-                {profileLoaded && (
-                  <div className="mt-4">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                      {t('settings.profile')}
-                    </p>
-                    <div className="space-y-3">
-                      <div>
-                        <label className="block text-xs text-vault-text-muted mb-1">
-                          {t('settings.username')}
-                        </label>
-                        <input
-                          type="text"
-                          value={profileUsername}
-                          disabled
-                          className={`${inputClass} opacity-60 cursor-not-allowed`}
-                        />
-                      </div>
-                      <div>
-                        <label className="block text-xs text-vault-text-muted mb-1">
-                          {t('settings.email')}
-                        </label>
-                        <div className="flex gap-2">
-                          <input
-                            type="email"
-                            value={profileEmailDraft}
-                            onChange={(e) => setProfileEmailDraft(e.target.value)}
-                            placeholder={t('settings.emailPlaceholder')}
-                            className={`${inputClass} flex-1`}
-                          />
-                          <button
-                            onClick={handleSaveEmail}
-                            disabled={emailSaving || profileEmailDraft === profileEmail}
-                            className={btnPrimary}
-                          >
-                            {emailSaving ? t('settings.saving') : t('settings.save')}
-                          </button>
-                        </div>
-                      </div>
-                    </div>
-                  </div>
-                )}
-
-                {/* Change Password */}
-                <div className="mt-5 pt-4 border-t border-vault-border">
-                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
-                    {t('settings.changePassword')}
-                  </p>
-                  <div className="space-y-3">
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">
-                        {t('settings.currentPassword')}
-                      </label>
-                      <input
-                        type="password"
-                        value={currentPw}
-                        onChange={(e) => setCurrentPw(e.target.value)}
-                        autoComplete="current-password"
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">
-                        {t('settings.newPassword')}
-                      </label>
-                      <input
-                        type="password"
-                        value={newPw}
-                        onChange={(e) => setNewPw(e.target.value)}
-                        autoComplete="new-password"
-                        className={inputClass}
-                      />
-                    </div>
-                    <div>
-                      <label className="block text-xs text-vault-text-muted mb-1">
-                        {t('settings.confirmNewPassword')}
-                      </label>
-                      <input
-                        type="password"
-                        value={confirmPw}
-                        onChange={(e) => setConfirmPw(e.target.value)}
-                        autoComplete="new-password"
-                        onKeyDown={(e) => e.key === 'Enter' && handleChangePassword()}
-                        className={inputClass}
-                      />
-                    </div>
-                    <button
-                      onClick={handleChangePassword}
-                      disabled={pwSaving || !currentPw || !newPw || !confirmPw}
-                      className={btnPrimary}
+                  <div>
+                    <label className="block text-xs text-vault-text-muted mb-1">
+                      {t('settings.expiresIn')}
+                    </label>
+                    <select
+                      value={newTokenExpiry}
+                      onChange={(e) => setNewTokenExpiry(e.target.value)}
+                      className={inputClass}
                     >
-                      {pwSaving ? t('settings.saving') : t('settings.update')}
-                    </button>
+                      <option value="">{t('settings.never')}</option>
+                      <option value="7">{t('settings.days7')}</option>
+                      <option value="30">{t('settings.days30')}</option>
+                      <option value="90">{t('settings.days90')}</option>
+                      <option value="365">{t('settings.year1')}</option>
+                    </select>
                   </div>
+                  <button
+                    onClick={handleCreateToken}
+                    disabled={tokenCreating || !newTokenName.trim()}
+                    className={btnPrimary}
+                  >
+                    {tokenCreating ? t('settings.creating') : t('settings.createToken')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Token list */}
+              <div className="mt-5 pt-4 border-t border-vault-border">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-vault-text-muted uppercase tracking-wide">
+                    {t('settings.activeTokens')}
+                  </p>
+                  <button
+                    onClick={handleLoadApiTokens}
+                    disabled={apiTokensLoading}
+                    className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+                  >
+                    {apiTokensLoading ? t('settings.loading') : t('settings.refresh')}
+                  </button>
                 </div>
 
-                {/* Active Sessions */}
-                <div className="mt-5 pt-4 border-t border-vault-border">
-                  <div className="flex items-center justify-between mb-2">
-                    <p className="text-xs text-vault-text-muted uppercase tracking-wide">
-                      {t('settings.activeSessions')}
-                    </p>
-                    <button
-                      onClick={handleLoadSessions}
-                      disabled={sessionsLoading}
-                      className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
-                    >
-                      {sessionsLoading ? t('settings.loading') : t('settings.refresh')}
-                    </button>
+                {apiTokensLoading && apiTokens.length === 0 ? (
+                  <div className="flex justify-center py-4">
+                    <LoadingSpinner />
                   </div>
-
-                  {sessionsLoading && sessions.length === 0 ? (
-                    <div className="flex justify-center py-4">
-                      <LoadingSpinner />
-                    </div>
-                  ) : (
-                    <div className="space-y-2">
-                      {sessions.map((s) => (
+                ) : apiTokens.length === 0 ? (
+                  <p className="text-xs text-vault-text-muted py-3">{t('settings.noTokens')}</p>
+                ) : (
+                  <div className="space-y-2">
+                    {apiTokens.map((tk) => {
+                      const isExpired = tk.expires_at && new Date(tk.expires_at) < new Date()
+                      return (
                         <div
-                          key={s.token_prefix}
+                          key={tk.id}
                           className={`bg-vault-input border rounded-lg px-3 py-2.5 ${
-                            s.is_current ? 'border-vault-accent/50' : 'border-vault-border'
+                            isExpired ? 'border-red-700/50 opacity-60' : 'border-vault-border'
                           }`}
                         >
                           <div className="flex items-start justify-between gap-2">
                             <div className="min-w-0 flex-1">
                               <div className="flex items-center gap-2">
-                                <span className="text-sm text-vault-text font-mono">
-                                  {s.token_prefix}...
+                                <span className="text-sm text-vault-text font-medium">
+                                  {tk.name || t('settings.unnamed')}
                                 </span>
-                                {s.is_current && (
-                                  <span className="text-[10px] bg-vault-accent/30 text-vault-accent px-1.5 py-0.5 rounded">
-                                    {t('settings.current')}
+                                {isExpired && (
+                                  <span className="text-[10px] bg-red-900/40 text-red-400 px-1.5 py-0.5 rounded">
+                                    {t('settings.tokenExpired')}
                                   </span>
                                 )}
                               </div>
-                              <p
-                                className="text-xs text-vault-text-muted mt-1 truncate"
-                                title={s.user_agent}
-                              >
-                                {s.user_agent || t('settings.unknownDevice')}
-                              </p>
-                              <div className="flex items-center gap-3 mt-1">
-                                <span className="text-xs text-vault-text-muted">{s.ip}</span>
-                                {s.created_at && (
-                                  <span className="text-xs text-vault-text-muted">
-                                    {new Date(s.created_at).toLocaleDateString()}
+                              {/* Token value — raw token after creation, prefix after list reload */}
+                              {(tk.token || tk.token_prefix) && (
+                                <div className="flex items-center gap-1.5 mt-1.5">
+                                  <code className="flex-1 text-xs text-vault-text-secondary bg-black/20 rounded px-2 py-1 font-mono break-all select-all">
+                                    {tk.token ?? `${tk.token_prefix}...`}
+                                  </code>
+                                  {tk.token && (
+                                    <button
+                                      onClick={() => {
+                                        navigator.clipboard.writeText(tk.token!)
+                                        toast.success(t('settings.copied'))
+                                      }}
+                                      className="px-1.5 py-1 text-vault-text-muted hover:text-vault-text transition-colors shrink-0"
+                                      title="Copy"
+                                    >
+                                      <Copy size={12} />
+                                    </button>
+                                  )}
+                                </div>
+                              )}
+                              <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-vault-text-muted">
+                                {tk.created_at && (
+                                  <span>
+                                    Created {new Date(tk.created_at).toLocaleDateString()}
                                   </span>
                                 )}
-                                <span className="text-xs text-vault-text-muted">
-                                  {t('settings.expiresIn')} {Math.ceil(s.ttl / 86400)}
-                                  {t('settings.days')}
-                                </span>
+                                {tk.last_used_at ? (
+                                  <span>
+                                    Last used {new Date(tk.last_used_at).toLocaleDateString()}
+                                  </span>
+                                ) : (
+                                  <span>Never used</span>
+                                )}
+                                {tk.expires_at && (
+                                  <span>
+                                    {isExpired ? 'Expired' : 'Expires'}{' '}
+                                    {new Date(tk.expires_at).toLocaleDateString()}
+                                  </span>
+                                )}
+                                {!tk.expires_at && <span>No expiration</span>}
                               </div>
                             </div>
-                            {!s.is_current && (
-                              <button
-                                onClick={() => handleRevokeSession(s.token_prefix)}
-                                disabled={revokingToken === s.token_prefix}
-                                className="text-xs text-red-400/70 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
-                              >
-                                {revokingToken === s.token_prefix ? '...' : t('settings.revoke')}
-                              </button>
-                            )}
+                            <button
+                              onClick={() => handleDeleteToken(tk.id)}
+                              disabled={deletingTokenId === tk.id}
+                              className="text-xs text-red-400/70 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
+                            >
+                              {deletingTokenId === tk.id ? '...' : 'Revoke'}
+                            </button>
                           </div>
                         </div>
-                      ))}
-                      {sessions.length === 0 && !sessionsLoading && (
-                        <p className="text-xs text-vault-text-muted py-2">
-                          {t('settings.noSessions')}
-                        </p>
-                      )}
-                    </div>
-                  )}
-                </div>
+                      )
+                    })}
+                  </div>
+                )}
+              </div>
 
-                <div className="mt-5 pt-4 border-t border-vault-border">
+              {/* RSS Feeds */}
+              <div className="mt-3 px-3 py-2 bg-vault-bg rounded border border-vault-border">
+                <p className="text-xs text-vault-text-muted mb-1">{t('rss.recentFeed')}</p>
+                <div className="flex items-center gap-2">
+                  <code className="text-xs text-vault-text-secondary flex-1 truncate">
+                    {typeof window !== 'undefined' ? window.location.origin : ''}
+                    /api/rss/recent?token=YOUR_TOKEN
+                  </code>
                   <button
-                    onClick={logout}
-                    className="px-4 py-2 bg-red-900/40 border border-red-700/50 hover:bg-red-900/60 text-red-400 rounded text-sm font-medium transition-colors"
+                    onClick={() => {
+                      navigator.clipboard.writeText(
+                        `${window.location.origin}/api/rss/recent?token=YOUR_TOKEN`,
+                      )
+                      toast.success(t('rss.copied'))
+                    }}
+                    className="p-1 rounded text-vault-text-muted hover:text-vault-accent transition-colors shrink-0"
+                    title={t('rss.copyUrl')}
                   >
-                    {t('settings.logOut')}
+                    <Copy size={14} />
                   </button>
                 </div>
               </div>
-            )}
-          </div>
+
+              {/* API usage info */}
+              <div className="mt-5 pt-4 border-t border-vault-border">
+                <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">Usage</p>
+                <div className="bg-vault-input border border-vault-border rounded-lg p-3">
+                  <p className="text-xs text-vault-text-secondary mb-2">
+                    Use the{' '}
+                    <code className="bg-black/30 px-1 py-0.5 rounded text-vault-text-muted">
+                      X-API-Token
+                    </code>{' '}
+                    header to authenticate external API requests.
+                  </p>
+                  <p className="text-xs text-vault-text-muted mb-1">Available endpoints:</p>
+                  <div className="space-y-0.5 font-mono text-[11px] text-vault-text-muted">
+                    <p>
+                      <span className="text-green-400">GET</span> /api/external/v1/status
+                    </p>
+                    <p>
+                      <span className="text-green-400">GET</span> /api/external/v1/galleries
+                    </p>
+                    <p>
+                      <span className="text-green-400">GET</span> /api/external/v1/galleries/:id
+                    </p>
+                    <p>
+                      <span className="text-green-400">GET</span>{' '}
+                      /api/external/v1/galleries/:id/images
+                    </p>
+                    <p>
+                      <span className="text-green-400">GET</span> /api/external/v1/tags
+                    </p>
+                    <p>
+                      <span className="text-blue-400">POST</span> /api/external/v1/download?url=...
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+          )}
+        </div>
+
+        {/* ── Account / Logout ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.account')}
+            sectionKey="account"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('account') && (
+            <div className="px-5 pb-5 border-t border-vault-border">
+              {/* Avatar */}
+              {profileLoaded && (
+                <div className="mt-4">
+                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-3">
+                    {t('settings.avatar')}
+                  </p>
+                  <div className="flex items-start gap-4">
+                    {}
+                    <img
+                      src={avatarUrl}
+                      alt=""
+                      className="w-16 h-16 rounded-full object-cover bg-vault-input shrink-0 border border-vault-border"
+                    />
+                    <div className="flex-1 space-y-3">
+                      {/* Style toggle */}
+                      <div className="flex bg-vault-input border border-vault-border rounded overflow-hidden">
+                        <button
+                          onClick={() => handleAvatarStyleChange('gravatar')}
+                          className={`flex-1 px-3 py-1.5 text-xs transition-colors ${avatarStyle === 'gravatar' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
+                        >
+                          {t('settings.avatarGravatar')}
+                        </button>
+                        <button
+                          onClick={() => handleAvatarStyleChange('manual')}
+                          className={`flex-1 px-3 py-1.5 text-xs transition-colors ${avatarStyle === 'manual' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
+                        >
+                          {t('settings.avatarCustom')}
+                        </button>
+                      </div>
+
+                      {avatarStyle === 'gravatar' ? (
+                        <p className="text-xs text-vault-text-muted">
+                          {t('settings.avatarGravatarDesc')}
+                        </p>
+                      ) : (
+                        <div className="space-y-2">
+                          <div className="flex gap-2">
+                            <label
+                              className={`${btnSecondary} cursor-pointer inline-flex items-center`}
+                            >
+                              {avatarUploading
+                                ? t('settings.avatarUploading')
+                                : t('settings.avatarUpload')}
+                              <input
+                                type="file"
+                                accept="image/*"
+                                className="hidden"
+                                disabled={avatarUploading}
+                                onChange={(e) => {
+                                  const f = e.target.files?.[0]
+                                  if (f) handleAvatarUpload(f)
+                                  e.target.value = ''
+                                }}
+                              />
+                            </label>
+                            <button onClick={handleAvatarRemove} className={btnSecondary}>
+                              {t('settings.avatarRemove')}
+                            </button>
+                          </div>
+                          <p className="text-xs text-vault-text-muted">
+                            {t('settings.avatarMaxSize')}
+                          </p>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Profile */}
+              {profileLoaded && (
+                <div className="mt-4">
+                  <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                    {t('settings.profile')}
+                  </p>
+                  <div className="space-y-3">
+                    <div>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        {t('settings.username')}
+                      </label>
+                      <input
+                        type="text"
+                        value={profileUsername}
+                        disabled
+                        className={`${inputClass} opacity-60 cursor-not-allowed`}
+                      />
+                    </div>
+                    <div>
+                      <label className="block text-xs text-vault-text-muted mb-1">
+                        {t('settings.email')}
+                      </label>
+                      <div className="flex gap-2">
+                        <input
+                          type="email"
+                          value={profileEmailDraft}
+                          onChange={(e) => setProfileEmailDraft(e.target.value)}
+                          placeholder={t('settings.emailPlaceholder')}
+                          className={`${inputClass} flex-1`}
+                        />
+                        <button
+                          onClick={handleSaveEmail}
+                          disabled={emailSaving || profileEmailDraft === profileEmail}
+                          className={btnPrimary}
+                        >
+                          {emailSaving ? t('settings.saving') : t('settings.save')}
+                        </button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+
+              {/* Change Password */}
+              <div className="mt-5 pt-4 border-t border-vault-border">
+                <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+                  {t('settings.changePassword')}
+                </p>
+                <div className="space-y-3">
+                  <div>
+                    <label className="block text-xs text-vault-text-muted mb-1">
+                      {t('settings.currentPassword')}
+                    </label>
+                    <input
+                      type="password"
+                      value={currentPw}
+                      onChange={(e) => setCurrentPw(e.target.value)}
+                      autoComplete="current-password"
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-vault-text-muted mb-1">
+                      {t('settings.newPassword')}
+                    </label>
+                    <input
+                      type="password"
+                      value={newPw}
+                      onChange={(e) => setNewPw(e.target.value)}
+                      autoComplete="new-password"
+                      className={inputClass}
+                    />
+                  </div>
+                  <div>
+                    <label className="block text-xs text-vault-text-muted mb-1">
+                      {t('settings.confirmNewPassword')}
+                    </label>
+                    <input
+                      type="password"
+                      value={confirmPw}
+                      onChange={(e) => setConfirmPw(e.target.value)}
+                      autoComplete="new-password"
+                      onKeyDown={(e) => e.key === 'Enter' && handleChangePassword()}
+                      className={inputClass}
+                    />
+                  </div>
+                  <button
+                    onClick={handleChangePassword}
+                    disabled={pwSaving || !currentPw || !newPw || !confirmPw}
+                    className={btnPrimary}
+                  >
+                    {pwSaving ? t('settings.saving') : t('settings.update')}
+                  </button>
+                </div>
+              </div>
+
+              {/* Active Sessions */}
+              <div className="mt-5 pt-4 border-t border-vault-border">
+                <div className="flex items-center justify-between mb-2">
+                  <p className="text-xs text-vault-text-muted uppercase tracking-wide">
+                    {t('settings.activeSessions')}
+                  </p>
+                  <button
+                    onClick={handleLoadSessions}
+                    disabled={sessionsLoading}
+                    className="text-xs text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+                  >
+                    {sessionsLoading ? t('settings.loading') : t('settings.refresh')}
+                  </button>
+                </div>
+
+                {sessionsLoading && sessions.length === 0 ? (
+                  <div className="flex justify-center py-4">
+                    <LoadingSpinner />
+                  </div>
+                ) : (
+                  <div className="space-y-2">
+                    {sessions.map((s) => (
+                      <div
+                        key={s.token_prefix}
+                        className={`bg-vault-input border rounded-lg px-3 py-2.5 ${
+                          s.is_current ? 'border-vault-accent/50' : 'border-vault-border'
+                        }`}
+                      >
+                        <div className="flex items-start justify-between gap-2">
+                          <div className="min-w-0 flex-1">
+                            <div className="flex items-center gap-2">
+                              <span className="text-sm text-vault-text font-mono">
+                                {s.token_prefix}...
+                              </span>
+                              {s.is_current && (
+                                <span className="text-[10px] bg-vault-accent/30 text-vault-accent px-1.5 py-0.5 rounded">
+                                  {t('settings.current')}
+                                </span>
+                              )}
+                            </div>
+                            <p
+                              className="text-xs text-vault-text-muted mt-1 truncate"
+                              title={s.user_agent}
+                            >
+                              {s.user_agent || t('settings.unknownDevice')}
+                            </p>
+                            <div className="flex items-center gap-3 mt-1">
+                              <span className="text-xs text-vault-text-muted">{s.ip}</span>
+                              {s.created_at && (
+                                <span className="text-xs text-vault-text-muted">
+                                  {new Date(s.created_at).toLocaleDateString()}
+                                </span>
+                              )}
+                              <span className="text-xs text-vault-text-muted">
+                                {t('settings.expiresIn')} {Math.ceil(s.ttl / 86400)}
+                                {t('settings.days')}
+                              </span>
+                            </div>
+                          </div>
+                          {!s.is_current && (
+                            <button
+                              onClick={() => handleRevokeSession(s.token_prefix)}
+                              disabled={revokingToken === s.token_prefix}
+                              className="text-xs text-red-400/70 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
+                            >
+                              {revokingToken === s.token_prefix ? '...' : t('settings.revoke')}
+                            </button>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+                    {sessions.length === 0 && !sessionsLoading && (
+                      <p className="text-xs text-vault-text-muted py-2">
+                        {t('settings.noSessions')}
+                      </p>
+                    )}
+                  </div>
+                )}
+              </div>
+
+              <div className="mt-5 pt-4 border-t border-vault-border">
+                <button
+                  onClick={logout}
+                  className="px-4 py-2 bg-red-900/40 border border-red-700/50 hover:bg-red-900/60 text-red-400 rounded text-sm font-medium transition-colors"
+                >
+                  {t('settings.logOut')}
+                </button>
+              </div>
+            </div>
+          )}
         </div>
       </div>
+    </div>
   )
 }

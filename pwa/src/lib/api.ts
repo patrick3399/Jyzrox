@@ -767,6 +767,24 @@ const settings = {
       method: 'POST',
       body: JSON.stringify({ unlocked }),
     }),
+
+  getRecoveryStrategy: () =>
+    apiFetch<{
+      running: 'auto_retry' | 'mark_failed'
+      paused: 'keep_paused' | 'auto_retry' | 'mark_failed'
+    }>('/api/settings/recovery-strategy'),
+
+  patchRecoveryStrategy: (data: {
+    running?: 'auto_retry' | 'mark_failed'
+    paused?: 'keep_paused' | 'auto_retry' | 'mark_failed'
+  }) =>
+    apiFetch<{
+      running: 'auto_retry' | 'mark_failed'
+      paused: 'keep_paused' | 'auto_retry' | 'mark_failed'
+    }>('/api/settings/recovery-strategy', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 }
 
 // ── History ───────────────────────────────────────────────────────────

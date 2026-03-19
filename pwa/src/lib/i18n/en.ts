@@ -223,6 +223,18 @@ const en: Record<string, string> = {
     'Galleries in trash are automatically deleted after this many days',
   'settings.trashDisableConfirm':
     'Disabling trash will permanently delete all galleries currently in trash. This cannot be undone. Continue?',
+  'settings.workerRecovery': 'Worker Recovery',
+  'settings.workerRecoveryDesc':
+    'Configure how the worker handles jobs that were interrupted by a restart.',
+  'settings.recoveryRunning': 'Running Jobs',
+  'settings.recoveryRunningDesc':
+    'Strategy for jobs that were actively running when the worker stopped.',
+  'settings.recoveryPaused': 'Paused Jobs',
+  'settings.recoveryPausedDesc': 'Strategy for jobs that were paused when the worker stopped.',
+  'settings.recoveryAutoRetry': 'Auto Retry',
+  'settings.recoveryMarkFailed': 'Mark Failed',
+  'settings.recoveryKeepPaused': 'Keep Paused',
+  'settings.recoveryUpdated': 'Recovery strategy updated',
   'settings.rateLimiting': 'Rate Limiting',
   'settings.rateLimitDesc': 'Protect login and API endpoints',
   'settings.refresh': 'Refresh',

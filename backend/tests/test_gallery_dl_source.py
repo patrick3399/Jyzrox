@@ -19,9 +19,25 @@ from tests.helpers import make_mock_site_config_svc
 
 @pytest.fixture(autouse=True)
 def mock_site_config_for_source():
-    """Mock SiteConfigService for all source.py download tests."""
+    """Mock SiteConfigService, Redis, and adaptive engine for all source.py download tests."""
     svc = make_mock_site_config_svc()
-    with patch("core.site_config.site_config_service", svc):
+    mock_pipeline = MagicMock()
+    mock_pipeline.get = MagicMock()
+    mock_pipeline.execute = AsyncMock(return_value=[])
+    mock_redis = MagicMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipeline)
+    mock_redis.get = AsyncMock(return_value=None)
+
+    from core.adaptive import AdaptiveState
+
+    mock_adaptive = MagicMock()
+    mock_adaptive.get_state = AsyncMock(return_value=AdaptiveState())
+
+    with (
+        patch("core.site_config.site_config_service", svc),
+        patch("core.redis_client.get_redis", return_value=mock_redis),
+        patch("core.adaptive.adaptive_engine", mock_adaptive),
+    ):
         yield svc
 
 

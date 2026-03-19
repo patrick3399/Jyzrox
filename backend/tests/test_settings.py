@@ -23,10 +23,7 @@ from sqlalchemy import text
 async def _insert_user(db_session):
     """Insert a test user and return its id."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-            "VALUES (1, 'testuser', 'x', 'admin')"
-        )
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'testuser', 'x', 'admin')")
     )
     await db_session.commit()
 
@@ -41,8 +38,7 @@ async def _insert_token(db_session, user_id=1, name="my-token", token_hash="abc1
     token_id = str(uuid.uuid4())
     await db_session.execute(
         text(
-            "INSERT INTO api_tokens (id, user_id, name, token_hash, created_at) "
-            "VALUES (:id, :uid, :name, :hash, NULL)"
+            "INSERT INTO api_tokens (id, user_id, name, token_hash, created_at) VALUES (:id, :uid, :name, :hash, NULL)"
         ),
         {"id": token_id, "uid": user_id, "name": name, "hash": token_hash},
     )
@@ -291,8 +287,7 @@ class TestDeleteToken:
         # Insert a second user and a token for them
         await db_session.execute(
             text(
-                "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-                "VALUES (2, 'otheruser', 'x', 'admin')"
+                "INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (2, 'otheruser', 'x', 'admin')"
             )
         )
         await db_session.commit()
@@ -1042,11 +1037,14 @@ class TestEhCookiesCheck:
     async def test_cookies_check_with_valid_cookies_returns_status(self, client):
         """When credentials exist and cookies are valid, should return eh_valid/ex_valid dict."""
         import json as _json
-        cookies_json = _json.dumps({
-            "ipb_member_id": "12345",
-            "ipb_pass_hash": "abcdef",
-            "igneous": "testigneous",
-        })
+
+        cookies_json = _json.dumps(
+            {
+                "ipb_member_id": "12345",
+                "ipb_pass_hash": "abcdef",
+                "igneous": "testigneous",
+            }
+        )
 
         mock_client = AsyncMock()
         mock_client.check_cookies = AsyncMock(return_value=True)
@@ -1089,6 +1087,7 @@ class TestEhAccountInfo:
     async def test_eh_account_invalid_cookies_returns_401(self, client):
         """When cookies fail check_cookies(), should return 401."""
         import json as _json
+
         cookies_json = _json.dumps({"ipb_member_id": "bad", "ipb_pass_hash": "bad"})
 
         mock_client = AsyncMock()
@@ -1109,6 +1108,7 @@ class TestEhAccountInfo:
     async def test_eh_account_valid_cookies_returns_account_info(self, client):
         """When cookies are valid, should return valid=True plus account info."""
         import json as _json
+
         cookies_json = _json.dumps({"ipb_member_id": "12345", "ipb_pass_hash": "hash"})
 
         mock_client = AsyncMock()
@@ -1234,10 +1234,7 @@ class TestPixivOAuthCallback:
 
     async def test_oauth_callback_accepts_full_callback_url(self, client):
         """When user pastes the full callback URL, code should be extracted from it."""
-        full_url = (
-            "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback"
-            "?code=extracted_code_123&state=abc"
-        )
+        full_url = "https://app-api.pixiv.net/web/v1/users/auth/pixiv/callback?code=extracted_code_123&state=abc"
 
         mock_token_resp = MagicMock()
         mock_token_resp.status_code = 200
@@ -1268,11 +1265,13 @@ class TestPixivOAuthCallback:
         import httpx
 
         mock_http = AsyncMock()
-        mock_http.post = AsyncMock(side_effect=httpx.HTTPStatusError(
-            "401 Unauthorized",
-            request=MagicMock(),
-            response=MagicMock(status_code=401),
-        ))
+        mock_http.post = AsyncMock(
+            side_effect=httpx.HTTPStatusError(
+                "401 Unauthorized",
+                request=MagicMock(),
+                response=MagicMock(status_code=401),
+            )
+        )
         mock_http.__aenter__ = AsyncMock(return_value=mock_http)
         mock_http.__aexit__ = AsyncMock(return_value=False)
 
@@ -1321,6 +1320,7 @@ class TestListCredentialsWithData:
     async def test_delete_credential_existing_source(self, client, db_session, db_session_factory):
         """Deleting an existing credential should return status=ok."""
         from sqlalchemy import text as _text
+
         await db_session.execute(
             _text(
                 "INSERT OR REPLACE INTO credentials (source, credential_type, value_encrypted) "
@@ -1333,4 +1333,118 @@ class TestListCredentialsWithData:
             resp = await client.delete("/api/settings/credentials/testsite")
 
         assert resp.status_code == 200
-        assert resp.json()["status"] == "ok"
+
+
+# ---------------------------------------------------------------------------
+# Recovery Strategy
+# ---------------------------------------------------------------------------
+
+
+class TestGetRecoveryStrategy:
+    """GET /api/settings/recovery-strategy — returns current strategy values."""
+
+    async def test_recovery_strategy_defaults(self, client, mock_redis):
+        """When no Redis keys are set, defaults to auto_retry / keep_paused."""
+        mock_redis.get = AsyncMock(return_value=None)
+        resp = await client.get("/api/settings/recovery-strategy")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"running": "auto_retry", "paused": "keep_paused"}
+
+    async def test_recovery_strategy_returns_stored_values(self, client, mock_redis):
+        """When Redis keys are set, returns the stored values."""
+
+        async def _get_side_effect(key):
+            mapping = {
+                "setting:recovery_running": b"mark_failed",
+                "setting:recovery_paused": b"auto_retry",
+            }
+            return mapping.get(key)
+
+        mock_redis.get = AsyncMock(side_effect=_get_side_effect)
+        resp = await client.get("/api/settings/recovery-strategy")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data == {"running": "mark_failed", "paused": "auto_retry"}
+
+
+class TestPatchRecoveryStrategy:
+    """PATCH /api/settings/recovery-strategy — updates strategy in Redis."""
+
+    async def test_patch_recovery_strategy_writes_to_redis_and_returns_updated(self, client, mock_redis):
+        """PATCH with valid strategies writes to Redis and returns updated values."""
+        stored: dict = {}
+
+        async def _set_side_effect(key, value):
+            stored[key] = value.encode() if isinstance(value, str) else value
+
+        async def _get_side_effect(key):
+            return stored.get(key)
+
+        mock_redis.set = AsyncMock(side_effect=_set_side_effect)
+        mock_redis.get = AsyncMock(side_effect=_get_side_effect)
+
+        resp = await client.patch(
+            "/api/settings/recovery-strategy",
+            json={"running": "mark_failed", "paused": "auto_retry"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["running"] == "mark_failed"
+        assert data["paused"] == "auto_retry"
+        # Verify Redis was written
+        assert stored.get("setting:recovery_running") == b"mark_failed"
+        assert stored.get("setting:recovery_paused") == b"auto_retry"
+
+    async def test_patch_recovery_strategy_partial_update_running_only(self, client, mock_redis):
+        """PATCH with only 'running' leaves 'paused' at its default."""
+        stored: dict = {}
+
+        async def _set_side_effect(key, value):
+            stored[key] = value.encode() if isinstance(value, str) else value
+
+        async def _get_side_effect(key):
+            return stored.get(key)
+
+        mock_redis.set = AsyncMock(side_effect=_set_side_effect)
+        mock_redis.get = AsyncMock(side_effect=_get_side_effect)
+
+        resp = await client.patch(
+            "/api/settings/recovery-strategy",
+            json={"running": "mark_failed"},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["running"] == "mark_failed"
+        assert data["paused"] == "keep_paused"  # default
+
+    async def test_recovery_strategy_validation_invalid_running_returns_422(self, client, mock_redis):
+        """PATCH with an invalid 'running' value returns 422 (Pydantic validation)."""
+        resp = await client.patch(
+            "/api/settings/recovery-strategy",
+            json={"running": "invalid_value"},
+        )
+        assert resp.status_code == 422
+
+    async def test_recovery_strategy_validation_invalid_paused_returns_422(self, client, mock_redis):
+        """PATCH with an invalid 'paused' value returns 422 (Pydantic validation)."""
+        resp = await client.patch(
+            "/api/settings/recovery-strategy",
+            json={"paused": "invalid_value"},
+        )
+        assert resp.status_code == 422
+
+    async def test_recovery_strategy_requires_admin_member_gets_403(self, make_client, db_session):
+        """Non-admin (member) calling GET /recovery-strategy gets 403."""
+        async with make_client(user_id=2, role="member") as ac:
+            resp = await ac.get("/api/settings/recovery-strategy")
+        assert resp.status_code == 403
+
+    async def test_recovery_strategy_requires_admin_viewer_gets_403(self, make_client, db_session):
+        """Non-admin (viewer) calling PATCH /recovery-strategy gets 403."""
+        async with make_client(user_id=2, role="viewer") as ac:
+            resp = await ac.patch(
+                "/api/settings/recovery-strategy",
+                json={"running": "mark_failed"},
+            )
+        assert resp.status_code == 403

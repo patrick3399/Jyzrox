@@ -23,6 +23,20 @@ if os.path.abspath(_backend_dir) not in sys.path:
 # Import shared mock factory (must come after sys.path setup)
 from tests.helpers import make_mock_site_config_svc
 
+import pytest
+
+
+@pytest.fixture(autouse=True)
+def mock_redis_global():
+    """Prevent any code path from calling get_redis() on an uninitialised client."""
+    mock_redis = AsyncMock()
+    mock_redis.pipeline.return_value = AsyncMock(execute=AsyncMock(return_value=[]))
+    mock_redis.get = AsyncMock(return_value=None)
+    mock_redis.set = AsyncMock(return_value=True)
+    mock_redis.delete = AsyncMock(return_value=1)
+    with patch("core.redis_client.get_redis", return_value=mock_redis):
+        yield mock_redis
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -806,9 +820,10 @@ class TestDownloadJobSignals:
 
         ctx = _make_ctx()
 
-        # Simulate cancel key being set — return b"1" for cancel/pause keys, None for others
+        # Simulate cancel key being set — return b"1" only for cancel keys
+        # (pause keys must return None to pass the pre-semaphore pause gate)
         async def _selective_get(key):
-            if key.startswith("download:cancel:") or key.startswith("download:pause:"):
+            if key.startswith("download:cancel:"):
                 return b"1"
             return None
 
@@ -935,8 +950,9 @@ class TestDownloadJobSignals:
 
         async def _get_side_effect(key):
             call_counter[0] += 1
-            # First call (during download) → not set; subsequent calls → set
-            if call_counter[0] <= 1:
+            # First 2 calls (pause gate + during download) → not set;
+            # subsequent calls (post-download cancel guard) → set
+            if call_counter[0] <= 2:
                 return None
             return b"1"
 
@@ -1001,9 +1017,14 @@ class TestDownloadJobSignals:
 
         ctx = _make_ctx()
 
+        pause_call_count = [0]
+
         async def _get_by_key(key):
             if "pause" in key:
-                return b"1"
+                pause_call_count[0] += 1
+                # First pause check (pre-semaphore gate) → not paused
+                # Second pause check (inside plugin) → paused
+                return b"1" if pause_call_count[0] > 1 else None
             return None
 
         ctx["redis"].get = _get_by_key
