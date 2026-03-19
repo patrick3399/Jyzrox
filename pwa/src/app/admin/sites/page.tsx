@@ -583,15 +583,7 @@ export default function AdminSitesPage() {
     }
   }, [profileLoading, profile, isAdmin, router])
 
-  if (profileLoading || !profile || !isAdmin) {
-    return (
-      <div className="flex items-center justify-center min-h-[60vh]">
-        <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
-      </div>
-    )
-  }
-
-  // Filter sites by search
+  // Filter sites by search — hooks must be called before any early return
   const filteredSites = useMemo(() => {
     if (!sites) return []
     const q = search.toLowerCase()
@@ -611,6 +603,14 @@ export default function AdminSitesPage() {
     }
     return map
   }, [filteredSites])
+
+  if (profileLoading || !profile || !isAdmin) {
+    return (
+      <div className="flex items-center justify-center min-h-[60vh]">
+        <div className="text-vault-text-secondary text-sm">{t('common.loading')}</div>
+      </div>
+    )
+  }
 
   const handleProbeSuccess = (
     fields: ProbeField[],
