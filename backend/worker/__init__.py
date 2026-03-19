@@ -55,6 +55,10 @@ from worker.subscription import (
     check_followed_artists,
     check_single_subscription,
 )
+from worker.subscription_group import (
+    check_subscription_group,
+    subscription_scheduler,
+)
 from worker.tagging import tag_job
 from worker.thumbhash_backfill import thumbhash_backfill_job
 from worker.thumbnail import thumbnail_job
@@ -248,6 +252,15 @@ async def startup(ctx: dict) -> None:
                 except Exception as exc:
                     logger.error("Failed to re-enqueue paused job %s: %s", job.id, exc)
             logger.info("Re-enqueued %d paused jobs from previous session", len(paused_jobs))
+
+        # Reset stuck subscription groups from previous worker session
+        from db.models import SubscriptionGroup
+
+        await session.execute(
+            update(SubscriptionGroup).where(SubscriptionGroup.status == "running").values(status="idle")
+        )
+        await session.commit()
+        logger.info("Reset stuck subscription groups to idle")
 
     # Clean up orphaned per-job config files
     import glob as _glob
@@ -509,6 +522,7 @@ class WorkerSettings:
         toggle_watcher_job,
         check_followed_artists,
         check_single_subscription,
+        check_subscription_group,
         dedup_tier1_job,
         dedup_tier2_job,
         dedup_tier3_job,
@@ -542,12 +556,11 @@ class WorkerSettings:
             timeout=3600,
         ),
         cron(
-            check_followed_artists,
-            hour={0, 2, 4, 6, 8, 10, 12, 14, 16, 18, 20, 22},
-            minute=30,
+            subscription_scheduler,
+            minute=None,  # every minute
             run_at_startup=False,
             unique=True,
-            timeout=3600,
+            timeout=120,
         ),
         cron(
             rate_limit_schedule_job,
@@ -623,6 +636,8 @@ __all__ = [
     "tag_job",
     "check_followed_artists",
     "check_single_subscription",
+    "check_subscription_group",
+    "subscription_scheduler",
     "dedup_tier1_job",
     "dedup_tier2_job",
     "dedup_tier3_job",

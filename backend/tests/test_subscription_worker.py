@@ -114,8 +114,7 @@ class TestEnqueueForSubscription:
 
         with (
             patch("core.redis_client.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled",
-                  new_callable=AsyncMock, side_effect=Exception("disabled")),
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock, side_effect=Exception("disabled")),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
         ):
             result = await _enqueue_for_subscription(_make_ctx(), sub)
@@ -304,9 +303,11 @@ class TestCheckSingleSubscription:
 
         with (
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
-            patch("worker.subscription._enqueue_for_subscription",
-                  new_callable=AsyncMock,
-                  side_effect=RuntimeError("redis unavailable")),
+            patch(
+                "worker.subscription._enqueue_for_subscription",
+                new_callable=AsyncMock,
+                side_effect=RuntimeError("redis unavailable"),
+            ),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
         ):
             result = await check_single_subscription(ctx, sub_id=20)
@@ -329,9 +330,11 @@ class TestCheckSingleSubscription:
 
         with (
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
-            patch("worker.subscription._enqueue_for_subscription",
-                  new_callable=AsyncMock,
-                  return_value={"status": "skipped", "reason": "source_disabled"}),
+            patch(
+                "worker.subscription._enqueue_for_subscription",
+                new_callable=AsyncMock,
+                return_value={"status": "skipped", "reason": "source_disabled"},
+            ),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
         ):
             result = await check_single_subscription(ctx, sub_id=30)
@@ -352,8 +355,7 @@ class TestCheckFollowedArtists:
         """When cron gate says not yet due, returns skipped immediately."""
         from worker.subscription import check_followed_artists
 
-        with patch("worker.subscription._cron_should_run",
-                   new_callable=AsyncMock, return_value=False):
+        with patch("worker.subscription._cron_should_run", new_callable=AsyncMock, return_value=False):
             result = await check_followed_artists(_make_ctx())
 
         assert result["status"] == "skipped"
@@ -370,8 +372,7 @@ class TestCheckFollowedArtists:
         ctx = _make_ctx()
 
         with (
-            patch("worker.subscription._cron_should_run",
-                  new_callable=AsyncMock, return_value=True),
+            patch("worker.subscription._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.subscription._cron_record", new_callable=AsyncMock),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
         ):
@@ -401,12 +402,10 @@ class TestCheckFollowedArtists:
             return {"status": "ok", "job_id": str(uuid.uuid4())}
 
         with (
-            patch("worker.subscription._cron_should_run",
-                  new_callable=AsyncMock, return_value=True),
+            patch("worker.subscription._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.subscription._cron_record", new_callable=AsyncMock),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
-            patch("worker.subscription._enqueue_for_subscription",
-                  side_effect=_fake_enqueue),
+            patch("worker.subscription._enqueue_for_subscription", side_effect=_fake_enqueue),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await check_followed_artists(ctx)
@@ -438,12 +437,10 @@ class TestCheckFollowedArtists:
             return {"status": "ok", "job_id": str(uuid.uuid4())}
 
         with (
-            patch("worker.subscription._cron_should_run",
-                  new_callable=AsyncMock, return_value=True),
+            patch("worker.subscription._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.subscription._cron_record", new_callable=AsyncMock),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
-            patch("worker.subscription._enqueue_for_subscription",
-                  side_effect=_flaky_enqueue),
+            patch("worker.subscription._enqueue_for_subscription", side_effect=_flaky_enqueue),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await check_followed_artists(ctx)
@@ -469,13 +466,14 @@ class TestCheckFollowedArtists:
         ctx = _make_ctx()
 
         with (
-            patch("worker.subscription._cron_should_run",
-                  new_callable=AsyncMock, return_value=False) as mock_cron,
+            patch("worker.subscription._cron_should_run", new_callable=AsyncMock, return_value=False) as mock_cron,
             patch("worker.subscription._cron_record", new_callable=AsyncMock),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
-            patch("worker.subscription._enqueue_for_subscription",
-                  new_callable=AsyncMock,
-                  return_value={"status": "ok", "job_id": str(uuid.uuid4())}),
+            patch(
+                "worker.subscription._enqueue_for_subscription",
+                new_callable=AsyncMock,
+                return_value={"status": "ok", "job_id": str(uuid.uuid4())},
+            ),
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             result = await check_followed_artists(ctx, user_id=7)
@@ -484,3 +482,61 @@ class TestCheckFollowedArtists:
         mock_cron.assert_not_awaited()
         assert result["status"] == "ok"
         assert result["checked"] == 1
+
+
+# ---------------------------------------------------------------------------
+# TestDuplicateGuardIncludesPaused
+# ---------------------------------------------------------------------------
+
+
+class TestDuplicateGuardIncludesPaused:
+    """Regression: duplicate guard must include 'paused' status to prevent re-enqueue.
+
+    Before this fix the duplicate guard only checked queued/running, allowing a
+    paused job to be re-enqueued while still in the paused state.
+    """
+
+    async def test_paused_job_blocks_new_enqueue(self):
+        """If a paused job exists for the same URL/user, subscription enqueue is skipped."""
+        from worker.subscription import _enqueue_for_subscription
+
+        sub = _make_sub()
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+
+        mock_cfg = MagicMock()
+        mock_cfg.credential_requirement = "optional"
+        mock_cfg.source_id = "gallery_dl"
+
+        paused_job_id = str(uuid.uuid4())
+
+        call_count = [0]
+
+        async def _execute_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            result = MagicMock()
+            if call_count[0] == 1:
+                # Duplicate guard query — returns a paused job id
+                result.scalar_one_or_none = MagicMock(return_value=paused_job_id)
+            else:
+                result.scalar_one_or_none = MagicMock(return_value=None)
+            result.scalars.return_value.all.return_value = []
+            return result
+
+        session = AsyncMock()
+        session.commit = AsyncMock()
+        session.execute = _execute_side_effect
+        session.add = MagicMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
+            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+        ):
+            result = await _enqueue_for_subscription(_make_ctx(), sub)
+
+        assert result["status"] == "skipped"
+        assert result["reason"] == "active_job_exists"

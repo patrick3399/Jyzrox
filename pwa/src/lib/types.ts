@@ -131,8 +131,8 @@ export interface EhSearchResult {
   galleries: EhGallery[]
   total: number
   page: number
-  next_gid?: number | null  // cursor for next page
-  has_prev?: boolean         // whether previous page exists
+  next_gid?: number | null // cursor for next page
+  has_prev?: boolean // whether previous page exists
 }
 
 export interface EhFavCategory {
@@ -236,7 +236,7 @@ export interface EhAccount {
 export interface ApiTokenInfo {
   id: string
   name: string | null
-  token?: string        // raw token, only present right after creation
+  token?: string // raw token, only present right after creation
   token_prefix?: string // first 8 chars of hash, from list API
   created_at: string | null
   last_used_at: string | null
@@ -557,6 +557,24 @@ export interface ScheduledTask {
   last_error: string | null
 }
 
+// ── Subscription Groups ─────────────────────────────────────────────
+
+export interface SubscriptionGroup {
+  id: number
+  name: string
+  schedule: string
+  concurrency: number
+  enabled: boolean
+  priority: number
+  is_system: boolean
+  status: string
+  last_run_at: string | null
+  last_completed_at: string | null
+  created_at: string | null
+  updated_at: string | null
+  sub_count: number
+}
+
 // ── Subscriptions ───────────────────────────────────────────────────
 
 export interface Subscription {
@@ -576,6 +594,7 @@ export interface Subscription {
   next_check_at: string | null
   created_at: string | null
   last_job_id: string | null
+  group_id: number | null
 }
 
 // ── File Explorer ────────────────────────────────────────────────────
@@ -611,7 +630,7 @@ export interface LibraryFile {
 // ── Dedup ────────────────────────────────────────────────────────────
 
 export interface DedupStats {
-  total_blobs: number     // blobs with phash
+  total_blobs: number // blobs with phash
   needs_t2: number
   needs_t3: number
   pending_review: number
@@ -732,4 +751,45 @@ export interface DownloadPreview {
   rating?: number | null
   thumb_url?: string | null
   category?: string | null
+}
+
+// ── Site Config (Admin) ──────────────────────────────────────────────
+
+export interface SiteConfigItem {
+  source_id: string
+  name: string
+  domain: string
+  category: string
+  download: {
+    retries: number
+    http_timeout: number
+    sleep_request: number | [number, number] | null
+    concurrency: number
+    inactivity_timeout: number
+  }
+  field_mapping?: Record<string, string | null>
+  auto_probe?: ProbeResult | null
+}
+
+export interface ProbeField {
+  key: string
+  field_type: string
+  sample_value: string
+  level: string
+}
+
+export interface ProbeFieldMapping {
+  jyzrox_field: string
+  gdl_field: string | null
+  confidence: number
+  suggested: boolean
+}
+
+export interface ProbeResult {
+  success: boolean
+  error?: string
+  raw_metadata: Record<string, unknown>[]
+  fields: ProbeField[]
+  suggested_mappings: ProbeFieldMapping[]
+  detected_source?: string
 }

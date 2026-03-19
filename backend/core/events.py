@@ -38,6 +38,8 @@ class EventType(str, Enum):
     SUBSCRIPTION_CREATED = "subscription.created"
     SUBSCRIPTION_DELETED = "subscription.deleted"
     SUBSCRIPTION_CHECKED = "subscription.checked"
+    SUBSCRIPTION_GROUP_UPDATED = "subscription_group.updated"
+    SUBSCRIPTION_GROUP_COMPLETED = "subscription_group.completed"
 
     # Collection
     COLLECTION_UPDATED = "collection.updated"

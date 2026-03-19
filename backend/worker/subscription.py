@@ -4,13 +4,12 @@ import asyncio
 import uuid
 from datetime import UTC, datetime
 
-from croniter import croniter as _croniter_cls
 from sqlalchemy import select, update
 
 from core.database import AsyncSessionLocal
 from db.models import DownloadJob, Subscription
 from worker.constants import logger
-from worker.helpers import _cron_record, _cron_should_run
+from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
 
 
 async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
@@ -24,121 +23,153 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
     # Race-condition guard: use Redis SETNX so only one concurrent check per sub proceeds
     redis = get_redis()
     lock_key = f"subscription:check_lock:{sub.id}"
-    acquired = await redis.set(lock_key, "1", nx=True, ex=60)
-    if not acquired:
+    lock_value = await acquire_lock(redis, lock_key, ttl=300)
+    if not lock_value:
         logger.info("[subscription] sub=%d check already in progress, skipping", sub.id)
         return {"status": "skipped", "reason": "check_in_progress"}
 
-    # Source-enabled check
-    source = sub.source or "gallery_dl"
     try:
-        from routers.download import _check_source_enabled
-        await _check_source_enabled(source)
-    except Exception:
-        logger.warning("[subscription] sub=%d source '%s' disabled, skipping", sub.id, source)
-        async with AsyncSessionLocal() as session:
-            await session.execute(
-                update(Subscription).where(Subscription.id == sub.id).values(
-                    last_status="failed",
-                    last_error=f"Download source '{source}' is disabled",
-                )
-            )
-            await session.commit()
-        return {"status": "skipped", "reason": "source_disabled"}
+        # Source-enabled check
+        source = sub.source or "gallery_dl"
+        try:
+            from routers.download import _check_source_enabled
 
-    # Credential check — skip if required credentials are missing
-    from plugins.builtin.gallery_dl._sites import get_site_config
-    cfg = get_site_config(source)
-    if cfg.credential_requirement == "required":
-        from services.credential import get_credential
-        cred = await get_credential(cfg.source_id)
-        if not cred:
-            logger.warning("[subscription] sub=%d source '%s' requires credentials, skipping", sub.id, source)
+            await _check_source_enabled(source)
+        except Exception:
+            logger.warning("[subscription] sub=%d source '%s' disabled, skipping", sub.id, source)
             async with AsyncSessionLocal() as session:
                 await session.execute(
-                    update(Subscription).where(Subscription.id == sub.id).values(
+                    update(Subscription)
+                    .where(Subscription.id == sub.id)
+                    .values(
                         last_status="failed",
-                        last_error=f"{cfg.name} credentials not configured",
+                        last_error=f"Download source '{source}' is disabled",
                     )
                 )
                 await session.commit()
-            return {"status": "skipped", "reason": "credentials_required"}
+            return {"status": "skipped", "reason": "source_disabled"}
 
-    # Duplicate guard: skip if this user already has a queued/running job for this URL
-    async with AsyncSessionLocal() as session:
-        existing = (await session.execute(
-            select(DownloadJob.id).where(
-                DownloadJob.url == sub.url,
-                DownloadJob.user_id == sub.user_id,
-                DownloadJob.status.in_(["queued", "running"]),
-            ).limit(1)
-        )).scalar_one_or_none()
-        if existing:
-            logger.info("[subscription] sub=%d URL already has active job %s for user %d, skipping", sub.id, existing, sub.user_id)
-            return {"status": "skipped", "reason": "active_job_exists"}
+        # Credential check — skip if required credentials are missing
+        from plugins.builtin.gallery_dl._sites import get_site_config
 
-    # Decide archive behavior: query galleries table (stable, not cleared by clear_finished_jobs).
-    # If a gallery with matching source_url exists and is complete/partial, use archive for incremental download.
-    skip_archive = True
-    async with AsyncSessionLocal() as session:
-        from db.models import Gallery
-        existing_gallery = (await session.execute(
-            select(Gallery.id).where(
-                Gallery.source_url == sub.url,
-                Gallery.download_status.in_(["complete", "partial"]),
-            ).limit(1)
-        )).scalar_one_or_none()
-        if existing_gallery:
-            skip_archive = False
+        cfg = get_site_config(source)
+        if cfg.credential_requirement == "required":
+            from services.credential import get_credential
 
-    options = {"skip_archive": True} if skip_archive else None
+            cred = await get_credential(cfg.source_id)
+            if not cred:
+                logger.warning("[subscription] sub=%d source '%s' requires credentials, skipping", sub.id, source)
+                async with AsyncSessionLocal() as session:
+                    await session.execute(
+                        update(Subscription)
+                        .where(Subscription.id == sub.id)
+                        .values(
+                            last_status="failed",
+                            last_error=f"{cfg.name} credentials not configured",
+                        )
+                    )
+                    await session.commit()
+                return {"status": "skipped", "reason": "credentials_required"}
 
-    # Create download job
-    job_id = uuid.uuid4()
-    async with AsyncSessionLocal() as session:
-        session.add(DownloadJob(
-            id=job_id,
-            url=sub.url,
-            source=sub.source or "gallery_dl",
-            status="queued",
-            progress={},
-            user_id=sub.user_id,
-            subscription_id=sub.id,
-        ))
-        await session.commit()
+        # Duplicate guard: skip if this user already has a queued/running/paused job for this URL
+        async with AsyncSessionLocal() as session:
+            existing = (
+                await session.execute(
+                    select(DownloadJob.id)
+                    .where(
+                        DownloadJob.url == sub.url,
+                        DownloadJob.user_id == sub.user_id,
+                        DownloadJob.status.in_(["queued", "running", "paused"]),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if existing:
+                logger.info(
+                    "[subscription] sub=%d URL already has active job %s for user %d, skipping",
+                    sub.id,
+                    existing,
+                    sub.user_id,
+                )
+                return {"status": "skipped", "reason": "active_job_exists"}
 
-    # Enqueue ARQ job
-    await pool.enqueue_job(
-        "download_job", sub.url, sub.source or "gallery_dl",
-        options, str(job_id), None,
-        _job_id=str(job_id),
-    )
+        # Decide archive behavior: query galleries table (stable, not cleared by clear_finished_jobs).
+        # If a gallery with matching source_url exists and is complete/partial, use archive for incremental download.
+        skip_archive = True
+        async with AsyncSessionLocal() as session:
+            from db.models import Gallery
 
-    # Update subscription
-    now = datetime.now(UTC)
-    next_check = _croniter_cls(sub.cron_expr or "0 */2 * * *", now).get_next(datetime)
-    async with AsyncSessionLocal() as session:
-        await session.execute(
-            update(Subscription).where(Subscription.id == sub.id).values(
-                last_checked_at=now,
-                last_job_id=job_id,
-                last_status="ok",
-                last_error=None,
-                next_check_at=next_check,
+            existing_gallery = (
+                await session.execute(
+                    select(Gallery.id)
+                    .where(
+                        Gallery.source_url == sub.url,
+                        Gallery.download_status.in_(["complete", "partial"]),
+                    )
+                    .limit(1)
+                )
+            ).scalar_one_or_none()
+            if existing_gallery:
+                skip_archive = False
+
+        options = {"skip_archive": True} if skip_archive else None
+
+        # Create download job
+        job_id = uuid.uuid4()
+        async with AsyncSessionLocal() as session:
+            session.add(
+                DownloadJob(
+                    id=job_id,
+                    url=sub.url,
+                    source=sub.source or "gallery_dl",
+                    status="queued",
+                    progress={},
+                    user_id=sub.user_id,
+                    subscription_id=sub.id,
+                )
             )
+            await session.commit()
+
+        # Enqueue ARQ job
+        await pool.enqueue_job(
+            "download_job",
+            sub.url,
+            sub.source or "gallery_dl",
+            options,
+            str(job_id),
+            None,
+            _job_id=str(job_id),
         )
-        await session.commit()
 
-    # WS event
-    await publish_job_event({
-        "type": "subscription_checked",
-        "sub_id": sub.id,
-        "status": "ok",
-        "job_id": str(job_id),
-        "user_id": sub.user_id,
-    })
+        # Update subscription (scheduling is now group-driven; no next_check_at update)
+        now = datetime.now(UTC)
+        async with AsyncSessionLocal() as session:
+            await session.execute(
+                update(Subscription)
+                .where(Subscription.id == sub.id)
+                .values(
+                    last_checked_at=now,
+                    last_job_id=job_id,
+                    last_status="ok",
+                    last_error=None,
+                )
+            )
+            await session.commit()
 
-    return {"status": "ok", "job_id": str(job_id)}
+        # WS event
+        await publish_job_event(
+            {
+                "type": "subscription_checked",
+                "sub_id": sub.id,
+                "status": "ok",
+                "job_id": str(job_id),
+                "user_id": sub.user_id,
+            }
+        )
+
+        return {"status": "ok", "job_id": str(job_id)}
+    finally:
+        await release_lock(redis, lock_key, lock_value)
 
 
 async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
@@ -148,13 +179,15 @@ async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
     async with AsyncSessionLocal() as session:
         sub = await session.get(Subscription, sub_id)
         if not sub:
-            await publish_job_event({
-                "type": "subscription_checked",
-                "sub_id": sub_id,
-                "status": "failed",
-                "job_id": None,
-                "user_id": None,
-            })
+            await publish_job_event(
+                {
+                    "type": "subscription_checked",
+                    "sub_id": sub_id,
+                    "status": "failed",
+                    "job_id": None,
+                    "user_id": None,
+                }
+            )
             return {"status": "failed", "error": "subscription not found"}
 
     try:
@@ -163,20 +196,24 @@ async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
         logger.error("[subscription] error processing sub %d: %s", sub_id, exc)
         async with AsyncSessionLocal() as session:
             await session.execute(
-                update(Subscription).where(Subscription.id == sub_id).values(
+                update(Subscription)
+                .where(Subscription.id == sub_id)
+                .values(
                     last_checked_at=datetime.now(UTC),
                     last_status="failed",
                     last_error=str(exc)[:500],
                 )
             )
             await session.commit()
-        await publish_job_event({
-            "type": "subscription_checked",
-            "sub_id": sub_id,
-            "status": "failed",
-            "job_id": None,
-            "user_id": None,
-        })
+        await publish_job_event(
+            {
+                "type": "subscription_checked",
+                "sub_id": sub_id,
+                "status": "failed",
+                "job_id": None,
+                "user_id": None,
+            }
+        )
         return {"status": "failed", "error": str(exc)}
 
 
@@ -193,17 +230,19 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
 
     now = datetime.now(UTC)
     async with AsyncSessionLocal() as session:
-        query = select(Subscription).where(Subscription.enabled == True)
+        query = select(Subscription).where(Subscription.enabled.is_(True))
         if user_id:
             query = query.where(Subscription.user_id == user_id)
         else:
-            # Only check subscriptions whose next_check_at is due (or never checked)
-            # and auto_download is enabled (manual-only subs skip cron)
+            # Only check ungrouped subscriptions whose next_check_at is due
+            # (group-assigned subs are handled by subscription_scheduler)
             from sqlalchemy import or_
+
             query = query.where(
-                Subscription.auto_download == True,
+                Subscription.auto_download.is_(True),
+                Subscription.group_id.is_(None),
                 or_(
-                    Subscription.next_check_at == None,
+                    Subscription.next_check_at.is_(None),
                     Subscription.next_check_at <= now,
                 ),
             )

@@ -34,6 +34,7 @@ from routers import (
     rss,
     scheduled_tasks,
     search,
+    subscription_groups,
     subscriptions,
     system,
     tag,
@@ -155,6 +156,7 @@ app.include_router(collections.router, prefix="/api/collections")
 app.include_router(opds.router, prefix="/opds")
 app.include_router(scheduled_tasks.router, prefix="/api/scheduled-tasks")
 app.include_router(subscriptions.router, prefix="/api/subscriptions")
+app.include_router(subscription_groups.router, prefix="/api/subscription-groups")
 app.include_router(dedup_router.router, prefix="/api/dedup")
 app.include_router(users_router.router, prefix="/api/users")
 app.include_router(rss.router, prefix="/api/rss")

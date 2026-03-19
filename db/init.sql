@@ -269,6 +269,27 @@ CREATE TABLE IF NOT EXISTS plugin_config (
     updated_at  TIMESTAMPTZ DEFAULT NOW()
 );
 
+-- ── Subscription Groups ──────────────────────────────────────────────
+CREATE TABLE IF NOT EXISTS subscription_groups (
+    id              SERIAL PRIMARY KEY,
+    name            TEXT NOT NULL,
+    schedule        TEXT NOT NULL DEFAULT '0 */6 * * *',
+    concurrency     SMALLINT DEFAULT 2,
+    enabled         BOOLEAN DEFAULT true,
+    priority        SMALLINT DEFAULT 5,
+    is_system       BOOLEAN DEFAULT false,
+    status          TEXT DEFAULT 'idle',
+    last_run_at     TIMESTAMPTZ,
+    last_completed_at TIMESTAMPTZ,
+    created_at      TIMESTAMPTZ DEFAULT now(),
+    updated_at      TIMESTAMPTZ DEFAULT now()
+);
+
+-- Seed Default group
+INSERT INTO subscription_groups (name, schedule, concurrency, priority, is_system)
+SELECT 'Default', '0 */2 * * *', 2, 3, true
+WHERE NOT EXISTS (SELECT 1 FROM subscription_groups WHERE is_system = true AND name = 'Default');
+
 -- ── Subscriptions (replaces followed_artists) ──────────────────────
 
 CREATE TABLE IF NOT EXISTS subscriptions (
@@ -293,6 +314,8 @@ CREATE TABLE IF NOT EXISTS subscriptions (
 CREATE INDEX IF NOT EXISTS idx_subscriptions_next_check ON subscriptions(next_check_at) WHERE enabled = true;
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_source ON subscriptions(source, source_id);
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS group_id INT REFERENCES subscription_groups(id) ON DELETE SET NULL;
+CREATE INDEX IF NOT EXISTS idx_subscriptions_group ON subscriptions(group_id);
 
 -- Artist grouping
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS artist_id TEXT;

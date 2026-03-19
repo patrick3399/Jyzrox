@@ -290,6 +290,23 @@ class PluginConfig(Base):
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
+class SubscriptionGroup(Base):
+    __tablename__ = "subscription_groups"
+
+    id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    schedule: Mapped[str] = mapped_column(Text, nullable=False, default="0 */6 * * *")
+    concurrency: Mapped[int] = mapped_column(SmallInteger, default=2)
+    enabled: Mapped[bool] = mapped_column(Boolean, default=True)
+    priority: Mapped[int] = mapped_column(SmallInteger, default=5)
+    is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+    status: Mapped[str] = mapped_column(Text, default="idle")
+    last_run_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_completed_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
 class Subscription(Base):
     __tablename__ = "subscriptions"
 
@@ -311,6 +328,9 @@ class Subscription(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     batch_total: Mapped[int] = mapped_column(Integer, default=0)
     batch_enqueued: Mapped[int] = mapped_column(Integer, default=0)
+    group_id: Mapped[int | None] = mapped_column(
+        Integer, ForeignKey("subscription_groups.id", ondelete="SET NULL"), nullable=True
+    )
     last_job_id: Mapped[uuid.UUID | None] = mapped_column(
         UUID(as_uuid=True), ForeignKey("download_jobs.id", ondelete="SET NULL"), nullable=True
     )

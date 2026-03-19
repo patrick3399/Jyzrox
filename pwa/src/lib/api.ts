@@ -42,6 +42,7 @@ import type {
   LibraryFile,
   ScheduledTask,
   Subscription,
+  SubscriptionGroup,
   DedupStats,
   DedupReviewResponse,
   DedupScanProgress,
@@ -52,13 +53,21 @@ import type {
   StorageInfo,
   LogEntry,
   LogLevelConfig,
+  SiteConfigItem,
+  ProbeResult,
 } from './types'
 
 // ── Local types ───────────────────────────────────────────────────────
 
 export type ReconcileStatus =
   | { status: 'never_run' }
-  | { status: string; completed_at: string; removed_images: number; removed_galleries: number; orphan_blobs_cleaned: number }
+  | {
+      status: string
+      completed_at: string
+      removed_images: number
+      removed_galleries: number
+      orphan_blobs_cleaned: number
+    }
 
 // ── Base fetch ───────────────────────────────────────────────────────
 
@@ -71,7 +80,9 @@ function getCookie(name: string): string | undefined {
 let isRedirecting = false
 // Reset redirect guard on successful navigation
 if (typeof window !== 'undefined') {
-  window.addEventListener('pageshow', () => { isRedirecting = false })
+  window.addEventListener('pageshow', () => {
+    isRedirecting = false
+  })
 }
 
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
@@ -119,7 +130,7 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     if (typeof raw === 'object' && raw !== null && raw.code) {
       const i18nKey = `error.${raw.code}`
       const translated = t(i18nKey)
-      msg = translated !== i18nKey ? translated : (raw.message || `HTTP ${res.status}`)
+      msg = translated !== i18nKey ? translated : raw.message || `HTTP ${res.status}`
     } else if (typeof raw === 'string') {
       msg = raw
     } else {
@@ -277,12 +288,7 @@ const eh = {
     apiFetch<{ comments: EhComment[] }>(`/api/eh/gallery/${gid}/${token}/comments`),
 
   /** Paginated image token fetch — avoids loading all tokens upfront for large galleries */
-  getImagesPaginated: (
-    gid: number,
-    token: string,
-    startPage: number = 0,
-    count: number = 20,
-  ) =>
+  getImagesPaginated: (gid: number, token: string, startPage: number = 0, count: number = 20) =>
     apiFetch<{
       images: Array<{ page: number; token: string }>
       previews: Record<string, string>
@@ -294,17 +300,17 @@ const eh = {
 // ── Library ───────────────────────────────────────────────────────────
 
 const library = {
-  getSources: () =>
-    apiFetch<{ value: string; label: string }[]>('/api/library/galleries/sources'),
+  getSources: () => apiFetch<{ value: string; label: string }[]>('/api/library/galleries/sources'),
 
-  getCategories: () =>
-    apiFetch<{ categories: string[] }>('/api/library/galleries/categories'),
+  getCategories: () => apiFetch<{ categories: string[] }>('/api/library/galleries/categories'),
 
   getGalleries: (params: GallerySearchParams = {}) =>
     apiFetch<GalleryListResponse>(`/api/library/galleries${qs(params as Record<string, unknown>)}`),
 
   getGallery: (source: string, sourceId: string) =>
-    apiFetch<Gallery>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`),
+    apiFetch<Gallery>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`,
+    ),
 
   getImages: (source: string, sourceId: string, opts?: { page?: number; limit?: number }) => {
     const params = new URLSearchParams()
@@ -318,34 +324,76 @@ const library = {
       page?: number
       has_next?: boolean
       favorited_image_ids?: number[]
-    }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/images${qs ? `?${qs}` : ''}`)
+    }>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/images${qs ? `?${qs}` : ''}`,
+    )
   },
 
-  updateGallery: (source: string, sourceId: string, patch: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string; in_reading_list?: boolean }) =>
-    apiFetch<Gallery>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`, {
-      method: 'PATCH',
-      body: JSON.stringify(patch),
-    }),
+  updateGallery: (
+    source: string,
+    sourceId: string,
+    patch: {
+      favorited?: boolean
+      rating?: number
+      title?: string
+      title_jpn?: string
+      category?: string
+      in_reading_list?: boolean
+    },
+  ) =>
+    apiFetch<Gallery>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`,
+      {
+        method: 'PATCH',
+        body: JSON.stringify(patch),
+      },
+    ),
 
-  batchGalleries: (body: { action: 'delete' | 'favorite' | 'unfavorite' | 'rate' | 'add_to_collection' | 'add_tags' | 'remove_tags' | 'add_to_reading_list' | 'remove_from_reading_list'; gallery_ids: number[]; rating?: number; collection_id?: number; tags?: string[] }) =>
-    apiFetch<{ status: string; affected: number; deleted_dirs?: number }>('/api/library/galleries/batch', {
-      method: 'POST',
-      body: JSON.stringify(body),
-    }),
+  batchGalleries: (body: {
+    action:
+      | 'delete'
+      | 'favorite'
+      | 'unfavorite'
+      | 'rate'
+      | 'add_to_collection'
+      | 'add_tags'
+      | 'remove_tags'
+      | 'add_to_reading_list'
+      | 'remove_from_reading_list'
+    gallery_ids: number[]
+    rating?: number
+    collection_id?: number
+    tags?: string[]
+  }) =>
+    apiFetch<{ status: string; affected: number; deleted_dirs?: number }>(
+      '/api/library/galleries/batch',
+      {
+        method: 'POST',
+        body: JSON.stringify(body),
+      },
+    ),
 
   deleteGallery: (source: string, sourceId: string) =>
-    apiFetch<{ status: string; deleted_files: number }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`, {
-      method: 'DELETE',
-    }),
+    apiFetch<{ status: string; deleted_files: number }>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`,
+      {
+        method: 'DELETE',
+      },
+    ),
 
   getProgress: (source: string, sourceId: string) =>
-    apiFetch<ReadProgress>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/progress`),
+    apiFetch<ReadProgress>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/progress`,
+    ),
 
   saveProgress: (source: string, sourceId: string, last_page: number) =>
-    apiFetch<{ status: string }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/progress`, {
-      method: 'POST',
-      body: JSON.stringify({ last_page }),
-    }),
+    apiFetch<{ status: string }>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/progress`,
+      {
+        method: 'POST',
+        body: JSON.stringify({ last_page }),
+      },
+    ),
 
   getGalleryTags: (source: string, sourceId: string) =>
     apiFetch<{
@@ -358,46 +406,64 @@ const library = {
       }>
     }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/tags`),
 
-  getArtists: (params: { q?: string; source?: string; sort?: string; page?: number; limit?: number } = {}) =>
-    apiFetch<{ artists: ArtistSummary[]; total: number }>(`/api/library/artists${qs(params as Record<string, unknown>)}`),
+  getArtists: (
+    params: { q?: string; source?: string; sort?: string; page?: number; limit?: number } = {},
+  ) =>
+    apiFetch<{ artists: ArtistSummary[]; total: number }>(
+      `/api/library/artists${qs(params as Record<string, unknown>)}`,
+    ),
 
   getArtistSummary: (artistId: string) =>
     apiFetch<ArtistDetail>(`/api/library/artists/${encodeURIComponent(artistId)}/summary`),
 
-  getArtistImages: (artistId: string, params: { page?: number; limit?: number; sort?: 'newest' | 'oldest' } = {}) =>
+  getArtistImages: (
+    artistId: string,
+    params: { page?: number; limit?: number; sort?: 'newest' | 'oldest' } = {},
+  ) =>
     apiFetch<{
       artist_id: string
       images: ArtistImageItem[]
       total: number
       page: number
       has_next: boolean
-    }>(`/api/library/artists/${encodeURIComponent(artistId)}/images${qs(params as Record<string, unknown>)}`),
+    }>(
+      `/api/library/artists/${encodeURIComponent(artistId)}/images${qs(params as Record<string, unknown>)}`,
+    ),
 
   listFiles: (params: { q?: string; page?: number; limit?: number } = {}) =>
     apiFetch<{ directories: LibraryDirectory[]; total: number; page: number }>(
-      `/api/library/files${qs(params as Record<string, unknown>)}`
+      `/api/library/files${qs(params as Record<string, unknown>)}`,
     ),
 
   listGalleryFiles: (source: string, sourceId: string) =>
-    apiFetch<{ gallery_id: number; source: string; source_id: string; title: string; category: string | null; files: LibraryFile[]; total_files: number }>(
-      `/api/library/files/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`
-    ),
+    apiFetch<{
+      gallery_id: number
+      source: string
+      source_id: string
+      title: string
+      category: string | null
+      files: LibraryFile[]
+      total_files: number
+    }>(`/api/library/files/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`),
 
   deleteImage: (source: string, sourceId: string, pageNum: number) =>
     apiFetch<{ status: string; remaining_pages: number }>(
       `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/delete-image`,
-      { method: 'POST', body: JSON.stringify({ page_num: pageNum }) }
+      { method: 'POST', body: JSON.stringify({ page_num: pageNum }) },
     ),
 
   listExcluded: (source: string, sourceId: string) =>
-    apiFetch<{ gallery_id: number; excluded: Array<{ blob_sha256: string; excluded_at: string | null }> }>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/excluded`
+    apiFetch<{
+      gallery_id: number
+      excluded: Array<{ blob_sha256: string; excluded_at: string | null }>
+    }>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/excluded`,
     ),
 
   restoreExcluded: (source: string, sourceId: string, sha256: string) =>
     apiFetch<{ status: string }>(
       `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/excluded/${encodeURIComponent(sha256)}`,
-      { method: 'DELETE' }
+      { method: 'DELETE' },
     ),
 
   favoriteImage: (imageId: number) =>
@@ -406,30 +472,75 @@ const library = {
   unfavoriteImage: (imageId: number) =>
     apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, { method: 'DELETE' }),
 
-  browseImages: (params: { tags?: string[]; exclude_tags?: string[]; cursor?: string; limit?: number; sort?: 'newest' | 'oldest'; gallery_id?: number; source?: string; category?: string; jump_at?: string; favorited?: boolean } = {}) =>
-    apiFetch<import('./types').ImageBrowserResponse>(`/api/library/images${qs(params as Record<string, unknown>)}`),
+  browseImages: (
+    params: {
+      tags?: string[]
+      exclude_tags?: string[]
+      cursor?: string
+      limit?: number
+      sort?: 'newest' | 'oldest'
+      gallery_id?: number
+      source?: string
+      category?: string
+      jump_at?: string
+      favorited?: boolean
+    } = {},
+  ) =>
+    apiFetch<import('./types').ImageBrowserResponse>(
+      `/api/library/images${qs(params as Record<string, unknown>)}`,
+    ),
 
-  imageTimeRange: (params: { tags?: string[]; exclude_tags?: string[]; source?: string; category?: string; gallery_id?: number; favorited?: boolean } = {}) =>
-    apiFetch<import('./types').ImageTimeRangeResponse>(`/api/library/images/time_range${qs(params as Record<string, unknown>)}`),
+  imageTimeRange: (
+    params: {
+      tags?: string[]
+      exclude_tags?: string[]
+      source?: string
+      category?: string
+      gallery_id?: number
+      favorited?: boolean
+    } = {},
+  ) =>
+    apiFetch<import('./types').ImageTimeRangeResponse>(
+      `/api/library/images/time_range${qs(params as Record<string, unknown>)}`,
+    ),
 
-  imageTimelinePercentiles: (params: { tags?: string[]; exclude_tags?: string[]; source?: string; category?: string; gallery_id?: number; buckets?: number; favorited?: boolean } = {}) =>
-    apiFetch<import('./types').TimelinePercentilesResponse>(`/api/library/images/timeline_percentiles${qs(params as Record<string, unknown>)}`),
+  imageTimelinePercentiles: (
+    params: {
+      tags?: string[]
+      exclude_tags?: string[]
+      source?: string
+      category?: string
+      gallery_id?: number
+      buckets?: number
+      favorited?: boolean
+    } = {},
+  ) =>
+    apiFetch<import('./types').TimelinePercentilesResponse>(
+      `/api/library/images/timeline_percentiles${qs(params as Record<string, unknown>)}`,
+    ),
 
   trashList: (params: { limit?: number; offset?: number } = {}) =>
-    apiFetch<{ total: number; galleries: Gallery[] }>(`/api/library/trash${qs(params as Record<string, unknown>)}`),
+    apiFetch<{ total: number; galleries: Gallery[] }>(
+      `/api/library/trash${qs(params as Record<string, unknown>)}`,
+    ),
 
-  trashCount: () =>
-    apiFetch<{ count: number }>('/api/library/trash/count'),
+  trashCount: () => apiFetch<{ count: number }>('/api/library/trash/count'),
 
   restore: (source: string, sourceId: string) =>
-    apiFetch<{ status: string }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/restore`, {
-      method: 'POST',
-    }),
+    apiFetch<{ status: string }>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/restore`,
+      {
+        method: 'POST',
+      },
+    ),
 
   permanentDelete: (source: string, sourceId: string) =>
-    apiFetch<{ status: string; affected: number; deleted_dirs: number }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/permanent-delete`, {
-      method: 'POST',
-    }),
+    apiFetch<{ status: string; affected: number; deleted_dirs: number }>(
+      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/permanent-delete`,
+      {
+        method: 'POST',
+      },
+    ),
 
   emptyTrash: () =>
     apiFetch<{ status: string; affected: number }>('/api/library/trash/empty', {
@@ -445,7 +556,7 @@ const library = {
       pages_diff?: { old: number; new: number } | null
     }>(
       `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/check-update`,
-      { method: 'POST' }
+      { method: 'POST' },
     ),
 }
 
@@ -481,7 +592,9 @@ const download = {
     }),
 
   getStats: (params: { exclude_subscription?: boolean } = {}) =>
-    apiFetch<{ running: number; finished: number }>(`/api/download/stats${qs(params as Record<string, unknown>)}`),
+    apiFetch<{ running: number; finished: number }>(
+      `/api/download/stats${qs(params as Record<string, unknown>)}`,
+    ),
 
   pauseJob: (id: string) =>
     apiFetch<{ status: string }>(`/api/download/jobs/${id}`, {
@@ -507,12 +620,14 @@ const download = {
     ),
 
   supportedSites: () =>
-    apiFetch<{ categories: Record<string, Array<{ source_id: string; name: string; domain: string; has_tags: boolean }>> }>(
-      '/api/download/supported-sites',
-    ),
+    apiFetch<{
+      categories: Record<
+        string,
+        Array<{ source_id: string; name: string; domain: string; has_tags: boolean }>
+      >
+    }>('/api/download/supported-sites'),
 
-  preview: (url: string) =>
-    apiFetch<DownloadPreview>(`/api/download/preview${qs({ url })}`),
+  preview: (url: string) => apiFetch<DownloadPreview>(`/api/download/preview${qs({ url })}`),
 }
 
 // ── Settings ──────────────────────────────────────────────────────────
@@ -577,17 +692,19 @@ const settings = {
 
   detectSite: (url: string) =>
     apiFetch<{ detected: boolean; source?: string; site_name?: string }>(
-      `/api/settings/credentials/detect?url=${encodeURIComponent(url)}`
+      `/api/settings/credentials/detect?url=${encodeURIComponent(url)}`,
     ),
 
-  setSiteCredential: (source: string, data: { cookies?: string; username?: string; password?: string }) =>
+  setSiteCredential: (
+    source: string,
+    data: { cookies?: string; username?: string; password?: string },
+  ) =>
     apiFetch<{ status: string; source: string }>('/api/settings/credentials/site', {
       method: 'POST',
       body: JSON.stringify({ source, ...data }),
     }),
 
-  getEhSite: () =>
-    apiFetch<{ use_ex: boolean }>('/api/settings/eh-site'),
+  getEhSite: () => apiFetch<{ use_ex: boolean }>('/api/settings/eh-site'),
 
   setEhSite: (use_ex: boolean) =>
     apiFetch<{ use_ex: boolean }>('/api/settings/eh-site', {
@@ -629,10 +746,14 @@ const settings = {
       body: JSON.stringify({ value }),
     }),
 
-  getRateLimits: () =>
-    apiFetch<RateLimitSettings>('/api/settings/rate-limits'),
+  getRateLimits: () => apiFetch<RateLimitSettings>('/api/settings/rate-limits'),
 
-  patchRateLimits: (data: Partial<{ sites: Record<string, Partial<SiteRateConfig>>; schedule: Partial<import('./types').RateLimitSchedule> }>) =>
+  patchRateLimits: (
+    data: Partial<{
+      sites: Record<string, Partial<SiteRateConfig>>
+      schedule: Partial<import('./types').RateLimitSchedule>
+    }>,
+  ) =>
     apiFetch<RateLimitSettings>('/api/settings/rate-limits', {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -745,7 +866,9 @@ const tags = {
     apiFetch<TagItem[]>(`/api/tags/autocomplete${qs({ q, limit })}`),
 
   getTranslations: (tags: string[], language = 'zh') =>
-    apiFetch<Record<string, string>>(`/api/tags/translations${qs({ tags: tags.join(','), language })}`),
+    apiFetch<Record<string, string>>(
+      `/api/tags/translations${qs({ tags: tags.join(','), language })}`,
+    ),
 
   listBlocked: () => apiFetch<BlockedTag[]>('/api/tags/blocked'),
 
@@ -775,13 +898,20 @@ const tags = {
       body: JSON.stringify(body),
     }),
 
-  upsertTranslation: (body: { namespace: string; name: string; language: string; translation: string }) =>
+  upsertTranslation: (body: {
+    namespace: string
+    name: string
+    language: string
+    translation: string
+  }) =>
     apiFetch<{ status: string }>('/api/tags/translations', {
       method: 'POST',
       body: JSON.stringify(body),
     }),
 
-  batchImportTranslations: (translations: Array<{ namespace: string; name: string; language: string; translation: string }>) =>
+  batchImportTranslations: (
+    translations: Array<{ namespace: string; name: string; language: string; translation: string }>,
+  ) =>
     apiFetch<{ status: string; count: number }>('/api/tags/translations/batch', {
       method: 'POST',
       body: JSON.stringify({ translations }),
@@ -815,23 +945,37 @@ const tokens = {
 const import_ = {
   batchScan: (rootDir: string, pattern: string) =>
     apiFetch<{
-      matches: Array<{ rel_path: string; abs_path: string; artist: string | null; title: string; file_count: number }>
+      matches: Array<{
+        rel_path: string
+        abs_path: string
+        artist: string | null
+        title: string
+        file_count: number
+      }>
       unmatched: Array<{ rel_path: string; file_count: number }>
     }>('/api/import/batch/scan', {
       method: 'POST',
       body: JSON.stringify({ root_dir: rootDir, pattern }),
     }),
 
-  batchStart: (rootDir: string, mode: string, galleries: Array<{ path: string; artist: string | null; title: string }>) =>
+  batchStart: (
+    rootDir: string,
+    mode: string,
+    galleries: Array<{ path: string; artist: string | null; title: string }>,
+  ) =>
     apiFetch<{ batch_id: string; total: number }>('/api/import/batch/start', {
       method: 'POST',
       body: JSON.stringify({ root_dir: rootDir, mode, galleries }),
     }),
 
   batchProgress: (batchId: string) =>
-    apiFetch<{ total: number; completed: number; failed: number; current_gallery_id: number | null; status: string }>(
-      `/api/import/batch/progress/${batchId}`,
-    ),
+    apiFetch<{
+      total: number
+      completed: number
+      failed: number
+      current_gallery_id: number | null
+      status: string
+    }>(`/api/import/batch/progress/${batchId}`),
 
   rescanLibraryPath: (libraryId: number) =>
     apiFetch<{ status: string }>(`/api/import/rescan/path/${libraryId}`, { method: 'POST' }),
@@ -857,8 +1001,7 @@ const import_ = {
       status?: string
     }>('/api/import/rescan/status'),
 
-  rescanCancel: () =>
-    apiFetch<{ status: string }>('/api/import/rescan/cancel', { method: 'POST' }),
+  rescanCancel: () => apiFetch<{ status: string }>('/api/import/rescan/cancel', { method: 'POST' }),
 
   libraries: () =>
     apiFetch<
@@ -920,7 +1063,15 @@ const plugins = {
 // ── Pixiv ─────────────────────────────────────────────────────────────
 
 const pixiv = {
-  search: (params: { word?: string; sort?: string; search_target?: string; duration?: string; offset?: number } = {}) => {
+  search: (
+    params: {
+      word?: string
+      sort?: string
+      search_target?: string
+      duration?: string
+      offset?: number
+    } = {},
+  ) => {
     const p = new URLSearchParams()
     if (params.word) p.set('word', params.word)
     if (params.sort) p.set('sort', params.sort)
@@ -930,7 +1081,16 @@ const pixiv = {
     return apiFetch<PixivSearchResult>(`/api/pixiv/search?${p}`)
   },
 
-  searchPublic: (params: { word?: string; order?: string; mode?: string; page?: number; s_mode?: string; type?: string } = {}) => {
+  searchPublic: (
+    params: {
+      word?: string
+      order?: string
+      mode?: string
+      page?: number
+      s_mode?: string
+      type?: string
+    } = {},
+  ) => {
     const p = new URLSearchParams()
     if (params.word) p.set('word', params.word)
     if (params.order) p.set('order', params.order)
@@ -938,19 +1098,19 @@ const pixiv = {
     if (params.page) p.set('page', String(params.page))
     if (params.s_mode) p.set('s_mode', params.s_mode)
     if (params.type) p.set('type', params.type)
-    return apiFetch<PixivSearchResult & { popular?: PixivIllust[]; related_tags?: string[] }>(`/api/pixiv/search-public?${p}`)
+    return apiFetch<PixivSearchResult & { popular?: PixivIllust[]; related_tags?: string[] }>(
+      `/api/pixiv/search-public?${p}`,
+    )
   },
 
-  getIllust: (id: number) =>
-    apiFetch<PixivIllust>(`/api/pixiv/illust/${id}`),
+  getIllust: (id: number) => apiFetch<PixivIllust>(`/api/pixiv/illust/${id}`),
 
   getIllustPages: (id: number) =>
     apiFetch<{ pages: Array<{ page_num: number; url: string }>; page_count: number }>(
       `/api/pixiv/illust/${id}/pages`,
     ),
 
-  getUser: (id: number) =>
-    apiFetch<PixivUserResult>(`/api/pixiv/user/${id}`),
+  getUser: (id: number) => apiFetch<PixivUserResult>(`/api/pixiv/user/${id}`),
 
   getUserIllusts: (id: number, offset = 0) =>
     apiFetch<PixivSearchResult>(`/api/pixiv/user/${id}/illusts?offset=${offset}`),
@@ -969,11 +1129,12 @@ const pixiv = {
       `/api/pixiv/following?restrict=${restrict}&offset=${offset}`,
     ),
 
-  imageProxyUrl: (url: string) =>
-    `/api/pixiv/image-proxy?url=${encodeURIComponent(url)}`,
+  imageProxyUrl: (url: string) => `/api/pixiv/image-proxy?url=${encodeURIComponent(url)}`,
 
   addBookmark: (id: number, restrict: 'public' | 'private' = 'public') =>
-    apiFetch<{ ok: boolean }>(`/api/pixiv/illust/${id}/bookmark?restrict=${restrict}`, { method: 'POST' }),
+    apiFetch<{ ok: boolean }>(`/api/pixiv/illust/${id}/bookmark?restrict=${restrict}`, {
+      method: 'POST',
+    }),
 
   deleteBookmark: (id: number) =>
     apiFetch<{ ok: boolean }>(`/api/pixiv/illust/${id}/bookmark`, { method: 'DELETE' }),
@@ -1017,7 +1178,13 @@ const artists = {
     return apiFetch<{ artists: FollowedArtist[]; total: number }>(`/api/artists/followed?${p}`)
   },
 
-  follow: (data: { source: string; artist_id: string; artist_name?: string; artist_avatar?: string; auto_download?: boolean }) =>
+  follow: (data: {
+    source: string
+    artist_id: string
+    artist_name?: string
+    artist_avatar?: string
+    auto_download?: boolean
+  }) =>
     apiFetch<{ status: string; id: number }>('/api/artists/follow', {
       method: 'POST',
       body: JSON.stringify(data),
@@ -1041,8 +1208,7 @@ const artists = {
 // ── Collections ──────────────────────────────────────────────────────
 
 const collections = {
-  list: () =>
-    apiFetch<{ collections: Collection[] }>('/api/collections/'),
+  list: () => apiFetch<{ collections: Collection[] }>('/api/collections/'),
 
   get: (id: number, params: { page?: number; limit?: number } = {}) =>
     apiFetch<{
@@ -1059,10 +1225,13 @@ const collections = {
     }>(`/api/collections/${id}${qs(params as Record<string, unknown>)}`),
 
   create: (data: { name: string; description?: string }) =>
-    apiFetch<{ id: number; name: string; description: string | null; created_at: string | null }>('/api/collections/', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+    apiFetch<{ id: number; name: string; description: string | null; created_at: string | null }>(
+      '/api/collections/',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
 
   update: (id: number, patch: { name?: string; description?: string; cover_gallery_id?: number }) =>
     apiFetch<{ status: string }>(`/api/collections/${id}`, {
@@ -1090,8 +1259,7 @@ const collections = {
 // ── Scheduled Tasks ──────────────────────────────────────────────────
 
 const scheduledTasks = {
-  list: () =>
-    apiFetch<{ tasks: ScheduledTask[] }>('/api/scheduled-tasks/'),
+  list: () => apiFetch<{ tasks: ScheduledTask[] }>('/api/scheduled-tasks/'),
 
   update: (taskId: string, data: { enabled?: boolean; cron_expr?: string }) =>
     apiFetch<{ status: string }>(`/api/scheduled-tasks/${taskId}`, {
@@ -1110,19 +1278,36 @@ const scheduledTasks = {
 const subscriptions = {
   list: (params: { source?: string; enabled?: boolean; limit?: number; offset?: number } = {}) =>
     apiFetch<{ subscriptions: Subscription[]; total: number }>(
-      `/api/subscriptions/${qs(params as Record<string, unknown>)}`
+      `/api/subscriptions/${qs(params as Record<string, unknown>)}`,
     ),
 
-  create: (data: { url: string; name?: string; cron_expr?: string; auto_download?: boolean }) =>
-    apiFetch<{ status: string; id: number; source: string | null; duplicate?: boolean }>('/api/subscriptions/', {
-      method: 'POST',
-      body: JSON.stringify(data),
-    }),
+  create: (data: {
+    url: string
+    name?: string
+    cron_expr?: string
+    auto_download?: boolean
+    group_id?: number | null
+  }) =>
+    apiFetch<{ status: string; id: number; source: string | null; duplicate?: boolean }>(
+      '/api/subscriptions/',
+      {
+        method: 'POST',
+        body: JSON.stringify(data),
+      },
+    ),
 
-  get: (id: number) =>
-    apiFetch<Subscription>(`/api/subscriptions/${id}`),
+  get: (id: number) => apiFetch<Subscription>(`/api/subscriptions/${id}`),
 
-  update: (id: number, data: { name?: string; enabled?: boolean; auto_download?: boolean; cron_expr?: string }) =>
+  update: (
+    id: number,
+    data: {
+      name?: string
+      enabled?: boolean
+      auto_download?: boolean
+      cron_expr?: string
+      group_id?: number | null
+    },
+  ) =>
     apiFetch<{ status: string }>(`/api/subscriptions/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(data),
@@ -1142,11 +1327,65 @@ const subscriptions = {
     apiFetch<{ jobs: DownloadJob[] }>(`/api/subscriptions/${id}/jobs${qs({ limit })}`),
 }
 
+// ── Subscription Groups ──────────────────────────────────────────────
+
+const subscriptionGroups = {
+  list: () => apiFetch<{ groups: SubscriptionGroup[] }>('/api/subscription-groups/'),
+
+  create: (data: { name: string; schedule?: string; concurrency?: number; priority?: number }) =>
+    apiFetch<{ status: string; id: number }>('/api/subscription-groups/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  get: (id: number) => apiFetch<SubscriptionGroup>(`/api/subscription-groups/${id}`),
+
+  update: (
+    id: number,
+    data: {
+      name?: string
+      schedule?: string
+      concurrency?: number
+      priority?: number
+      enabled?: boolean
+    },
+  ) =>
+    apiFetch<{ status: string }>(`/api/subscription-groups/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
+
+  delete: (id: number) =>
+    apiFetch<{ status: string }>(`/api/subscription-groups/${id}`, {
+      method: 'DELETE',
+    }),
+
+  run: (id: number) =>
+    apiFetch<{ status: string }>(`/api/subscription-groups/${id}/run`, {
+      method: 'POST',
+    }),
+
+  pause: (id: number) =>
+    apiFetch<{ status: string }>(`/api/subscription-groups/${id}/pause`, {
+      method: 'POST',
+    }),
+
+  resume: (id: number) =>
+    apiFetch<{ status: string }>(`/api/subscription-groups/${id}/resume`, {
+      method: 'POST',
+    }),
+
+  bulkMove: (sub_ids: number[], group_id: number | null) =>
+    apiFetch<{ status: string; updated: number }>('/api/subscriptions/bulk-move', {
+      method: 'POST',
+      body: JSON.stringify({ sub_ids, group_id }),
+    }),
+}
+
 // ── Dedup ────────────────────────────────────────────────────────────
 
 const dedup = {
-  getStats: () =>
-    apiFetch<DedupStats>('/api/dedup/stats'),
+  getStats: () => apiFetch<DedupStats>('/api/dedup/stats'),
 
   getReview: (params: { relationship?: string; cursor?: string } = {}) =>
     apiFetch<DedupReviewResponse>(`/api/dedup/review${qs(params as Record<string, unknown>)}`),
@@ -1192,22 +1431,60 @@ const users = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
-  delete: (id: number) =>
-    apiFetch<{ status: string }>(`/api/users/${id}`, { method: 'DELETE' }),
+  delete: (id: number) => apiFetch<{ status: string }>(`/api/users/${id}`, { method: 'DELETE' }),
+}
+
+// ── Admin Sites ──────────────────────────────────────────────────────
+
+const adminSites = {
+  list: () => apiFetch<SiteConfigItem[]>('/api/admin/sites'),
+  get: (sourceId: string) => apiFetch<SiteConfigItem>(`/api/admin/sites/${sourceId}`),
+  update: (sourceId: string, data: { download?: Record<string, unknown> }) =>
+    apiFetch<SiteConfigItem>(`/api/admin/sites/${sourceId}`, {
+      method: 'PUT',
+      body: JSON.stringify(data),
+    }),
+  probe: (url: string) =>
+    apiFetch<ProbeResult>('/api/admin/sites/probe', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
+    }),
+  updateFieldMapping: (sourceId: string, fieldMapping: Record<string, string | null>) =>
+    apiFetch<SiteConfigItem>(`/api/admin/sites/${sourceId}/field-mapping`, {
+      method: 'PUT',
+      body: JSON.stringify({ field_mapping: fieldMapping }),
+    }),
+  reset: (sourceId: string, fieldPath: string) =>
+    apiFetch<SiteConfigItem>(`/api/admin/sites/${sourceId}/reset`, {
+      method: 'POST',
+      body: JSON.stringify({ field_path: fieldPath }),
+    }),
+  resetAdaptive: (sourceId: string) =>
+    apiFetch<SiteConfigItem>(`/api/admin/sites/${sourceId}/reset-adaptive`, {
+      method: 'POST',
+    }),
 }
 
 // ── Logs ──────────────────────────────────────────────────────────────
 
 const logs = {
-  list: (params?: { level?: string[]; source?: string; search?: string; limit?: number; offset?: number }) => {
+  list: (params?: {
+    level?: string[]
+    source?: string
+    search?: string
+    limit?: number
+    offset?: number
+  }) => {
     const sp = new URLSearchParams()
-    if (params?.level) params.level.forEach(l => sp.append('level', l))
+    if (params?.level) params.level.forEach((l) => sp.append('level', l))
     if (params?.source) sp.set('source', params.source)
     if (params?.search) sp.set('search', params.search)
     if (params?.limit) sp.set('limit', String(params.limit))
     if (params?.offset) sp.set('offset', String(params.offset))
     const qs = sp.toString()
-    return apiFetch<{ logs: LogEntry[]; total: number; has_more: boolean }>(`/api/logs/${qs ? `?${qs}` : ''}`)
+    return apiFetch<{ logs: LogEntry[]; total: number; has_more: boolean }>(
+      `/api/logs/${qs ? `?${qs}` : ''}`,
+    )
   },
   clear: () => apiFetch<{ status: string; deleted: number }>('/api/logs/', { method: 'DELETE' }),
   getLevels: () => apiFetch<LogLevelConfig>('/api/logs/levels'),
@@ -1245,7 +1522,9 @@ export const api = {
   collections,
   scheduledTasks,
   subscriptions,
+  subscriptionGroups,
   dedup,
   users,
   logs,
+  adminSites,
 }

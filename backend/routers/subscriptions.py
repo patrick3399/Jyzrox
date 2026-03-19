@@ -1,9 +1,8 @@
 """Subscription management endpoints."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import UTC
 
-from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import delete, select, update
@@ -12,7 +11,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth, require_role
 from core.database import async_session
-from core.utils import detect_source, normalize_subscription_url
+from core.utils import detect_source, normalize_subscription_url, validate_cron
 from db.models import Subscription
 
 logger = logging.getLogger(__name__)
@@ -26,6 +25,7 @@ class CreateSubscriptionRequest(BaseModel):
     name: str | None = None
     cron_expr: str | None = None
     auto_download: bool = True
+    group_id: int | None = None
 
 
 class PatchSubscriptionRequest(BaseModel):
@@ -33,12 +33,41 @@ class PatchSubscriptionRequest(BaseModel):
     enabled: bool | None = None
     auto_download: bool | None = None
     cron_expr: str | None = None
+    group_id: int | None = None
+
+
+class BulkMoveRequest(BaseModel):
+    sub_ids: list[int]
+    group_id: int | None
+
+
+def _serialize_subscription(s) -> dict:
+    return {
+        "id": s.id,
+        "name": s.name,
+        "url": s.url,
+        "source": s.source,
+        "source_id": s.source_id,
+        "avatar_url": s.avatar_url,
+        "enabled": s.enabled,
+        "auto_download": s.auto_download,
+        "cron_expr": s.cron_expr,
+        "group_id": s.group_id,
+        "last_checked_at": s.last_checked_at.isoformat() if s.last_checked_at else None,
+        "last_item_id": s.last_item_id,
+        "last_status": s.last_status,
+        "last_error": s.last_error,
+        "last_job_id": str(s.last_job_id) if s.last_job_id else None,
+        "next_check_at": s.next_check_at.isoformat() if s.next_check_at else None,
+        "created_at": s.created_at.isoformat() if s.created_at else None,
+    }
 
 
 @router.get("/")
 async def list_subscriptions(
     source: str | None = Query(default=None),
     enabled: bool | None = Query(default=None),
+    group_id: int | None = Query(default=None),
     limit: int = Query(default=50, ge=1, le=200),
     offset: int = Query(default=0, ge=0),
     auth: dict = Depends(require_auth),
@@ -51,6 +80,8 @@ async def list_subscriptions(
             query = query.where(Subscription.source == source)
         if enabled is not None:
             query = query.where(Subscription.enabled == enabled)
+        if group_id is not None:
+            query = query.where(Subscription.group_id == group_id)
         query = query.order_by(Subscription.created_at.desc()).offset(offset).limit(limit)
 
         result = await session.execute(query)
@@ -61,30 +92,12 @@ async def list_subscriptions(
             count_q = count_q.where(Subscription.source == source)
         if enabled is not None:
             count_q = count_q.where(Subscription.enabled == enabled)
+        if group_id is not None:
+            count_q = count_q.where(Subscription.group_id == group_id)
         total = (await session.execute(count_q)).scalar() or 0
 
     return {
-        "subscriptions": [
-            {
-                "id": s.id,
-                "name": s.name,
-                "url": s.url,
-                "source": s.source,
-                "source_id": s.source_id,
-                "avatar_url": s.avatar_url,
-                "enabled": s.enabled,
-                "auto_download": s.auto_download,
-                "cron_expr": s.cron_expr,
-                "last_checked_at": s.last_checked_at.isoformat() if s.last_checked_at else None,
-                "last_item_id": s.last_item_id,
-                "last_status": s.last_status,
-                "last_error": s.last_error,
-                "last_job_id": str(s.last_job_id) if s.last_job_id else None,
-                "next_check_at": s.next_check_at.isoformat() if s.next_check_at else None,
-                "created_at": s.created_at.isoformat() if s.created_at else None,
-            }
-            for s in subs
-        ],
+        "subscriptions": [_serialize_subscription(s) for s in subs],
         "total": total,
     }
 
@@ -102,49 +115,84 @@ async def create_subscription(
         source = None
 
     if req.cron_expr:
-        try:
-            croniter(req.cron_expr)
-        except (ValueError, KeyError) as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid cron expression: {exc}")
+        validate_cron(req.cron_expr)
 
     cron_expr = req.cron_expr or "0 */2 * * *"
-    from datetime import datetime, timezone
-    next_check = croniter(cron_expr, datetime.now(timezone.utc)).get_next(datetime)
+    from datetime import datetime
+
+    from croniter import croniter
+
+    next_check = croniter(cron_expr, datetime.now(UTC)).get_next(datetime)
 
     async with async_session() as session:
-        existing = (await session.execute(
-            select(Subscription.id).where(
-                Subscription.user_id == user_id,
-                Subscription.url == normalized_url,
+        existing = (
+            await session.execute(
+                select(Subscription.id).where(
+                    Subscription.user_id == user_id,
+                    Subscription.url == normalized_url,
+                )
             )
-        )).scalar_one_or_none()
+        ).scalar_one_or_none()
 
-        stmt = pg_insert(Subscription).values(
-            user_id=user_id,
-            url=normalized_url,
-            name=req.name,
-            source=source,
-            source_id=None,
-            auto_download=req.auto_download,
-            cron_expr=cron_expr,
-            next_check_at=next_check,
-        ).on_conflict_do_update(
-            constraint="subscriptions_user_id_url_key",
-            set_={
-                "name": req.name,
-                "auto_download": req.auto_download,
-                "cron_expr": cron_expr,
-                "enabled": True,
-            },
-        ).returning(Subscription.id)
+        stmt = (
+            pg_insert(Subscription)
+            .values(
+                user_id=user_id,
+                url=normalized_url,
+                name=req.name,
+                source=source,
+                source_id=None,
+                auto_download=req.auto_download,
+                cron_expr=cron_expr,
+                next_check_at=next_check,
+                group_id=req.group_id,
+            )
+            .on_conflict_do_update(
+                constraint="subscriptions_user_id_url_key",
+                set_={
+                    "name": req.name,
+                    "auto_download": req.auto_download,
+                    "cron_expr": cron_expr,
+                    "enabled": True,
+                },
+            )
+            .returning(Subscription.id)
+        )
 
         result = await session.execute(stmt)
         row = result.fetchone()
         await session.commit()
 
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.SUBSCRIPTION_CREATED, actor_user_id=auth["user_id"], resource_type="subscription", resource_id=row.id if row else None)
+
+    await emit_safe(
+        EventType.SUBSCRIPTION_CREATED,
+        actor_user_id=auth["user_id"],
+        resource_type="subscription",
+        resource_id=row.id if row else None,
+    )
     return {"status": "ok", "id": row.id if row else None, "source": source, "duplicate": existing is not None}
+
+
+@router.post("/bulk-move")
+async def bulk_move_subscriptions(
+    req: BulkMoveRequest,
+    auth: dict = Depends(_member),
+):
+    """Move subscriptions to a different group."""
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        result = await session.execute(
+            update(Subscription)
+            .where(
+                Subscription.id.in_(req.sub_ids),
+                Subscription.user_id == user_id,
+            )
+            .values(group_id=req.group_id)
+        )
+        await session.commit()
+
+    return {"status": "ok", "updated": result.rowcount}  # type: ignore[union-attr]
 
 
 @router.get("/{sub_id}")
@@ -155,31 +203,16 @@ async def get_subscription(
     """Get subscription detail."""
     user_id = auth["user_id"]
     async with async_session() as session:
-        sub = (await session.execute(
-            select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == user_id)
-        )).scalar_one_or_none()
+        sub = (
+            await session.execute(
+                select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == user_id)
+            )
+        ).scalar_one_or_none()
 
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")
 
-    return {
-        "id": sub.id,
-        "name": sub.name,
-        "url": sub.url,
-        "source": sub.source,
-        "source_id": sub.source_id,
-        "avatar_url": sub.avatar_url,
-        "enabled": sub.enabled,
-        "auto_download": sub.auto_download,
-        "cron_expr": sub.cron_expr,
-        "last_checked_at": sub.last_checked_at.isoformat() if sub.last_checked_at else None,
-        "last_item_id": sub.last_item_id,
-        "last_status": sub.last_status,
-        "last_error": sub.last_error,
-        "last_job_id": str(sub.last_job_id) if sub.last_job_id else None,
-        "next_check_at": sub.next_check_at.isoformat() if sub.next_check_at else None,
-        "created_at": sub.created_at.isoformat() if sub.created_at else None,
-    }
+    return _serialize_subscription(sub)
 
 
 @router.get("/{sub_id}/jobs")
@@ -195,9 +228,11 @@ async def get_subscription_jobs(
     user_id = auth["user_id"]
     async with async_session() as session:
         # Verify ownership
-        sub = (await session.execute(
-            select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == user_id)
-        )).scalar_one_or_none()
+        sub = (
+            await session.execute(
+                select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == user_id)
+            )
+        ).scalar_one_or_none()
         if not sub:
             raise HTTPException(status_code=404, detail="Subscription not found")
 
@@ -237,21 +272,23 @@ async def update_subscription(
     if req.auto_download is not None:
         updates["auto_download"] = req.auto_download
     if req.cron_expr is not None:
-        try:
-            croniter(req.cron_expr)
-        except (ValueError, KeyError) as exc:
-            raise HTTPException(status_code=400, detail=f"Invalid cron expression: {exc}")
+        validate_cron(req.cron_expr)
         updates["cron_expr"] = req.cron_expr
+    if req.group_id is not None:
+        updates["group_id"] = req.group_id
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")
 
     async with async_session() as session:
         result = await session.execute(
-            update(Subscription).where(
+            update(Subscription)
+            .where(
                 Subscription.id == sub_id,
                 Subscription.user_id == user_id,
-            ).values(**updates).returning(Subscription.id)
+            )
+            .values(**updates)
+            .returning(Subscription.id)
         )
         updated = result.fetchone()
         await session.commit()
@@ -279,12 +316,19 @@ async def delete_subscription(
         # Must run before the DELETE because the FK has ondelete="SET NULL",
         # which would clear subscription_id and leak jobs into the Queue page.
         from db.models import DownloadJob
-        active_jobs = (await session.execute(
-            select(DownloadJob).where(
-                DownloadJob.subscription_id == sub_id,
-                DownloadJob.status.in_(["queued", "running"]),
+
+        active_jobs = (
+            (
+                await session.execute(
+                    select(DownloadJob).where(
+                        DownloadJob.subscription_id == sub_id,
+                        DownloadJob.status.in_(["queued", "running"]),
+                    )
+                )
             )
-        )).scalars().all()
+            .scalars()
+            .all()
+        )
         for job in active_jobs:
             job.status = "cancelled"
             cancelled_jobs.append(str(job.id))
@@ -303,12 +347,16 @@ async def delete_subscription(
     # Set Redis cancel flags for running jobs so workers stop promptly
     if cancelled_jobs:
         from core.redis_client import get_redis
+
         redis = get_redis()
         for job_id in cancelled_jobs:
             await redis.setex(f"download:cancel:{job_id}", 3600, "1")
 
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.SUBSCRIPTION_DELETED, actor_user_id=auth["user_id"], resource_type="subscription", resource_id=sub_id)
+
+    await emit_safe(
+        EventType.SUBSCRIPTION_DELETED, actor_user_id=auth["user_id"], resource_type="subscription", resource_id=sub_id
+    )
     return {"status": "ok", "cancelled_jobs": len(cancelled_jobs)}
 
 
@@ -321,9 +369,11 @@ async def check_subscription(
     """Trigger immediate check for a subscription."""
     user_id = auth["user_id"]
     async with async_session() as session:
-        sub = (await session.execute(
-            select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == user_id)
-        )).scalar_one_or_none()
+        sub = (
+            await session.execute(
+                select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == user_id)
+            )
+        ).scalar_one_or_none()
 
     if not sub:
         raise HTTPException(status_code=404, detail="Subscription not found")

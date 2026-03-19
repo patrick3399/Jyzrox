@@ -175,3 +175,25 @@ async def _cron_record(ctx: dict, task_id: str, status: str, error: str | None =
     else:
         pipe.delete(f"cron:{task_id}:last_error")
     await pipe.execute()
+
+
+# ── Renewable Lock ────────────────────────────────────────────────────
+
+LOCK_RELEASE_LUA = "if redis.call('get',KEYS[1])==ARGV[1] then return redis.call('del',KEYS[1]) else return 0 end"
+
+
+async def acquire_lock(redis, key: str, ttl: int = 300) -> str | None:
+    """Acquire a distributed lock with a unique value. Returns lock_value or None."""
+    import uuid as _uuid
+
+    lock_value = str(_uuid.uuid4())
+    acquired = await redis.set(key, lock_value, nx=True, ex=ttl)
+    if acquired:
+        return lock_value
+    return None
+
+
+async def release_lock(redis, key: str, lock_value: str) -> bool:
+    """Release a lock only if we still own it (compare-and-delete via Lua)."""
+    result = await redis.eval(LOCK_RELEASE_LUA, 1, key, lock_value)
+    return result == 1

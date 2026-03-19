@@ -26,6 +26,21 @@ _INVALIDATION_CHANNEL = "site_config:invalidate"
 # Fields allowed in overrides.download
 _DOWNLOAD_FIELDS = {"retries", "http_timeout", "sleep_request", "concurrency", "inactivity_timeout"}
 
+# Jyzrox canonical field names allowed in overrides.field_mapping
+JYZROX_FIELDS = frozenset(
+    {
+        "source_id",
+        "title",
+        "artist",
+        "tags",
+        "date",
+        "title_jpn",
+        "category",
+        "language",
+        "uploader",
+    }
+)
+
 
 @dataclass(frozen=True, slots=True)
 class DownloadParams:
@@ -65,8 +80,8 @@ class SiteConfigService:
         self._cache[source_id] = (params, time.time())
         return params
 
-    async def update(self, source_id: str, overrides: dict) -> DownloadParams:
-        """Update user overrides for a source. Validates and persists to DB."""
+    async def update(self, source_id: str, overrides: dict) -> tuple[DownloadParams, SiteConfig]:
+        """Update user overrides for a source. Returns (params, row)."""
         self._validate_overrides(overrides)
 
         async with AsyncSessionLocal() as session:
@@ -85,12 +100,13 @@ class SiteConfigService:
                 row.overrides = merged
             await session.commit()
             result = self._merge(source_id, row)
+            session.expunge(row)
 
         await self._invalidate(source_id)
-        return result
+        return result, row
 
-    async def reset(self, source_id: str, field_path: str) -> DownloadParams:
-        """Remove a specific override field. E.g. field_path='download.retries'."""
+    async def reset(self, source_id: str, field_path: str) -> tuple[DownloadParams, SiteConfig | None]:
+        """Remove a specific override field. E.g. field_path='download.retries'. Returns (params, row)."""
         parts = field_path.split(".")
         if len(parts) != 2:
             raise ValueError(f"field_path must be 'section.field', got '{field_path}'")
@@ -109,25 +125,85 @@ class SiteConfigService:
                     updated.pop(section, None)
                 row.overrides = updated
                 await session.commit()
+            if row is not None:
+                session.expunge(row)
             result = self._merge(source_id, row)
 
         await self._invalidate(source_id)
-        return result
+        return result, row
 
-    async def reset_adaptive(self, source_id: str) -> DownloadParams:
-        """Clear all adaptive state for a source."""
+    async def reset_adaptive(self, source_id: str) -> tuple[DownloadParams, SiteConfig | None]:
+        """Clear all adaptive state for a source. Returns (params, row)."""
         async with AsyncSessionLocal() as session:
             row = await session.get(SiteConfig, source_id)
             if row is not None:
                 row.adaptive = {}
                 await session.commit()
+                session.expunge(row)
             result = self._merge(source_id, row)
 
         await self._invalidate(source_id)
         from core.adaptive import adaptive_engine
 
         await adaptive_engine.reset(source_id)
-        return result
+        return result, row
+
+    async def save_probe_result(self, source_id: str, probe_data: dict) -> None:
+        """Persist probe result to the auto_probe JSONB column."""
+        async with AsyncSessionLocal() as session:
+            row = await session.get(SiteConfig, source_id)
+            if row is None:
+                row = SiteConfig(source_id=source_id, auto_probe=probe_data)
+                session.add(row)
+            else:
+                row.auto_probe = probe_data
+            await session.commit()
+
+    async def save_field_mapping(self, source_id: str, field_mapping: dict) -> tuple[DownloadParams, SiteConfig]:
+        """Save user-confirmed field mappings to overrides.field_mapping. Returns (params, row)."""
+        _validate_field_mapping(field_mapping)
+        return await self.update(source_id, {"field_mapping": field_mapping})
+
+    async def get_params_with_row(self, source_id: str) -> tuple[DownloadParams, SiteConfig | None]:
+        """Return merged download params AND the DB row in a single query."""
+        async with AsyncSessionLocal() as session:
+            row = (
+                await session.execute(select(SiteConfig).where(SiteConfig.source_id == source_id))
+            ).scalar_one_or_none()
+            if row is not None:
+                session.expunge(row)
+        params = self._merge(source_id, row)
+        self._cache[source_id] = (params, time.time())
+        return params, row
+
+    async def get_all_with_rows(self) -> list[tuple[str, DownloadParams, SiteConfig | None]]:
+        """Return all sources with params and DB rows in a single query.
+
+        Also populates the batch params cache (same as get_all_download_params).
+        """
+        from plugins.builtin.gallery_dl._sites import GDL_SITES
+
+        db_rows: dict[str, SiteConfig] = {}
+        async with AsyncSessionLocal() as session:
+            result = await session.execute(select(SiteConfig))
+            for row in result.scalars().all():
+                session.expunge(row)
+                db_rows[row.source_id] = row
+
+        seen: set[str] = set()
+        output: list[tuple[str, DownloadParams, SiteConfig | None]] = []
+        params_cache: dict[str, DownloadParams] = {}
+        for site in GDL_SITES:
+            if site.source_id in seen:
+                continue
+            seen.add(site.source_id)
+            row = db_rows.get(site.source_id)
+            params = self._merge(site.source_id, row)
+            output.append((site.source_id, params, row))
+            params_cache[site.source_id] = params
+
+        self._batch_cache = (params_cache, time.time())
+        return output
 
     async def get_all_download_params(self) -> dict[str, DownloadParams]:
         """Return effective download params for ALL known sources.
@@ -280,6 +356,23 @@ class SiteConfigService:
                         raise ValueError(f"sleep_request tuple values must be 0 < value <= 3600, got {sr}")
                 else:
                     raise ValueError(f"sleep_request must be float or [min, max] pair, got {type(sr).__name__}")
+
+        fm = overrides.get("field_mapping", {})
+        if fm:
+            _validate_field_mapping(fm)
+
+
+# ── Module-level helpers ──────────────────────────────────────────────
+
+
+def _validate_field_mapping(field_mapping: dict) -> None:
+    """Validate a field_mapping dict: keys must be Jyzrox fields, values str or None."""
+    for key in field_mapping:
+        if key not in JYZROX_FIELDS:
+            raise ValueError(f"Unknown Jyzrox field in field_mapping: '{key}'")
+    for val in field_mapping.values():
+        if val is not None and not isinstance(val, str):
+            raise ValueError(f"field_mapping values must be strings or null, got {type(val).__name__}")
 
 
 # ── Module-level singleton ────────────────────────────────────────────

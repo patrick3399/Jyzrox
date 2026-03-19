@@ -513,6 +513,22 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS subscription_groups (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        name TEXT NOT NULL,
+        schedule TEXT NOT NULL DEFAULT '0 */6 * * *',
+        concurrency INTEGER DEFAULT 2,
+        enabled BOOLEAN DEFAULT 1,
+        priority INTEGER DEFAULT 5,
+        is_system BOOLEAN DEFAULT 0,
+        status TEXT DEFAULT 'idle',
+        last_run_at TIMESTAMP,
+        last_completed_at TIMESTAMP,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS subscriptions (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
@@ -532,6 +548,7 @@ _SQLITE_SCHEMA = [
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         batch_total INTEGER DEFAULT 0,
         batch_enqueued INTEGER DEFAULT 0,
+        group_id INTEGER,
         last_job_id TEXT,
         UNIQUE (user_id, url)
     )
@@ -735,6 +752,7 @@ async def client(db_session, db_session_factory, mock_redis):
         patch("routers.import_router.async_session", db_session_factory),
         patch("routers.artists.async_session", db_session_factory),
         patch("routers.subscriptions.async_session", db_session_factory),
+        patch("routers.subscription_groups.async_session", db_session_factory),
         patch("routers.dedup.async_session", db_session_factory),
         patch("plugins.builtin.ehentai.browse.async_session", db_session_factory),
         patch("plugins.builtin.ehentai.browse.get_redis", return_value=mock_redis),
@@ -966,6 +984,7 @@ def make_client(db_session, db_session_factory, mock_redis):
             patch("routers.import_router.async_session", db_session_factory),
             patch("routers.artists.async_session", db_session_factory),
             patch("routers.subscriptions.async_session", db_session_factory),
+            patch("routers.subscription_groups.async_session", db_session_factory),
             patch("plugins.builtin.ehentai.browse.async_session", db_session_factory),
             patch("plugins.builtin.ehentai.browse.get_redis", return_value=mock_redis),
             patch("routers.settings.get_redis", return_value=mock_redis),
