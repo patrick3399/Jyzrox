@@ -49,6 +49,7 @@ from routers import (
     plugins as plugins_router,
 )
 from routers import settings as settings_router
+from routers import site_config as site_config_router
 from routers import (
     users as users_router,
 )
@@ -75,6 +76,10 @@ async def lifespan(app: FastAPI):
 
     await init_plugins()
     logger.info("Plugins initialized")
+    from core.site_config import site_config_service
+
+    await site_config_service.start_listener()
+    logger.info("SiteConfigService listener started")
     # Mount browse routers dynamically from plugins
     from plugins.registry import plugin_registry
 
@@ -85,6 +90,7 @@ async def lifespan(app: FastAPI):
         logger.info("Mounted browse router: %s → %s", sid, prefix)
     yield
     logger.info("Shutting down...")
+    await site_config_service.stop_listener()
     await app.state.arq.aclose()
     await close_redis()
     await engine.dispose()
@@ -154,6 +160,7 @@ app.include_router(users_router.router, prefix="/api/users")
 app.include_router(rss.router, prefix="/api/rss")
 app.include_router(logs_router.router, prefix="/api/logs")
 app.include_router(gallery_dl_admin.router, prefix="/api/admin/gallery-dl")
+app.include_router(site_config_router.router, prefix="/api/admin/sites")
 
 
 @app.get("/api/health")

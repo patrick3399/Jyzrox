@@ -48,6 +48,15 @@ ignore = [
 "services/pixiv_client.py" = [
     "S105",   # _TOKEN_KEY = "pixiv:access_token" — Redis key name, not a password
 ]
+"main.py" = [
+    "E402",   # patch_asyncio_for_314() must run before any arq/asyncio import
+]
+"db/models.py" = [
+    "E402",   # relationship alias must precede func/DateTime imports
+]
+"tests/conftest.py" = [
+    "E402",   # SQLite compatibility patches require interleaved imports
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["core", "db", "routers", "services"]

@@ -430,3 +430,12 @@ CREATE TABLE IF NOT EXISTS user_reading_list (
     PRIMARY KEY (user_id, gallery_id)
 );
 CREATE INDEX IF NOT EXISTS idx_user_reading_list_gallery ON user_reading_list (gallery_id);
+
+-- ── Site Configs (download tuning) ──────────────────────────────────
+CREATE TABLE IF NOT EXISTS site_configs (
+    source_id   TEXT PRIMARY KEY,
+    overrides   JSONB NOT NULL DEFAULT '{}',
+    adaptive    JSONB NOT NULL DEFAULT '{}',
+    auto_probe  JSONB,
+    updated_at  TIMESTAMPTZ DEFAULT now()
+);

@@ -66,10 +66,11 @@ _placeholder_factory = async_sessionmaker(_placeholder_engine, class_=AsyncSessi
 
 # Register `now()` for SQLite (PostgreSQL compat) on the placeholder engine.
 # Production code (e.g. verify_api_token) uses raw `now()` in SQL text.
-from sqlalchemy import event as _sa_event
-from datetime import datetime as _dt
 import sqlite3
 import uuid
+from datetime import datetime as _dt
+
+from sqlalchemy import event as _sa_event
 
 # SQLAlchemy uses UUID(as_uuid=True) for PG but SQLite has no UUID type.
 # Override UUID bind processing to store as TEXT strings in SQLite.
@@ -83,10 +84,12 @@ _original_bind = PG_UUID.bind_processor
 def _patched_bind_processor(self, dialect):
     """For non-PG dialects (SQLite), convert UUID to str instead of calling .hex."""
     if dialect.name != "postgresql":
+
         def process(value):
             if value is not None:
                 return str(value) if isinstance(value, uuid.UUID) else value
             return value
+
         return process
     return _original_bind(self, dialect)
 
@@ -99,10 +102,12 @@ _original_result = PG_UUID.result_processor
 def _patched_result_processor(self, dialect, coltype):
     """For non-PG dialects (SQLite), convert str back to UUID."""
     if dialect.name != "postgresql":
+
         def process(value):
             if value is not None and not isinstance(value, uuid.UUID):
                 return uuid.UUID(value)
             return value
+
         return process
     return _original_result(self, dialect, coltype)
 
@@ -111,6 +116,7 @@ PG_UUID.result_processor = _patched_result_processor
 
 # ARRAY → store as JSON text in SQLite
 import json as _json
+
 from sqlalchemy import ARRAY as SA_ARRAY
 
 _original_array_bind = SA_ARRAY.bind_processor
@@ -118,10 +124,12 @@ _original_array_bind = SA_ARRAY.bind_processor
 
 def _patched_array_bind(self, dialect):
     if dialect.name != "postgresql":
+
         def process(value):
             if value is not None:
                 return _json.dumps(value) if not isinstance(value, str) else value
             return value
+
         return process
     return _original_array_bind(self, dialect)
 
@@ -133,10 +141,12 @@ _original_array_result = SA_ARRAY.result_processor
 
 def _patched_array_result(self, dialect, coltype):
     if dialect.name != "postgresql":
+
         def process(value):
             if value is not None and isinstance(value, str):
                 return _json.loads(value)
             return value
+
         return process
     return _original_array_result(self, dialect, coltype)
 
@@ -151,10 +161,12 @@ _original_jsonb_bind = PG_JSONB.bind_processor
 
 def _patched_jsonb_bind(self, dialect):
     if dialect.name != "postgresql":
+
         def process(value):
             if value is not None:
                 return _json.dumps(value) if not isinstance(value, str) else value
             return value
+
         return process
     return _original_jsonb_bind(self, dialect)
 
@@ -166,10 +178,12 @@ _original_jsonb_result = PG_JSONB.result_processor
 
 def _patched_jsonb_result(self, dialect, coltype):
     if dialect.name != "postgresql":
+
         def process(value):
             if value is not None and isinstance(value, str):
                 return _json.loads(value)
             return value
+
         return process
     return _original_jsonb_result(self, dialect, coltype)
 
@@ -222,6 +236,7 @@ _redis_close_patch = patch("core.redis_client.close_redis", new_callable=AsyncMo
 
 # Patch StaticFiles to skip directory check (swagger-ui dir only exists in Docker)
 import starlette.staticfiles as _sf_mod
+
 _OrigStaticFiles = _sf_mod.StaticFiles
 
 
@@ -229,6 +244,7 @@ class _NoCheckStaticFiles(_OrigStaticFiles):
     def __init__(self, **kwargs):
         kwargs.pop("directory", None)
         import tempfile
+
         kwargs["directory"] = tempfile.mkdtemp()
         super().__init__(**kwargs)
 
@@ -598,6 +614,15 @@ _SQLITE_SCHEMA = [
         PRIMARY KEY (user_id, gallery_id)
     )
     """,
+    """
+    CREATE TABLE IF NOT EXISTS site_configs (
+        source_id TEXT PRIMARY KEY,
+        overrides TEXT NOT NULL DEFAULT '{}',
+        adaptive TEXT NOT NULL DEFAULT '{}',
+        auto_probe TEXT,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
 ]
 
 # ---------------------------------------------------------------------------
@@ -616,7 +641,6 @@ def event_loop():
 @pytest.fixture
 async def db_engine():
     """SQLite in-memory engine with schema, created fresh per test."""
-    from datetime import datetime
 
     # Use shared cache so all connections see the same in-memory DB
     engine = create_async_engine(
@@ -720,6 +744,8 @@ async def client(db_session, db_session_factory, mock_redis):
         patch("routers.system.get_redis", return_value=mock_redis),
         patch("routers.scheduled_tasks.get_redis", return_value=mock_redis),
         patch("routers.logs.get_redis", return_value=mock_redis),
+        patch("core.site_config.AsyncSessionLocal", db_session_factory),
+        patch("core.site_config.get_redis", return_value=mock_redis),
     ]
     with ExitStack() as stack:
         for p in _patches:
@@ -921,9 +947,7 @@ def make_client(db_session, db_session_factory, mock_redis):
         _app.dependency_overrides[require_auth] = _override_require_auth
 
         _app.state.arq = AsyncMock()
-        _app.state.arq.enqueue_job = AsyncMock(
-            return_value=MagicMock(job_id=f"test-job-{user_id}")
-        )
+        _app.state.arq.enqueue_job = AsyncMock(return_value=MagicMock(job_id=f"test-job-{user_id}"))
 
         _make_patches = [
             patch("core.redis_client.get_redis", return_value=mock_redis),
@@ -946,6 +970,8 @@ def make_client(db_session, db_session_factory, mock_redis):
             patch("plugins.builtin.ehentai.browse.get_redis", return_value=mock_redis),
             patch("routers.settings.get_redis", return_value=mock_redis),
             patch("routers.logs.get_redis", return_value=mock_redis),
+            patch("core.site_config.AsyncSessionLocal", db_session_factory),
+            patch("core.site_config.get_redis", return_value=mock_redis),
         ]
         with ExitStack() as stack:
             for p in _make_patches:

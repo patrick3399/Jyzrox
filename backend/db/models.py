@@ -12,9 +12,11 @@ from sqlalchemy import (
     SmallInteger,
     Text,
     UniqueConstraint,
+    text,
 )
 from sqlalchemy.dialects.postgresql import JSONB, UUID
 from sqlalchemy.orm import Mapped, mapped_column, relationship
+
 _rel = relationship  # alias to avoid shadowing by BlobRelationship.relationship column
 from sqlalchemy.sql import func
 from sqlalchemy.types import DateTime
@@ -179,15 +181,21 @@ class DownloadJob(Base):
     retry_count: Mapped[int] = mapped_column(SmallInteger, default=0)
     max_retries: Mapped[int] = mapped_column(SmallInteger, default=3)
     next_retry_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
-    gallery_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"), nullable=True)
-    subscription_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("subscriptions.id", ondelete="SET NULL"), nullable=True)
+    gallery_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"), nullable=True
+    )
+    subscription_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("subscriptions.id", ondelete="SET NULL"), nullable=True
+    )
 
 
 class ReadProgress(Base):
     __tablename__ = "read_progress"
 
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
+    )
     last_page: Mapped[int] = mapped_column(Integer, default=0)
     last_read_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -303,11 +311,11 @@ class Subscription(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     batch_total: Mapped[int] = mapped_column(Integer, default=0)
     batch_enqueued: Mapped[int] = mapped_column(Integer, default=0)
-    last_job_id: Mapped[uuid.UUID | None] = mapped_column(UUID(as_uuid=True), ForeignKey("download_jobs.id", ondelete="SET NULL"), nullable=True)
-
-    __table_args__ = (
-        UniqueConstraint("user_id", "url", name="uq_subscription_user_url"),
+    last_job_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("download_jobs.id", ondelete="SET NULL"), nullable=True
     )
+
+    __table_args__ = (UniqueConstraint("user_id", "url", name="uq_subscription_user_url"),)
 
 
 class Collection(Base):
@@ -322,14 +330,20 @@ class Collection(Base):
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     cover_gallery: Mapped["Gallery | None"] = relationship()
-    collection_galleries: Mapped[list["CollectionGallery"]] = relationship(back_populates="collection", cascade="all, delete-orphan")
+    collection_galleries: Mapped[list["CollectionGallery"]] = relationship(
+        back_populates="collection", cascade="all, delete-orphan"
+    )
 
 
 class CollectionGallery(Base):
     __tablename__ = "collection_galleries"
 
-    collection_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("collections.id", ondelete="CASCADE"), primary_key=True)
-    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    collection_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("collections.id", ondelete="CASCADE"), primary_key=True
+    )
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
+    )
     position: Mapped[int] = mapped_column(Integer, default=0)
     added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -340,7 +354,9 @@ class CollectionGallery(Base):
 class ExcludedBlob(Base):
     __tablename__ = "excluded_blobs"
 
-    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
+    )
     blob_sha256: Mapped[str] = mapped_column(Text, primary_key=True)
     excluded_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -369,7 +385,9 @@ class BlobRelationship(Base):
 class UserFavorite(Base):
     __tablename__ = "user_favorites"
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
+    )
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
@@ -383,7 +401,9 @@ class UserImageFavorite(Base):
 class UserRating(Base):
     __tablename__ = "user_ratings"
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
+    )
     rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
     rated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
@@ -391,5 +411,19 @@ class UserRating(Base):
 class UserReadingList(Base):
     __tablename__ = "user_reading_list"
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
-    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True)
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
+    )
     added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+
+
+class SiteConfig(Base):
+    __tablename__ = "site_configs"
+
+    source_id: Mapped[str] = mapped_column(Text, primary_key=True)
+    overrides: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    adaptive: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    auto_probe: Mapped[dict | None] = mapped_column(JSONB)
+    updated_at: Mapped[DateTime | None] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
+    )

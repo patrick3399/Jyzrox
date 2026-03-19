@@ -8,6 +8,16 @@ import pytest
 from plugins.builtin.gallery_dl.source import _is_fragment
 
 
+@pytest.fixture(autouse=True)
+def mock_site_config_service():
+    """Prevent _build_gallery_dl_config from querying the real DB."""
+    from tests.helpers import make_mock_site_config_svc
+
+    svc = make_mock_site_config_svc()
+    with patch("core.site_config.site_config_service", svc):
+        yield svc
+
+
 # ── _is_fragment tests ──
 
 

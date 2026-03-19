@@ -106,15 +106,18 @@ async def _build_gallery_dl_config(credentials: dict, config_id: str | None = No
         },
     }
 
-    # Inject per-site tuning params (sleep-request, retries, timeout) for ALL sites
+    # Inject per-site sleep-request via SiteConfigService (config file method)
+    from core.site_config import site_config_service
+
+    all_params = await site_config_service.get_all_download_params()
     for site_cfg in GDL_SITES:
-        if site_cfg.sleep_request is None:
-            continue
-        ext = site_cfg.extractor or site_cfg.source_id
-        entry = config["extractor"].setdefault(ext, {})
-        entry["sleep-request"] = (
-            list(site_cfg.sleep_request) if isinstance(site_cfg.sleep_request, tuple) else site_cfg.sleep_request
-        )
+        params = all_params.get(site_cfg.source_id)
+        if params and params.sleep_request is not None:
+            ext = site_cfg.extractor or site_cfg.source_id
+            entry = config["extractor"].setdefault(ext, {})
+            entry["sleep-request"] = (
+                list(params.sleep_request) if isinstance(params.sleep_request, tuple) else params.sleep_request
+            )
 
     # Merge credentials on top
     for src, cred_val in credentials.items():
@@ -370,8 +373,6 @@ class GalleryDlPlugin(SourcePlugin):
         options: dict | None = None,
     ) -> DownloadResult:
         """Run gallery-dl as a subprocess and stream progress."""
-        from core.redis_client import get_download_delay
-
         if credentials is None:
             credentials = {}
 
@@ -393,10 +394,6 @@ class GalleryDlPlugin(SourcePlugin):
             str(dest_dir),
         ]
 
-        delay_secs = await get_download_delay("gallery_dl", 0)
-        if delay_secs > 0:
-            cmd += ["--sleep-request", str(delay_secs)]
-
         # Download archive — skip already-downloaded URLs (unless skip_archive requested)
         if not (options and options.get("skip_archive")):
             from pathlib import Path as _Path
@@ -405,17 +402,20 @@ class GalleryDlPlugin(SourcePlugin):
             archive_dir.mkdir(parents=True, exist_ok=True)
             cmd += ["--download-archive", str(archive_dir / "gallery-dl.db")]
 
-        # Per-site download tuning
+        # Per-site download tuning via SiteConfigService
         from urllib.parse import urlparse as _urlparse
 
+        from core.site_config import site_config_service
         from plugins.builtin.gallery_dl._sites import get_site_by_domain
 
         _domain = _urlparse(url).netloc.removeprefix("www.")
         _site_cfg = get_site_by_domain(_domain)
-        if _site_cfg.retries != 4:  # only add if non-default
-            cmd += ["--retries", str(_site_cfg.retries)]
-        if _site_cfg.http_timeout != 30:  # only add if non-default
-            cmd += ["--http-timeout", str(_site_cfg.http_timeout)]
+        _dl_params = await site_config_service.get_effective_download_params(_site_cfg.source_id)
+
+        if _dl_params.retries != 4:  # only add if non-default
+            cmd += ["--retries", str(_dl_params.retries)]
+        if _dl_params.http_timeout != 30:  # only add if non-default
+            cmd += ["--http-timeout", str(_dl_params.http_timeout)]
 
         # Options-driven flags
         if options:
@@ -429,7 +429,7 @@ class GalleryDlPlugin(SourcePlugin):
         cmd.append(url)
 
         # Resolve inactivity timeout: options override, then site config, then default
-        inactivity_timeout: int = (options or {}).get("inactivity_timeout", _site_cfg.inactivity_timeout)
+        inactivity_timeout: int = (options or {}).get("inactivity_timeout", _dl_params.inactivity_timeout)
 
         try:
             proc = await asyncio.create_subprocess_exec(

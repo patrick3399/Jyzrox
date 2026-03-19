@@ -11,6 +11,20 @@ import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
+
+from core.site_config import DownloadParams
+from tests.helpers import make_mock_site_config_svc
+
+
+@pytest.fixture(autouse=True)
+def mock_site_config_for_source():
+    """Mock SiteConfigService for all source.py download tests."""
+    svc = make_mock_site_config_svc()
+    with patch("core.site_config.site_config_service", svc):
+        yield svc
+
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -137,7 +151,6 @@ class TestGalleryDlDownloadHappyPath:
                 new_callable=AsyncMock,
                 return_value=Path("/tmp/test-gdl.json"),
             ),
-            patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
             from plugins.builtin.gallery_dl.source import GalleryDlPlugin
@@ -167,7 +180,6 @@ class TestGalleryDlDownloadHappyPath:
                 new_callable=AsyncMock,
                 return_value=Path("/tmp/test-gdl.json"),
             ),
-            patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
             from plugins.builtin.gallery_dl.source import GalleryDlPlugin
@@ -199,7 +211,6 @@ class TestGalleryDlDownloadHappyPath:
                 new_callable=AsyncMock,
                 return_value=Path("/tmp/test-gdl.json"),
             ),
-            patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
             from plugins.builtin.gallery_dl.source import GalleryDlPlugin
@@ -233,7 +244,6 @@ class TestGalleryDlDownloadErrors:
                 new_callable=AsyncMock,
                 return_value=Path("/tmp/test-gdl.json"),
             ),
-            patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
             from plugins.builtin.gallery_dl.source import GalleryDlPlugin
@@ -259,7 +269,6 @@ class TestGalleryDlDownloadErrors:
                 new_callable=AsyncMock,
                 return_value=Path("/tmp/test-gdl.json"),
             ),
-            patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
             from plugins.builtin.gallery_dl.source import GalleryDlPlugin
@@ -287,7 +296,6 @@ class TestGalleryDlDownloadErrors:
                 new_callable=AsyncMock,
                 return_value=Path("/tmp/test-gdl.json"),
             ),
-            patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
             from plugins.builtin.gallery_dl.source import GalleryDlPlugin
@@ -318,7 +326,6 @@ class TestGalleryDlDownloadErrors:
                 new_callable=AsyncMock,
                 return_value=Path("/tmp/test-gdl.json"),
             ),
-            patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=0),
             patch("pathlib.Path.mkdir"),
         ):
             from plugins.builtin.gallery_dl.source import GalleryDlPlugin
@@ -333,14 +340,18 @@ class TestGalleryDlDownloadErrors:
 
         assert result.status == "cancelled"
 
-    async def test_delay_appended_when_nonzero(self, tmp_path):
-        """When get_download_delay returns >0, --sleep-request flag is added to cmd."""
+    async def test_nondefault_retries_appended_to_cmd(self, tmp_path, mock_site_config_for_source):
+        """When SiteConfigService returns non-default retries, --retries flag is added."""
         proc = _make_fake_process([], returncode=0)
         captured_cmd = []
 
         async def _capture_exec(*cmd, **kwargs):
             captured_cmd.extend(cmd)
             return proc
+
+        mock_site_config_for_source.get_effective_download_params = AsyncMock(
+            return_value=DownloadParams(retries=8, http_timeout=60)
+        )
 
         with (
             patch("asyncio.create_subprocess_exec", side_effect=_capture_exec),
@@ -349,7 +360,6 @@ class TestGalleryDlDownloadErrors:
                 new_callable=AsyncMock,
                 return_value=Path("/tmp/test-gdl.json"),
             ),
-            patch("core.redis_client.get_download_delay", new_callable=AsyncMock, return_value=2.5),
             patch("pathlib.Path.mkdir"),
         ):
             from plugins.builtin.gallery_dl.source import GalleryDlPlugin
@@ -361,9 +371,12 @@ class TestGalleryDlDownloadErrors:
                 credentials={},
             )
 
-        assert "--sleep-request" in captured_cmd
-        idx = captured_cmd.index("--sleep-request")
-        assert captured_cmd[idx + 1] == "2.5"
+        assert "--retries" in captured_cmd
+        idx = captured_cmd.index("--retries")
+        assert captured_cmd[idx + 1] == "8"
+        assert "--http-timeout" in captured_cmd
+        idx2 = captured_cmd.index("--http-timeout")
+        assert captured_cmd[idx2 + 1] == "60"
 
 
 # ---------------------------------------------------------------------------

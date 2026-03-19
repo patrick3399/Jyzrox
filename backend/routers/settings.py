@@ -6,7 +6,7 @@ import json
 import logging
 import secrets
 import urllib.parse
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -16,7 +16,7 @@ from sqlalchemy import select, text
 from core.auth import require_auth, require_role
 from core.config import settings as app_settings
 from core.database import async_session
-from core.redis_client import get_redis, is_rate_limit_boosted
+from core.redis_client import get_redis
 from db.models import Credential
 from services.cache import get_system_alerts, push_system_alert
 from services.credential import get_credential, list_credentials, set_credential
@@ -127,7 +127,9 @@ async def eh_login_with_password(
     ) as client:
         resp2 = await client.get(
             "https://e-hentai.org/",
-            headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
+            headers={
+                "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+            },
         )
     sk = resp2.cookies.get("sk", "")
 
@@ -143,7 +145,9 @@ async def eh_login_with_password(
         ) as ex_client:
             ex_resp = await ex_client.get(
                 "https://exhentai.org/",
-                headers={"User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"},
+                headers={
+                    "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/131.0.0.0 Safari/537.36"
+                },
             )
             igneous = ex_resp.cookies.get("igneous")
             if not igneous:
@@ -326,24 +330,24 @@ async def set_pixiv_cookie_credentials(
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36"
         }
-        
+
         async with httpx.AsyncClient(follow_redirects=False) as client:
             resp = await client.get(auth_url, cookies=cookies, headers=headers)
-            
+
             # The expected success response is a 302 redirect back to the app-api.pixiv.net URL
             if resp.status_code != 302:
                 raise ValueError("Invalid session cookie or user not logged in. (Expected 302 redirect)")
-                
+
             location = resp.headers.get("Location")
             if not location or "code=" not in location:
                 raise ValueError("No authorization code found in redirect URL")
-                
+
             # Extract code from location
             parsed = urllib.parse.urlparse(location)
             qs = urllib.parse.parse_qs(parsed.query)
             if "code" not in qs:
                 raise ValueError("Failed to extract code from callback URL")
-                
+
             code = qs["code"][0]
 
         # Step 2: Exchange the code for a refresh_token (same as OAuth callback)
@@ -363,11 +367,7 @@ async def set_pixiv_cookie_credentials(
             "App-OS": "android",
         }
         async with httpx.AsyncClient() as client:
-            resp = await client.post(
-                "https://oauth.secure.pixiv.net/auth/token", 
-                data=data, 
-                headers=headers_exchange
-            )
+            resp = await client.post("https://oauth.secure.pixiv.net/auth/token", data=data, headers=headers_exchange)
             resp.raise_for_status()
             token_data = resp.json()
             refresh_token = token_data.get("refresh_token")
@@ -383,7 +383,6 @@ async def set_pixiv_cookie_credentials(
     # Step 3: Save the credential
     await set_credential("pixiv", refresh_token, "oauth_token")
     return {"status": "ok", "username": username}
-
 
 
 @router.post("/credentials/generic")
@@ -452,9 +451,7 @@ async def delete_credential_endpoint(
 ):
     """Delete stored credential for a source."""
     async with async_session() as session:
-        result = await session.execute(
-            select(Credential).where(Credential.source == source)
-        )
+        result = await session.execute(select(Credential).where(Credential.source == source))
         cred = result.scalar_one_or_none()
         if not cred:
             raise HTTPException(status_code=404, detail="No credential found")
@@ -574,8 +571,12 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "ai_tagging_enabled": await _get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled),
         "tag_translation_enabled": await _get_toggle("setting:tag_translation_enabled", True),
         "download_eh_enabled": await _get_toggle("setting:download_eh_enabled", app_settings.download_eh_enabled),
-        "download_pixiv_enabled": await _get_toggle("setting:download_pixiv_enabled", app_settings.download_pixiv_enabled),
-        "download_gallery_dl_enabled": await _get_toggle("setting:download_gallery_dl_enabled", app_settings.download_gallery_dl_enabled),
+        "download_pixiv_enabled": await _get_toggle(
+            "setting:download_pixiv_enabled", app_settings.download_pixiv_enabled
+        ),
+        "download_gallery_dl_enabled": await _get_toggle(
+            "setting:download_gallery_dl_enabled", app_settings.download_gallery_dl_enabled
+        ),
         "dedup_phash_enabled": await _get_toggle("setting:dedup_phash_enabled", False),
         "dedup_heuristic_enabled": await _get_toggle("setting:dedup_heuristic_enabled", False),
         "dedup_phash_threshold": await _get_int_setting("setting:dedup_phash_threshold", 10),
@@ -928,7 +929,9 @@ async def _build_rate_limit_response(redis) -> dict:
 
     eh_concurrency = await _read_int("rate_limit:config:ehentai:concurrency", app_settings.eh_max_concurrency)
     eh_delay_ms = await _read_int("rate_limit:config:ehentai:delay_ms", 0)
-    eh_image_concurrency = await _read_int("rate_limit:config:ehentai:image_concurrency", app_settings.eh_download_concurrency)
+    eh_image_concurrency = await _read_int(
+        "rate_limit:config:ehentai:image_concurrency", app_settings.eh_download_concurrency
+    )
 
     pixiv_concurrency = await _read_int("rate_limit:config:pixiv:concurrency", 2)
     pixiv_page_delay = await _read_int("rate_limit:config:pixiv:page_delay_ms", 500)
@@ -1034,6 +1037,21 @@ async def patch_rate_limits(
             if cfg.illust_delay_ms is not None:
                 await redis.set(f"rate_limit:config:{source}:illust_delay_ms", str(cfg.illust_delay_ms))
 
+        # Bridge writes to SiteConfigService (M1)
+        from core.site_config import site_config_service
+
+        for source, cfg in req.sites.items():
+            dl_overrides: dict = {}
+            if cfg.concurrency is not None:
+                dl_overrides["concurrency"] = cfg.concurrency
+            if cfg.delay_ms is not None:
+                dl_overrides["sleep_request"] = cfg.delay_ms / 1000.0 if cfg.delay_ms > 0 else None
+            if dl_overrides:
+                try:
+                    await site_config_service.update(source, {"download": dl_overrides})
+                except Exception:
+                    pass  # Redis keys still authoritative during migration
+
     if req.schedule:
         sched = req.schedule
         _validate_hour(sched.start_hour, "schedule.start_hour")
@@ -1068,7 +1086,7 @@ async def patch_rate_limits(
             except (ValueError, TypeError):
                 end_hour = 6
 
-            current_hour = datetime.now(timezone.utc).hour
+            current_hour = datetime.now(UTC).hour
             if start_hour <= end_hour:
                 in_window = start_hour <= current_hour < end_hour
             else:
