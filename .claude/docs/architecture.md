@@ -303,12 +303,14 @@ queued → running → done
 
 #### Worker Startup Cleanup (`__init__.py` → `startup()`)
 
-On startup, the worker performs crash-recovery housekeeping:
+On startup, the worker performs crash-recovery housekeeping with configurable strategies (admin-settable via `GET/PATCH /api/settings/recovery-strategy`, stored in Redis keys `setting:recovery_running` and `setting:recovery_paused`):
 
-1. **Stale running jobs** — marks `running` jobs as `failed` (worker crash during download)
-2. **Orphaned gallery statuses** — resets `downloading` galleries back to partial/pending
+1. **Orphaned gallery statuses** — resets `downloading` galleries back to `partial` (always runs, regardless of strategy)
+2. **Stale running jobs** — strategy `auto_retry` (default): re-enqueue with `retry_count++`; strategy `mark_failed`: set `status=failed`
 3. **Stale queued jobs** — re-enqueues `queued` jobs that survived a crash (new ARQ task via `enqueue_download_job`)
-4. **Stale paused jobs** — marks `paused` jobs as `failed` (coroutine dead after restart, cannot resume)
+4. **Stale paused jobs** — strategy `keep_paused` (default): re-enqueue for pause gate; strategy `auto_retry`: delete pause key + re-enqueue as retry; strategy `mark_failed`: delete pause key + mark failed
+5. **Subscription group reset** — marks `running` groups as `idle`
+6. **Emit `SYSTEM_WORKER_RECOVERED`** — event with strategy names + recovery counts (running_retried, running_failed, paused_kept, paused_retried, paused_failed, queued_requeued)
 
 #### Resume Re-enqueue (`routers/download.py`)
 
@@ -466,7 +468,7 @@ class Event:
     data: dict[str, Any]       # Extra context (progress, error, count, etc.)
 ```
 
-#### EventType Enum (35 types)
+#### EventType Enum (36 types)
 
 | Domain | Types |
 |--------|-------|
@@ -478,7 +480,7 @@ class Event:
 | Tag | `TAGS_UPDATED` |
 | Dedup | `DEDUP_SCAN_STARTED`, `DEDUP_SCAN_COMPLETED`, `DEDUP_PAIR_RESOLVED` |
 | Thumbnail | `THUMBNAILS_GENERATED` |
-| System | `TRASH_CLEANED`, `RESCAN_COMPLETED`, `RETRY_PROCESSED`, `EHTAG_SYNC_COMPLETED`, `RECONCILIATION_COMPLETED`, `SYSTEM_ALERT`, `SYSTEM_DISK_LOW`, `SYSTEM_GDL_UPGRADED`, `LOG_LEVEL_CHANGED` |
+| System | `TRASH_CLEANED`, `RESCAN_COMPLETED`, `RETRY_PROCESSED`, `EHTAG_SYNC_COMPLETED`, `RECONCILIATION_COMPLETED`, `SYSTEM_ALERT`, `SYSTEM_DISK_LOW`, `SYSTEM_GDL_UPGRADED`, `SYSTEM_WORKER_RECOVERED`, `LOG_LEVEL_CHANGED` |
 | Adaptive | `ADAPTIVE_BLOCKED` |
 
 #### Emission Points
@@ -504,7 +506,7 @@ class Event:
 - `ehtag_sync.py` — `EHTAG_SYNC_COMPLETED`
 - `subscription_group.py` — `SUBSCRIPTION_GROUP_COMPLETED`
 - `download.py` — `SYSTEM_DISK_LOW` (pre-flight check, syscall fallback only)
-- `__init__.py` — `SYSTEM_DISK_LOW` (disk_monitor_job cron, every 5 min)
+- `__init__.py` — `SYSTEM_DISK_LOW` (disk_monitor_job cron, every 5 min), `SYSTEM_WORKER_RECOVERED` (startup recovery)
 - `source.py` (`_on_file_with_validation`) — `ADAPTIVE_BLOCKED` (3+ HTML responses in same download)
 - `redis_client.py` — `SEMAPHORE_CHANGED` (on semaphore acquire/release)
 

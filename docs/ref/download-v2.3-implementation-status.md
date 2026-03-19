@@ -2,7 +2,7 @@
 
 Tracks implementation progress against
 [download-system-v2.3-design.md](download-system-v2.3-design.md).
-Last updated: 2026-03-19.
+Last updated: 2026-03-20.
 
 ---
 
@@ -21,14 +21,11 @@ Last updated: 2026-03-19.
 | **M5A** | Gallery-dl Isolated venv | ✅ Done | `download-v2` branch | — |
 | **M5B** | Inactivity Timeout | ✅ Done | `9001ba7` | M0D |
 | **M6** | Adaptive Rate Limiting | ✅ Done | `download-v2` branch | M1 |
-| **M7** | Worker Recovery | ⚠️ Partial | `9001ba7`, `cf24f3a`, `download-v2` | M0A, M0B |
+| **M7** | Worker Recovery | ✅ Done | `9001ba7`, `cf24f3a`, `e6e57a0` | M0A, M0B |
 
-**Summary**: **All 12 modules complete** (M7 partial — configurable strategy deferred).
-M4 (Live Dashboard) implemented with timing data in progress JSONB, admin-only
-REST endpoint (Redis-cached 3s snapshot), WebSocket relay for semaphore events,
-dashboard page with 4 sections (global bar, per-site table, active jobs, queue),
-boost mode toggle, STALLING warning, and 38 tests (19 backend + 19 frontend).
-M7 partial (pre-semaphore pause gate and paused job re-enqueue implemented).
+**Summary**: **All 12 modules complete.**
+M7 completed with configurable recovery strategies (admin UI + Redis-backed),
+`SYSTEM_WORKER_RECOVERED` event emission, and 19 tests (8 settings + 7 worker + 4 frontend).
 
 ---
 
@@ -200,8 +197,9 @@ M7 partial (pre-semaphore pause gate and paused job re-enqueue implemented).
 | Paused → preserved | Keep pause keys, log count | ✅ Same | Match |
 | Orphan key cleanup | Delete cancel/pid, preserve pause | ✅ Same | Match |
 | Gallery stuck fix | Batch image count query | ✅ Same (improved from N+1 to GROUP BY) | Match |
-| Configurable strategy | Redis-based per-status strategy | **Not implemented** — hardcoded behavior | **Deferred** |
-| Recovery event | `SYSTEM_WORKER_RECOVERED` | **Not emitted** | **Deferred** |
+| Configurable strategy | Redis-based per-status strategy | ✅ `GET/PATCH /api/settings/recovery-strategy` (admin), `RecoveryStrategyUpdate` with Literal types, `setting:recovery_running` / `setting:recovery_paused` Redis keys | Match |
+| Recovery event | `SYSTEM_WORKER_RECOVERED` | ✅ `emit_safe(SYSTEM_WORKER_RECOVERED, resource_type="system", running_strategy=, paused_strategy=, **recovery_counts)` after sub group reset | Match |
+| Recovery strategy UI | Settings page section | ✅ Worker Recovery section with two `<select>` dropdowns (between Log Levels and Rate Limits), 10 i18n keys, immediate save on change | **Addition** |
 | Subscription group reset | Mark running groups idle | ✅ Implemented in `startup()` — `UPDATE subscription_groups SET status='idle' WHERE status='running'` | Match |
 | Race condition fix | Status set after successful enqueue | ✅ Done in `cf24f3a` | Match |
 | Pre-semaphore pause gate | Check pause key before `sem.acquire()` | **Implemented** — returns `{"status": "paused"}` without acquiring slot | **Fixed** |
@@ -303,7 +301,15 @@ M7 partial (pre-semaphore pause gate and paused job re-enqueue implemented).
 | M0C | `core/events.py:66` | `SYSTEM_DISK_LOW = "system.disk_low"` |
 | M0D | `source.py:154-575` | `_DownloadState`, `_read_stdout`, `_read_stderr`, `_heartbeat_loop` (sentinel, kills on eviction), `_inactivity_watchdog`, `_pause_cancel_watcher`, orchestration in `download()` |
 | M5B | `_sites.py:64`, `source.py:432` | `inactivity_timeout` field, watchdog reads from options |
-| M7 | `__init__.py:125-230` | Cancel/PID cleanup, running→queued, paused preserve, config cleanup |
+| M7 | `__init__.py:155-316` | Cancel/PID cleanup, configurable recovery (running/paused strategy), queued re-enqueue, sub group reset, `SYSTEM_WORKER_RECOVERED` event, config cleanup |
+| M7 | `routers/settings.py:1117-1147` | `GET/PATCH /recovery-strategy` endpoints (admin), `RecoveryStrategyUpdate` model with Literal types |
+| M7 | `core/events.py:66` | `SYSTEM_WORKER_RECOVERED = "system.worker_recovered"` |
+| M7 | `pwa/src/app/settings/page.tsx:2049-2107` | Worker Recovery section (two `<select>` dropdowns) |
+| M7 | `pwa/src/lib/api.ts:769-779` | `getRecoveryStrategy()`, `patchRecoveryStrategy()` |
+| M7 | `pwa/src/lib/i18n/en.ts:226-235` | 10 i18n keys (`settings.workerRecovery*`, `settings.recovery*`) |
+| M7 | `tests/test_settings.py:1336-1451` | 8 recovery strategy endpoint tests |
+| M7 | `tests/test_worker_recovery.py` | 7 startup recovery tests (strategy branching, event emission) |
+| M7 | `__tests__/settings-recovery.test.tsx` | 4 frontend tests (renders, API calls) |
 | M2 | `core/probe.py` | Probe engine: SSRF protection (5 layers), field diff/fingerprint/score, `ProbeResult` |
 | M2 | `routers/site_config.py` | +2 endpoints: `POST /probe`, `PUT /{id}/field-mapping`; `_serialize_probe_results()` |
 | M2 | `core/site_config.py` | +`save_probe_result()`, `save_field_mapping()`, `get_params_with_row()`, `get_all_with_rows()`, `JYZROX_FIELDS` |
@@ -444,6 +450,4 @@ M0C (Disk Pre-flight)     ← ✅ DONE
 M5A (Gallery-dl venv)     ← ✅ DONE
 ```
 
-**Remaining work**:
-
-1. **M7** (Worker Recovery) — partial, configurable strategy + SYSTEM_WORKER_RECOVERED event deferred
+**Remaining work**: None — all 12 modules fully implemented.
