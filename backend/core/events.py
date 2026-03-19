@@ -64,6 +64,7 @@ class EventType(str, Enum):
     # System alerts
     SYSTEM_ALERT = "system.alert"
     SYSTEM_DISK_LOW = "system.disk_low"
+    ADAPTIVE_BLOCKED = "adaptive.blocked"
 
     # System config
     LOG_LEVEL_CHANGED = "system.log_level_changed"

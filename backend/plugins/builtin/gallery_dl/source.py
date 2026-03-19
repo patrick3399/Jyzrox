@@ -119,6 +119,36 @@ async def _build_gallery_dl_config(credentials: dict, config_id: str | None = No
                 list(params.sleep_request) if isinstance(params.sleep_request, tuple) else params.sleep_request
             )
 
+    # Apply adaptive sleep multipliers from Redis
+    from core.redis_client import get_redis
+
+    r = get_redis()
+    source_ids = list({s.source_id for s in GDL_SITES})
+    pipe = r.pipeline(transaction=False)
+    for sid in source_ids:
+        pipe.get(f"adaptive:{sid}")
+    raw_states = await pipe.execute()
+
+    for sid, raw_adaptive in zip(source_ids, raw_states, strict=False):
+        if not raw_adaptive:
+            continue
+        try:
+            state_data = json.loads(raw_adaptive if isinstance(raw_adaptive, str) else raw_adaptive.decode())
+            multiplier = state_data.get("sleep_multiplier", 1.0)
+        except (json.JSONDecodeError, AttributeError):
+            continue
+        if multiplier <= 1.0:
+            continue
+        site = get_site_config(sid)
+        ext = site.extractor or site.source_id
+        entry = config["extractor"].get(ext)
+        if entry and "sleep-request" in entry:
+            sr = entry["sleep-request"]
+            if isinstance(sr, list) and len(sr) == 2:
+                entry["sleep-request"] = [sr[0] * multiplier, sr[1] * multiplier]
+            elif isinstance(sr, int | float):
+                entry["sleep-request"] = sr * multiplier
+
     # Merge credentials on top
     for src, cred_val in credentials.items():
         if not cred_val:
@@ -166,6 +196,9 @@ class _DownloadState:
     last_progress_update: float = 0.0
     stderr_lines: list[str] = field(default_factory=list)
     pending_file: Path | None = None
+    html_response_count: int = 0
+    source_id: str = ""
+    pending_success_count: int = 0
 
 
 async def _read_stdout(
@@ -186,9 +219,9 @@ async def _read_stdout(
 
         if path_match or _FILE_PATH_RE.search(line) or _IMAGE_EXT_RE.search(line):
             # Process the PREVIOUS pending file
-            if state.pending_file is not None and on_file:
+            if state.pending_file is not None:
                 try:
-                    await on_file(state.pending_file)
+                    await _on_file_with_validation(state.pending_file, state, proc, on_file)
                 except Exception as exc:
                     logger.warning("[gallery_dl] progressive import error: %s", exc)
 
@@ -202,6 +235,7 @@ async def _read_stdout(
                 state.skipped_count += 1
             else:
                 state.downloaded += 1
+                state.pending_success_count += 1
 
             total_seen = state.downloaded + state.skipped_count
             now = asyncio.get_event_loop().time()
@@ -212,11 +246,16 @@ async def _read_stdout(
                         await on_progress(total_seen, 0)
                     except Exception:
                         pass
+                # Flush accumulated success signals
+                await _flush_success_signals(state)
+
+    # Flush any remaining success signals
+    await _flush_success_signals(state)
 
     # Process the last pending file after loop ends — only if not cancelled
-    if state.pending_file is not None and on_file and not state.cancelled:
+    if state.pending_file is not None and not state.cancelled:
         try:
-            await on_file(state.pending_file)
+            await _on_file_with_validation(state.pending_file, state, proc, on_file)
         except Exception as exc:
             logger.warning("[gallery_dl] progressive import error (last file): %s", exc)
 
@@ -227,11 +266,18 @@ async def _read_stderr(
 ) -> None:
     """Accumulate stderr lines (prepared for future adaptive logic)."""
     assert proc.stderr is not None
+    from core.adaptive import adaptive_engine, parse_adaptive_signal
+
     async for raw_line in proc.stderr:
-        state.last_activity = asyncio.get_event_loop().time()
         line = raw_line.decode("utf-8", errors="replace").rstrip()
         if line and len(state.stderr_lines) < _MAX_STDERR_LINES:
             state.stderr_lines.append(line)
+            sig = parse_adaptive_signal(line)
+            if sig is not None and state.source_id:
+                try:
+                    await adaptive_engine.record_signal(state.source_id, sig)
+                except Exception:
+                    pass
 
 
 async def _heartbeat_loop(
@@ -332,6 +378,102 @@ async def _pause_cancel_watcher(
                 pass
 
 
+def _validate_download_content(file_path: Path) -> str | None:
+    """Check downloaded file content. Returns 'html', 'empty', or None (ok)."""
+    try:
+        size = file_path.stat().st_size
+    except OSError:
+        return None
+    if size == 0:
+        return "empty"
+    if size < 102400:  # < 100KB
+        try:
+            head = file_path.read_bytes()[:512]
+            text = head.decode("utf-8", errors="replace").lower()
+            if "<!doctype" in text or "<html" in text or "cf-browser-verification" in text:
+                return "html"
+        except OSError:
+            pass
+    return None
+
+
+async def _record_signal(state: _DownloadState, signal: AdaptiveSignal) -> None:  # noqa: F821
+    """Fire-and-forget adaptive signal recording. Swallows all errors."""
+    if not state.source_id:
+        return
+    from core.adaptive import adaptive_engine
+
+    try:
+        await adaptive_engine.record_signal(state.source_id, signal)
+    except Exception:
+        pass
+
+
+async def _flush_success_signals(state: _DownloadState) -> None:
+    """Flush pending success count to adaptive engine."""
+    if not (state.pending_success_count > 0 and state.source_id):
+        return
+    from core.adaptive import AdaptiveSignal, adaptive_engine
+
+    try:
+        await adaptive_engine.record_signal(
+            state.source_id,
+            AdaptiveSignal.SUCCESS,
+            count=state.pending_success_count,
+        )
+    except Exception:
+        pass
+    state.pending_success_count = 0
+
+
+async def _on_file_with_validation(
+    file_path: Path,
+    state: _DownloadState,
+    proc: asyncio.subprocess.Process,
+    inner_on_file: Callable[[Path], Awaitable[None]] | None,
+) -> None:
+    """Wrap on_file with content validation + adaptive feedback."""
+    from core.adaptive import AdaptiveSignal
+
+    result = _validate_download_content(file_path)
+    if result == "html":
+        state.html_response_count += 1
+        await _record_signal(state, AdaptiveSignal.HTML_RESPONSE)
+        if state.html_response_count >= 5:
+            logger.warning(
+                "[gallery_dl] too many HTML responses (%d) — killing process",
+                state.html_response_count,
+            )
+            state.cancelled = True
+            try:
+                proc.kill()
+            except ProcessLookupError:
+                pass
+        elif state.html_response_count >= 3:
+            # Design: HTML_RESPONSE ×3 → sleep_multiplier *= 4 (two 429 signals, each ×2)
+            if state.html_response_count == 3:
+                await _record_signal(state, AdaptiveSignal.HTTP_429)
+                await _record_signal(state, AdaptiveSignal.HTTP_429)
+            from core.events import EventType, emit_safe
+
+            await emit_safe(
+                EventType.ADAPTIVE_BLOCKED,
+                resource_type="download",
+                source_id=state.source_id,
+                html_response_count=state.html_response_count,
+            )
+        try:
+            file_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        return
+    elif result == "empty":
+        await _record_signal(state, AdaptiveSignal.EMPTY_FILE)
+        return
+    if inner_on_file:
+        await inner_on_file(file_path)
+
+
 class GalleryDlPlugin(SourcePlugin):
     """Fallback SourcePlugin that delegates to gallery-dl subprocess."""
 
@@ -414,8 +556,14 @@ class GalleryDlPlugin(SourcePlugin):
 
         if _dl_params.retries != 4:  # only add if non-default
             cmd += ["--retries", str(_dl_params.retries)]
-        if _dl_params.http_timeout != 30:  # only add if non-default
-            cmd += ["--http-timeout", str(_dl_params.http_timeout)]
+
+        # Apply adaptive http_timeout adjustment
+        from core.adaptive import adaptive_engine
+
+        adaptive = await adaptive_engine.get_state(_site_cfg.source_id)
+        effective_timeout = _dl_params.http_timeout + adaptive.http_timeout_add
+        if effective_timeout != 30:  # only add if non-default
+            cmd += ["--http-timeout", str(effective_timeout)]
 
         # Options-driven flags
         if options:
@@ -452,6 +600,7 @@ class GalleryDlPlugin(SourcePlugin):
         state = _DownloadState(
             last_activity=asyncio.get_event_loop().time(),
             last_progress_update=asyncio.get_event_loop().time(),
+            source_id=_site_cfg.source_id,
         )
 
         # Background reader tasks (these finish when the process's pipes close)

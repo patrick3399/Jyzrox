@@ -124,6 +124,9 @@ class SiteConfigService:
             result = self._merge(source_id, row)
 
         await self._invalidate(source_id)
+        from core.adaptive import adaptive_engine
+
+        await adaptive_engine.reset(source_id)
         return result
 
     async def get_all_download_params(self) -> dict[str, DownloadParams]:

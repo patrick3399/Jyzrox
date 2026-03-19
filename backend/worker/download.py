@@ -228,6 +228,14 @@ async def download_job(
     # ── 11. Execute download ────────────────────────────────────────
     job_id_str = db_job_id or str(uuid.uuid4())
 
+    # ── Pre-semaphore pause gate (for keep_paused recovery) ────────
+    if db_job_id:
+        pause_val = await redis.get(f"download:pause:{db_job_id}")
+        if pause_val is not None:
+            await _set_job_status(db_job_id, "paused")
+            logger.info("[download] pre-semaphore pause gate: job %s is paused, skipping", db_job_id)
+            return {"status": "paused"}
+
     try:
         wait_secs = await sem.acquire(job_id_str)
         if wait_secs > 0:

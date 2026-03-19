@@ -119,6 +119,11 @@ async def startup(ctx: dict) -> None:
 
     await site_config_service.start_listener()
     logger.info("SiteConfigService listener started")
+    from core.adaptive import adaptive_engine
+
+    loaded = await adaptive_engine.load_all_from_db()
+    if loaded:
+        logger.info("Loaded %d adaptive states from DB", loaded)
     # Initialize gallery-dl venv (before recovery — downloads need it)
     try:
         await ensure_venv()
@@ -228,12 +233,21 @@ async def startup(ctx: dict) -> None:
             await session.commit()
             logger.info("Processed %d stale queued jobs", len(stale_queued))
 
-        # Paused jobs: preserve (do NOT mark as failed)
-        paused_count = (
-            await session.execute(select(func.count()).select_from(DownloadJob).where(DownloadJob.status == "paused"))
-        ).scalar_one()
-        if paused_count:
-            logger.info("Preserved %d paused jobs from previous session", paused_count)
+        # Paused jobs: re-enqueue so ARQ result is written (pause gate catches them)
+        # This ensures the resume endpoint can detect "coroutine dead" and re-enqueue properly.
+        # Without this, resume after restart thinks the coroutine is alive and sets status
+        # to "running" without re-enqueueing — leaving the job stuck forever.
+        paused_jobs = (await session.execute(select(DownloadJob).where(DownloadJob.status == "paused"))).scalars().all()
+        if paused_jobs:
+            arq_pool = ctx["redis"]
+            for job in paused_jobs:
+                arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                try:
+                    await enqueue_download_job(arq_pool, job, arq_job_id)
+                    logger.info("Re-enqueued paused job %s (pause gate will catch it)", job.id)
+                except Exception as exc:
+                    logger.error("Failed to re-enqueue paused job %s: %s", job.id, exc)
+            logger.info("Re-enqueued %d paused jobs from previous session", len(paused_jobs))
 
     # Clean up orphaned per-job config files
     import glob as _glob
@@ -465,6 +479,14 @@ async def disk_monitor_job(ctx: dict) -> dict:
     return {"status": "ok", "free_gb": free_gb}
 
 
+async def adaptive_persist_job(ctx: dict) -> dict:
+    """Persist dirty adaptive states from Redis to database."""
+    from core.adaptive import adaptive_engine
+
+    count = await adaptive_engine.persist_dirty()
+    return {"persisted": count}
+
+
 # ── ARQ Worker Settings ──────────────────────────────────────────────
 
 
@@ -500,6 +522,7 @@ class WorkerSettings:
         arq_func(gdl_upgrade_job, name="gdl_upgrade_job", max_tries=1),
         arq_func(gdl_rollback_job, name="gdl_rollback_job", max_tries=1),
         disk_monitor_job,
+        adaptive_persist_job,
     ]
     cron_jobs = [
         cron(
@@ -569,6 +592,13 @@ class WorkerSettings:
             unique=True,
             timeout=30,
         ),
+        cron(
+            adaptive_persist_job,
+            minute=set(range(0, 60, 5)),
+            run_at_startup=False,
+            unique=True,
+            timeout=60,
+        ),
     ]
     on_startup = startup
     on_shutdown = shutdown
@@ -607,6 +637,7 @@ __all__ = [
     "gdl_upgrade_job",
     "gdl_rollback_job",
     "disk_monitor_job",
+    "adaptive_persist_job",
     "startup",
     "shutdown",
     "WorkerSettings",
