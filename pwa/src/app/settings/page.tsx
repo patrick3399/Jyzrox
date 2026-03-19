@@ -8,6 +8,7 @@ import { ChevronUp, ChevronDown, Shield, Monitor, CalendarClock, Key } from 'luc
 import { toast } from 'sonner'
 import { api, type ReconcileStatus } from '@/lib/api'
 import { useAuth } from '@/hooks/useAuth'
+import { useProfile } from '@/hooks/useProfile'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
 import { Copy, BookOpen, X, Plus, Tag, ScanLine } from 'lucide-react'
@@ -22,6 +23,7 @@ import {
 } from '@/lib/swCacheConfig'
 import { BottomTabConfig } from '@/components/BottomTabConfig'
 import { DashboardLinksConfig } from '@/components/DashboardLinksConfig'
+import { SidebarConfig } from '@/components/SidebarConfig'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
 import type {
   SystemHealth,
@@ -39,6 +41,7 @@ type SectionKey =
   | 'system'
   | 'account'
   | 'browse'
+  | 'sidebarOrder'
   | 'bottomTab'
   | 'dashboardLinks'
   | 'security'
@@ -1108,6 +1111,7 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
 
 export default function SettingsPage() {
   const { logout } = useAuth()
+  const { data: profile } = useProfile()
   const { locale, setLocale: changeLocale } = useLocale()
   const [openSections, setOpenSections] = useState<Set<SectionKey>>(new Set(['system']))
 
@@ -2232,6 +2236,17 @@ export default function SettingsPage() {
             onToggle={toggleSection}
           />
           {openSections.has('bottomTab') && <BottomTabConfig />}
+        </div>
+
+        {/* ── Sidebar Navigation ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.sidebarOrder')}
+            sectionKey="sidebarOrder"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('sidebarOrder') && <SidebarConfig userRole={profile?.role} />}
         </div>
 
         {/* ── Dashboard Quick Links ── */}

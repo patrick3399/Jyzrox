@@ -1,140 +1,17 @@
 'use client'
 
+import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { useTheme } from 'next-themes'
-import {
-  LayoutDashboard,
-  Compass,
-  BookOpen,
-  Clock,
-  Download,
-  Tags,
-  Settings,
-  LogOut,
-  Sun,
-  Moon,
-  Monitor,
-  PackageOpen,
-  FolderInput,
-  Key,
-  Puzzle,
-  Palette,
-  Users,
-  FolderTree,
-  Rss,
-  CalendarClock,
-  ScanSearch,
-  ShieldCheck,
-  Images,
-  Trash2,
-  BookMarked,
-  ScrollText,
-  Globe,
-  Activity,
-} from 'lucide-react'
+import { Settings, LogOut, Sun, Moon, Monitor } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
-import type { UserRole } from '@/lib/types'
-
-function hasRole(userRole: string | undefined, minRole: UserRole): boolean {
-  const ROLE_LEVEL: Record<string, number> = { admin: 3, member: 2, viewer: 1 }
-  return (ROLE_LEVEL[userRole || 'viewer'] ?? 0) >= ROLE_LEVEL[minRole]
-}
-
-const navLinks = [
-  {
-    href: '/',
-    label: () => t('nav.dashboard'),
-    icon: LayoutDashboard,
-    minRole: 'viewer' as UserRole,
-  },
-  {
-    href: '/e-hentai',
-    label: () => t('nav.ehentai'),
-    icon: Compass,
-    minRole: 'viewer' as UserRole,
-  },
-  { href: '/pixiv', label: () => t('nav.pixiv'), icon: Palette, minRole: 'viewer' as UserRole },
-  {
-    href: '/library',
-    label: () => t('nav.library'),
-    icon: BookOpen,
-    minRole: 'viewer' as UserRole,
-  },
-  {
-    href: '/reading-list',
-    label: () => t('nav.readingList'),
-    icon: BookMarked,
-    minRole: 'viewer' as UserRole,
-  },
-  { href: '/trash', label: () => t('nav.trash'), icon: Trash2, minRole: 'viewer' as UserRole },
-  { href: '/images', label: () => t('nav.images'), icon: Images, minRole: 'viewer' as UserRole },
-  {
-    href: '/explorer',
-    label: () => t('nav.explorer'),
-    icon: FolderTree,
-    minRole: 'viewer' as UserRole,
-  },
-  { href: '/artists', label: () => t('nav.artists'), icon: Users, minRole: 'viewer' as UserRole },
-  {
-    href: '/subscriptions',
-    label: () => t('nav.subscriptions'),
-    icon: Rss,
-    minRole: 'member' as UserRole,
-  },
-  { href: '/history', label: () => t('nav.history'), icon: Clock, minRole: 'viewer' as UserRole },
-  { href: '/queue', label: () => t('nav.queue'), icon: Download, minRole: 'member' as UserRole },
-  { href: '/tags', label: () => t('nav.tags'), icon: Tags, minRole: 'viewer' as UserRole },
-  {
-    href: '/export',
-    label: () => t('nav.export'),
-    icon: PackageOpen,
-    minRole: 'member' as UserRole,
-  },
-  {
-    href: '/import',
-    label: () => t('nav.import'),
-    icon: FolderInput,
-    minRole: 'member' as UserRole,
-  },
-  {
-    href: '/scheduled-tasks',
-    label: () => t('nav.scheduledTasks'),
-    icon: CalendarClock,
-    minRole: 'admin' as UserRole,
-  },
-  { href: '/dedup', label: () => t('nav.dedup'), icon: ScanSearch, minRole: 'admin' as UserRole },
-  {
-    href: '/credentials',
-    label: () => t('nav.credentials'),
-    icon: Key,
-    minRole: 'admin' as UserRole,
-  },
-  { href: '/plugins', label: () => t('nav.plugins'), icon: Puzzle, minRole: 'admin' as UserRole },
-  { href: '/logs', label: () => t('nav.logs'), icon: ScrollText, minRole: 'admin' as UserRole },
-  {
-    href: '/admin/users',
-    label: () => t('nav.users'),
-    icon: ShieldCheck,
-    minRole: 'admin' as UserRole,
-  },
-  {
-    href: '/admin/sites',
-    label: () => t('nav.siteConfig'),
-    icon: Globe,
-    minRole: 'admin' as UserRole,
-  },
-  {
-    href: '/admin/dashboard',
-    label: () => t('nav.downloadDashboard'),
-    icon: Activity,
-    minRole: 'admin' as UserRole,
-  },
-]
+import { PAGE_REGISTRY, hasRole, type PageDef } from '@/lib/pageRegistry'
+import { loadSidebarConfig, SIDEBAR_CONFIG_KEY } from '@/components/SidebarConfig'
 
 const themeCycle = ['light', 'dark', 'amoled', 'system'] as const
 const themeIcon = { light: Sun, dark: Moon, amoled: Moon, system: Monitor }
@@ -153,6 +30,22 @@ export function Sidebar() {
   const { data: profile } = useProfile()
   const { data: stats } = useDownloadStats()
 
+  const [sidebarConfig, setSidebarConfig] = useState(() => loadSidebarConfig())
+
+  useEffect(() => {
+    const handler = (e: StorageEvent) => {
+      if (e.key === SIDEBAR_CONFIG_KEY) setSidebarConfig(loadSidebarConfig())
+    }
+    window.addEventListener('storage', handler)
+    return () => window.removeEventListener('storage', handler)
+  }, [])
+
+  const visibleLinks = useMemo(() => {
+    return sidebarConfig.order
+      .map((href) => PAGE_REGISTRY.find((p) => p.href === href))
+      .filter((p): p is PageDef => p != null && hasRole(profile?.role, p.minRole ?? 'viewer'))
+  }, [sidebarConfig.order, profile?.role])
+
   const cycleTheme = () => {
     const idx = themeCycle.indexOf(theme as (typeof themeCycle)[number])
     setTheme(themeCycle[(idx + 1) % themeCycle.length])
@@ -167,41 +60,39 @@ export function Sidebar() {
 
       {/* Nav links */}
       <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto no-scrollbar">
-        {navLinks
-          .filter((link) => hasRole(profile?.role, link.minRole))
-          .map((link) => {
-            const Icon = link.icon
-            const isActive =
-              pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
-            return (
-              <Link
-                key={link.href}
-                href={link.href}
-                className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                  isActive
-                    ? 'bg-vault-accent/10 text-vault-accent font-medium'
-                    : 'text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover'
-                }`}
-              >
-                <Icon size={18} />
-                <span>{link.label()}</span>
-                {link.href === '/queue' && stats && (
-                  <span className="ml-auto flex items-center gap-1">
-                    {stats.running > 0 && (
-                      <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1">
-                        {stats.running}
-                      </span>
-                    )}
-                    {stats.finished > 0 && (
-                      <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold px-1">
-                        {stats.finished}
-                      </span>
-                    )}
-                  </span>
-                )}
-              </Link>
-            )
-          })}
+        {visibleLinks.map((link) => {
+          const Icon = link.icon
+          const isActive =
+            pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
+          return (
+            <Link
+              key={link.href}
+              href={link.href}
+              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                isActive
+                  ? 'bg-vault-accent/10 text-vault-accent font-medium'
+                  : 'text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover'
+              }`}
+            >
+              <Icon size={18} />
+              <span>{t(link.labelKey)}</span>
+              {link.href === '/queue' && stats && (
+                <span className="ml-auto flex items-center gap-1">
+                  {stats.running > 0 && (
+                    <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1">
+                      {stats.running}
+                    </span>
+                  )}
+                  {stats.finished > 0 && (
+                    <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold px-1">
+                      {stats.finished}
+                    </span>
+                  )}
+                </span>
+              )}
+            </Link>
+          )
+        })}
       </nav>
 
       {/* Bottom section */}

@@ -5,13 +5,19 @@ import { Check, GripVertical } from 'lucide-react'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { PAGE_REGISTRY, type PageDef } from '@/lib/pageRegistry'
+import { useDragReorder } from '@/hooks/useDragReorder'
 
 const ALL_DASHBOARD_LINKS: PageDef[] = PAGE_REGISTRY.filter((p) => p.dashboard)
 
 export const DASHBOARD_LINKS_CONFIG_KEY = 'dashboard_quick_links'
 
 export const DEFAULT_DASHBOARD_HREFS: string[] = [
-  '/e-hentai', '/pixiv', '/library', '/explorer', '/artists', '/images',
+  '/e-hentai',
+  '/pixiv',
+  '/library',
+  '/explorer',
+  '/artists',
+  '/images',
 ]
 
 export function loadDashboardConfig(): PageDef[] {
@@ -39,7 +45,10 @@ function saveSelectedHrefs(hrefs: string[]) {
   localStorage.setItem(DASHBOARD_LINKS_CONFIG_KEY, JSON.stringify(hrefs))
   // Notify other tabs / Dashboard instances
   window.dispatchEvent(
-    new StorageEvent('storage', { key: DASHBOARD_LINKS_CONFIG_KEY, newValue: JSON.stringify(hrefs) }),
+    new StorageEvent('storage', {
+      key: DASHBOARD_LINKS_CONFIG_KEY,
+      newValue: JSON.stringify(hrefs),
+    }),
   )
 }
 
@@ -50,8 +59,16 @@ function loadSelectedHrefs(): string[] {
 export function DashboardLinksConfig() {
   useLocale()
   const [selected, setSelected] = useState<string[]>(() => loadSelectedHrefs())
-  const [dragIdx, setDragIdx] = useState<number | null>(null)
-  const [dragOver, setDragOver] = useState<number | null>(null)
+
+  const handleReorder = useCallback((newItems: string[]) => {
+    setSelected(newItems)
+    saveSelectedHrefs(newItems)
+  }, [])
+
+  const { dragIdx, dragOver, getDragProps } = useDragReorder({
+    items: selected,
+    onReorder: handleReorder,
+  })
 
   const toggleLink = useCallback((href: string) => {
     setSelected((prev) => {
@@ -72,29 +89,6 @@ export function DashboardLinksConfig() {
     setSelected(DEFAULT_DASHBOARD_HREFS)
     saveSelectedHrefs(DEFAULT_DASHBOARD_HREFS)
   }, [])
-
-  // Drag-and-drop reordering among selected links
-  const handleDragStart = useCallback((idx: number) => {
-    setDragIdx(idx)
-  }, [])
-
-  const handleDragEnter = useCallback((idx: number) => {
-    setDragOver(idx)
-  }, [])
-
-  const handleDragEnd = useCallback(() => {
-    if (dragIdx !== null && dragOver !== null && dragIdx !== dragOver) {
-      setSelected((prev) => {
-        const next = [...prev]
-        const [moved] = next.splice(dragIdx, 1)
-        next.splice(dragOver, 0, moved)
-        saveSelectedHrefs(next)
-        return next
-      })
-    }
-    setDragIdx(null)
-    setDragOver(null)
-  }, [dragIdx, dragOver])
 
   const selectedCount = selected.length
 
@@ -118,17 +112,13 @@ export function DashboardLinksConfig() {
               return (
                 <div
                   key={href}
-                  draggable
-                  onDragStart={() => handleDragStart(idx)}
-                  onDragEnter={() => handleDragEnter(idx)}
-                  onDragEnd={handleDragEnd}
-                  onDragOver={(e) => e.preventDefault()}
+                  {...getDragProps(idx)}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium cursor-grab select-none transition-all ${
                     isDragging
                       ? 'opacity-40 border-vault-accent bg-vault-accent/10 text-vault-accent'
                       : isOver
-                      ? 'border-vault-accent bg-vault-accent/15 text-vault-accent scale-105'
-                      : 'border-vault-border bg-vault-input text-vault-text-secondary'
+                        ? 'border-vault-accent bg-vault-accent/15 text-vault-accent scale-105'
+                        : 'border-vault-border bg-vault-input text-vault-text-secondary'
                   }`}
                 >
                   <GripVertical size={12} className="text-vault-text-muted shrink-0" />
@@ -165,9 +155,7 @@ export function DashboardLinksConfig() {
                   {position + 1}
                 </span>
               )}
-              {!isSelected && (
-                <Check size={14} className="text-vault-text-muted/40 shrink-0" />
-              )}
+              {!isSelected && <Check size={14} className="text-vault-text-muted/40 shrink-0" />}
             </button>
           )
         })}

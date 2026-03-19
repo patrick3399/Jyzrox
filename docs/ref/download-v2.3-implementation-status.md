@@ -2,7 +2,7 @@
 
 Tracks implementation progress against
 [download-system-v2.3-design.md](download-system-v2.3-design.md).
-Last updated: 2026-03-20.
+Last updated: 2026-03-19.
 
 ---
 
@@ -127,6 +127,7 @@ M7 completed with configurable recovery strategies (admin UI + Redis-backed),
 | UI: Page layout | Left panel (raw) + right panel (fields) | **Single-panel slide-out** with sections | **Intentional** — simpler UX, same functionality |
 | Custom expressions | `"twitter:{user.id}"` | **Not implemented** | **Deferred** — future enhancement |
 | "Test with another URL" | Verify mapping generality | **Not implemented** | **Deferred** — future enhancement |
+| React hooks violation | Not in design | `useMemo` hooks called after early return in `AdminSitesPage` — caused React error #310 (page crash). **Fixed**: moved `useMemo` before early return. | **Bugfix** |
 | Serialization | Not specified | `dataclasses.asdict()` via `_serialize_probe_results()` | **Addition** |
 | `JYZROX_FIELDS` | Not specified | `frozenset` in `site_config.py`, imported by `probe.py` | **Addition** — canonical field validation |
 | Tests | Not specified | 54 tests (URL validation, DNS SSRF, field analysis, scoring, API endpoints) | **Addition** |
@@ -438,7 +439,44 @@ quality beyond the original design:
 
 ---
 
-## 5. Unimplemented Modules — Dependency Analysis
+## 4b. Deployment Verification (2026-03-19)
+
+Full-stack verification against design spec, covering 182 code-level checkpoints
+across 15 parallel agents + Playwright UI chain testing.
+
+### Issues Found & Fixed
+
+| Issue | Severity | Location | Fix |
+|-------|----------|----------|-----|
+| M2 React hooks violation (#310) | **Critical** — page crash | `pwa/src/app/admin/sites/page.tsx:586` | Moved `useMemo` hooks before conditional early return |
+| M3 `subscription_groups` table missing | **Critical** — worker crash | DB schema | Ran `db/migrations/m3_subscription_groups.sql` |
+
+### Verification Coverage
+
+| Layer | Method | Points | Result |
+|-------|--------|--------|--------|
+| Inter-module interfaces | 6 Explore agents | ~60 | ✅ All pass |
+| UI readiness | 3 Explore agents | ~30 | ✅ All pass (M5A upgrade UI = known deferred) |
+| End-to-end chain | Playwright MCP | 4 chains (M2/M3/M4/M7) | ✅ All pass (after M2 fix) |
+| Automated tests | pytest + vitest | 2935 (2199 backend + 736 frontend) | ✅ 0 failures |
+| Deep code verification | 6 Explore agents | 182 checkpoints | ✅ 181 pass, 1 known deviation |
+
+### Known Design Deviations (Verified as Intentional)
+
+All deviations below are documented in the module deviation tables above and
+confirmed as functionally equivalent or explicitly deferred:
+
+- M6 content validation: HTML/empty only (no magic bytes) — format check delegated to import pipeline
+- M0D pause: SIGSTOP/SIGCONT instead of slot release after 120s
+- M0B EhSemaphore: kept separate (different use case)
+- M5B archive verification: deferred
+- M5A upgrade/rollback UI: deferred (backend API ready)
+- M0B Lua ARGV order: different but functionally equivalent
+- M3 EPOCH fallback: `datetime(2000, 1, 1)` instead of Unix epoch
+
+---
+
+## 5. Module Completion Status
 
 ```
 M1 (SiteConfigService) ─── ✅ DONE ──┬── M2 (Config Builder UI)     ← ✅ DONE

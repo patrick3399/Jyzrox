@@ -32,6 +32,10 @@ vi.mock('lucide-react', () => {
     Trash2: stub,
     CalendarClock: stub,
     ScanSearch: stub,
+    ScrollText: stub,
+    ShieldCheck: stub,
+    Globe: stub,
+    Activity: stub,
   }
 })
 

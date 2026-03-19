@@ -4,7 +4,14 @@ import { useState, useCallback } from 'react'
 import { Check, GripVertical } from 'lucide-react'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
-import { ALL_TABS, BOTTOM_TAB_CONFIG_KEY, TAB_COUNT, DEFAULT_TAB_HREFS, loadTabConfig, type TabDefinition } from '@/components/BottomTabBar'
+import {
+  ALL_TABS,
+  BOTTOM_TAB_CONFIG_KEY,
+  TAB_COUNT,
+  DEFAULT_TAB_HREFS,
+  loadTabConfig,
+} from '@/components/BottomTabBar'
+import { useDragReorder } from '@/hooks/useDragReorder'
 
 function loadSelectedHrefs(): string[] {
   return loadTabConfig().map((tab) => tab.href)
@@ -21,59 +28,41 @@ function saveSelectedHrefs(hrefs: string[]) {
 export function BottomTabConfig() {
   useLocale()
   const [selected, setSelected] = useState<string[]>(() => loadSelectedHrefs())
-  const [dragIdx, setDragIdx] = useState<number | null>(null)
-  const [dragOver, setDragOver] = useState<number | null>(null)
 
-  const toggleTab = useCallback(
-    (href: string) => {
-      setSelected((prev) => {
-        let next: string[]
-        if (prev.includes(href)) {
-          // Deselect only if more than 1 selected (must keep at least 1 to allow reordering)
-          if (prev.length <= 1) return prev
-          next = prev.filter((h) => h !== href)
+  const handleReorder = useCallback((newItems: string[]) => {
+    setSelected(newItems)
+    if (newItems.length === TAB_COUNT) saveSelectedHrefs(newItems)
+  }, [])
+
+  const { dragIdx, dragOver, getDragProps } = useDragReorder({
+    items: selected,
+    onReorder: handleReorder,
+  })
+
+  const toggleTab = useCallback((href: string) => {
+    setSelected((prev) => {
+      let next: string[]
+      if (prev.includes(href)) {
+        // Deselect only if more than 1 selected (must keep at least 1 to allow reordering)
+        if (prev.length <= 1) return prev
+        next = prev.filter((h) => h !== href)
+      } else {
+        if (prev.length >= TAB_COUNT) {
+          // Replace the last item
+          next = [...prev.slice(0, TAB_COUNT - 1), href]
         } else {
-          if (prev.length >= TAB_COUNT) {
-            // Replace the last item
-            next = [...prev.slice(0, TAB_COUNT - 1), href]
-          } else {
-            next = [...prev, href]
-          }
+          next = [...prev, href]
         }
-        if (next.length === TAB_COUNT) saveSelectedHrefs(next)
-        return next
-      })
-    },
-    [],
-  )
+      }
+      if (next.length === TAB_COUNT) saveSelectedHrefs(next)
+      return next
+    })
+  }, [])
 
   const handleReset = useCallback(() => {
     setSelected(DEFAULT_TAB_HREFS)
     saveSelectedHrefs(DEFAULT_TAB_HREFS)
   }, [])
-
-  // Drag-and-drop reordering among selected tabs
-  const handleDragStart = useCallback((idx: number) => {
-    setDragIdx(idx)
-  }, [])
-
-  const handleDragEnter = useCallback((idx: number) => {
-    setDragOver(idx)
-  }, [])
-
-  const handleDragEnd = useCallback(() => {
-    if (dragIdx !== null && dragOver !== null && dragIdx !== dragOver) {
-      setSelected((prev) => {
-        const next = [...prev]
-        const [moved] = next.splice(dragIdx, 1)
-        next.splice(dragOver, 0, moved)
-        if (next.length === TAB_COUNT) saveSelectedHrefs(next)
-        return next
-      })
-    }
-    setDragIdx(null)
-    setDragOver(null)
-  }, [dragIdx, dragOver])
 
   const selectedCount = selected.length
 
@@ -97,17 +86,13 @@ export function BottomTabConfig() {
               return (
                 <div
                   key={href}
-                  draggable
-                  onDragStart={() => handleDragStart(idx)}
-                  onDragEnter={() => handleDragEnter(idx)}
-                  onDragEnd={handleDragEnd}
-                  onDragOver={(e) => e.preventDefault()}
+                  {...getDragProps(idx)}
                   className={`flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg border text-xs font-medium cursor-grab select-none transition-all ${
                     isDragging
                       ? 'opacity-40 border-vault-accent bg-vault-accent/10 text-vault-accent'
                       : isOver
-                      ? 'border-vault-accent bg-vault-accent/15 text-vault-accent scale-105'
-                      : 'border-vault-border bg-vault-input text-vault-text-secondary'
+                        ? 'border-vault-accent bg-vault-accent/15 text-vault-accent scale-105'
+                        : 'border-vault-border bg-vault-input text-vault-text-secondary'
                   }`}
                 >
                   <GripVertical size={12} className="text-vault-text-muted shrink-0" />
@@ -137,8 +122,8 @@ export function BottomTabConfig() {
                 isSelected
                   ? 'border-vault-accent bg-vault-accent/10 text-vault-accent'
                   : isDisabled
-                  ? 'border-vault-border bg-vault-input text-vault-text-muted opacity-40 cursor-not-allowed'
-                  : 'border-vault-border bg-vault-input text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text'
+                    ? 'border-vault-border bg-vault-input text-vault-text-muted opacity-40 cursor-not-allowed'
+                    : 'border-vault-border bg-vault-input text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text'
               }`}
             >
               <Icon size={16} className="shrink-0" />

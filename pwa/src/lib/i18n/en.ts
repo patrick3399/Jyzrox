@@ -1270,6 +1270,13 @@ const en: Record<string, string> = {
   'settings.bottomTabSelect': 'Select exactly 4 tabs',
   'settings.bottomTabReset': 'Reset to defaults',
 
+  // ── Sidebar Navigation ──
+  'settings.sidebarOrder': 'Sidebar Navigation',
+  'settings.sidebarOrderDesc':
+    'Reorder or hide items in the sidebar. Hidden items also disappear from the mobile menu.',
+  'settings.sidebarOrderSelect': 'Visible items',
+  'settings.sidebarOrderReset': 'Reset to defaults',
+
   // ── Dashboard Quick Links ──
   'settings.dashboardLinks': 'Dashboard Quick Links',
   'settings.dashboardLinksDesc': 'Choose and reorder the quick links shown on the dashboard.',
