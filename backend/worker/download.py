@@ -8,10 +8,11 @@ from pathlib import Path
 from urllib.parse import urlparse
 
 from core.config import settings
+from core.events import EventType, emit_safe
 from core.redis_client import DownloadSemaphore
 from services.credential import get_credential
-from worker.constants import logger
-from worker.helpers import _set_job_progress, _set_job_status
+from worker.constants import DISK_LOW_KEY, logger
+from worker.helpers import _set_job_progress, _set_job_status, check_disk_space
 
 
 async def download_job(
@@ -68,13 +69,34 @@ async def download_job(
         await _set_job_status(db_job_id, "failed", err)
         return {"status": "failed", "error": err}
 
+    # ── 4b. Disk space pre-flight ─────────────────────────────────────
+    # Fast path: check the Redis flag set by disk_monitor_job (no syscall).
+    # Fall back to a direct check if the flag was never set (e.g. first boot).
+    redis = ctx["redis"]
+    disk_low_val = await redis.get(DISK_LOW_KEY)
+    if disk_low_val is not None:
+        _free = disk_low_val.decode() if isinstance(disk_low_val, bytes) else disk_low_val
+        disk_ok, free_gb = False, float(_free)
+    else:
+        disk_ok, free_gb = check_disk_space("/data", settings.disk_min_free_gb)
+
+    if not disk_ok:
+        err = f"Insufficient disk space: {free_gb:.1f} GB free, {settings.disk_min_free_gb} GB required"
+        logger.error("[download] %s", err)
+        await _set_job_status(db_job_id, "failed", err)
+        await emit_safe(EventType.SYSTEM_DISK_LOW, free_gb=free_gb)
+        return {"status": "failed", "error": err}
+
     # ── 5. Semaphore ────────────────────────────────────────────────
+    from core.site_config import site_config_service
+
     sem_key = plugin.meta.semaphore_key or source_id
+    _dl_params = await site_config_service.get_effective_download_params(source_id)
+
     if sem_key == "gallery_dl":
         domain = urlparse(url).netloc.removeprefix("www.")
         sem_key = f"gallery_dl:{domain}"
-    limit = await DownloadSemaphore.get_limit(sem_key)
-    sem = DownloadSemaphore(sem_key, max_count=limit)
+    sem = DownloadSemaphore(sem_key, max_count=_dl_params.concurrency)
     _base_progress: dict = {} if total is None else {"total": total}
     await _set_job_progress(db_job_id, {**_base_progress, "status_text": "Waiting for download slot..."})
 
@@ -137,7 +159,6 @@ async def download_job(
         await _set_job_progress(db_job_id, progress)
 
     # ── 9. Cancel / Pause / PID callbacks ───────────────────────────
-    redis = ctx["redis"]
     cancel_key = f"download:cancel:{db_job_id}" if db_job_id else None
 
     async def cancel_check() -> bool:
@@ -227,17 +248,10 @@ async def download_job(
             return alive
 
         # Inject semaphore heartbeat and config isolation into options
-        from urllib.parse import urlparse as _urlparse_opts
-
-        from plugins.builtin.gallery_dl._sites import get_site_by_domain
-
-        _domain_opts = _urlparse_opts(url).netloc.removeprefix("www.")
-        _site_cfg = get_site_by_domain(_domain_opts)
-
         opts = dict(options or {})
         opts["config_id"] = db_job_id
         opts["sem_heartbeat"] = _sem_heartbeat
-        opts["inactivity_timeout"] = _site_cfg.inactivity_timeout
+        opts["inactivity_timeout"] = _dl_params.inactivity_timeout
 
         try:
             result = await plugin.download(

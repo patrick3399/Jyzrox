@@ -1,6 +1,7 @@
 """Shared helper functions for the worker package."""
 
 import hashlib
+import shutil
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -21,7 +22,7 @@ def _validate_image_magic(file_path: Path) -> bool:
     magic bytes matching its file extension. Returns False for mismatches.
     """
     try:
-        with open(file_path, 'rb') as f:
+        with open(file_path, "rb") as f:
             header = f.read(12)
     except OSError:
         return False
@@ -36,12 +37,12 @@ def _validate_image_magic(file_path: Path) -> bool:
             return ext in valid_exts
 
     # Special case: WebP needs RIFF + WEBP check
-    if header[:4] == b'RIFF' and header[8:12] == b'WEBP':
-        return ext == '.webp'
+    if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
+        return ext == ".webp"
 
     # Special case: AVIF/HEIC ftyp box (offset 4 = 'ftyp')
-    if len(header) >= 8 and header[4:8] == b'ftyp':
-        return ext in {'.avif', '.heic'}
+    if len(header) >= 8 and header[4:8] == b"ftyp":
+        return ext in {".avif", ".heic"}
 
     # Unknown magic — reject
     return False
@@ -53,6 +54,16 @@ def _sha256(path: Path) -> str:
         for chunk in iter(lambda: f.read(65536), b""):
             h.update(chunk)
     return h.hexdigest()
+
+
+def check_disk_space(path: str = "/data", min_free_gb: float = 2.0) -> tuple[bool, float]:
+    """Return (ok, free_gb). Fail-open on OSError."""
+    try:
+        usage = shutil.disk_usage(path)
+        free_gb = round(usage.free / (1024**3), 2)
+        return free_gb >= min_free_gb, free_gb
+    except OSError:
+        return True, -1.0
 
 
 async def _set_job_status(job_id: str | None, status: str, error: str | None = None) -> None:
@@ -72,13 +83,15 @@ async def _set_job_status(job_id: str | None, status: str, error: str | None = N
                     job.finished_at = datetime.now(UTC)
                 await session.commit()
                 try:
-                    await publish_job_event({
-                        "type": "job_update",
-                        "job_id": job_id,
-                        "status": status,
-                        "progress": job.progress,
-                        "user_id": job.user_id,
-                    })
+                    await publish_job_event(
+                        {
+                            "type": "job_update",
+                            "job_id": job_id,
+                            "status": status,
+                            "progress": job.progress,
+                            "user_id": job.user_id,
+                        }
+                    )
                 except Exception:
                     pass
     except (sqlalchemy.exc.SQLAlchemyError, ValueError, OSError) as exc:
@@ -96,13 +109,15 @@ async def _set_job_progress(job_id: str | None, progress: dict) -> None:
                 job.progress = progress
                 await session.commit()
                 try:
-                    await publish_job_event({
-                        "type": "job_update",
-                        "job_id": job_id,
-                        "status": job.status,
-                        "progress": progress,
-                        "user_id": job.user_id,
-                    })
+                    await publish_job_event(
+                        {
+                            "type": "job_update",
+                            "job_id": job_id,
+                            "status": job.status,
+                            "progress": progress,
+                            "user_id": job.user_id,
+                        }
+                    )
                 except Exception:
                     pass
     except (sqlalchemy.exc.SQLAlchemyError, ValueError, OSError) as exc:

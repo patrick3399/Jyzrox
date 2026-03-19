@@ -7,6 +7,7 @@ from sqlalchemy import select, update
 
 from core.database import AsyncSessionLocal
 from db.models import DownloadJob
+from worker.constants import DISK_LOW_KEY
 from worker.helpers import _cron_record, _cron_should_run, compute_arq_job_id, enqueue_download_job
 
 logger = logging.getLogger("worker")
@@ -27,8 +28,16 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
         await _cron_record(ctx, "retry_downloads", "disabled")
         return {"status": "disabled"}
 
+    disk_low = await r.get(DISK_LOW_KEY)
+    if disk_low:
+        logger.info(
+            "[retry] skipping — disk low (%s GB free)", disk_low.decode() if isinstance(disk_low, bytes) else disk_low
+        )
+        await _cron_record(ctx, "retry_downloads", "skipped_disk_low")
+        return {"status": "skipped_disk_low"}
+
     max_retries_raw = await r.get("setting:retry_max_retries")
-    max_retries = int(max_retries_raw) if max_retries_raw else 3
+    max_retries = int(max_retries_raw) if max_retries_raw else 3  # noqa: F841
 
     base_delay_raw = await r.get("setting:retry_base_delay_minutes")
     base_delay = int(base_delay_raw) if base_delay_raw else 5
@@ -106,7 +115,7 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 job.error = None
 
                 # Compute next_retry_at for if THIS retry also fails
-                backoff_minutes = min(base_delay * (2 ** job.retry_count), _MAX_BACKOFF_MINUTES)
+                backoff_minutes = min(base_delay * (2**job.retry_count), _MAX_BACKOFF_MINUTES)
                 job.next_retry_at = now + timedelta(minutes=backoff_minutes)
 
                 arq_job_id = compute_arq_job_id(job.id, job.retry_count)
@@ -115,7 +124,9 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                     retried += 1
                     logger.info(
                         "[retry] re-queued job %s (attempt %d/%d)",
-                        job.id, job.retry_count, job.max_retries,
+                        job.id,
+                        job.retry_count,
+                        job.max_retries,
                     )
                 except Exception as exc:
                     # Revert if enqueue fails
@@ -131,7 +142,14 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
         await _cron_record(ctx, "retry_downloads", "ok" if retried > 0 or stale_count > 0 else "idle", None)
         logger.info("[retry] done: %s", status_msg)
         from core.events import EventType, emit_safe
-        await emit_safe(EventType.RETRY_PROCESSED, resource_type="system", retried=retried, skipped=skipped, stale_reaped=stale_count)
+
+        await emit_safe(
+            EventType.RETRY_PROCESSED,
+            resource_type="system",
+            retried=retried,
+            skipped=skipped,
+            stale_reaped=stale_count,
+        )
         return {"status": "ok", "retried": retried, "skipped": skipped, "stale_reaped": stale_count}
 
     except Exception as exc:

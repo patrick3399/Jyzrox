@@ -57,6 +57,12 @@ ignore = [
 "tests/conftest.py" = [
     "E402",   # SQLite compatibility patches require interleaved imports
 ]
+"tests/test_download_worker.py" = [
+    "E402",   # sys.path setup must precede test helper imports
+]
+"worker/__init__.py" = [
+    "E402",   # patch_asyncio_for_314() must run before any arq/asyncio import
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["core", "db", "routers", "services"]

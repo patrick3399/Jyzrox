@@ -20,6 +20,8 @@ _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend_dir))
 
+# Import shared mock factory (must come after sys.path setup)
+from tests.helpers import make_mock_site_config_svc
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -90,11 +92,6 @@ def _source_patches():
             return_value=Path("/tmp/gallery-dl-test.json"),
         ),
         patch(
-            "core.redis_client.get_download_delay",
-            new_callable=AsyncMock,
-            return_value=0,
-        ),
-        patch(
             "plugins.builtin.gallery_dl.source.settings",
             MagicMock(
                 data_gallery_path="/data/gallery",
@@ -103,6 +100,7 @@ def _source_patches():
             ),
         ),
         patch("pathlib.Path.mkdir"),
+        patch("core.site_config.site_config_service", make_mock_site_config_svc()),
     ]
 
 
@@ -373,9 +371,8 @@ def _patch_download_job_dependencies(
         patch("core.database.AsyncSessionLocal", return_value=session),
         patch("worker.progressive.ProgressiveImporter", return_value=importer),
         patch("worker.download.DownloadSemaphore", mock_sem_cls),
-        patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
         patch("core.redis_client.get_redis", return_value=MagicMock()),
-        patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+        patch("core.site_config.site_config_service", make_mock_site_config_svc()),
     ]
 
 
@@ -481,9 +478,8 @@ class TestDownloadJobPluginErrors:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(_make_ctx(), "https://example.com/gallery/99", db_job_id="job-003")
 
@@ -530,9 +526,8 @@ class TestDownloadJobPluginErrors:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(_make_ctx(), "https://example.com/gallery/99", db_job_id="job-004")
 
@@ -578,9 +573,8 @@ class TestDownloadJobPluginErrors:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(_make_ctx(), "https://example.com/gallery/99", db_job_id="job-005")
 
@@ -652,8 +646,8 @@ class TestDownloadJobSemaphore:
                 ),
             ),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-sem-01")
 
@@ -700,11 +694,10 @@ class TestDownloadJobSemaphore:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-sem-02")
 
@@ -754,11 +747,10 @@ class TestDownloadJobSemaphore:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", side_effect=_capture_sem),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             await download_job(_make_ctx(), "https://danbooru.donmai.us/posts/1", db_job_id="job-sem-03")
 
@@ -813,8 +805,14 @@ class TestDownloadJobSignals:
         mock_sem_cls = MagicMock(return_value=mock_sem)
 
         ctx = _make_ctx()
-        # Simulate cancel key being set
-        ctx["redis"].get = AsyncMock(return_value=b"1")
+
+        # Simulate cancel key being set — return b"1" for cancel/pause keys, None for others
+        async def _selective_get(key):
+            if key.startswith("download:cancel:") or key.startswith("download:pause:"):
+                return b"1"
+            return None
+
+        ctx["redis"].get = _selective_get
 
         with (
             patch("plugins.registry.plugin_registry", mock_registry),
@@ -824,9 +822,8 @@ class TestDownloadJobSignals:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-sig-01")
 
@@ -884,11 +881,10 @@ class TestDownloadJobSignals:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-sig-02")
 
@@ -955,10 +951,9 @@ class TestDownloadJobSignals:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("pathlib.Path.exists", return_value=False),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-sig-03")
 
@@ -1021,11 +1016,10 @@ class TestDownloadJobSignals:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-sig-04")
 
@@ -1088,11 +1082,10 @@ class TestDownloadJobValidation:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             # Point target_dir at tmp_path so rglob finds our corrupt file
             patch("worker.download.settings", MagicMock(data_gallery_path=str(tmp_path))),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-val-01")
 
@@ -1151,11 +1144,10 @@ class TestDownloadJobValidation:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-val-02")
 
@@ -1224,11 +1216,10 @@ class TestDownloadJobValidation:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-val-03")
 
@@ -1282,11 +1273,10 @@ class TestDownloadJobValidation:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-val-04")
 
@@ -1334,14 +1324,300 @@ class TestDownloadJobValidation:
             patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
             patch("worker.progressive.ProgressiveImporter", return_value=importer),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
-            patch("worker.download.DownloadSemaphore.get_limit", new_callable=AsyncMock, return_value=2),
             patch("core.redis_client.get_redis", return_value=MagicMock()),
             patch("worker.helpers._validate_image_magic", return_value=True),
             patch("pathlib.Path.exists", return_value=False),
-            patch("plugins.builtin.gallery_dl._sites.get_site_by_domain", return_value=_make_default_site_cfg()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
             result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-val-05")
 
         assert result["status"] == "done"
         assert result["downloaded"] == 7
         mock_status.assert_any_call("job-val-05", "done")
+
+
+# ---------------------------------------------------------------------------
+# TestCheckDiskSpace
+# ---------------------------------------------------------------------------
+
+
+class TestCheckDiskSpace:
+    """Unit tests for the check_disk_space() helper in worker.helpers."""
+
+    def test_check_disk_space_sufficient(self):
+        """Returns (True, free_gb) when free space exceeds the threshold."""
+        from worker.helpers import check_disk_space
+
+        _50_gb = 50 * (1024**3)
+        fake_usage = MagicMock()
+        fake_usage.free = _50_gb
+
+        with patch("shutil.disk_usage", return_value=fake_usage):
+            ok, free_gb = check_disk_space("/data", 2.0)
+
+        assert ok is True
+        assert free_gb == round(_50_gb / (1024**3), 2)
+
+    def test_check_disk_space_insufficient(self):
+        """Returns (False, free_gb) when free space is below the threshold."""
+        from worker.helpers import check_disk_space
+
+        _0_5_gb = int(0.5 * (1024**3))
+        fake_usage = MagicMock()
+        fake_usage.free = _0_5_gb
+
+        with patch("shutil.disk_usage", return_value=fake_usage):
+            ok, free_gb = check_disk_space("/data", 2.0)
+
+        assert ok is False
+        assert free_gb == round(_0_5_gb / (1024**3), 2)
+
+    def test_check_disk_space_fail_open_on_oserror(self):
+        """Returns (True, -1.0) when shutil.disk_usage raises OSError (fail-open)."""
+        from worker.helpers import check_disk_space
+
+        with patch("shutil.disk_usage", side_effect=OSError("no such device")):
+            ok, free_gb = check_disk_space("/data", 2.0)
+
+        assert ok is True
+        assert free_gb == -1.0
+
+
+# ---------------------------------------------------------------------------
+# TestDownloadJobDiskSpace
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadJobDiskSpace:
+    """Tests for the disk space pre-flight check inside download_job()."""
+
+    async def test_download_job_fails_on_low_disk_space(self):
+        """When disk space is insufficient, download_job returns failed before acquiring the semaphore."""
+        from worker.download import download_job
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = AsyncMock(return_value=_make_plugin_result())
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock) as mock_status,
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+            patch("worker.download.check_disk_space", return_value=(False, 0.5)),
+        ):
+            result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-disk-01")
+
+        assert result["status"] == "failed"
+        assert "disk space" in result["error"].lower()
+        mock_status.assert_any_call("job-disk-01", "failed", result["error"])
+        # Semaphore must NOT have been acquired — the early-return fired before step 5
+        mock_sem.acquire.assert_not_awaited()
+
+    async def test_download_job_fails_on_redis_disk_low_flag(self):
+        """When system:disk_low Redis flag is set, download_job fails without calling check_disk_space."""
+        from worker.download import download_job
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        # ctx with disk_low flag set — selective mock returns flag only for DISK_LOW_KEY
+        ctx = _make_ctx()
+        _orig_get = ctx["redis"].get
+
+        async def _disk_flag_get(key):
+            if key == "system:disk_low":
+                return b"0.3"
+            return await _orig_get(key)
+
+        ctx["redis"].get = _disk_flag_get
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock) as mock_status,
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+            patch("worker.helpers.check_disk_space") as mock_check,
+        ):
+            result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-disk-flag")
+
+        assert result["status"] == "failed"
+        assert "disk space" in result["error"].lower()
+        mock_status.assert_any_call("job-disk-flag", "failed", result["error"])
+        # check_disk_space should NOT have been called — Redis flag was the fast path
+        mock_check.assert_not_called()
+
+    async def test_download_job_proceeds_on_sufficient_disk_space(self):
+        """When disk space is sufficient, download_job does not return early with a disk space error."""
+        from worker.download import download_job
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = AsyncMock(return_value=_make_plugin_result())
+
+        importer = MagicMock()
+        importer.gallery_id = "gal-disk-ok"
+        importer.title = "Disk OK Gallery"
+        importer.source_url = None
+        importer.import_file = AsyncMock()
+        importer.ensure_gallery_from_url = AsyncMock()
+        importer.ensure_gallery = AsyncMock()
+        importer.finalize = AsyncMock(return_value="gal-disk-ok")
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("worker.helpers._validate_image_magic", return_value=True),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+            patch("worker.download.check_disk_space", return_value=(True, 50.0)),
+        ):
+            result = await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-disk-02")
+
+        # The key assertion: the job did NOT fail with a disk space error.
+        assert result.get("error", "") == "" or "disk space" not in result.get("error", "").lower()
+        # It should have proceeded past the disk check and reached the semaphore.
+        mock_sem.acquire.assert_awaited_once()
+
+
+# ---------------------------------------------------------------------------
+# TestDiskMonitorJob
+# ---------------------------------------------------------------------------
+
+
+class TestDiskMonitorJob:
+    """Tests for disk_monitor_job() in worker.__init__."""
+
+    async def test_disk_monitor_sets_redis_flag_when_low(self):
+        """When disk is low, disk_monitor_job sets system:disk_low in Redis and returns status=low."""
+        from worker import disk_monitor_job
+
+        redis = AsyncMock()
+        redis.set = AsyncMock()
+        redis.delete = AsyncMock()
+        ctx = {"redis": redis}
+
+        with (
+            patch("worker.helpers.check_disk_space", return_value=(False, 0.5)),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            result = await disk_monitor_job(ctx)
+
+        assert result["status"] == "low"
+        assert result["free_gb"] == 0.5
+        redis.set.assert_awaited_once_with("system:disk_low", "0.5", ex=600)
+
+    async def test_disk_monitor_clears_flag_when_ok(self):
+        """When disk is OK, disk_monitor_job deletes system:disk_low and returns status=ok."""
+        from worker import disk_monitor_job
+
+        redis = AsyncMock()
+        redis.set = AsyncMock()
+        redis.delete = AsyncMock()
+        ctx = {"redis": redis}
+
+        with patch("worker.helpers.check_disk_space", return_value=(True, 50.0)):
+            result = await disk_monitor_job(ctx)
+
+        assert result["status"] == "ok"
+        assert result["free_gb"] == 50.0
+        redis.delete.assert_awaited_once_with("system:disk_low")
+
+
+# ---------------------------------------------------------------------------
+# TestRetryJobDiskLow
+# ---------------------------------------------------------------------------
+
+
+class TestRetryJobDiskLow:
+    """Tests for disk-low guard inside retry_failed_downloads_job()."""
+
+    async def test_retry_skips_when_disk_low(self):
+        """When system:disk_low is set in Redis, retry_failed_downloads_job returns skipped_disk_low."""
+        from worker.retry import retry_failed_downloads_job
+
+        redis = AsyncMock()
+
+        async def _redis_get(key):
+            if key == "system:disk_low":
+                return b"0.5"
+            # cron:retry_downloads:enabled — not disabled (return None = use default)
+            if key == "cron:retry_downloads:enabled":
+                return None
+            # cron:retry_downloads:cron_expr — use default
+            if key == "cron:retry_downloads:cron_expr":
+                return None
+            # cron:retry_downloads:last_run — no last run (always run)
+            if key == "cron:retry_downloads:last_run":
+                return None
+            # setting:retry_enabled — not disabled
+            if key == "setting:retry_enabled":
+                return None
+            return None
+
+        redis.get = _redis_get
+        redis.set = AsyncMock()
+        redis.delete = AsyncMock()
+        redis.pipeline = MagicMock(
+            return_value=AsyncMock(
+                __aenter__=AsyncMock(return_value=AsyncMock(execute=AsyncMock())),
+                execute=AsyncMock(),
+            )
+        )
+        ctx = {"redis": redis}
+
+        result = await retry_failed_downloads_job(ctx)
+
+        assert result["status"] == "skipped_disk_low"

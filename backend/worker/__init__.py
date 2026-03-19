@@ -115,6 +115,10 @@ async def startup(ctx: dict) -> None:
     from plugins import init_plugins
 
     await init_plugins()
+    from core.site_config import site_config_service
+
+    await site_config_service.start_listener()
+    logger.info("SiteConfigService listener started")
     # Initialize gallery-dl venv (before recovery — downloads need it)
     try:
         await ensure_venv()
@@ -338,7 +342,7 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
 
 async def rate_limit_schedule_job(ctx: dict) -> dict:
     """Check the rate limit schedule and update the active flag in Redis."""
-    from datetime import datetime, timezone
+    from datetime import datetime, timezone  # noqa: F401
 
     r = ctx["redis"]
 
@@ -435,6 +439,32 @@ async def log_cleanup_job(ctx: dict) -> dict:
     return {"removed": removed, "max_entries": max_entries}
 
 
+async def disk_monitor_job(ctx: dict) -> dict:
+    """Cron: check disk space, set/clear Redis flag, emit event when low."""
+    from core.config import settings
+    from worker.constants import DISK_LOW_KEY
+    from worker.helpers import check_disk_space
+
+    disk_ok, free_gb = check_disk_space("/data", settings.disk_min_free_gb)
+    r = ctx["redis"]
+
+    if not disk_ok:
+        await r.set(DISK_LOW_KEY, str(free_gb), ex=600)
+        from core.events import EventType, emit_safe
+
+        await emit_safe(
+            EventType.SYSTEM_DISK_LOW,
+            resource_type="system",
+            free_gb=free_gb,
+            threshold_gb=settings.disk_min_free_gb,
+        )
+        logger.warning("[disk_monitor] LOW: %.2f GB free (min %.1f GB)", free_gb, settings.disk_min_free_gb)
+        return {"status": "low", "free_gb": free_gb}
+
+    await r.delete(DISK_LOW_KEY)
+    return {"status": "ok", "free_gb": free_gb}
+
+
 # ── ARQ Worker Settings ──────────────────────────────────────────────
 
 
@@ -469,6 +499,7 @@ class WorkerSettings:
         log_cleanup_job,
         arq_func(gdl_upgrade_job, name="gdl_upgrade_job", max_tries=1),
         arq_func(gdl_rollback_job, name="gdl_rollback_job", max_tries=1),
+        disk_monitor_job,
     ]
     cron_jobs = [
         cron(
@@ -531,6 +562,13 @@ class WorkerSettings:
             unique=True,
             timeout=300,
         ),
+        cron(
+            disk_monitor_job,
+            minute=set(range(0, 60, 5)),
+            run_at_startup=True,
+            unique=True,
+            timeout=30,
+        ),
     ]
     on_startup = startup
     on_shutdown = shutdown
@@ -568,6 +606,7 @@ __all__ = [
     "log_cleanup_job",
     "gdl_upgrade_job",
     "gdl_rollback_job",
+    "disk_monitor_job",
     "startup",
     "shutdown",
     "WorkerSettings",
