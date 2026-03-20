@@ -521,6 +521,9 @@ function BrowsePage() {
   )
   const [favScrollLoading, setFavScrollLoading] = useState(false)
   const [favScrollHasMore, setFavScrollHasMore] = useState(restored?.favScrollHasMore ?? true)
+  const favScrollNeedsSeedRef = useRef(
+    restored?.favScrollGalleries != null && restored.favScrollGalleries.length > 0 ? false : true,
+  )
 
   // Toplist state — initialised from URL (or restored state) so back-navigation preserves the selection
   const [toplistTl, setToplistTl] = useState(() => {
@@ -765,21 +768,31 @@ function BrowsePage() {
       setFavScrollGalleries([])
       setFavScrollNextCursor(undefined)
       setFavScrollHasMore(true)
+      favScrollNeedsSeedRef.current = true
     }
   }, [favCat, favSearch, loadMode])
 
   // Append favorites results in scroll mode
   useEffect(() => {
     if (loadMode !== 'scroll' || !favData || activeTab !== 'favorites') return
-    setFavScrollGalleries((prev) => {
-      if (!favCursor.next && !favCursor.prev) return favData.galleries
-      const existingIds = new Set(prev.map((g) => g.gid))
-      const newOnes = favData.galleries.filter((g) => !existingIds.has(g.gid))
-      return [...prev, ...newOnes]
-    })
-    setFavScrollHasMore(favData.has_next)
-    setFavScrollNextCursor(favData.next_cursor ?? undefined)
-    setFavScrollLoading(false)
+    if (favScrollNeedsSeedRef.current) {
+      // First page seed (or re-seed after filter change)
+      setFavScrollGalleries(favData.galleries)
+      setFavScrollHasMore(favData.has_next)
+      setFavScrollNextCursor(favData.next_cursor ?? undefined)
+      setFavScrollLoading(false)
+      favScrollNeedsSeedRef.current = false
+    } else if (favCursor.next || favCursor.prev) {
+      // Append subsequent pages (skip if this is the restored first-page SWR response)
+      setFavScrollGalleries((prev) => {
+        const existingIds = new Set(prev.map((g) => g.gid))
+        const newOnes = favData.galleries.filter((g) => !existingIds.has(g.gid))
+        return [...prev, ...newOnes]
+      })
+      setFavScrollHasMore(favData.has_next)
+      setFavScrollNextCursor(favData.next_cursor ?? undefined)
+      setFavScrollLoading(false)
+    }
   }, [favData]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Handlers ────────────────────────────────────────────
