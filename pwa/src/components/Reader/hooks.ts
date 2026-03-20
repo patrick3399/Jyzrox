@@ -377,13 +377,18 @@ export function useKeyboardNav(
 
 // ── useProgressSave ───────────────────────────────────────────────────
 
-export function useProgressSave(source: string, sourceId: string, currentPage: number) {
+export function useProgressSave(
+  source: string,
+  sourceId: string,
+  currentPage: number,
+  enabled = true,
+) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const retryRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
-    // Skip progress save for proxy-only browsing (source or sourceId empty)
-    if (!source || !sourceId) return
+    // Skip progress save for proxy-only browsing or when disabled
+    if (!source || !sourceId || !enabled) return
 
     clearTimeout(timerRef.current)
     timerRef.current = setTimeout(() => {

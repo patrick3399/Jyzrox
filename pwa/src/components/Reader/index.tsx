@@ -1209,7 +1209,7 @@ function ThumbnailStrip({
                 const cellH = Number(parts[3]) || 300
                 // Always scale by height to fill 80px; crop excess width
                 const scale = thumbH / cellH
-                const scaledOx = ox * scale
+                const scaledOx = Math.abs(ox) * scale
                 // Center the crop horizontally within the 60px button
                 const scaledCellW = cellW * scale
                 const cropOffset = scaledCellW > thumbW ? (scaledCellW - thumbW) / 2 : 0
@@ -1730,7 +1730,7 @@ export default function Reader({
   )
 
   useSequentialPrefetch(images, state.currentPage, isProxyMode)
-  useProgressSave(source, sourceId, state.currentPage)
+  useProgressSave(source, sourceId, state.currentPage, !isProxyMode)
 
   const handleToggleOverlay = useCallback(() => toggleOverlay(), [toggleOverlay])
   const handleBack = useCallback(() => router.back(), [router])
