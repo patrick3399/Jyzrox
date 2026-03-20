@@ -98,41 +98,74 @@ def _make_ctx():
 # ---------------------------------------------------------------------------
 
 
+_FIXED_NOW = datetime(2026, 1, 15, 10, 0, 0, tzinfo=UTC)
+
+
+def _make_frozen_datetime(fixed_now: datetime):
+    """Return a datetime subclass whose now() always returns fixed_now.
+
+    Using a subclass (rather than a MagicMock) keeps the class itself a real
+    type, so croniter's ``issubclass(ret_type, datetime.datetime)`` check still
+    passes when the worker calls ``it.get_next(datetime)``.
+    """
+
+    class _FrozenDatetime(datetime):
+        @classmethod
+        def now(cls, tz=None):  # type: ignore[override]
+            return fixed_now
+
+    return _FrozenDatetime
+
+
 class TestCronIsDue:
-    """Unit tests for _cron_is_due helper."""
+    """Unit tests for _cron_is_due helper.
+
+    All tests freeze datetime.now to _FIXED_NOW (2026-01-15 10:00 UTC) via a
+    datetime subclass so they are not sensitive to the wall-clock time at which
+    the test suite runs.
+    """
 
     def test_due_when_never_run(self):
         """If last_run is None the schedule is always considered due."""
         from worker.subscription_group import _cron_is_due
 
-        assert _cron_is_due("* * * * *", None) is True
+        with patch("worker.subscription_group.datetime", _make_frozen_datetime(_FIXED_NOW)):
+            assert _cron_is_due("* * * * *", None) is True
 
     def test_not_due_when_recently_run(self):
         """A schedule that fires every 6h is not due when last run was just now."""
         from worker.subscription_group import _cron_is_due
 
-        assert _cron_is_due("0 */6 * * *", datetime.now(UTC)) is False
+        with patch("worker.subscription_group.datetime", _make_frozen_datetime(_FIXED_NOW)):
+            assert _cron_is_due("0 */6 * * *", _FIXED_NOW) is False
 
     def test_due_when_last_run_is_old(self):
         """A 6h schedule is due when last run was 7 hours ago."""
         from worker.subscription_group import _cron_is_due
 
-        old = datetime.now(UTC) - timedelta(hours=7)
-        assert _cron_is_due("0 */6 * * *", old) is True
+        old = _FIXED_NOW - timedelta(hours=7)
+        with patch("worker.subscription_group.datetime", _make_frozen_datetime(_FIXED_NOW)):
+            assert _cron_is_due("0 */6 * * *", old) is True
 
     def test_minutely_schedule_due_after_one_minute(self):
         """A * * * * * schedule is due after 65 seconds."""
         from worker.subscription_group import _cron_is_due
 
-        just_over_minute = datetime.now(UTC) - timedelta(seconds=65)
-        assert _cron_is_due("* * * * *", just_over_minute) is True
+        just_over_minute = _FIXED_NOW - timedelta(seconds=65)
+        with patch("worker.subscription_group.datetime", _make_frozen_datetime(_FIXED_NOW)):
+            assert _cron_is_due("* * * * *", just_over_minute) is True
 
     def test_daily_schedule_not_due_after_one_hour(self):
-        """A daily schedule (0 3 * * *) is not due 1 hour after last run."""
+        """A daily schedule (0 3 * * *) is not due 1 hour after last run.
+
+        Uses a fixed now of 10:00 UTC so last_run=09:00 and the next 03:00
+        occurrence is 2026-01-16 03:00 — well in the future, confirming not due.
+        """
         from worker.subscription_group import _cron_is_due
 
-        one_hour_ago = datetime.now(UTC) - timedelta(hours=1)
-        assert _cron_is_due("0 3 * * *", one_hour_ago) is False
+        one_hour_ago = _FIXED_NOW - timedelta(hours=1)
+        with patch("worker.subscription_group.datetime", _make_frozen_datetime(_FIXED_NOW)):
+            assert _cron_is_due("0 3 * * *", one_hour_ago) is False
 
 
 # ---------------------------------------------------------------------------

@@ -186,8 +186,32 @@ async def ensure_venv() -> None:
 
 
 async def get_current_version() -> str | None:
-    """Return the currently active gallery-dl version."""
-    return await _get_version(get_gdl_bin())
+    """Return the currently active gallery-dl version.
+
+    Reads version directly from the active venv's package metadata via
+    ``pip show``.  This avoids two cross-process pitfalls:
+
+    * ``_gdl_bin_cache`` is per-process — the API process never sees the
+      cache invalidation that the worker process performs after an upgrade.
+    * The gallery-dl entry-point script's shebang may point to a stale
+      Python path when the venv is a copytree of an older directory.
+
+    Falls back to running the system ``gallery-dl --version`` if the venv
+    does not exist.
+    """
+    if VENV_ACTIVE.exists():
+        try:
+            site_pkgs = VENV_ACTIVE / "lib"
+            # Find gallery_dl-*.dist-info/METADATA
+            for meta in site_pkgs.rglob("gallery_dl-*.dist-info/METADATA"):
+                for line in meta.read_text().splitlines():
+                    if line.startswith("Version:"):
+                        return line.split(":", 1)[1].strip()
+                break
+        except Exception:
+            pass
+    # Fallback: system gallery-dl (e.g. baked into Docker image)
+    return await _get_version("gallery-dl")
 
 
 async def get_latest_pypi_version() -> str | None:
