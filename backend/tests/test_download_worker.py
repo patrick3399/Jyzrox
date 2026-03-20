@@ -21,9 +21,9 @@ if os.path.abspath(_backend_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend_dir))
 
 # Import shared mock factory (must come after sys.path setup)
-from tests.helpers import make_mock_site_config_svc
-
 import pytest
+
+from tests.helpers import make_mock_site_config_svc
 
 
 @pytest.fixture(autouse=True)
@@ -36,6 +36,7 @@ def mock_redis_global():
     mock_redis.delete = AsyncMock(return_value=1)
     with patch("core.redis_client.get_redis", return_value=mock_redis):
         yield mock_redis
+
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -133,9 +134,9 @@ class TestGalleryDlCancel:
         plugin = GalleryDlPlugin()
 
         lines = [
-            b"/data/gallery/image001.jpg\n",
-            b"/data/gallery/image002.jpg\n",
-            b"/data/gallery/image003.jpg\n",
+            b"JYZROX_FILE\t/data/gallery/image001.jpg\tabc1\n",
+            b"JYZROX_FILE\t/data/gallery/image002.jpg\tabc2\n",
+            b"JYZROX_FILE\t/data/gallery/image003.jpg\tabc3\n",
         ]
         # block_wait=True: proc.wait() blocks until kill() is called by the cancel watcher
         mock_proc = _make_mock_proc(lines, returncode=0, block_wait=True)
@@ -173,14 +174,14 @@ class TestGalleryDlCancel:
         # cancel_check always returns True, so _pause_cancel_watcher fires immediately
         # and sets state.cancelled=True, which prevents the last pending file import.
         lines = [
-            b"/data/gallery/image001.jpg\n",
-            b"/data/gallery/image002.jpg\n",
+            b"JYZROX_FILE\t/data/gallery/image001.jpg\tabc1\n",
+            b"JYZROX_FILE\t/data/gallery/image002.jpg\tabc2\n",
         ]
         mock_proc = _make_mock_proc(lines, returncode=0, block_wait=True)
 
         imported_files: list[Path] = []
 
-        async def on_file(path: Path) -> None:
+        async def on_file(path: Path, sha256: str | None = None) -> None:
             imported_files.append(path)
 
         async def cancel_check() -> bool:
@@ -224,8 +225,8 @@ class TestGalleryDlPartial:
         plugin = GalleryDlPlugin()
 
         lines = [
-            b"/data/gallery/image001.jpg\n",
-            b"/data/gallery/image002.jpg\n",
+            b"JYZROX_FILE\t/data/gallery/image001.jpg\tabc123\n",
+            b"JYZROX_FILE\t/data/gallery/image002.jpg\tdef456\n",
         ]
         mock_proc = _make_mock_proc(lines, returncode=1, stderr=b"some error")
 
