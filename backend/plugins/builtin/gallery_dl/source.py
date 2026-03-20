@@ -161,7 +161,10 @@ async def _build_gallery_dl_config(
         # N10a: archive-mode memory for batch writes (subscription)
         config["extractor"]["archive-mode"] = "memory"
         if last_completed_at:
-            config["extractor"]["date-after"] = last_completed_at.strftime("%Y-%m-%dT%H:%M:%S")
+            from datetime import timedelta
+
+            cutoff = last_completed_at - timedelta(days=1)
+            config["extractor"]["date-after"] = cutoff.strftime("%Y-%m-%dT%H:%M:%S")
 
     # Inject per-site sleep-request via SiteConfigService
     from core.site_config import site_config_service
@@ -186,6 +189,10 @@ async def _build_gallery_dl_config(
         # N7: per-site proxy
         if params.proxy_url:
             entry["proxy"] = params.proxy_url
+
+        # N7: per-site rate limit
+        if params.rate_limit:
+            config["downloader"]["rate"] = params.rate_limit
 
     # Merge credentials on top
     for src, cred_val in credentials.items():
@@ -222,6 +229,9 @@ async def _build_gallery_dl_config(
             {
                 "name": "ugoira",
                 "ffmpeg-output": True,
+                "ffmpeg-args": ["-c:v", "libx264", "-pix_fmt", "yuv420p", "-an"],
+                "ffmpeg-twopass": False,
+                "keep-files": False,
                 "extension": "mp4",
             }
         )

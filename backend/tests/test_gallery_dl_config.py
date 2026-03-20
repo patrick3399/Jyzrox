@@ -254,7 +254,8 @@ async def test_v3_subscription_context_has_abort_and_date(mock_config_path):
     await _build_gallery_dl_config({}, job_context="subscription", last_completed_at=last)
     config = json.loads(mock_config_path.read_text())
     assert config["extractor"]["skip"] == "abort:10"
-    assert "date-after" in config["extractor"]
+    # date-after should be 1 day before last_completed_at (buffer for timezone edge cases)
+    assert config["extractor"]["date-after"] == "2026-03-14T08:00:00"
 
 
 @pytest.mark.asyncio
