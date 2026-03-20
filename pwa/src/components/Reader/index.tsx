@@ -1209,9 +1209,11 @@ function ThumbnailStrip({
                 const cellH = Number(parts[3]) || 300
                 const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
                 const naturalSize = spriteNaturalSizes[proxyUrl]
-                // Scale so the CELL (not the whole sprite) fills thumbH.
-                // Each cell in the sprite can have a different height.
-                const scale = thumbH / cellH
+                // cellH from EH HTML is the DISPLAY div height, not the sprite
+                // cell height. All cells share one row (height = sprite height).
+                // Use cover semantics so the cell always fills the thumbnail.
+                const trueCellH = naturalSize?.h ?? 300
+                const scale = Math.max(thumbW / cellW, thumbH / trueCellH)
                 const scaledOx = Math.abs(ox) * scale
                 const scaledCellW = cellW * scale
                 // Horizontally: center-crop if cell wider than thumb, else center with padding
