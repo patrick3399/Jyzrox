@@ -93,26 +93,7 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
                 )
                 return {"status": "skipped", "reason": "active_job_exists"}
 
-        # Decide archive behavior: query galleries table (stable, not cleared by clear_finished_jobs).
-        # If a gallery with matching source_url exists and is complete/partial, use archive for incremental download.
-        skip_archive = True
-        async with AsyncSessionLocal() as session:
-            from db.models import Gallery
-
-            existing_gallery = (
-                await session.execute(
-                    select(Gallery.id)
-                    .where(
-                        Gallery.source_url == sub.url,
-                        Gallery.download_status.in_(["complete", "partial"]),
-                    )
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-            if existing_gallery:
-                skip_archive = False
-
-        options = {"skip_archive": True} if skip_archive else None
+        options = None  # v3.0: archive always active, lifecycle via CASCADE
 
         # Create download job
         job_id = uuid.uuid4()

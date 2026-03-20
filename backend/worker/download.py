@@ -207,7 +207,7 @@ async def download_job(
     # ── 10. Unified on_file callback (ALL sources) ──────────────────
     _gallery_create_lock = asyncio.Lock()
 
-    async def on_file(file_path: Path):
+    async def on_file(file_path: Path, sha256: str | None = None):
         if file_path.suffix.lower() not in _MEDIA_EXTS:
             return
         # Serialize gallery creation to avoid race with concurrent downloads
@@ -237,7 +237,7 @@ async def download_job(
                                 "status_text": f"Downloading: {importer.title}",
                             },
                         )
-        await importer.import_file(file_path)
+        await importer.import_file(file_path, sha256=sha256)
 
     # ── 11. Execute download ────────────────────────────────────────
     job_id_str = db_job_id or str(uuid.uuid4())

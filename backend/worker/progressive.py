@@ -32,6 +32,7 @@ class ProgressiveImporter:
         self._page_counter = 0
         self.source_url: str | None = None
         self._sem = asyncio.Semaphore(2)
+        self._job_started_at = datetime.now(UTC)
         self._tasks: list[asyncio.Task] = []
         self._page_num_from_filename = page_num_from_filename
         self._excluded_set: set[str] = set()
@@ -42,17 +43,26 @@ class ProgressiveImporter:
             return
         async with AsyncSessionLocal() as session:
             from sqlalchemy import func
-            rows = (await session.execute(
-                select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == self.gallery_id)
-            )).scalars().all()
+
+            rows = (
+                (
+                    await session.execute(
+                        select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == self.gallery_id)
+                    )
+                )
+                .scalars()
+                .all()
+            )
             self._excluded_set = set(rows)
             if self._excluded_set:
-                logger.info("[progressive] loaded %d excluded blob(s) for gallery %d", len(self._excluded_set), self.gallery_id)
+                logger.info(
+                    "[progressive] loaded %d excluded blob(s) for gallery %d", len(self._excluded_set), self.gallery_id
+                )
 
             # Resume page counter from current max page_num so new images don't collide
-            max_page = (await session.execute(
-                select(func.max(Image.page_num)).where(Image.gallery_id == self.gallery_id)
-            )).scalar_one_or_none()
+            max_page = (
+                await session.execute(select(func.max(Image.page_num)).where(Image.gallery_id == self.gallery_id))
+            ).scalar_one_or_none()
             if max_page and max_page > self._page_counter:
                 self._page_counter = max_page
                 logger.info("[progressive] resuming page counter at %d for gallery %d", max_page, self.gallery_id)
@@ -106,6 +116,7 @@ class ProgressiveImporter:
             # Link gallery_id to the DownloadJob
             if self.db_job_id:
                 from db.models import DownloadJob
+
                 job = await session.get(DownloadJob, uuid.UUID(self.db_job_id))
                 if job:
                     job.gallery_id = self.gallery_id
@@ -168,6 +179,7 @@ class ProgressiveImporter:
 
             if self.db_job_id:
                 from db.models import DownloadJob
+
                 job = await session.get(DownloadJob, uuid.UUID(self.db_job_id))
                 if job:
                     job.gallery_id = self.gallery_id
@@ -222,6 +234,7 @@ class ProgressiveImporter:
 
             if self.db_job_id:
                 from db.models import DownloadJob
+
                 job = await session.get(DownloadJob, uuid.UUID(self.db_job_id))
                 if job:
                     job.gallery_id = self.gallery_id
@@ -232,7 +245,7 @@ class ProgressiveImporter:
         await self._load_gallery_state()
         return self.gallery_id
 
-    async def import_file(self, file_path: Path) -> None:
+    async def import_file(self, file_path: Path, sha256: str | None = None) -> None:
         """Import a single media file with bounded concurrency.
 
         Page number is assigned here (serial caller) to guarantee deterministic
@@ -260,12 +273,12 @@ class ProgressiveImporter:
 
         async def _do_import():
             async with self._sem:
-                await self._import_single(file_path, page_num)
+                await self._import_single(file_path, page_num, sha256=sha256)
 
         task = asyncio.create_task(_do_import())
         self._tasks.append(task)
 
-    async def _import_single(self, file_path: Path, page_num: int) -> None:
+    async def _import_single(self, file_path: Path, page_num: int, sha256: str | None = None) -> None:
         """Import one file: sha256 -> store_blob -> image record -> symlink -> thumbnail."""
         if not file_path.exists():
             return
@@ -277,16 +290,27 @@ class ProgressiveImporter:
                 return
 
         try:
-            sha256 = await asyncio.to_thread(_sha256, file_path)
+            final_sha256 = sha256 or await asyncio.to_thread(_sha256, file_path)
 
             # Skip excluded blobs
-            if sha256 in self._excluded_set:
-                logger.debug("[progressive] skipping excluded blob %s for gallery %d", sha256[:12], self.gallery_id)
+            if final_sha256 in self._excluded_set:
+                logger.debug(
+                    "[progressive] skipping excluded blob %s for gallery %d", final_sha256[:12], self.gallery_id
+                )
                 return
 
             async with AsyncSessionLocal() as session:
-                blob = await store_blob(file_path, sha256, session)
+                blob = await store_blob(file_path, final_sha256, session)
                 await session.flush()
+
+                # N5: mtime PP sets original upload date
+                try:
+                    mtime = file_path.stat().st_mtime
+                    added_at = datetime.fromtimestamp(mtime, tz=UTC)
+                    if added_at.year < 2000 or added_at > datetime.now(UTC):
+                        added_at = datetime.now(UTC)
+                except (OSError, ValueError, OverflowError):
+                    added_at = datetime.now(UTC)
 
                 img_stmt = (
                     pg_insert(Image)
@@ -294,8 +318,8 @@ class ProgressiveImporter:
                         gallery_id=self.gallery_id,
                         page_num=page_num,
                         filename=file_path.name,
-                        blob_sha256=sha256,
-                        added_at=datetime.now(UTC),
+                        blob_sha256=final_sha256,
+                        added_at=added_at,
                     )
                     .on_conflict_do_nothing()
                     .returning(Image.id)
@@ -306,9 +330,7 @@ class ProgressiveImporter:
                 if inserted is not None:
                     # New Image row was created — increment blob ref_count now.
                     await session.execute(
-                        update(Blob)
-                        .where(Blob.sha256 == sha256)
-                        .values(ref_count=Blob.ref_count + 1)
+                        update(Blob).where(Blob.sha256 == final_sha256).values(ref_count=Blob.ref_count + 1)
                     )
 
                 # Create library symlink before closing session (need blob data)
@@ -328,6 +350,63 @@ class ProgressiveImporter:
         except Exception as exc:
             logger.warning("[progressive] failed to import %s: %s", file_path.name, exc)
 
+    async def _link_archive_entries(self, session) -> None:
+        """Link gallery-dl archive entries to this gallery via gallery_id FK.
+
+        Strategy 1: LIKE by source_id prefix (E-Hentai, Pixiv, booru).
+        Strategy 2: job_id + time window (Twitter, etc.).
+        """
+        if not (self.gallery_id and self.source):
+            return
+        from sqlalchemy import text
+
+        from plugins.builtin.gallery_dl._sites import get_site_config
+
+        cfg = get_site_config(self.source)
+        table = cfg.extractor or cfg.source_id
+
+        try:
+            exists = (
+                await session.execute(
+                    text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = :t)"),
+                    {"t": table},
+                )
+            ).scalar()
+            if not exists:
+                return
+
+            # Strategy 1: LIKE match by source_id prefix
+            if self.source_id:
+                prefix = f"{self.source_id}%"
+                result = await session.execute(
+                    text(f'UPDATE "{table}" SET gallery_id = :gid WHERE gallery_id IS NULL AND entry LIKE :prefix'),
+                    {"gid": self.gallery_id, "prefix": prefix},
+                )
+                if result.rowcount:
+                    logger.info("[progressive] linked %d archive entries (prefix)", result.rowcount)
+                    return
+
+            # Strategy 2: time window + job_id exclusion
+            if self.db_job_id:
+                result = await session.execute(
+                    text(
+                        f'UPDATE "{table}" SET gallery_id = :gid, job_id = :jid '
+                        f"WHERE gallery_id IS NULL AND job_id IS NULL "
+                        f"AND created_at BETWEEN :start AND :end"
+                    ),
+                    {
+                        "gid": self.gallery_id,
+                        "jid": self.db_job_id,
+                        "start": self._job_started_at,
+                        "end": datetime.now(UTC),
+                    },
+                )
+                if result.rowcount:
+                    logger.info("[progressive] linked %d archive entries (job_id)", result.rowcount)
+
+        except Exception as exc:
+            logger.warning("[progressive] failed to link archive entries: %s", exc)
+
     async def finalize(self, dest_dir: Path, *, partial: bool = False) -> int | None:
         """Wait for pending tasks, update gallery pages + status, clean up temp dir."""
         if self._tasks:
@@ -342,18 +421,21 @@ class ProgressiveImporter:
 
         async with AsyncSessionLocal() as session:
             from sqlalchemy import func
+
             gallery = await session.get(Gallery, self.gallery_id)
             if gallery:
-                count = (await session.execute(
-                    select(func.count()).where(Image.gallery_id == self.gallery_id)
-                )).scalar_one()
+                count = (
+                    await session.execute(select(func.count()).where(Image.gallery_id == self.gallery_id))
+                ).scalar_one()
                 gallery.pages = count
                 gallery.download_status = "partial" if partial else "complete"
                 gallery.metadata_updated_at = func.now()
+                await self._link_archive_entries(session)
                 await session.commit()
 
         try:
             import shutil
+
             if dest_dir.exists():
                 shutil.rmtree(str(dest_dir), ignore_errors=True)
         except Exception as exc:
@@ -362,8 +444,10 @@ class ProgressiveImporter:
         logger.info("[progressive] finalized: gallery_id=%d pages=%d", self.gallery_id, self._page_counter)
 
         from core.config import settings
+
         if settings.tag_model_enabled:
             from core.redis_client import get_redis
+
             r = get_redis()
             await r.enqueue_job("tag_job", self.gallery_id)
 
@@ -382,11 +466,12 @@ class ProgressiveImporter:
 
         async with AsyncSessionLocal() as session:
             from sqlalchemy import func
+
             gallery = await session.get(Gallery, self.gallery_id)
             if gallery:
-                count = (await session.execute(
-                    select(func.count()).where(Image.gallery_id == self.gallery_id)
-                )).scalar_one()
+                count = (
+                    await session.execute(select(func.count()).where(Image.gallery_id == self.gallery_id))
+                ).scalar_one()
                 gallery.pages = count
                 gallery.download_status = "partial" if count > 0 else "downloading"
                 await session.commit()
@@ -422,9 +507,7 @@ class ProgressiveImporter:
 
             # Load all images and their blobs before deleting DB records
             images_result = await session.execute(
-                select(Image)
-                .where(Image.gallery_id == self.gallery_id)
-                .options(selectinload(Image.blob))
+                select(Image).where(Image.gallery_id == self.gallery_id).options(selectinload(Image.blob))
             )
             images = images_result.scalars().all()
             blob_sha256s = [img.blob_sha256 for img in images]
@@ -441,9 +524,7 @@ class ProgressiveImporter:
             zero_ref_sha256s: set[str] = set()
             if blob_sha256s:
                 zero_ref_result = await session.execute(
-                    select(Blob.sha256).where(
-                        Blob.sha256.in_(blob_sha256s), Blob.ref_count <= 0
-                    )
+                    select(Blob.sha256).where(Blob.sha256.in_(blob_sha256s), Blob.ref_count <= 0)
                 )
                 zero_ref_sha256s = set(zero_ref_result.scalars().all())
 

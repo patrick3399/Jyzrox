@@ -13,14 +13,11 @@ Strategy:
 
 from __future__ import annotations
 
-import sys
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 # ---------------------------------------------------------------------------
 # Helpers — insert records via raw SQL (SQLite-compatible, no pg_insert)
@@ -101,6 +98,7 @@ def _make_session_factory_cm(factory):
     each call opens a *new* session that shares the same SQLite connection
     so committed writes are visible across calls.
     """
+
     @asynccontextmanager
     async def _cm():
         async with factory() as session:
@@ -121,9 +119,7 @@ def _make_session_factory_cm(factory):
 class TestProgressiveImporterCleanup:
     """Tests for ProgressiveImporter.cleanup()."""
 
-    async def test_cleanup_deletes_gallery_and_images(
-        self, db_session, db_session_factory
-    ):
+    async def test_cleanup_deletes_gallery_and_images(self, db_session, db_session_factory):
         """cleanup() must delete the gallery row and CASCADE-delete its images."""
         from worker.progressive import ProgressiveImporter
 
@@ -148,24 +144,16 @@ class TestProgressiveImporterCleanup:
             await importer.cleanup()
 
         # Gallery must be gone
-        row = (
-            await db_session.execute(
-                text("SELECT id FROM galleries WHERE id = :id"), {"id": gallery_id}
-            )
-        ).fetchone()
+        row = (await db_session.execute(text("SELECT id FROM galleries WHERE id = :id"), {"id": gallery_id})).fetchone()
         assert row is None, "Gallery should have been deleted by cleanup()"
 
         # Images must be gone (CASCADE)
         count = (
-            await db_session.execute(
-                text("SELECT COUNT(*) FROM images WHERE gallery_id = :id"), {"id": gallery_id}
-            )
+            await db_session.execute(text("SELECT COUNT(*) FROM images WHERE gallery_id = :id"), {"id": gallery_id})
         ).scalar()
         assert count == 0, "Images should have been CASCADE-deleted with the gallery"
 
-    async def test_cleanup_decrements_blob_ref_count(
-        self, db_session, db_session_factory
-    ):
+    async def test_cleanup_decrements_blob_ref_count(self, db_session, db_session_factory):
         """cleanup() must call decrement_ref_count for each blob linked to the gallery."""
         from worker.progressive import ProgressiveImporter
 
@@ -194,22 +182,16 @@ class TestProgressiveImporterCleanup:
 
         # sha_a: 2 - 1 = 1; sha_b: 1 - 1 = 0
         row_a = (
-            await db_session.execute(
-                text("SELECT ref_count FROM blobs WHERE sha256 = :sha"), {"sha": sha_a}
-            )
+            await db_session.execute(text("SELECT ref_count FROM blobs WHERE sha256 = :sha"), {"sha": sha_a})
         ).fetchone()
         row_b = (
-            await db_session.execute(
-                text("SELECT ref_count FROM blobs WHERE sha256 = :sha"), {"sha": sha_b}
-            )
+            await db_session.execute(text("SELECT ref_count FROM blobs WHERE sha256 = :sha"), {"sha": sha_b})
         ).fetchone()
 
         assert row_a[0] == 1, "sha_a ref_count should have been decremented from 2 to 1"
         assert row_b[0] == 0, "sha_b ref_count should have been decremented from 1 to 0"
 
-    async def test_cleanup_removes_filesystem_artifacts(
-        self, db_session, db_session_factory, tmp_path
-    ):
+    async def test_cleanup_removes_filesystem_artifacts(self, db_session, db_session_factory, tmp_path):
         """cleanup() must remove library_dir and thumb_dirs for zero-ref blobs."""
         from worker.progressive import ProgressiveImporter
 
@@ -267,9 +249,7 @@ class TestProgressiveImporterCleanup:
 class TestProgressiveImporterAbort:
     """Tests for ProgressiveImporter.abort()."""
 
-    async def test_abort_preserves_gallery_as_partial(
-        self, db_session, db_session_factory
-    ):
+    async def test_abort_preserves_gallery_as_partial(self, db_session, db_session_factory):
         """abort() must set download_status='partial' when images exist."""
         from worker.progressive import ProgressiveImporter
 
@@ -300,9 +280,7 @@ class TestProgressiveImporterAbort:
         assert row[0] == "partial", "Gallery download_status should be 'partial' after abort with images"
         assert row[1] == 2, "Gallery pages count should reflect actual image count"
 
-    async def test_abort_no_images_sets_downloading(
-        self, db_session, db_session_factory
-    ):
+    async def test_abort_no_images_sets_downloading(self, db_session, db_session_factory):
         """abort() must keep download_status='downloading' when no images exist."""
         from worker.progressive import ProgressiveImporter
 
@@ -338,9 +316,7 @@ class TestProgressiveImporterAbort:
 class TestProgressiveImporterFinalize:
     """Tests for ProgressiveImporter.finalize()."""
 
-    async def test_finalize_sets_complete_status(
-        self, db_session, db_session_factory, tmp_path
-    ):
+    async def test_finalize_sets_complete_status(self, db_session, db_session_factory, tmp_path):
         """finalize(partial=False) must set download_status='complete' and correct pages count."""
         from worker.progressive import ProgressiveImporter
 
@@ -384,9 +360,7 @@ class TestProgressiveImporterFinalize:
         assert row[0] == "complete", "Gallery download_status should be 'complete' after finalize"
         assert row[1] == 3, "Gallery pages should match actual image count"
 
-    async def test_finalize_partial_sets_partial_status(
-        self, db_session, db_session_factory, tmp_path
-    ):
+    async def test_finalize_partial_sets_partial_status(self, db_session, db_session_factory, tmp_path):
         """finalize(partial=True) must set download_status='partial'."""
         from worker.progressive import ProgressiveImporter
 
@@ -489,9 +463,7 @@ class TestProgressiveImporterEnsureGallery:
         importer = ProgressiveImporter(db_job_id=None, user_id=None)
 
         with patch("worker.progressive.AsyncSessionLocal", fake_factory):
-            gid = await importer.ensure_gallery_from_url(
-                "https://example.com/comics/my_series", Path("/tmp/dest")
-            )
+            gid = await importer.ensure_gallery_from_url("https://example.com/comics/my_series", Path("/tmp/dest"))
 
         assert gid == 42
         assert importer.gallery_id == 42
@@ -504,9 +476,7 @@ class TestProgressiveImporterEnsureGallery:
         importer = ProgressiveImporter(db_job_id=None, user_id=None)
 
         with patch("worker.progressive.AsyncSessionLocal", fake_factory):
-            await importer.ensure_gallery_from_url(
-                "https://www.testsite.org/gallery/12345", Path("/tmp/dest")
-            )
+            await importer.ensure_gallery_from_url("https://www.testsite.org/gallery/12345", Path("/tmp/dest"))
 
         # Path component "gallery" is used as source_id
         assert importer.source_id == "gallery"
@@ -519,16 +489,12 @@ class TestProgressiveImporterEnsureGallery:
         fake_factory1, _ = _make_mock_session_for_ensure(gallery_id=10)
         importer1 = ProgressiveImporter(db_job_id=None, user_id=None)
         with patch("worker.progressive.AsyncSessionLocal", fake_factory1):
-            gid1 = await importer1.ensure_gallery_from_url(
-                "https://dup.example.com/art/9999", Path("/tmp/dest_dup")
-            )
+            gid1 = await importer1.ensure_gallery_from_url("https://dup.example.com/art/9999", Path("/tmp/dest_dup"))
 
         fake_factory2, _ = _make_mock_session_for_ensure(gallery_id=10)
         importer2 = ProgressiveImporter(db_job_id=None, user_id=None)
         with patch("worker.progressive.AsyncSessionLocal", fake_factory2):
-            gid2 = await importer2.ensure_gallery_from_url(
-                "https://dup.example.com/art/9999", Path("/tmp/dest_dup")
-            )
+            gid2 = await importer2.ensure_gallery_from_url("https://dup.example.com/art/9999", Path("/tmp/dest_dup"))
 
         assert isinstance(gid1, int)
         assert isinstance(gid2, int)
@@ -542,9 +508,7 @@ class TestProgressiveImporterEnsureGallery:
 class TestProgressiveImporterImportFile:
     """Tests for ProgressiveImporter._import_single (via import_file)."""
 
-    async def test_import_file_with_excluded_blob_is_skipped(
-        self, db_session, db_session_factory, tmp_path
-    ):
+    async def test_import_file_with_excluded_blob_is_skipped(self, db_session, db_session_factory, tmp_path):
         """A file whose sha256 is in the excluded set must be silently skipped."""
         from worker.progressive import ProgressiveImporter
 
@@ -570,6 +534,7 @@ class TestProgressiveImporterImportFile:
             await importer.import_file(fake_file)
             # Drain all tasks
             import asyncio
+
             if importer._tasks:
                 await asyncio.gather(*importer._tasks, return_exceptions=True)
 
@@ -581,9 +546,7 @@ class TestProgressiveImporterImportFile:
         ).scalar()
         assert count == 0, "Excluded blob must not produce an image record"
 
-    async def test_import_file_validates_magic_bytes(
-        self, db_session, db_session_factory, tmp_path
-    ):
+    async def test_import_file_validates_magic_bytes(self, db_session, db_session_factory, tmp_path):
         """File with invalid magic bytes must be skipped without importing."""
         from worker.progressive import ProgressiveImporter
 
@@ -603,6 +566,7 @@ class TestProgressiveImporterImportFile:
         with patch("worker.progressive.AsyncSessionLocal", fake_factory):
             await importer.import_file(bad_file)
             import asyncio
+
             if importer._tasks:
                 await asyncio.gather(*importer._tasks, return_exceptions=True)
 
@@ -668,6 +632,7 @@ class TestProgressiveImporterPageNumbering:
     async def test_page_numbering_starts_from_zero_offset(self, tmp_path):
         """First file imported must receive page_num=1 (counter starts at 0)."""
         import asyncio
+
         from worker.progressive import ProgressiveImporter
 
         importer = ProgressiveImporter(db_job_id=None, user_id=None)
@@ -677,7 +642,7 @@ class TestProgressiveImporterPageNumbering:
 
         captured_pages: list[int] = []
 
-        async def _capture(file_path, page_num):
+        async def _capture(file_path, page_num, sha256=None):
             captured_pages.append(page_num)
 
         f = tmp_path / "p1.jpg"
@@ -694,6 +659,7 @@ class TestProgressiveImporterPageNumbering:
     async def test_sequential_page_numbering_maintained(self, tmp_path):
         """Files imported sequentially must receive consecutive page numbers."""
         import asyncio
+
         from worker.progressive import ProgressiveImporter
 
         importer = ProgressiveImporter(db_job_id=None, user_id=None)
@@ -703,7 +669,7 @@ class TestProgressiveImporterPageNumbering:
 
         captured_pages: list[int] = []
 
-        async def _capture(file_path, page_num):
+        async def _capture(file_path, page_num, sha256=None):
             captured_pages.append(page_num)
 
         files = []
@@ -721,9 +687,7 @@ class TestProgressiveImporterPageNumbering:
 
         assert captured_pages == [1, 2, 3, 4, 5]
 
-    async def test_page_counter_resumes_from_loaded_max(
-        self, db_session, db_session_factory, tmp_path
-    ):
+    async def test_page_counter_resumes_from_loaded_max(self, db_session, db_session_factory, tmp_path):
         """After _load_gallery_state, new pages must continue from existing max page_num."""
         from worker.progressive import ProgressiveImporter
 
@@ -742,6 +706,4 @@ class TestProgressiveImporterPageNumbering:
         with patch("worker.progressive.AsyncSessionLocal", fake_factory):
             await importer._load_gallery_state()
 
-        assert importer._page_counter == 5, (
-            "Counter must resume from existing max page_num so new pages start at 6"
-        )
+        assert importer._page_counter == 5, "Counter must resume from existing max page_num so new pages start at 6"

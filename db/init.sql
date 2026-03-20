@@ -462,3 +462,86 @@ CREATE TABLE IF NOT EXISTS site_configs (
     auto_probe  JSONB,
     updated_at  TIMESTAMPTZ DEFAULT now()
 );
+
+-- ── gallery-dl archive tables (v3.0) ────────────────────────────────
+-- gallery-dl only reads/writes the 'entry' column.
+-- Jyzrox adds gallery_id FK for CASCADE lifecycle management.
+-- Tables are named by gallery-dl category (archive-table: "{category}").
+
+CREATE TABLE IF NOT EXISTS exhentai (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_exhentai_unlinked ON exhentai (job_id) WHERE gallery_id IS NULL;
+
+CREATE TABLE IF NOT EXISTS pixiv (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_pixiv_unlinked ON pixiv (job_id) WHERE gallery_id IS NULL;
+
+CREATE TABLE IF NOT EXISTS twitter (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_twitter_unlinked ON twitter (job_id) WHERE gallery_id IS NULL;
+
+CREATE TABLE IF NOT EXISTS instagram (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS danbooru (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS gelbooru (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS newgrounds (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS nijie (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS kemono (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS nhentai (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS hitomi (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS rule34 (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);

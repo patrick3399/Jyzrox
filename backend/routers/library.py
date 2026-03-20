@@ -6,29 +6,49 @@ import hmac
 import json
 import logging
 import re as _re
-import sqlite3
 from datetime import UTC, datetime
 from itertools import combinations
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import ARRAY, Text, and_, asc, case as sql_case, cast, delete as sa_delete, desc, exists, func, not_, or_, select, tuple_
-from sqlalchemy.sql import literal as sql_literal
-from sqlalchemy.orm import selectinload
-from sqlalchemy.sql import text as sql_text
+from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, exists, func, not_, or_, select, tuple_
+from sqlalchemy import case as sql_case
+from sqlalchemy import delete as sa_delete
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
+from sqlalchemy.sql import literal as sql_literal
+from sqlalchemy.sql import text as sql_text
 
 from core.auth import gallery_access_filter, require_auth, require_role
 from core.config import settings
 from core.database import get_db
 from core.redis_client import get_redis
 from core.source_display import get_display_config
-from plugins.builtin.gallery_dl._sites import get_site_config as _get_gdl_site_config
-from db.models import Blob, BlockedTag, ExcludedBlob, Gallery, GalleryTag, Image, ReadProgress, Tag, UserFavorite, UserImageFavorite, UserRating, UserReadingList
-from services.cas import cas_url, create_library_symlink, decrement_ref_count, library_dir, resolve_blob_path, safe_source_id, thumb_dir, thumb_url as cas_thumb_url
+from db.models import (
+    Blob,
+    BlockedTag,
+    ExcludedBlob,
+    Gallery,
+    GalleryTag,
+    Image,
+    ReadProgress,
+    Tag,
+    UserFavorite,
+    UserImageFavorite,
+    UserRating,
+    UserReadingList,
+)
 from plugins.builtin.ehentai.browse import _make_client as _make_eh_client
+from plugins.builtin.gallery_dl._sites import get_site_config as _get_gdl_site_config
+from services.cas import (
+    cas_url,
+    decrement_ref_count,
+    library_dir,
+    thumb_dir,
+)
+from services.cas import thumb_url as cas_thumb_url
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["library"])
@@ -40,25 +60,13 @@ def _trash_filter(auth: dict):
     """Return WHERE clause for trash visibility: soft-deleted galleries the user can see."""
     filters = [Gallery.deleted_at.is_not(None)]
     if auth.get("role") != "admin":
-        filters.append(or_(
-            Gallery.created_by_user_id == auth["user_id"],
-            Gallery.created_by_user_id.is_(None),
-        ))
+        filters.append(
+            or_(
+                Gallery.created_by_user_id == auth["user_id"],
+                Gallery.created_by_user_id.is_(None),
+            )
+        )
     return and_(*filters)
-
-
-def _cleanup_archive_entries(archive_keys: list[str]) -> None:
-    """Remove entries from gallery-dl.db so deleted galleries can be re-downloaded."""
-    from pathlib import Path as _Path
-    archive_path = _Path(settings.data_archive_path) / "gallery-dl.db"
-    if not archive_path.exists() or not archive_keys:
-        return
-    conn = sqlite3.connect(str(archive_path))
-    try:
-        conn.executemany("DELETE FROM archive WHERE entry = ?", [(k,) for k in archive_keys])
-        conn.commit()
-    finally:
-        conn.close()
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
@@ -162,11 +170,7 @@ async def _get_rating_map(db: AsyncSession, user_id: int, gallery_ids: list[int]
 
 async def _get_blocked_tag_strings(db: AsyncSession, user_id: int) -> list[str]:
     """Return list of 'namespace:name' blocked tag strings for the user."""
-    rows = (
-        await db.execute(
-            select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == user_id)
-        )
-    ).all()
+    rows = (await db.execute(select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == user_id))).all()
     return [f"{r.namespace}:{r.name}" for r in rows]
 
 
@@ -258,7 +262,11 @@ async def _user_gallery_state(db: AsyncSession, user_id: int, gallery_id: int) -
             UserReadingList.gallery_id == gallery_id,
         )
     )
-    return (fav_row.scalar_one_or_none() is not None, rating_row.scalar_one_or_none(), rl_row.scalar_one_or_none() is not None)
+    return (
+        fav_row.scalar_one_or_none() is not None,
+        rating_row.scalar_one_or_none(),
+        rl_row.scalar_one_or_none() is not None,
+    )
 
 
 _SOURCES_CACHE_KEY = "library:sources"
@@ -287,21 +295,27 @@ async def list_gallery_sources(
     if cached is not None:
         return json.loads(cached)
 
-    rows = (await db.execute(
-        select(Gallery.source).where(Gallery.source.is_not(None)).distinct()
-    )).scalars().all()
+    rows = (await db.execute(select(Gallery.source).where(Gallery.source.is_not(None)).distinct())).scalars().all()
 
     # Build source list with import_mode variants for 'local'
     sources: list[dict] = []
     for src in sorted(rows):
         if src == "local":
             # Check which import_modes exist
-            modes = (await db.execute(
-                select(Gallery.import_mode).where(
-                    Gallery.source == "local",
-                    Gallery.import_mode.is_not(None),
-                ).distinct()
-            )).scalars().all()
+            modes = (
+                (
+                    await db.execute(
+                        select(Gallery.import_mode)
+                        .where(
+                            Gallery.source == "local",
+                            Gallery.import_mode.is_not(None),
+                        )
+                        .distinct()
+                    )
+                )
+                .scalars()
+                .all()
+            )
             for mode in sorted(modes):
                 sources.append({"value": f"local:{mode}", "label": f"local:{mode}"})
             if not modes:
@@ -374,16 +388,12 @@ async def list_galleries(
     if favorited is not None:
         if favorited:
             stmt = stmt.where(
-                Gallery.id.in_(
-                    select(UserFavorite.gallery_id).where(UserFavorite.user_id == auth["user_id"])
-                )
+                Gallery.id.in_(select(UserFavorite.gallery_id).where(UserFavorite.user_id == auth["user_id"]))
             )
     if in_reading_list is not None:
         if in_reading_list:
             stmt = stmt.where(
-                Gallery.id.in_(
-                    select(UserReadingList.gallery_id).where(UserReadingList.user_id == auth["user_id"])
-                )
+                Gallery.id.in_(select(UserReadingList.gallery_id).where(UserReadingList.user_id == auth["user_id"]))
             )
     if min_rating is not None:
         stmt = stmt.where(
@@ -409,10 +419,9 @@ async def list_galleries(
         stmt = stmt.where(Gallery.title.ilike(f"%{q}%"))
     if collection is not None:
         from db.models import CollectionGallery
+
         stmt = stmt.where(
-            Gallery.id.in_(
-                select(CollectionGallery.gallery_id).where(CollectionGallery.collection_id == collection)
-            )
+            Gallery.id.in_(select(CollectionGallery.gallery_id).where(CollectionGallery.collection_id == collection))
         )
 
     # Filter out galleries containing blocked tags
@@ -489,7 +498,13 @@ async def list_galleries(
 
         return {
             "galleries": [
-                _g(g, cover_thumb=cover_map.get(g.id), is_favorited=(g.id in fav_set), my_rating=rating_map.get(g.id), in_reading_list=(g.id in rl_set))
+                _g(
+                    g,
+                    cover_thumb=cover_map.get(g.id),
+                    is_favorited=(g.id in fav_set),
+                    my_rating=rating_map.get(g.id),
+                    in_reading_list=(g.id in rl_set),
+                )
                 for g in rows
             ],
             "next_cursor": next_cursor,
@@ -518,7 +533,13 @@ async def list_galleries(
             "total": total,
             "page": page,
             "galleries": [
-                _g(g, cover_thumb=cover_map.get(g.id), is_favorited=(g.id in fav_set), my_rating=rating_map.get(g.id), in_reading_list=(g.id in rl_set))
+                _g(
+                    g,
+                    cover_thumb=cover_map.get(g.id),
+                    is_favorited=(g.id in fav_set),
+                    my_rating=rating_map.get(g.id),
+                    in_reading_list=(g.id in rl_set),
+                )
                 for g in galleries
             ],
         }
@@ -528,10 +549,12 @@ async def list_galleries(
 
 
 def _encode_image_cursor(img: Image) -> str:
-    payload = json.dumps({
-        "added_at": img.added_at.isoformat() if img.added_at else "",
-        "id": img.id,
-    })
+    payload = json.dumps(
+        {
+            "added_at": img.added_at.isoformat() if img.added_at else "",
+            "id": img.id,
+        }
+    )
     sig = hmac.new(_cursor_secret(), payload.encode(), hashlib.sha256).hexdigest()
     raw = base64.urlsafe_b64encode(payload.encode()).decode().rstrip("=")
     return f"{raw}.{sig}"
@@ -571,7 +594,9 @@ def _i_browse(img: Image) -> dict:
 # ── Image browser ─────────────────────────────────────────────────────
 
 
-async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, auth, db, category=None, favorited=None):
+async def _apply_image_filters(
+    stmt, *, tags, exclude_tags, source, gallery_id, auth, db, category=None, favorited=None
+):
     """Apply common image browser filters (tags, source, category, blocked tags, gallery access)."""
     stmt = stmt.where(gallery_access_filter(auth))
 
@@ -581,7 +606,7 @@ async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, 
         # Support compound source filter like "local:link" → source="local", import_mode="link"
         colon_idx = source.find(":")
         if colon_idx != -1:
-            stmt = stmt.where(Gallery.source == source[:colon_idx], Gallery.import_mode == source[colon_idx + 1:])
+            stmt = stmt.where(Gallery.source == source[:colon_idx], Gallery.import_mode == source[colon_idx + 1 :])
         else:
             stmt = stmt.where(Gallery.source == source)
     if category is not None:
@@ -595,10 +620,9 @@ async def _apply_image_filters(stmt, *, tags, exclude_tags, source, gallery_id, 
         stmt = stmt.where(not_(Image.tags_array.overlap(cast(exclude_tags, ARRAY(Text)))))
 
     # Blocked tags exclusion
-    blocked_rows = (await db.execute(
-        select(BlockedTag.namespace, BlockedTag.name)
-        .where(BlockedTag.user_id == auth["user_id"])
-    )).all()
+    blocked_rows = (
+        await db.execute(select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == auth["user_id"]))
+    ).all()
     if blocked_rows:
         blocked_patterns = [f"{ns}:{name}" for ns, name in blocked_rows]
         stmt = stmt.where(not_(Image.tags_array.overlap(cast(blocked_patterns, ARRAY(Text)))))
@@ -637,8 +661,14 @@ async def image_timeline_percentiles(
     """
     base = select(Image.added_at).join(Gallery, Image.gallery_id == Gallery.id)
     base = await _apply_image_filters(
-        base, tags=tags, exclude_tags=exclude_tags, source=source,
-        gallery_id=gallery_id, auth=auth, db=db, category=category,
+        base,
+        tags=tags,
+        exclude_tags=exclude_tags,
+        source=source,
+        gallery_id=gallery_id,
+        auth=auth,
+        db=db,
+        category=category,
         favorited=favorited,
     )
     base = base.where(Image.added_at.isnot(None))
@@ -648,11 +678,7 @@ async def image_timeline_percentiles(
     bucket_col = func.ntile(buckets).over(order_by=desc(Image.added_at)).label("bucket")
     sub = base.add_columns(bucket_col).subquery()
 
-    stmt = (
-        select(sub.c.bucket, func.min(sub.c.added_at).label("ts"))
-        .group_by(sub.c.bucket)
-        .order_by(sub.c.bucket)
-    )
+    stmt = select(sub.c.bucket, func.min(sub.c.added_at).label("ts")).group_by(sub.c.bucket).order_by(sub.c.bucket)
 
     rows = (await db.execute(stmt)).all()
     return {
@@ -673,13 +699,16 @@ async def image_time_range(
     auth: dict = Depends(require_auth),
 ):
     """Return min/max added_at for the filtered image set."""
-    stmt = (
-        select(func.min(Image.added_at), func.max(Image.added_at))
-        .join(Gallery, Image.gallery_id == Gallery.id)
-    )
+    stmt = select(func.min(Image.added_at), func.max(Image.added_at)).join(Gallery, Image.gallery_id == Gallery.id)
     stmt = await _apply_image_filters(
-        stmt, tags=tags, exclude_tags=exclude_tags, source=source,
-        gallery_id=gallery_id, auth=auth, db=db, category=category,
+        stmt,
+        tags=tags,
+        exclude_tags=exclude_tags,
+        source=source,
+        gallery_id=gallery_id,
+        auth=auth,
+        db=db,
+        category=category,
         favorited=favorited,
     )
     row = (await db.execute(stmt)).one()
@@ -714,8 +743,14 @@ async def browse_images(
         .options(selectinload(Image.blob), selectinload(Image.gallery))
     )
     stmt = await _apply_image_filters(
-        stmt, tags=tags, exclude_tags=exclude_tags, source=source,
-        gallery_id=gallery_id, auth=auth, db=db, category=category,
+        stmt,
+        tags=tags,
+        exclude_tags=exclude_tags,
+        source=source,
+        gallery_id=gallery_id,
+        auth=auth,
+        db=db,
+        category=category,
         favorited=favorited,
     )
 
@@ -798,13 +833,17 @@ async def list_artists(
 ):
     """List artists grouped from gallery artist_id field."""
     # Base query: group galleries by artist_id
-    base = select(
-        Gallery.artist_id,
-        func.max(Gallery.uploader).label("artist_name"),
-        func.count().label("gallery_count"),
-        func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
-        func.max(Gallery.added_at).label("latest_added_at"),
-    ).where(Gallery.artist_id.is_not(None), gallery_access_filter(auth)).group_by(Gallery.artist_id)
+    base = (
+        select(
+            Gallery.artist_id,
+            func.max(Gallery.uploader).label("artist_name"),
+            func.count().label("gallery_count"),
+            func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
+            func.max(Gallery.added_at).label("latest_added_at"),
+        )
+        .where(Gallery.artist_id.is_not(None), gallery_access_filter(auth))
+        .group_by(Gallery.artist_id)
+    )
 
     if q:
         base = base.having(func.max(Gallery.uploader).ilike(f"%{q}%"))
@@ -844,10 +883,7 @@ async def list_artists(
             .join(Blob, Image.blob_sha256 == Blob.sha256)
             .where(Image.page_num == 1)
         )
-        first_covers = {
-            r.artist_id: (r.source, r.sha256)
-            for r in (await db.execute(first_cover_stmt)).all()
-        }
+        first_covers = {r.artist_id: (r.source, r.sha256) for r in (await db.execute(first_cover_stmt)).all()}
 
         # Last page covers
         max_page_sub = (
@@ -859,15 +895,15 @@ async def list_artists(
             select(latest_gallery_sub.c.artist_id, latest_gallery_sub.c.source, Blob.sha256)
             .join(Image, Image.gallery_id == latest_gallery_sub.c.id)
             .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .join(max_page_sub, and_(
-                Image.gallery_id == max_page_sub.c.gallery_id,
-                Image.page_num == max_page_sub.c.max_page,
-            ))
+            .join(
+                max_page_sub,
+                and_(
+                    Image.gallery_id == max_page_sub.c.gallery_id,
+                    Image.page_num == max_page_sub.c.max_page,
+                ),
+            )
         )
-        last_covers = {
-            r.artist_id: (r.source, r.sha256)
-            for r in (await db.execute(last_cover_stmt)).all()
-        }
+        last_covers = {r.artist_id: (r.source, r.sha256) for r in (await db.execute(last_cover_stmt)).all()}
 
         cover_map = {}
         for artist_id_val in first_covers.keys() | last_covers.keys():
@@ -882,15 +918,17 @@ async def list_artists(
     for r in rows:
         aid = r.artist_id
         src = aid.split(":", 1)[0] if ":" in aid else ""
-        result.append({
-            "artist_id": aid,
-            "artist_name": r.artist_name or "",
-            "source": src,
-            "gallery_count": r.gallery_count,
-            "total_pages": r.total_pages,
-            "cover_thumb": cover_map.get(aid),
-            "latest_added_at": r.latest_added_at.isoformat() if r.latest_added_at else None,
-        })
+        result.append(
+            {
+                "artist_id": aid,
+                "artist_name": r.artist_name or "",
+                "source": src,
+                "gallery_count": r.gallery_count,
+                "total_pages": r.total_pages,
+                "cover_thumb": cover_map.get(aid),
+                "latest_added_at": r.latest_added_at.isoformat() if r.latest_added_at else None,
+            }
+        )
 
     return {"artists": result, "total": total}
 
@@ -903,15 +941,12 @@ async def get_artist_summary(
 ):
     """Get summary info for a specific artist."""
     # Aggregate gallery-level fields
-    agg_stmt = (
-        select(
-            func.max(Gallery.uploader).label("artist_name"),
-            func.count().label("gallery_count"),
-            func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
-            func.max(Gallery.added_at).label("latest_added_at"),
-        )
-        .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
-    )
+    agg_stmt = select(
+        func.max(Gallery.uploader).label("artist_name"),
+        func.count().label("gallery_count"),
+        func.coalesce(func.sum(Gallery.pages), 0).label("total_pages"),
+        func.max(Gallery.added_at).label("latest_added_at"),
+    ).where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
     agg_row = (await db.execute(agg_stmt)).one_or_none()
     if not agg_row or agg_row.gallery_count == 0:
         raise HTTPException(status_code=404, detail="Artist not found")
@@ -940,11 +975,7 @@ async def get_artist_summary(
         latest_source = latest_gallery_row.source or ""
         display_cfg = get_display_config(latest_source)
         if display_cfg.cover_page == "last":
-            cover_page_sub = (
-                select(func.max(Image.page_num))
-                .where(Image.gallery_id == latest_gid)
-                .scalar_subquery()
-            )
+            cover_page_sub = select(func.max(Image.page_num)).where(Image.gallery_id == latest_gid).scalar_subquery()
             cover_sha256 = (
                 await db.execute(
                     select(Blob.sha256)
@@ -1003,11 +1034,14 @@ async def list_artist_images(
     total_count = (await db.execute(total_stmt)).scalar_one()
 
     # Main query: Image + Blob + Gallery for the given artist
-    gallery_order = (
-        desc(Gallery.added_at) if sort == "newest" else asc(Gallery.added_at)
-    )
+    gallery_order = desc(Gallery.added_at) if sort == "newest" else asc(Gallery.added_at)
     stmt = (
-        select(Image, Gallery.title.label("gallery_title"), Gallery.source.label("gallery_source"), Gallery.source_id.label("gallery_source_id"))
+        select(
+            Image,
+            Gallery.title.label("gallery_title"),
+            Gallery.source.label("gallery_source"),
+            Gallery.source_id.label("gallery_source_id"),
+        )
         .join(Gallery, Image.gallery_id == Gallery.id)
         .where(Gallery.artist_id == artist_id, gallery_access_filter(auth))
         .order_by(gallery_order, asc(Image.page_num))
@@ -1024,23 +1058,25 @@ async def list_artist_images(
         gallery_source: str = row[2]
         gallery_source_id: str = row[3]
         blob = img.blob
-        images.append({
-            "id": img.id,
-            "gallery_id": img.gallery_id,
-            "page_num": img.page_num,
-            "filename": img.filename,
-            "width": blob.width if blob else None,
-            "height": blob.height if blob else None,
-            "file_path": _to_url(blob),
-            "thumb_path": _thumb_url(blob),
-            "file_size": blob.file_size if blob else None,
-            "file_hash": blob.sha256 if blob else None,
-            "media_type": blob.media_type if blob else "image",
-            "duration": blob.duration if blob else None,
-            "gallery_title": gallery_title,
-            "gallery_source": gallery_source,
-            "gallery_source_id": gallery_source_id,
-        })
+        images.append(
+            {
+                "id": img.id,
+                "gallery_id": img.gallery_id,
+                "page_num": img.page_num,
+                "filename": img.filename,
+                "width": blob.width if blob else None,
+                "height": blob.height if blob else None,
+                "file_path": _to_url(blob),
+                "thumb_path": _thumb_url(blob),
+                "file_size": blob.file_size if blob else None,
+                "file_hash": blob.sha256 if blob else None,
+                "media_type": blob.media_type if blob else "image",
+                "duration": blob.duration if blob else None,
+                "gallery_title": gallery_title,
+                "gallery_source": gallery_source,
+                "gallery_source_id": gallery_source_id,
+            }
+        )
 
     return {
         "artist_id": artist_id,
@@ -1104,6 +1140,7 @@ async def list_files(
     size_map = {(e[0], e[1]): (e[2], e[3]) for e in raw_entries}
 
     from sqlalchemy import tuple_
+
     stmt = select(Gallery).where(tuple_(Gallery.source, Gallery.source_id).in_(fs_keys))
     if q:
         stmt = stmt.where(Gallery.title.ilike(f"%{q}%"))
@@ -1122,19 +1159,21 @@ async def list_files(
     result = []
     for g in paged:
         file_count, disk_size = size_map.get((g.source, g.source_id), (0, 0))
-        result.append({
-            "gallery_id": g.id,
-            "source_id": g.source_id,
-            "title": g.title,
-            "category": g.category,
-            "file_count": file_count,
-            "rating": g.rating,
-            "favorited": False,
-            "is_favorited": g.id in fav_set,
-            "my_rating": rating_map.get(g.id, 0),
-            "source": g.source,
-            "disk_size": disk_size,
-        })
+        result.append(
+            {
+                "gallery_id": g.id,
+                "source_id": g.source_id,
+                "title": g.title,
+                "category": g.category,
+                "file_count": file_count,
+                "rating": g.rating,
+                "favorited": False,
+                "is_favorited": g.id in fav_set,
+                "my_rating": rating_map.get(g.id, 0),
+                "source": g.source,
+                "disk_size": disk_size,
+            }
+        )
 
     return {"directories": result, "total": total, "page": page}
 
@@ -1177,13 +1216,15 @@ async def list_gallery_files(
                         file_size = entry.stat(follow_symlinks=True).st_size
                     except OSError:
                         pass
-                entries.append({
-                    "filename": entry.name,
-                    "file_size": file_size,
-                    "is_symlink": is_symlink,
-                    "is_broken": is_broken,
-                    "symlink_target": symlink_target,
-                })
+                entries.append(
+                    {
+                        "filename": entry.name,
+                        "file_size": file_size,
+                        "is_symlink": is_symlink,
+                        "is_broken": is_broken,
+                        "symlink_target": symlink_target,
+                    }
+                )
         except OSError:
             pass
         return entries
@@ -1206,19 +1247,21 @@ async def list_gallery_files(
     for f in sorted(raw_files, key=lambda x: x["filename"]):
         img = img_map.get(f["filename"])
         blob = img.blob if img else None
-        files.append({
-            "filename": f["filename"],
-            "page_num": img.page_num if img else None,
-            "width": blob.width if blob else None,
-            "height": blob.height if blob else None,
-            "file_size": f["file_size"],
-            "media_type": blob.media_type if blob else "image",
-            "thumb_path": _thumb_url(blob),
-            "file_path": _to_url(blob),
-            "is_symlink": f["is_symlink"],
-            "is_broken": f["is_broken"],
-            "symlink_target": f["symlink_target"],
-        })
+        files.append(
+            {
+                "filename": f["filename"],
+                "page_num": img.page_num if img else None,
+                "width": blob.width if blob else None,
+                "height": blob.height if blob else None,
+                "file_size": f["file_size"],
+                "media_type": blob.media_type if blob else "image",
+                "thumb_path": _thumb_url(blob),
+                "file_path": _to_url(blob),
+                "is_symlink": f["is_symlink"],
+                "is_broken": f["is_broken"],
+                "symlink_target": f["symlink_target"],
+            }
+        )
 
     return {
         "gallery_id": gallery_id,
@@ -1232,7 +1275,17 @@ async def list_gallery_files(
 
 
 class BatchAction(BaseModel):
-    action: Literal["delete", "favorite", "unfavorite", "rate", "add_to_collection", "add_tags", "remove_tags", "add_to_reading_list", "remove_from_reading_list"]
+    action: Literal[
+        "delete",
+        "favorite",
+        "unfavorite",
+        "rate",
+        "add_to_collection",
+        "add_tags",
+        "remove_tags",
+        "add_to_reading_list",
+        "remove_from_reading_list",
+    ]
     gallery_ids: list[int]  # max 100
     rating: int | None = None  # required when action=rate
     collection_id: int | None = None  # required when action=add_to_collection
@@ -1255,9 +1308,14 @@ async def batch_galleries(
 
     if body.action == "favorite":
         for gid in body.gallery_ids:
-            stmt = pg_insert(UserFavorite).values(
-                user_id=auth["user_id"], gallery_id=gid,
-            ).on_conflict_do_nothing()
+            stmt = (
+                pg_insert(UserFavorite)
+                .values(
+                    user_id=auth["user_id"],
+                    gallery_id=gid,
+                )
+                .on_conflict_do_nothing()
+            )
             await db.execute(stmt)
         await db.commit()
         return {"status": "ok", "affected": len(body.gallery_ids)}
@@ -1274,9 +1332,14 @@ async def batch_galleries(
 
     elif body.action == "add_to_reading_list":
         for gid in body.gallery_ids:
-            stmt = pg_insert(UserReadingList).values(
-                user_id=auth["user_id"], gallery_id=gid,
-            ).on_conflict_do_nothing()
+            stmt = (
+                pg_insert(UserReadingList)
+                .values(
+                    user_id=auth["user_id"],
+                    gallery_id=gid,
+                )
+                .on_conflict_do_nothing()
+            )
             await db.execute(stmt)
         await db.commit()
         return {"status": "ok", "affected": len(body.gallery_ids)}
@@ -1301,11 +1364,17 @@ async def batch_galleries(
                     )
                 )
             else:
-                stmt = pg_insert(UserRating).values(
-                    user_id=auth["user_id"], gallery_id=gid, rating=body.rating,
-                ).on_conflict_do_update(
-                    index_elements=["user_id", "gallery_id"],
-                    set_={"rating": body.rating, "rated_at": func.now()},
+                stmt = (
+                    pg_insert(UserRating)
+                    .values(
+                        user_id=auth["user_id"],
+                        gallery_id=gid,
+                        rating=body.rating,
+                    )
+                    .on_conflict_do_update(
+                        index_elements=["user_id", "gallery_id"],
+                        set_={"rating": body.rating, "rated_at": func.now()},
+                    )
                 )
                 await db.execute(stmt)
         await db.commit()
@@ -1315,14 +1384,16 @@ async def batch_galleries(
         if body.collection_id is None:
             raise HTTPException(status_code=400, detail="collection_id required for add_to_collection")
         from db.models import Collection, CollectionGallery
+
         collection = await db.get(Collection, body.collection_id)
         if not collection or collection.user_id != auth["user_id"]:
             raise HTTPException(status_code=404, detail="Collection not found")
 
         max_pos_result = (
             await db.execute(
-                select(func.coalesce(func.max(CollectionGallery.position), -1))
-                .where(CollectionGallery.collection_id == body.collection_id)
+                select(func.coalesce(func.max(CollectionGallery.position), -1)).where(
+                    CollectionGallery.collection_id == body.collection_id
+                )
             )
         ).scalar_one()
 
@@ -1330,8 +1401,7 @@ async def batch_galleries(
         for i, gid in enumerate(body.gallery_ids):
             existing = (
                 await db.execute(
-                    select(CollectionGallery)
-                    .where(
+                    select(CollectionGallery).where(
                         CollectionGallery.collection_id == body.collection_id,
                         CollectionGallery.gallery_id == gid,
                     )
@@ -1371,13 +1441,7 @@ async def batch_galleries(
         await db.execute(tag_stmt)
 
         # Resolve tag IDs in one query
-        tag_ids = (
-            await db.execute(
-                select(Tag.id).where(
-                    tuple_(Tag.namespace, Tag.name).in_(parsed)
-                )
-            )
-        ).scalars().all()
+        tag_ids = (await db.execute(select(Tag.id).where(tuple_(Tag.namespace, Tag.name).in_(parsed)))).scalars().all()
 
         if not tag_ids:
             return {"status": "ok", "affected": 0}
@@ -1414,13 +1478,9 @@ async def batch_galleries(
 
         # Recalculate counts for affected tags (correct, not inflated)
         for tid in tag_ids:
-            count_result = await db.execute(
-                select(func.count()).where(GalleryTag.tag_id == tid)
-            )
+            count_result = await db.execute(select(func.count()).where(GalleryTag.tag_id == tid))
             actual_count = count_result.scalar_one()
-            await db.execute(
-                Tag.__table__.update().where(Tag.id == tid).values(count=actual_count)
-            )
+            await db.execute(Tag.__table__.update().where(Tag.id == tid).values(count=actual_count))
 
         await db.commit()
         return {"status": "ok", "affected": len(body.gallery_ids)}
@@ -1435,12 +1495,8 @@ async def batch_galleries(
             return {"status": "ok", "affected": 0}
 
         # Resolve tag IDs once
-        ns_name_filter = or_(
-            *[(Tag.namespace == ns) & (Tag.name == name) for ns, name in parsed]
-        )
-        tag_ids = (
-            await db.execute(select(Tag.id).where(ns_name_filter))
-        ).scalars().all()
+        ns_name_filter = or_(*[(Tag.namespace == ns) & (Tag.name == name) for ns, name in parsed])
+        tag_ids = (await db.execute(select(Tag.id).where(ns_name_filter))).scalars().all()
 
         if not tag_ids:
             return {"status": "ok", "affected": 0}
@@ -1457,13 +1513,9 @@ async def batch_galleries(
 
         # Recalculate counts for affected tags
         for tid in tag_ids:
-            count_result = await db.execute(
-                select(func.count()).where(GalleryTag.tag_id == tid)
-            )
+            count_result = await db.execute(select(func.count()).where(GalleryTag.tag_id == tid))
             actual_count = count_result.scalar_one()
-            await db.execute(
-                Tag.__table__.update().where(Tag.id == tid).values(count=actual_count)
-            )
+            await db.execute(Tag.__table__.update().where(Tag.id == tid).values(count=actual_count))
 
         # Rebuild tags_array for each gallery
         for gid in body.gallery_ids:
@@ -1489,6 +1541,7 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
 
     # Filter out galleries with active downloads (skip rather than reject for batch)
     from db.models import DownloadJob
+
     active_gallery_ids_result = await db.execute(
         select(DownloadJob.gallery_id).where(
             DownloadJob.gallery_id.in_([g.id for g in galleries]),
@@ -1520,20 +1573,10 @@ async def _hard_delete_galleries(db: AsyncSession, galleries: list) -> dict:
         return {"affected": 0, "deleted_dirs": 0}
 
     # Load all images with blobs
-    img_stmt = (
-        select(Image)
-        .where(Image.gallery_id.in_([g.id for g in galleries]))
-        .options(selectinload(Image.blob))
-    )
+    img_stmt = select(Image).where(Image.gallery_id.in_([g.id for g in galleries])).options(selectinload(Image.blob))
     images = (await db.execute(img_stmt)).scalars().all()
 
     blob_sha256s = [img.blob_sha256 for img in images]
-
-    gallery_source_map = {g.id: g.source for g in galleries}
-    archive_keys = [
-        f"{gallery_source_map.get(img.gallery_id, '')}{img.filename}"
-        for img in images if img.filename
-    ]
 
     for sha256 in blob_sha256s:
         await decrement_ref_count(sha256, db)
@@ -1578,12 +1621,6 @@ async def _hard_delete_galleries(db: AsyncSession, galleries: list) -> dict:
         logger.warning("[hard_delete] cleanup failed: %s", exc)
         deleted_count = 0
 
-    if archive_keys:
-        try:
-            await asyncio.to_thread(_cleanup_archive_entries, archive_keys)
-        except Exception as exc:
-            logger.warning("[hard_delete] archive cleanup failed: %s", exc)
-
     return {"affected": len(galleries), "deleted_dirs": deleted_count}
 
 
@@ -1597,9 +1634,7 @@ async def trash_count(
 ):
     """Return count of soft-deleted galleries."""
     trash_cond = _trash_filter(auth)
-    count = (await db.execute(
-        select(func.count()).select_from(Gallery).where(trash_cond)
-    )).scalar_one()
+    count = (await db.execute(select(func.count()).select_from(Gallery).where(trash_cond))).scalar_one()
     return {"count": count}
 
 
@@ -1613,14 +1648,18 @@ async def list_trash(
     """List soft-deleted galleries (trash)."""
     trash_cond = _trash_filter(auth)
 
-    count_result = await db.execute(
-        select(func.count()).select_from(Gallery).where(trash_cond)
-    )
+    count_result = await db.execute(select(func.count()).select_from(Gallery).where(trash_cond))
     total = count_result.scalar_one()
 
-    rows = (await db.execute(
-        select(Gallery).where(trash_cond).order_by(desc(Gallery.deleted_at)).limit(limit).offset(offset)
-    )).scalars().all()
+    rows = (
+        (
+            await db.execute(
+                select(Gallery).where(trash_cond).order_by(desc(Gallery.deleted_at)).limit(limit).offset(offset)
+            )
+        )
+        .scalars()
+        .all()
+    )
 
     return {
         "total": total,
@@ -1636,20 +1675,25 @@ async def restore_gallery(
     db: AsyncSession = Depends(get_db),
 ):
     """Restore a soft-deleted gallery from trash."""
-    g = (await db.execute(
-        select(Gallery).where(
-            Gallery.source == source,
-            Gallery.source_id == source_id,
-            Gallery.deleted_at.is_not(None),
+    g = (
+        await db.execute(
+            select(Gallery).where(
+                Gallery.source == source,
+                Gallery.source_id == source_id,
+                Gallery.deleted_at.is_not(None),
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if not g:
         raise HTTPException(status_code=404, detail="Gallery not found in trash")
     _check_write_access(auth, g)
     g.deleted_at = None
     await db.commit()
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.GALLERY_RESTORED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=g.id)
+
+    await emit_safe(
+        EventType.GALLERY_RESTORED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=g.id
+    )
     return {"status": "ok"}
 
 
@@ -1661,13 +1705,15 @@ async def permanent_delete_gallery(
     db: AsyncSession = Depends(get_db),
 ):
     """Permanently delete a gallery (from trash). Irreversible."""
-    g = (await db.execute(
-        select(Gallery).where(
-            Gallery.source == source,
-            Gallery.source_id == source_id,
-            Gallery.deleted_at.is_not(None),
+    g = (
+        await db.execute(
+            select(Gallery).where(
+                Gallery.source == source,
+                Gallery.source_id == source_id,
+                Gallery.deleted_at.is_not(None),
+            )
         )
-    )).scalar_one_or_none()
+    ).scalar_one_or_none()
     if not g:
         raise HTTPException(status_code=404, detail="Gallery not found in trash")
     _check_write_access(auth, g)
@@ -1683,9 +1729,7 @@ async def empty_trash(
     """Permanently delete all galleries in trash."""
     trash_cond = _trash_filter(auth)
 
-    galleries = (await db.execute(
-        select(Gallery).where(trash_cond)
-    )).scalars().all()
+    galleries = (await db.execute(select(Gallery).where(trash_cond))).scalars().all()
 
     if not galleries:
         return {"status": "ok", "affected": 0}
@@ -1738,10 +1782,7 @@ async def get_gallery_images(
     if limit is not None:
         p = page or 1
         total_stmt = select(func.count()).select_from(
-            select(Image.id)
-            .where(Image.gallery_id == gallery_id)
-            .where(~exists(excluded_sq))
-            .subquery()
+            select(Image.id).where(Image.gallery_id == gallery_id).where(~exists(excluded_sq)).subquery()
         )
         total = (await db.execute(total_stmt)).scalar_one()
 
@@ -1771,17 +1812,24 @@ async def favorite_image(
     db: AsyncSession = Depends(get_db),
 ):
     """Add an image to the user's favorites."""
-    img = (await db.execute(
-        select(Image)
-        .join(Gallery, Image.gallery_id == Gallery.id)
-        .where(Image.id == image_id, gallery_access_filter(auth))
-    )).scalar_one_or_none()
+    img = (
+        await db.execute(
+            select(Image)
+            .join(Gallery, Image.gallery_id == Gallery.id)
+            .where(Image.id == image_id, gallery_access_filter(auth))
+        )
+    ).scalar_one_or_none()
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    stmt = pg_insert(UserImageFavorite).values(
-        user_id=auth["user_id"], image_id=image_id,
-    ).on_conflict_do_nothing()
+    stmt = (
+        pg_insert(UserImageFavorite)
+        .values(
+            user_id=auth["user_id"],
+            image_id=image_id,
+        )
+        .on_conflict_do_nothing()
+    )
     await db.execute(stmt)
     await db.commit()
     return {"status": "ok"}
@@ -1815,23 +1863,29 @@ async def get_gallery_tags(
     g = await _get_or_404_by_source(db, source, source_id, auth)
     gallery_id = g.id
     rows = (
-        await db.execute(
-            select(GalleryTag)
-            .where(GalleryTag.gallery_id == gallery_id)
-            .options(selectinload(GalleryTag.tag))
-            .order_by(GalleryTag.confidence.desc())
+        (
+            await db.execute(
+                select(GalleryTag)
+                .where(GalleryTag.gallery_id == gallery_id)
+                .options(selectinload(GalleryTag.tag))
+                .order_by(GalleryTag.confidence.desc())
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
 
     tags = []
     for gt in rows:
         tag = gt.tag
-        tags.append({
-            "namespace": tag.namespace,
-            "name": tag.name,
-            "confidence": gt.confidence,
-            "source": gt.source,
-        })
+        tags.append(
+            {
+                "namespace": tag.namespace,
+                "name": tag.name,
+                "confidence": gt.confidence,
+                "source": gt.source,
+            }
+        )
     return {"gallery_id": gallery_id, "tags": tags}
 
 
@@ -1860,9 +1914,14 @@ async def update_gallery(
     _check_write_access(auth, g)
     if patch.favorited is not None:
         if patch.favorited:
-            stmt = pg_insert(UserFavorite).values(
-                user_id=auth["user_id"], gallery_id=gallery_id,
-            ).on_conflict_do_nothing()
+            stmt = (
+                pg_insert(UserFavorite)
+                .values(
+                    user_id=auth["user_id"],
+                    gallery_id=gallery_id,
+                )
+                .on_conflict_do_nothing()
+            )
             await db.execute(stmt)
         else:
             await db.execute(
@@ -1880,18 +1939,29 @@ async def update_gallery(
                 )
             )
         else:
-            stmt = pg_insert(UserRating).values(
-                user_id=auth["user_id"], gallery_id=gallery_id, rating=patch.rating,
-            ).on_conflict_do_update(
-                index_elements=["user_id", "gallery_id"],
-                set_={"rating": patch.rating, "rated_at": func.now()},
+            stmt = (
+                pg_insert(UserRating)
+                .values(
+                    user_id=auth["user_id"],
+                    gallery_id=gallery_id,
+                    rating=patch.rating,
+                )
+                .on_conflict_do_update(
+                    index_elements=["user_id", "gallery_id"],
+                    set_={"rating": patch.rating, "rated_at": func.now()},
+                )
             )
             await db.execute(stmt)
     if patch.in_reading_list is not None:
         if patch.in_reading_list:
-            stmt = pg_insert(UserReadingList).values(
-                user_id=auth["user_id"], gallery_id=gallery_id,
-            ).on_conflict_do_nothing()
+            stmt = (
+                pg_insert(UserReadingList)
+                .values(
+                    user_id=auth["user_id"],
+                    gallery_id=gallery_id,
+                )
+                .on_conflict_do_nothing()
+            )
             await db.execute(stmt)
         else:
             await db.execute(
@@ -1908,7 +1978,10 @@ async def update_gallery(
         g.category = patch.category
     await db.commit()
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.GALLERY_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
+
+    await emit_safe(
+        EventType.GALLERY_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id
+    )
     # Fetch updated per-user state to return accurate response
     is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], gallery_id)
     return _g(g, is_favorited=is_fav, my_rating=my_rating, in_reading_list=in_rl)
@@ -1932,19 +2005,29 @@ async def delete_gallery(
 
     # Prevent deletion while download is active
     if g.download_status == "downloading":
-        raise HTTPException(status_code=409, detail="Cannot delete gallery while downloading. Cancel the download first.")
+        raise HTTPException(
+            status_code=409, detail="Cannot delete gallery while downloading. Cancel the download first."
+        )
     from db.models import DownloadJob
-    active_job = (await db.execute(
-        select(DownloadJob.id).where(
-            DownloadJob.gallery_id == g.id,
-            DownloadJob.status.in_(["queued", "running"]),
-        ).limit(1)
-    )).scalar_one_or_none()
+
+    active_job = (
+        await db.execute(
+            select(DownloadJob.id)
+            .where(
+                DownloadJob.gallery_id == g.id,
+                DownloadJob.status.in_(["queued", "running"]),
+            )
+            .limit(1)
+        )
+    ).scalar_one_or_none()
     if active_job:
-        raise HTTPException(status_code=409, detail="Cannot delete gallery with active download job. Cancel the download first.")
+        raise HTTPException(
+            status_code=409, detail="Cannot delete gallery with active download job. Cancel the download first."
+        )
 
     # Check if trash is enabled
     from routers.settings import _get_toggle
+
     trash_enabled = await _get_toggle("setting:trash_enabled", True)
 
     if not trash_enabled:
@@ -1957,6 +2040,7 @@ async def delete_gallery(
     await db.commit()
     await _invalidate_sources_cache()
     from core.events import EventType, emit_safe
+
     await emit_safe(EventType.GALLERY_DELETED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=g.id)
     return {"status": "ok", "deleted_files": 0}
 
@@ -2000,9 +2084,15 @@ async def delete_gallery_image(
 
     # Record blob as excluded so re-imports skip it
     from db.models import ExcludedBlob
-    excl_stmt = pg_insert(ExcludedBlob).values(
-        gallery_id=gallery_id, blob_sha256=blob_sha256,
-    ).on_conflict_do_nothing()
+
+    excl_stmt = (
+        pg_insert(ExcludedBlob)
+        .values(
+            gallery_id=gallery_id,
+            blob_sha256=blob_sha256,
+        )
+        .on_conflict_do_nothing()
+    )
     await db.execute(excl_stmt)
 
     # Remove the symlink from the library directory (use gallery ORM attributes)
@@ -2017,11 +2107,7 @@ async def delete_gallery_image(
     # Re-number remaining images sequentially starting at 1.
     # Two-pass approach to avoid unique constraint violations during renumber:
     # 1) Set all page_nums to negative temporaries, 2) Set to final positive values.
-    remaining_stmt = (
-        select(Image)
-        .where(Image.gallery_id == gallery_id)
-        .order_by(Image.page_num)
-    )
+    remaining_stmt = select(Image).where(Image.gallery_id == gallery_id).order_by(Image.page_num)
     remaining = (await db.execute(remaining_stmt)).scalars().all()
     for i, remaining_img in enumerate(remaining):
         remaining_img.page_num = -(i + 1)
@@ -2032,9 +2118,7 @@ async def delete_gallery_image(
     await db.commit()
 
     # Check if the blob is now unreferenced; if so, clean up its thumbnail directory
-    zero_ref_result = await db.execute(
-        select(Blob.sha256).where(Blob.sha256 == blob_sha256, Blob.ref_count <= 0)
-    )
+    zero_ref_result = await db.execute(select(Blob.sha256).where(Blob.sha256 == blob_sha256, Blob.ref_count <= 0))
     zero_ref_sha256 = zero_ref_result.scalar_one_or_none()
 
     if zero_ref_sha256:
@@ -2123,7 +2207,7 @@ def _hamming_neighbors_all(quarters: list[int], max_dist: int) -> list[set[int]]
                 for bits in combinations(range(16), dist):
                     flipped = uval
                     for b in bits:
-                        flipped ^= (1 << b)
+                        flipped ^= 1 << b
                     signed = flipped - 0x10000 if flipped >= 0x8000 else flipped
                     neighbors.add(signed)
         result.append(neighbors)
@@ -2147,9 +2231,7 @@ async def find_similar_images(
     32 = very loose match.
     """
     img_row = (
-        await db.execute(
-            select(Image).where(Image.id == image_id).options(selectinload(Image.blob))
-        )
+        await db.execute(select(Image).where(Image.id == image_id).options(selectinload(Image.blob)))
     ).scalar_one_or_none()
     if not img_row:
         raise HTTPException(status_code=404, detail="Image not found")
@@ -2186,12 +2268,17 @@ async def find_similar_images(
             ORDER BY distance ASC
             LIMIT :limit
         """)
-        results = (await db.execute(stmt, {
-            "phash_int": phash_int_val,
-            "image_id": image_id,
-            "threshold": threshold,
-            "limit": limit,
-        })).all()
+        results = (
+            await db.execute(
+                stmt,
+                {
+                    "phash_int": phash_int_val,
+                    "image_id": image_id,
+                    "threshold": threshold,
+                    "limit": limit,
+                },
+            )
+        ).all()
     else:
         # Phase 1: generate Hamming neighborhoods for each quarter
         neighbors = _hamming_neighbors_all(quarters, max_quarter_dist)
@@ -2212,12 +2299,17 @@ async def find_similar_images(
                 ORDER BY distance ASC
                 LIMIT :limit
             """)
-            results = (await db.execute(stmt, {
-                "phash_int": phash_int_val,
-                "image_id": image_id,
-                "threshold": threshold,
-                "limit": limit,
-            })).all()
+            results = (
+                await db.execute(
+                    stmt,
+                    {
+                        "phash_int": phash_int_val,
+                        "image_id": image_id,
+                        "threshold": threshold,
+                        "limit": limit,
+                    },
+                )
+            ).all()
         else:
             # Phase 2: indexed pre-filter — OR across all four quarter columns,
             # then exact bit_count check on the surviving candidates only.
@@ -2285,12 +2377,11 @@ async def list_excluded_blobs(
 ):
     """List excluded blob hashes for a gallery."""
     from db.models import ExcludedBlob
+
     g = await _get_or_404_by_source(db, source, source_id, auth)
     gallery_id = g.id
     result = await db.execute(
-        select(ExcludedBlob)
-        .where(ExcludedBlob.gallery_id == gallery_id)
-        .order_by(ExcludedBlob.excluded_at.desc())
+        select(ExcludedBlob).where(ExcludedBlob.gallery_id == gallery_id).order_by(ExcludedBlob.excluded_at.desc())
     )
     blobs = result.scalars().all()
     return {
@@ -2315,6 +2406,7 @@ async def restore_excluded_blob(
     gallery_id = gallery.id
     _check_write_access(auth, gallery)
     from db.models import ExcludedBlob
+
     result = await db.execute(
         select(ExcludedBlob).where(
             ExcludedBlob.gallery_id == gallery_id,
@@ -2399,8 +2491,7 @@ async def check_gallery_update(
 
     # Build changed fields list
     changed_fields = [
-        f for f in ("title", "title_jpn", "category", "uploader", "pages", "rating")
-        if getattr(g, f) != old[f]
+        f for f in ("title", "title_jpn", "category", "uploader", "pages", "rating") if getattr(g, f) != old[f]
     ]
     if list(g.tags_array or []) != old["tags_array"]:
         changed_fields.append("tags")
@@ -2480,7 +2571,13 @@ def _check_write_access(auth: dict, gallery: Gallery) -> None:
     raise HTTPException(status_code=403, detail="You do not have permission to modify this gallery")
 
 
-def _g(g: Gallery, cover_thumb: str | None = None, is_favorited: bool = False, my_rating: int | None = None, in_reading_list: bool = False) -> dict:
+def _g(
+    g: Gallery,
+    cover_thumb: str | None = None,
+    is_favorited: bool = False,
+    my_rating: int | None = None,
+    in_reading_list: bool = False,
+) -> dict:
     display_cfg = get_display_config(g.source or "")
     return {
         "id": g.id,
