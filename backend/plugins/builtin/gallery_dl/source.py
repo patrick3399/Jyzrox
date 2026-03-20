@@ -37,6 +37,29 @@ _PROGRESS_EVERY_N = 5
 _PROGRESS_EVERY_S = 10.0
 _MAX_STDERR_LINES = 10000
 
+# Fields included in the metadata postprocessor JSON output.
+_METADATA_INCLUDE = [
+    "category",
+    "subcategory",
+    "title",
+    "title_en",
+    "title_jpn",
+    "tags",
+    "tag_string",
+    "description",
+    "id",
+    "gallery_id",
+    "uploader",
+    "user",
+    "artist",
+    "date",
+    "posted_at",
+    "count",
+    "num",
+    "rating",
+    "language",
+]
+
 
 def _build_supported_sites() -> list[SiteInfo]:
     """Generate SiteInfo list from unified site registry."""
@@ -128,31 +151,7 @@ async def _build_gallery_dl_config(
             # N5: mtime PP — preserves original upload timestamp
             {"name": "mtime"},
             # N10d: metadata PP with include filter (replaces --write-metadata --write-tags)
-            {
-                "name": "metadata",
-                "mode": "json",
-                "include": [
-                    "category",
-                    "subcategory",
-                    "title",
-                    "title_en",
-                    "title_jpn",
-                    "tags",
-                    "tag_string",
-                    "description",
-                    "id",
-                    "gallery_id",
-                    "uploader",
-                    "user",
-                    "artist",
-                    "date",
-                    "posted_at",
-                    "count",
-                    "num",
-                    "rating",
-                    "language",
-                ],
-            },
+            {"name": "metadata", "mode": "json", "include": list(_METADATA_INCLUDE)},
         ],
     }
 
@@ -162,10 +161,7 @@ async def _build_gallery_dl_config(
         # N10a: archive-mode memory for batch writes (subscription)
         config["extractor"]["archive-mode"] = "memory"
         if last_completed_at:
-            from datetime import datetime as _dt
-
-            if isinstance(last_completed_at, _dt):
-                config["extractor"]["date-after"] = last_completed_at.strftime("%Y-%m-%dT%H:%M:%S")
+            config["extractor"]["date-after"] = last_completed_at.strftime("%Y-%m-%dT%H:%M:%S")
 
     # Inject per-site sleep-request via SiteConfigService
     from core.site_config import site_config_service
@@ -499,14 +495,12 @@ async def _on_file_with_validation(
 
 def _read_url_file(path: Path) -> list[str]:
     """Read and delete a URL file (--write-unsupported / --error-file output)."""
-    if not path.exists():
-        return []
     try:
-        return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+        lines = [line.strip() for line in path.read_text().splitlines() if line.strip()]
+        path.unlink(missing_ok=True)
+        return lines
     except OSError:
         return []
-    finally:
-        path.unlink(missing_ok=True)
 
 
 class GalleryDlPlugin(SourcePlugin):
