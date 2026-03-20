@@ -1209,19 +1209,26 @@ function ThumbnailStrip({
                 const cellH = Number(parts[3]) || 300
                 const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
                 const naturalSize = spriteNaturalSizes[proxyUrl]
-                // Use sprite's actual height for scale when available; fall back to HTML cellH
-                const spriteH = naturalSize?.h ?? cellH
-                const scale = thumbH / spriteH
+                // Scale so the CELL (not the whole sprite) fills thumbH.
+                // Each cell in the sprite can have a different height.
+                const scale = thumbH / cellH
                 const scaledOx = Math.abs(ox) * scale
-                // Center the crop horizontally within the 60px button
                 const scaledCellW = cellW * scale
-                const cropOffset = scaledCellW > thumbW ? (scaledCellW - thumbW) / 2 : 0
-                const bgSize = naturalSize
-                  ? `${naturalSize.w * scale}px ${thumbH}px`
-                  : `auto ${thumbH}px`
+                // Horizontally: center-crop if cell wider than thumb, else center with padding
+                const cropX = scaledCellW > thumbW ? (scaledCellW - thumbW) / 2 : 0
+                // Vertically: the sprite is taller than the cell. Find where
+                // this cell sits vertically — EH sprites are single-row (cells
+                // side by side, same top), so the Y offset is 0 in the cell's
+                // local frame. But the sprite may be taller than cellH after
+                // scaling, so center vertically.
+                const scaledSpriteH = naturalSize ? naturalSize.h * scale : thumbH
+                const cropY = scaledSpriteH > thumbH ? (scaledSpriteH - thumbH) / 2 : 0
+                const bgW = naturalSize ? naturalSize.w * scale : undefined
+                const bgSize =
+                  bgW != null ? `${bgW}px ${scaledSpriteH}px` : `auto ${scaledSpriteH}px`
                 spriteStyle = {
                   backgroundImage: `url(${proxyUrl})`,
-                  backgroundPosition: `-${scaledOx + cropOffset}px 0px`,
+                  backgroundPosition: `-${scaledOx + cropX}px -${cropY}px`,
                   backgroundSize: bgSize,
                   backgroundRepeat: 'no-repeat',
                   width: '100%',
