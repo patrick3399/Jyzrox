@@ -55,6 +55,7 @@ type SectionKey =
   | 'browserCache'
   | 'logLevels'
   | 'workerRecovery'
+  | 'galleryDl'
 
 const VERSION_LABELS: Record<string, string> = {
   jyzrox: 'Jyzrox',
@@ -200,6 +201,114 @@ function AiTaggingSection() {
           <p className="text-[10px] text-vault-text-muted mt-1">{t('settings.importEhtagDesc')}</p>
         </div>
       </div>
+    </div>
+  )
+}
+
+// ── Gallery-dl Version sub-component ─────────────────────────────────
+
+function GalleryDlSection() {
+  const [version, setVersion] = useState<{ current: string | null; latest: string | null } | null>(
+    null,
+  )
+  const [operating, setOperating] = useState(false)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const fetchVersion = useCallback(async () => {
+    try {
+      const data = await api.galleryDl.getVersion()
+      setVersion(data)
+    } catch {
+      toast.error(t('common.loadFailed'))
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchVersion()
+    return () => clearTimeout(timerRef.current)
+  }, [fetchVersion])
+
+  const upToDate =
+    version?.current != null && version?.latest != null && version.current === version.latest
+
+  const runJob = async (action: () => Promise<unknown>, successMsg: string) => {
+    setOperating(true)
+    try {
+      await action()
+      toast.success(successMsg)
+      timerRef.current = setTimeout(async () => {
+        try {
+          await fetchVersion()
+        } finally {
+          setOperating(false)
+        }
+      }, 5000)
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.error'))
+      setOperating(false)
+    }
+  }
+
+  if (!version) {
+    return (
+      <div className="px-5 pb-5 border-t border-vault-border flex justify-center py-8">
+        <LoadingSpinner />
+      </div>
+    )
+  }
+
+  return (
+    <div className="px-5 pb-5 border-t border-vault-border">
+      <p className="text-xs text-vault-text-muted mt-4 mb-4">{t('settings.galleryDlDesc')}</p>
+
+      <div className="bg-vault-input border border-vault-border rounded-lg divide-y divide-vault-border mb-4">
+        <div className="flex justify-between px-4 py-2.5">
+          <span className="text-sm text-vault-text-muted">{t('settings.galleryDlCurrent')}</span>
+          <span className="text-sm text-vault-text font-mono">
+            {version.current ?? t('settings.galleryDlNotInstalled')}
+          </span>
+        </div>
+        <div className="flex justify-between px-4 py-2.5">
+          <span className="text-sm text-vault-text-muted">{t('settings.galleryDlLatest')}</span>
+          <span className="text-sm text-vault-text font-mono">
+            {version.latest ?? t('settings.galleryDlUnknown')}
+          </span>
+        </div>
+      </div>
+
+      {upToDate && <p className="text-sm text-green-400 mb-4">{t('settings.galleryDlUpToDate')}</p>}
+
+      <div className="flex flex-wrap gap-3 mb-3">
+        <button
+          onClick={() =>
+            runJob(
+              () => api.galleryDl.upgrade(version.latest ?? undefined),
+              t('settings.galleryDlUpgradeQueued'),
+            )
+          }
+          disabled={upToDate || operating || !version.latest}
+          className="px-4 py-2 bg-blue-900/30 border border-blue-700/50 text-blue-400 hover:bg-blue-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {operating
+            ? t('common.loading')
+            : version.latest && !upToDate
+              ? t('settings.galleryDlUpgradeTo', { version: version.latest })
+              : t('settings.galleryDlUpgrade')}
+        </button>
+        <button
+          onClick={() =>
+            runJob(() => api.galleryDl.rollback(), t('settings.galleryDlRollbackQueued'))
+          }
+          disabled={operating}
+          className="px-4 py-2 bg-amber-900/30 border border-amber-700/50 text-amber-400 hover:bg-amber-900/50 rounded text-sm font-medium transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+        >
+          {t('settings.galleryDlRollback')}
+        </button>
+      </div>
+
+      <p className="text-[10px] text-amber-400/70 italic">
+        {t('settings.galleryDlRunningWarning')}
+      </p>
     </div>
   )
 }
@@ -2203,6 +2312,17 @@ export default function SettingsPage() {
               </div>
             </div>
           )}
+        </div>
+
+        {/* ── Gallery-dl Version ── */}
+        <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
+          <SectionHeader
+            title={t('settings.galleryDl')}
+            sectionKey="galleryDl"
+            openSections={openSections}
+            onToggle={toggleSection}
+          />
+          {openSections.has('galleryDl') && <GalleryDlSection />}
         </div>
 
         {/* ── Rate Limits ── */}

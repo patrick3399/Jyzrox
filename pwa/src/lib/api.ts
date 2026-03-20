@@ -1522,6 +1522,18 @@ const logs = {
     }),
 }
 
+const galleryDl = {
+  getVersion: () =>
+    apiFetch<{ current: string | null; latest: string | null }>('/api/admin/gallery-dl/version'),
+  upgrade: (version?: string) =>
+    apiFetch<{ job_id: string }>('/api/admin/gallery-dl/upgrade', {
+      method: 'POST',
+      body: JSON.stringify(version ? { version } : {}),
+    }),
+  rollback: () =>
+    apiFetch<{ job_id: string }>('/api/admin/gallery-dl/rollback', { method: 'POST' }),
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
 export const api = {
@@ -1548,4 +1560,5 @@ export const api = {
   users,
   logs,
   adminSites,
+  galleryDl,
 }
