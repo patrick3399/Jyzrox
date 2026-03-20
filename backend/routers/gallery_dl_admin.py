@@ -3,7 +3,7 @@
 import asyncio
 import logging
 
-from fastapi import APIRouter, Depends, Request
+from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from core.auth import require_role
@@ -46,6 +46,10 @@ async def rollback_gallery_dl(
     _: dict = Depends(_admin),
 ):
     """Enqueue gallery-dl rollback job."""
+    from worker.gallery_dl_venv import _previous_version_dir
+
+    if _previous_version_dir() is None:
+        raise HTTPException(status_code=409, detail="No previous version to rollback to")
     arq = request.app.state.arq
     job = await arq.enqueue_job("gdl_rollback_job")
     return {"job_id": job.job_id}
