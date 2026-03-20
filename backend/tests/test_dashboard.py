@@ -215,7 +215,7 @@ def _make_dashboard_mocks(mock_redis):
     mock_redis.scan = AsyncMock(return_value=(0, []))
     mock_redis.zcard = AsyncMock(return_value=0)
 
-    _default_adaptive = MagicMock(sleep_multiplier=1.0, last_signal="ok", last_signal_at=None)
+    _default_adaptive = MagicMock(last_signal="ok", last_signal_at=None)
     return [
         patch("core.adaptive.adaptive_engine.get_state", new_callable=AsyncMock, return_value=_default_adaptive),
         patch("core.adaptive.adaptive_engine.get_states_batch", new_callable=AsyncMock, return_value={}),

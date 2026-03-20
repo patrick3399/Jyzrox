@@ -727,9 +727,9 @@ async def get_dashboard(auth: dict = Depends(_admin), db: AsyncSession = Depends
         delay_ms = 0
         if params and params.sleep_request is not None:
             if isinstance(params.sleep_request, tuple):
-                delay_ms = round(params.sleep_request[0] * 1000 * adaptive_state.sleep_multiplier)
+                delay_ms = round(params.sleep_request[0] * 1000)
             else:
-                delay_ms = round(params.sleep_request * 1000 * adaptive_state.sleep_multiplier)
+                delay_ms = round(params.sleep_request * 1000)
 
         site_stats[src] = {
             "semaphore": sem_info,
@@ -738,7 +738,6 @@ async def get_dashboard(auth: dict = Depends(_admin), db: AsyncSession = Depends
             "avg_speed": avg_speed,
             "current_delay_ms": delay_ms,
             "adaptive": {
-                "sleep_multiplier": adaptive_state.sleep_multiplier,
                 "last_429_at": adaptive_state.last_signal_at if adaptive_state.last_signal == "http_429" else None,
             },
         }
