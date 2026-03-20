@@ -153,10 +153,10 @@ class TestGalleryDlDownloadHappyPath:
     """download() — subprocess succeeds with downloaded files."""
 
     async def test_download_success_returns_done_status(self, tmp_path):
-        """When gallery-dl exits 0 with file lines, status=done is returned."""
+        """When gallery-dl exits 0 with JYZROX_FILE lines, status=done is returned."""
         lines = [
-            b"/data/gallery/test/img001.jpg\n",
-            b"/data/gallery/test/img002.jpg\n",
+            b"JYZROX_FILE\t/data/gallery/test/img001.jpg\tabc123\n",
+            b"JYZROX_FILE\t/data/gallery/test/img002.jpg\tdef456\n",
         ]
         proc = _make_fake_process(lines, returncode=0)
 
@@ -183,7 +183,7 @@ class TestGalleryDlDownloadHappyPath:
 
     async def test_download_calls_pid_callback(self, tmp_path):
         """When pid_callback is provided, it should be called with the process PID."""
-        proc = _make_fake_process([b"/data/x.jpg\n"], returncode=0)
+        proc = _make_fake_process([b"JYZROX_FILE\t/data/x.jpg\tabc123\n"], returncode=0)
         pid_received = []
 
         async def _pid_cb(pid: int):
@@ -213,7 +213,7 @@ class TestGalleryDlDownloadHappyPath:
     async def test_download_calls_on_progress(self, tmp_path):
         """on_progress callback should be invoked when progress threshold is reached."""
         # Generate enough lines to trigger progress (every 5 or every 10s)
-        lines = [f"/data/img{i:03d}.jpg\n".encode() for i in range(10)]
+        lines = [f"JYZROX_FILE\t/data/img{i:03d}.jpg\tabc{i:03d}\n".encode() for i in range(10)]
         proc = _make_fake_process(lines, returncode=0)
         progress_calls = []
 
@@ -302,7 +302,7 @@ class TestGalleryDlDownloadErrors:
 
     async def test_nonzero_exit_with_files_returns_partial(self, tmp_path):
         """Non-zero exit after some files were downloaded → status=partial."""
-        lines = [b"/data/img001.jpg\n", b"/data/img002.jpg\n"]
+        lines = [b"JYZROX_FILE\t/data/img001.jpg\tabc123\n", b"JYZROX_FILE\t/data/img002.jpg\tdef456\n"]
         proc = _make_fake_process(lines, returncode=1, stderr=b"Error mid-way\n")
 
         with (
@@ -329,7 +329,7 @@ class TestGalleryDlDownloadErrors:
     async def test_cancel_check_true_returns_cancelled(self, tmp_path):
         """When cancel_check immediately returns True, status=cancelled."""
         # Provide one line so the loop runs at least once
-        lines = [b"/data/img001.jpg\n"]
+        lines = [b"JYZROX_FILE\t/data/img001.jpg\tabc123\n"]
         proc = _make_fake_process(lines, returncode=0, block_wait=True)
 
         async def _always_cancel():
