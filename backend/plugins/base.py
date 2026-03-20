@@ -21,10 +21,10 @@ from plugins.models import (
     TagResult,
 )
 
-
 # ---------------------------------------------------------------------------
 # Protocol interfaces (Phase 2)
 # ---------------------------------------------------------------------------
+
 
 @runtime_checkable
 class HasMeta(Protocol):
@@ -46,7 +46,7 @@ class Downloadable(Protocol):
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
         pause_check: Callable[[], Awaitable[bool]] | None = None,
-        on_file: Callable[[Path], Awaitable[None]] | None = None,
+        on_file: Callable[[Path, str | None], Awaitable[None]] | None = None,
         options: dict | None = None,
     ) -> DownloadResult: ...
 
@@ -95,6 +95,7 @@ class Taggable(Protocol):
 # Legacy ABCs — DEPRECATED — use Protocol interfaces above
 # ---------------------------------------------------------------------------
 
+
 class SourcePlugin(ABC):
     """Plugin that can download galleries from a specific source.
 
@@ -118,7 +119,7 @@ class SourcePlugin(ABC):
         cancel_check: Callable[[], Awaitable[bool]] | None = None,
         pid_callback: Callable[[int], Awaitable[None]] | None = None,
         pause_check: Callable[[], Awaitable[bool]] | None = None,
-        on_file: Callable[[Path], Awaitable[None]] | None = None,
+        on_file: Callable[[Path, str | None], Awaitable[None]] | None = None,
         options: dict | None = None,
     ) -> DownloadResult:
         """Download a gallery to dest_dir. Returns a DownloadResult."""

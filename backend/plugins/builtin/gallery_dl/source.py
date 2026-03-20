@@ -230,7 +230,8 @@ async def _build_gallery_dl_config(
             }
         )
 
-    config_path = Path(f"/app/config/gallery-dl-{config_id}.json") if config_id else Path(settings.gallery_dl_config)
+    config_dir = Path(settings.gallery_dl_config).parent
+    config_path = config_dir / f"gallery-dl-{config_id}.json" if config_id else Path(settings.gallery_dl_config)
     tmp_path = config_path.with_suffix(".tmp")
     tmp_path.write_text(json.dumps(config, indent=2))
     os.rename(tmp_path, config_path)

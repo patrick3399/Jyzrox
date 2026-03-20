@@ -303,3 +303,70 @@ async def test_v3_cookie_source_has_cookies_update(mock_config_path):
     await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'})
     config = json.loads(mock_config_path.read_text())
     assert config["extractor"]["ehentai"].get("cookies-update") is True
+
+
+@pytest.mark.asyncio
+async def test_v3_full_config_integration(mock_config_path):
+    """Verify complete v3.0 config output with all features enabled."""
+    from datetime import UTC, datetime
+
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    last = datetime(2026, 3, 15, 8, 0, 0, tzinfo=UTC)
+    credentials = {
+        "ehentai": '{"cookies": {"ipb_member_id": "1"}}',
+        "pixiv": "refresh_token_123",
+    }
+    config_path = await _build_gallery_dl_config(
+        credentials,
+        config_id="test-job-123",
+        job_context="subscription",
+        last_completed_at=last,
+    )
+
+    config = json.loads(config_path.read_text())
+
+    # N1: PostgreSQL archive (CASCADE tables, no format override)
+    assert config["extractor"]["archive"].startswith("postgresql://")
+    assert config["extractor"]["archive-table"] == "{category}"
+    assert "archive-format" not in config["extractor"]
+
+    # N10a: subscription has archive-mode memory
+    assert config["extractor"]["archive-mode"] == "memory"
+
+    # N10b: file-unique
+    assert config["extractor"]["file-unique"] is True
+
+    # N2: subscription optimization
+    assert config["extractor"]["skip"] == "abort:10"
+    assert "date-after" in config["extractor"]
+
+    # N3: native rate limiting
+    assert "sleep-429" in config["extractor"]
+    assert "sleep-retries" in config["extractor"]
+
+    # N4: content integrity
+    assert config["extractor"]["filesize-min"] == "1k"
+    assert config["downloader"]["adjust-extensions"] is True
+
+    # N5: postprocessors
+    pp_names = [pp["name"] for pp in config["postprocessors"]]
+    assert "hash" in pp_names
+    assert "mtime" in pp_names
+
+    # N10d: metadata PP with include filter (replaces --write-metadata)
+    assert "metadata" in pp_names
+    meta_pp = next(pp for pp in config["postprocessors"] if pp["name"] == "metadata")
+    assert "include" in meta_pp
+    assert "title" in meta_pp["include"]
+    assert "tags" in meta_pp["include"]
+
+    # N6: ugoira (pixiv present in credentials)
+    assert "ugoira" in pp_names
+
+    # N8: cookies-update for EH (cookie-based auth)
+    assert config["extractor"]["ehentai"].get("cookies-update") is True
+
+    # Credentials merged correctly
+    assert config["extractor"]["ehentai"]["cookies"] == {"ipb_member_id": "1"}
+    assert config["extractor"]["pixiv"]["refresh-token"] == "refresh_token_123"

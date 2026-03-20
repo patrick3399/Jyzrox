@@ -111,7 +111,7 @@ def _source_patches():
             MagicMock(
                 data_gallery_path="/data/gallery",
                 gallery_dl_config="/tmp/gallery-dl-test.json",
-                data_archive_path="/tmp/gallery-dl-archive",
+                gdl_archive_dsn="postgresql://test:test@localhost:5432/test",
             ),
         ),
         patch("pathlib.Path.mkdir"),
