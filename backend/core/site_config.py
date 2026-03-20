@@ -24,7 +24,16 @@ logger = logging.getLogger(__name__)
 _INVALIDATION_CHANNEL = "site_config:invalidate"
 
 # Fields allowed in overrides.download
-_DOWNLOAD_FIELDS = {"retries", "http_timeout", "sleep_request", "concurrency", "inactivity_timeout"}
+_DOWNLOAD_FIELDS = {
+    "retries",
+    "http_timeout",
+    "sleep_request",
+    "concurrency",
+    "inactivity_timeout",
+    "browser_profile",
+    "proxy_url",
+    "rate_limit",
+}
 
 # Jyzrox canonical field names allowed in overrides.field_mapping
 JYZROX_FIELDS = frozenset(
@@ -51,6 +60,9 @@ class DownloadParams:
     sleep_request: float | tuple[float, float] | None = None
     concurrency: int = 2
     inactivity_timeout: int = 300
+    browser_profile: str | None = None
+    proxy_url: str | None = None
+    rate_limit: str | None = None
 
 
 class SiteConfigService:
@@ -356,6 +368,14 @@ class SiteConfigService:
                         raise ValueError(f"sleep_request tuple values must be 0 < value <= 3600, got {sr}")
                 else:
                     raise ValueError(f"sleep_request must be float or [min, max] pair, got {type(sr).__name__}")
+        if "browser_profile" in dl:
+            bp = dl["browser_profile"]
+            if bp is not None and bp not in ("chrome", "firefox"):
+                raise ValueError("browser_profile must be 'chrome', 'firefox', or null")
+        if "proxy_url" in dl:
+            pu = dl["proxy_url"]
+            if pu is not None and not pu.startswith(("http://", "https://", "socks5://")):
+                raise ValueError("proxy_url must start with http://, https://, or socks5://")
 
         fm = overrides.get("field_mapping", {})
         if fm:
