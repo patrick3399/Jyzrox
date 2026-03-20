@@ -559,6 +559,24 @@ const library = {
       `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/check-update`,
       { method: 'POST' },
     ),
+
+  findSimilar: (
+    imageId: number,
+    threshold = 10,
+    limit = 20,
+  ): Promise<{
+    image_id: number
+    phash: string
+    similar: Array<{
+      id: number
+      gallery_id: number
+      filename: string
+      file_path: string
+      thumb_path: string | null
+      phash: string
+      distance: number
+    }>
+  }> => apiFetch(`/api/library/images/${imageId}/similar?threshold=${threshold}&limit=${limit}`),
 }
 
 // ── Download ──────────────────────────────────────────────────────────
@@ -840,6 +858,19 @@ const system = {
     apiFetch<{ deleted_keys: number }>(`/api/system/cache/${category}`, { method: 'DELETE' }),
   startReconcile: () => apiFetch<{ status: string }>('/api/system/reconcile', { method: 'POST' }),
   getReconcileStatus: () => apiFetch<ReconcileStatus>('/api/system/reconcile'),
+  getEvents: (
+    limit = 50,
+  ): Promise<{
+    events: Array<{
+      event_type: string
+      timestamp: string
+      actor_user_id: number | null
+      resource_type: string | null
+      resource_id: string | null
+      data: Record<string, unknown>
+    }>
+    count: number
+  }> => apiFetch(`/api/system/events?limit=${limit}`),
 }
 
 // ── Tags ─────────────────────────────────────────────────────────────
@@ -1067,6 +1098,25 @@ const import_ = {
     apiFetch<{ mounts: { name: string; path: string; type: string }[] }>(
       '/api/import/mount-points',
     ),
+
+  recent: (): Promise<
+    Array<{ id: number; title: string; pages: number; status: string; added_at: string }>
+  > => apiFetch('/api/import/recent'),
+
+  getScanSettings: (): Promise<{
+    enabled: boolean
+    interval_hours: number
+    last_run: string | null
+  }> => apiFetch('/api/import/scan-settings'),
+
+  updateScanSettings: (data: {
+    enabled?: boolean
+    interval_hours?: number
+  }): Promise<{ enabled: boolean; interval_hours: number; last_run: string | null }> =>
+    apiFetch('/api/import/scan-settings', {
+      method: 'PATCH',
+      body: JSON.stringify(data),
+    }),
 }
 
 // ── Export ────────────────────────────────────────────────────────────
@@ -1534,6 +1584,50 @@ const galleryDl = {
     apiFetch<{ job_id: string }>('/api/admin/gallery-dl/rollback', { method: 'POST' }),
 }
 
+// ── Search ────────────────────────────────────────────────────────────
+
+export type SearchGalleryItem = {
+  id: number
+  title: string
+  title_jpn: string | null
+  source: string
+  source_id: string
+  category: string | null
+  language: string | null
+  pages: number
+  rating: number
+  favorited: boolean
+  uploader: string | null
+  download_status: string
+  added_at: string | null
+  posted_at: string | null
+  tags: string[]
+  cover_thumb?: string | null
+}
+
+export type SearchGalleriesResponse = {
+  query: string
+  items: SearchGalleryItem[]
+  next_cursor?: string
+  has_next?: boolean
+  total?: number
+  page?: number
+}
+
+const search = {
+  galleries: (
+    q: string,
+    options?: { cursor?: string; page?: number; limit?: number; sort?: string },
+  ): Promise<SearchGalleriesResponse> => {
+    const params = new URLSearchParams({ q })
+    if (options?.cursor) params.set('cursor', options.cursor)
+    if (options?.page) params.set('page', String(options.page))
+    if (options?.limit) params.set('limit', String(options.limit))
+    if (options?.sort) params.set('sort', options.sort)
+    return apiFetch(`/api/search/?${params}`)
+  },
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
 export const api = {
@@ -1561,4 +1655,5 @@ export const api = {
   logs,
   adminSites,
   galleryDl,
+  search,
 }

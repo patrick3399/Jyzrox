@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import { useWs } from '@/lib/ws'
 import type { GalleryListResponse, GallerySearchParams, EhSearchParams } from '@/lib/types'
+import type { SearchGalleriesResponse } from '@/lib/api'
 
 // ── Library ───────────────────────────────────────────────────────────
 
@@ -75,21 +76,20 @@ export function useInfiniteLibraryGalleries(
       clearTimeout(timerRef.current)
       timerRef.current = setTimeout(doMutate, LIBRARY_THROTTLE_MS - elapsed)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastJobUpdate])
 
-  const { data, error, size, setSize, isValidating, isLoading, mutate } = useSWRInfinite<GalleryListResponse>(
-    getKey,
-    ([, fetchParams]: [string, GallerySearchParams]) => api.library.getGalleries(fetchParams),
-    { revalidateOnFocus: false },
-  )
+  const { data, error, size, setSize, isValidating, isLoading, mutate } =
+    useSWRInfinite<GalleryListResponse>(
+      getKey,
+      ([, fetchParams]: [string, GallerySearchParams]) => api.library.getGalleries(fetchParams),
+      { revalidateOnFocus: false },
+    )
 
-  const galleries = useMemo(
-    () => (data ? data.flatMap((page) => page.galleries) : []),
-    [data],
-  )
+  const galleries = useMemo(() => (data ? data.flatMap((page) => page.galleries) : []), [data])
   const total = data?.[0]?.total
-  const isLoadingMore = isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
+  const isLoadingMore =
+    isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
   const isEmpty = data?.[0]?.galleries.length === 0
   const lastPage = data?.[data.length - 1]
   const isReachingEnd =
@@ -110,31 +110,40 @@ export function useInfiniteLibraryGalleries(
 }
 
 export function useLibraryGallery(source: string | null, sourceId: string | null) {
-  return useSWR(
-    source && sourceId ? ['library/gallery', source, sourceId] : null,
-    () => api.library.getGallery(source!, sourceId!),
+  return useSWR(source && sourceId ? ['library/gallery', source, sourceId] : null, () =>
+    api.library.getGallery(source!, sourceId!),
   )
 }
 
 export function useGalleryImages(source: string | null, sourceId: string | null) {
-  return useSWR(
-    source && sourceId ? ['gallery/images', source, sourceId] : null,
-    () => api.library.getImages(source!, sourceId!),
+  return useSWR(source && sourceId ? ['gallery/images', source, sourceId] : null, () =>
+    api.library.getImages(source!, sourceId!),
   )
 }
 
 export function useGalleryProgress(source: string | null, sourceId: string | null) {
-  return useSWR(
-    source && sourceId ? ['gallery/progress', source, sourceId] : null,
-    () => api.library.getProgress(source!, sourceId!),
+  return useSWR(source && sourceId ? ['gallery/progress', source, sourceId] : null, () =>
+    api.library.getProgress(source!, sourceId!),
   )
 }
 
 export function useUpdateGallery(source: string, sourceId: string) {
   return useSWRMutation(
     ['library/gallery', source, sourceId],
-    (_key: unknown, { arg }: { arg: { favorited?: boolean; rating?: number; title?: string; title_jpn?: string; category?: string } }) =>
-      api.library.updateGallery(source, sourceId, arg),
+    (
+      _key: unknown,
+      {
+        arg,
+      }: {
+        arg: {
+          favorited?: boolean
+          rating?: number
+          title?: string
+          title_jpn?: string
+          category?: string
+        }
+      },
+    ) => api.library.updateGallery(source, sourceId, arg),
   )
 }
 
@@ -335,11 +344,63 @@ export function useEhGalleryImagesPaginated(
     [fetchNextBatch],
   )
 
-  return { tokenMap, previewMap, isLoading, error, onPageChange, fetchUpTo, isDone: doneRef.current }
+  return {
+    tokenMap,
+    previewMap,
+    isLoading,
+    error,
+    onPageChange,
+    fetchUpTo,
+    isDone: doneRef.current,
+  }
+}
+
+// ── Unified Search ────────────────────────────────────────────────────
+
+export function useSearchGalleries(q: string, options?: { sort?: string; limit?: number }) {
+  const getKey = (pageIndex: number, previousPageData: SearchGalleriesResponse | null) => {
+    if (!q) return null
+    if (pageIndex === 0) return ['search/galleries', q, options]
+    if (previousPageData && !previousPageData.has_next) return null
+    if (previousPageData?.next_cursor) {
+      return ['search/galleries', q, { ...options, cursor: previousPageData.next_cursor }]
+    }
+    return ['search/galleries', q, { ...options, page: pageIndex + 1 }]
+  }
+
+  const { data, error, size, setSize, isLoading } = useSWRInfinite<SearchGalleriesResponse>(
+    getKey,
+    ([, query, opts]: [
+      string,
+      string,
+      { cursor?: string; page?: number; sort?: string; limit?: number } | undefined,
+    ]) => api.search.galleries(query, opts),
+    { revalidateOnFocus: false },
+  )
+
+  const items = useMemo(() => (data ? data.flatMap((page) => page.items) : []), [data])
+  const total = data?.[0]?.total
+  const lastPage = data?.[data.length - 1]
+  const isReachingEnd =
+    lastPage?.has_next === false ||
+    (lastPage?.has_next === undefined && (lastPage?.items?.length ?? 0) < (options?.limit ?? 24))
+
+  return {
+    items,
+    total,
+    error,
+    isLoading,
+    isReachingEnd,
+    size,
+    setSize,
+    loadMore: () => setSize(size + 1),
+  }
 }
 
 export function useEhPopular(enabled = true) {
-  return useSWR(enabled ? 'eh/popular' : null, () => api.eh.getPopular(), { revalidateOnFocus: false })
+  return useSWR(enabled ? 'eh/popular' : null, () => api.eh.getPopular(), {
+    revalidateOnFocus: false,
+  })
 }
 
 export function useEhToplist(tl: number, page = 0, enabled = true) {

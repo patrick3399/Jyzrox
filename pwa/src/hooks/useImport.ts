@@ -23,8 +23,18 @@ export function useBatchScan() {
 export function useBatchStart() {
   return useSWRMutation(
     'import/batch/start',
-    (_key: unknown, { arg }: { arg: { rootDir: string; mode: string; galleries: Array<{ path: string; artist: string | null; title: string }> } }) =>
-      api.import_.batchStart(arg.rootDir, arg.mode, arg.galleries),
+    (
+      _key: unknown,
+      {
+        arg,
+      }: {
+        arg: {
+          rootDir: string
+          mode: string
+          galleries: Array<{ path: string; artist: string | null; title: string }>
+        }
+      },
+    ) => api.import_.batchStart(arg.rootDir, arg.mode, arg.galleries),
   )
 }
 
@@ -72,9 +82,8 @@ export function useAddLibrary() {
 }
 
 export function useRemoveLibrary() {
-  return useSWRMutation(
-    'import/removeLibrary',
-    (_key: unknown, { arg }: { arg: number }) => api.import_.removeLibrary(arg),
+  return useSWRMutation('import/removeLibrary', (_key: unknown, { arg }: { arg: number }) =>
+    api.import_.removeLibrary(arg),
   )
 }
 
@@ -84,10 +93,7 @@ export function useCancelRescan() {
 
 export function useBrowseFs(path: string, options?: { enabled?: boolean }) {
   const enabled = options?.enabled ?? true
-  return useSWR(
-    enabled ? ['import/browse-fs', path] : null,
-    () => api.import_.browseFs(path),
-  )
+  return useSWR(enabled ? ['import/browse-fs', path] : null, () => api.import_.browseFs(path))
 }
 
 export function useMountPoints() {
@@ -96,9 +102,32 @@ export function useMountPoints() {
 
 export function useToggleMonitor() {
   const { mutate } = useSWRConfig()
-  return useSWRMutation('import/monitor/toggle', async (_key: unknown, { arg }: { arg: boolean }) => {
-    const res = await api.import_.toggleMonitor(arg)
-    mutate('import/monitor/status')
-    return res
-  })
+  return useSWRMutation(
+    'import/monitor/toggle',
+    async (_key: unknown, { arg }: { arg: boolean }) => {
+      const res = await api.import_.toggleMonitor(arg)
+      mutate('import/monitor/status')
+      return res
+    },
+  )
+}
+
+export function useRecentImports() {
+  return useSWR('import/recent', () => api.import_.recent())
+}
+
+export function useScanSettings(enabled = true) {
+  return useSWR(enabled ? 'import/scan-settings' : null, () => api.import_.getScanSettings())
+}
+
+export function useUpdateScanSettings() {
+  const { mutate } = useSWRConfig()
+  return useSWRMutation(
+    'import/scan-settings/update',
+    async (_key: unknown, { arg }: { arg: { enabled?: boolean; interval_hours?: number } }) => {
+      const res = await api.import_.updateScanSettings(arg)
+      mutate('import/scan-settings')
+      return res
+    },
+  )
 }

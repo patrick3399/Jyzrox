@@ -1,9 +1,25 @@
 'use client'
 
-import { useState, useCallback, Suspense, useEffect } from 'react'
+import { useState, useCallback, Suspense, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, Plus, Minus, X, ChevronDown, LayoutGrid, List, Bookmark, BookmarkCheck } from 'lucide-react'
-import { useInfiniteLibraryGalleries, useGalleryCategories, useLibrarySources } from '@/hooks/useGalleries'
+import {
+  BookOpen,
+  Plus,
+  Minus,
+  X,
+  ChevronDown,
+  LayoutGrid,
+  List,
+  Bookmark,
+  BookmarkCheck,
+  HelpCircle,
+} from 'lucide-react'
+import {
+  useInfiniteLibraryGalleries,
+  useGalleryCategories,
+  useLibrarySources,
+  useSearchGalleries,
+} from '@/hooks/useGalleries'
 import type { Gallery } from '@/lib/types'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
@@ -27,11 +43,26 @@ const SORT_OPTIONS = [
 
 const PAGE_SIZE = 24
 
+function isAdvancedQuery(q: string): boolean {
+  if (!q) return false
+  return (
+    /(?:^|\s)(?:character|artist|parody|group|male|female|general|language|source|rating|favorited|title|sort):/.test(
+      q,
+    ) || /(?:^|\s)-\w+:/.test(q)
+  )
+}
+
 function LibraryContent() {
   const router = useRouter()
   const { mutate: globalMutate } = useSWRConfig()
-  const { state, dispatch, parsedSource, parsedImportMode, handleSearchChange, handleSearchCommit } =
-    useLibraryFilters()
+  const {
+    state,
+    dispatch,
+    parsedSource,
+    parsedImportMode,
+    handleSearchChange,
+    handleSearchCommit,
+  } = useLibraryFilters()
 
   const {
     searchInput,
@@ -59,6 +90,7 @@ function LibraryContent() {
   const [batchTagMode, setBatchTagMode] = useState<'add' | 'remove' | null>(null)
   const [batchTagInput, setBatchTagInput] = useState('')
   const [batchTagList, setBatchTagList] = useState<string[]>([])
+  const [syntaxHelpOpen, setSyntaxHelpOpen] = useState(false)
 
   // View mode: 'grid' | 'list', persisted to localStorage
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
@@ -132,48 +164,110 @@ function LibraryContent() {
       category: categoryFilter || undefined,
     })
 
-  const handleFavoriteToggle = useCallback(async (gallery: Gallery) => {
-    try {
-      await api.library.updateGallery(gallery.source, gallery.source_id, {
-        favorited: !gallery.is_favorited,
-      })
-      toast.success(gallery.is_favorited ? t('library.unfavorited') : t('library.favorited'))
-      mutate()
-    } catch {
-      toast.error(t('library.updateFailed'))
-    }
-  }, [mutate])
+  // Advanced search: detect tag syntax in committed search query
+  const advancedSearch = isAdvancedQuery(searchQuery)
+  const {
+    items: searchItems,
+    isLoading: searchLoading,
+    isReachingEnd: searchEnd,
+    loadMore: searchLoadMore,
+    total: searchTotal,
+  } = useSearchGalleries(advancedSearch ? searchQuery || '' : '', { sort, limit: PAGE_SIZE })
 
-  const handleDelete = useCallback(async (gallery: Gallery) => {
-    if (!window.confirm(t('library.deleteConfirm', { title: gallery.title }))) return
-    try {
-      await api.library.deleteGallery(gallery.source, gallery.source_id)
-      toast.success(t('library.deleted'))
-      mutate()
-    } catch {
-      toast.error(t('library.updateFailed'))
-    }
-  }, [mutate])
+  const searchGalleries: Gallery[] = useMemo(() => {
+    if (!advancedSearch || !searchItems) return []
+    return searchItems.map((item) => ({
+      id: item.id,
+      title: item.title,
+      title_jpn: item.title_jpn ?? '',
+      source: item.source,
+      source_id: item.source_id,
+      category: item.category ?? '',
+      language: item.language ?? '',
+      pages: item.pages,
+      rating: item.rating,
+      favorited: item.favorited,
+      is_favorited: item.favorited,
+      my_rating: null,
+      uploader: item.uploader ?? '',
+      artist_id: null,
+      download_status: item.download_status as Gallery['download_status'],
+      added_at: item.added_at ?? '',
+      posted_at: item.posted_at,
+      tags_array: item.tags,
+      cover_thumb: null,
+      in_reading_list: false,
+      source_url: null,
+      import_mode: null,
+    }))
+  }, [advancedSearch, searchItems])
 
-  const handleReadingListToggle = useCallback(async (g: Gallery) => {
-    try {
-      await api.library.updateGallery(g.source, g.source_id, { in_reading_list: !g.in_reading_list })
-      globalMutate((key: unknown) => typeof key === 'string' && key.startsWith('library-galleries'))
-      toast.success(g.in_reading_list ? t('contextMenu.removeFromReadingList') : t('contextMenu.addToReadingList'))
-    } catch {
-      toast.error(t('common.failedToLoad'))
-    }
-  }, [globalMutate])
+  const displayGalleries = advancedSearch ? searchGalleries : galleries
+  const displayTotal = advancedSearch ? searchTotal : total
+  const displayLoading = advancedSearch ? searchLoading : isLoading
+  const displayLoadMore = advancedSearch ? searchLoadMore : loadMore
+  const displayReachingEnd = advancedSearch ? searchEnd : isReachingEnd
+  const displayLoadingMore = advancedSearch ? searchLoading : isLoadingMore
+
+  const handleFavoriteToggle = useCallback(
+    async (gallery: Gallery) => {
+      try {
+        await api.library.updateGallery(gallery.source, gallery.source_id, {
+          favorited: !gallery.is_favorited,
+        })
+        toast.success(gallery.is_favorited ? t('library.unfavorited') : t('library.favorited'))
+        mutate()
+      } catch {
+        toast.error(t('library.updateFailed'))
+      }
+    },
+    [mutate],
+  )
+
+  const handleDelete = useCallback(
+    async (gallery: Gallery) => {
+      if (!window.confirm(t('library.deleteConfirm', { title: gallery.title }))) return
+      try {
+        await api.library.deleteGallery(gallery.source, gallery.source_id)
+        toast.success(t('library.deleted'))
+        mutate()
+      } catch {
+        toast.error(t('library.updateFailed'))
+      }
+    },
+    [mutate],
+  )
+
+  const handleReadingListToggle = useCallback(
+    async (g: Gallery) => {
+      try {
+        await api.library.updateGallery(g.source, g.source_id, {
+          in_reading_list: !g.in_reading_list,
+        })
+        globalMutate(
+          (key: unknown) => typeof key === 'string' && key.startsWith('library-galleries'),
+        )
+        toast.success(
+          g.in_reading_list
+            ? t('contextMenu.removeFromReadingList')
+            : t('contextMenu.addToReadingList'),
+        )
+      } catch {
+        toast.error(t('common.failedToLoad'))
+      }
+    },
+    [globalMutate],
+  )
 
   // ── Scroll restoration ──────────────────────────────────
-  const { saveScroll } = useScrollRestore('library_scrollY', galleries.length > 0)
+  const { saveScroll } = useScrollRestore('library_scrollY', displayGalleries.length > 0)
 
   // ── Keyboard grid navigation ────────────────────────────
   const { focusedIndex, registerElement } = useGridKeyboard({
-    totalItems: galleries.length,
+    totalItems: displayGalleries.length,
     colCount,
     onEnter: (i) => {
-      const g = galleries[i]
+      const g = displayGalleries[i]
       if (g) {
         saveScroll()
         router.push(`/library/${g.source}/${g.source_id}`)
@@ -208,14 +302,41 @@ function LibraryContent() {
         >
           <div className="overflow-hidden">
             <div className="px-4 pb-4 space-y-4 border-t border-vault-border pt-4">
-              <input
-                type="text"
-                value={searchInput}
-                onChange={(e) => handleSearchChange(e.target.value)}
-                onKeyDown={handleSearchKeyDown}
-                placeholder={t('library.searchPlaceholder')}
-                className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
-              />
+              <div>
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={searchInput}
+                    onChange={(e) => handleSearchChange(e.target.value)}
+                    onKeyDown={handleSearchKeyDown}
+                    placeholder={t('library.searchPlaceholder')}
+                    className="flex-1 bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
+                  />
+                  <button
+                    onClick={() => setSyntaxHelpOpen((v) => !v)}
+                    className="shrink-0 p-2 text-vault-text-muted hover:text-vault-accent transition-colors"
+                    title={t('library.syntaxHelp')}
+                  >
+                    <HelpCircle size={16} />
+                  </button>
+                </div>
+                {advancedSearch && searchQuery && (
+                  <p className="text-xs text-vault-accent mt-1">
+                    {t('library.advancedSearchActive')}
+                  </p>
+                )}
+                {syntaxHelpOpen && (
+                  <div className="mt-2 p-3 bg-vault-input border border-vault-border rounded-lg text-xs text-vault-text-secondary space-y-1 font-mono">
+                    <p>character:rem — {t('library.syntaxTagSearch')}</p>
+                    <p>-general:sketch — {t('library.syntaxExclude')}</p>
+                    <p>title:&quot;re zero&quot; — {t('library.syntaxTitle')}</p>
+                    <p>source:ehentai — {t('library.syntaxSource')}</p>
+                    <p>rating:&gt;=4 — {t('library.syntaxRating')}</p>
+                    <p>favorited:true — {t('library.syntaxFavorited')}</p>
+                    <p>sort:rating — {t('library.syntaxSort')}</p>
+                  </div>
+                )}
+              </div>
 
               {/* Tag Filters */}
               <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
@@ -227,7 +348,9 @@ function LibraryContent() {
                     <input
                       type="text"
                       value={includeInput}
-                      onChange={(e) => dispatch({ type: 'SET_INCLUDE_INPUT', payload: e.target.value })}
+                      onChange={(e) =>
+                        dispatch({ type: 'SET_INCLUDE_INPUT', payload: e.target.value })
+                      }
                       onKeyDown={(e) => e.key === 'Enter' && addIncludeTag()}
                       placeholder={t('library.tagFilterPlaceholder')}
                       className="flex-1 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
@@ -260,7 +383,9 @@ function LibraryContent() {
                     <input
                       type="text"
                       value={excludeInput}
-                      onChange={(e) => dispatch({ type: 'SET_EXCLUDE_INPUT', payload: e.target.value })}
+                      onChange={(e) =>
+                        dispatch({ type: 'SET_EXCLUDE_INPUT', payload: e.target.value })
+                      }
                       onKeyDown={(e) => e.key === 'Enter' && addExcludeTag()}
                       placeholder={t('library.excludeTagPlaceholder')}
                       className="flex-1 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
@@ -348,7 +473,9 @@ function LibraryContent() {
                       className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
                     >
                       <option value="">{t('library.allCategories')}</option>
-                      <option value="__uncategorized__">{t('library.categoryUncategorized')}</option>
+                      <option value="__uncategorized__">
+                        {t('library.categoryUncategorized')}
+                      </option>
                       {categoriesData.categories.map((cat) => (
                         <option key={cat} value={cat}>
                           {cat}
@@ -411,14 +538,18 @@ function LibraryContent() {
                     }}
                     className="w-4 h-4 accent-yellow-500"
                   />
-                  <span className="text-sm text-vault-text-secondary">{t('library.favoritesOnly')}</span>
+                  <span className="text-sm text-vault-text-secondary">
+                    {t('library.favoritesOnly')}
+                  </span>
                 </label>
 
                 <label className="flex items-center gap-2 text-sm text-vault-text-secondary cursor-pointer whitespace-nowrap">
                   <input
                     type="checkbox"
                     checked={inReadingList}
-                    onChange={(e) => dispatch({ type: 'SET_IN_READING_LIST', payload: e.target.checked })}
+                    onChange={(e) =>
+                      dispatch({ type: 'SET_IN_READING_LIST', payload: e.target.checked })
+                    }
                     className="rounded border-vault-border"
                   />
                   {t('library.readingListOnly')}
@@ -461,10 +592,10 @@ function LibraryContent() {
         </div>
       )}
 
-      {total !== undefined && (
+      {displayTotal !== undefined && (
         <div className="flex items-center justify-between mb-4">
           <span className="text-sm text-vault-text-muted">
-            {`${formatNumber(total)} ${t('library.galleries')}`}
+            {`${formatNumber(displayTotal)} ${t('library.galleries')}`}
           </span>
           {/* View mode toggle */}
           <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
@@ -486,7 +617,7 @@ function LibraryContent() {
         </div>
       )}
 
-      {isLoading && <SkeletonGrid />}
+      {displayLoading && <SkeletonGrid />}
 
       {error && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4 text-red-400">
@@ -494,10 +625,12 @@ function LibraryContent() {
         </div>
       )}
 
-      {!isLoading && galleries.length > 0 && (
+      {!displayLoading && displayGalleries.length > 0 && (
         <VirtualGrid
-          items={galleries}
-          columns={viewMode === 'list' ? { base: 1 } : { base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }}
+          items={displayGalleries}
+          columns={
+            viewMode === 'list' ? { base: 1 } : { base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }
+          }
           gap={viewMode === 'list' ? 8 : 12}
           estimateHeight={viewMode === 'list' ? 134 : 300}
           focusedIndex={focusedIndex}
@@ -530,20 +663,23 @@ function LibraryContent() {
               <Card
                 gallery={gallery}
                 thumbUrl={gallery.cover_thumb ?? undefined}
-                onClick={() => { saveScroll(); router.push(`/library/${gallery.source}/${gallery.source_id}`) }}
+                onClick={() => {
+                  saveScroll()
+                  router.push(`/library/${gallery.source}/${gallery.source_id}`)
+                }}
                 onFavoriteToggle={handleFavoriteToggle}
                 onReadingListToggle={handleReadingListToggle}
                 onDelete={handleDelete}
               />
             )
           }}
-          onLoadMore={loadMore}
-          hasMore={!isReachingEnd}
-          isLoading={isLoadingMore}
+          onLoadMore={displayLoadMore}
+          hasMore={!displayReachingEnd}
+          isLoading={displayLoadingMore}
         />
       )}
 
-      {!isLoading && galleries.length === 0 && !error && (
+      {!displayLoading && displayGalleries.length === 0 && !error && (
         <EmptyState icon={BookOpen} title={t('library.noGalleries')} />
       )}
 
@@ -555,7 +691,10 @@ function LibraryContent() {
             </span>
             <button
               onClick={() =>
-                dispatch({ type: 'SET_SELECTED_IDS', payload: new Set(galleries.map((g) => g.id)) })
+                dispatch({
+                  type: 'SET_SELECTED_IDS',
+                  payload: new Set(displayGalleries.map((g) => g.id)),
+                })
               }
               className="text-xs text-vault-accent hover:underline"
             >
@@ -682,7 +821,9 @@ function LibraryContent() {
                       gallery_ids: [...selectedIds],
                       collection_id: collectionId,
                     })
-                    toast.success(t('collections.addedToCollection', { count: String(res.affected) }))
+                    toast.success(
+                      t('collections.addedToCollection', { count: String(res.affected) }),
+                    )
                     dispatch({ type: 'CLEAR_SELECTION' })
                   } catch {
                     toast.error(t('collections.addFailed'))
@@ -702,20 +843,29 @@ function LibraryContent() {
               </select>
             )}
             <button
-              onClick={() => { setBatchTagMode('add'); setBatchTagList([]); setBatchTagInput('') }}
+              onClick={() => {
+                setBatchTagMode('add')
+                setBatchTagList([])
+                setBatchTagInput('')
+              }}
               className="px-3 py-1.5 bg-green-600 hover:bg-green-700 rounded text-white text-sm transition-colors"
             >
               {t('library.batchAddTags')}
             </button>
             <button
-              onClick={() => { setBatchTagMode('remove'); setBatchTagList([]); setBatchTagInput('') }}
+              onClick={() => {
+                setBatchTagMode('remove')
+                setBatchTagList([])
+                setBatchTagInput('')
+              }}
               className="px-3 py-1.5 bg-orange-600 hover:bg-orange-700 rounded text-white text-sm transition-colors"
             >
               {t('library.batchRemoveTags')}
             </button>
             <button
               onClick={async () => {
-                if (!confirm(t('library.batchDeleteConfirm', { count: String(selectedIds.size) }))) return
+                if (!confirm(t('library.batchDeleteConfirm', { count: String(selectedIds.size) })))
+                  return
                 try {
                   const res = await api.library.batchGalleries({
                     action: 'delete',
@@ -742,8 +892,14 @@ function LibraryContent() {
       )}
 
       {batchTagMode && (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]" onClick={() => setBatchTagMode(null)}>
-          <div className="bg-vault-card border border-vault-border rounded-lg p-4 w-96 max-w-[90vw]" onClick={e => e.stopPropagation()}>
+        <div
+          className="fixed inset-0 bg-black/50 flex items-center justify-center z-[60]"
+          onClick={() => setBatchTagMode(null)}
+        >
+          <div
+            className="bg-vault-card border border-vault-border rounded-lg p-4 w-96 max-w-[90vw]"
+            onClick={(e) => e.stopPropagation()}
+          >
             <h3 className="text-lg font-medium text-vault-text mb-3">
               {batchTagMode === 'add' ? t('library.batchAddTags') : t('library.batchRemoveTags')}
             </h3>
@@ -751,10 +907,10 @@ function LibraryContent() {
               <input
                 type="text"
                 value={batchTagInput}
-                onChange={e => setBatchTagInput(e.target.value)}
-                onKeyDown={e => {
+                onChange={(e) => setBatchTagInput(e.target.value)}
+                onKeyDown={(e) => {
                   if (e.key === 'Enter' && batchTagInput.trim()) {
-                    setBatchTagList(prev => [...prev, batchTagInput.trim()])
+                    setBatchTagList((prev) => [...prev, batchTagInput.trim()])
                     setBatchTagInput('')
                   }
                 }}
@@ -765,16 +921,25 @@ function LibraryContent() {
             </div>
             <div className="flex flex-wrap gap-1 mb-3 min-h-[2rem]">
               {batchTagList.map((tag, i) => (
-                <span key={i} className="flex items-center gap-1 px-2 py-0.5 bg-vault-accent/10 border border-vault-accent/30 text-vault-accent rounded text-xs">
+                <span
+                  key={i}
+                  className="flex items-center gap-1 px-2 py-0.5 bg-vault-accent/10 border border-vault-accent/30 text-vault-accent rounded text-xs"
+                >
                   {tag}
-                  <button onClick={() => setBatchTagList(prev => prev.filter((_, j) => j !== i))} className="hover:text-red-400">
+                  <button
+                    onClick={() => setBatchTagList((prev) => prev.filter((_, j) => j !== i))}
+                    className="hover:text-red-400"
+                  >
                     <X size={12} />
                   </button>
                 </span>
               ))}
             </div>
             <div className="flex justify-end gap-2">
-              <button onClick={() => setBatchTagMode(null)} className="px-3 py-1.5 text-vault-text-muted text-sm">
+              <button
+                onClick={() => setBatchTagMode(null)}
+                className="px-3 py-1.5 text-vault-text-muted text-sm"
+              >
                 {t('common.cancel')}
               </button>
               <button

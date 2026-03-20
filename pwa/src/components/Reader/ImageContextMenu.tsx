@@ -2,7 +2,16 @@
 
 import { useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
-import { Download, Copy, Share2, EyeOff, Heart, ExternalLink, type LucideIcon } from 'lucide-react'
+import {
+  Download,
+  Copy,
+  Share2,
+  EyeOff,
+  Heart,
+  ExternalLink,
+  Search,
+  type LucideIcon,
+} from 'lucide-react'
 import { t } from '@/lib/i18n'
 
 interface ImageContextMenuProps {
@@ -15,9 +24,21 @@ interface ImageContextMenuProps {
   isFavorited?: boolean
   onToggleFavorite?: () => void
   onViewGallery?: () => void
+  onFindSimilar?: () => void
 }
 
-export function ImageContextMenu({ open, onClose, position, imageUrl, imageName, onHide, isFavorited, onToggleFavorite, onViewGallery }: ImageContextMenuProps) {
+export function ImageContextMenu({
+  open,
+  onClose,
+  position,
+  imageUrl,
+  imageName,
+  onHide,
+  isFavorited,
+  onToggleFavorite,
+  onViewGallery,
+  onFindSimilar,
+}: ImageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
 
   // ── Phantom-click guard ──────────────────────────────────────────────
@@ -38,7 +59,7 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
   const guardedClick = useCallback((action: () => void) => {
     return (e: React.MouseEvent) => {
       e.stopPropagation()
-      if (!hadPointerDownRef.current) return   // phantom click — ignore
+      if (!hadPointerDownRef.current) return // phantom click — ignore
       hadPointerDownRef.current = false
       action()
     }
@@ -51,7 +72,9 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
 
   // ── Dismiss on outside-click or Escape ───────────────────────────────
   const handleKeyDown = useCallback(
-    (e: KeyboardEvent) => { if (e.key === 'Escape') onClose() },
+    (e: KeyboardEvent) => {
+      if (e.key === 'Escape') onClose()
+    },
     [onClose],
   )
 
@@ -82,9 +105,7 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
     try {
       const response = await fetch(imageUrl)
       const blob = await response.blob()
-      await navigator.clipboard.write([
-        new ClipboardItem({ [blob.type]: blob }),
-      ])
+      await navigator.clipboard.write([new ClipboardItem({ [blob.type]: blob })])
     } catch {
       // Fallback: copy URL instead
       await navigator.clipboard.writeText(imageUrl)
@@ -111,7 +132,11 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
   const ITEM_HEIGHT = 48
   const SEPARATOR_HEIGHT = 1
   const hasShare = typeof navigator !== 'undefined' && !!navigator.share
-  const baseItems = (hasShare ? 3 : 2) + (onToggleFavorite ? 1 : 0) + (onViewGallery ? 1 : 0)
+  const baseItems =
+    (hasShare ? 3 : 2) +
+    (onToggleFavorite ? 1 : 0) +
+    (onViewGallery ? 1 : 0) +
+    (onFindSimilar ? 1 : 0)
   const MENU_HEIGHT = baseItems * ITEM_HEIGHT + (onHide ? SEPARATOR_HEIGHT + ITEM_HEIGHT : 0)
 
   const x = Math.min(position.x, window.innerWidth - MENU_WIDTH - 8)
@@ -119,22 +144,49 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
   const adjustedX = Math.max(8, x)
   const adjustedY = Math.max(8, y)
 
-  const items: { label: string; icon: LucideIcon; onClick: () => void; iconClassName?: string }[] = [
-    ...(onViewGallery ? [{
-      label: t('reader.viewGallery'),
-      icon: ExternalLink,
-      onClick: () => { onViewGallery(); onClose() },
-    }] : []),
-    ...(onToggleFavorite ? [{
-      label: isFavorited ? t('reader.unfavoriteImage') : t('reader.favoriteImage'),
-      icon: Heart,
-      onClick: () => { onToggleFavorite(); onClose() },
-      iconClassName: isFavorited ? 'fill-current text-red-400' : 'text-white/70',
-    }] : []),
-    { label: t('reader.saveImage'), icon: Download, onClick: handleSave },
-    { label: t('reader.copyImage'), icon: Copy, onClick: handleCopy },
-    ...(hasShare ? [{ label: t('reader.shareImage'), icon: Share2, onClick: handleShare }] : []),
-  ]
+  const items: { label: string; icon: LucideIcon; onClick: () => void; iconClassName?: string }[] =
+    [
+      ...(onViewGallery
+        ? [
+            {
+              label: t('reader.viewGallery'),
+              icon: ExternalLink,
+              onClick: () => {
+                onViewGallery()
+                onClose()
+              },
+            },
+          ]
+        : []),
+      ...(onToggleFavorite
+        ? [
+            {
+              label: isFavorited ? t('reader.unfavoriteImage') : t('reader.favoriteImage'),
+              icon: Heart,
+              onClick: () => {
+                onToggleFavorite()
+                onClose()
+              },
+              iconClassName: isFavorited ? 'fill-current text-red-400' : 'text-white/70',
+            },
+          ]
+        : []),
+      ...(onFindSimilar
+        ? [
+            {
+              label: t('similar.findSimilar'),
+              icon: Search,
+              onClick: () => {
+                onFindSimilar()
+                onClose()
+              },
+            },
+          ]
+        : []),
+      { label: t('reader.saveImage'), icon: Download, onClick: handleSave },
+      { label: t('reader.copyImage'), icon: Copy, onClick: handleCopy },
+      ...(hasShare ? [{ label: t('reader.shareImage'), icon: Share2, onClick: handleShare }] : []),
+    ]
 
   const menu = (
     <>
@@ -142,8 +194,14 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
       <div
         className="fixed inset-0 z-[199]"
         aria-hidden="true"
-        onPointerDown={(e) => { e.stopPropagation(); onClose() }}
-        onContextMenu={(e) => { e.preventDefault(); onClose() }}
+        onPointerDown={(e) => {
+          e.stopPropagation()
+          onClose()
+        }}
+        onContextMenu={(e) => {
+          e.preventDefault()
+          onClose()
+        }}
       />
       <div
         ref={menuRef}
@@ -171,7 +229,10 @@ export function ImageContextMenu({ open, onClose, position, imageUrl, imageName,
             <div className="border-t border-white/10" />
             <button
               role="menuitem"
-              onClick={guardedClick(() => { onHide(); onClose() })}
+              onClick={guardedClick(() => {
+                onHide()
+                onClose()
+              })}
               className="w-full px-4 py-3 text-sm text-red-400 hover:bg-white/10 flex items-center gap-3 transition-colors text-left"
             >
               <EyeOff className="w-4 h-4 shrink-0 text-red-400/70" />

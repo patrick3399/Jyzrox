@@ -17,6 +17,7 @@ import { t, formatDate } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
 import { TagAutocomplete } from '@/components/TagAutocomplete'
 import { Pencil, Heart, Bookmark, BookmarkCheck } from 'lucide-react'
+import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
   character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
@@ -89,8 +90,15 @@ export default function GalleryDetailPage() {
     error: galleryError,
     mutate: mutateGallery,
   } = useLibraryGallery(source, sourceId)
-  const { data: imagesData, isLoading: imagesLoading, mutate: mutateImages } = useGalleryImages(source, sourceId)
-  const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(source ?? '', sourceId ?? '')
+  const {
+    data: imagesData,
+    isLoading: imagesLoading,
+    mutate: mutateImages,
+  } = useGalleryImages(source, sourceId)
+  const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(
+    source ?? '',
+    sourceId ?? '',
+  )
   const { data: tagTranslations } = useTagTranslations(gallery?.tags_array ?? [])
   const { data: featureSettings } = useSWR('settings/features', () => api.settings.getFeatures(), {
     revalidateOnFocus: false,
@@ -101,7 +109,9 @@ export default function GalleryDetailPage() {
   const updateCheckedRef = useRef<boolean>(false)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRetagging, setIsRetagging] = useState(false)
-  const [tagData, setTagData] = useState<Array<{ namespace: string; name: string; confidence: number; source: string }>>([])
+  const [tagData, setTagData] = useState<
+    Array<{ namespace: string; name: string; confidence: number; source: string }>
+  >([])
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.35)
   const [editingTags, setEditingTags] = useState(false)
 
@@ -109,7 +119,9 @@ export default function GalleryDetailPage() {
   const [selectMode, setSelectMode] = useState(false)
   const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set())
   const [isHiding, setIsHiding] = useState(false)
-  const [excludedBlobs, setExcludedBlobs] = useState<Array<{ blob_sha256: string; excluded_at: string | null }>>([])
+  const [excludedBlobs, setExcludedBlobs] = useState<
+    Array<{ blob_sha256: string; excluded_at: string | null }>
+  >([])
   const [showExcluded, setShowExcluded] = useState(false)
   const [restoringHash, setRestoringHash] = useState<string | null>(null)
 
@@ -125,6 +137,9 @@ export default function GalleryDetailPage() {
 
   const activeImageRef = useRef<GalleryImage | null>(null)
 
+  // Similar images modal state
+  const [similarImageId, setSimilarImageId] = useState<number | null>(null)
+
   // Track favorited image IDs from API response + optimistic overrides
   const [localFavOverrides, setLocalFavOverrides] = useState<Map<number, boolean>>(new Map())
 
@@ -137,7 +152,10 @@ export default function GalleryDetailPage() {
     return set
   }, [imagesData?.favorited_image_ids, localFavOverrides])
 
-  const isFavorited = useCallback((imageId: number) => favoritedImageIds.has(imageId), [favoritedImageIds])
+  const isFavorited = useCallback(
+    (imageId: number) => favoritedImageIds.has(imageId),
+    [favoritedImageIds],
+  )
 
   // Inline-edit state
   const [editingTitle, setEditingTitle] = useState(false)
@@ -174,7 +192,8 @@ export default function GalleryDetailPage() {
       updateCheckedRef.current = true
       return
     }
-    const checkDays: number = (featureSettings as unknown as Record<string, number>).gallery_update_check_days ?? -1
+    const checkDays: number =
+      (featureSettings as unknown as Record<string, number>).gallery_update_check_days ?? -1
     if (checkDays === -1) {
       updateCheckedRef.current = true
       return
@@ -197,15 +216,18 @@ export default function GalleryDetailPage() {
       return
     }
     setIsCheckingUpdate(true)
-    api.library.checkUpdate(gallery.source, gallery.source_id)
+    api.library
+      .checkUpdate(gallery.source, gallery.source_id)
       .then((result) => {
         if (result.status === 'updated') {
           mutateGallery()
           if (result.pages_diff) {
-            toast.success(t('library.metadataPagesChanged', {
-              old: String(result.pages_diff.old),
-              new: String(result.pages_diff.new),
-            }))
+            toast.success(
+              t('library.metadataPagesChanged', {
+                old: String(result.pages_diff.old),
+                new: String(result.pages_diff.new),
+              }),
+            )
             if (result.pages_diff.new > result.pages_diff.old) {
               setPagesOutdated(result.pages_diff)
             }
@@ -224,26 +246,39 @@ export default function GalleryDetailPage() {
 
   const refetchTagData = useCallback(() => {
     if (!source || !sourceId) return
-    api.library.getGalleryTags(source, sourceId).then((res) => setTagData(res.tags)).catch(() => {})
+    api.library
+      .getGalleryTags(source, sourceId)
+      .then((res) => setTagData(res.tags))
+      .catch(() => {})
   }, [source, sourceId])
 
-  useEffect(() => { refetchTagData() }, [refetchTagData])
+  useEffect(() => {
+    refetchTagData()
+  }, [refetchTagData])
 
-  const handleUpdateTag = useCallback(async (tagStr: string, action: 'add' | 'remove') => {
-    if (!gallery) return
-    try {
-      await api.tags.updateGalleryTags(gallery.id, { tags: [tagStr], action })
-      toast.success(t(action === 'add' ? 'library.tagAdded' : 'library.tagRemoved'))
-      mutateGallery()
-      refetchTagData()
-    } catch {
-      toast.error(t(action === 'add' ? 'library.tagAddFailed' : 'library.tagRemoveFailed'))
-    }
-  }, [gallery, mutateGallery, refetchTagData])
+  const handleUpdateTag = useCallback(
+    async (tagStr: string, action: 'add' | 'remove') => {
+      if (!gallery) return
+      try {
+        await api.tags.updateGalleryTags(gallery.id, { tags: [tagStr], action })
+        toast.success(t(action === 'add' ? 'library.tagAdded' : 'library.tagRemoved'))
+        mutateGallery()
+        refetchTagData()
+      } catch {
+        toast.error(t(action === 'add' ? 'library.tagAddFailed' : 'library.tagRemoveFailed'))
+      }
+    },
+    [gallery, mutateGallery, refetchTagData],
+  )
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
-      if (e.target instanceof HTMLInputElement || e.target instanceof HTMLTextAreaElement || e.target instanceof HTMLSelectElement) return
+      if (
+        e.target instanceof HTMLInputElement ||
+        e.target instanceof HTMLTextAreaElement ||
+        e.target instanceof HTMLSelectElement
+      )
+        return
       if (selectMode) return
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
@@ -408,7 +443,9 @@ export default function GalleryDetailPage() {
     }
   }, [source, sourceId])
 
-  useEffect(() => { fetchExcluded() }, [fetchExcluded])
+  useEffect(() => {
+    fetchExcluded()
+  }, [fetchExcluded])
 
   // Restore excluded blob
   const handleRestore = async (sha256: string) => {
@@ -430,9 +467,10 @@ export default function GalleryDetailPage() {
   const handleImageLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     const img = activeImageRef.current
     if (!img) return
-    const pos = 'touches' in e
-      ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
-      : { x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY }
+    const pos =
+      'touches' in e
+        ? { x: e.touches[0].clientX, y: e.touches[0].clientY }
+        : { x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY }
     setImageMenu({
       open: true,
       position: pos,
@@ -443,7 +481,12 @@ export default function GalleryDetailPage() {
     })
   }, [])
 
-  const { onTouchStart: lpStart, onTouchMove: lpMove, onTouchEnd: lpEnd, onContextMenu: lpCtx } = useLongPress({ onLongPress: handleImageLongPress })
+  const {
+    onTouchStart: lpStart,
+    onTouchMove: lpMove,
+    onTouchEnd: lpEnd,
+    onContextMenu: lpCtx,
+  } = useLongPress({ onLongPress: handleImageLongPress })
 
   const handleImageToggleFavorite = useCallback(async () => {
     if (!imageMenu) return
@@ -452,7 +495,7 @@ export default function GalleryDetailPage() {
     setImageMenu(null)
 
     // Optimistic update
-    setLocalFavOverrides(prev => new Map(prev).set(imageId, !wasFavorited))
+    setLocalFavOverrides((prev) => new Map(prev).set(imageId, !wasFavorited))
 
     try {
       if (wasFavorited) {
@@ -461,18 +504,21 @@ export default function GalleryDetailPage() {
         await api.library.favoriteImage(imageId)
       }
       toast.success(wasFavorited ? t('reader.imageUnfavorited') : t('reader.imageFavorited'))
-      mutateImages(prev => {
-        if (!prev) return prev
-        return {
-          ...prev,
-          favorited_image_ids: wasFavorited
-            ? (prev.favorited_image_ids ?? []).filter((id: number) => id !== imageId)
-            : [...(prev.favorited_image_ids ?? []), imageId],
-        }
-      }, { revalidate: false })
+      mutateImages(
+        (prev) => {
+          if (!prev) return prev
+          return {
+            ...prev,
+            favorited_image_ids: wasFavorited
+              ? (prev.favorited_image_ids ?? []).filter((id: number) => id !== imageId)
+              : [...(prev.favorited_image_ids ?? []), imageId],
+          }
+        },
+        { revalidate: false },
+      )
     } catch {
       // Revert optimistic update
-      setLocalFavOverrides(prev => {
+      setLocalFavOverrides((prev) => {
         const next = new Map(prev)
         next.delete(imageId)
         return next
@@ -499,9 +545,13 @@ export default function GalleryDetailPage() {
     }
   }, [imageMenu, source, sourceId, mutateGallery, mutateImages, fetchExcluded])
 
-  const manualTagSet = useMemo(() => new Set(
-    tagData.filter((td) => td.source === 'manual').map((td) => `${td.namespace}:${td.name}`)
-  ), [tagData])
+  const manualTagSet = useMemo(
+    () =>
+      new Set(
+        tagData.filter((td) => td.source === 'manual').map((td) => `${td.namespace}:${td.name}`),
+      ),
+    [tagData],
+  )
 
   if (galleryLoading) {
     return (
@@ -531,188 +581,205 @@ export default function GalleryDetailPage() {
   if (!gallery) return null
 
   const tagGroups = groupTagsByNamespace(gallery.tags_array)
-  const aiTags = tagData.filter((tag) => tag.source === 'ai' && tag.confidence >= confidenceThreshold)
+  const aiTags = tagData.filter(
+    (tag) => tag.source === 'ai' && tag.confidence >= confidenceThreshold,
+  )
   const images = imagesData?.images ?? []
   const statusInfo =
     DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
 
   return (
     <div>
-        {/* Back */}
-        <BackButton fallback="/library" />
+      {/* Back */}
+      <BackButton fallback="/library" />
 
-        {/* Header */}
-        <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
-          <div className="flex flex-col md:flex-row gap-5">
-            {/* Thumbnail preview from first image */}
-            <div className="shrink-0">
-              {images[0]?.thumb_path ? (
-                <img
-                  src={images[0].thumb_path}
-                  alt={gallery.title}
-                  className="w-40 h-56 object-cover rounded"
+      {/* Header */}
+      <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
+        <div className="flex flex-col md:flex-row gap-5">
+          {/* Thumbnail preview from first image */}
+          <div className="shrink-0">
+            {images[0]?.thumb_path ? (
+              <img
+                src={images[0].thumb_path}
+                alt={gallery.title}
+                className="w-40 h-56 object-cover rounded"
+              />
+            ) : (
+              <div className="w-40 h-56 bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
+                {t('library.noCover')}
+              </div>
+            )}
+          </div>
+
+          {/* Meta */}
+          <div className="flex-1 min-w-0">
+            <div className="flex items-start justify-between gap-2 mb-1">
+              {editingTitle ? (
+                <input
+                  autoFocus
+                  value={editTitleValue}
+                  onChange={(e) => setEditTitleValue(e.target.value)}
+                  onBlur={async () => {
+                    await handleTitleSave('title', editTitleValue)
+                    setEditingTitle(false)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur()
+                    if (e.key === 'Escape') setEditingTitle(false)
+                  }}
+                  className="text-xl font-bold text-vault-text leading-tight bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
                 />
               ) : (
-                <div className="w-40 h-56 bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
-                  {t('library.noCover')}
-                </div>
+                <h1
+                  onClick={() => {
+                    setEditTitleValue(gallery.title)
+                    setEditingTitle(true)
+                  }}
+                  className="text-xl font-bold text-vault-text leading-tight cursor-pointer hover:text-vault-accent transition-colors"
+                  title={t('library.editTitle')}
+                >
+                  {gallery.title}
+                </h1>
+              )}
+              {pagesOutdated && gallery.download_status === 'complete' ? (
+                <span className="shrink-0 px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
+                  {t('library.statusOutdated')}
+                </span>
+              ) : (
+                <span
+                  className={`shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
+                >
+                  {t(statusInfo.labelKey)}
+                </span>
               )}
             </div>
-
-            {/* Meta */}
-            <div className="flex-1 min-w-0">
-              <div className="flex items-start justify-between gap-2 mb-1">
-                {editingTitle ? (
-                  <input
-                    autoFocus
-                    value={editTitleValue}
-                    onChange={(e) => setEditTitleValue(e.target.value)}
-                    onBlur={async () => {
-                      await handleTitleSave('title', editTitleValue)
-                      setEditingTitle(false)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') e.currentTarget.blur()
-                      if (e.key === 'Escape') setEditingTitle(false)
-                    }}
-                    className="text-xl font-bold text-vault-text leading-tight bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
-                  />
-                ) : (
-                  <h1
-                    onClick={() => { setEditTitleValue(gallery.title); setEditingTitle(true) }}
-                    className="text-xl font-bold text-vault-text leading-tight cursor-pointer hover:text-vault-accent transition-colors"
-                    title={t('library.editTitle')}
-                  >
-                    {gallery.title}
-                  </h1>
-                )}
-                {pagesOutdated && gallery.download_status === 'complete' ? (
-                  <span className="shrink-0 px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
-                    {t('library.statusOutdated')}
-                  </span>
-                ) : (
-                  <span
-                    className={`shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
-                  >
-                    {t(statusInfo.labelKey)}
-                  </span>
-                )}
-              </div>
-              {(gallery.title_jpn || editingTitleJpn) && (
-                editingTitleJpn ? (
-                  <input
-                    autoFocus
-                    value={editTitleJpnValue}
-                    onChange={(e) => setEditTitleJpnValue(e.target.value)}
-                    onBlur={async () => {
-                      await handleTitleSave('title_jpn', editTitleJpnValue)
-                      setEditingTitleJpn(false)
-                    }}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') e.currentTarget.blur()
-                      if (e.key === 'Escape') setEditingTitleJpn(false)
-                    }}
-                    className="text-sm text-vault-text-secondary mb-3 bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
-                  />
-                ) : (
-                  <p
-                    onClick={() => { setEditTitleJpnValue(gallery.title_jpn ?? ''); setEditingTitleJpn(true) }}
-                    className="text-sm text-vault-text-secondary mb-3 cursor-pointer hover:text-vault-accent transition-colors"
-                    title={t('library.editTitle')}
-                  >
-                    {gallery.title_jpn}
-                  </p>
-                )
-              )}
-
-              {/* Meta grid */}
-              <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm mb-4">
-                {[
-                  { labelKey: 'library.metaSource', value: gallery.source },
-                  { labelKey: 'library.metaLanguage', value: gallery.language || 'N/A' },
-                  { labelKey: 'library.metaPages', value: String(gallery.pages) },
-                  {
-                    labelKey: 'library.metaAdded',
-                    value: formatDate(gallery.added_at),
-                  },
-                  ...(gallery.posted_at
-                    ? [{ labelKey: 'library.metaPosted', value: formatDate(gallery.posted_at) }]
-                    : []),
-                ].map(({ labelKey, value }) => (
-                  <div key={labelKey}>
-                    <span className="text-vault-text-muted">{t(labelKey)}: </span>
-                    <span className="text-vault-text">{value}</span>
-                  </div>
-                ))}
-                {/* Category — inline select */}
-                <div>
-                  <span className="text-vault-text-muted">{t('library.metaCategory')}: </span>
-                  <select
-                    value={gallery.category}
-                    onChange={(e) => handleCategoryChange(e.target.value)}
-                    className="bg-vault-input border border-vault-border rounded px-1 py-0.5 text-vault-text text-sm focus:outline-none"
-                  >
-                    <option value="">{t('library.categoryUncategorized')}</option>
-                    {['Doujinshi', 'Manga', 'Artist CG', 'Game CG', 'Western', 'Non-H', 'Image Set', 'Cosplay', 'Asian Porn', 'Misc'].map((cat) => (
-                      <option key={cat} value={cat}>{cat}</option>
-                    ))}
-                  </select>
-                </div>
-                {/* Uploader — clickable when artist_id is available */}
-                <div>
-                  <span className="text-vault-text-muted">{t('library.metaUploader')}: </span>
-                  {gallery.artist_id ? (
-                    <Link
-                      href={`/library?artist=${encodeURIComponent(gallery.artist_id)}`}
-                      className="text-vault-text hover:text-vault-accent hover:underline transition-colors"
-                    >
-                      {gallery.uploader || 'N/A'}
-                    </Link>
-                  ) : (
-                    <span className="text-vault-text">{gallery.uploader || 'N/A'}</span>
-                  )}
-                </div>
-              </div>
-
-              {/* Rating */}
-              <div className="flex items-center gap-3 mb-4">
-                <span className="text-sm text-vault-text-muted">{t('library.metaRating')}</span>
-                <RatingStars
-                  rating={gallery.my_rating ?? 0}
-                  readonly={isUpdating}
-                  onChange={handleRatingChange}
+            {(gallery.title_jpn || editingTitleJpn) &&
+              (editingTitleJpn ? (
+                <input
+                  autoFocus
+                  value={editTitleJpnValue}
+                  onChange={(e) => setEditTitleJpnValue(e.target.value)}
+                  onBlur={async () => {
+                    await handleTitleSave('title_jpn', editTitleJpnValue)
+                    setEditingTitleJpn(false)
+                  }}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') e.currentTarget.blur()
+                    if (e.key === 'Escape') setEditingTitleJpn(false)
+                  }}
+                  className="text-sm text-vault-text-secondary mb-3 bg-vault-input border border-vault-border rounded px-2 py-1 w-full focus:outline-none focus:border-vault-accent"
                 />
-                <span className="text-sm text-vault-text-secondary">
-                  {(gallery.my_rating ?? 0).toFixed(1)}
-                </span>
-              </div>
-
-              {/* Action Buttons */}
-              <div className="flex flex-wrap gap-2">
-                <Link
-                  href={`/reader/${gallery.source}/${gallery.source_id}`}
-                  className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-medium transition-colors"
+              ) : (
+                <p
+                  onClick={() => {
+                    setEditTitleJpnValue(gallery.title_jpn ?? '')
+                    setEditingTitleJpn(true)
+                  }}
+                  className="text-sm text-vault-text-secondary mb-3 cursor-pointer hover:text-vault-accent transition-colors"
+                  title={t('library.editTitle')}
                 >
-                  {t('browse.read')}
-                </Link>
-                {gallery.artist_id && (
+                  {gallery.title_jpn}
+                </p>
+              ))}
+
+            {/* Meta grid */}
+            <div className="grid grid-cols-2 md:grid-cols-3 gap-x-4 gap-y-1 text-sm mb-4">
+              {[
+                { labelKey: 'library.metaSource', value: gallery.source },
+                { labelKey: 'library.metaLanguage', value: gallery.language || 'N/A' },
+                { labelKey: 'library.metaPages', value: String(gallery.pages) },
+                {
+                  labelKey: 'library.metaAdded',
+                  value: formatDate(gallery.added_at),
+                },
+                ...(gallery.posted_at
+                  ? [{ labelKey: 'library.metaPosted', value: formatDate(gallery.posted_at) }]
+                  : []),
+              ].map(({ labelKey, value }) => (
+                <div key={labelKey}>
+                  <span className="text-vault-text-muted">{t(labelKey)}: </span>
+                  <span className="text-vault-text">{value}</span>
+                </div>
+              ))}
+              {/* Category — inline select */}
+              <div>
+                <span className="text-vault-text-muted">{t('library.metaCategory')}: </span>
+                <select
+                  value={gallery.category}
+                  onChange={(e) => handleCategoryChange(e.target.value)}
+                  className="bg-vault-input border border-vault-border rounded px-1 py-0.5 text-vault-text text-sm focus:outline-none"
+                >
+                  <option value="">{t('library.categoryUncategorized')}</option>
+                  {[
+                    'Doujinshi',
+                    'Manga',
+                    'Artist CG',
+                    'Game CG',
+                    'Western',
+                    'Non-H',
+                    'Image Set',
+                    'Cosplay',
+                    'Asian Porn',
+                    'Misc',
+                  ].map((cat) => (
+                    <option key={cat} value={cat}>
+                      {cat}
+                    </option>
+                  ))}
+                </select>
+              </div>
+              {/* Uploader — clickable when artist_id is available */}
+              <div>
+                <span className="text-vault-text-muted">{t('library.metaUploader')}: </span>
+                {gallery.artist_id ? (
                   <Link
                     href={`/library?artist=${encodeURIComponent(gallery.artist_id)}`}
-                    className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
+                    className="text-vault-text hover:text-vault-accent hover:underline transition-colors"
                   >
-                    {t('library.viewAllByArtist')}
+                    {gallery.uploader || 'N/A'}
                   </Link>
+                ) : (
+                  <span className="text-vault-text">{gallery.uploader || 'N/A'}</span>
                 )}
-                {gallery.source_url && (() => {
+              </div>
+            </div>
+
+            {/* Rating */}
+            <div className="flex items-center gap-3 mb-4">
+              <span className="text-sm text-vault-text-muted">{t('library.metaRating')}</span>
+              <RatingStars
+                rating={gallery.my_rating ?? 0}
+                readonly={isUpdating}
+                onChange={handleRatingChange}
+              />
+              <span className="text-sm text-vault-text-secondary">
+                {(gallery.my_rating ?? 0).toFixed(1)}
+              </span>
+            </div>
+
+            {/* Action Buttons */}
+            <div className="flex flex-wrap gap-2">
+              <Link
+                href={`/reader/${gallery.source}/${gallery.source_id}`}
+                className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-medium transition-colors"
+              >
+                {t('browse.read')}
+              </Link>
+              {gallery.artist_id && (
+                <Link
+                  href={`/library?artist=${encodeURIComponent(gallery.artist_id)}`}
+                  className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
+                >
+                  {t('library.viewAllByArtist')}
+                </Link>
+              )}
+              {gallery.source_url &&
+                (() => {
                   const { href, external } = getSourceLink(gallery.source_url, gallery.source)
-                  const btnClass = "px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
+                  const btnClass =
+                    'px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors'
                   return external ? (
-                    <a
-                      href={href}
-                      target="_blank"
-                      rel="noopener noreferrer"
-                      className={btnClass}
-                    >
+                    <a href={href} target="_blank" rel="noopener noreferrer" className={btnClass}>
                       {t('library.viewSource')}
                     </a>
                   ) : (
@@ -721,367 +788,416 @@ export default function GalleryDetailPage() {
                     </Link>
                   )
                 })()}
-                <button
-                  onClick={handleFavoriteToggle}
-                  disabled={isUpdating}
-                  className={`px-4 py-2 rounded text-sm font-medium border transition-colors ${
-                    gallery.is_favorited
-                      ? 'bg-yellow-900/40 border-yellow-600 text-yellow-400 hover:bg-yellow-900/60'
-                      : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
-                  }`}
-                >
-                  {gallery.is_favorited ? t('library.favorited') : t('library.unfavorited')}
-                </button>
-                <button
-                  onClick={async () => {
-                    try {
-                      const updated = await api.library.updateGallery(source!, sourceId!, { in_reading_list: !gallery.in_reading_list })
-                      mutateGallery(updated, false)
-                      toast.success(gallery.in_reading_list ? t('contextMenu.removeFromReadingList') : t('contextMenu.addToReadingList'))
-                    } catch {
-                      toast.error(t('common.failedToLoad'))
-                    }
-                  }}
-                  disabled={isUpdating}
-                  title={gallery.in_reading_list ? t('library.inReadingList') : t('library.readLater')}
-                  className={`px-4 py-2 rounded text-sm font-medium border transition-colors flex items-center gap-1.5 ${
-                    gallery.in_reading_list
-                      ? 'bg-blue-900/40 border-blue-600 text-blue-400 hover:bg-blue-900/60'
-                      : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-blue-600 hover:text-blue-400'
-                  }`}
-                >
-                  {gallery.in_reading_list
-                    ? <><BookmarkCheck size={16} />{t('library.inReadingList')}</>
-                    : <><Bookmark size={16} />{t('library.readLater')}</>
+              <button
+                onClick={handleFavoriteToggle}
+                disabled={isUpdating}
+                className={`px-4 py-2 rounded text-sm font-medium border transition-colors ${
+                  gallery.is_favorited
+                    ? 'bg-yellow-900/40 border-yellow-600 text-yellow-400 hover:bg-yellow-900/60'
+                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-yellow-600 hover:text-yellow-400'
+                }`}
+              >
+                {gallery.is_favorited ? t('library.favorited') : t('library.unfavorited')}
+              </button>
+              <button
+                onClick={async () => {
+                  try {
+                    const updated = await api.library.updateGallery(source!, sourceId!, {
+                      in_reading_list: !gallery.in_reading_list,
+                    })
+                    mutateGallery(updated, false)
+                    toast.success(
+                      gallery.in_reading_list
+                        ? t('contextMenu.removeFromReadingList')
+                        : t('contextMenu.addToReadingList'),
+                    )
+                  } catch {
+                    toast.error(t('common.failedToLoad'))
                   }
-                </button>
-                <button
-                  onClick={handleDelete}
-                  disabled={isDeleting}
-                  className="px-4 py-2 rounded text-sm font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
-                >
-                  {isDeleting
-                    ? t('library.deleting')
-                    : gallery.import_mode === 'link'
-                      ? t('library.delete.link.button')
-                      : t('library.delete')}
-                </button>
-                <button
-                  onClick={handleRetag}
-                  disabled={isRetagging}
-                  className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-purple-600 hover:text-purple-400 transition-colors disabled:opacity-50"
-                >
-                  {isRetagging ? t('library.retagging') : t('library.retag')}
-                </button>
-              </div>
+                }}
+                disabled={isUpdating}
+                title={
+                  gallery.in_reading_list ? t('library.inReadingList') : t('library.readLater')
+                }
+                className={`px-4 py-2 rounded text-sm font-medium border transition-colors flex items-center gap-1.5 ${
+                  gallery.in_reading_list
+                    ? 'bg-blue-900/40 border-blue-600 text-blue-400 hover:bg-blue-900/60'
+                    : 'bg-vault-input border-vault-border text-vault-text-secondary hover:border-blue-600 hover:text-blue-400'
+                }`}
+              >
+                {gallery.in_reading_list ? (
+                  <>
+                    <BookmarkCheck size={16} />
+                    {t('library.inReadingList')}
+                  </>
+                ) : (
+                  <>
+                    <Bookmark size={16} />
+                    {t('library.readLater')}
+                  </>
+                )}
+              </button>
+              <button
+                onClick={handleDelete}
+                disabled={isDeleting}
+                className="px-4 py-2 rounded text-sm font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
+              >
+                {isDeleting
+                  ? t('library.deleting')
+                  : gallery.import_mode === 'link'
+                    ? t('library.delete.link.button')
+                    : t('library.delete')}
+              </button>
+              <button
+                onClick={handleRetag}
+                disabled={isRetagging}
+                className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-purple-600 hover:text-purple-400 transition-colors disabled:opacity-50"
+              >
+                {isRetagging ? t('library.retagging') : t('library.retag')}
+              </button>
             </div>
           </div>
         </div>
+      </div>
 
-        {isCheckingUpdate && (
-          <p className="text-xs text-vault-text-muted animate-pulse mb-2">{t('library.checkingMetadata')}</p>
-        )}
+      {isCheckingUpdate && (
+        <p className="text-xs text-vault-text-muted animate-pulse mb-2">
+          {t('library.checkingMetadata')}
+        </p>
+      )}
 
-        {gallery.download_status === 'downloading' && (
-          <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-5 flex items-center gap-2 text-blue-400 text-sm">
-            <span className="flex gap-0.5">
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0ms]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:150ms]" />
-              <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:300ms]" />
-            </span>
-            {t('library.downloadingBanner')}
+      {gallery.download_status === 'downloading' && (
+        <div className="bg-blue-500/10 border border-blue-500/30 rounded-lg p-3 mb-5 flex items-center gap-2 text-blue-400 text-sm">
+          <span className="flex gap-0.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:0ms]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:150ms]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-bounce [animation-delay:300ms]" />
+          </span>
+          {t('library.downloadingBanner')}
+        </div>
+      )}
+
+      {/* Tags */}
+      <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
+            {t('common.tags')}
+          </h2>
+          <button
+            onClick={() => setEditingTags(!editingTags)}
+            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
+              editingTags
+                ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
+                : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
+            }`}
+          >
+            <Pencil size={12} />
+            {editingTags ? t('library.doneEditingTags') : t('library.editTags')}
+          </button>
+        </div>
+        {editingTags && (
+          <div className="mb-3">
+            <TagAutocomplete
+              onSelect={(tag) => handleUpdateTag(tag, 'add')}
+              clearOnSelect={true}
+              placeholder={t('library.addTagPlaceholder')}
+            />
           </div>
         )}
-
-        {/* Tags */}
-        <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
-              {t('common.tags')}
-            </h2>
-            <button
-              onClick={() => setEditingTags(!editingTags)}
-              className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
-                editingTags
-                  ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
-                  : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
-              }`}
-            >
-              <Pencil size={12} />
-              {editingTags ? t('library.doneEditingTags') : t('library.editTags')}
-            </button>
-          </div>
-          {editingTags && (
-            <div className="mb-3">
-              <TagAutocomplete
-                onSelect={(tag) => handleUpdateTag(tag, 'add')}
-                clearOnSelect={true}
-                placeholder={t('library.addTagPlaceholder')}
-              />
-            </div>
-          )}
-          {Object.keys(tagGroups).length === 0 ? (
-            <p className="text-sm text-vault-text-muted">{t('library.noTags')}</p>
-          ) : (
-            <div className="space-y-2">
-              {Object.entries(tagGroups).map(([namespace, values]) => (
-                <div key={namespace} className="flex flex-wrap gap-1 items-start">
-                  <span className="text-xs text-vault-text-muted w-20 shrink-0 pt-0.5 capitalize">
-                    {namespace}:
-                  </span>
-                  <div className="flex flex-wrap gap-1">
-                    {values.map((value) => {
-                      const fullTag = namespace === 'general' ? value : `${namespace}:${value}`
-                      const translation = tagTranslations?.[fullTag]
-                      const isManual = manualTagSet.has(fullTag)
-                      return (
-                        <span
-                          key={value}
-                          className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs ${getTagColor(fullTag)}`}
-                          title={translation ? `${namespace}:${value}` : undefined}
-                        >
-                          {translation || value}
-                          {editingTags && isManual && (
-                            <button
-                              type="button"
-                              onClick={() => handleUpdateTag(fullTag, 'remove')}
-                              className="ml-0.5 opacity-60 hover:opacity-100 leading-none"
-                              aria-label={t('common.removeTag', { tag: fullTag })}
-                            >
-                              ×
-                            </button>
-                          )}
-                        </span>
-                      )
-                    })}
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-
-          {/* AI Tags (if any) */}
-          {tagData.some((t) => t.source === 'ai') && (
-            <div className="mt-4 pt-4 border-t border-vault-border">
-              <div className="flex items-center justify-between mb-3">
-                <h3 className="text-xs font-semibold text-vault-text-secondary uppercase tracking-wide">
-                  {t('library.aiTags')}
-                </h3>
-                <div className="flex items-center gap-2">
-                  <label className="text-xs text-vault-text-muted">
-                    {t('library.confidence')}: {Math.round(confidenceThreshold * 100)}%
-                  </label>
-                  <input
-                    type="range"
-                    min="0"
-                    max="100"
-                    value={Math.round(confidenceThreshold * 100)}
-                    onChange={(e) => setConfidenceThreshold(Number(e.target.value) / 100)}
-                    className="w-24 h-1.5 accent-purple-500"
-                  />
-                </div>
-              </div>
-              {aiTags.length > 0 ? (
+        {Object.keys(tagGroups).length === 0 ? (
+          <p className="text-sm text-vault-text-muted">{t('library.noTags')}</p>
+        ) : (
+          <div className="space-y-2">
+            {Object.entries(tagGroups).map(([namespace, values]) => (
+              <div key={namespace} className="flex flex-wrap gap-1 items-start">
+                <span className="text-xs text-vault-text-muted w-20 shrink-0 pt-0.5 capitalize">
+                  {namespace}:
+                </span>
                 <div className="flex flex-wrap gap-1">
-                  {aiTags.map((tag) => (
-                    <span
-                      key={`${tag.namespace}:${tag.name}`}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded border bg-purple-900/30 border-purple-700/40 text-purple-300 text-xs"
-                      title={`${Math.round(tag.confidence * 100)}% confidence`}
-                    >
-                      {tag.namespace !== 'general' && (
-                        <span className="text-purple-400/60">{tag.namespace}:</span>
-                      )}
-                      {tag.name}
-                      <span className="text-purple-400/50 text-[10px]">
-                        {Math.round(tag.confidence * 100)}%
+                  {values.map((value) => {
+                    const fullTag = namespace === 'general' ? value : `${namespace}:${value}`
+                    const translation = tagTranslations?.[fullTag]
+                    const isManual = manualTagSet.has(fullTag)
+                    return (
+                      <span
+                        key={value}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs ${getTagColor(fullTag)}`}
+                        title={translation ? `${namespace}:${value}` : undefined}
+                      >
+                        {translation || value}
+                        {editingTags && isManual && (
+                          <button
+                            type="button"
+                            onClick={() => handleUpdateTag(fullTag, 'remove')}
+                            className="ml-0.5 opacity-60 hover:opacity-100 leading-none"
+                            aria-label={t('common.removeTag', { tag: fullTag })}
+                          >
+                            ×
+                          </button>
+                        )}
                       </span>
-                    </span>
-                  ))}
+                    )
+                  })}
                 </div>
-              ) : (
-                <p className="text-xs text-vault-text-muted">{t('library.noAiTagsAboveThreshold')}</p>
-              )}
-            </div>
-          )}
-        </div>
+              </div>
+            ))}
+          </div>
+        )}
 
-        {/* Image Thumbnails */}
-        <div className="bg-vault-card border border-vault-border rounded-xl p-5">
-          <div className="flex items-center justify-between mb-3">
-            <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
-              {t('library.images')} ({gallery.pages} {t('library.metaPages')})
-            </h2>
-            <div className="flex items-center gap-2">
-              {selectMode ? (
-                <>
-                  <button
-                    onClick={handleHideSelected}
-                    disabled={selectedPages.size === 0 || isHiding}
-                    className="px-3 py-1 rounded text-xs font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
+        {/* AI Tags (if any) */}
+        {tagData.some((t) => t.source === 'ai') && (
+          <div className="mt-4 pt-4 border-t border-vault-border">
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-xs font-semibold text-vault-text-secondary uppercase tracking-wide">
+                {t('library.aiTags')}
+              </h3>
+              <div className="flex items-center gap-2">
+                <label className="text-xs text-vault-text-muted">
+                  {t('library.confidence')}: {Math.round(confidenceThreshold * 100)}%
+                </label>
+                <input
+                  type="range"
+                  min="0"
+                  max="100"
+                  value={Math.round(confidenceThreshold * 100)}
+                  onChange={(e) => setConfidenceThreshold(Number(e.target.value) / 100)}
+                  className="w-24 h-1.5 accent-purple-500"
+                />
+              </div>
+            </div>
+            {aiTags.length > 0 ? (
+              <div className="flex flex-wrap gap-1">
+                {aiTags.map((tag) => (
+                  <span
+                    key={`${tag.namespace}:${tag.name}`}
+                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded border bg-purple-900/30 border-purple-700/40 text-purple-300 text-xs"
+                    title={`${Math.round(tag.confidence * 100)}% confidence`}
                   >
-                    {isHiding ? t('library.hidingImages') : t('library.hideSelected', { count: selectedPages.size })}
-                  </button>
+                    {tag.namespace !== 'general' && (
+                      <span className="text-purple-400/60">{tag.namespace}:</span>
+                    )}
+                    {tag.name}
+                    <span className="text-purple-400/50 text-[10px]">
+                      {Math.round(tag.confidence * 100)}%
+                    </span>
+                  </span>
+                ))}
+              </div>
+            ) : (
+              <p className="text-xs text-vault-text-muted">{t('library.noAiTagsAboveThreshold')}</p>
+            )}
+          </div>
+        )}
+      </div>
+
+      {/* Image Thumbnails */}
+      <div className="bg-vault-card border border-vault-border rounded-xl p-5">
+        <div className="flex items-center justify-between mb-3">
+          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
+            {t('library.images')} ({gallery.pages} {t('library.metaPages')})
+          </h2>
+          <div className="flex items-center gap-2">
+            {selectMode ? (
+              <>
+                <button
+                  onClick={handleHideSelected}
+                  disabled={selectedPages.size === 0 || isHiding}
+                  className="px-3 py-1 rounded text-xs font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
+                >
+                  {isHiding
+                    ? t('library.hidingImages')
+                    : t('library.hideSelected', { count: selectedPages.size })}
+                </button>
+                <button
+                  onClick={() => {
+                    setSelectMode(false)
+                    setSelectedPages(new Set())
+                  }}
+                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                >
+                  {t('library.cancelSelect')}
+                </button>
+              </>
+            ) : (
+              <>
+                {images.length > 0 && (
                   <button
-                    onClick={() => { setSelectMode(false); setSelectedPages(new Set()) }}
+                    onClick={() => setSelectMode(true)}
                     className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
                   >
-                    {t('library.cancelSelect')}
+                    {t('library.selectImages')}
                   </button>
-                </>
-              ) : (
-                <>
-                  {images.length > 0 && (
-                    <button
-                      onClick={() => setSelectMode(true)}
-                      className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
-                    >
-                      {t('library.selectImages')}
-                    </button>
-                  )}
-                  {excludedBlobs.length > 0 && (
-                    <button
-                      onClick={() => setShowExcluded(!showExcluded)}
-                      className="px-3 py-1 rounded text-xs font-medium border bg-yellow-900/30 border-yellow-700/50 text-yellow-400 hover:bg-yellow-900/50 transition-colors"
-                    >
-                      {showExcluded ? t('library.hideExcluded') : t('library.showExcluded', { count: excludedBlobs.length })}
-                    </button>
-                  )}
-                </>
-              )}
-            </div>
+                )}
+                {excludedBlobs.length > 0 && (
+                  <button
+                    onClick={() => setShowExcluded(!showExcluded)}
+                    className="px-3 py-1 rounded text-xs font-medium border bg-yellow-900/30 border-yellow-700/50 text-yellow-400 hover:bg-yellow-900/50 transition-colors"
+                  >
+                    {showExcluded
+                      ? t('library.hideExcluded')
+                      : t('library.showExcluded', { count: excludedBlobs.length })}
+                  </button>
+                )}
+              </>
+            )}
           </div>
+        </div>
 
-          {imagesLoading && (
-            <div className="flex justify-center py-10">
-              <LoadingSpinner />
-            </div>
-          )}
+        {imagesLoading && (
+          <div className="flex justify-center py-10">
+            <LoadingSpinner />
+          </div>
+        )}
 
-          {!imagesLoading && (
-            <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
-              {images.map((image, idx) => {
-                const isSelected = selectedPages.has(image.page_num)
-                if (selectMode) {
-                  return (
-                    <button
-                      key={image.id}
-                      type="button"
-                      onClick={() => togglePage(image.page_num)}
-                      className={`relative group rounded border-2 transition-colors ${
-                        isSelected
-                          ? 'border-red-500 ring-2 ring-red-500/30'
-                          : 'border-vault-border hover:border-vault-border-hover'
-                      }`}
-                    >
-                      {image.thumb_path ? (
-                        <img
-                          src={image.thumb_path}
-                          alt={`Page ${image.page_num}`}
-                          loading={idx < 20 ? undefined : 'lazy'}
-                          className={`w-full aspect-[3/4] object-cover rounded ${isSelected ? 'opacity-60' : ''}`}
-                        />
-                      ) : (
-                        <div className="w-full aspect-[3/4] bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
-                          {image.page_num}
-                        </div>
-                      )}
-                      {isSelected && (
-                        <div className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
-                          <svg className="w-3 h-3 text-white" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-                            <path strokeLinecap="round" strokeLinejoin="round" strokeWidth={3} d="M5 13l4 4L19 7" />
-                          </svg>
-                        </div>
-                      )}
-                    </button>
-                  )
-                }
+        {!imagesLoading && (
+          <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
+            {images.map((image, idx) => {
+              const isSelected = selectedPages.has(image.page_num)
+              if (selectMode) {
                 return (
-                  <div
+                  <button
                     key={image.id}
-                    role="button"
-                    tabIndex={0}
-                    onClick={() => router.push(`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`)}
-                    onKeyDown={(e) => { if (e.key === 'Enter') router.push(`/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`) }}
-                    onTouchStart={(e) => { activeImageRef.current = image; lpStart(e) }}
-                    onTouchMove={lpMove}
-                    onTouchEnd={lpEnd}
-                    onContextMenu={(e) => { activeImageRef.current = image; lpCtx(e) }}
-                    className="group relative cursor-pointer select-none [-webkit-touch-callout:none]"
+                    type="button"
+                    onClick={() => togglePage(image.page_num)}
+                    className={`relative group rounded border-2 transition-colors ${
+                      isSelected
+                        ? 'border-red-500 ring-2 ring-red-500/30'
+                        : 'border-vault-border hover:border-vault-border-hover'
+                    }`}
                   >
                     {image.thumb_path ? (
                       <img
                         src={image.thumb_path}
                         alt={`Page ${image.page_num}`}
                         loading={idx < 20 ? undefined : 'lazy'}
-                        className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
+                        className={`w-full aspect-[3/4] object-cover rounded ${isSelected ? 'opacity-60' : ''}`}
                       />
                     ) : (
-                      <div className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border group-hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors">
+                      <div className="w-full aspect-[3/4] bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
                         {image.page_num}
                       </div>
                     )}
-                    {isFavorited(image.id) && (
-                      <div className="absolute top-1 right-1">
-                        <Heart className="w-4 h-4 fill-current text-red-400 drop-shadow" />
+                    {isSelected && (
+                      <div className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+                        <svg
+                          className="w-3 h-3 text-white"
+                          fill="none"
+                          stroke="currentColor"
+                          viewBox="0 0 24 24"
+                        >
+                          <path
+                            strokeLinecap="round"
+                            strokeLinejoin="round"
+                            strokeWidth={3}
+                            d="M5 13l4 4L19 7"
+                          />
+                        </svg>
                       </div>
                     )}
-                    {imageMenu?.imageId === image.id && (
-                      <div className="absolute inset-0 rounded border-2 border-vault-accent pointer-events-none" />
+                  </button>
+                )
+              }
+              return (
+                <div
+                  key={image.id}
+                  role="button"
+                  tabIndex={0}
+                  onClick={() =>
+                    router.push(
+                      `/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`,
+                    )
+                  }
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter')
+                      router.push(
+                        `/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`,
+                      )
+                  }}
+                  onTouchStart={(e) => {
+                    activeImageRef.current = image
+                    lpStart(e)
+                  }}
+                  onTouchMove={lpMove}
+                  onTouchEnd={lpEnd}
+                  onContextMenu={(e) => {
+                    activeImageRef.current = image
+                    lpCtx(e)
+                  }}
+                  className="group relative cursor-pointer select-none [-webkit-touch-callout:none]"
+                >
+                  {image.thumb_path ? (
+                    <img
+                      src={image.thumb_path}
+                      alt={`Page ${image.page_num}`}
+                      loading={idx < 20 ? undefined : 'lazy'}
+                      className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
+                    />
+                  ) : (
+                    <div className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border group-hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors">
+                      {image.page_num}
+                    </div>
+                  )}
+                  {isFavorited(image.id) && (
+                    <div className="absolute top-1 right-1">
+                      <Heart className="w-4 h-4 fill-current text-red-400 drop-shadow" />
+                    </div>
+                  )}
+                  {imageMenu?.imageId === image.id && (
+                    <div className="absolute inset-0 rounded border-2 border-vault-accent pointer-events-none" />
+                  )}
+                </div>
+              )
+            })}
+
+            {/* Placeholder pages if images array is shorter than pages count */}
+            {images.length === 0 &&
+              Array.from({ length: Math.min(gallery.pages, 40) }).map((_, i) => (
+                <Link
+                  key={i}
+                  href={`/reader/${gallery.source}/${gallery.source_id}?page=${i + 1}`}
+                  className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors"
+                >
+                  {i + 1}
+                </Link>
+              ))}
+          </div>
+        )}
+
+        {/* Excluded (hidden) images panel */}
+        {showExcluded && excludedBlobs.length > 0 && (
+          <div className="mt-4 pt-4 border-t border-vault-border">
+            <h3 className="text-sm font-semibold text-yellow-400 mb-3">
+              {t('library.excludedImages')} ({excludedBlobs.length})
+            </h3>
+            <div className="space-y-2">
+              {excludedBlobs.map((blob) => (
+                <div
+                  key={blob.blob_sha256}
+                  className="flex items-center justify-between bg-vault-input border border-vault-border rounded px-3 py-2"
+                >
+                  <div className="flex flex-col min-w-0 mr-3">
+                    <span className="text-xs text-vault-text-muted font-mono truncate">
+                      {blob.blob_sha256.slice(0, 16)}...
+                    </span>
+                    {blob.excluded_at && (
+                      <span className="text-[10px] text-vault-text-muted">
+                        {formatDate(blob.excluded_at)}
+                      </span>
                     )}
                   </div>
-                )
-              })}
-
-              {/* Placeholder pages if images array is shorter than pages count */}
-              {images.length === 0 &&
-                Array.from({ length: Math.min(gallery.pages, 40) }).map((_, i) => (
-                  <Link
-                    key={i}
-                    href={`/reader/${gallery.source}/${gallery.source_id}?page=${i + 1}`}
-                    className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors"
+                  <button
+                    onClick={() => handleRestore(blob.blob_sha256)}
+                    disabled={restoringHash === blob.blob_sha256}
+                    className="px-3 py-1 rounded text-xs font-medium border bg-green-900/30 border-green-700/50 text-green-400 hover:bg-green-900/50 transition-colors disabled:opacity-50 shrink-0"
                   >
-                    {i + 1}
-                  </Link>
-                ))}
+                    {restoringHash === blob.blob_sha256 ? '...' : t('library.restoreExcluded')}
+                  </button>
+                </div>
+              ))}
             </div>
-          )}
-
-          {/* Excluded (hidden) images panel */}
-          {showExcluded && excludedBlobs.length > 0 && (
-            <div className="mt-4 pt-4 border-t border-vault-border">
-              <h3 className="text-sm font-semibold text-yellow-400 mb-3">
-                {t('library.excludedImages')} ({excludedBlobs.length})
-              </h3>
-              <div className="space-y-2">
-                {excludedBlobs.map((blob) => (
-                  <div
-                    key={blob.blob_sha256}
-                    className="flex items-center justify-between bg-vault-input border border-vault-border rounded px-3 py-2"
-                  >
-                    <div className="flex flex-col min-w-0 mr-3">
-                      <span className="text-xs text-vault-text-muted font-mono truncate">
-                        {blob.blob_sha256.slice(0, 16)}...
-                      </span>
-                      {blob.excluded_at && (
-                        <span className="text-[10px] text-vault-text-muted">
-                          {formatDate(blob.excluded_at)}
-                        </span>
-                      )}
-                    </div>
-                    <button
-                      onClick={() => handleRestore(blob.blob_sha256)}
-                      disabled={restoringHash === blob.blob_sha256}
-                      className="px-3 py-1 rounded text-xs font-medium border bg-green-900/30 border-green-700/50 text-green-400 hover:bg-green-900/50 transition-colors disabled:opacity-50 shrink-0"
-                    >
-                      {restoringHash === blob.blob_sha256 ? '...' : t('library.restoreExcluded')}
-                    </button>
-                  </div>
-                ))}
-              </div>
-            </div>
-          )}
-        </div>
+          </div>
+        )}
+      </div>
 
       {imageMenu?.open && (
         <ImageContextMenu
@@ -1093,7 +1209,15 @@ export default function GalleryDetailPage() {
           onHide={handleImageHide}
           isFavorited={isFavorited(imageMenu.imageId)}
           onToggleFavorite={handleImageToggleFavorite}
+          onFindSimilar={() => {
+            setSimilarImageId(imageMenu.imageId)
+            setImageMenu(null)
+          }}
         />
+      )}
+
+      {similarImageId && (
+        <SimilarImagesPanel imageId={similarImageId} onClose={() => setSimilarImageId(null)} />
       )}
     </div>
   )

@@ -27,7 +27,12 @@ import {
   useRemoveLibrary,
   useToggleMonitor,
   useRescanLibraryPath,
+  useRecentImports,
+  useScanSettings,
+  useUpdateScanSettings,
 } from '@/hooks/useImport'
+import { useProfile } from '@/hooks/useProfile'
+import { useRouter } from 'next/navigation'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
 
@@ -99,9 +104,7 @@ function FolderPicker({
               <ArrowLeft size={16} />
             </button>
           )}
-          <h3 className="text-sm font-medium text-vault-text">
-            {t('import.folderPicker.title')}
-          </h3>
+          <h3 className="text-sm font-medium text-vault-text">{t('import.folderPicker.title')}</h3>
           <button
             onClick={onClose}
             className="ml-auto text-vault-text-muted hover:text-vault-text transition-colors shrink-0"
@@ -113,7 +116,9 @@ function FolderPicker({
         {/* Editable path input */}
         <div className="px-4 py-2 border-b border-vault-border bg-vault-bg">
           <div className="flex items-center gap-2">
-            <p className="text-xs text-vault-text-muted shrink-0">{t('import.folderPicker.path')}</p>
+            <p className="text-xs text-vault-text-muted shrink-0">
+              {t('import.folderPicker.path')}
+            </p>
             {isEditing ? (
               <input
                 type="text"
@@ -121,7 +126,10 @@ function FolderPicker({
                 onChange={(e) => setEditingPath(e.target.value)}
                 onKeyDown={(e) => {
                   if (e.key === 'Enter') handlePathSubmit()
-                  if (e.key === 'Escape') { setEditingPath(currentPath ?? ''); setIsEditing(false) }
+                  if (e.key === 'Escape') {
+                    setEditingPath(currentPath ?? '')
+                    setIsEditing(false)
+                  }
                 }}
                 onBlur={handlePathSubmit}
                 autoFocus
@@ -129,7 +137,10 @@ function FolderPicker({
               />
             ) : (
               <button
-                onClick={() => { setEditingPath(currentPath ?? '/'); setIsEditing(true) }}
+                onClick={() => {
+                  setEditingPath(currentPath ?? '/')
+                  setIsEditing(true)
+                }}
                 className="flex-1 text-left text-xs font-mono text-vault-accent hover:text-vault-text truncate transition-colors"
               >
                 {displayPath}
@@ -217,15 +228,26 @@ function FolderPicker({
 
 // ── Zone A: Monitored Folders ─────────────────────────────────────────
 
-function ZoneA() {
+function ZoneA({ isAdmin }: { isAdmin: boolean }) {
   const { data: libraries, mutate: mutateLibraries } = useLibraries()
   const { data: monitorData, mutate: mutateMonitor } = useMonitorStatus()
   const { trigger: addLib } = useAddLibrary()
   const { trigger: removeLib } = useRemoveLibrary()
   const { trigger: toggleMonitor, isMutating: togglingMonitor } = useToggleMonitor()
   const { trigger: rescanPath } = useRescanLibraryPath()
+  const { data: scanSettings } = useScanSettings(isAdmin)
+  const { trigger: updateScan } = useUpdateScanSettings()
   const [rescanningId, setRescanningId] = useState<number | null>(null)
   const [showFolderPicker, setShowFolderPicker] = useState(false)
+  const [scanInterval, setScanInterval] = useState<string>('')
+
+  // Sync scanInterval from server once loaded
+  useEffect(() => {
+    if (scanSettings && scanInterval === '') {
+      setScanInterval(String(scanSettings.interval_hours))
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [scanSettings])
 
   const handleMonitorToggle = async () => {
     if (!monitorData) return
@@ -246,6 +268,28 @@ function ZoneA() {
       toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
     } finally {
       setRescanningId(null)
+    }
+  }
+
+  const handleScanEnabledToggle = async () => {
+    if (!scanSettings) return
+    try {
+      await updateScan({ enabled: !scanSettings.enabled })
+      toast.success(t('import.scan.saved'))
+    } catch {
+      toast.error(t('import.scan.saveFailed'))
+    }
+  }
+
+  const handleIntervalBlur = async () => {
+    const val = parseInt(scanInterval, 10)
+    if (isNaN(val) || val < 6 || val > 168) return
+    if (scanSettings && val === scanSettings.interval_hours) return
+    try {
+      await updateScan({ interval_hours: val })
+      toast.success(t('import.scan.saved'))
+    } catch {
+      toast.error(t('import.scan.saveFailed'))
     }
   }
 
@@ -293,7 +337,10 @@ function ZoneA() {
                     title={t('import.zoneA.rescan')}
                     className="shrink-0 p-1.5 text-vault-text-muted hover:text-vault-accent transition-colors disabled:opacity-40"
                   >
-                    <RefreshCw size={13} className={rescanningId === lib.id ? 'animate-spin' : ''} />
+                    <RefreshCw
+                      size={13}
+                      className={rescanningId === lib.id ? 'animate-spin' : ''}
+                    />
                   </button>
                 )}
                 {/* Remove button */}
@@ -366,6 +413,55 @@ function ZoneA() {
             />
           </button>
         </div>
+
+        {/* Scan settings (admin only) */}
+        {isAdmin && scanSettings && (
+          <div className="pt-2 space-y-3 border-t border-vault-border/50 mt-2">
+            {/* Auto-scan toggle */}
+            <div className="flex items-center gap-3">
+              <span className="text-sm text-vault-text">{t('import.scan.autoEnabled')}</span>
+              <button
+                onClick={handleScanEnabledToggle}
+                className={`relative w-10 h-5 rounded-full transition-colors ${
+                  scanSettings.enabled ? 'bg-vault-accent' : 'bg-vault-border'
+                }`}
+              >
+                <span
+                  className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${
+                    scanSettings.enabled ? 'translate-x-5' : ''
+                  }`}
+                />
+              </button>
+            </div>
+
+            {/* Interval input */}
+            {scanSettings.enabled && (
+              <div className="flex items-center gap-2">
+                <label className="text-sm text-vault-text shrink-0">
+                  {t('import.scan.intervalLabel')}
+                </label>
+                <input
+                  type="number"
+                  min={6}
+                  max={168}
+                  value={scanInterval}
+                  onChange={(e) => setScanInterval(e.target.value)}
+                  onBlur={handleIntervalBlur}
+                  className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1 text-sm text-vault-text focus:outline-none focus:border-vault-accent"
+                />
+              </div>
+            )}
+
+            {/* Last scan time */}
+            <p className="text-xs text-vault-text-muted">
+              {scanSettings.last_run
+                ? t('import.scan.lastScan', {
+                    time: new Date(scanSettings.last_run).toLocaleString(),
+                  })
+                : t('import.scan.neverScanned')}
+            </p>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -383,7 +479,9 @@ type BatchMatch = {
 }
 
 function ZoneB() {
-  const [phase, setPhase] = useState<'idle' | 'scanning' | 'previewing' | 'importing' | 'done'>('idle')
+  const [phase, setPhase] = useState<'idle' | 'scanning' | 'previewing' | 'importing' | 'done'>(
+    'idle',
+  )
   const [selectedDir, setSelectedDir] = useState<string | null>(null)
   const [pattern, setPattern] = useState('{title}')
   const [mode, setMode] = useState<'copy' | 'link'>('copy')
@@ -466,7 +564,6 @@ function ZoneB() {
       </div>
 
       <div className="p-4 space-y-4">
-
         {/* ── idle: select folder ── */}
         {phase === 'idle' && (
           <>
@@ -516,7 +613,9 @@ function ZoneB() {
                 placeholder="{title}"
                 className="w-full bg-vault-input border border-vault-border rounded px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent text-sm font-mono"
               />
-              <p className="text-[11px] text-vault-text-muted mt-1">{t('import.batch.patternHelp')}</p>
+              <p className="text-[11px] text-vault-text-muted mt-1">
+                {t('import.batch.patternHelp')}
+              </p>
             </div>
 
             {/* Preset chips */}
@@ -545,7 +644,9 @@ function ZoneB() {
                 <button
                   onClick={() => setMode('copy')}
                   className={`px-4 py-1.5 text-xs font-medium transition-colors ${
-                    mode === 'copy' ? 'bg-vault-accent text-white' : 'bg-vault-input text-vault-text-muted hover:text-vault-text'
+                    mode === 'copy'
+                      ? 'bg-vault-accent text-white'
+                      : 'bg-vault-input text-vault-text-muted hover:text-vault-text'
                   }`}
                 >
                   {t('import.batch.modeCopy')}
@@ -553,7 +654,9 @@ function ZoneB() {
                 <button
                   onClick={() => setMode('link')}
                   className={`px-4 py-1.5 text-xs font-medium transition-colors ${
-                    mode === 'link' ? 'bg-vault-accent text-white' : 'bg-vault-input text-vault-text-muted hover:text-vault-text'
+                    mode === 'link'
+                      ? 'bg-vault-accent text-white'
+                      : 'bg-vault-input text-vault-text-muted hover:text-vault-text'
                   }`}
                 >
                   {t('import.batch.modeLink')}
@@ -606,7 +709,9 @@ function ZoneB() {
                 </span>
               )}
               <button
-                onClick={() => { setPhase('scanning'); }}
+                onClick={() => {
+                  setPhase('scanning')
+                }}
                 className="ml-auto text-xs text-vault-text-muted hover:text-vault-accent transition-colors"
               >
                 {t('import.zoneB.change')}
@@ -687,8 +792,12 @@ function ZoneB() {
                   <div className="divide-y divide-vault-border/50">
                     {unmatched.map((u) => (
                       <div key={u.rel_path} className="flex items-center gap-2 px-3 py-1.5 text-xs">
-                        <span className="font-mono text-vault-text-muted truncate flex-1">{u.rel_path}</span>
-                        <span className="text-vault-text-muted tabular-nums shrink-0">{u.file_count}</span>
+                        <span className="font-mono text-vault-text-muted truncate flex-1">
+                          {u.rel_path}
+                        </span>
+                        <span className="text-vault-text-muted tabular-nums shrink-0">
+                          {u.file_count}
+                        </span>
                       </div>
                     ))}
                   </div>
@@ -724,9 +833,10 @@ function ZoneB() {
               <div
                 className="h-full bg-blue-500 rounded-full transition-all duration-500"
                 style={{
-                  width: progress.total > 0
-                    ? `${Math.round((progress.completed / progress.total) * 100)}%`
-                    : '0%',
+                  width:
+                    progress.total > 0
+                      ? `${Math.round((progress.completed / progress.total) * 100)}%`
+                      : '0%',
                 }}
               />
             </div>
@@ -761,8 +871,83 @@ function ZoneB() {
             </button>
           </div>
         )}
-
       </div>
+    </div>
+  )
+}
+
+// ── Zone C: Recent Imports ────────────────────────────────────────────
+
+function ZoneC() {
+  const [open, setOpen] = useState(false)
+  const router = useRouter()
+  const { data: items } = useRecentImports()
+
+  const statusBadge = (status: string) => {
+    if (status === 'done' || status === 'completed')
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-green-500/10 text-green-400">
+          {t('import.recent.statusDone')}
+        </span>
+      )
+    if (status === 'failed')
+      return (
+        <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-red-500/10 text-red-400">
+          {t('import.recent.statusFailed')}
+        </span>
+      )
+    return (
+      <span className="px-2 py-0.5 rounded-full text-[11px] font-medium bg-vault-input text-vault-text-muted">
+        {t('import.recent.statusPending')}
+      </span>
+    )
+  }
+
+  return (
+    <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden mb-4">
+      <button
+        onClick={() => setOpen((o) => !o)}
+        className="w-full flex items-center justify-between px-5 py-4 hover:bg-vault-card-hover/30 transition-colors"
+      >
+        <div className="flex items-center gap-2">
+          <FolderInput size={15} className="text-vault-accent shrink-0" />
+          <h2 className="text-sm font-semibold text-vault-text">{t('import.recent.title')}</h2>
+        </div>
+        <ChevronDown
+          size={16}
+          className={`text-vault-text-muted transition-transform ${open ? 'rotate-180' : ''}`}
+        />
+      </button>
+
+      {open && (
+        <div className="border-t border-vault-border px-4 pb-4">
+          {!items || items.length === 0 ? (
+            <p className="text-sm text-vault-text-muted py-4 text-center">
+              {t('import.recent.noItems')}
+            </p>
+          ) : (
+            <div className="divide-y divide-vault-border/50">
+              {items.map((item) => (
+                <button
+                  key={item.id}
+                  onClick={() => router.push(`/library/local/${item.id}`)}
+                  className="w-full flex items-center gap-3 py-2.5 text-left hover:bg-vault-card-hover/30 transition-colors rounded"
+                >
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm text-vault-text truncate">{item.title}</p>
+                    <p className="text-xs text-vault-text-muted mt-0.5">
+                      {t('import.recent.pages', { count: String(item.pages) })}
+                      {' · '}
+                      {new Date(item.added_at).toLocaleDateString()}
+                    </p>
+                  </div>
+                  {statusBadge(item.status)}
+                </button>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
     </div>
   )
 }
@@ -771,32 +956,37 @@ function ZoneB() {
 
 export default function ImportPage() {
   const { data: monitorData } = useMonitorStatus()
+  const { data: profile } = useProfile()
+  const isAdmin = profile?.role === 'admin'
 
   return (
     <div className="max-w-3xl">
-        {/* Header */}
-        <div className="flex items-center gap-3 mb-6">
-          <FolderInput size={22} className="text-vault-accent shrink-0" />
-          <h1 className="text-2xl font-bold text-vault-text">{t('import.title')}</h1>
-          {monitorData && (
-            <span
-              className="ml-auto flex items-center gap-1 text-xs text-vault-text-muted"
-              title={monitorData.running ? t('import.monitor.active') : t('import.monitor.inactive')}
-            >
-              <CircleDot
-                size={12}
-                className={monitorData.running ? 'text-green-400' : 'text-vault-text-muted'}
-              />
-              {monitorData.running ? t('import.monitor.active') : t('import.monitor.inactive')}
-            </span>
-          )}
-        </div>
-
-        {/* A Zone: Monitored Folders */}
-        <ZoneA />
-
-        {/* B Zone: Import into System */}
-        <ZoneB />
+      {/* Header */}
+      <div className="flex items-center gap-3 mb-6">
+        <FolderInput size={22} className="text-vault-accent shrink-0" />
+        <h1 className="text-2xl font-bold text-vault-text">{t('import.title')}</h1>
+        {monitorData && (
+          <span
+            className="ml-auto flex items-center gap-1 text-xs text-vault-text-muted"
+            title={monitorData.running ? t('import.monitor.active') : t('import.monitor.inactive')}
+          >
+            <CircleDot
+              size={12}
+              className={monitorData.running ? 'text-green-400' : 'text-vault-text-muted'}
+            />
+            {monitorData.running ? t('import.monitor.active') : t('import.monitor.inactive')}
+          </span>
+        )}
       </div>
+
+      {/* A Zone: Monitored Folders */}
+      <ZoneA isAdmin={isAdmin} />
+
+      {/* B Zone: Import into System */}
+      <ZoneB />
+
+      {/* C Zone: Recent Imports */}
+      <ZoneC />
+    </div>
   )
 }

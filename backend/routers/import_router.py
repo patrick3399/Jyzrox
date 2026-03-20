@@ -8,10 +8,10 @@ from pathlib import Path
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select, text
+from sqlalchemy import desc, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from core.auth import require_auth, require_role
+from core.auth import require_role
 from core.config import get_all_library_paths, settings
 from core.database import async_session
 from core.redis_client import get_redis
@@ -22,6 +22,8 @@ router = APIRouter(tags=["import"])
 
 _member = require_role("member")
 _admin = require_role("admin")
+
+_SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
 
 
 class BatchScanRequest(BaseModel):
@@ -56,10 +58,7 @@ async def _validate_root_dir(root_dir: str) -> str:
     allowed_real = [os.path.realpath(p) for p in all_library_paths]
     allowed_real.append(os.path.realpath(settings.library_base_path))
 
-    if not any(
-        real_root == rp or real_root.startswith(rp + os.sep)
-        for rp in allowed_real
-    ):
+    if not any(real_root == rp or real_root.startswith(rp + os.sep) for rp in allowed_real):
         raise HTTPException(status_code=400, detail="root_dir must be within a configured library path")
 
     if not os.path.isdir(real_root):
@@ -72,18 +71,18 @@ async def _validate_root_dir(root_dir: str) -> str:
 
 def _build_pattern_regex(pattern: str) -> re.Pattern:
     """Build a full-match regex from a pattern string with {name} placeholders."""
-    parts = re.split(r'(\{[^}]+\})', pattern)
+    parts = re.split(r"(\{[^}]+\})", pattern)
     regex_parts = []
     for part in parts:
-        if part.startswith('{') and part.endswith('}'):
+        if part.startswith("{") and part.endswith("}"):
             name = part[1:-1]
-            if name == '_':
-                regex_parts.append(r'(?:[^/]+)')
+            if name == "_":
+                regex_parts.append(r"(?:[^/]+)")
             else:
-                regex_parts.append(rf'(?P<{name}>[^/]+)')
+                regex_parts.append(rf"(?P<{name}>[^/]+)")
         else:
             regex_parts.append(re.escape(part))
-    return re.compile('^' + ''.join(regex_parts) + '$')
+    return re.compile("^" + "".join(regex_parts) + "$")
 
 
 @router.post("/batch/scan")
@@ -100,7 +99,7 @@ async def batch_scan(
 
     for dirpath, dirnames, filenames in os.walk(real_root):
         # Skip hidden directories
-        dirnames[:] = [d for d in dirnames if not d.startswith('.')]
+        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
 
         media_files = [f for f in filenames if Path(f).suffix.lower() in _SUPPORTED_EXTS]
         if not media_files:
@@ -113,29 +112,33 @@ async def batch_scan(
             continue
 
         # Skip root itself
-        if rel_path == '.':
+        if rel_path == ".":
             continue
 
         # Normalize path separators
-        rel_path_normalized = rel_path.replace(os.sep, '/')
+        rel_path_normalized = rel_path.replace(os.sep, "/")
 
         m = pattern_re.match(rel_path_normalized)
         if m:
             groups = m.groupdict()
-            artist = groups.get('artist') or None
-            title = groups.get('title') or Path(abs_path).name
-            matches.append({
-                "rel_path": rel_path_normalized,
-                "abs_path": abs_path,
-                "artist": artist,
-                "title": title,
-                "file_count": len(media_files),
-            })
+            artist = groups.get("artist") or None
+            title = groups.get("title") or Path(abs_path).name
+            matches.append(
+                {
+                    "rel_path": rel_path_normalized,
+                    "abs_path": abs_path,
+                    "artist": artist,
+                    "title": title,
+                    "file_count": len(media_files),
+                }
+            )
         else:
-            unmatched.append({
-                "rel_path": rel_path_normalized,
-                "file_count": len(media_files),
-            })
+            unmatched.append(
+                {
+                    "rel_path": rel_path_normalized,
+                    "file_count": len(media_files),
+                }
+            )
 
     return {"matches": matches, "unmatched": unmatched}
 
@@ -159,23 +162,29 @@ async def batch_start(
     await r.setex(
         f"import:batch:{batch_id}",
         3600,
-        json.dumps({
-            "total": total,
-            "completed": 0,
-            "failed": 0,
-            "status": "running",
-            "current_gallery_id": None,
-        }),
+        json.dumps(
+            {
+                "total": total,
+                "completed": 0,
+                "failed": 0,
+                "status": "running",
+                "current_gallery_id": None,
+            }
+        ),
     )
     await r.setex(f"import:batch:{batch_id}:owner", 3600, str(auth["user_id"]))
 
     # If link mode, auto-register root_dir as a library path
     if req.mode == "link":
         async with async_session() as session:
-            stmt = pg_insert(LibraryPath).values(
-                path=real_root,
-                label=Path(real_root).name,
-            ).on_conflict_do_nothing()
+            stmt = (
+                pg_insert(LibraryPath)
+                .values(
+                    path=real_root,
+                    label=Path(real_root).name,
+                )
+                .on_conflict_do_nothing()
+            )
             await session.execute(stmt)
             await session.commit()
 
@@ -222,90 +231,6 @@ async def get_import_progress(
     return {"gallery_id": gallery_id, **json.loads(data)}
 
 
-_SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
-
-
-@router.get("/browse")
-async def browse_directory(path: str = "", library: str = "", _: dict = Depends(_member)):
-    """List directories and image files within a library path.
-
-    The ``library`` param selects which library root to browse (must be one of
-    the configured library paths). If omitted, the primary gallery path is used.
-    """
-    # Determine and validate the base library path
-    all_paths = await get_all_library_paths()
-
-    if library:
-        real_lib = os.path.realpath(library)
-        allowed = [os.path.realpath(p) for p in all_paths]
-        # Also allow the base path itself even if the directory doesn't exist yet
-        if os.path.realpath(settings.library_base_path) not in allowed:
-            allowed.append(os.path.realpath(settings.library_base_path))
-        if real_lib not in allowed:
-            raise HTTPException(status_code=400, detail="Library path not in configured paths")
-        base = Path(real_lib)
-    else:
-        base = Path(settings.library_base_path)
-
-    target = (base / path).resolve()
-
-    # Security: use os.path.realpath to prevent path traversal via symlinks.
-    real_base = os.path.realpath(str(base))
-    real_target = os.path.realpath(str(target))
-    if not (real_target == real_base or real_target.startswith(real_base + os.sep)):
-        raise HTTPException(status_code=400, detail="Path outside allowed directory")
-
-    # Block any path that resolves inside the internal download directory.
-    real_data = os.path.realpath(settings.data_gallery_path)
-    if real_target == real_data or real_target.startswith(real_data + os.sep):
-        raise HTTPException(
-            status_code=400,
-            detail="Browsing the internal download directory is not allowed",
-        )
-    if not target.is_dir():
-        raise HTTPException(status_code=404, detail="Directory not found")
-
-    entries = []
-    try:
-        items = sorted(target.iterdir(), key=lambda x: x.name)
-    except OSError as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to list directory: {exc}") from exc
-
-    for item in items:
-        if item.name.startswith("."):
-            continue
-        if item.is_dir():
-            try:
-                file_count = sum(
-                    1 for f in item.iterdir()
-                    if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS
-                )
-            except OSError:
-                file_count = 0
-            entries.append({"name": item.name, "type": "dir", "file_count": file_count})
-        elif item.is_file() and item.suffix.lower() in _SUPPORTED_EXTS:
-            try:
-                size = item.stat().st_size
-            except OSError:
-                size = 0
-            entries.append({"name": item.name, "type": "file", "size": size})
-
-    # Mark directories that are already imported
-    if entries:
-        dir_names = [e["name"] for e in entries if e["type"] == "dir"]
-        if dir_names:
-            async with async_session() as session:
-                result = await session.execute(
-                    select(Gallery.source_id).where(Gallery.source_id.in_(dir_names))
-                )
-                imported_ids = {row[0] for row in result.fetchall()}
-            for e in entries:
-                if e["type"] == "dir":
-                    e["imported"] = e["name"] in imported_ids
-
-    return {"path": path or "/", "base": str(base), "library": str(base), "entries": entries}
-
-
 @router.get("/mount-points")
 async def list_mount_points(_: dict = Depends(_member)):
     """List meaningful mount points in the container (similar to Jellyfin's GetDrives).
@@ -322,15 +247,17 @@ async def list_mount_points(_: dict = Depends(_member)):
         if p.mountpoint in MOUNT_EXCLUDE_PATHS:
             continue
         # Skip /dev/* mounts
-        if p.mountpoint.startswith('/dev/'):
+        if p.mountpoint.startswith("/dev/"):
             continue
         if not os.path.isdir(p.mountpoint):
             continue
-        mounts.append({
-            "name": Path(p.mountpoint).name or p.mountpoint,
-            "path": p.mountpoint,
-            "type": "dir",
-        })
+        mounts.append(
+            {
+                "name": Path(p.mountpoint).name or p.mountpoint,
+                "path": p.mountpoint,
+                "type": "dir",
+            }
+        )
 
     # Sort by path for consistent ordering
     mounts.sort(key=lambda m: m["path"])
@@ -349,9 +276,23 @@ async def browse_filesystem(path: str = "/mnt", _: dict = Depends(_member)):
     real_target = os.path.realpath(str(target))
 
     # Block sensitive paths
-    blocked = ["/proc", "/sys", "/dev", "/etc", "/var", "/usr", "/bin", "/sbin",
-               "/lib", "/root", "/tmp", "/run", "/boot", "/srv",
-               os.path.realpath(settings.data_gallery_path)]
+    blocked = [
+        "/proc",
+        "/sys",
+        "/dev",
+        "/etc",
+        "/var",
+        "/usr",
+        "/bin",
+        "/sbin",
+        "/lib",
+        "/root",
+        "/tmp",
+        "/run",
+        "/boot",
+        "/srv",
+        os.path.realpath(settings.data_gallery_path),
+    ]
     for b in blocked:
         if real_target == b or real_target.startswith(b + os.sep):
             raise HTTPException(status_code=400, detail="Cannot browse this path")
@@ -385,6 +326,7 @@ async def browse_filesystem(path: str = "/mnt", _: dict = Depends(_member)):
 async def recent_imports(auth: dict = Depends(_member)):
     """Return the 20 most recently added local galleries."""
     from core.auth import gallery_access_filter
+
     async with async_session() as session:
         result = await session.execute(
             select(Gallery)
@@ -464,7 +406,11 @@ async def rescan_gallery(
         gallery = await session.get(Gallery, gallery_id)
         if not gallery:
             raise HTTPException(404, "Gallery not found")
-        if auth["role"] != "admin" and gallery.created_by_user_id is not None and gallery.created_by_user_id != auth["user_id"]:
+        if (
+            auth["role"] != "admin"
+            and gallery.created_by_user_id is not None
+            and gallery.created_by_user_id != auth["user_id"]
+        ):
             raise HTTPException(403, "Not your gallery")
     arq = request.app.state.arq
     await arq.enqueue_job("rescan_gallery_job", gallery_id)
@@ -510,6 +456,7 @@ async def update_scan_settings(req: ScanScheduleRequest, _: dict = Depends(_admi
 
 # ── Library Path Management ───────────────────────────────────────────
 
+
 @router.get("/libraries")
 async def list_libraries(_: dict = Depends(_member)):
     """List all library paths (primary + extras from env + DB-stored)."""
@@ -532,16 +479,18 @@ async def list_libraries(_: dict = Depends(_member)):
     libraries = []
     for p in all_paths:
         lp = db_map.get(p)
-        libraries.append({
-            "id": lp.id if lp else None,
-            "path": p,
-            "label": lp.label if lp else Path(p).name,
-            "enabled": lp.enabled if lp else True,
-            "monitor": lp.monitor if lp else True,
-            "exists": Path(p).is_dir(),
-            "added_at": str(lp.added_at) if lp else None,
-            "gallery_count": gallery_counts.get(p, 0),
-        })
+        libraries.append(
+            {
+                "id": lp.id if lp else None,
+                "path": p,
+                "label": lp.label if lp else Path(p).name,
+                "enabled": lp.enabled if lp else True,
+                "monitor": lp.monitor if lp else True,
+                "exists": Path(p).is_dir(),
+                "added_at": str(lp.added_at) if lp else None,
+                "gallery_count": gallery_counts.get(p, 0),
+            }
+        )
     return libraries
 
 
@@ -558,10 +507,14 @@ async def add_library(req: AddLibraryRequest, _: dict = Depends(_admin)):
         raise HTTPException(status_code=400, detail="Path does not exist or is not a directory")
 
     async with async_session() as session:
-        stmt = pg_insert(LibraryPath).values(
-            path=real_path,
-            label=req.label or Path(real_path).name,
-        ).on_conflict_do_nothing()
+        stmt = (
+            pg_insert(LibraryPath)
+            .values(
+                path=real_path,
+                label=req.label or Path(real_path).name,
+            )
+            .on_conflict_do_nothing()
+        )
         await session.execute(stmt)
         await session.commit()
 
@@ -581,6 +534,7 @@ async def remove_library(library_id: int, _: dict = Depends(_admin)):
 
 
 # ── Monitor Status ────────────────────────────────────────────────────
+
 
 @router.get("/monitor/status")
 async def monitor_status(_: dict = Depends(_member)):

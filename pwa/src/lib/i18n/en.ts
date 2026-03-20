@@ -1526,6 +1526,53 @@ const en: Record<string, string> = {
   'downloadDashboard.resume': 'Resume',
   'downloadDashboard.toggleBoostOn': 'Enable Boost',
   'downloadDashboard.toggleBoostOff': 'Disable Boost',
+
+  // ── Admin Event Log ──
+  'adminEvents.title': 'Recent Events',
+  'adminEvents.colTime': 'Time',
+  'adminEvents.colType': 'Event',
+  'adminEvents.colResource': 'Resource',
+  'adminEvents.colActor': 'Actor',
+  'adminEvents.noEvents': 'No recent events',
+  'adminEvents.filterAll': 'All',
+  'adminEvents.filterDownload': 'Download',
+  'adminEvents.filterGallery': 'Gallery',
+  'adminEvents.filterImport': 'Import',
+  'adminEvents.filterSystem': 'System',
+  'adminEvents.actorSystem': 'System',
+
+  // ── Recent Imports ──
+  'import.recent.title': 'Recent Imports',
+  'import.recent.noItems': 'No recent imports',
+  'import.recent.pages': '{count} pages',
+  'import.recent.statusDone': 'Done',
+  'import.recent.statusFailed': 'Failed',
+  'import.recent.statusPending': 'Pending',
+
+  // ── Scan Settings ──
+  'import.scan.autoEnabled': 'Auto-scan enabled',
+  'import.scan.intervalLabel': 'Scan interval (hours)',
+  'import.scan.lastScan': 'Last scan: {time}',
+  'import.scan.neverScanned': 'Never',
+  'import.scan.saved': 'Scan settings saved',
+  'import.scan.saveFailed': 'Failed to save scan settings',
+
+  // ── Advanced Search ──
+  'library.advancedSearchActive': 'Advanced search active',
+  'library.syntaxHelp': 'Search Syntax',
+  'library.syntaxTagSearch': 'search by tag',
+  'library.syntaxExclude': 'exclude tag',
+  'library.syntaxTitle': 'title search',
+  'library.syntaxSource': 'filter by source',
+  'library.syntaxRating': 'minimum rating',
+  'library.syntaxFavorited': 'favorites only',
+  'library.syntaxSort': 'sort override',
+
+  // ── Similar Images ──
+  'similar.title': 'Similar Images',
+  'similar.noResults': 'No similar images found',
+  'similar.distance': 'd={d}',
+  'similar.findSimilar': 'Find Similar',
 }
 
 export default en
