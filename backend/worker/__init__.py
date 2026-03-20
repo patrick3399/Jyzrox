@@ -109,6 +109,54 @@ async def _log_level_subscriber(ctx: dict) -> None:
             pass
 
 
+async def _ensure_archive_table_schema() -> None:
+    """Ensure all gallery-dl archive tables have the gallery_id FK column.
+
+    Called at worker startup. Finds tables that gallery-dl auto-created
+    without the Jyzrox extensions and ALTERs them to add gallery_id + created_at.
+    """
+    from sqlalchemy import text
+
+    from core.database import AsyncSessionLocal
+
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(
+            text("""
+            SELECT t.table_name
+            FROM information_schema.columns t
+            WHERE t.column_name = 'entry'
+              AND t.table_schema = 'public'
+              AND t.table_name NOT IN (
+                  SELECT table_name FROM information_schema.columns
+                  WHERE column_name = 'gallery_id' AND table_schema = 'public'
+              )
+        """)
+        )
+        tables = [row[0] for row in result]
+        for table in tables:
+            col_count = (
+                await session.execute(
+                    text(
+                        "SELECT COUNT(*) FROM information_schema.columns "
+                        "WHERE table_name = :t AND table_schema = 'public'"
+                    ),
+                    {"t": table},
+                )
+            ).scalar()
+            if col_count != 1:
+                continue  # not a gallery-dl archive table (has more than just 'entry')
+            await session.execute(
+                text(f'''
+                ALTER TABLE "{table}"
+                ADD COLUMN IF NOT EXISTS gallery_id BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+                ADD COLUMN IF NOT EXISTS job_id UUID,
+                ADD COLUMN IF NOT EXISTS created_at TIMESTAMPTZ DEFAULT now()
+            ''')
+            )
+            logger.info("[archive] upgraded table '%s' with gallery_id FK", table)
+        await session.commit()
+
+
 async def startup(ctx: dict) -> None:
     logger.info("ARQ Worker started — Jyzrox")
     await init_redis()
@@ -133,6 +181,11 @@ async def startup(ctx: dict) -> None:
         await ensure_venv()
     except Exception as exc:
         logger.error("gallery-dl venv initialization failed: %s", exc)
+    # Auto-upgrade archive tables created by gallery-dl without Jyzrox columns
+    try:
+        await _ensure_archive_table_schema()
+    except Exception as exc:
+        logger.warning("Archive table schema check failed (non-fatal): %s", exc)
     # Start log level subscriber background task
     ctx["_log_level_task"] = asyncio.ensure_future(_log_level_subscriber(ctx))
     r = ctx["redis"]
