@@ -23,7 +23,6 @@ Implementation note on init_redis / close_redis:
 """
 
 import json
-import sys
 from contextlib import contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -37,6 +36,7 @@ def _real_redis_fns():
     """Context manager that briefly restores init_redis and close_redis to their
     original implementations by stopping the conftest-level patches."""
     import sys as _sys
+
     _cf = _sys.modules.get("conftest") or _sys.modules.get("tests.conftest")
     if _cf is None:
         raise RuntimeError("conftest module not found in sys.modules")
@@ -227,6 +227,7 @@ async def test_publish_job_event_delegates_job_update_to_event_bus():
     """publish_job_event() with type=job_update must delegate to EventBus pipeline,
     publishing to events:download.completed and events:all channels."""
     from unittest.mock import MagicMock
+
     from core.redis_client import publish_job_event
 
     mock_redis = AsyncMock()
@@ -302,3 +303,310 @@ def test_get_pubsub_returns_pubsub_from_redis_instance():
         result = get_pubsub()
 
     assert result is mock_pubsub
+
+
+# ---------------------------------------------------------------------------
+# TestEhSemaphore
+# ---------------------------------------------------------------------------
+
+
+class TestEhSemaphore:
+    async def test_acquire_success_yields_and_decrements_on_exit(self):
+        """acquire() yields when count <= max_count, then decrements the counter."""
+        from core.redis_client import EhSemaphore
+
+        sem = EhSemaphore()
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)  # no custom concurrency
+        mock_redis.incr = AsyncMock(return_value=1)
+        mock_redis.decr = AsyncMock(return_value=0)
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with patch("core.redis_client.settings") as mock_settings:
+                mock_settings.eh_max_concurrency = 2
+                mock_settings.eh_acquire_timeout = 5
+                async with sem.acquire():
+                    pass  # slot acquired successfully
+
+        mock_redis.decr.assert_called_once_with(EhSemaphore._COUNTER_KEY)
+
+    async def test_release_called_on_context_exit(self):
+        """decr is called in the finally block even when no exception occurs."""
+        from core.redis_client import EhSemaphore
+
+        sem = EhSemaphore()
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.incr = AsyncMock(return_value=1)
+        mock_redis.decr = AsyncMock(return_value=0)
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with patch("core.redis_client.settings") as mock_settings:
+                mock_settings.eh_max_concurrency = 2
+                mock_settings.eh_acquire_timeout = 5
+                async with sem.acquire():
+                    assert mock_redis.decr.call_count == 0  # not yet released
+
+        assert mock_redis.decr.call_count == 1  # released on exit
+
+    async def test_acquire_timeout_raises_timeout_error(self):
+        """acquire() raises TimeoutError when no slot is available within timeout."""
+        from core.redis_client import EhSemaphore
+
+        sem = EhSemaphore()
+        sem.acquire_timeout = 0  # expire immediately
+
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.incr = AsyncMock(return_value=100)  # always > max
+        mock_redis.decr = AsyncMock(return_value=99)
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with patch("core.redis_client.settings") as mock_settings:
+                mock_settings.eh_max_concurrency = 2
+                mock_settings.eh_acquire_timeout = 0
+                with pytest.raises(TimeoutError, match="EH semaphore"):
+                    async with sem.acquire():
+                        pass
+
+    async def test_concurrency_limit_read_from_redis(self):
+        """acquire() reads concurrency limit from rate_limit:config:ehentai:concurrency."""
+        from core.redis_client import EhSemaphore
+
+        sem = EhSemaphore()
+        mock_redis = AsyncMock()
+
+        def _get(key):
+            if key == "rate_limit:config:ehentai:concurrency":
+                return b"5"
+            return None
+
+        mock_redis.get = AsyncMock(side_effect=_get)
+        mock_redis.incr = AsyncMock(return_value=4)  # ≤ 5 → should acquire
+        mock_redis.decr = AsyncMock(return_value=3)
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with patch("core.redis_client.settings") as mock_settings:
+                mock_settings.eh_max_concurrency = 2
+                mock_settings.eh_acquire_timeout = 5
+                async with sem.acquire():
+                    pass  # acquired with custom limit of 5
+
+        mock_redis.decr.assert_called_once()
+
+    async def test_default_concurrency_fallback_when_no_redis_key(self):
+        """acquire() uses settings.eh_max_concurrency when no Redis key is set."""
+        from core.redis_client import EhSemaphore
+
+        sem = EhSemaphore()
+        mock_redis = AsyncMock()
+        mock_redis.get = AsyncMock(return_value=None)  # no Redis key
+        mock_redis.incr = AsyncMock(return_value=2)  # == eh_max_concurrency=2 → should acquire
+        mock_redis.decr = AsyncMock(return_value=1)
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with patch("core.redis_client.settings") as mock_settings:
+                mock_settings.eh_max_concurrency = 2
+                mock_settings.eh_acquire_timeout = 5
+                async with sem.acquire():
+                    pass
+
+        mock_redis.decr.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# TestDownloadSemaphoreAcquire
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadSemaphoreAcquire:
+    async def test_acquire_success_returns_nonnegative_wait_time(self):
+        """acquire() returns elapsed wait time (≥ 0) when slot is immediately available."""
+        from core.redis_client import DownloadSemaphore
+
+        sem = DownloadSemaphore("ehentai")
+        mock_redis = AsyncMock()
+        mock_redis.eval = AsyncMock(return_value=1)  # Lua returns 1 = acquired
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with patch("core.events.emit_safe", new_callable=AsyncMock):
+                wait_time = await sem.acquire("job-001")
+
+        assert isinstance(wait_time, float)
+        assert wait_time >= 0
+
+    async def test_acquire_timeout_raises_timeout_error(self):
+        """acquire() raises TimeoutError when slot never becomes available."""
+        from core.redis_client import DownloadSemaphore
+
+        sem = DownloadSemaphore("ehentai")
+        mock_redis = AsyncMock()
+        mock_redis.eval = AsyncMock(return_value=0)  # never acquired
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with pytest.raises(TimeoutError, match="Download semaphore"):
+                await sem.acquire("job-timeout", timeout=0)
+
+    async def test_acquire_emits_semaphore_changed_event(self):
+        """acquire() emits SEMAPHORE_CHANGED event with action=acquire on success."""
+        from core.redis_client import DownloadSemaphore
+
+        sem = DownloadSemaphore("pixiv")
+        mock_redis = AsyncMock()
+        mock_redis.eval = AsyncMock(return_value=1)
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with patch("core.events.emit_safe", new_callable=AsyncMock) as mock_emit:
+                await sem.acquire("job-emit")
+
+        mock_emit.assert_awaited_once()
+        call_kwargs = mock_emit.call_args[1]
+        assert call_kwargs.get("action") == "acquire"
+        assert call_kwargs.get("job_id") == "job-emit"
+
+
+# ---------------------------------------------------------------------------
+# TestDownloadSemaphoreRelease
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadSemaphoreRelease:
+    async def test_release_calls_zrem_with_correct_key_and_job(self):
+        """release() removes the job from the sorted set via ZREM."""
+        from core.redis_client import DownloadSemaphore
+
+        sem = DownloadSemaphore("ehentai")
+        mock_redis = AsyncMock()
+        mock_redis.zrem = AsyncMock(return_value=1)
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with patch("core.events.emit_safe", new_callable=AsyncMock):
+                await sem.release("job-zrem")
+
+        mock_redis.zrem.assert_awaited_once_with(sem._key, "job-zrem")
+
+    async def test_release_emits_semaphore_changed_event(self):
+        """release() emits SEMAPHORE_CHANGED event with action=release."""
+        from core.redis_client import DownloadSemaphore
+
+        sem = DownloadSemaphore("gallery_dl")
+        mock_redis = AsyncMock()
+        mock_redis.zrem = AsyncMock(return_value=1)
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            with patch("core.events.emit_safe", new_callable=AsyncMock) as mock_emit:
+                await sem.release("job-release-emit")
+
+        mock_emit.assert_awaited_once()
+        call_kwargs = mock_emit.call_args[1]
+        assert call_kwargs.get("action") == "release"
+        assert call_kwargs.get("job_id") == "job-release-emit"
+
+
+# ---------------------------------------------------------------------------
+# TestDownloadSemaphoreHeartbeat
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadSemaphoreHeartbeat:
+    async def test_heartbeat_returns_true_when_job_exists_in_set(self):
+        """heartbeat() returns True when Lua script finds the job in the sorted set."""
+        from core.redis_client import DownloadSemaphore
+
+        sem = DownloadSemaphore("ehentai")
+        mock_redis = AsyncMock()
+        mock_redis.eval = AsyncMock(return_value=1)  # job exists
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            result = await sem.heartbeat("job-alive")
+
+        assert result is True
+
+    async def test_heartbeat_returns_false_when_job_was_evicted(self):
+        """heartbeat() returns False when Lua script finds job was evicted."""
+        from core.redis_client import DownloadSemaphore
+
+        sem = DownloadSemaphore("ehentai")
+        mock_redis = AsyncMock()
+        mock_redis.eval = AsyncMock(return_value=0)  # job not found
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            result = await sem.heartbeat("job-evicted")
+
+        assert result is False
+
+
+# ---------------------------------------------------------------------------
+# TestDownloadSemaphoreGetAllActive
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadSemaphoreGetAllActive:
+    async def test_returns_empty_dict_when_no_keys_exist(self):
+        """get_all_active() returns {} when scan finds no download:sem:* keys."""
+        from core.redis_client import DownloadSemaphore
+
+        mock_redis = AsyncMock()
+        mock_redis.scan = AsyncMock(return_value=(0, []))  # no keys
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            result = await DownloadSemaphore.get_all_active()
+
+        assert result == {}
+
+    async def test_returns_usage_info_for_multiple_sources(self):
+        """get_all_active() returns {source: {used, max}} for each active key."""
+        from core.redis_client import DownloadSemaphore
+
+        mock_redis = AsyncMock()
+        mock_redis.scan = AsyncMock(return_value=(0, [b"download:sem:ehentai", b"download:sem:pixiv"]))
+
+        mock_pipe = MagicMock()
+        mock_pipe.execute = AsyncMock(return_value=[2, None, 1, b"3"])
+        # ehentai: used=2, limit=None (default 2); pixiv: used=1, limit=b"3"
+        mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+
+        with patch("core.redis_client.get_redis", return_value=mock_redis):
+            result = await DownloadSemaphore.get_all_active()
+
+        assert "ehentai" in result
+        assert result["ehentai"]["used"] == 2
+        assert result["ehentai"]["max"] == 2  # default from _LIMITS
+        assert "pixiv" in result
+        assert result["pixiv"]["used"] == 1
+        assert result["pixiv"]["max"] == 3  # from Redis value b"3"
+
+
+# ---------------------------------------------------------------------------
+# TestDownloadSemaphoreAcquireCtx
+# ---------------------------------------------------------------------------
+
+
+class TestDownloadSemaphoreAcquireCtx:
+    async def test_acquire_ctx_calls_acquire_and_release_on_normal_exit(self):
+        """acquire_ctx() calls acquire() then release() on clean exit."""
+        from core.redis_client import DownloadSemaphore
+
+        sem = DownloadSemaphore("ehentai")
+        sem.acquire = AsyncMock(return_value=0.0)
+        sem.release = AsyncMock()
+
+        async with sem.acquire_ctx("job-ctx"):
+            pass
+
+        sem.acquire.assert_awaited_once_with("job-ctx")
+        sem.release.assert_awaited_once_with("job-ctx")
+
+    async def test_acquire_ctx_releases_even_when_exception_raised(self):
+        """acquire_ctx() calls release() in finally even when body raises."""
+        from core.redis_client import DownloadSemaphore
+
+        sem = DownloadSemaphore("ehentai")
+        sem.acquire = AsyncMock(return_value=0.0)
+        sem.release = AsyncMock()
+
+        with pytest.raises(ValueError):
+            async with sem.acquire_ctx("job-exc"):
+                raise ValueError("body error")
+
+        sem.release.assert_awaited_once_with("job-exc")

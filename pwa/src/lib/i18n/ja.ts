@@ -659,7 +659,6 @@ const ja: Record<string, string> = {
   'browse.pageN': '{page}ページ',
   'browse.cannotJumpForward': '最後のページに達しました',
   'browse.failedLoadResults': '結果の読み込みに失敗しました',
-  'browse.favoritesN': 'お気に入り {n}',
   'browse.matchingQuery': '「{query}」に一致',
   'browse.failedLoadFavorites': 'お気に入りの読み込みに失敗しました',
   'browse.failedLoadPopular': '人気の読み込みに失敗しました',

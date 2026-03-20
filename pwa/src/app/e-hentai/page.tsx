@@ -15,6 +15,7 @@ import { CredentialBanner } from '@/components/CredentialBanner'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { RatingStars } from '@/components/RatingStars'
+import Paginator from '@/components/Paginator'
 import {
   Search as SearchIcon,
   X as XIcon,
@@ -444,15 +445,28 @@ function BrowsePage() {
   const initialFavCat = searchParams.get('favcat') || 'all'
   const initialFavSearch = searchParams.get('favsearch') || ''
 
-  const [activeTab, setActiveTab] = useState<BrowseTab>(initialTab)
+  // Restore saved browse state from back-navigation (consumed once on mount)
+  const [restored] = useState(() => {
+    if (typeof window === 'undefined') return null
+    const raw = sessionStorage.getItem('eh_browse_state')
+    if (!raw) return null
+    sessionStorage.removeItem('eh_browse_state')
+    try {
+      return JSON.parse(raw)
+    } catch {
+      return null
+    }
+  })
+
+  const [activeTab, setActiveTab] = useState<BrowseTab>(restored?.activeTab ?? initialTab)
   const [inputValue, setInputValue] = useState(initialQ)
   const [searchQuery, setSearchQuery] = useState(initialQ)
   const [category, setCategory] = useState<string | null>(null)
 
   // Cursor-based pagination for search tab
-  const [currentCursor, setCurrentCursor] = useState<number | null>(null)
-  const [prevCursors, setPrevCursors] = useState<number[]>([])
-  const [pageIndex, setPageIndex] = useState(0)
+  const [currentCursor, setCurrentCursor] = useState<number | null>(restored?.currentCursor ?? null)
+  const [prevCursors, setPrevCursors] = useState<number[]>(restored?.prevCursors ?? [])
+  const [pageIndex, setPageIndex] = useState(restored?.pageIndex ?? 0)
 
   const [viewMode, setViewMode] = useState<ViewMode>('grid')
   const [selectedGallery, setSelectedGallery] = useState<EhGallery | null>(null)
@@ -479,33 +493,43 @@ function BrowsePage() {
   const [pageTo, setPageTo] = useState<string>(searchParams.get('pto') ?? '')
 
   // Favorites state (cursor-based pagination — EH favorites uses next/prev cursors, not page numbers)
-  const [favCat, setFavCat] = useState<string>(initialFavCat)
-  const [favCursor, setFavCursor] = useState<{ next?: string; prev?: string }>({})
-  const [favSearch, setFavSearch] = useState(initialFavSearch)
-
-  // Page input for search pagination
-  const [pageInputValue, setPageInputValue] = useState('1')
+  const [favCat, setFavCat] = useState<string>(restored?.favCat ?? initialFavCat)
+  const [favCursor, setFavCursor] = useState<{ next?: string; prev?: string }>(
+    restored?.favCursor ?? {},
+  )
+  const [favSearch, setFavSearch] = useState(restored?.favSearch ?? initialFavSearch)
+  const [favPageIndex, setFavPageIndex] = useState(restored?.favPageIndex ?? 0)
 
   // Infinite scroll state
   const [loadMode] = useState<LoadMode>(getLoadMode)
-  const [scrollGalleries, setScrollGalleries] = useState<EhGallery[]>([])
+  const [scrollGalleries, setScrollGalleries] = useState<EhGallery[]>(
+    restored?.scrollGalleries ?? [],
+  )
   const [scrollPage, setScrollPage] = useState(0)
-  const [scrollNextGid, setScrollNextGid] = useState<number | null>(null)
-  const scrollNeedsSeedRef = useRef(true)
+  const [scrollNextGid, setScrollNextGid] = useState<number | null>(restored?.scrollNextGid ?? null)
+  const scrollNeedsSeedRef = useRef(
+    restored?.scrollGalleries != null && restored.scrollGalleries.length > 0 ? false : true,
+  )
   const [scrollLoading, setScrollLoading] = useState(false)
-  const [scrollHasMore, setScrollHasMore] = useState(true)
+  const [scrollHasMore, setScrollHasMore] = useState(restored?.scrollHasMore ?? true)
   // Same for favorites scroll (cursor-based)
-  const [favScrollGalleries, setFavScrollGalleries] = useState<EhGallery[]>([])
-  const [favScrollNextCursor, setFavScrollNextCursor] = useState<string | undefined>(undefined)
+  const [favScrollGalleries, setFavScrollGalleries] = useState<EhGallery[]>(
+    restored?.favScrollGalleries ?? [],
+  )
+  const [favScrollNextCursor, setFavScrollNextCursor] = useState<string | undefined>(
+    restored?.favScrollNextCursor,
+  )
   const [favScrollLoading, setFavScrollLoading] = useState(false)
-  const [favScrollHasMore, setFavScrollHasMore] = useState(true)
+  const [favScrollHasMore, setFavScrollHasMore] = useState(restored?.favScrollHasMore ?? true)
 
-  // Toplist state — initialised from URL so back-navigation preserves the selection
+  // Toplist state — initialised from URL (or restored state) so back-navigation preserves the selection
   const [toplistTl, setToplistTl] = useState(() => {
+    if (restored?.toplistTl != null) return restored.toplistTl
     const tl = searchParams.get('tl')
     return tl ? Number(tl) : 11
   })
   const [toplistPage, setToplistPage] = useState(() => {
+    if (restored?.toplistPage != null) return restored.toplistPage
     const p = searchParams.get('tlpage')
     return p ? Number(p) : 0
   })
@@ -698,25 +722,19 @@ function BrowsePage() {
   // Restore scroll position after back-navigation (once data is loaded)
   const scrollRestoredRef = useRef(false)
   useEffect(() => {
-    if (scrollRestoredRef.current) return
-    const hasData = activeTab === 'search' ? !!data : !!favData
+    if (scrollRestoredRef.current || !restored?.scrollY) return
+    const hasData =
+      activeTab === 'search' || activeTab === 'popular'
+        ? !!data || scrollGalleries.length > 0
+        : activeTab === 'favorites'
+          ? !!favData || favScrollGalleries.length > 0
+          : !!toplistData
     if (!hasData) return
-    const savedY = sessionStorage.getItem('browse_scrollY')
-    if (savedY) {
-      scrollRestoredRef.current = true
-      sessionStorage.removeItem('browse_scrollY')
-      requestAnimationFrame(() => {
-        window.scrollTo(0, Number(savedY))
-      })
-    } else {
-      scrollRestoredRef.current = true
-    }
-  }, [data, favData, activeTab])
-
-  // Sync page input with pageIndex
-  useEffect(() => {
-    setPageInputValue(String(pageIndex + 1))
-  }, [pageIndex])
+    scrollRestoredRef.current = true
+    requestAnimationFrame(() => {
+      window.scrollTo(0, restored.scrollY)
+    })
+  }, [data, favData, toplistData, scrollGalleries.length, favScrollGalleries.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Infinite scroll: reset when search changes ─────────
   useEffect(() => {
@@ -840,12 +858,61 @@ function BrowsePage() {
     [showAdvanced],
   )
 
+  // Save all pagination state to sessionStorage before navigating to a gallery detail page
+  const saveBrowseState = useCallback(() => {
+    sessionStorage.setItem(
+      'eh_browse_state',
+      JSON.stringify({
+        activeTab,
+        scrollY: window.scrollY,
+        // Search pagination
+        pageIndex,
+        currentCursor,
+        prevCursors,
+        // Favorites
+        favCat,
+        favCursor,
+        favSearch,
+        favPageIndex,
+        // Toplist
+        toplistTl,
+        toplistPage,
+        // Scroll mode accumulated data (only save when relevant)
+        ...(loadMode === 'scroll' && activeTab === 'search'
+          ? { scrollGalleries, scrollNextGid, scrollHasMore }
+          : {}),
+        ...(loadMode === 'scroll' && activeTab === 'favorites'
+          ? { favScrollGalleries, favScrollNextCursor, favScrollHasMore }
+          : {}),
+      }),
+    )
+  }, [
+    activeTab,
+    pageIndex,
+    currentCursor,
+    prevCursors,
+    favCat,
+    favCursor,
+    favSearch,
+    favPageIndex,
+    toplistTl,
+    toplistPage,
+    loadMode,
+    scrollGalleries,
+    scrollNextGid,
+    scrollHasMore,
+    favScrollGalleries,
+    favScrollNextCursor,
+    favScrollHasMore,
+  ])
+
   const navigateToGallery = useCallback(
     (g: EhGallery) => {
-      sessionStorage.setItem('browse_scrollY', String(window.scrollY))
-      router.push(`/e-hentai/${g.gid}/${g.token}`)
+      saveBrowseState()
+      const fav = activeTab === 'favorites' ? '?fav=1' : ''
+      router.push(`/e-hentai/${g.gid}/${g.token}${fav}`)
     },
-    [router],
+    [router, activeTab, saveBrowseState],
   )
 
   const handleDownload = useCallback(async (g: EhGallery) => {
@@ -945,7 +1012,7 @@ function BrowsePage() {
     onEnter: (i) => {
       const g = activeGalleries[i]
       if (g) {
-        sessionStorage.setItem('browse_scrollY', String(window.scrollY))
+        saveBrowseState()
         router.push(`/e-hentai/${g.gid}/${g.token}`)
       }
     },
@@ -1446,6 +1513,7 @@ function BrowsePage() {
               onClick={() => {
                 setActiveTab('favorites')
                 setFavCursor({})
+                setFavPageIndex(0)
               }}
               className={`shrink-0 ml-3 md:ml-auto px-4 py-2 text-sm font-medium border-b-2 transition-colors ${
                 activeTab === 'favorites'
@@ -1766,148 +1834,104 @@ function BrowsePage() {
 
               {/* Pagination mode — cursor-based prev/next */}
               {loadMode === 'pagination' && data && (data.has_prev || data.next_gid) && (
-                <div className="flex justify-center items-center gap-2 pt-2">
-                  {/* First page */}
-                  <button
-                    onClick={() => {
+                <Paginator
+                  page={pageIndex}
+                  hasPrev={pageIndex > 0}
+                  hasNext={!!data.next_gid}
+                  onFirst={() => {
+                    setCurrentCursor(null)
+                    setPrevCursors([])
+                    setPageIndex(0)
+                    window.scrollTo(0, 0)
+                  }}
+                  onPrev={() => {
+                    if (pageIndex === 0) return
+                    const stack = [...prevCursors]
+                    const prev = stack.pop()
+                    setPrevCursors(stack)
+                    setCurrentCursor(prev === 0 ? null : (prev ?? null))
+                    setPageIndex((p: number) => p - 1)
+                    window.scrollTo(0, 0)
+                  }}
+                  onNext={() => {
+                    if (!data?.next_gid) return
+                    setPrevCursors((prev) => [...prev, currentCursor ?? 0])
+                    setCurrentCursor(data.next_gid)
+                    setPageIndex((p: number) => p + 1)
+                    window.scrollTo(0, 0)
+                  }}
+                  onJump={(target) => {
+                    if (target === pageIndex) return
+                    if (target === 0) {
                       setCurrentCursor(null)
                       setPrevCursors([])
                       setPageIndex(0)
                       window.scrollTo(0, 0)
-                    }}
-                    disabled={pageIndex === 0}
-                    title={t('common.firstPage')}
-                    className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
-                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
-                  >
-                    «
-                  </button>
-                  <button
-                    onClick={() => {
-                      if (pageIndex === 0) return
+                    } else if (target < pageIndex) {
+                      const stepsBack = pageIndex - target
                       const stack = [...prevCursors]
-                      const prev = stack.pop()
+                      for (let i = 0; i < stepsBack - 1; i++) stack.pop()
+                      const cursor = stack.pop() ?? null
                       setPrevCursors(stack)
-                      setCurrentCursor(prev === 0 ? null : (prev ?? null))
-                      setPageIndex((p) => p - 1)
+                      setCurrentCursor(cursor === 0 ? null : cursor)
+                      setPageIndex(target)
                       window.scrollTo(0, 0)
-                    }}
-                    disabled={pageIndex === 0}
-                    className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
-                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
-                  >
-                    ‹
-                  </button>
-                  <input
-                    type="number"
-                    min={1}
-                    value={pageInputValue}
-                    onChange={(e) => setPageInputValue(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        const target = parseInt(pageInputValue)
-                        if (isNaN(target) || target < 1) return
-                        if (target === pageIndex + 1) return // Already on this page
-                        if (target === 1) {
-                          // Jump to first page
-                          setCurrentCursor(null)
-                          setPrevCursors([])
-                          setPageIndex(0)
-                          window.scrollTo(0, 0)
-                        } else if (target <= pageIndex) {
-                          // Jump backward using prevCursors stack
-                          const stepsBack = pageIndex + 1 - target
-                          const stack = [...prevCursors]
-                          for (let i = 0; i < stepsBack - 1; i++) stack.pop()
-                          const cursor = stack.pop() ?? null
-                          setPrevCursors(stack)
-                          setCurrentCursor(cursor === 0 ? null : cursor)
-                          setPageIndex(target - 1)
-                          window.scrollTo(0, 0)
-                        } else {
-                          // Jump forward — sequentially fetch cursors
-                          e.currentTarget.blur()
-                          const stepsForward = target - (pageIndex + 1)
-                          // Build current search params for the sequential fetches
-                          const searchParams = {
-                            q: searchQuery || undefined,
-                            ...(showAdvanced
-                              ? {
-                                  f_cats: computedFCats,
-                                  advance:
-                                    advSearch !== 0 ||
-                                    minRating !== null ||
-                                    pageFrom !== '' ||
-                                    pageTo !== '',
-                                  adv_search: advSearch || undefined,
-                                  min_rating: minRating || undefined,
-                                  page_from: pageFrom ? Number(pageFrom) : undefined,
-                                  page_to: pageTo ? Number(pageTo) : undefined,
-                                }
-                              : { category: category || undefined }),
-                          }
-                          // Start from current page's next cursor
-                          let cursor = data?.next_gid
-                          if (!cursor) {
-                            setPageInputValue(String(pageIndex + 1))
-                            toast.error(t('browse.cannotJumpForward'))
-                            return
-                          }
-                          const newCursors = [...prevCursors, currentCursor ?? 0]
-                          // Sequential fetch
-                          ;(async () => {
-                            try {
-                              for (let i = 0; i < stepsForward - 1; i++) {
-                                const result = await api.eh.search({
-                                  ...searchParams,
-                                  next_gid: cursor,
-                                })
-                                if (!result.next_gid) {
-                                  // Reached the last page before target
-                                  newCursors.push(cursor!)
-                                  setPrevCursors(newCursors)
-                                  setCurrentCursor(cursor!)
-                                  setPageIndex(pageIndex + i + 1)
-                                  setPageInputValue(String(pageIndex + i + 2))
-                                  window.scrollTo(0, 0)
-                                  toast.error(t('browse.cannotJumpForward'))
-                                  return
-                                }
-                                newCursors.push(cursor!)
-                                cursor = result.next_gid
-                              }
-                              // We now have the cursor for the target page
+                    } else {
+                      // Jump forward — sequentially fetch cursors
+                      const stepsForward = target - pageIndex
+                      const jumpSearchParams = {
+                        q: searchQuery || undefined,
+                        ...(showAdvanced
+                          ? {
+                              f_cats: computedFCats,
+                              advance:
+                                advSearch !== 0 ||
+                                minRating !== null ||
+                                pageFrom !== '' ||
+                                pageTo !== '',
+                              adv_search: advSearch || undefined,
+                              min_rating: minRating || undefined,
+                              page_from: pageFrom ? Number(pageFrom) : undefined,
+                              page_to: pageTo ? Number(pageTo) : undefined,
+                            }
+                          : { category: category || undefined }),
+                      }
+                      let cursor = data?.next_gid
+                      if (!cursor) {
+                        toast.error(t('browse.cannotJumpForward'))
+                        return
+                      }
+                      const newCursors = [...prevCursors, currentCursor ?? 0]
+                      ;(async () => {
+                        try {
+                          for (let i = 0; i < stepsForward - 1; i++) {
+                            const result = await api.eh.search({
+                              ...jumpSearchParams,
+                              next_gid: cursor,
+                            })
+                            if (!result.next_gid) {
+                              newCursors.push(cursor!)
                               setPrevCursors(newCursors)
                               setCurrentCursor(cursor!)
-                              setPageIndex(target - 1)
+                              setPageIndex(pageIndex + i + 1)
                               window.scrollTo(0, 0)
-                            } catch {
-                              setPageInputValue(String(pageIndex + 1))
                               toast.error(t('browse.cannotJumpForward'))
+                              return
                             }
-                          })()
+                            newCursors.push(cursor!)
+                            cursor = result.next_gid
+                          }
+                          setPrevCursors(newCursors)
+                          setCurrentCursor(cursor!)
+                          setPageIndex(target)
+                          window.scrollTo(0, 0)
+                        } catch {
+                          toast.error(t('browse.cannotJumpForward'))
                         }
-                      }
-                    }}
-                    onBlur={() => setPageInputValue(String(pageIndex + 1))}
-                    className="w-14 text-center bg-vault-card border border-vault-border rounded-lg py-2 text-sm text-vault-text
-                                 focus:outline-none focus:border-vault-accent [appearance:textfield] [&::-webkit-outer-spin-button]:appearance-none [&::-webkit-inner-spin-button]:appearance-none"
-                  />
-                  <button
-                    onClick={() => {
-                      if (!data?.next_gid) return
-                      setPrevCursors((prev) => [...prev, currentCursor ?? 0])
-                      setCurrentCursor(data.next_gid)
-                      setPageIndex((p) => p + 1)
-                      window.scrollTo(0, 0)
-                    }}
-                    disabled={!data.next_gid}
-                    className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
-                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
-                  >
-                    ›
-                  </button>
-                </div>
+                      })()
+                    }
+                  }}
+                />
               )}
 
               {/* Scroll mode end indicator */}
@@ -1935,6 +1959,7 @@ function BrowsePage() {
               onClick={() => {
                 setFavCat('all')
                 setFavCursor({})
+                setFavPageIndex(0)
                 setFavScrollGalleries([])
                 setFavScrollNextCursor(undefined)
                 setFavScrollHasMore(true)
@@ -1949,7 +1974,7 @@ function BrowsePage() {
             </button>
             {Array.from({ length: 10 }, (_, i) => {
               const catData = favData?.categories?.find((c) => c.index === i)
-              const name = catData?.name || t('browse.favoritesN', { n: String(i) })
+              const name = catData?.name || `Favorites ${i}`
               const count = catData?.count
               const color = FAV_COLORS[i]
               const isActive = favCat === String(i)
@@ -1959,6 +1984,7 @@ function BrowsePage() {
                   onClick={() => {
                     setFavCat(String(i))
                     setFavCursor({})
+                    setFavPageIndex(0)
                     setFavScrollGalleries([])
                     setFavScrollNextCursor(undefined)
                     setFavScrollHasMore(true)
@@ -1983,6 +2009,7 @@ function BrowsePage() {
             onChange={(e) => {
               setFavSearch(e.target.value)
               setFavCursor({})
+              setFavPageIndex(0)
             }}
             placeholder={t('browse.filterFavorites')}
             className="w-full bg-vault-card border border-vault-border rounded-lg px-4 py-2 text-sm
@@ -2061,46 +2088,30 @@ function BrowsePage() {
 
               {/* Pagination mode — cursor-based prev/next */}
               {loadMode === 'pagination' && (favData?.has_prev || favData?.has_next) && (
-                <div className="flex justify-center items-center gap-2 pt-2">
-                  <button
-                    disabled={!favData?.has_prev}
-                    onClick={() => {
-                      setFavCursor({})
+                <Paginator
+                  page={favPageIndex}
+                  hasPrev={!!favData?.has_prev}
+                  hasNext={!!favData?.has_next}
+                  onFirst={() => {
+                    setFavCursor({})
+                    setFavPageIndex(0)
+                    window.scrollTo(0, 0)
+                  }}
+                  onPrev={() => {
+                    if (favData?.prev_cursor) {
+                      setFavCursor({ prev: favData.prev_cursor })
+                      setFavPageIndex((p: number) => Math.max(0, p - 1))
                       window.scrollTo(0, 0)
-                    }}
-                    title={t('common.firstPage')}
-                    className="rounded-lg bg-vault-card border border-vault-border px-3 py-2 text-sm text-vault-text
-                             hover:border-vault-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  >
-                    «
-                  </button>
-                  <button
-                    disabled={!favData?.has_prev}
-                    onClick={() => {
-                      if (favData?.prev_cursor) {
-                        setFavCursor({ prev: favData.prev_cursor })
-                        window.scrollTo(0, 0)
-                      }
-                    }}
-                    className="rounded-lg bg-vault-card border border-vault-border px-3 py-2 text-sm text-vault-text
-                             hover:border-vault-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  >
-                    ‹
-                  </button>
-                  <button
-                    disabled={!favData?.has_next}
-                    onClick={() => {
-                      if (favData?.next_cursor) {
-                        setFavCursor({ next: favData.next_cursor })
-                        window.scrollTo(0, 0)
-                      }
-                    }}
-                    className="rounded-lg bg-vault-card border border-vault-border px-3 py-2 text-sm text-vault-text
-                             hover:border-vault-accent disabled:opacity-30 disabled:cursor-not-allowed transition-colors"
-                  >
-                    ›
-                  </button>
-                </div>
+                    }
+                  }}
+                  onNext={() => {
+                    if (favData?.next_cursor) {
+                      setFavCursor({ next: favData.next_cursor })
+                      setFavPageIndex((p: number) => p + 1)
+                      window.scrollTo(0, 0)
+                    }
+                  }}
+                />
               )}
 
               {/* Scroll mode end indicator */}
@@ -2254,45 +2265,27 @@ function BrowsePage() {
 
               {/* Toplist pagination */}
               {toplistData.galleries.length > 0 && (
-                <div className="flex justify-center items-center gap-2 pt-2">
-                  <button
-                    onClick={() => {
-                      setToplistPage(0)
-                      window.scrollTo(0, 0)
-                    }}
-                    disabled={toplistPage === 0}
-                    title={t('common.firstPage')}
-                    className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
-                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
-                  >
-                    «
-                  </button>
-                  <button
-                    onClick={() => {
-                      setToplistPage((p) => Math.max(0, p - 1))
-                      window.scrollTo(0, 0)
-                    }}
-                    disabled={toplistPage === 0}
-                    className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
-                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
-                  >
-                    ‹
-                  </button>
-                  <span className="text-sm text-vault-text-muted px-2">
-                    {t('browse.pageN', { page: String(toplistPage + 1) })}
-                  </span>
-                  <button
-                    onClick={() => {
-                      setToplistPage((p) => p + 1)
-                      window.scrollTo(0, 0)
-                    }}
-                    disabled={toplistData.galleries.length < EH_PAGE_SIZE}
-                    className="px-3 py-2 rounded-lg bg-vault-card border border-vault-border text-sm
-                                 disabled:opacity-30 disabled:cursor-not-allowed hover:border-vault-accent transition-colors"
-                  >
-                    ›
-                  </button>
-                </div>
+                <Paginator
+                  page={toplistPage}
+                  hasPrev={toplistPage > 0}
+                  hasNext={toplistData.galleries.length >= EH_PAGE_SIZE}
+                  onFirst={() => {
+                    setToplistPage(0)
+                    window.scrollTo(0, 0)
+                  }}
+                  onPrev={() => {
+                    setToplistPage((p: number) => Math.max(0, p - 1))
+                    window.scrollTo(0, 0)
+                  }}
+                  onNext={() => {
+                    setToplistPage((p: number) => p + 1)
+                    window.scrollTo(0, 0)
+                  }}
+                  onJump={(target) => {
+                    setToplistPage(Math.max(0, target))
+                    window.scrollTo(0, 0)
+                  }}
+                />
               )}
             </>
           )}

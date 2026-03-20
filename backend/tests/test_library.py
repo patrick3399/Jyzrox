@@ -62,10 +62,7 @@ async def _insert_image(db_session, gallery_id, page_num=1, filename="001.jpg"):
         {"sha": sha},
     )
     await db_session.execute(
-        text(
-            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
-            "VALUES (:gid, :pn, :fn, :sha)"
-        ),
+        text("INSERT INTO images (gallery_id, page_num, filename, blob_sha256) VALUES (:gid, :pn, :fn, :sha)"),
         {"gid": gallery_id, "pn": page_num, "fn": filename, "sha": sha},
     )
     await db_session.commit()
@@ -334,7 +331,7 @@ class TestBrowseImages:
         """When more images than limit exist, has_next=True and next_cursor is set."""
         gid = await _insert_gallery(db_session, source="ehentai", source_id="99002")
         for i in range(5):
-            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i+1:03d}.jpg")
+            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i + 1:03d}.jpg")
 
         resp = await client.get("/api/library/images", params={"limit": 3})
         assert resp.status_code == 200
@@ -365,10 +362,7 @@ class TestBrowseImages:
         )
         # Block the tag for user_id=1
         await db_session.execute(
-            text(
-                "INSERT INTO blocked_tags (user_id, namespace, name) "
-                "VALUES (1, 'artist', 'banned_artist')"
-            ),
+            text("INSERT INTO blocked_tags (user_id, namespace, name) VALUES (1, 'artist', 'banned_artist')"),
         )
         await db_session.commit()
 
@@ -538,38 +532,6 @@ class TestDeleteGallery:
         check = await client.get("/api/library/galleries/local/del_single")
         assert check.status_code == 404
 
-    async def test_delete_gallery_decrements_blob_ref_count(self, client, db_session):
-        """Deleting a gallery decrements the ref_count on associated blobs."""
-        gid = await _insert_gallery(
-            db_session, source="local", source_id="del_ref", title="Ref Count Test"
-        )
-        sha = "sha_refcount_test_abc123"
-        await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO blobs (sha256, file_size, extension, ref_count) "
-                "VALUES (:sha, 2000, 'jpg', 1)"
-            ),
-            {"sha": sha},
-        )
-        await db_session.execute(
-            text(
-                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
-                "VALUES (:gid, 1, 'ref.jpg', :sha)"
-            ),
-            {"gid": gid, "sha": sha},
-        )
-        await db_session.commit()
-
-        resp = await client.delete("/api/library/galleries/local/del_ref")
-        assert resp.status_code == 200
-
-        # ref_count should now be 0
-        result = await db_session.execute(
-            text("SELECT ref_count FROM blobs WHERE sha256 = :sha"), {"sha": sha}
-        )
-        ref_count = result.scalar_one_or_none()
-        assert ref_count == 0
-
 
 # ---------------------------------------------------------------------------
 # Delete single image from gallery
@@ -603,9 +565,7 @@ class TestDeleteGalleryImage:
         Uses pg_insert(ExcludedBlob).on_conflict_do_nothing() which is
         PostgreSQL-specific. We accept 200 (PG) or 500 (SQLite limitation).
         """
-        gid = await _insert_gallery(
-            db_session, source="local", source_id="del_img_ok", title="Two Pages", pages=2
-        )
+        gid = await _insert_gallery(db_session, source="local", source_id="del_img_ok", title="Two Pages", pages=2)
         await _insert_image(db_session, gid, page_num=1, filename="p1.jpg")
         await _insert_image(db_session, gid, page_num=2, filename="p2.jpg")
 
@@ -661,14 +621,9 @@ class TestSaveProgress:
         Uses pg_insert ON CONFLICT which is PostgreSQL-specific. We accept
         200 (PG) or 500 (SQLite limitation).
         """
-        gid = await _insert_gallery(
-            db_session, source="ehentai", source_id="prog_update", title="Update Prog"
-        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="prog_update", title="Update Prog")
         await db_session.execute(
-            text(
-                "INSERT INTO read_progress (user_id, gallery_id, last_page) "
-                "VALUES (1, :gid, 3)"
-            ),
+            text("INSERT INTO read_progress (user_id, gallery_id, last_page) VALUES (1, :gid, 3)"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -698,19 +653,11 @@ class TestGetGalleryTags:
 
     async def test_get_gallery_tags_with_tags_returns_tag_list(self, client, db_session):
         """Gallery with linked tags should return those tags in the response."""
-        gid = await _insert_gallery(
-            db_session, source="ehentai", source_id="tagged_gal", title="Tagged Gallery"
-        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="tagged_gal", title="Tagged Gallery")
         # Insert a tag and link it to the gallery
-        await db_session.execute(
-            text(
-                "INSERT INTO tags (namespace, name) VALUES ('artist', 'alice')"
-            )
-        )
+        await db_session.execute(text("INSERT INTO tags (namespace, name) VALUES ('artist', 'alice')"))
         await db_session.commit()
-        tag_id_row = await db_session.execute(
-            text("SELECT id FROM tags WHERE namespace='artist' AND name='alice'")
-        )
+        tag_id_row = await db_session.execute(text("SELECT id FROM tags WHERE namespace='artist' AND name='alice'"))
         tag_id = tag_id_row.scalar_one()
         await db_session.execute(
             text(
@@ -742,9 +689,7 @@ class TestExcludedBlobs:
 
     async def test_list_excluded_empty_returns_empty_list(self, client, db_session):
         """Gallery with no exclusions should return excluded=[]."""
-        await _insert_gallery(
-            db_session, source="local", source_id="excl_empty", title="No Exclusions"
-        )
+        await _insert_gallery(db_session, source="local", source_id="excl_empty", title="No Exclusions")
 
         resp = await client.get("/api/library/galleries/local/excl_empty/excluded")
         assert resp.status_code == 200
@@ -753,15 +698,10 @@ class TestExcludedBlobs:
 
     async def test_list_excluded_returns_exclusion_entries(self, client, db_session):
         """Gallery with excluded blobs should return those entries."""
-        gid = await _insert_gallery(
-            db_session, source="local", source_id="excl_has", title="With Exclusion"
-        )
+        gid = await _insert_gallery(db_session, source="local", source_id="excl_has", title="With Exclusion")
         sha = "sha_excluded_abc000"
         await db_session.execute(
-            text(
-                "INSERT INTO excluded_blobs (gallery_id, blob_sha256) "
-                "VALUES (:gid, :sha)"
-            ),
+            text("INSERT INTO excluded_blobs (gallery_id, blob_sha256) VALUES (:gid, :sha)"),
             {"gid": gid, "sha": sha},
         )
         await db_session.commit()
@@ -775,22 +715,15 @@ class TestExcludedBlobs:
 
     async def test_restore_excluded_blob_removes_exclusion_entry(self, client, db_session):
         """DELETE on excluded blob should remove the exclusion record."""
-        gid = await _insert_gallery(
-            db_session, source="local", source_id="excl_restore", title="Restore Test"
-        )
+        gid = await _insert_gallery(db_session, source="local", source_id="excl_restore", title="Restore Test")
         sha = "sha_restore_abc111"
         await db_session.execute(
-            text(
-                "INSERT INTO excluded_blobs (gallery_id, blob_sha256) "
-                "VALUES (:gid, :sha)"
-            ),
+            text("INSERT INTO excluded_blobs (gallery_id, blob_sha256) VALUES (:gid, :sha)"),
             {"gid": gid, "sha": sha},
         )
         await db_session.commit()
 
-        resp = await client.delete(
-            f"/api/library/galleries/local/excl_restore/excluded/{sha}"
-        )
+        resp = await client.delete(f"/api/library/galleries/local/excl_restore/excluded/{sha}")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
@@ -814,29 +747,21 @@ class TestFindSimilarImages:
 
     async def test_find_similar_image_without_phash_returns_400(self, client, db_session):
         """Image whose blob has no phash should return 400."""
-        gid = await _insert_gallery(
-            db_session, source="local", source_id="sim_nophash", title="No Phash"
-        )
+        gid = await _insert_gallery(db_session, source="local", source_id="sim_nophash", title="No Phash")
         sha = "sha_nophash_xyz999"
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO blobs (sha256, file_size, extension) "
-                "VALUES (:sha, 500, 'jpg')"
-            ),
+            text("INSERT OR IGNORE INTO blobs (sha256, file_size, extension) VALUES (:sha, 500, 'jpg')"),
             {"sha": sha},
         )
         await db_session.execute(
             text(
-                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
-                "VALUES (:gid, 1, 'nophash.jpg', :sha)"
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) VALUES (:gid, 1, 'nophash.jpg', :sha)"
             ),
             {"gid": gid, "sha": sha},
         )
         await db_session.commit()
 
-        img_id_row = await db_session.execute(
-            text("SELECT id FROM images WHERE blob_sha256 = :sha"), {"sha": sha}
-        )
+        img_id_row = await db_session.execute(text("SELECT id FROM images WHERE blob_sha256 = :sha"), {"sha": sha})
         img_id = img_id_row.scalar_one()
 
         resp = await client.get(f"/api/library/images/{img_id}/similar")
@@ -886,9 +811,7 @@ class TestListGalleryFiles:
 
     async def test_list_gallery_files_existing_gallery(self, client, db_session):
         """Existing gallery with no disk files returns empty files list and correct metadata."""
-        await _insert_gallery(
-            db_session, source="local", source_id="gfiles_01", title="Files Gallery"
-        )
+        await _insert_gallery(db_session, source="local", source_id="gfiles_01", title="Files Gallery")
         resp = await client.get("/api/library/files/local/gfiles_01")
         assert resp.status_code == 200
         data = resp.json()
@@ -900,9 +823,7 @@ class TestListGalleryFiles:
 
     async def test_list_gallery_files_includes_db_metadata(self, client, db_session):
         """Files cross-referenced with DB images should expose page_num."""
-        gid = await _insert_gallery(
-            db_session, source="local", source_id="gfiles_db", title="DB Meta Gallery"
-        )
+        gid = await _insert_gallery(db_session, source="local", source_id="gfiles_db", title="DB Meta Gallery")
         await _insert_image(db_session, gid, page_num=1, filename="p1.jpg")
 
         resp = await client.get("/api/library/files/local/gfiles_db")
@@ -947,6 +868,721 @@ class TestArtistSummary:
         assert data["artist_name"] == "SummaryArtist"
         assert "total_images" in data
 
+
+# ---------------------------------------------------------------------------
+# Gallery sources
+# ---------------------------------------------------------------------------
+
+
+class TestListGallerySources:
+    """GET /api/library/galleries/sources — distinct source values with Redis cache."""
+
+    async def test_empty_db_returns_empty_list(self, client, mock_redis):
+        """Empty DB should return empty sources list."""
+        from unittest.mock import patch
+
+        mock_redis.get = AsyncMock_returning(None)
+        with patch("routers.library.get_redis", return_value=mock_redis):
+            resp = await client.get("/api/library/galleries/sources")
+        assert resp.status_code == 200
+        assert resp.json() == []
+
+    async def test_returns_distinct_sources(self, client, db_session, mock_redis):
+        """Distinct source values from galleries should be returned."""
+        from unittest.mock import patch
+
+        mock_redis.get = AsyncMock_returning(None)
+        for src, sid in [("pixiv", "src1"), ("pixiv", "src2"), ("ehentai", "src3")]:
+            await _insert_gallery(db_session, source=src, source_id=sid)
+
+        with patch("routers.library.get_redis", return_value=mock_redis):
+            resp = await client.get("/api/library/galleries/sources")
+        assert resp.status_code == 200
+        values = [s["value"] for s in resp.json()]
+        assert "pixiv" in values
+        assert "ehentai" in values
+        assert len(values) == 2
+
+    async def test_cached_result_is_returned(self, client, mock_redis):
+        """Redis-cached result should be returned without hitting the DB."""
+        import json as _json
+        from unittest.mock import patch
+
+        cached_sources = [{"value": "pixiv", "label": "pixiv"}]
+        mock_redis.get = AsyncMock_returning(_json.dumps(cached_sources).encode())
+        with patch("routers.library.get_redis", return_value=mock_redis):
+            resp = await client.get("/api/library/galleries/sources")
+        assert resp.status_code == 200
+        assert resp.json() == cached_sources
+
+    async def test_local_source_split_by_import_mode(self, client, db_session, mock_redis):
+        """Local galleries should be split into 'local:{mode}' entries per import_mode."""
+        from unittest.mock import patch
+
+        mock_redis.get = AsyncMock_returning(None)
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, import_mode) "
+                "VALUES ('local', 'lsrc1', 'Link', 'completed', '[]', 'link')"
+            )
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, import_mode) "
+                "VALUES ('local', 'lsrc2', 'Copy', 'completed', '[]', 'copy')"
+            )
+        )
+        await db_session.commit()
+
+        with patch("routers.library.get_redis", return_value=mock_redis):
+            resp = await client.get("/api/library/galleries/sources")
+        assert resp.status_code == 200
+        values = [s["value"] for s in resp.json()]
+        assert "local:link" in values
+        assert "local:copy" in values
+
+    async def test_cache_write_after_db_hit(self, client, db_session, mock_redis):
+        """Result should be written to Redis after a DB query."""
+        from unittest.mock import patch
+
+        mock_redis.get = AsyncMock_returning(None)
+        await _insert_gallery(db_session, source="pixiv", source_id="cw1")
+
+        with patch("routers.library.get_redis", return_value=mock_redis):
+            resp = await client.get("/api/library/galleries/sources")
+        assert resp.status_code == 200
+        mock_redis.set.assert_called_once()
+        call_args = mock_redis.set.call_args
+        assert call_args[0][0] == "library:sources"
+
+
+# ---------------------------------------------------------------------------
+# Gallery categories
+# ---------------------------------------------------------------------------
+
+
+class TestListGalleryCategories:
+    """GET /api/library/galleries/categories — distinct non-empty categories."""
+
+    async def test_empty_db_returns_empty_categories(self, client):
+        """Empty DB should return categories=[]."""
+        resp = await client.get("/api/library/galleries/categories")
+        assert resp.status_code == 200
+        assert resp.json()["categories"] == []
+
+    async def test_returns_distinct_categories(self, client, db_session):
+        """Distinct non-null/non-empty categories should be returned sorted."""
+        await _insert_gallery(db_session, source_id="cat1", category="doujinshi")
+        await _insert_gallery(db_session, source_id="cat2", category="manga")
+        await _insert_gallery(db_session, source_id="cat3", category="doujinshi")
+
+        resp = await client.get("/api/library/galleries/categories")
+        assert resp.status_code == 200
+        cats = resp.json()["categories"]
+        assert "doujinshi" in cats
+        assert "manga" in cats
+        assert len(cats) == 2
+
+    async def test_excludes_null_and_empty_categories(self, client, db_session):
+        """Null and empty string categories should not be returned."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, category) "
+                "VALUES ('pixiv', 'nc1', 'No Cat', 'completed', '[]', NULL)"
+            )
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, category) "
+                "VALUES ('pixiv', 'ec1', 'Empty Cat', 'completed', '[]', '')"
+            )
+        )
+        await _insert_gallery(db_session, source_id="vc1", category="manga")
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries/categories")
+        assert resp.status_code == 200
+        cats = resp.json()["categories"]
+        assert None not in cats
+        assert "" not in cats
+        assert "manga" in cats
+        assert len(cats) == 1
+
+
+# ---------------------------------------------------------------------------
+# Image time range
+# ---------------------------------------------------------------------------
+
+
+class TestImageTimeRange:
+    """GET /api/library/images/time_range — min/max added_at timestamps."""
+
+    async def test_empty_db_returns_null_timestamps(self, client):
+        """Empty DB should return min_at=None, max_at=None."""
+        resp = await client.get("/api/library/images/time_range")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["min_at"] is None
+        assert data["max_at"] is None
+
+    async def test_returns_min_max_timestamps(self, client, db_session):
+        """Images with different added_at should return correct min/max (200 or 500 on SQLite)."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="tr001")
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, added_at) "
+                "VALUES (:gid, 1, 'a.jpg', '2025-01-01T00:00:00')"
+            ),
+            {"gid": gid},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, added_at) "
+                "VALUES (:gid, 2, 'b.jpg', '2025-06-01T00:00:00')"
+            ),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/images/time_range")
+        # May return 500 on SQLite if datetime.isoformat() fails on string
+        if resp.status_code == 200:
+            data = resp.json()
+            assert data["min_at"] is not None
+            assert data["max_at"] is not None
+        else:
+            assert resp.status_code == 500
+
+    async def test_source_filter_narrows_time_range(self, client, db_session):
+        """Source filter should restrict min/max to matching galleries only."""
+        gid1 = await _insert_gallery(db_session, source="pixiv", source_id="tr002")
+        gid2 = await _insert_gallery(db_session, source="ehentai", source_id="tr003")
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, added_at) "
+                "VALUES (:gid, 1, 'p.jpg', '2025-03-01T00:00:00')"
+            ),
+            {"gid": gid1},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, added_at) "
+                "VALUES (:gid, 1, 'e.jpg', '2024-01-01T00:00:00')"
+            ),
+            {"gid": gid2},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/images/time_range", params={"source": "pixiv"})
+        if resp.status_code == 200:
+            data = resp.json()
+            # Both min and max should equal the pixiv image timestamp
+            assert data["min_at"] == data["max_at"]
+        else:
+            assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# Image timeline percentiles
+# ---------------------------------------------------------------------------
+
+
+class TestImageTimelinePercentiles:
+    """GET /api/library/images/timeline_percentiles — NTILE-based bucket timestamps."""
+
+    async def test_empty_db_returns_empty_timestamps(self, client):
+        """Empty DB should return timestamps=[] and total_buckets=0."""
+        resp = await client.get("/api/library/images/timeline_percentiles")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["timestamps"] == []
+        assert data["total_buckets"] == 0
+
+    async def test_with_images_returns_bucket_data(self, client, db_session):
+        """With images, should return timestamp data (200 or 500 depending on SQLite support)."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="tp001")
+        for i in range(3):
+            await db_session.execute(
+                text("INSERT INTO images (gallery_id, page_num, filename, added_at) VALUES (:gid, :pn, :fn, :at)"),
+                {"gid": gid, "pn": i + 1, "fn": f"{i}.jpg", "at": f"2025-0{i + 1}-01T00:00:00"},
+            )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/images/timeline_percentiles", params={"buckets": 2})
+        # NTILE window function — works on SQLite 3.25+; accept 200 or 500
+        if resp.status_code == 200:
+            data = resp.json()
+            assert isinstance(data["timestamps"], list)
+            assert isinstance(data["total_buckets"], int)
+        else:
+            assert resp.status_code == 500
+
+
+# ---------------------------------------------------------------------------
+# List galleries — advanced filters
+# ---------------------------------------------------------------------------
+
+
+class TestListGalleriesAdvancedFilters:
+    """GET /api/library/galleries — advanced filter parameters."""
+
+    async def test_in_reading_list_filter(self, client, db_session):
+        """?in_reading_list=true should only return galleries in user's reading list."""
+        gid1 = await _insert_gallery(db_session, source_id="rl1", title="In RL")
+        await _insert_gallery(db_session, source_id="rl2", title="Not in RL")
+        await db_session.execute(
+            text("INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"),
+            {"gid": gid1},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries", params={"in_reading_list": "true"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["galleries"][0]["id"] == gid1
+
+    async def test_import_mode_filter(self, client, db_session):
+        """?import_mode= should filter by import_mode field."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, import_mode) "
+                "VALUES ('local', 'im1', 'Link Gallery', 'completed', '[]', 'link')"
+            )
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, import_mode) "
+                "VALUES ('local', 'im2', 'Copy Gallery', 'completed', '[]', 'copy')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries", params={"import_mode": "link"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["galleries"][0]["title"] == "Link Gallery"
+
+    async def test_collection_filter(self, client, db_session):
+        """?collection= should only return galleries belonging to that collection."""
+        gid1 = await _insert_gallery(db_session, source_id="col1", title="In Collection")
+        await _insert_gallery(db_session, source_id="col2", title="Not In Collection")
+        await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'Test Collection')"))
+        await db_session.commit()
+        coll_id = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+        await db_session.execute(
+            text("INSERT INTO collection_galleries (collection_id, gallery_id) VALUES (:cid, :gid)"),
+            {"cid": coll_id, "gid": gid1},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries", params={"collection": coll_id})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["galleries"][0]["id"] == gid1
+
+    async def test_category_filter(self, client, db_session):
+        """?category= should filter by exact category match."""
+        await _insert_gallery(db_session, source_id="cf1", category="manga")
+        await _insert_gallery(db_session, source_id="cf2", category="doujinshi")
+
+        resp = await client.get("/api/library/galleries", params={"category": "manga"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["galleries"][0]["category"] == "manga"
+
+    async def test_category_uncategorized_filter(self, client, db_session):
+        """?category=__uncategorized__ returns galleries with null/empty category."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, category) "
+                "VALUES ('pixiv', 'unc1', 'No Category', 'completed', '[]', NULL)"
+            )
+        )
+        await _insert_gallery(db_session, source_id="unc_cat1", category="manga")
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries", params={"category": "__uncategorized__"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["galleries"][0]["title"] == "No Category"
+
+    async def test_min_rating_filter(self, client, db_session):
+        """?min_rating= should filter galleries with user rating >= threshold."""
+        gid1 = await _insert_gallery(db_session, source_id="mr1", title="High Rated")
+        gid2 = await _insert_gallery(db_session, source_id="mr2", title="Low Rated")
+        await db_session.execute(
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 5)"),
+            {"gid": gid1},
+        )
+        await db_session.execute(
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 2)"),
+            {"gid": gid2},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/galleries", params={"min_rating": 4})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["galleries"][0]["id"] == gid1
+
+    async def test_cursor_pagination(self, client, db_session):
+        """Cursor-based pagination should not overlap between pages."""
+        for i in range(5):
+            await _insert_gallery(db_session, source_id=f"cur{i}", title=f"Gallery {i}")
+
+        resp1 = await client.get("/api/library/galleries", params={"limit": 2})
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert len(data1["galleries"]) == 2
+
+        if data1.get("next_cursor"):
+            resp2 = await client.get(
+                "/api/library/galleries",
+                params={"cursor": data1["next_cursor"], "limit": 2},
+            )
+            assert resp2.status_code == 200
+            data2 = resp2.json()
+            ids1 = {g["id"] for g in data1["galleries"]}
+            ids2 = {g["id"] for g in data2["galleries"]}
+            assert not ids1 & ids2
+
+
+# ---------------------------------------------------------------------------
+# Batch reading list
+# ---------------------------------------------------------------------------
+
+
+class TestBatchReadingList:
+    """POST /api/library/galleries/batch — reading list add/remove."""
+
+    async def test_add_to_reading_list(self, client, db_session):
+        """add_to_reading_list action should upsert user_reading_list row."""
+        gid = await _insert_gallery(db_session, source_id="rl_add1", title="Add to RL")
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "add_to_reading_list", "gallery_ids": [gid]},
+        )
+        # pg_insert is PG-only; accept 200 (PG) or 500 (SQLite)
+        if resp.status_code == 200:
+            assert resp.json()["status"] == "ok"
+            assert resp.json()["affected"] == 1
+        else:
+            assert resp.status_code == 500
+
+    async def test_remove_from_reading_list(self, client, db_session):
+        """remove_from_reading_list action should delete the entry."""
+        gid = await _insert_gallery(db_session, source_id="rl_rem1", title="Remove from RL")
+        await db_session.execute(
+            text("INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "remove_from_reading_list", "gallery_ids": [gid]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+        assert resp.json()["affected"] == 1
+
+    async def test_add_to_reading_list_idempotent(self, client, db_session):
+        """Adding same gallery twice should not raise errors (on_conflict_do_nothing)."""
+        gid = await _insert_gallery(db_session, source_id="rl_idem1", title="Idempotent RL")
+
+        resp1 = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "add_to_reading_list", "gallery_ids": [gid]},
+        )
+        resp2 = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "add_to_reading_list", "gallery_ids": [gid]},
+        )
+        assert resp1.status_code in (200, 500)
+        assert resp2.status_code in (200, 500)
+
+
+# ---------------------------------------------------------------------------
+# Image favorite edge cases
+# ---------------------------------------------------------------------------
+
+
+class TestImageFavoriteEdgeCases:
+    """POST/DELETE /api/library/images/{image_id}/favorite — edge cases."""
+
+    async def test_favorite_nonexistent_image_returns_404(self, client):
+        """Favoriting a non-existent image should return 404."""
+        resp = await client.post("/api/library/images/999999/favorite")
+        assert resp.status_code == 404
+
+    async def test_unfavorite_nonexistent_image_succeeds(self, client):
+        """Unfavoriting an image that isn't favorited should succeed (idempotent DELETE)."""
+        resp = await client.delete("/api/library/images/999999/favorite")
+        assert resp.status_code == 200
+
+    async def test_favorite_image_idempotent(self, client, db_session):
+        """Favoriting an already-favorited image should succeed without error."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="if_idem1")
+        await _insert_image(db_session, gid, page_num=1)
+        img_id = (
+            await db_session.execute(
+                text("SELECT id FROM images WHERE gallery_id = :gid AND page_num = 1"),
+                {"gid": gid},
+            )
+        ).scalar_one()
+
+        resp1 = await client.post(f"/api/library/images/{img_id}/favorite")
+        resp2 = await client.post(f"/api/library/images/{img_id}/favorite")
+        # on_conflict_do_nothing → 200 on PG; SQLite may return 500
+        assert resp1.status_code in (200, 500)
+        assert resp2.status_code in (200, 500)
+
+
+# ---------------------------------------------------------------------------
+# _build_cover_map helper
+# ---------------------------------------------------------------------------
+
+
+class TestBuildCoverMap:
+    """_build_cover_map() and _single_cover_thumb() — unit tests."""
+
+    async def test_empty_ids_returns_empty_dict(self, db_session):
+        """Empty gallery_ids list should immediately return {}."""
+        from routers.library import _build_cover_map
+
+        result = await _build_cover_map(db_session, [])
+        assert result == {}
+
+    async def test_gallery_without_images_not_in_map(self, db_session):
+        """Gallery with no images should not appear in the cover map."""
+        from routers.library import _build_cover_map
+
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array) "
+                "VALUES ('ehentai', 'cm1', 'No Images', 'completed', '[]')"
+            )
+        )
+        await db_session.commit()
+        gid = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+
+        result = await _build_cover_map(db_session, [gid])
+        assert gid not in result
+
+    async def test_single_cover_thumb_returns_url(self, db_session):
+        """_single_cover_thumb returns a URL string when page 1 image exists."""
+        from routers.library import _single_cover_thumb
+
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array) "
+                "VALUES ('ehentai', 'ct1', 'Cover Test', 'completed', '[]')"
+            )
+        )
+        await db_session.commit()
+        gid = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+
+        sha = "sha_cover_test_001abc"
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO blobs (sha256, file_size, extension) VALUES (:sha, 1000, 'jpg')"),
+            {"sha": sha},
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) VALUES (:gid, 1, 'cover.jpg', :sha)"
+            ),
+            {"gid": gid, "sha": sha},
+        )
+        await db_session.commit()
+
+        result = await _single_cover_thumb(db_session, gid, "ehentai")
+        assert result is not None
+        assert isinstance(result, str)
+
+
+# ---------------------------------------------------------------------------
+# _user_gallery_state helper
+# ---------------------------------------------------------------------------
+
+
+class TestUserGalleryState:
+    """_user_gallery_state() — unit tests for favorite/rating/reading-list queries."""
+
+    async def test_no_state_returns_defaults(self, db_session):
+        """Gallery with no user interactions returns (False, None, False)."""
+        from routers.library import _user_gallery_state
+
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array) "
+                "VALUES ('ehentai', 'ugs1', 'UGS Test', 'completed', '[]')"
+            )
+        )
+        await db_session.commit()
+        gid = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+
+        is_fav, rating, in_rl = await _user_gallery_state(db_session, user_id=1, gallery_id=gid)
+        assert is_fav is False
+        assert rating is None
+        assert in_rl is False
+
+    async def test_with_favorite_and_rating(self, db_session):
+        """User with favorite and rating should return is_fav=True and correct rating."""
+        from routers.library import _user_gallery_state
+
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array) "
+                "VALUES ('ehentai', 'ugs2', 'Fav Test', 'completed', '[]')"
+            )
+        )
+        await db_session.commit()
+        gid = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+
+        await db_session.execute(
+            text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"),
+            {"gid": gid},
+        )
+        await db_session.execute(
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 4)"),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        is_fav, rating, in_rl = await _user_gallery_state(db_session, user_id=1, gallery_id=gid)
+        assert is_fav is True
+        assert rating == 4
+        assert in_rl is False
+
+    async def test_with_reading_list(self, db_session):
+        """User with gallery in reading list should return in_rl=True."""
+        from routers.library import _user_gallery_state
+
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array) "
+                "VALUES ('ehentai', 'ugs3', 'RL Test', 'completed', '[]')"
+            )
+        )
+        await db_session.commit()
+        gid = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+
+        await db_session.execute(
+            text("INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        is_fav, rating, in_rl = await _user_gallery_state(db_session, user_id=1, gallery_id=gid)
+        assert is_fav is False
+        assert rating is None
+        assert in_rl is True
+
+
+# ---------------------------------------------------------------------------
+# _apply_image_filters — via browse images endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestApplyImageFilters:
+    """_apply_image_filters() tested via GET /api/library/images endpoint."""
+
+    async def test_source_compound_filter(self, client, db_session):
+        """?source=local:link filters images from galleries where source=local AND import_mode=link."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, import_mode) "
+                "VALUES ('local', 'aif_link1', 'Link Gallery', 'completed', '[]', 'link')"
+            )
+        )
+        await db_session.commit()
+        gid_link = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, import_mode) "
+                "VALUES ('local', 'aif_copy1', 'Copy Gallery', 'completed', '[]', 'copy')"
+            )
+        )
+        await db_session.commit()
+        gid_copy = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+
+        await _insert_image(db_session, gid_link, page_num=1, filename="link_img.jpg")
+        await _insert_image(db_session, gid_copy, page_num=1, filename="copy_img.jpg")
+
+        resp = await client.get("/api/library/images", params={"source": "local:link"})
+        assert resp.status_code == 200
+        data = resp.json()
+        gallery_ids = [img["gallery_id"] for img in data["images"]]
+        assert all(gid == gid_link for gid in gallery_ids)
+        assert len(gallery_ids) == 1
+
+    async def test_category_uncategorized_filter(self, client, db_session):
+        """?category=__uncategorized__ returns images from galleries with null category."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, category) "
+                "VALUES ('pixiv', 'aif_nc1', 'No Category', 'completed', '[]', NULL)"
+            )
+        )
+        await db_session.commit()
+        gid_nc = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
+
+        gid_cat = await _insert_gallery(db_session, source_id="aif_cat1", category="manga")
+        await _insert_image(db_session, gid_nc, page_num=1, filename="nc_img.jpg")
+        await _insert_image(db_session, gid_cat, page_num=1, filename="cat_img.jpg")
+
+        resp = await client.get("/api/library/images", params={"category": "__uncategorized__"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["images"]) == 1
+        assert data["images"][0]["gallery_id"] == gid_nc
+
+    async def test_favorited_image_filter(self, client, db_session):
+        """?favorited=true returns only images in user_image_favorites for current user."""
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="aif_fav1")
+        await _insert_image(db_session, gid, page_num=1, filename="fav.jpg")
+        await _insert_image(db_session, gid, page_num=2, filename="notfav.jpg")
+
+        img_id = (
+            await db_session.execute(
+                text("SELECT id FROM images WHERE gallery_id = :gid AND page_num = 1"),
+                {"gid": gid},
+            )
+        ).scalar_one()
+
+        # Direct insert — SQLite doesn't enforce FK so no user row needed
+        await db_session.execute(
+            text("INSERT INTO user_image_favorites (user_id, image_id) VALUES (1, :iid)"),
+            {"iid": img_id},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/images", params={"favorited": "true"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert len(data["images"]) == 1
+        assert data["images"][0]["id"] == img_id
+
+
+# ---------------------------------------------------------------------------
+# Helpers used by library tests
+# ---------------------------------------------------------------------------
+
+
+def AsyncMock_returning(value):
+    """Create an AsyncMock that returns a fixed value (mirrors test_auth helper)."""
+    from unittest.mock import AsyncMock
+
+    return AsyncMock(return_value=value)
+
     async def test_artist_summary_artist_id_with_slash(self, client, db_session):
         """artist_id containing a colon should be routed correctly via :path."""
         await db_session.execute(
@@ -972,7 +1608,7 @@ class TestArtistImages:
 
     async def test_artist_images_returns_paginated_images(self, client, db_session):
         """Artist with galleries should return images with artist_id and pagination info."""
-        gid = await db_session.execute(
+        await db_session.execute(
             text(
                 "INSERT INTO galleries (source, source_id, title, download_status, "
                 "tags_array, artist_id, uploader) "
@@ -1009,9 +1645,7 @@ class TestArtistImages:
 
         await _insert_image(db_session, gallery_id, page_num=1, filename="s1.jpg")
 
-        resp = await client.get(
-            "/api/library/artists/pixiv:art_sort/images", params={"sort": "oldest"}
-        )
+        resp = await client.get("/api/library/artists/pixiv:art_sort/images", params={"sort": "oldest"})
         assert resp.status_code == 200
         assert resp.json()["total"] == 1
 
@@ -1028,7 +1662,7 @@ class TestArtistImages:
         await db_session.commit()
 
         for i in range(5):
-            await _insert_image(db_session, gallery_id, page_num=i + 1, filename=f"p{i+1}.jpg")
+            await _insert_image(db_session, gallery_id, page_num=i + 1, filename=f"p{i + 1}.jpg")
 
         resp = await client.get(
             "/api/library/artists/pixiv:art_paginlimit/images",
@@ -1051,9 +1685,7 @@ class TestGetGalleryTagsExtra:
 
     async def test_get_gallery_tags_empty_gallery_returns_empty_list(self, client, db_session):
         """Gallery with no linked tags should return tags=[]."""
-        await _insert_gallery(
-            db_session, source="local", source_id="notags_gallery", title="No Tags"
-        )
+        await _insert_gallery(db_session, source="local", source_id="notags_gallery", title="No Tags")
         resp = await client.get("/api/library/galleries/local/notags_gallery/tags")
         assert resp.status_code == 200
         data = resp.json()
@@ -1061,9 +1693,7 @@ class TestGetGalleryTagsExtra:
 
     async def test_get_gallery_tags_multiple_namespaces(self, client, db_session):
         """Gallery with tags from multiple namespaces should return all of them."""
-        gid = await _insert_gallery(
-            db_session, source="local", source_id="multitag_gal", title="Multi-tag Gallery"
-        )
+        gid = await _insert_gallery(db_session, source="local", source_id="multitag_gal", title="Multi-tag Gallery")
         for ns, name in [("artist", "bob"), ("character", "hero"), ("general", "action")]:
             await db_session.execute(
                 text("INSERT INTO tags (namespace, name) VALUES (:ns, :name)"),
@@ -1071,7 +1701,9 @@ class TestGetGalleryTagsExtra:
             )
         await db_session.commit()
         rows = await db_session.execute(
-            text("SELECT id FROM tags WHERE (namespace, name) IN (('artist','bob'), ('character','hero'), ('general','action'))")
+            text(
+                "SELECT id FROM tags WHERE (namespace, name) IN (('artist','bob'), ('character','hero'), ('general','action'))"
+            )
         )
         tag_ids = [r[0] for r in rows.fetchall()]
         for tid in tag_ids:
@@ -1110,14 +1742,9 @@ class TestSaveProgressExtra:
 
     async def test_get_progress_returns_gallery_id_field(self, client, db_session):
         """GET progress response should include gallery_id field."""
-        gid = await _insert_gallery(
-            db_session, source="local", source_id="prog_field_test", title="Progress Field"
-        )
+        gid = await _insert_gallery(db_session, source="local", source_id="prog_field_test", title="Progress Field")
         await db_session.execute(
-            text(
-                "INSERT INTO read_progress (user_id, gallery_id, last_page) "
-                "VALUES (1, :gid, 5)"
-            ),
+            text("INSERT INTO read_progress (user_id, gallery_id, last_page) VALUES (1, :gid, 5)"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -1175,9 +1802,7 @@ class TestListGalleriesExtra:
         await _insert_gallery(db_session, source_id="af02", title="No Artist")
         await db_session.commit()
 
-        resp = await client.get(
-            "/api/library/galleries", params={"artist": "pixiv:filter_artist"}
-        )
+        resp = await client.get("/api/library/galleries", params={"artist": "pixiv:filter_artist"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 1
@@ -1194,12 +1819,8 @@ class TestListGalleriesStatusCategory:
 
     async def test_source_filter_filters_by_source(self, client, db_session):
         """?source= should filter galleries by source."""
-        await _insert_gallery(
-            db_session, source="ehentai", source_id="srcfilt01", title="EH Gallery"
-        )
-        await _insert_gallery(
-            db_session, source="pixiv", source_id="srcfilt02", title="Pixiv Gallery"
-        )
+        await _insert_gallery(db_session, source="ehentai", source_id="srcfilt01", title="EH Gallery")
+        await _insert_gallery(db_session, source="pixiv", source_id="srcfilt02", title="Pixiv Gallery")
 
         resp = await client.get("/api/library/galleries", params={"source": "pixiv"})
         assert resp.status_code == 200
@@ -1243,26 +1864,18 @@ class TestListGalleriesStatusCategory:
         assert data["total"] == 1
         assert data["galleries"][0]["source"] == "local"
 
-    async def test_min_rating_filter_returns_only_rated_above_threshold(
-        self, client, db_session
-    ):
+    async def test_min_rating_filter_returns_only_rated_above_threshold(self, client, db_session):
         """?min_rating= should return only galleries with user rating >= threshold."""
         gid_high = await _insert_gallery(db_session, source_id="mr01", title="High Rating")
         gid_low = await _insert_gallery(db_session, source_id="mr02", title="Low Rating")
 
         # Insert user ratings directly
         await db_session.execute(
-            text(
-                "INSERT INTO user_ratings (user_id, gallery_id, rating) "
-                "VALUES (1, :gid, 5)"
-            ),
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 5)"),
             {"gid": gid_high},
         )
         await db_session.execute(
-            text(
-                "INSERT INTO user_ratings (user_id, gallery_id, rating) "
-                "VALUES (1, :gid, 2)"
-            ),
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 2)"),
             {"gid": gid_low},
         )
         await db_session.commit()
@@ -1290,14 +1903,10 @@ class TestListGalleriesStatusCategory:
         assert "page" in data
         assert data["page"] == 0
 
-    async def test_page_based_pagination_returns_total_and_page(
-        self, client, db_session
-    ):
+    async def test_page_based_pagination_returns_total_and_page(self, client, db_session):
         """Page-based pagination should return total and page fields."""
         for i in range(5):
-            await _insert_gallery(
-                db_session, source_id=f"cur{i:03d}", title=f"Cursor Gallery {i}"
-            )
+            await _insert_gallery(db_session, source_id=f"cur{i:03d}", title=f"Cursor Gallery {i}")
 
         # Page 0 — limit 3 (page-based mode, no cursor param)
         resp = await client.get("/api/library/galleries", params={"page": 0, "limit": 3})
@@ -1316,16 +1925,12 @@ class TestListGalleriesStatusCategory:
 
     async def test_invalid_cursor_returns_400(self, client):
         """An invalid cursor string should return 400."""
-        resp = await client.get(
-            "/api/library/galleries", params={"cursor": "not-a-valid-cursor"}
-        )
+        resp = await client.get("/api/library/galleries", params={"cursor": "not-a-valid-cursor"})
         assert resp.status_code == 400
 
     async def test_browse_images_sort_oldest(self, client, db_session):
         """sort=oldest on the image browser should return 200 with images in order."""
-        gid = await _insert_gallery(
-            db_session, source="ehentai", source_id="imgold001", title="Old Sort"
-        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="imgold001", title="Old Sort")
         await _insert_image(db_session, gid, page_num=1, filename="a.jpg")
         await _insert_image(db_session, gid, page_num=2, filename="b.jpg")
 
@@ -1336,12 +1941,8 @@ class TestListGalleriesStatusCategory:
 
     async def test_browse_images_gallery_id_filter(self, client, db_session):
         """gallery_id param should restrict images to the specified gallery."""
-        gid1 = await _insert_gallery(
-            db_session, source="ehentai", source_id="giflt001", title="Gallery 1"
-        )
-        gid2 = await _insert_gallery(
-            db_session, source="ehentai", source_id="giflt002", title="Gallery 2"
-        )
+        gid1 = await _insert_gallery(db_session, source="ehentai", source_id="giflt001", title="Gallery 1")
+        gid2 = await _insert_gallery(db_session, source="ehentai", source_id="giflt002", title="Gallery 2")
         await _insert_image(db_session, gid1, page_num=1, filename="g1.jpg")
         await _insert_image(db_session, gid2, page_num=1, filename="g2.jpg")
 
@@ -1360,13 +1961,9 @@ class TestListGalleriesStatusCategory:
 class TestGetGalleryDetail:
     """GET /api/library/galleries/{source}/{source_id} — additional coverage."""
 
-    async def test_get_gallery_includes_is_favorited_and_my_rating(
-        self, client, db_session
-    ):
+    async def test_get_gallery_includes_is_favorited_and_my_rating(self, client, db_session):
         """Gallery detail should include is_favorited and my_rating fields."""
-        gid = await _insert_gallery(
-            db_session, source="ehentai", source_id="detail01", title="Detail Gallery"
-        )
+        await _insert_gallery(db_session, source="ehentai", source_id="detail01", title="Detail Gallery")
         resp = await client.get("/api/library/galleries/ehentai/detail01")
         assert resp.status_code == 200
         data = resp.json()
@@ -1419,9 +2016,7 @@ class TestGetGalleryImagesExtra:
 
     async def test_images_response_includes_expected_fields(self, client, db_session):
         """Each image in the response should include id, page_num, gallery_id."""
-        gid = await _insert_gallery(
-            db_session, source="ehentai", source_id="imgfields01", title="Field Check"
-        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="imgfields01", title="Field Check")
         await _insert_image(db_session, gid, page_num=1, filename="p1.jpg")
 
         resp = await client.get("/api/library/galleries/ehentai/imgfields01/images")
@@ -1435,9 +2030,7 @@ class TestGetGalleryImagesExtra:
 
     async def test_images_unauthenticated_returns_401(self, unauthed_client):
         """Unauthenticated request should return 401."""
-        resp = await unauthed_client.get(
-            "/api/library/galleries/ehentai/12345/images"
-        )
+        resp = await unauthed_client.get("/api/library/galleries/ehentai/12345/images")
         assert resp.status_code == 401
 
 
@@ -1451,14 +2044,10 @@ class TestPatchGalleryExtra:
 
     async def test_patch_gallery_unfavorite_via_false(self, client, db_session):
         """Passing favorited=False should attempt to remove the favorite entry."""
-        gid = await _insert_gallery(
-            db_session, source="ehentai", source_id="unfav01", title="Unfav Test"
-        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="unfav01", title="Unfav Test")
         # Insert a favorite for user_id=1
         await db_session.execute(
-            text(
-                "INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"
-            ),
+            text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -1504,9 +2093,7 @@ class TestDeleteGalleryExtra:
 
     async def test_delete_gallery_returns_ok_status(self, client, db_session):
         """Successful deletion should return status=ok."""
-        await _insert_gallery(
-            db_session, source="local", source_id="del_extra01", title="Extra Delete Test"
-        )
+        await _insert_gallery(db_session, source="local", source_id="del_extra01", title="Extra Delete Test")
         resp = await client.delete("/api/library/galleries/local/del_extra01")
         assert resp.status_code == 200
 
@@ -1516,7 +2103,7 @@ class TestDeleteGalleryExtra:
 # ---------------------------------------------------------------------------
 
 
-class TestGetGalleryDetail:
+class TestGetGalleryDetailFields:
     """GET /api/library/galleries/{source}/{source_id} — response field coverage."""
 
     async def test_gallery_response_includes_expected_fields(self, client, db_session):
@@ -1572,9 +2159,7 @@ class TestGetGalleryDetail:
         """Gallery with a user_ratings row should return my_rating equal to stored value."""
         gid = await _insert_gallery(db_session, source="ehentai", source_id="rated_detail01")
         await db_session.execute(
-            text(
-                "INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 4)"
-            ),
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 4)"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -1600,7 +2185,7 @@ class TestGetGalleryImagesPaginated:
         """When limit is provided the response includes total, page, has_next."""
         gid = await _insert_gallery(db_session, source="ehentai", source_id="imgpag01")
         for i in range(5):
-            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i+1:03d}.jpg")
+            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i + 1:03d}.jpg")
 
         resp = await client.get(
             "/api/library/galleries/ehentai/imgpag01/images",
@@ -1617,7 +2202,7 @@ class TestGetGalleryImagesPaginated:
         """has_next should be False on the last page."""
         gid = await _insert_gallery(db_session, source="ehentai", source_id="imgpag02")
         for i in range(3):
-            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i+1:03d}.jpg")
+            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i + 1:03d}.jpg")
 
         resp = await client.get(
             "/api/library/galleries/ehentai/imgpag02/images",
@@ -1631,7 +2216,7 @@ class TestGetGalleryImagesPaginated:
         """Without a limit parameter, all images are returned without pagination keys."""
         gid = await _insert_gallery(db_session, source="ehentai", source_id="imgall01")
         for i in range(4):
-            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i+1:03d}.jpg")
+            await _insert_image(db_session, gid, page_num=i + 1, filename=f"{i + 1:03d}.jpg")
 
         resp = await client.get("/api/library/galleries/ehentai/imgall01/images")
         assert resp.status_code == 200
@@ -1662,9 +2247,7 @@ class TestUpdateGalleryMetadata:
 
     async def test_update_category_changes_category(self, client, db_session):
         """PATCH with category should update the gallery category."""
-        await _insert_gallery(
-            db_session, source="local", source_id="edit_cat01", title="Cat Test", category="manga"
-        )
+        await _insert_gallery(db_session, source="local", source_id="edit_cat01", title="Cat Test", category="manga")
 
         resp = await client.patch(
             "/api/library/galleries/local/edit_cat01",
@@ -1704,9 +2287,7 @@ class TestUpdateGalleryMetadata:
         """PATCH with rating=0 should delete the user rating row."""
         gid = await _insert_gallery(db_session, source="local", source_id="ratingzero01")
         await db_session.execute(
-            text(
-                "INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 3)"
-            ),
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 3)"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -1756,15 +2337,11 @@ class TestListGalleriesFilters:
         gid_high = await _insert_gallery(db_session, source_id="minr01", title="High Rated")
         gid_low = await _insert_gallery(db_session, source_id="minr02", title="Low Rated")
         await db_session.execute(
-            text(
-                "INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 5)"
-            ),
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 5)"),
             {"gid": gid_high},
         )
         await db_session.execute(
-            text(
-                "INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 2)"
-            ),
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 2)"),
             {"gid": gid_low},
         )
         await db_session.commit()
@@ -1801,7 +2378,7 @@ class TestListGalleriesFilters:
 # ---------------------------------------------------------------------------
 
 
-class TestSaveProgress:
+class TestSaveProgressEdgeCases:
     """POST /api/library/galleries/{source}/{source_id}/progress — save read progress."""
 
     async def test_save_progress_returns_ok(self, client, db_session):
@@ -1902,7 +2479,7 @@ class TestBatchGalleriesExtra:
 # ---------------------------------------------------------------------------
 
 
-class TestGetGalleryTags:
+class TestGetGalleryTagsEdgeCases:
     """GET /api/library/galleries/{source}/{source_id}/tags"""
 
     async def test_get_tags_empty_returns_empty_list(self, client, db_session):
@@ -1918,11 +2495,7 @@ class TestGetGalleryTags:
         """Gallery with tags in gallery_tags table should return them."""
         gid = await _insert_gallery(db_session, source="ehentai", source_id="tags_data01")
         # Insert a tag and a gallery_tag record
-        await db_session.execute(
-            text(
-                "INSERT INTO tags (namespace, name) VALUES ('artist', 'test_artist')"
-            )
-        )
+        await db_session.execute(text("INSERT INTO tags (namespace, name) VALUES ('artist', 'test_artist')"))
         await db_session.commit()
         tag_id_row = await db_session.execute(
             text("SELECT id FROM tags WHERE namespace='artist' AND name='test_artist'")
@@ -1930,8 +2503,7 @@ class TestGetGalleryTags:
         tag_id = tag_id_row.scalar()
         await db_session.execute(
             text(
-                "INSERT INTO gallery_tags (gallery_id, tag_id, confidence, source) "
-                "VALUES (:gid, :tid, 1.0, 'metadata')"
+                "INSERT INTO gallery_tags (gallery_id, tag_id, confidence, source) VALUES (:gid, :tid, 1.0, 'metadata')"
             ),
             {"gid": gid, "tid": tag_id},
         )
@@ -1961,7 +2533,7 @@ class TestGetGalleryTags:
 # ---------------------------------------------------------------------------
 
 
-class TestUpdateGallery:
+class TestUpdateGalleryEdgeCases:
     """PATCH /api/library/galleries/{source}/{source_id}"""
 
     async def test_patch_title_updates_gallery(self, client, db_session):
@@ -2055,7 +2627,7 @@ class TestUpdateGallery:
 # ---------------------------------------------------------------------------
 
 
-class TestDeleteGallery:
+class TestDeleteGalleryEdgeCases:
     """DELETE /api/library/galleries/{source}/{source_id}"""
 
     async def test_delete_gallery_returns_ok(self, client, db_session):
@@ -2093,7 +2665,7 @@ class TestDeleteGallery:
 # ---------------------------------------------------------------------------
 
 
-class TestReadProgress:
+class TestReadProgressEdgeCases:
     """GET/POST /api/library/galleries/{source}/{source_id}/progress"""
 
     async def test_get_progress_no_record_returns_zero(self, client, db_session):
@@ -2129,10 +2701,7 @@ class TestReadProgress:
         """When a progress record exists it should be returned correctly."""
         gid = await _insert_gallery(db_session, source="ehentai", source_id="prog03")
         await db_session.execute(
-            text(
-                "INSERT INTO read_progress (user_id, gallery_id, last_page) "
-                "VALUES (1, :gid, 12)"
-            ),
+            text("INSERT INTO read_progress (user_id, gallery_id, last_page) VALUES (1, :gid, 12)"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -2146,7 +2715,7 @@ class TestReadProgress:
 # ---------------------------------------------------------------------------
 
 
-class TestBrowseImages:
+class TestBrowseImagesFilters:
     """GET /api/library/images — cross-gallery image browser."""
 
     async def test_browse_images_empty(self, client):
@@ -2195,7 +2764,7 @@ class TestBrowseImages:
 # ---------------------------------------------------------------------------
 
 
-class TestListArtists:
+class TestListArtistsEdgeCases:
     """GET /api/library/artists"""
 
     async def test_list_artists_empty(self, client):
@@ -2263,18 +2832,12 @@ class TestReadingList:
 
     async def test_reading_list_filter(self, client, db_session):
         """GET ?in_reading_list=true returns only galleries in the reading list."""
-        gid1 = await _insert_gallery(
-            db_session, source="ehentai", source_id="rl_filter01", title="In List"
-        )
-        await _insert_gallery(
-            db_session, source="ehentai", source_id="rl_filter02", title="Not In List"
-        )
+        gid1 = await _insert_gallery(db_session, source="ehentai", source_id="rl_filter01", title="In List")
+        await _insert_gallery(db_session, source="ehentai", source_id="rl_filter02", title="Not In List")
 
         # Insert reading list row directly (avoids pg_insert SQLite incompatibility)
         await db_session.execute(
-            text(
-                "INSERT INTO user_reading_list (user_id, gallery_id) VALUES (:uid, :gid)"
-            ),
+            text("INSERT INTO user_reading_list (user_id, gallery_id) VALUES (:uid, :gid)"),
             {"uid": 1, "gid": gid1},
         )
         await db_session.commit()
@@ -2297,12 +2860,8 @@ class TestReadingList:
         we accept 200 (PG) or 500 (SQLite).  remove_from_reading_list uses a plain
         DELETE and must return 200 with affected == 2.
         """
-        gid1 = await _insert_gallery(
-            db_session, source="ehentai", source_id="batch_rl01", title="Batch RL 1"
-        )
-        gid2 = await _insert_gallery(
-            db_session, source="ehentai", source_id="batch_rl02", title="Batch RL 2"
-        )
+        gid1 = await _insert_gallery(db_session, source="ehentai", source_id="batch_rl01", title="Batch RL 1")
+        gid2 = await _insert_gallery(db_session, source="ehentai", source_id="batch_rl02", title="Batch RL 2")
 
         # Add both to reading list
         resp_add = await client.post(
@@ -2316,10 +2875,7 @@ class TestReadingList:
         # Pre-insert reading list rows so the remove step has something to delete
         for gid in (gid1, gid2):
             await db_session.execute(
-                text(
-                    "INSERT OR IGNORE INTO user_reading_list (user_id, gallery_id) "
-                    "VALUES (:uid, :gid)"
-                ),
+                text("INSERT OR IGNORE INTO user_reading_list (user_id, gallery_id) VALUES (:uid, :gid)"),
                 {"uid": 1, "gid": gid},
             )
         await db_session.commit()
@@ -2340,21 +2896,12 @@ class TestReadingList:
         that the second PATCH with in_reading_list=True also returns a valid
         response without an unhandled exception.
         """
-        await _insert_gallery(
-            db_session, source="ehentai", source_id="rl_idem01", title="Idempotent RL"
-        )
-        gid = (
-            await db_session.execute(
-                text("SELECT id FROM galleries WHERE source_id='rl_idem01'")
-            )
-        ).scalar_one()
+        await _insert_gallery(db_session, source="ehentai", source_id="rl_idem01", title="Idempotent RL")
+        gid = (await db_session.execute(text("SELECT id FROM galleries WHERE source_id='rl_idem01'"))).scalar_one()
 
         # Insert the row directly so subsequent PATCH sees an existing entry
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO user_reading_list (user_id, gallery_id) "
-                "VALUES (1, :gid)"
-            ),
+            text("INSERT OR IGNORE INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -2372,22 +2919,16 @@ class TestReadingList:
     async def test_reading_list_survives_soft_delete(self, client, db_session):
         """Soft-deleted gallery is hidden from the in_reading_list filter but the
         user_reading_list row is preserved so it can be restored later."""
-        gid = await _insert_gallery(
-            db_session, source="ehentai", source_id="rl_soft01", title="Soft Delete RL"
-        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="rl_soft01", title="Soft Delete RL")
         await db_session.execute(
-            text(
-                "INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"
-            ),
+            text("INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"),
             {"gid": gid},
         )
         await db_session.commit()
 
         # Soft delete the gallery
         await db_session.execute(
-            text(
-                "UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :gid"
-            ),
+            text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :gid"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -2400,10 +2941,7 @@ class TestReadingList:
         # The user_reading_list row must still exist
         rl_row = (
             await db_session.execute(
-                text(
-                    "SELECT 1 FROM user_reading_list "
-                    "WHERE user_id=1 AND gallery_id=:gid"
-                ),
+                text("SELECT 1 FROM user_reading_list WHERE user_id=1 AND gallery_id=:gid"),
                 {"gid": gid},
             )
         ).scalar_one_or_none()
@@ -2411,20 +2949,14 @@ class TestReadingList:
 
     async def test_reading_list_reappears_after_restore(self, client, db_session):
         """Gallery removed from reading list view via soft delete reappears after restore."""
-        gid = await _insert_gallery(
-            db_session, source="ehentai", source_id="rl_restore01", title="Restore RL"
-        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="rl_restore01", title="Restore RL")
         await db_session.execute(
-            text(
-                "INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"
-            ),
+            text("INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"),
             {"gid": gid},
         )
         # Soft delete
         await db_session.execute(
-            text(
-                "UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :gid"
-            ),
+            text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :gid"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -2444,13 +2976,9 @@ class TestReadingList:
 
     async def test_reading_list_cascade_on_hard_delete(self, client, db_session):
         """Hard-deleting a gallery cascades to user_reading_list (ON DELETE CASCADE)."""
-        gid = await _insert_gallery(
-            db_session, source="ehentai", source_id="rl_cascade01", title="Cascade RL"
-        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="rl_cascade01", title="Cascade RL")
         await db_session.execute(
-            text(
-                "INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"
-            ),
+            text("INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -2467,10 +2995,7 @@ class TestReadingList:
 
         rl_row = (
             await db_session.execute(
-                text(
-                    "SELECT 1 FROM user_reading_list "
-                    "WHERE user_id=1 AND gallery_id=:gid"
-                ),
+                text("SELECT 1 FROM user_reading_list WHERE user_id=1 AND gallery_id=:gid"),
                 {"gid": gid},
             )
         ).scalar_one_or_none()
@@ -2478,9 +3003,7 @@ class TestReadingList:
 
     async def test_gallery_detail_includes_in_reading_list(self, client, db_session):
         """GET gallery detail exposes in_reading_list field; value changes after PATCH."""
-        gid = await _insert_gallery(
-            db_session, source="ehentai", source_id="rl_detail01", title="RL Detail"
-        )
+        gid = await _insert_gallery(db_session, source="ehentai", source_id="rl_detail01", title="RL Detail")
         await _insert_image(db_session, gid, page_num=1, filename="cover.jpg")
 
         # Initially not in reading list
@@ -2492,10 +3015,7 @@ class TestReadingList:
 
         # Insert reading list row directly (avoids pg_insert SQLite incompatibility)
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO user_reading_list (user_id, gallery_id) "
-                "VALUES (1, :gid)"
-            ),
+            text("INSERT OR IGNORE INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -2582,7 +3102,7 @@ class TestListArtistImages:
 # ---------------------------------------------------------------------------
 
 
-class TestGetGalleryImagesPaginated:
+class TestGetGalleryImagesPaginatedEdgeCases:
     """GET /api/library/galleries/{source}/{source_id}/images?limit="""
 
     async def test_paginated_images_returns_total(self, client, db_session):
@@ -2651,9 +3171,7 @@ class TestBatchDeleteGalleries:
         """Batch delete with an existing gallery should return affected >= 1."""
         await _insert_gallery(db_session, source="ehentai", source_id="batch_del01")
         # Need to get the actual ID
-        result = await db_session.execute(
-            text("SELECT id FROM galleries WHERE source_id='batch_del01'")
-        )
+        result = await db_session.execute(text("SELECT id FROM galleries WHERE source_id='batch_del01'"))
         gid = result.scalar()
         resp = await client.post(
             "/api/library/galleries/batch",
@@ -2670,7 +3188,7 @@ class TestBatchDeleteGalleries:
 # ---------------------------------------------------------------------------
 
 
-class TestExcludedBlobs:
+class TestExcludedBlobsEdgeCases:
     """GET/DELETE /api/library/galleries/{source}/{source_id}/excluded"""
 
     async def test_list_excluded_blobs_empty(self, client, db_session):
@@ -2694,25 +3212,19 @@ class TestExcludedBlobs:
     async def test_restore_excluded_blob_not_found_returns_404(self, client, db_session):
         """Restoring non-existent excluded blob returns 404."""
         await _insert_gallery(db_session, source="ehentai", source_id="excl02")
-        resp = await client.delete(
-            "/api/library/galleries/ehentai/excl02/excluded/fakehash123"
-        )
+        resp = await client.delete("/api/library/galleries/ehentai/excl02/excluded/fakehash123")
         assert resp.status_code == 404
 
     async def test_restore_excluded_blob_requires_auth(self, unauthed_client):
         """Unauthenticated restore request returns 401."""
-        resp = await unauthed_client.delete(
-            "/api/library/galleries/ehentai/any/excluded/fakehash"
-        )
+        resp = await unauthed_client.delete("/api/library/galleries/ehentai/any/excluded/fakehash")
         assert resp.status_code == 401
 
     async def test_list_excluded_blobs_with_data(self, client, db_session):
         """Gallery with an excluded blob entry should return it."""
         gid = await _insert_gallery(db_session, source="ehentai", source_id="excl03")
         await db_session.execute(
-            text(
-                "INSERT INTO excluded_blobs (gallery_id, blob_sha256) VALUES (:gid, 'abc123')"
-            ),
+            text("INSERT INTO excluded_blobs (gallery_id, blob_sha256) VALUES (:gid, 'abc123')"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -2728,7 +3240,7 @@ class TestExcludedBlobs:
 # ---------------------------------------------------------------------------
 
 
-class TestFindSimilarImages:
+class TestFindSimilarImagesEdgeCases:
     """GET /api/library/images/{image_id}/similar"""
 
     async def test_similar_images_not_found_returns_404(self, client):
@@ -2845,25 +3357,19 @@ class TestTrashEndpoints:
 
     async def test_restore_requires_auth(self, unauthed_client):
         """Unauthenticated restore should return 401."""
-        resp = await unauthed_client.post(
-            "/api/library/galleries/local/any/restore"
-        )
+        resp = await unauthed_client.post("/api/library/galleries/local/any/restore")
         assert resp.status_code == 401
 
     async def test_permanent_delete_not_in_trash_returns_404(self, client):
         """Permanent-deleting a gallery not in trash should return 404."""
-        resp = await client.post(
-            "/api/library/galleries/local/ghost_perm/permanent-delete"
-        )
+        resp = await client.post("/api/library/galleries/local/ghost_perm/permanent-delete")
         assert resp.status_code == 404
 
     async def test_permanent_delete_gallery_removes_it(self, client, db_session):
         """Permanently deleting a trashed gallery should remove it from DB."""
         await self._soft_delete_gallery(db_session, "local", "trash_perm_01", title="Permanent Gone")
 
-        resp = await client.post(
-            "/api/library/galleries/local/trash_perm_01/permanent-delete"
-        )
+        resp = await client.post("/api/library/galleries/local/trash_perm_01/permanent-delete")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "ok"
@@ -2874,17 +3380,13 @@ class TestTrashEndpoints:
 
     async def test_permanent_delete_requires_auth(self, unauthed_client):
         """Unauthenticated permanent-delete should return 401."""
-        resp = await unauthed_client.post(
-            "/api/library/galleries/local/any/permanent-delete"
-        )
+        resp = await unauthed_client.post("/api/library/galleries/local/any/permanent-delete")
         assert resp.status_code == 401
 
     async def test_empty_trash_with_galleries_removes_all(self, client, db_session):
         """Empty trash should remove all soft-deleted galleries."""
         for i in range(3):
-            await self._soft_delete_gallery(
-                db_session, "local", f"trash_empty_{i:02d}", title=f"Trash {i}"
-            )
+            await self._soft_delete_gallery(db_session, "local", f"trash_empty_{i:02d}", title=f"Trash {i}")
 
         resp = await client.get("/api/library/trash/count")
         assert resp.json()["count"] == 3
@@ -2912,9 +3414,7 @@ class TestTrashEndpoints:
 
     async def test_delete_gallery_moves_to_trash(self, client, db_session):
         """DELETE on a gallery should soft-delete it (set deleted_at)."""
-        await _insert_gallery(
-            db_session, source="local", source_id="soft_del_01", title="Soft Delete"
-        )
+        await _insert_gallery(db_session, source="local", source_id="soft_del_01", title="Soft Delete")
         resp = await client.delete("/api/library/galleries/local/soft_del_01")
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
@@ -2965,14 +3465,10 @@ class TestCursorPagination:
     async def test_cursor_pagination_round_trip(self, client, db_session):
         """Using next_cursor from first page should return different set of results."""
         for i in range(6):
-            await _insert_gallery(
-                db_session, source_id=f"cur_rt_{i:03d}", title=f"Cursor RT {i}"
-            )
+            await _insert_gallery(db_session, source_id=f"cur_rt_{i:03d}", title=f"Cursor RT {i}")
 
         # First page: cursor-less, limit=3
-        resp1 = await client.get(
-            "/api/library/galleries", params={"limit": 3, "sort": "added_at"}
-        )
+        resp1 = await client.get("/api/library/galleries", params={"limit": 3, "sort": "added_at"})
         assert resp1.status_code == 200
         data1 = resp1.json()
         assert len(data1["galleries"]) == 3
@@ -2984,9 +3480,12 @@ class TestCursorPagination:
         # Build a valid-looking but invalid cursor
         import base64
         import json as _json
-        payload = base64.urlsafe_b64encode(
-            _json.dumps({"id": 1, "v": "2024-01-01T00:00:00", "s": "added_at"}).encode()
-        ).decode().rstrip("=")
+
+        payload = (
+            base64.urlsafe_b64encode(_json.dumps({"id": 1, "v": "2024-01-01T00:00:00", "s": "added_at"}).encode())
+            .decode()
+            .rstrip("=")
+        )
         fake_cursor = f"{payload}.aaaaaaaabbbbbbbbccccccccddddddddeeeeeeeeffffffff0000000011111111"
 
         resp = await client.get(

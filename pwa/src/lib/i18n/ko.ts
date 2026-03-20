@@ -840,7 +840,6 @@ const ko: Record<string, string> = {
   'browse.pageN': '{page} 페이지',
   'browse.cannotJumpForward': '마지막 페이지에 도달했습니다',
   'browse.failedLoadResults': '결과 로드 실패',
-  'browse.favoritesN': '즐겨찾기 {n}',
   'browse.matchingQuery': '"{query}" 일치',
   'browse.failedLoadFavorites': '즐겨찾기 로드 실패',
   'browse.failedLoadPopular': '인기 로드 실패',

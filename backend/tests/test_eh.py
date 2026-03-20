@@ -61,10 +61,7 @@ _FAKE_SEARCH_RESULT = {
 async def _insert_user(db_session, user_id=1):
     """Insert a test user so FK constraints on blocked_tags can reference it."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash) "
-            "VALUES (:id, 'testuser', 'x')"
-        ),
+        text("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (:id, 'testuser', 'x')"),
         {"id": user_id},
     )
     await db_session.commit()
@@ -72,10 +69,7 @@ async def _insert_user(db_session, user_id=1):
 
 async def _insert_blocked_tag(db_session, namespace, name, user_id=1):
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO blocked_tags (user_id, namespace, name) "
-            "VALUES (:uid, :ns, :n)"
-        ),
+        text("INSERT OR IGNORE INTO blocked_tags (user_id, namespace, name) VALUES (:uid, :ns, :n)"),
         {"uid": user_id, "ns": namespace, "n": name},
     )
     await db_session.commit()
@@ -422,6 +416,7 @@ def _make_http_response(
     # raise_for_status: no-op by default; raise on 4xx/5xx if requested
     if status_code >= 400:
         import httpx
+
         resp.raise_for_status.side_effect = httpx.HTTPStatusError(
             f"HTTP {status_code}",
             request=MagicMock(),
@@ -519,9 +514,7 @@ class TestGalleryMetadataParsing:
                 }
             ]
         }
-        client._http.post = AsyncMock(
-            return_value=_make_http_response(200, text="", content=b"")
-        )
+        client._http.post = AsyncMock(return_value=_make_http_response(200, text="", content=b""))
         client._http.post.return_value.json = MagicMock(return_value=api_response)
 
         result = await client.get_gallery_metadata(12345, "abcdef1234")
@@ -554,9 +547,7 @@ class TestGalleryMetadataParsing:
                 }
             ]
         }
-        client._http.post = AsyncMock(
-            return_value=_make_http_response(200)
-        )
+        client._http.post = AsyncMock(return_value=_make_http_response(200))
         client._http.post.return_value.json = MagicMock(return_value=api_response)
 
         with pytest.raises(ValueError, match="expunged"):
@@ -569,9 +560,7 @@ class TestGalleryMetadataParsing:
         client = _build_eh_client()
 
         api_response = {"gmetadata": []}
-        client._http.post = AsyncMock(
-            return_value=_make_http_response(200)
-        )
+        client._http.post = AsyncMock(return_value=_make_http_response(200))
         client._http.post.return_value.json = MagicMock(return_value=api_response)
 
         with pytest.raises(ValueError, match="not found"):
@@ -629,10 +618,12 @@ class TestImageTokenParsing:
         )
         html_p1 = '<a href="/s/0000000015/11111-21"><div style="width:100px;height:140px;background:transparent url(https://ehgt.org/p/021.jpg) 0px 0 no-repeat"></div></a>'
 
-        client._http.get = AsyncMock(side_effect=[
-            _make_http_response(200, text=html_p0),
-            _make_http_response(200, text=html_p1),
-        ])
+        client._http.get = AsyncMock(
+            side_effect=[
+                _make_http_response(200, text=html_p0),
+                _make_http_response(200, text=html_p1),
+            ]
+        )
 
         with patch("asyncio.sleep", new_callable=AsyncMock):
             token_map, _ = await client.get_image_tokens(11111, "tok1111abcd", 21)
@@ -655,9 +646,7 @@ class TestImageTokenParsing:
         from services.eh_client import EhClient
 
         client = EhClient.__new__(EhClient)
-        token_map, preview_map = client._parse_detail_html(
-            "<html><body>no previews here at all</body></html>"
-        )
+        token_map, preview_map = client._parse_detail_html("<html><body>no previews here at all</body></html>")
 
         assert token_map == {}
         assert preview_map == {}
@@ -674,6 +663,7 @@ class TestRateLimitDetection:
     async def test_check_auth_raises_on_509_gif(self):
         """_check_auth should raise PermissionError when HTML contains /509.gif."""
         import pytest
+
         from services.eh_client import EhClient
 
         client = EhClient.__new__(EhClient)
@@ -686,6 +676,7 @@ class TestRateLimitDetection:
     async def test_check_auth_raises_on_sad_panda(self):
         """_check_auth should raise PermissionError for tiny non-HTML response (Sad Panda)."""
         import pytest
+
         from services.eh_client import EhClient
 
         client = EhClient.__new__(EhClient)
@@ -720,6 +711,7 @@ class TestCookieHandling:
     async def test_cookies_injected_with_nw_1(self):
         """__aenter__ should merge user cookies with nw=1."""
         import httpx
+
         from services.eh_client import EhClient
 
         user_cookies = {"ipb_member_id": "123456", "ipb_pass_hash": "abcdef"}
@@ -738,9 +730,7 @@ class TestCookieHandling:
     async def test_check_cookies_returns_true_when_credits_present(self):
         """check_cookies should return True if 'Credits' appears in home.php."""
         client = _build_eh_client()
-        client._http.get = AsyncMock(
-            return_value=_make_http_response(200, text="<html>1,234 Credits available</html>")
-        )
+        client._http.get = AsyncMock(return_value=_make_http_response(200, text="<html>1,234 Credits available</html>"))
 
         result = await client.check_cookies()
 
@@ -751,9 +741,7 @@ class TestCookieHandling:
         import httpx
 
         client = _build_eh_client()
-        client._http.get = AsyncMock(
-            side_effect=httpx.TimeoutException("timed out")
-        )
+        client._http.get = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
 
         result = await client.check_cookies()
 
@@ -770,7 +758,6 @@ class TestErrorResponses:
 
     async def test_get_previews_raises_value_error_on_404(self):
         """get_previews should raise ValueError when gallery page returns 404."""
-        import httpx
         import pytest
 
         client = _build_eh_client()
@@ -814,7 +801,6 @@ class TestArchiveDownload:
 
     async def test_download_image_with_retry_succeeds_on_first_attempt(self):
         """download_image_with_retry should return image data when first attempt succeeds."""
-        import httpx
 
         client = _build_eh_client()
 
@@ -843,6 +829,7 @@ class TestArchiveDownload:
     async def test_download_image_with_retry_raises_image509_error(self):
         """download_image_with_retry should raise Image509Error immediately for 509 URLs."""
         import pytest
+
         from services.eh_client import Image509Error
 
         client = _build_eh_client()
@@ -856,6 +843,209 @@ class TestArchiveDownload:
         client._http.post = AsyncMock(return_value=api_resp)
 
         with pytest.raises(Image509Error, match="509"):
-            await client.download_image_with_retry(
-                showkey="testshowkey2", gid=12345, page=1, imgkey="abcdef1234"
+            await client.download_image_with_retry(showkey="testshowkey2", gid=12345, page=1, imgkey="abcdef1234")
+
+
+# ---------------------------------------------------------------------------
+# TestEhGalleryPreviews
+# ---------------------------------------------------------------------------
+
+
+class TestEhGalleryPreviews:
+    """GET /api/eh/gallery/{gid}/{token}/previews"""
+
+    async def test_gallery_previews_returns_thumbnails(self, client):
+        """Should return preview thumbnail URLs indexed by page number."""
+        eh_mock = _make_eh_client_mock()
+
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("services.cache.get_preview_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_preview_cache", new_callable=AsyncMock),
+        ):
+            resp = await client.get("/api/eh/gallery/12345/abcdef/previews")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gid"] == 12345
+        assert "previews" in data
+        assert "1" in data["previews"]
+
+    async def test_gallery_previews_sad_panda_returns_403(self, client):
+        """Sad Panda PermissionError during preview fetch should return 403."""
+        eh_mock = _make_eh_client_mock()
+        eh_mock.get_previews = AsyncMock(side_effect=PermissionError("Sad Panda"))
+
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("services.cache.get_preview_cache", new_callable=AsyncMock, return_value=None),
+            patch("plugins.builtin.ehentai.browse.push_system_alert", new_callable=AsyncMock),
+        ):
+            resp = await client.get("/api/eh/gallery/12345/abcdef/previews")
+
+        assert resp.status_code == 403
+
+
+# ---------------------------------------------------------------------------
+# TestEhGalleryImages
+# ---------------------------------------------------------------------------
+
+
+class TestEhGalleryImages:
+    """GET /api/eh/gallery/{gid}/{token}/images"""
+
+    async def test_gallery_images_returns_token_map(self, client):
+        """Should return image token map and preview URLs for a gallery."""
+        eh_mock = _make_eh_client_mock()
+
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=_FAKE_GALLERY_META),
+            patch("services.cache.get_preview_cache", new_callable=AsyncMock, return_value={}),
+            patch("services.cache.set_preview_cache", new_callable=AsyncMock),
+        ):
+            resp = await client.get("/api/eh/gallery/12345/abcdef/images")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gid"] == 12345
+        assert "images" in data
+        assert "1" in data["images"]
+
+    async def test_gallery_images_cache_hit_returns_without_client_call(self, client):
+        """Cached image token list should be returned without calling EH client."""
+        cached_tokens = {"1": "pt_abc", "2": "pt_def"}
+
+        with (
+            patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=cached_tokens),
+            patch("services.cache.get_preview_cache", new_callable=AsyncMock, return_value={}),
+        ):
+            resp = await client.get("/api/eh/gallery/12345/abcdef/images")
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gid"] == 12345
+        assert data["images"] == cached_tokens
+
+
+# ---------------------------------------------------------------------------
+# TestEhGalleryImagesPaginated
+# ---------------------------------------------------------------------------
+
+
+class TestEhGalleryImagesPaginated:
+    """GET /api/eh/gallery/{gid}/{token}/images-paginated"""
+
+    async def test_gallery_images_paginated_cache_hit_returns_result(self, client):
+        """When gallery and detail page are cached, returns window without EH HTTP calls."""
+        gallery_cache = _FAKE_GALLERY_META.copy()  # pages=30
+        cached_detail_page = {
+            "tokens": {"1": "tok001", "2": "tok002"},
+            "previews": {"1": "https://ehgt.org/p/001.jpg", "2": "https://ehgt.org/p/002.jpg"},
+        }
+
+        with (
+            patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=gallery_cache),
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=cached_detail_page),
+            patch("services.cache.set_json", new_callable=AsyncMock),
+            patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value={}),
+            patch("services.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.cache.get_preview_cache", new_callable=AsyncMock, return_value={}),
+            patch("services.cache.set_preview_cache", new_callable=AsyncMock),
+        ):
+            resp = await client.get(
+                "/api/eh/gallery/12345/abcdef/images-paginated",
+                params={"start_page": 0, "count": 2},
             )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gid"] == 12345
+        assert "images" in data
+        assert "has_more" in data
+        assert data["total"] == 30
+
+    async def test_gallery_images_paginated_out_of_range_returns_empty(self, client):
+        """start_page >= total_pages should return empty image list immediately."""
+        gallery_cache = _FAKE_GALLERY_META.copy()  # pages=30
+
+        with patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=gallery_cache):
+            resp = await client.get(
+                "/api/eh/gallery/12345/abcdef/images-paginated",
+                params={"start_page": 100, "count": 20},
+            )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["images"] == []
+        assert data["has_more"] is False
+        assert data["total"] == 30
+
+
+# ---------------------------------------------------------------------------
+# TestEhImageProxy
+# ---------------------------------------------------------------------------
+
+
+class TestEhImageProxy:
+    """GET /api/eh/image-proxy/{gid}/{page}"""
+
+    async def test_image_proxy_serves_cached_image(self, client):
+        """Should return cached image bytes without making any EH requests."""
+        fake_jpeg = b"\xff\xd8\xff" + b"\x00" * 100
+
+        with patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=fake_jpeg):
+            resp = await client.get("/api/eh/image-proxy/12345/1")
+
+        assert resp.status_code == 200
+        assert resp.content == fake_jpeg
+
+    async def test_image_proxy_missing_imagelist_returns_404(self, client):
+        """If image token map is not in cache, should return 404 instructing caller to fetch /images first."""
+        with (
+            patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+        ):
+            resp = await client.get("/api/eh/image-proxy/12345/1")
+
+        assert resp.status_code == 404
+        assert "images" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# TestEhErrorParsing
+# ---------------------------------------------------------------------------
+
+
+class TestEhErrorParsing:
+    """Test EH-specific PermissionError → HTTP status code mapping."""
+
+    async def test_toplist_509_bandwidth_error_returns_403(self, client):
+        """PermissionError with '509' on toplist endpoint should return 403 (bandwidth exceeded)."""
+        eh_mock = _make_eh_client_mock()
+        eh_mock.get_toplist = AsyncMock(side_effect=PermissionError("bandwidth 509 exceeded"))
+
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch("plugins.builtin.ehentai.browse.push_system_alert", new_callable=AsyncMock),
+        ):
+            resp = await client.get("/api/eh/toplists", params={"tl": 11})
+
+        assert resp.status_code == 403
+
+    async def test_toplist_sad_panda_returns_403(self, client):
+        """PermissionError with 'Sad Panda' on toplist endpoint should return 403 (access denied)."""
+        eh_mock = _make_eh_client_mock()
+        eh_mock.get_toplist = AsyncMock(side_effect=PermissionError("Sad Panda"))
+
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch("plugins.builtin.ehentai.browse.push_system_alert", new_callable=AsyncMock),
+        ):
+            resp = await client.get("/api/eh/toplists", params={"tl": 11})
+
+        assert resp.status_code == 403

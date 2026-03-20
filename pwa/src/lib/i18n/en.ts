@@ -637,7 +637,6 @@ const en: Record<string, string> = {
   'browse.pageN': 'Page {page}',
   'browse.cannotJumpForward': 'Reached the last available page',
   'browse.failedLoadResults': 'Failed to load results',
-  'browse.favoritesN': 'Favorites {n}',
   'browse.matchingQuery': 'matching "{query}"',
   'browse.failedLoadFavorites': 'Failed to load favorites',
   'browse.failedLoadPopular': 'Failed to load popular',

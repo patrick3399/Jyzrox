@@ -1,7 +1,7 @@
 'use client'
 
-import { useState, useMemo, useCallback, useRef, useEffect } from 'react'
-import { useParams, useRouter } from 'next/navigation'
+import { Suspense, useState, useMemo, useCallback, useRef, useEffect } from 'react'
+import { useParams, useRouter, useSearchParams } from 'next/navigation'
 import { useEhGallery, useEhGalleryPreviews, useEhGalleryComments } from '@/hooks/useGalleries'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -216,9 +216,18 @@ function formatDate(unix: number) {
 // ── Main page ──────────────────────────────────────────────────────────
 
 export default function EhGalleryDetailPage() {
+  return (
+    <Suspense>
+      <EhGalleryDetail />
+    </Suspense>
+  )
+}
+
+function EhGalleryDetail() {
   const { gid: gidStr, token } = useParams<{ gid: string; token: string }>()
   const gid = Number(gidStr)
   const router = useRouter()
+  const searchParams = useSearchParams()
 
   const { data: gallery, error: galleryError } = useEhGallery(gid, token)
   const { data: previewData } = useEhGalleryPreviews(gid, token)
@@ -233,10 +242,10 @@ export default function EhGalleryDetailPage() {
   )
   const comments = commentsData?.comments
 
-  // Favorite state
+  // Favorite state — initialise from ?fav=1 when navigating from favorites list
   const [showFavPicker, setShowFavPicker] = useState(false)
   const [favSaving, setFavSaving] = useState(false)
-  const [isFavorited, setIsFavorited] = useState(false)
+  const [isFavorited, setIsFavorited] = useState(() => searchParams.get('fav') === '1')
   const favRef = useRef<HTMLDivElement>(null)
 
   // Load More previews state

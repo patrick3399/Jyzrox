@@ -11,7 +11,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -214,7 +213,6 @@ class TestPixivRanking:
         """Different params should produce different cache keys."""
         cache_keys_seen = []
 
-        original_get_json = AsyncMock(return_value=None)
         original_set_json = AsyncMock()
         mock_resp = _make_httpx_response(_FAKE_RANKING_RESPONSE)
 
@@ -380,9 +378,7 @@ class TestPixivImageProxyAnonymousFallback:
             patch("httpx.AsyncClient") as mock_httpx_cls,
         ):
             mock_http = AsyncMock()
-            mock_http.get = AsyncMock(
-                side_effect=httpx.RequestError("connection refused", request=MagicMock())
-            )
+            mock_http.get = AsyncMock(side_effect=httpx.RequestError("connection refused", request=MagicMock()))
             mock_http.__aenter__ = AsyncMock(return_value=mock_http)
             mock_http.__aexit__ = AsyncMock(return_value=None)
             mock_httpx_cls.return_value = mock_http
@@ -750,10 +746,7 @@ class TestPixivTokenRefresh:
 
     async def test_refresh_token_raises_permission_error_on_auth_failure(self):
         """When pixivpy3.auth raises, _refresh_token should wrap it in PermissionError."""
-        import asyncio
         from unittest.mock import AsyncMock, MagicMock, patch
-
-        import pytest
 
         from services.pixiv_client import PixivClient
 
@@ -783,7 +776,7 @@ class TestPixivClientErrorHandling:
 
     async def test_call_retries_on_403_token_expired(self):
         """When a pixivpy3 call raises a 403 error, _call should flush Redis and retry once."""
-        from unittest.mock import AsyncMock, MagicMock, call, patch
+        from unittest.mock import AsyncMock, MagicMock, patch
 
         from services.pixiv_client import PixivClient
 
@@ -817,7 +810,6 @@ class TestPixivClientErrorHandling:
 
     async def test_call_propagates_non_auth_exception(self):
         """Non-auth exceptions from pixivpy3 should propagate directly from _call."""
-        import pytest
 
         from services.pixiv_client import PixivClient
 
@@ -1313,3 +1305,161 @@ class TestPixivR18Ranking:
             resp = await client.get("/api/pixiv/ranking", params={"mode": "daily_r18"})
 
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# GET /api/pixiv/bookmarks — my bookmarks
+# ---------------------------------------------------------------------------
+
+
+class TestPixivMyBookmarks:
+    """GET /api/pixiv/bookmarks — authenticated user's own bookmarks."""
+
+    async def test_my_bookmarks_returns_cached_result(self, client):
+        """Cached my_bookmarks result should be returned without calling PixivClient."""
+        cached = {"illusts": [{"id": 300}], "next_url": None}
+        with patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=cached):
+            resp = await client.get("/api/pixiv/bookmarks")
+
+        assert resp.status_code == 200
+        assert resp.json() == cached
+
+    async def test_my_bookmarks_no_credentials_returns_400(self, client):
+        """No Pixiv credentials configured should return 400 (pixiv_not_configured)."""
+        with (
+            patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=None),
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value=None,
+            ),
+        ):
+            resp = await client.get("/api/pixiv/bookmarks")
+
+        assert resp.status_code == 400
+
+    async def test_my_bookmarks_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.get("/api/pixiv/bookmarks")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Follow / unfollow / following list
+# ---------------------------------------------------------------------------
+
+
+class TestPixivFollowOps:
+    """POST/DELETE /api/pixiv/user/{user_id}/follow and GET /api/pixiv/following."""
+
+    async def test_follow_user_returns_ok(self, client):
+        """POST /user/{id}/follow should call PixivClient.user_follow_add and return {ok: True}."""
+        mock_pixiv_client = AsyncMock()
+        mock_pixiv_client.user_follow_add = AsyncMock(return_value=None)
+        mock_pixiv_client.__aenter__ = AsyncMock(return_value=mock_pixiv_client)
+        mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
+
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+
+        with (
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value="valid_token",
+            ),
+            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+        ):
+            resp = await client.post("/api/pixiv/user/555/follow")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        mock_pixiv_client.user_follow_add.assert_called_once_with(555, restrict="public")
+
+    async def test_unfollow_user_returns_ok(self, client):
+        """DELETE /user/{id}/follow should call PixivClient.user_follow_delete and return {ok: True}."""
+        mock_pixiv_client = AsyncMock()
+        mock_pixiv_client.user_follow_delete = AsyncMock(return_value=None)
+        mock_pixiv_client.__aenter__ = AsyncMock(return_value=mock_pixiv_client)
+        mock_pixiv_client.__aexit__ = AsyncMock(return_value=False)
+
+        mock_redis = AsyncMock()
+        mock_redis.delete = AsyncMock()
+
+        with (
+            patch(
+                "plugins.builtin.pixiv._browse.get_credential",
+                new_callable=AsyncMock,
+                return_value="valid_token",
+            ),
+            patch("plugins.builtin.pixiv._browse.PixivClient", return_value=mock_pixiv_client),
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+        ):
+            resp = await client.delete("/api/pixiv/user/555/follow")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"ok": True}
+        mock_pixiv_client.user_follow_delete.assert_called_once_with(555)
+
+    async def test_following_list_returns_cached_result(self, client):
+        """GET /following should return cached following list without calling PixivClient."""
+        cached = {"user_previews": [{"user": {"id": 100, "name": "artist"}}], "next_url": None}
+        with patch("services.cache.get_pixiv_search_cache", new_callable=AsyncMock, return_value=cached):
+            resp = await client.get("/api/pixiv/following")
+
+        assert resp.status_code == 200
+        assert resp.json() == cached
+
+    async def test_follow_user_no_credentials_returns_400(self, client):
+        """POST /user/{id}/follow without credentials → 400 (pixiv_not_configured)."""
+        with patch(
+            "plugins.builtin.pixiv._browse.get_credential",
+            new_callable=AsyncMock,
+            return_value=None,
+        ):
+            resp = await client.post("/api/pixiv/user/555/follow")
+
+        assert resp.status_code == 400
+
+    async def test_follow_user_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.post("/api/pixiv/user/555/follow")
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# TestPixivPublicAjaxParsing — unit test for _detect_media_type
+# ---------------------------------------------------------------------------
+
+
+class TestPixivPublicAjaxParsing:
+    """Unit tests for _detect_media_type helper in _browse.py."""
+
+    def test_detect_media_type_returns_png_for_png_magic_bytes(self):
+        """PNG magic bytes should be identified as image/png."""
+        from plugins.builtin.pixiv._browse import _detect_media_type
+
+        png_bytes = b"\x89PNG\r\n\x1a\n" + b"\x00" * 100
+        assert _detect_media_type(png_bytes) == "image/png"
+
+    def test_detect_media_type_returns_gif_for_gif_magic_bytes(self):
+        """GIF89a header should be identified as image/gif."""
+        from plugins.builtin.pixiv._browse import _detect_media_type
+
+        gif_bytes = b"GIF89a" + b"\x00" * 100
+        assert _detect_media_type(gif_bytes) == "image/gif"
+
+    def test_detect_media_type_returns_webp_for_webp_header(self):
+        """RIFF....WEBP header should be identified as image/webp."""
+        from plugins.builtin.pixiv._browse import _detect_media_type
+
+        webp_bytes = b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 100
+        assert _detect_media_type(webp_bytes) == "image/webp"
+
+    def test_detect_media_type_defaults_to_jpeg_for_unknown(self):
+        """Unrecognized magic bytes should fall back to image/jpeg."""
+        from plugins.builtin.pixiv._browse import _detect_media_type
+
+        unknown_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 100
+        assert _detect_media_type(unknown_bytes) == "image/jpeg"

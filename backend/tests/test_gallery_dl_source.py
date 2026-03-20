@@ -481,3 +481,138 @@ class TestGalleryDlParseMetadata:
 
         assert result is not None
         assert result.title == "A description-based title"
+
+
+# ---------------------------------------------------------------------------
+# TestConfigGeneration
+# ---------------------------------------------------------------------------
+
+
+class TestConfigGeneration:
+    """Tests for _build_gallery_dl_config — config file generation logic."""
+
+    async def test_subscription_mode_sets_skip_and_archive_mode(self, tmp_path):
+        """subscription job_context should set skip=abort:10 and archive-mode=memory in extractor."""
+        from unittest.mock import MagicMock, patch
+
+        from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+        config_file = tmp_path / "gallery-dl.json"
+        mock_settings = MagicMock()
+        mock_settings.data_gallery_path = str(tmp_path / "gallery")
+        mock_settings.gdl_archive_dsn = "postgresql://test/archive"
+        mock_settings.gallery_dl_config = str(config_file)
+
+        with patch("plugins.builtin.gallery_dl.source.settings", mock_settings):
+            path = await _build_gallery_dl_config({}, job_context="subscription")
+
+        config = json.loads(path.read_text())
+        assert config["extractor"].get("skip") == "abort:10"
+        assert config["extractor"].get("archive-mode") == "memory"
+
+    async def test_manual_mode_does_not_set_skip(self, tmp_path):
+        """Default (manual) job_context should NOT set skip or archive-mode in extractor config."""
+        from unittest.mock import MagicMock, patch
+
+        from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+        config_file = tmp_path / "gallery-dl.json"
+        mock_settings = MagicMock()
+        mock_settings.data_gallery_path = str(tmp_path / "gallery")
+        mock_settings.gdl_archive_dsn = "postgresql://test/archive"
+        mock_settings.gallery_dl_config = str(config_file)
+
+        with patch("plugins.builtin.gallery_dl.source.settings", mock_settings):
+            path = await _build_gallery_dl_config({}, job_context="manual")
+
+        config = json.loads(path.read_text())
+        assert "skip" not in config["extractor"]
+        assert "archive-mode" not in config["extractor"]
+
+
+# ---------------------------------------------------------------------------
+# TestProcessLifecycle
+# ---------------------------------------------------------------------------
+
+
+class TestProcessLifecycle:
+    """Tests for heartbeat loop, pause/cancel watcher, and skip counting."""
+
+    async def test_heartbeat_loop_eviction_kills_process(self):
+        """_heartbeat_loop returns 'evicted' and kills the process when heartbeat returns False."""
+        from plugins.builtin.gallery_dl.source import _DownloadState, _heartbeat_loop
+
+        state = _DownloadState()
+        proc = MagicMock()
+        proc.kill = MagicMock()
+
+        async def lost_heartbeat():
+            return False  # semaphore eviction immediately
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            result = await _heartbeat_loop(state, proc, lost_heartbeat, interval=0.01)
+
+        assert result == "evicted"
+        proc.kill.assert_called_once()
+        assert state.cancelled is True
+
+    async def test_pause_cancel_watcher_sends_sigstop_and_sigcont(self):
+        """_pause_cancel_watcher sends SIGSTOP when paused and SIGCONT when resumed."""
+        import signal
+
+        from plugins.builtin.gallery_dl.source import _DownloadState, _pause_cancel_watcher
+
+        state = _DownloadState()
+        proc = MagicMock()
+        proc.send_signal = MagicMock()
+        proc.kill = MagicMock()
+
+        # pause_check: True (pause), then False (unpause)
+        pause_seq = [True, False]
+        cancel_calls = 0
+
+        async def pause_check():
+            return pause_seq.pop(0) if pause_seq else False
+
+        async def cancel_check():
+            nonlocal cancel_calls
+            cancel_calls += 1
+            return cancel_calls > 4  # allow a few iterations before ending
+
+        with patch("asyncio.sleep", new_callable=AsyncMock):
+            await _pause_cancel_watcher(state, proc, cancel_check, pause_check)
+
+        # SIGSTOP sent during pause, SIGCONT sent on resume
+        proc.send_signal.assert_any_call(signal.SIGSTOP)
+        proc.send_signal.assert_any_call(signal.SIGCONT)
+
+    async def test_skipped_files_counted_in_download_total(self, tmp_path):
+        """JYZROX_SKIP lines should increment skipped_count and be included in result.total."""
+        lines = [
+            b"JYZROX_FILE\t/data/img001.jpg\tabc123\n",
+            b"JYZROX_SKIP\n",
+            b"JYZROX_SKIP\n",
+        ]
+        proc = _make_fake_process(lines, returncode=0)
+
+        with (
+            patch("asyncio.create_subprocess_exec", new_callable=AsyncMock, return_value=proc),
+            patch(
+                "plugins.builtin.gallery_dl.source._build_gallery_dl_config",
+                new_callable=AsyncMock,
+                return_value=Path("/tmp/test-gdl.json"),
+            ),
+            patch("pathlib.Path.mkdir"),
+        ):
+            from plugins.builtin.gallery_dl.source import GalleryDlPlugin
+
+            plugin = GalleryDlPlugin()
+            result = await plugin.download(
+                url="https://example.com/x",
+                dest_dir=tmp_path,
+                credentials={},
+            )
+
+        assert result.status == "done"
+        assert result.downloaded == 1
+        assert result.total == 3  # 1 downloaded + 2 skipped

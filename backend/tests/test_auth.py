@@ -835,3 +835,404 @@ class TestRequireOpdsAuth:
             headers={"Authorization": f"Basic {creds}"},
         )
         assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
+# Upload avatar
+# ---------------------------------------------------------------------------
+
+
+class TestUploadAvatar:
+    """PUT /api/auth/avatar — upload custom avatar image."""
+
+    async def test_upload_avatar_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        import io
+
+        resp = await unauthed_client.put(
+            "/api/auth/avatar",
+            files={"file": ("avatar.png", io.BytesIO(b"\x89PNG"), "image/png")},
+        )
+        assert resp.status_code == 401
+
+    async def test_upload_avatar_non_image_content_type_returns_400(self, client, db_session, tmp_path):
+        """Non-image content type should return 400."""
+        from unittest.mock import patch
+
+        await _create_user(db_session)
+        with patch("routers.auth.settings") as mock_settings:
+            mock_settings.data_avatars_path = str(tmp_path)
+            resp = await client.put(
+                "/api/auth/avatar",
+                files={"file": ("doc.txt", b"text content", "text/plain")},
+            )
+        assert resp.status_code == 400
+        assert "image" in resp.json()["detail"].lower()
+
+    async def test_upload_avatar_too_large_returns_400(self, client, db_session, tmp_path):
+        """File > 2 MB should return 400."""
+        from unittest.mock import patch
+
+        await _create_user(db_session)
+        big_data = b"\x89PNG" + b"X" * (2 * 1024 * 1024 + 1)
+        with patch("routers.auth.settings") as mock_settings:
+            mock_settings.data_avatars_path = str(tmp_path)
+            resp = await client.put(
+                "/api/auth/avatar",
+                files={"file": ("big.png", big_data, "image/png")},
+            )
+        assert resp.status_code == 400
+        assert "large" in resp.json()["detail"].lower()
+
+    async def test_upload_avatar_corrupt_image_returns_400(self, client, db_session, tmp_path):
+        """Corrupt image data (valid header, corrupt body) should return 400."""
+        from unittest.mock import patch
+
+        await _create_user(db_session)
+        # PNG magic bytes + garbage body — Pillow will fail to open it
+        corrupt = b"\x89PNG\r\n\x1a\n" + b"\x00" * 50
+        with patch("routers.auth.settings") as mock_settings:
+            mock_settings.data_avatars_path = str(tmp_path)
+            resp = await client.put(
+                "/api/auth/avatar",
+                files={"file": ("corrupt.png", corrupt, "image/png")},
+            )
+        assert resp.status_code == 400
+
+    async def test_upload_valid_avatar_returns_200_and_sets_style(self, client, db_session, tmp_path):
+        """Valid image upload should resize and set avatar_style=manual."""
+        import io as _io
+        from unittest.mock import patch
+
+        from PIL import Image as PILImage
+
+        await _create_user(db_session)
+        buf = _io.BytesIO()
+        PILImage.new("RGB", (1, 1), color=(255, 0, 0)).save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+        with patch("routers.auth.settings") as mock_settings:
+            mock_settings.data_avatars_path = str(tmp_path)
+            resp = await client.put(
+                "/api/auth/avatar",
+                files={"file": ("avatar.png", png_bytes, "image/png")},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["avatar_style"] == "manual"
+        assert "avatar_url" in data
+
+    async def test_upload_avatar_creates_webp_file(self, client, db_session, tmp_path):
+        """Valid upload should create a .webp file at {data_avatars_path}/1.webp."""
+        import io as _io
+        from unittest.mock import patch
+
+        from PIL import Image as PILImage
+
+        await _create_user(db_session)
+        buf = _io.BytesIO()
+        PILImage.new("RGB", (2, 2), color=(0, 128, 255)).save(buf, format="PNG")
+        png_bytes = buf.getvalue()
+
+        with patch("routers.auth.settings") as mock_settings:
+            mock_settings.data_avatars_path = str(tmp_path)
+            resp = await client.put(
+                "/api/auth/avatar",
+                files={"file": ("avatar.png", png_bytes, "image/png")},
+            )
+        assert resp.status_code == 200
+        webp_file = tmp_path / "1.webp"
+        assert webp_file.exists()
+
+
+# ---------------------------------------------------------------------------
+# Change password — success paths
+# ---------------------------------------------------------------------------
+
+
+class TestChangePasswordSuccess:
+    """POST /api/auth/change-password — password hash update and session management."""
+
+    async def test_change_password_updates_hash_in_db(self, client, db_session, db_session_factory, mock_redis):
+        """Successful password change updates password_hash in the DB."""
+        mock_redis.scan = AsyncMock_returning((0, []))
+        await _create_user(db_session, "admin", "testpass123")
+
+        resp = await client.post(
+            "/api/auth/change-password",
+            json={"current_password": "testpass123", "new_password": "newpassword123!"},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+        # Verify the hash changed
+        async with db_session_factory() as verify_session:
+            result = await verify_session.execute(text("SELECT password_hash FROM users WHERE id = 1"))
+            new_hash = result.scalar_one_or_none()
+        assert new_hash is not None
+        assert bcrypt.checkpw(b"newpassword123!", new_hash.encode())
+
+    async def test_change_password_invalidates_other_sessions(self, client, db_session, mock_redis):
+        """Change password deletes all sessions except the current one."""
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        other_key = b"session:1:othertoken12345"
+        current_key = b"session:1:currenttoken9"
+        mock_redis.scan = _AsyncMock(return_value=(0, [other_key, current_key]))
+        await _create_user(db_session, "admin", "testpass123")
+
+        resp = await client.post(
+            "/api/auth/change-password",
+            json={"current_password": "testpass123", "new_password": "newpassword123!"},
+            cookies={"vault_session": "1:currenttoken9"},
+        )
+        assert resp.status_code == 200
+        # 'othertoken' session should have been deleted
+        deleted_keys = [str(call) for call in mock_redis.delete.call_args_list]
+        assert any("othertoken12345" in k for k in deleted_keys)
+
+    async def test_change_password_keeps_current_session(self, client, db_session, mock_redis):
+        """Change password does NOT delete the current session."""
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        other_key = b"session:1:othertoken99999"
+        current_key = b"session:1:keepmetoken123"
+        mock_redis.scan = _AsyncMock(return_value=(0, [other_key, current_key]))
+        await _create_user(db_session, "admin", "testpass123")
+
+        resp = await client.post(
+            "/api/auth/change-password",
+            json={"current_password": "testpass123", "new_password": "newpassword123!"},
+            cookies={"vault_session": "1:keepmetoken123"},
+        )
+        assert resp.status_code == 200
+        # The current session must NOT be in the deleted keys
+        deleted_keys = [str(call) for call in mock_redis.delete.call_args_list]
+        assert not any("keepmetoken123" in k for k in deleted_keys)
+
+
+# ---------------------------------------------------------------------------
+# List sessions — detailed
+# ---------------------------------------------------------------------------
+
+
+class TestListSessionsDetailed:
+    """GET /api/auth/sessions — detailed session metadata parsing."""
+
+    async def test_list_sessions_parses_metadata(self, client, mock_redis):
+        """Sessions with valid signed metadata return parsed ip/user_agent/created_at."""
+        import json as _json
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        from core.auth import _sign_session
+
+        meta = _json.dumps(
+            {
+                "user_id": 1,
+                "role": "admin",
+                "ip": "192.168.1.1",
+                "user_agent": "Mozilla/5.0",
+                "created_at": "2025-01-01T00:00:00+00:00",
+            }
+        )
+        signed = _sign_session(meta).encode()
+
+        mock_redis.scan = _AsyncMock(return_value=(0, [b"session:1:abcdefgh12345678"]))
+        mock_redis.get = _AsyncMock(return_value=signed)
+        mock_redis.ttl = _AsyncMock(return_value=2592000)
+
+        resp = await client.get("/api/auth/sessions")
+        assert resp.status_code == 200
+        sessions = resp.json()["sessions"]
+        assert len(sessions) == 1
+        assert sessions[0]["ip"] == "192.168.1.1"
+        assert sessions[0]["user_agent"] == "Mozilla/5.0"
+        assert sessions[0]["token_prefix"] == "abcdefgh"
+
+    async def test_list_sessions_marks_current(self, client, mock_redis):
+        """Session matching the cookie token should have is_current=True."""
+        import json as _json
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        from core.auth import _sign_session
+
+        token = "currenttoken123"
+        meta = _json.dumps(
+            {
+                "user_id": 1,
+                "role": "admin",
+                "ip": "",
+                "user_agent": "",
+                "created_at": "",
+            }
+        )
+        signed = _sign_session(meta).encode()
+
+        mock_redis.scan = _AsyncMock(return_value=(0, [f"session:1:{token}".encode()]))
+        mock_redis.get = _AsyncMock(return_value=signed)
+        mock_redis.ttl = _AsyncMock(return_value=100)
+
+        resp = await client.get(
+            "/api/auth/sessions",
+            cookies={"vault_session": f"1:{token}"},
+        )
+        assert resp.status_code == 200
+        sessions = resp.json()["sessions"]
+        assert len(sessions) == 1
+        assert sessions[0]["is_current"] is True
+
+    async def test_list_sessions_handles_corrupted_metadata(self, client, mock_redis):
+        """Sessions with corrupted metadata should still be listed with empty ip/user_agent."""
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        mock_redis.scan = _AsyncMock(return_value=(0, [b"session:1:brokentoken12"]))
+        mock_redis.get = _AsyncMock(return_value=b"notvalidsigneddata")
+        mock_redis.ttl = _AsyncMock(return_value=100)
+
+        resp = await client.get("/api/auth/sessions")
+        assert resp.status_code == 200
+        sessions = resp.json()["sessions"]
+        assert len(sessions) == 1
+        assert sessions[0]["ip"] == "unknown"
+
+    async def test_list_sessions_sorted_current_first(self, client, mock_redis):
+        """Current session should appear first in the sorted result."""
+        import json as _json
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        from core.auth import _sign_session
+
+        token_other = "oth111111aaaaa"
+        token_current = "cur222222bbbbb"
+
+        meta_other = _json.dumps(
+            {
+                "user_id": 1,
+                "role": "admin",
+                "ip": "1.1.1.1",
+                "user_agent": "",
+                "created_at": "2025-01-02T00:00:00",
+            }
+        )
+        meta_current = _json.dumps(
+            {
+                "user_id": 1,
+                "role": "admin",
+                "ip": "2.2.2.2",
+                "user_agent": "",
+                "created_at": "2025-01-01T00:00:00",
+            }
+        )
+
+        mock_redis.scan = _AsyncMock(
+            return_value=(
+                0,
+                [
+                    f"session:1:{token_other}".encode(),
+                    f"session:1:{token_current}".encode(),
+                ],
+            )
+        )
+        mock_redis.get = _AsyncMock(
+            side_effect=[
+                _sign_session(meta_other).encode(),
+                _sign_session(meta_current).encode(),
+            ]
+        )
+        mock_redis.ttl = _AsyncMock(side_effect=[100, 100])
+
+        resp = await client.get(
+            "/api/auth/sessions",
+            cookies={"vault_session": f"1:{token_current}"},
+        )
+        assert resp.status_code == 200
+        sessions = resp.json()["sessions"]
+        assert len(sessions) == 2
+        assert sessions[0]["is_current"] is True
+
+
+# ---------------------------------------------------------------------------
+# Revoke session — detailed
+# ---------------------------------------------------------------------------
+
+
+class TestRevokeSessionDetailed:
+    """DELETE /api/auth/sessions/{token_prefix} — detailed revocation."""
+
+    async def test_revoke_session_deletes_from_redis(self, client, mock_redis):
+        """Revoking a non-current session should delete it from Redis."""
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        token = "targettoken1234"
+        mock_redis.scan = _AsyncMock(return_value=(0, [f"session:1:{token}".encode()]))
+
+        resp = await client.delete(f"/api/auth/sessions/{token[:8]}")
+        assert resp.status_code == 200
+        mock_redis.delete.assert_called_once_with(f"session:1:{token}")
+
+    async def test_revoke_current_session_returns_400(self, client, mock_redis):
+        """Trying to revoke the current session should return 400."""
+        from unittest.mock import AsyncMock as _AsyncMock
+
+        token = "currenttoken99"
+        mock_redis.scan = _AsyncMock(return_value=(0, [f"session:1:{token}".encode()]))
+
+        resp = await client.delete(
+            f"/api/auth/sessions/{token[:8]}",
+            cookies={"vault_session": f"1:{token}"},
+        )
+        assert resp.status_code == 400
+        assert "current" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Update profile — detailed email scenarios
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateProfileDetailed:
+    """PATCH /api/auth/profile — detailed email update scenarios."""
+
+    async def test_update_profile_duplicate_email_returns_409(self, client, db_session):
+        """Setting email to one already used by another user should return 409."""
+        await _create_user(db_session)  # id=1
+        # Insert another user with the target email
+        await db_session.execute(
+            text(
+                "INSERT INTO users (username, password_hash, role, email) "
+                "VALUES ('other_user', 'hashvalue', 'viewer', 'taken@example.com')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.patch("/api/auth/profile", json={"email": "taken@example.com"})
+        assert resp.status_code == 409
+        assert "use" in resp.json()["detail"].lower()
+
+    async def test_update_profile_empty_email_sets_null(self, client, db_session, db_session_factory):
+        """Setting email to empty string should store NULL (clear email)."""
+        await _create_user(db_session)
+        # Pre-set an email for user 1
+        await db_session.execute(text("UPDATE users SET email = 'old@example.com' WHERE id = 1"))
+        await db_session.commit()
+
+        resp = await client.patch("/api/auth/profile", json={"email": ""})
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+        # Verify email is now NULL
+        async with db_session_factory() as verify:
+            result = await verify.execute(text("SELECT email FROM users WHERE id = 1"))
+            assert result.scalar_one_or_none() is None
+
+    async def test_update_profile_valid_email_updates(self, client, db_session, db_session_factory):
+        """Valid new email should be stored in the DB."""
+        await _create_user(db_session)
+
+        resp = await client.patch("/api/auth/profile", json={"email": "new@example.com"})
+        assert resp.status_code == 200
+
+        async with db_session_factory() as verify:
+            result = await verify.execute(text("SELECT email FROM users WHERE id = 1"))
+            assert result.scalar_one_or_none() == "new@example.com"

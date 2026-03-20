@@ -713,7 +713,6 @@ const zhCN: Record<string, string> = {
   'browse.resultsFor': '「{query}」的搜索结果',
   'browse.pageN': '第 {page} 页',
   'browse.failedLoadResults': '加载结果失败',
-  'browse.favoritesN': '收藏 {n}',
   'browse.matchingQuery': '符合「{query}」',
   'browse.failedLoadFavorites': '加载收藏失败',
   'browse.failedLoadPopular': '加载热门失败',

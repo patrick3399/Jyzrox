@@ -664,7 +664,6 @@ const zhTW: Record<string, string> = {
   'browse.resultsFor': '「{query}」的搜尋結果',
   'browse.pageN': '第 {page} 頁',
   'browse.failedLoadResults': '載入結果失敗',
-  'browse.favoritesN': '收藏 {n}',
   'browse.matchingQuery': '符合「{query}」',
   'browse.failedLoadFavorites': '載入收藏失敗',
   'browse.failedLoadPopular': '載入熱門失敗',
