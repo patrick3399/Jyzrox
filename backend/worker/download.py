@@ -15,6 +15,42 @@ from worker.constants import DISK_LOW_KEY, logger
 from worker.helpers import _set_job_progress, _set_job_status, check_disk_space
 
 
+async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> None:
+    """Read cookie update files written by gallery-dl's cookies-update PP and save to DB."""
+    import http.cookiejar
+
+    if not isinstance(credentials, dict):
+        return
+
+    from plugins.builtin.gallery_dl._sites import get_site_config
+    from services.credential import set_credential
+
+    for src in credentials:
+        cfg = get_site_config(src)
+        if cfg.credential_type != "cookies":
+            continue
+        cookie_path = Path(f"/tmp/gdl-cookies-{job_id}-{src}.txt")
+        if not cookie_path.exists():
+            continue
+        try:
+            jar = http.cookiejar.MozillaCookieJar(str(cookie_path))
+            jar.load(ignore_discard=True, ignore_expires=True)
+            updated = {c.name: c.value for c in jar}
+            if updated:
+                original_raw = credentials.get(src, "{}")
+                try:
+                    original = json.loads(original_raw) if isinstance(original_raw, str) else {}
+                except (json.JSONDecodeError, TypeError):
+                    original = {}
+                if updated != original:
+                    await set_credential(src, json.dumps(updated), "cookies")
+                    logger.info("[download] cookies updated for %s (%d cookies)", src, len(updated))
+        except Exception as exc:
+            logger.warning("[download] failed to update cookies for %s: %s", src, exc)
+        finally:
+            cookie_path.unlink(missing_ok=True)
+
+
 async def download_job(
     ctx: dict,
     url: str,
@@ -276,6 +312,8 @@ async def download_job(
         opts["sem_heartbeat"] = _sem_heartbeat
         opts["inactivity_timeout"] = _dl_params.inactivity_timeout
         opts["timing_ctx"] = timing_ctx
+        opts["job_context"] = (options or {}).get("job_context", "manual")
+        opts["last_completed_at"] = (options or {}).get("last_completed_at")
 
         try:
             result = await plugin.download(
@@ -289,6 +327,12 @@ async def download_job(
                 on_file=on_file,
                 options=opts,
             )
+            # N8: cookie writeback (updated cookies → encrypted DB)
+            if db_job_id and result.status in ("done", "partial"):
+                try:
+                    await _writeback_cookies(credentials, db_job_id)
+                except Exception as exc:
+                    logger.warning("[download] cookie writeback failed: %s", exc)
         except Exception as exc:
             err = f"Download failed: {exc}"
             logger.error("[download] %s", err, exc_info=True)

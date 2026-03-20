@@ -93,7 +93,13 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
                 )
                 return {"status": "skipped", "reason": "active_job_exists"}
 
-        options = None  # v3.0: archive always active, lifecycle via CASCADE
+        # v3.0: inject subscription context for archive-mode and date-after optimization
+        options: dict | None = {
+            "job_context": "subscription",
+        }
+        # Add last_completed_at from the subscription's last successful job
+        if sub.last_checked_at:
+            options["last_completed_at"] = sub.last_checked_at.isoformat()
 
         # Create download job
         job_id = uuid.uuid4()

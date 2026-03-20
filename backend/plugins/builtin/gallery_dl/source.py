@@ -496,6 +496,18 @@ async def _on_file_with_validation(
         await inner_on_file(file_path, sha256)
 
 
+def _read_url_file(path: Path) -> list[str]:
+    """Read and delete a URL file (--write-unsupported / --error-file output)."""
+    if not path.exists():
+        return []
+    try:
+        return [line.strip() for line in path.read_text().splitlines() if line.strip()]
+    except OSError:
+        return []
+    finally:
+        path.unlink(missing_ok=True)
+
+
 class GalleryDlPlugin(SourcePlugin):
     """Fallback SourcePlugin that delegates to gallery-dl subprocess."""
 
@@ -549,6 +561,8 @@ class GalleryDlPlugin(SourcePlugin):
 
         from worker.gallery_dl_venv import get_gdl_bin
 
+        config_id = (options or {}).get("config_id")
+
         cmd = [
             get_gdl_bin(),
             "--config-ignore",
@@ -556,7 +570,15 @@ class GalleryDlPlugin(SourcePlugin):
             str(config_path),
             "--directory",
             str(dest_dir),
+            "--Print",
+            "after:JYZROX_FILE\t{_path}\t{sha256}",
+            "--Print",
+            "skip:JYZROX_SKIP",
         ]
+
+        if config_id:
+            cmd += ["--write-unsupported", f"/tmp/gdl-unsupported-{config_id}.txt"]
+            cmd += ["--error-file", f"/tmp/gdl-errors-{config_id}.txt"]
 
         # Per-site download tuning via SiteConfigService
         from urllib.parse import urlparse as _urlparse
@@ -684,10 +706,23 @@ class GalleryDlPlugin(SourcePlugin):
             except ProcessLookupError:
                 pass
 
+        # Capture unsupported + error URLs
+        unsupported_urls: list[str] = []
+        error_urls: list[str] = []
+        if config_id:
+            unsupported_urls = _read_url_file(Path(f"/tmp/gdl-unsupported-{config_id}.txt"))
+            error_urls = _read_url_file(Path(f"/tmp/gdl-errors-{config_id}.txt"))
+
         # Result mapping
         if state.cancelled:
             logger.info("[gallery_dl] cancelled: %s (downloaded=%d)", url, state.downloaded)
-            return DownloadResult(status="cancelled", downloaded=state.downloaded, total=state.downloaded)
+            return DownloadResult(
+                status="cancelled",
+                downloaded=state.downloaded,
+                total=state.downloaded,
+                unsupported_urls=unsupported_urls,
+                error_urls=error_urls,
+            )
 
         if timed_out:
             return DownloadResult(
@@ -695,6 +730,8 @@ class GalleryDlPlugin(SourcePlugin):
                 downloaded=state.downloaded,
                 total=state.downloaded,
                 error="download timeout after 86400s",
+                unsupported_urls=unsupported_urls,
+                error_urls=error_urls,
             )
 
         if inactivity_killed:
@@ -705,8 +742,17 @@ class GalleryDlPlugin(SourcePlugin):
                     downloaded=state.downloaded,
                     total=state.downloaded + state.skipped_count,
                     error=err,
+                    unsupported_urls=unsupported_urls,
+                    error_urls=error_urls,
                 )
-            return DownloadResult(status="failed", downloaded=0, total=0, error=err)
+            return DownloadResult(
+                status="failed",
+                downloaded=0,
+                total=0,
+                error=err,
+                unsupported_urls=unsupported_urls,
+                error_urls=error_urls,
+            )
 
         if evicted:
             err = "Semaphore eviction — heartbeat lost"
@@ -716,6 +762,8 @@ class GalleryDlPlugin(SourcePlugin):
                 downloaded=state.downloaded,
                 total=state.downloaded + state.skipped_count,
                 error=err,
+                unsupported_urls=unsupported_urls,
+                error_urls=error_urls,
             )
 
         stderr_text = "\n".join(state.stderr_lines)
@@ -733,12 +781,16 @@ class GalleryDlPlugin(SourcePlugin):
                     downloaded=state.downloaded,
                     total=state.downloaded + state.skipped_count,
                     error=err,
+                    unsupported_urls=unsupported_urls,
+                    error_urls=error_urls,
                 )
             return DownloadResult(
                 status="failed",
                 downloaded=state.downloaded,
                 total=state.downloaded + state.skipped_count,
                 error=err,
+                unsupported_urls=unsupported_urls,
+                error_urls=error_urls,
             )
 
         logger.info("[gallery_dl] done: %s (downloaded=%d, skipped=%d)", url, state.downloaded, state.skipped_count)
@@ -746,6 +798,8 @@ class GalleryDlPlugin(SourcePlugin):
             status="done",
             downloaded=state.downloaded,
             total=state.downloaded + state.skipped_count,
+            unsupported_urls=unsupported_urls,
+            error_urls=error_urls,
         )
 
     def resolve_output_dir(self, url: str, base_path: Path) -> Path:

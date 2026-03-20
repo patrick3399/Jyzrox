@@ -98,6 +98,8 @@ class DownloadResult(BaseModel):
     total: int
     failed_pages: list[int] = []
     error: str | None = None
+    unsupported_urls: list[str] = []
+    error_urls: list[str] = []
 
 
 class SearchResult(BaseModel):
