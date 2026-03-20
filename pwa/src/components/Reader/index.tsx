@@ -235,7 +235,9 @@ function SinglePageView({
     },
   )
 
-  useEffect(() => { onZoomChange?.(isZoomed) }, [isZoomed, onZoomChange])
+  useEffect(() => {
+    onZoomChange?.(isZoomed)
+  }, [isZoomed, onZoomChange])
 
   const leftAction = readingDirection === 'rtl' ? onNext : onPrev
   const rightAction = readingDirection === 'rtl' ? onPrev : onNext
@@ -280,7 +282,10 @@ function SinglePageView({
             className={`reader-tap-zone absolute cursor-pointer select-none ${readingDirection === 'vertical' ? 'top-[30%] left-0 w-full h-[40%]' : 'left-[30%] top-0 h-full w-[40%]'}`}
             onClick={(e) => {
               e.stopPropagation()
-              if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+              if (isDoubleTapRef.current) {
+                isDoubleTapRef.current = false
+                return
+              }
               clearTimeout(centerTapTimerRef.current)
               centerTapTimerRef.current = setTimeout(() => onToggleOverlay(), 250)
             }}
@@ -293,7 +298,10 @@ function SinglePageView({
                 className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
                 onClick={(e) => {
                   e.stopPropagation()
-                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  if (isDoubleTapRef.current) {
+                    isDoubleTapRef.current = false
+                    return
+                  }
                   onPrev()
                 }}
                 aria-label={t('common.previousPage')}
@@ -302,7 +310,10 @@ function SinglePageView({
                 className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
                 onClick={(e) => {
                   e.stopPropagation()
-                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  if (isDoubleTapRef.current) {
+                    isDoubleTapRef.current = false
+                    return
+                  }
                   onNext()
                 }}
                 aria-label={t('common.nextPage')}
@@ -315,19 +326,29 @@ function SinglePageView({
                 className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
                 onClick={(e) => {
                   e.stopPropagation()
-                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  if (isDoubleTapRef.current) {
+                    isDoubleTapRef.current = false
+                    return
+                  }
                   leftAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? t('common.nextPage') : t('common.previousPage')}
+                aria-label={
+                  readingDirection === 'rtl' ? t('common.nextPage') : t('common.previousPage')
+                }
               />
               <div
                 className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
                 onClick={(e) => {
                   e.stopPropagation()
-                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  if (isDoubleTapRef.current) {
+                    isDoubleTapRef.current = false
+                    return
+                  }
                   rightAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? t('common.previousPage') : t('common.nextPage')}
+                aria-label={
+                  readingDirection === 'rtl' ? t('common.previousPage') : t('common.nextPage')
+                }
               />
             </>
           )}
@@ -349,7 +370,14 @@ interface WebtoonViewProps {
   imageLongPress?: (pageNum: number, imageUrl: string) => ImageLongPressHandlers
 }
 
-function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage, scaleMode, imageLongPress }: WebtoonViewProps) {
+function WebtoonView({
+  images,
+  onPageChange,
+  onToggleOverlay,
+  scrollToPage,
+  scaleMode,
+  imageLongPress,
+}: WebtoonViewProps) {
   const elRefs = useRef<Map<number, HTMLElement>>(new Map())
   const scrollRef = useRef<HTMLDivElement>(null)
   const [loadedPages, setLoadedPages] = useState<Set<number>>(new Set())
@@ -460,7 +488,8 @@ function WebtoonView({ images, onPageChange, onToggleOverlay, scrollToPage, scal
       }}
     >
       {images.map((img) => {
-        const lpHandlers = imageLongPress && img.url ? imageLongPress(img.pageNum, img.url) : undefined
+        const lpHandlers =
+          imageLongPress && img.url ? imageLongPress(img.pageNum, img.url) : undefined
         return (
           <div
             key={img.pageNum}
@@ -542,7 +571,9 @@ function DoublePageView({
     },
   )
 
-  useEffect(() => { onZoomChange?.(isZoomed) }, [isZoomed, onZoomChange])
+  useEffect(() => {
+    onZoomChange?.(isZoomed)
+  }, [isZoomed, onZoomChange])
 
   const leftAction = readingDirection === 'rtl' ? onNext : onPrev
   const rightAction = readingDirection === 'rtl' ? onPrev : onNext
@@ -569,52 +600,62 @@ function DoublePageView({
         className="flex h-full w-full flex-row"
       >
         <div className="flex h-full w-1/2 items-center justify-center overflow-hidden">
-          {firstImage ? (() => {
-            const lp = imageLongPress && firstImage.url ? imageLongPress(firstImage.pageNum, firstImage.url) : undefined
-            return (
-              <div
-                className="w-full h-full flex items-center justify-center"
-                onTouchStart={lp?.onTouchStart}
-                onTouchMove={lp?.onTouchMove}
-                onTouchEnd={lp?.onTouchEnd}
-                onContextMenu={lp?.onContextMenu}
-              >
-                <MediaElement
-                  image={firstImage}
-                  className={imgClass}
-                  draggable={false}
-                  onLoad={onImageLoaded}
-                  onToggleOverlay={onToggleOverlay}
-                  overlayVisible={showOverlay}
-                />
-              </div>
-            )
-          })() : (
+          {firstImage ? (
+            (() => {
+              const lp =
+                imageLongPress && firstImage.url
+                  ? imageLongPress(firstImage.pageNum, firstImage.url)
+                  : undefined
+              return (
+                <div
+                  className="w-full h-full flex items-center justify-center"
+                  onTouchStart={lp?.onTouchStart}
+                  onTouchMove={lp?.onTouchMove}
+                  onTouchEnd={lp?.onTouchEnd}
+                  onContextMenu={lp?.onContextMenu}
+                >
+                  <MediaElement
+                    image={firstImage}
+                    className={imgClass}
+                    draggable={false}
+                    onLoad={onImageLoaded}
+                    onToggleOverlay={onToggleOverlay}
+                    overlayVisible={showOverlay}
+                  />
+                </div>
+              )
+            })()
+          ) : (
             <div className="h-full w-full" />
           )}
         </div>
         <div className="flex h-full w-1/2 items-center justify-center overflow-hidden">
-          {secondImage ? (() => {
-            const lp = imageLongPress && secondImage.url ? imageLongPress(secondImage.pageNum, secondImage.url) : undefined
-            return (
-              <div
-                className="w-full h-full flex items-center justify-center"
-                onTouchStart={lp?.onTouchStart}
-                onTouchMove={lp?.onTouchMove}
-                onTouchEnd={lp?.onTouchEnd}
-                onContextMenu={lp?.onContextMenu}
-              >
-                <MediaElement
-                  image={secondImage}
-                  className={imgClass}
-                  draggable={false}
-                  onLoad={onImageLoaded}
-                  onToggleOverlay={onToggleOverlay}
-                  overlayVisible={showOverlay}
-                />
-              </div>
-            )
-          })() : (
+          {secondImage ? (
+            (() => {
+              const lp =
+                imageLongPress && secondImage.url
+                  ? imageLongPress(secondImage.pageNum, secondImage.url)
+                  : undefined
+              return (
+                <div
+                  className="w-full h-full flex items-center justify-center"
+                  onTouchStart={lp?.onTouchStart}
+                  onTouchMove={lp?.onTouchMove}
+                  onTouchEnd={lp?.onTouchEnd}
+                  onContextMenu={lp?.onContextMenu}
+                >
+                  <MediaElement
+                    image={secondImage}
+                    className={imgClass}
+                    draggable={false}
+                    onLoad={onImageLoaded}
+                    onToggleOverlay={onToggleOverlay}
+                    overlayVisible={showOverlay}
+                  />
+                </div>
+              )
+            })()
+          ) : (
             <div className="h-full w-full" />
           )}
         </div>
@@ -631,7 +672,10 @@ function DoublePageView({
             className={`reader-tap-zone absolute cursor-pointer select-none ${readingDirection === 'vertical' ? 'top-[30%] left-0 w-full h-[40%]' : 'left-[30%] top-0 h-full w-[40%]'}`}
             onClick={(e) => {
               e.stopPropagation()
-              if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+              if (isDoubleTapRef.current) {
+                isDoubleTapRef.current = false
+                return
+              }
               clearTimeout(centerTapTimerRef.current)
               centerTapTimerRef.current = setTimeout(() => onToggleOverlay(), 250)
             }}
@@ -644,7 +688,10 @@ function DoublePageView({
                 className="reader-tap-zone absolute top-0 left-0 w-full h-[30%] cursor-pointer select-none"
                 onClick={(e) => {
                   e.stopPropagation()
-                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  if (isDoubleTapRef.current) {
+                    isDoubleTapRef.current = false
+                    return
+                  }
                   onPrev()
                 }}
                 aria-label={t('common.previousPage')}
@@ -653,7 +700,10 @@ function DoublePageView({
                 className="reader-tap-zone absolute bottom-0 left-0 w-full h-[30%] cursor-pointer select-none"
                 onClick={(e) => {
                   e.stopPropagation()
-                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  if (isDoubleTapRef.current) {
+                    isDoubleTapRef.current = false
+                    return
+                  }
                   onNext()
                 }}
                 aria-label={t('common.nextPage')}
@@ -666,19 +716,29 @@ function DoublePageView({
                 className="reader-tap-zone absolute left-0 top-0 h-full w-[30%] cursor-pointer select-none"
                 onClick={(e) => {
                   e.stopPropagation()
-                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  if (isDoubleTapRef.current) {
+                    isDoubleTapRef.current = false
+                    return
+                  }
                   leftAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? t('common.nextPage') : t('common.previousPage')}
+                aria-label={
+                  readingDirection === 'rtl' ? t('common.nextPage') : t('common.previousPage')
+                }
               />
               <div
                 className="reader-tap-zone absolute right-0 top-0 h-full w-[30%] cursor-pointer select-none"
                 onClick={(e) => {
                   e.stopPropagation()
-                  if (isDoubleTapRef.current) { isDoubleTapRef.current = false; return }
+                  if (isDoubleTapRef.current) {
+                    isDoubleTapRef.current = false
+                    return
+                  }
                   rightAction()
                 }}
-                aria-label={readingDirection === 'rtl' ? t('common.previousPage') : t('common.nextPage')}
+                aria-label={
+                  readingDirection === 'rtl' ? t('common.previousPage') : t('common.nextPage')
+                }
               />
             </>
           )}
@@ -964,7 +1024,7 @@ function ThumbnailStrip({
   }, [previews])
 
   const displayImages = useMemo(
-    () => readingDirection === 'rtl' ? [...images].reverse() : images,
+    () => (readingDirection === 'rtl' ? [...images].reverse() : images),
     [images, readingDirection],
   )
   const displayImagesRef = useRef(displayImages)
@@ -1001,7 +1061,7 @@ function ThumbnailStrip({
         const imgs = displayImagesRef.current
         const rightmostVisibleIndex = Math.min(
           imgs.length - 1,
-          Math.ceil((el.scrollLeft + el.clientWidth) / THUMB_TOTAL_W)
+          Math.ceil((el.scrollLeft + el.clientWidth) / THUMB_TOTAL_W),
         )
         const maxPage = imgs[rightmostVisibleIndex]?.pageNum ?? 1
         if (maxPage > lastScrollNotifyPageRef.current) {
@@ -1072,20 +1132,30 @@ function ThumbnailStrip({
 
     if (!active) {
       // Active thumbnail is outside the virtual render window — compute scroll from index
-      const activeIndex = displayImagesRef.current.findIndex(img => img.pageNum === currentPage)
+      const activeIndex = displayImagesRef.current.findIndex((img) => img.pageNum === currentPage)
       if (activeIndex >= 0) {
         const targetScrollLeft = activeIndex * THUMB_TOTAL_W - (strip.clientWidth - 60) / 2
-        strip.scrollLeft = Math.max(0, Math.min(targetScrollLeft, strip.scrollWidth - strip.clientWidth))
+        strip.scrollLeft = Math.max(
+          0,
+          Math.min(targetScrollLeft, strip.scrollWidth - strip.clientWidth),
+        )
       }
-      requestAnimationFrame(() => { programmaticScrollRef.current = false })
+      requestAnimationFrame(() => {
+        programmaticScrollRef.current = false
+      })
       return
     }
 
     // Scroll strip to center active thumbnail
     const targetScrollLeft = active.offsetLeft - (strip.clientWidth - active.offsetWidth) / 2
-    strip.scrollLeft = Math.max(0, Math.min(targetScrollLeft, strip.scrollWidth - strip.clientWidth))
+    strip.scrollLeft = Math.max(
+      0,
+      Math.min(targetScrollLeft, strip.scrollWidth - strip.clientWidth),
+    )
     // Reset flag after the scroll event has had a chance to fire
-    requestAnimationFrame(() => { programmaticScrollRef.current = false })
+    requestAnimationFrame(() => {
+      programmaticScrollRef.current = false
+    })
   }, [currentPage])
 
   return (
@@ -1112,7 +1182,14 @@ function ThumbnailStrip({
         className="reader-thumb-strip flex bg-black/70 px-2 py-2 backdrop-blur-sm overflow-x-auto"
         style={{ paddingBottom: 'calc(8px + env(safe-area-inset-bottom))' }}
       >
-        <div style={{ width: displayImages.length * THUMB_TOTAL_W, position: 'relative', height: 80, flexShrink: 0 }}>
+        <div
+          style={{
+            width: displayImages.length * THUMB_TOTAL_W,
+            position: 'relative',
+            height: 80,
+            flexShrink: 0,
+          }}
+        >
           {displayImages.slice(visibleRange.start, visibleRange.end).map((img, i) => {
             const actualIndex = visibleRange.start + i
             const isActive = img.pageNum === currentPage
@@ -1120,8 +1197,8 @@ function ThumbnailStrip({
 
             let thumbSrc: string | null = null
             let spriteStyle: React.CSSProperties | null = null
-            let thumbW = 60
-            let thumbH = 80
+            const thumbW = 60
+            const thumbH = 80
 
             if (previewRaw) {
               if (previewRaw.includes('|')) {
@@ -1130,24 +1207,20 @@ function ThumbnailStrip({
                 const ox = Number(parts[1])
                 const cellW = Number(parts[2]) || 200
                 const cellH = Number(parts[3]) || 300
-                const maxH = 80
-                const maxW = 100
-                const scaleByH = maxH / cellH
-                const scaleByW = maxW / cellW
-                const scale = Math.min(scaleByH, scaleByW)
-                const renderedW = Math.round(cellW * scale)
-                const renderedH = Math.round(cellH * scale)
-                thumbW = renderedW
-                thumbH = renderedH
+                // Always scale by height to fill 80px; crop excess width
+                const scale = thumbH / cellH
                 const scaledOx = ox * scale
+                // Center the crop horizontally within the 60px button
+                const scaledCellW = cellW * scale
+                const cropOffset = scaledCellW > thumbW ? (scaledCellW - thumbW) / 2 : 0
                 const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
                 const naturalSize = spriteNaturalSizes[proxyUrl]
                 const bgSize = naturalSize
                   ? `${naturalSize.w * scale}px ${naturalSize.h * scale}px`
-                  : `auto ${cellH * scale}px`
+                  : `auto ${thumbH}px`
                 spriteStyle = {
                   backgroundImage: `url(${proxyUrl})`,
-                  backgroundPosition: `${scaledOx}px 0px`,
+                  backgroundPosition: `-${scaledOx + cropOffset}px 0px`,
                   backgroundSize: bgSize,
                   backgroundRepeat: 'no-repeat',
                   width: '100%',
@@ -1177,7 +1250,7 @@ function ThumbnailStrip({
                   <img
                     src={thumbSrc}
                     alt={`Thumb ${img.pageNum}`}
-                    className="h-full w-full object-contain"
+                    className="h-full w-full object-cover"
                   />
                 ) : (
                   <div className="h-full w-full bg-neutral-800 flex items-center justify-center">
@@ -1301,18 +1374,20 @@ function SeekBar({
         />
         <div
           className="absolute w-3 h-3 rounded-full bg-white shadow"
-          style={isRtl
-            ? { right: `${progress}%`, top: '50%', transform: 'translate(50%, -50%)' }
-            : { left: `${progress}%`, top: '50%', transform: 'translate(-50%, -50%)' }
+          style={
+            isRtl
+              ? { right: `${progress}%`, top: '50%', transform: 'translate(50%, -50%)' }
+              : { left: `${progress}%`, top: '50%', transform: 'translate(-50%, -50%)' }
           }
         />
       </div>
       {previewPage != null && (
         <div
           className="absolute -top-8 bg-black/80 text-white text-xs px-2 py-1 rounded pointer-events-none"
-          style={isRtl
-            ? { right: `${progress}%`, transform: 'translateX(50%)' }
-            : { left: `${progress}%`, transform: 'translateX(-50%)' }
+          style={
+            isRtl
+              ? { right: `${progress}%`, transform: 'translateX(50%)' }
+              : { left: `${progress}%`, transform: 'translateX(-50%)' }
           }
         >
           {previewPage}
@@ -1357,7 +1432,12 @@ function StatusBar({
       )}
 
       {settings.statusBarShowProgress && (
-        <SeekBar currentPage={currentPage} totalPages={totalPages} onSeek={onPageSelect} readingDirection={readingDirection} />
+        <SeekBar
+          currentPage={currentPage}
+          totalPages={totalPages}
+          onSeek={onPageSelect}
+          readingDirection={readingDirection}
+        />
       )}
 
       {settings.statusBarShowPageCount && (
@@ -1479,7 +1559,7 @@ export default function Reader({
 
   const [hiddenPages, setHiddenPages] = useState<Set<number>>(new Set())
   const [favImageIds, setFavImageIds] = useState<Set<number>>(
-    () => new Set(initialFavoritedImageIds ?? [])
+    () => new Set(initialFavoritedImageIds ?? []),
   )
 
   const images: ReaderImage[] = rawImages
@@ -1540,9 +1620,8 @@ export default function Reader({
   }, [])
 
   const effectiveTotalPages = totalPages - hiddenPages.size
-  const isLastPage = images.length > 0
-    ? state.currentPage >= images[images.length - 1].pageNum
-    : true
+  const isLastPage =
+    images.length > 0 ? state.currentPage >= images[images.length - 1].pageNum : true
 
   const { countdown, resetCountdown } = useAutoAdvance(
     autoAdvanceEnabled,
@@ -1658,7 +1737,9 @@ export default function Reader({
 
   // Track viewMode in ref so swipe callbacks stay stable across mode changes
   const viewModeRef = useRef(state.viewMode)
-  useEffect(() => { viewModeRef.current = state.viewMode }, [state.viewMode])
+  useEffect(() => {
+    viewModeRef.current = state.viewMode
+  }, [state.viewMode])
 
   // Swipe: respect RTL direction; in webtoon mode, swipeRight = go back
   const swipeLeft = useCallback(() => {
@@ -1667,7 +1748,10 @@ export default function Reader({
   }, [state.readingDirection, rawNextPage, rawPrevPage])
 
   const swipeRight = useCallback(() => {
-    if (viewModeRef.current === 'webtoon') { handleBack(); return }
+    if (viewModeRef.current === 'webtoon') {
+      handleBack()
+      return
+    }
     if (state.readingDirection === 'rtl') rawNextPage()
     else rawPrevPage()
   }, [state.readingDirection, rawNextPage, rawPrevPage, handleBack])
@@ -1677,11 +1761,27 @@ export default function Reader({
   }, [handleBack])
 
   const isZoomedRef = useRef(false)
-  const handleZoomChange = useCallback((z: boolean) => { isZoomedRef.current = z }, [])
+  const handleZoomChange = useCallback((z: boolean) => {
+    isZoomedRef.current = z
+  }, [])
 
-  useTouchGesture(containerRef as React.RefObject<HTMLElement | null>, swipeLeft, swipeRight, handleSwipeUp, 50, () => isZoomedRef.current)
+  useTouchGesture(
+    containerRef as React.RefObject<HTMLElement | null>,
+    swipeLeft,
+    swipeRight,
+    handleSwipeUp,
+    50,
+    () => isZoomedRef.current,
+  )
 
-  useKeyboardNav(rawNextPage, rawPrevPage, handleToggleOverlay, handleBack, state.readingDirection, state.viewMode)
+  useKeyboardNav(
+    rawNextPage,
+    rawPrevPage,
+    handleToggleOverlay,
+    handleBack,
+    state.readingDirection,
+    state.viewMode,
+  )
 
   // Mouse wheel: scroll down → next page, scroll up → prev page (single/double only)
   // Webtoon mode uses native continuous scrolling (like mobile touch)
@@ -1700,7 +1800,9 @@ export default function Reader({
       if (Math.abs(dy) < 10) return
       e.preventDefault()
       cooldown = true
-      setTimeout(() => { cooldown = false }, 200)
+      setTimeout(() => {
+        cooldown = false
+      }, 200)
       if (dy > 0) rawNextPage()
       else rawPrevPage()
     }
@@ -1857,7 +1959,17 @@ export default function Reader({
     } catch {
       toast.error(t('reader.hideImageFailed'))
     }
-  }, [imageMenu, source, sourceId, rawImages, hiddenPages, state.currentPage, setPage, router, onHideImage])
+  }, [
+    imageMenu,
+    source,
+    sourceId,
+    rawImages,
+    hiddenPages,
+    state.currentPage,
+    setPage,
+    router,
+    onHideImage,
+  ])
 
   const handleViewGallery = useCallback(() => {
     router.push(`/library/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`)
@@ -1866,7 +1978,7 @@ export default function Reader({
 
   const handleToggleFavorite = useCallback(async () => {
     if (!imageMenu) return
-    const img = rawImages.find(i => i.page_num === imageMenu.pageNum)
+    const img = rawImages.find((i) => i.page_num === imageMenu.pageNum)
     if (!img?.id) return
 
     const isFav = favImageIds.has(img.id)
@@ -1875,11 +1987,15 @@ export default function Reader({
     try {
       if (isFav) {
         await api.library.unfavoriteImage(img.id)
-        setFavImageIds(prev => { const next = new Set(prev); next.delete(img.id); return next })
+        setFavImageIds((prev) => {
+          const next = new Set(prev)
+          next.delete(img.id)
+          return next
+        })
         toast.success(t('reader.imageUnfavorited'))
       } else {
         await api.library.favoriteImage(img.id)
-        setFavImageIds(prev => new Set(prev).add(img.id))
+        setFavImageIds((prev) => new Set(prev).add(img.id))
         toast.success(t('reader.imageFavorited'))
       }
     } catch {
@@ -1906,8 +2022,11 @@ export default function Reader({
   const pageNotReady = !currentImage && isDownloading && images.length > 0
 
   // Compute favorite eligibility for current context menu image
-  const contextMenuImg = imageMenu ? rawImages.find(i => i.page_num === imageMenu.pageNum) : undefined
-  const canFavoriteContextImg = !isProxyMode && contextMenuImg?.id != null && contextMenuImg?.file_path != null
+  const contextMenuImg = imageMenu
+    ? rawImages.find((i) => i.page_num === imageMenu.pageNum)
+    : undefined
+  const canFavoriteContextImg =
+    !isProxyMode && contextMenuImg?.id != null && contextMenuImg?.file_path != null
 
   return (
     <div ref={containerRef} className="reader-container flex flex-col bg-black">
@@ -2032,7 +2151,11 @@ export default function Reader({
 
       {/* Help overlay */}
       {showHelp && (
-        <HelpOverlay readingDirection={state.readingDirection} viewMode={state.viewMode} onDismiss={handleDismissHelp} />
+        <HelpOverlay
+          readingDirection={state.readingDirection}
+          viewMode={state.viewMode}
+          onDismiss={handleDismissHelp}
+        />
       )}
 
       {/* Image context menu (long-press / right-click) */}
@@ -2044,7 +2167,8 @@ export default function Reader({
           imageUrl={imageMenu.imageUrl}
           imageName={imageMenu.imageName}
           onHide={
-            (imageMenu.pageNum && images.find(i => i.pageNum === imageMenu.pageNum)?.isLocal) || onHideImage
+            (imageMenu.pageNum && images.find((i) => i.pageNum === imageMenu.pageNum)?.isLocal) ||
+            onHideImage
               ? handleHideImage
               : undefined
           }
