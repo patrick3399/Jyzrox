@@ -1,8 +1,34 @@
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+# Shared fragments (YAML anchors)
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
+x-logging: &default-logging
+  driver: "json-file"
+  options:
+    max-size: "50m"
+    max-file: "5"
+
+x-backend-env: &backend-env
+  TZ: ${TZ:-Asia/Taipei}
+  PUID: ${PUID:-1042}
+  PGID: ${PGID:-1042}
+  DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vault}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vault}
+
+x-backend-depends: &backend-depends
+  postgres:
+    condition: service_healthy
+  redis:
+    condition: service_healthy
+
+# ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
+
 services:
   nginx:
     build: ./nginx
     ports:
       - "${HTTP_PORT:-35689}:80"
+    environment:
+      - NGINX_CLIENT_MAX_BODY_SIZE=${NGINX_CLIENT_MAX_BODY_SIZE:-100m}
     volumes:
       - app_data:/data:ro
       # NAS/SMB mount guide: docs/smb-storage.md
@@ -29,11 +55,7 @@ services:
           memory: 256M
         reservations:
           memory: 128M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "5"
+    logging: *default-logging
 
   api:
     build: ./backend
@@ -41,9 +63,7 @@ services:
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 30s
     environment:
-      - TZ=Asia/Taipei
-      - PUID=1042
-      - PGID=1042
+      <<: *backend-env
     env_file: .env
     volumes:
       - app_data:/data
@@ -51,10 +71,7 @@ services:
       - ./mnt:/mnt:ro
       - gallery_dl_venv:/opt/gallery-dl:ro
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      <<: *backend-depends
     networks:
       - frontend
       - backend
@@ -73,11 +90,7 @@ services:
           memory: 2G
         reservations:
           memory: 512M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "5"
+    logging: *default-logging
 
   worker:
     build: ./backend
@@ -85,9 +98,7 @@ services:
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 120s
     environment:
-      - TZ=Asia/Taipei
-      - PUID=1042
-      - PGID=1042
+      <<: *backend-env
     env_file: .env
     volumes:
       - app_data:/data
@@ -96,10 +107,7 @@ services:
       - ./mnt:/mnt:ro
       - gallery_dl_venv:/opt/gallery-dl
     depends_on:
-      postgres:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
+      <<: *backend-depends
     networks:
       - frontend
       - backend
@@ -118,16 +126,12 @@ services:
           memory: 2G
         reservations:
           memory: 512M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "5"
+    logging: *default-logging
 
   pwa:
     build: ./pwa
     environment:
-      - TZ=Asia/Taipei
+      - TZ=${TZ:-Asia/Taipei}
       - NODE_ENV=production
       - NEXT_TELEMETRY_DISABLED=1
     depends_on:
@@ -149,17 +153,14 @@ services:
           memory: 512M
         reservations:
           memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "5"
+    logging: *default-logging
 
   tagger:
     build: ./tagger
     environment:
-      - TAG_MODEL_NAME=SmilingWolf/wd-swinv2-tagger-v3
-      - ONNX_PROVIDERS=CPUExecutionProvider
+      - TZ=${TZ:-Asia/Taipei}
+      - TAG_MODEL_NAME=${TAG_MODEL_NAME:-SmilingWolf/wd-swinv2-tagger-v3}
+      - ONNX_PROVIDERS=${ONNX_PROVIDERS:-CPUExecutionProvider}
     volumes:
       - app_data:/data:ro
       - ./mnt:/mnt:ro
@@ -183,11 +184,7 @@ services:
           memory: 1G
     profiles:
       - tagging
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "5"
+    logging: *default-logging
 
   postgres:
     image: postgres:18-alpine
@@ -216,15 +213,11 @@ services:
           memory: 2G
         reservations:
           memory: 512M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "5"
+    logging: *default-logging
 
   redis:
     image: redis:8-alpine
-    command: redis-server --appendonly yes --maxmemory 768mb --maxmemory-policy allkeys-lru --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
+    command: redis-server --appendonly yes --maxmemory ${REDIS_MAXMEMORY:-768mb} --maxmemory-policy allkeys-lru --auto-aof-rewrite-percentage 100 --auto-aof-rewrite-min-size 64mb
     volumes:
       - redis_data:/data
     healthcheck:
@@ -243,11 +236,7 @@ services:
           memory: 1G
         reservations:
           memory: 256M
-    logging:
-      driver: "json-file"
-      options:
-        max-size: "50m"
-        max-file: "5"
+    logging: *default-logging
 
 volumes:
   app_data:
