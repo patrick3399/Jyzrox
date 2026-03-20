@@ -3,13 +3,7 @@
 import Link from 'next/link'
 import useSWR from 'swr'
 import { useState, useCallback, useEffect } from 'react'
-import {
-  ArrowRight,
-  BookMarked,
-  X,
-  LayoutList,
-  LayoutGrid,
-} from 'lucide-react'
+import { ArrowRight, BookMarked, X, LayoutList, LayoutGrid } from 'lucide-react'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { SkeletonGrid } from '@/components/Skeleton'
@@ -53,15 +47,16 @@ function alertStyles(severity: 'error' | 'warning' | 'info') {
 }
 
 function SystemAlerts({ alerts }: { alerts: string[] }) {
-  const [dismissed, setDismissed] = useState<Set<string>>(() => {
-    if (typeof window === 'undefined') return new Set()
+  const [dismissed, setDismissed] = useState<Set<string>>(new Set())
+
+  useEffect(() => {
     try {
       const stored = sessionStorage.getItem(DISMISSED_KEY)
-      return stored ? new Set(JSON.parse(stored) as string[]) : new Set()
+      if (stored) setDismissed(new Set(JSON.parse(stored) as string[]))
     } catch {
-      return new Set()
+      // sessionStorage unavailable
     }
-  })
+  }, [])
 
   const dismiss = (msg: string) => {
     setDismissed((prev) => {
@@ -140,11 +135,10 @@ export default function Dashboard() {
     focusThrottleInterval: 10000,
   })
 
-  const { data: alertsData } = useSWR(
-    'dashboard/alerts',
-    () => api.settings.getAlerts(),
-    { revalidateOnFocus: false, dedupingInterval: 60000 },
-  )
+  const { data: alertsData } = useSWR('dashboard/alerts', () => api.settings.getAlerts(), {
+    revalidateOnFocus: false,
+    dedupingInterval: 60000,
+  })
 
   const alerts = alertsData?.alerts ?? []
 
@@ -153,6 +147,7 @@ export default function Dashboard() {
   )
 
   // Quick links config — user-customisable via Settings > Dashboard Quick Links
+  // loadDashboardConfig() is SSR-safe (returns ALL_DASHBOARD_LINKS when window is undefined)
   const [quickLinks, setQuickLinks] = useState(() => loadDashboardConfig())
 
   useEffect(() => {
@@ -167,173 +162,196 @@ export default function Dashboard() {
 
   // Compact links state — persisted to localStorage.
   // Default: compact on mobile (< lg = 1024px), expanded on desktop.
-  const [compactLinks, setCompactLinks] = useState<boolean>(() => {
-    if (typeof window === 'undefined') return false
+  const [compactLinks, setCompactLinks] = useState<boolean>(false)
+
+  useEffect(() => {
     const stored = localStorage.getItem(COMPACT_LINKS_KEY)
-    if (stored !== null) return stored === 'true'
-    return window.innerWidth < 1024
-  })
+    if (stored !== null) {
+      setCompactLinks(stored === 'true')
+    } else {
+      setCompactLinks(window.innerWidth < 1024)
+    }
+  }, [])
 
   const toggleCompactLinks = useCallback(() => {
     setCompactLinks((prev) => {
       const next = !prev
-      try { localStorage.setItem(COMPACT_LINKS_KEY, String(next)) } catch { /* noop */ }
+      try {
+        localStorage.setItem(COMPACT_LINKS_KEY, String(next))
+      } catch {
+        /* noop */
+      }
       return next
     })
   }, [])
 
   return (
     <div className="space-y-8">
-        {/* Header */}
-        <div className="flex items-center justify-between">
-          <div>
-            <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
-          </div>
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">{t('dashboard.title')}</h1>
+        </div>
+      </div>
+
+      {/* System Alerts */}
+      {alerts.length > 0 && <SystemAlerts alerts={alerts} />}
+
+      {/* Quick Links */}
+      <div>
+        {/* Section header with toggle */}
+        <div className="flex items-center justify-between mb-2">
+          <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
+            {t('dashboard.quickLinks.title')}
+          </h2>
+          <button
+            onClick={toggleCompactLinks}
+            className="p-1.5 rounded-md text-vault-text-muted hover:text-vault-text hover:bg-vault-card-hover transition-colors"
+            aria-label={
+              compactLinks
+                ? t('dashboard.quickLinks.expandedView')
+                : t('dashboard.quickLinks.compactView')
+            }
+            title={
+              compactLinks
+                ? t('dashboard.quickLinks.expandedView')
+                : t('dashboard.quickLinks.compactView')
+            }
+          >
+            {compactLinks ? <LayoutList size={15} /> : <LayoutGrid size={15} />}
+          </button>
         </div>
 
-        {/* System Alerts */}
-        {alerts.length > 0 && <SystemAlerts alerts={alerts} />}
-
-        {/* Quick Links */}
-        <div>
-          {/* Section header with toggle */}
-          <div className="flex items-center justify-between mb-2">
-            <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
-              {t('dashboard.quickLinks.title')}
-            </h2>
-            <button
-              onClick={toggleCompactLinks}
-              className="p-1.5 rounded-md text-vault-text-muted hover:text-vault-text hover:bg-vault-card-hover transition-colors"
-              aria-label={compactLinks ? t('dashboard.quickLinks.expandedView') : t('dashboard.quickLinks.compactView')}
-              title={compactLinks ? t('dashboard.quickLinks.expandedView') : t('dashboard.quickLinks.compactView')}
-            >
-              {compactLinks ? <LayoutList size={15} /> : <LayoutGrid size={15} />}
-            </button>
-          </div>
-
-          {/* Grid — animates between compact and expanded */}
-          <div
-            className={`grid gap-2 transition-all duration-200 ${
-              compactLinks
-                ? 'grid-cols-4 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9 xl:grid-cols-10'
-                : 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7'
-            }`}
-          >
-            {quickLinks.map((link) => {
-              const Icon = link.icon
-              if (compactLinks) {
-                return (
-                  <Link
-                    key={link.href}
-                    href={link.href}
-                    className="bg-vault-card border border-vault-border rounded-lg p-2 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group flex flex-col items-center gap-1.5"
-                    title={link.descKey ? t(link.descKey) : t(link.labelKey)}
-                  >
-                    <Icon
-                      size={18}
-                      className="text-vault-text-muted group-hover:text-vault-accent transition-colors shrink-0"
-                    />
-                    <p className="text-[10px] text-vault-text-secondary text-center leading-tight font-medium line-clamp-2">
-                      {t(link.labelKey)}
-                    </p>
-                  </Link>
-                )
-              }
+        {/* Grid — animates between compact and expanded */}
+        <div
+          className={`grid gap-2 transition-all duration-200 ${
+            compactLinks
+              ? 'grid-cols-4 sm:grid-cols-5 md:grid-cols-7 lg:grid-cols-9 xl:grid-cols-10'
+              : 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7'
+          }`}
+        >
+          {quickLinks.map((link) => {
+            const Icon = link.icon
+            if (compactLinks) {
               return (
                 <Link
                   key={link.href}
                   href={link.href}
-                  className="bg-vault-card border border-vault-border rounded-lg p-3 lg:p-4 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group flex flex-col items-center lg:items-start gap-1"
+                  className="bg-vault-card border border-vault-border rounded-lg p-2 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group flex flex-col items-center gap-1.5"
+                  title={link.descKey ? t(link.descKey) : t(link.labelKey)}
                 >
                   <Icon
-                    size={20}
-                    className="text-vault-text-muted group-hover:text-vault-accent transition-colors lg:hidden"
+                    size={18}
+                    className="text-vault-text-muted group-hover:text-vault-accent transition-colors shrink-0"
                   />
-                  <div className="hidden lg:flex items-center gap-2 mb-1">
-                    <Icon size={16} className="text-vault-text-muted group-hover:text-vault-accent transition-colors" />
-                    <p className="font-medium text-sm">{t(link.labelKey)}</p>
-                  </div>
-                  <p className="text-xs text-vault-text-secondary text-center lg:text-left font-medium lg:font-normal lg:hidden">{t(link.labelKey)}</p>
-                  <p className="text-xs text-vault-text-muted hidden lg:block">{link.descKey ? t(link.descKey) : ''}</p>
+                  <p className="text-[10px] text-vault-text-secondary text-center leading-tight font-medium line-clamp-2">
+                    {t(link.labelKey)}
+                  </p>
                 </Link>
               )
-            })}
-          </div>
-        </div>
-
-        {/* Active Downloads */}
-        {activeJobs.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
-                {t('dashboard.activeDownloads')} ({activeJobs.length})
-              </h2>
+            }
+            return (
               <Link
-                href="/queue"
-                className="flex items-center gap-1 text-xs text-vault-accent hover:text-vault-accent/80 transition-colors"
+                key={link.href}
+                href={link.href}
+                className="bg-vault-card border border-vault-border rounded-lg p-3 lg:p-4 hover:border-vault-border-hover hover:bg-vault-card-hover transition-colors group flex flex-col items-center lg:items-start gap-1"
               >
-                {t('dashboard.viewAll')} <ArrowRight size={12} />
-              </Link>
-            </div>
-            <div className="space-y-2">
-              {activeJobs.map((job: DownloadJob) => (
-                <div
-                  key={job.id}
-                  className="bg-vault-card border border-vault-border rounded-lg px-4 py-3 flex items-center justify-between gap-3"
-                >
-                  <p className="text-sm text-vault-text-secondary truncate">{job.url}</p>
-                  <span
-                    className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded border ${
-                      job.status === 'running'
-                        ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
-                        : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
-                    }`}
-                  >
-                    {job.status}
-                  </span>
+                <Icon
+                  size={20}
+                  className="text-vault-text-muted group-hover:text-vault-accent transition-colors lg:hidden"
+                />
+                <div className="hidden lg:flex items-center gap-2 mb-1">
+                  <Icon
+                    size={16}
+                    className="text-vault-text-muted group-hover:text-vault-accent transition-colors"
+                  />
+                  <p className="font-medium text-sm">{t(link.labelKey)}</p>
                 </div>
-              ))}
-            </div>
-          </div>
-        )}
+                <p className="text-xs text-vault-text-secondary text-center lg:text-left font-medium lg:font-normal lg:hidden">
+                  {t(link.labelKey)}
+                </p>
+                <p className="text-xs text-vault-text-muted hidden lg:block">
+                  {link.descKey ? t(link.descKey) : ''}
+                </p>
+              </Link>
+            )
+          })}
+        </div>
+      </div>
 
-        {/* Recently Added */}
+      {/* Active Downloads */}
+      {activeJobs.length > 0 && (
         <div>
-          <div className="flex items-center justify-between mb-4">
+          <div className="flex items-center justify-between mb-3">
             <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
-              {t('dashboard.recentlyAdded')}
-              {libraryData && (
-                <span className="ml-2 text-vault-text-muted/60 normal-case font-normal">
-                  ({(libraryData.total ?? 0).toLocaleString()} {t('dashboard.total')})
-                </span>
-              )}
+              {t('dashboard.activeDownloads')} ({activeJobs.length})
             </h2>
             <Link
-              href="/library"
+              href="/queue"
               className="flex items-center gap-1 text-xs text-vault-accent hover:text-vault-accent/80 transition-colors"
             >
-              {t('dashboard.viewLibrary')} <ArrowRight size={12} />
+              {t('dashboard.viewAll')} <ArrowRight size={12} />
             </Link>
           </div>
-
-          {libraryLoading && <SkeletonGrid count={12} />}
-
-          {!libraryLoading && libraryData && libraryData.galleries.length === 0 && (
-            <EmptyState
-              icon={BookMarked}
-              title={t('dashboard.noGalleries')}
-              description={t('dashboard.noGalleriesHint')}
-            />
-          )}
-
-          {!libraryLoading && libraryData && libraryData.galleries.length > 0 && (
-            <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 gap-3">
-              {libraryData.galleries.map((gallery) => (
-                <GalleryThumb key={gallery.id} gallery={gallery} />
-              ))}
-            </div>
-          )}
+          <div className="space-y-2">
+            {activeJobs.map((job: DownloadJob) => (
+              <div
+                key={job.id}
+                className="bg-vault-card border border-vault-border rounded-lg px-4 py-3 flex items-center justify-between gap-3"
+              >
+                <p className="text-sm text-vault-text-secondary truncate">{job.url}</p>
+                <span
+                  className={`shrink-0 text-xs font-medium px-2 py-0.5 rounded border ${
+                    job.status === 'running'
+                      ? 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+                      : 'bg-yellow-500/10 border-yellow-500/30 text-yellow-400'
+                  }`}
+                >
+                  {job.status}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
+      )}
+
+      {/* Recently Added */}
+      <div>
+        <div className="flex items-center justify-between mb-4">
+          <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
+            {t('dashboard.recentlyAdded')}
+            {libraryData && (
+              <span className="ml-2 text-vault-text-muted/60 normal-case font-normal">
+                ({(libraryData.total ?? 0).toLocaleString()} {t('dashboard.total')})
+              </span>
+            )}
+          </h2>
+          <Link
+            href="/library"
+            className="flex items-center gap-1 text-xs text-vault-accent hover:text-vault-accent/80 transition-colors"
+          >
+            {t('dashboard.viewLibrary')} <ArrowRight size={12} />
+          </Link>
+        </div>
+
+        {libraryLoading && <SkeletonGrid count={12} />}
+
+        {!libraryLoading && libraryData && libraryData.galleries.length === 0 && (
+          <EmptyState
+            icon={BookMarked}
+            title={t('dashboard.noGalleries')}
+            description={t('dashboard.noGalleriesHint')}
+          />
+        )}
+
+        {!libraryLoading && libraryData && libraryData.galleries.length > 0 && (
+          <div className="grid grid-cols-3 sm:grid-cols-4 md:grid-cols-6 lg:grid-cols-8 xl:grid-cols-10 2xl:grid-cols-12 gap-3">
+            {libraryData.galleries.map((gallery) => (
+              <GalleryThumb key={gallery.id} gallery={gallery} />
+            ))}
+          </div>
+        )}
+      </div>
     </div>
   )
 }

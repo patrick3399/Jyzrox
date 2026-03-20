@@ -21,11 +21,13 @@ function detectLocale(): Locale {
 }
 
 export function LocaleProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>(() => {
+  const [locale, setLocaleState] = useState<Locale>('en')
+
+  useEffect(() => {
     const detected = detectLocale()
     setI18nLocale(detected)
-    return detected
-  })
+    if (detected !== 'en') setLocaleState(detected)
+  }, [])
 
   const setLocale = useCallback((newLocale: Locale) => {
     setI18nLocale(newLocale)
@@ -36,7 +38,8 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
 
   // On mount: sync locale from server profile (server wins for cross-device sync)
   useEffect(() => {
-    api.auth.getProfile()
+    api.auth
+      .getProfile()
       .then((profile) => {
         if (profile.locale && SUPPORTED_LOCALES.includes(profile.locale as Locale)) {
           const serverLocale = profile.locale as Locale
@@ -54,11 +57,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(STORAGE_KEY, locale)
   }, [locale])
 
-  return (
-    <LocaleContext.Provider value={{ locale, setLocale }}>
-      {children}
-    </LocaleContext.Provider>
-  )
+  return <LocaleContext.Provider value={{ locale, setLocale }}>{children}</LocaleContext.Provider>
 }
 
 export function useLocale() {
