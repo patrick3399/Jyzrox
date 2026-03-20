@@ -33,7 +33,13 @@ function getVariantStyles(variant: 'default' | 'include' | 'exclude'): string {
   }
 }
 
-export function TagBadge({ tag, translation, onClick, onRemove, variant = 'default' }: TagBadgeProps) {
+export function TagBadge({
+  tag,
+  translation,
+  onClick,
+  onRemove,
+  variant = 'default',
+}: TagBadgeProps) {
   const colonIndex = tag.indexOf(':')
   const namespace = colonIndex !== -1 ? tag.slice(0, colonIndex) : 'general'
   const name = colonIndex !== -1 ? tag.slice(colonIndex + 1) : tag

@@ -135,7 +135,10 @@ describe('usePullToRefresh — touch end handling', () => {
   it('test_pullToRefresh_afterRefreshCompletes_stateReturnsToIdle', async () => {
     let resolveRefresh!: () => void
     const onRefresh = vi.fn().mockImplementation(
-      () => new Promise<void>((res) => { resolveRefresh = res })
+      () =>
+        new Promise<void>((res) => {
+          resolveRefresh = res
+        }),
     )
     const { result } = renderHook(() => usePullToRefresh({ onRefresh }))
 

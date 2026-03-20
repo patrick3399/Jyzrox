@@ -31,11 +31,9 @@ export default function AdminUsersPage() {
   const router = useRouter()
   const { data: profile, isLoading: profileLoading } = useProfile()
 
-  const { data, isLoading, mutate } = useSWR(
-    'admin/users',
-    () => api.users.list(),
-    { revalidateOnFocus: false },
-  )
+  const { data, isLoading, mutate } = useSWR('admin/users', () => api.users.list(), {
+    revalidateOnFocus: false,
+  })
 
   // Create dialog state
   const [showCreate, setShowCreate] = useState(false)
@@ -221,7 +219,9 @@ export default function AdminUsersPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-vault-card border border-vault-border rounded-xl w-full max-w-md shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-vault-border">
-              <h2 className="text-lg font-semibold text-vault-text">{t('admin.users.createTitle')}</h2>
+              <h2 className="text-lg font-semibold text-vault-text">
+                {t('admin.users.createTitle')}
+              </h2>
               <button
                 onClick={() => setShowCreate(false)}
                 className="p-1.5 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
@@ -265,7 +265,9 @@ export default function AdminUsersPage() {
                 </label>
                 <select
                   value={createForm.role}
-                  onChange={(e) => setCreateForm((f) => ({ ...f, role: e.target.value as UserRole }))}
+                  onChange={(e) =>
+                    setCreateForm((f) => ({ ...f, role: e.target.value as UserRole }))
+                  }
                   className="w-full bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-sm text-vault-text focus:outline-none focus:ring-1 focus:ring-vault-accent"
                 >
                   <option value="admin">{t('admin.users.roleAdmin')}</option>
@@ -276,7 +278,9 @@ export default function AdminUsersPage() {
               <div className="space-y-1.5">
                 <label className="block text-sm font-medium text-vault-text">
                   {t('admin.users.email')}
-                  <span className="ml-1 text-vault-text-secondary font-normal text-xs">({t('common.optional')})</span>
+                  <span className="ml-1 text-vault-text-secondary font-normal text-xs">
+                    ({t('common.optional')})
+                  </span>
                 </label>
                 <input
                   type="email"
@@ -313,7 +317,9 @@ export default function AdminUsersPage() {
         <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60 backdrop-blur-sm">
           <div className="bg-vault-card border border-vault-border rounded-xl w-full max-w-sm shadow-2xl">
             <div className="flex items-center justify-between px-6 py-4 border-b border-vault-border">
-              <h2 className="text-lg font-semibold text-vault-text">{t('admin.users.deleteTitle')}</h2>
+              <h2 className="text-lg font-semibold text-vault-text">
+                {t('admin.users.deleteTitle')}
+              </h2>
               <button
                 onClick={() => setDeleteTarget(null)}
                 className="p-1.5 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
@@ -323,9 +329,7 @@ export default function AdminUsersPage() {
               </button>
             </div>
             <div className="px-6 py-5 space-y-5">
-              <p className="text-sm text-vault-text-secondary">
-                {t('admin.users.deleteConfirm')}
-              </p>
+              <p className="text-sm text-vault-text-secondary">{t('admin.users.deleteConfirm')}</p>
               <p className="text-sm font-medium text-vault-text">{deleteTarget.username}</p>
               <div className="flex justify-end gap-3">
                 <button

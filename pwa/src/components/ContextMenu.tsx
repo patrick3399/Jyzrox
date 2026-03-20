@@ -64,7 +64,10 @@ export function ContextMenu({ open, onClose, position, items }: ContextMenuProps
       <div
         className="fixed inset-0 z-[9998]"
         aria-hidden="true"
-        onPointerDown={(e) => { e.stopPropagation(); onClose() }}
+        onPointerDown={(e) => {
+          e.stopPropagation()
+          onClose()
+        }}
       />
 
       <div
@@ -88,7 +91,12 @@ export function ContextMenu({ open, onClose, position, items }: ContextMenuProps
                 onClose()
               }}
             >
-              {Icon && <Icon size={15} className={`shrink-0 ${item.className ?? 'text-vault-text-muted'}`} />}
+              {Icon && (
+                <Icon
+                  size={15}
+                  className={`shrink-0 ${item.className ?? 'text-vault-text-muted'}`}
+                />
+              )}
               {item.label}
             </button>
           )

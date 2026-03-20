@@ -29,7 +29,7 @@ export function useDownloadJobs(params: JobListParams = {}) {
         mutate(['download/jobs', params])
       }, THROTTLE_MS - elapsed)
     }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [trigger])
 
   return useSWR(['download/jobs', params], () => api.download.getJobs(params), {

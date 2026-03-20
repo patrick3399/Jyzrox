@@ -6,25 +6,25 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 
 // Map of Tailwind breakpoints to column counts (px)
 export interface ColumnConfig {
-  base: number    // default cols (mobile)
-  sm?: number     // >= 640px
-  md?: number     // >= 768px
-  lg?: number     // >= 1024px
-  xl?: number     // >= 1280px
-  xxl?: number    // >= 1536px
+  base: number // default cols (mobile)
+  sm?: number // >= 640px
+  md?: number // >= 768px
+  lg?: number // >= 1024px
+  xl?: number // >= 1280px
+  xxl?: number // >= 1536px
 }
 
 export interface VirtualGridProps<T> {
   items: T[]
   columns: ColumnConfig
-  gap?: number              // gap in px (default 16 = gap-4)
-  estimateHeight?: number   // estimated row height in px (default 280)
+  gap?: number // gap in px (default 16 = gap-4)
+  estimateHeight?: number // estimated row height in px (default 280)
   renderItem: (item: T, index: number) => React.ReactNode
   onLoadMore?: () => void
   hasMore?: boolean
   isLoading?: boolean
   loadingElement?: React.ReactNode
-  overscan?: number         // extra rows to render (default 3)
+  overscan?: number // extra rows to render (default 3)
   className?: string
   focusedIndex?: number | null
   onScrollToIndex?: (index: number) => void

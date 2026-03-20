@@ -2,7 +2,16 @@
 
 import { useCallback, useState } from 'react'
 import { useRouter } from 'next/navigation'
-import { BookOpen, ExternalLink, Heart, Download, Check, Trash2, Bookmark, BookmarkCheck } from 'lucide-react'
+import {
+  BookOpen,
+  ExternalLink,
+  Heart,
+  Download,
+  Check,
+  Trash2,
+  Bookmark,
+  BookmarkCheck,
+} from 'lucide-react'
 import type { Gallery } from '@/lib/types'
 import { RatingStars } from '@/components/RatingStars'
 import { ContextMenu } from '@/components/ContextMenu'
@@ -43,15 +52,12 @@ export function GalleryListCard({
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
 
-  const handleLongPress = useCallback(
-    (e: React.TouchEvent | React.MouseEvent) => {
-      e.preventDefault()
-      const pos = getEventPosition(e)
-      setMenuPos(pos)
-      setMenuOpen(true)
-    },
-    [],
-  )
+  const handleLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
+    e.preventDefault()
+    const pos = getEventPosition(e)
+    setMenuPos(pos)
+    setMenuOpen(true)
+  }, [])
 
   const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
 
@@ -125,7 +131,7 @@ export function GalleryListCard({
           transition-all duration-150 cursor-pointer
           hover:bg-vault-card-hover hover:border-vault-accent
           focus:outline-none focus:ring-2 focus:ring-vault-accent
-          ${(selected || menuOpen) ? 'border-2 border-vault-accent' : 'border border-vault-border'}
+          ${selected || menuOpen ? 'border-2 border-vault-accent' : 'border border-vault-border'}
         `}
       >
         {/* Select-mode checkbox overlay */}
@@ -133,7 +139,9 @@ export function GalleryListCard({
           <div className="absolute top-2 left-2 z-10">
             <div
               className={`w-5 h-5 rounded border-2 flex items-center justify-center ${
-                selected ? 'bg-vault-accent border-vault-accent text-white' : 'border-white/60 bg-black/30'
+                selected
+                  ? 'bg-vault-accent border-vault-accent text-white'
+                  : 'border-white/60 bg-black/30'
               }`}
             >
               {selected && <Check size={12} />}
@@ -207,7 +215,10 @@ export function GalleryListCard({
 
             {/* Favourite indicator */}
             {gallery.is_favorited && (
-              <span className="text-red-400 text-sm leading-none" aria-label={t('common.favourited')}>
+              <span
+                className="text-red-400 text-sm leading-none"
+                aria-label={t('common.favourited')}
+              >
                 ♥
               </span>
             )}

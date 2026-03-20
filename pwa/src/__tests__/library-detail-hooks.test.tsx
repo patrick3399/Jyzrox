@@ -158,7 +158,12 @@ type GalleryHookState = {
   mutate: ReturnType<typeof vi.fn>
 }
 
-const loadingState: GalleryHookState = { data: undefined, isLoading: true, error: null, mutate: vi.fn() }
+const loadingState: GalleryHookState = {
+  data: undefined,
+  isLoading: true,
+  error: null,
+  mutate: vi.fn(),
+}
 
 function dataState(gallery?: ReturnType<typeof makeGallery>): GalleryHookState {
   return { data: gallery ?? makeGallery(), isLoading: false, error: null, mutate: vi.fn() }

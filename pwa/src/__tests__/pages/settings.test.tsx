@@ -76,7 +76,9 @@ vi.mock('@/lib/api', () => ({
       setFeature: vi.fn().mockResolvedValue({}),
       setFeatureValue: vi.fn().mockResolvedValue({}),
       getRateLimits: vi.fn().mockResolvedValue({ sites: {}, schedule: {}, override_active: false }),
-      patchRateLimits: vi.fn().mockResolvedValue({ sites: {}, schedule: {}, override_active: false }),
+      patchRateLimits: vi
+        .fn()
+        .mockResolvedValue({ sites: {}, schedule: {}, override_active: false }),
       setRateLimitOverride: vi.fn().mockResolvedValue({}),
     },
     tags: {

@@ -114,7 +114,17 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <WsContext.Provider value={{ alerts, connected, dismissAlert, lastJobUpdate, lastSubCheck, lastEvent, lastLogEntry }}>
+    <WsContext.Provider
+      value={{
+        alerts,
+        connected,
+        dismissAlert,
+        lastJobUpdate,
+        lastSubCheck,
+        lastEvent,
+        lastLogEntry,
+      }}
+    >
       {children}
     </WsContext.Provider>
   )

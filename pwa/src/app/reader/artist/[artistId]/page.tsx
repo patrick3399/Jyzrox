@@ -79,7 +79,11 @@ export default function ArtistReaderPage() {
     const original = originalImagesRef.current[originalIndex]
     if (!original) throw new Error('Image not found')
 
-    await api.library.deleteImage(original.gallery_source, original.gallery_source_id, original.page_num)
+    await api.library.deleteImage(
+      original.gallery_source,
+      original.gallery_source_id,
+      original.page_num,
+    )
 
     originalImagesRef.current = originalImagesRef.current.filter((_, i) => i !== originalIndex)
   }, [])
@@ -101,9 +105,7 @@ export default function ArtistReaderPage() {
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-50">
-            {total !== null
-              ? `Loading images... ${loaded}/${total}`
-              : 'Loading images...'}
+            {total !== null ? `Loading images... ${loaded}/${total}` : 'Loading images...'}
           </p>
         </div>
       </div>

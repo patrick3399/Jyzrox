@@ -32,38 +32,46 @@ function timeAgo(iso: string | null): string {
 
 export default function TrashPage() {
   useLocale()
-  const { data, isLoading, mutate } = useSWR('trash-list', () => api.library.trashList({ limit: 200 }))
+  const { data, isLoading, mutate } = useSWR('trash-list', () =>
+    api.library.trashList({ limit: 200 }),
+  )
   const { data: featuresData } = useSWR('settings/features', () => api.settings.getFeatures())
   const trashEnabled = featuresData?.trash_enabled ?? true
   const retentionDays = featuresData?.trash_retention_days ?? 30
   const [actionInProgress, setActionInProgress] = useState<string | null>(null)
 
-  const handleRestore = useCallback(async (g: Gallery) => {
-    setActionInProgress(`restore-${g.id}`)
-    try {
-      await api.library.restore(g.source, g.source_id)
-      toast.success(t('trash.restored'))
-      mutate()
-    } catch {
-      toast.error(t('common.failedToLoad'))
-    } finally {
-      setActionInProgress(null)
-    }
-  }, [mutate])
+  const handleRestore = useCallback(
+    async (g: Gallery) => {
+      setActionInProgress(`restore-${g.id}`)
+      try {
+        await api.library.restore(g.source, g.source_id)
+        toast.success(t('trash.restored'))
+        mutate()
+      } catch {
+        toast.error(t('common.failedToLoad'))
+      } finally {
+        setActionInProgress(null)
+      }
+    },
+    [mutate],
+  )
 
-  const handlePermanentDelete = useCallback(async (g: Gallery) => {
-    if (!confirm(t('trash.permanentDeleteConfirm'))) return
-    setActionInProgress(`delete-${g.id}`)
-    try {
-      await api.library.permanentDelete(g.source, g.source_id)
-      toast.success(t('trash.permanentlyDeleted'))
-      mutate()
-    } catch {
-      toast.error(t('common.failedToLoad'))
-    } finally {
-      setActionInProgress(null)
-    }
-  }, [mutate])
+  const handlePermanentDelete = useCallback(
+    async (g: Gallery) => {
+      if (!confirm(t('trash.permanentDeleteConfirm'))) return
+      setActionInProgress(`delete-${g.id}`)
+      try {
+        await api.library.permanentDelete(g.source, g.source_id)
+        toast.success(t('trash.permanentlyDeleted'))
+        mutate()
+      } catch {
+        toast.error(t('common.failedToLoad'))
+      } finally {
+        setActionInProgress(null)
+      }
+    },
+    [mutate],
+  )
 
   const handleEmptyTrash = useCallback(async () => {
     if (!confirm(t('trash.emptyTrashConfirm'))) return
@@ -102,11 +110,17 @@ export default function TrashPage() {
       </div>
 
       {isLoading && (
-        <div className="flex justify-center py-12"><LoadingSpinner /></div>
+        <div className="flex justify-center py-12">
+          <LoadingSpinner />
+        </div>
       )}
 
       {!isLoading && !trashEnabled && (
-        <EmptyState icon={Trash2} title={t('trash.disabled')} description={t('trash.disabledDesc')} />
+        <EmptyState
+          icon={Trash2}
+          title={t('trash.disabled')}
+          description={t('trash.disabledDesc')}
+        />
       )}
 
       {!isLoading && trashEnabled && galleries.length === 0 && (
@@ -116,7 +130,10 @@ export default function TrashPage() {
       {!isLoading && trashEnabled && galleries.length > 0 && (
         <div className="space-y-2">
           {galleries.map((g) => (
-            <div key={g.id} className="bg-vault-card border border-vault-border rounded-lg p-3 flex items-center gap-3">
+            <div
+              key={g.id}
+              className="bg-vault-card border border-vault-border rounded-lg p-3 flex items-center gap-3"
+            >
               {g.cover_thumb && (
                 <img
                   src={g.cover_thumb}
@@ -125,14 +142,20 @@ export default function TrashPage() {
                 />
               )}
               <div className="flex-1 min-w-0">
-                <p className="text-sm font-medium text-vault-text truncate">{g.title || g.title_jpn || `${g.source}/${g.source_id}`}</p>
+                <p className="text-sm font-medium text-vault-text truncate">
+                  {g.title || g.title_jpn || `${g.source}/${g.source_id}`}
+                </p>
                 <div className="flex items-center gap-3 text-xs text-vault-text-muted mt-0.5">
                   <span>{t('queue.previewPages', { count: String(g.pages || 0) })}</span>
                   <span>{g.source}</span>
                   {g.deleted_at && (
                     <>
                       <span>{t('trash.deletedAt', { time: timeAgo(g.deleted_at) })}</span>
-                      <span className="text-orange-400">{t('trash.daysRemaining', { days: String(daysRemaining(g.deleted_at, retentionDays)) })}</span>
+                      <span className="text-orange-400">
+                        {t('trash.daysRemaining', {
+                          days: String(daysRemaining(g.deleted_at, retentionDays)),
+                        })}
+                      </span>
                     </>
                   )}
                 </div>

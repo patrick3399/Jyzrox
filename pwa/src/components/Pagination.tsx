@@ -106,11 +106,7 @@ export function Pagination({
               aria-current={isActive ? 'page' : undefined}
               aria-busy={isLoadingActive}
             >
-              {isLoadingActive ? (
-                <Loader2 size={14} className="animate-spin" />
-              ) : (
-                item + 1
-              )}
+              {isLoadingActive ? <Loader2 size={14} className="animate-spin" /> : item + 1}
             </button>
           )
         })}

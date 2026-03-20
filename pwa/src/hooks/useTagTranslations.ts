@@ -6,9 +6,9 @@ import type { Locale } from '@/lib/i18n'
 const LOCALE_TO_LANG: Record<Locale, string> = {
   'zh-TW': 'zh-TW',
   'zh-CN': 'zh',
-  'ja': 'ja',
-  'ko': 'ko',
-  'en': 'zh',
+  ja: 'ja',
+  ko: 'ko',
+  en: 'zh',
 }
 
 /**
@@ -28,9 +28,10 @@ export function useTagTranslations(tags: string[]) {
   })
   const enabled = features?.tag_translation_enabled ?? true
 
-  const key = enabled && tags.length > 0
-    ? ['tags/translations', language, tags.slice().sort().join(',')]
-    : null
+  const key =
+    enabled && tags.length > 0
+      ? ['tags/translations', language, tags.slice().sort().join(',')]
+      : null
 
   return useSWR(key, () => api.tags.getTranslations(tags, language), {
     revalidateOnFocus: false,

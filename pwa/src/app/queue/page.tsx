@@ -1,7 +1,19 @@
 'use client'
 
 import { useState, useCallback, useEffect } from 'react'
-import { Download, X, Plus, Trash2, Pause, Play, ChevronRight, Globe, WifiOff, RotateCcw, RefreshCw } from 'lucide-react'
+import {
+  Download,
+  X,
+  Plus,
+  Trash2,
+  Pause,
+  Play,
+  ChevronRight,
+  Globe,
+  WifiOff,
+  RotateCcw,
+  RefreshCw,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import {
   useDownloadJobs,
@@ -129,7 +141,10 @@ function JobRow({
           {/* Retry info */}
           {job.retry_count > 0 && (
             <p className="mt-1 text-xs text-vault-text-muted">
-              {t('queue.retryCount', { count: String(job.retry_count), max: String(job.max_retries) })}
+              {t('queue.retryCount', {
+                count: String(job.retry_count),
+                max: String(job.max_retries),
+              })}
             </p>
           )}
           {/* Failed pages info */}
@@ -139,11 +154,10 @@ function JobRow({
             </p>
           )}
           {/* Permanently failed notice */}
-          {job.retry_count >= job.max_retries && (job.status === 'failed' || job.status === 'partial') && (
-            <p className="mt-1 text-xs text-red-400/70">
-              {t('queue.permanentlyFailed')}
-            </p>
-          )}
+          {job.retry_count >= job.max_retries &&
+            (job.status === 'failed' || job.status === 'partial') && (
+              <p className="mt-1 text-xs text-red-400/70">{t('queue.permanentlyFailed')}</p>
+            )}
           {job.status === 'running' && job.progress && (
             <div className="mt-2">
               {typeof job.progress.downloaded === 'number' && (
@@ -236,15 +250,16 @@ function JobRow({
               <X size={14} />
             </button>
           )}
-          {(job.status === 'failed' || job.status === 'partial') && job.retry_count < job.max_retries && (
-            <button
-              onClick={() => onRetry(job.id)}
-              className="p-1.5 rounded-lg bg-vault-accent/10 border border-vault-accent/30 hover:bg-vault-accent/20 text-vault-accent transition-colors"
-              title={t('queue.retry')}
-            >
-              <RotateCcw size={14} />
-            </button>
-          )}
+          {(job.status === 'failed' || job.status === 'partial') &&
+            job.retry_count < job.max_retries && (
+              <button
+                onClick={() => onRetry(job.id)}
+                className="p-1.5 rounded-lg bg-vault-accent/10 border border-vault-accent/30 hover:bg-vault-accent/20 text-vault-accent transition-colors"
+                title={t('queue.retry')}
+              >
+                <RotateCcw size={14} />
+              </button>
+            )}
         </div>
       </div>
     </div>
@@ -256,7 +271,11 @@ function DownloadPreviewPanel({ preview }: { preview: DownloadPreview }) {
     return (
       <div className="mt-3 p-3 bg-vault-input/50 border border-vault-border rounded-lg">
         <p className="text-xs text-vault-text-muted">{t('queue.previewNotAvailable')}</p>
-        {preview.title && <p className="text-xs text-vault-text-secondary mt-1">{preview.source}: {preview.title}</p>}
+        {preview.title && (
+          <p className="text-xs text-vault-text-secondary mt-1">
+            {preview.source}: {preview.title}
+          </p>
+        )}
       </div>
     )
   }
@@ -264,25 +283,48 @@ function DownloadPreviewPanel({ preview }: { preview: DownloadPreview }) {
   return (
     <div className="mt-3 flex gap-3 p-3 bg-vault-input/50 border border-vault-border rounded-lg">
       {preview.thumb_url && preview.source === 'ehentai' && (
-        <img src={api.eh.thumbProxyUrl(preview.thumb_url)} alt="" className="w-16 h-20 object-cover rounded shrink-0" />
+        <img
+          src={api.eh.thumbProxyUrl(preview.thumb_url)}
+          alt=""
+          className="w-16 h-20 object-cover rounded shrink-0"
+        />
       )}
       {preview.thumb_url && preview.source === 'pixiv' && (
-        <img src={api.pixiv.imageProxyUrl(preview.thumb_url)} alt="" className="w-16 h-16 object-cover rounded shrink-0" />
+        <img
+          src={api.pixiv.imageProxyUrl(preview.thumb_url)}
+          alt=""
+          className="w-16 h-16 object-cover rounded shrink-0"
+        />
       )}
       <div className="flex-1 min-w-0">
         <p className="text-sm text-vault-text font-medium truncate">{preview.title}</p>
         <div className="flex flex-wrap items-center gap-2 mt-1 text-xs text-vault-text-muted">
-          {preview.pages && <span>{t('queue.previewPages', { count: String(preview.pages) })}</span>}
-          {preview.uploader && <span>{t('queue.previewUploader', { name: preview.uploader })}</span>}
+          {preview.pages && (
+            <span>{t('queue.previewPages', { count: String(preview.pages) })}</span>
+          )}
+          {preview.uploader && (
+            <span>{t('queue.previewUploader', { name: preview.uploader })}</span>
+          )}
           {preview.rating && <span>★ {preview.rating.toFixed(1)}</span>}
-          {preview.category && <span className="px-1.5 py-0.5 rounded bg-vault-border text-[10px]">{preview.category}</span>}
+          {preview.category && (
+            <span className="px-1.5 py-0.5 rounded bg-vault-border text-[10px]">
+              {preview.category}
+            </span>
+          )}
         </div>
         {preview.tags && preview.tags.length > 0 && (
           <div className="flex flex-wrap gap-1 mt-1.5">
             {preview.tags.slice(0, 10).map((tag) => (
-              <span key={tag} className="px-1.5 py-0.5 rounded bg-vault-border/60 text-[10px] text-vault-text-muted">{tag}</span>
+              <span
+                key={tag}
+                className="px-1.5 py-0.5 rounded bg-vault-border/60 text-[10px] text-vault-text-muted"
+              >
+                {tag}
+              </span>
             ))}
-            {preview.tags.length > 10 && <span className="text-[10px] text-vault-text-muted">+{preview.tags.length - 10}</span>}
+            {preview.tags.length > 10 && (
+              <span className="text-[10px] text-vault-text-muted">+{preview.tags.length - 10}</span>
+            )}
           </div>
         )}
       </div>
@@ -333,8 +375,8 @@ export default function QueuePage() {
       await mutate()
       if (result.warning) {
         const warningMap: Record<string, string> = {
-          'eh_credentials_recommended': 'credential.ehRecommended',
-          'pixiv_credentials_required': 'credential.pixivRequired',
+          eh_credentials_recommended: 'credential.ehRecommended',
+          pixiv_credentials_required: 'credential.pixivRequired',
         }
         const i18nKey = warningMap[result.warning] || result.warning
         toast(t(i18nKey), { icon: '⚠️' })
@@ -396,7 +438,11 @@ export default function QueuePage() {
     (j) => j.status === 'queued' || j.status === 'running' || j.status === 'paused',
   )
   const completedJobs = allJobs.filter(
-    (j) => j.status === 'done' || j.status === 'failed' || j.status === 'cancelled' || j.status === 'partial',
+    (j) =>
+      j.status === 'done' ||
+      j.status === 'failed' ||
+      j.status === 'cancelled' ||
+      j.status === 'partial',
   )
 
   const statusOrder: Record<string, number> = { running: 0, paused: 1, queued: 2 }
@@ -413,170 +459,137 @@ export default function QueuePage() {
     <div>
       <h1 className="text-2xl font-bold mb-6">{t('queue.title')}</h1>
 
-        {/* Add Download Form */}
-        <div className="bg-vault-card border border-vault-border rounded-lg p-4 mb-6">
-          <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide mb-3">
-            {t('queue.addDownload')}
-          </h2>
-          <div className="flex gap-2">
-            <input
-              type="text"
-              value={urlInput}
-              onChange={(e) => setUrlInput(e.target.value)}
-              onKeyDown={(e) => e.key === 'Enter' && handleEnqueue()}
-              placeholder={t('queue.urlPlaceholder')}
-              className="flex-1 bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
-            />
-            <button
-              onClick={handleEnqueue}
-              disabled={isEnqueuing || !urlInput.trim()}
-              className="flex items-center gap-1.5 px-4 py-2 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 rounded-lg text-white text-sm font-medium transition-colors"
-            >
-              <Plus size={16} />
-              {isEnqueuing ? t('queue.adding') : t('queue.add')}
-            </button>
-          </div>
-          {/* URL Recognition Badge */}
-          {debouncedUrl.trim() && checkResult && (
-            <div className="mt-2 flex items-center gap-2">
-              {checkResult.supported ? (
-                checkResult.source_id !== 'gallery_dl' ? (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 border border-green-500/30 text-green-400 text-xs font-medium">
-                    <Globe size={12} />
-                    {checkResult.name}
-                  </span>
-                ) : (
-                  <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-medium">
-                    <Globe size={12} />
-                    {t('queue.supportedViaGalleryDl')}
-                  </span>
-                )
-              ) : null}
-            </div>
-          )}
-          {/* Download Preview */}
-          {debouncedUrl.trim() && downloadPreview && !previewLoading && (
-            <DownloadPreviewPanel preview={downloadPreview} />
-          )}
-          {debouncedUrl.trim() && previewLoading && (
-            <div className="mt-3 flex items-center gap-2 text-xs text-vault-text-muted animate-pulse">
-              <LoadingSpinner />
-              <span>{t('queue.preview')}</span>
-            </div>
-          )}
-        </div>
-
-        {/* Supported Sites */}
-        <div className="bg-vault-card border border-vault-border rounded-lg mb-6 overflow-hidden">
+      {/* Add Download Form */}
+      <div className="bg-vault-card border border-vault-border rounded-lg p-4 mb-6">
+        <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide mb-3">
+          {t('queue.addDownload')}
+        </h2>
+        <div className="flex gap-2">
+          <input
+            type="text"
+            value={urlInput}
+            onChange={(e) => setUrlInput(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && handleEnqueue()}
+            placeholder={t('queue.urlPlaceholder')}
+            className="flex-1 bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
+          />
           <button
-            onClick={() => setSitesOpen((o) => !o)}
-            className="w-full flex items-center justify-between px-4 py-3 text-sm text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+            onClick={handleEnqueue}
+            disabled={isEnqueuing || !urlInput.trim()}
+            className="flex items-center gap-1.5 px-4 py-2 bg-vault-accent hover:bg-vault-accent/90 disabled:opacity-40 rounded-lg text-white text-sm font-medium transition-colors"
           >
-            <span className="flex items-center gap-2">
-              <Globe size={14} />
-              {t('queue.supportedSites')}
-            </span>
-            <ChevronRight
-              size={14}
-              className={`transition-transform ${sitesOpen ? 'rotate-90' : ''}`}
-            />
+            <Plus size={16} />
+            {isEnqueuing ? t('queue.adding') : t('queue.add')}
           </button>
-          {sitesOpen && sitesData?.categories && (
-            <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-              {Object.entries(sitesData.categories).map(([category, sites]) => (
-                <div key={category}>
-                  <h3 className="text-xs font-semibold text-vault-text-muted uppercase tracking-wide mb-2">
-                    {t(`queue.category${category.charAt(0).toUpperCase() + category.slice(1)}`)}
-                  </h3>
-                  <div className="flex flex-wrap gap-1.5">
-                    {sites.map((site) => (
-                      <span
-                        key={site.source_id}
-                        className="inline-flex items-center px-2 py-0.5 rounded bg-vault-border/50 text-xs text-vault-text-secondary"
-                      >
-                        {site.name}
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              ))}
-              <div className="col-span-full text-xs text-vault-text-muted mt-1">
-                {t('queue.moreViaGalleryDl')}
-              </div>
-            </div>
-          )}
         </div>
-
-        {isLoading && (
-          <div className="flex justify-center py-16">
+        {/* URL Recognition Badge */}
+        {debouncedUrl.trim() && checkResult && (
+          <div className="mt-2 flex items-center gap-2">
+            {checkResult.supported ? (
+              checkResult.source_id !== 'gallery_dl' ? (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-green-500/10 border border-green-500/30 text-green-400 text-xs font-medium">
+                  <Globe size={12} />
+                  {checkResult.name}
+                </span>
+              ) : (
+                <span className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded-full bg-yellow-500/10 border border-yellow-500/30 text-yellow-400 text-xs font-medium">
+                  <Globe size={12} />
+                  {t('queue.supportedViaGalleryDl')}
+                </span>
+              )
+            ) : null}
+          </div>
+        )}
+        {/* Download Preview */}
+        {debouncedUrl.trim() && downloadPreview && !previewLoading && (
+          <DownloadPreviewPanel preview={downloadPreview} />
+        )}
+        {debouncedUrl.trim() && previewLoading && (
+          <div className="mt-3 flex items-center gap-2 text-xs text-vault-text-muted animate-pulse">
             <LoadingSpinner />
+            <span>{t('queue.preview')}</span>
           </div>
         )}
+      </div>
 
-        {error && (
-          <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4 text-red-400 text-sm">
-            {error.message || t('common.failedToLoad')}
-          </div>
-        )}
-
-        {/* WebSocket Fallback Warning */}
-        {showFallbackWarning && (
-          <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4 flex items-center gap-2 text-yellow-400 text-sm">
-            <WifiOff size={15} className="shrink-0" />
-            {t('queue.wsFallback')}
-          </div>
-        )}
-
-        {/* Active Jobs */}
-        {!isLoading && (
-          <div className="mb-6">
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
-                {t('queue.active')} ({sortedActive.length})
-              </h2>
-              <span className="text-xs text-vault-text-muted">
-                {connected ? t('queue.autoRefreshWs') : t('queue.autoRefresh')}
-              </span>
-            </div>
-
-            {sortedActive.length === 0 ? (
-              <EmptyState icon={Download} title={t('queue.noActive')} />
-            ) : (
-              <div className="space-y-2">
-                {sortedActive.map((job) => (
-                  <JobRow
-                    key={job.id}
-                    job={job}
-                    onCancel={handleCancel}
-                    onPause={handlePause}
-                    onRetry={handleRetry}
-                    isCancelling={false}
-                  />
-                ))}
+      {/* Supported Sites */}
+      <div className="bg-vault-card border border-vault-border rounded-lg mb-6 overflow-hidden">
+        <button
+          onClick={() => setSitesOpen((o) => !o)}
+          className="w-full flex items-center justify-between px-4 py-3 text-sm text-vault-text-muted hover:text-vault-text-secondary transition-colors"
+        >
+          <span className="flex items-center gap-2">
+            <Globe size={14} />
+            {t('queue.supportedSites')}
+          </span>
+          <ChevronRight
+            size={14}
+            className={`transition-transform ${sitesOpen ? 'rotate-90' : ''}`}
+          />
+        </button>
+        {sitesOpen && sitesData?.categories && (
+          <div className="px-4 pb-4 grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
+            {Object.entries(sitesData.categories).map(([category, sites]) => (
+              <div key={category}>
+                <h3 className="text-xs font-semibold text-vault-text-muted uppercase tracking-wide mb-2">
+                  {t(`queue.category${category.charAt(0).toUpperCase() + category.slice(1)}`)}
+                </h3>
+                <div className="flex flex-wrap gap-1.5">
+                  {sites.map((site) => (
+                    <span
+                      key={site.source_id}
+                      className="inline-flex items-center px-2 py-0.5 rounded bg-vault-border/50 text-xs text-vault-text-secondary"
+                    >
+                      {site.name}
+                    </span>
+                  ))}
+                </div>
               </div>
-            )}
+            ))}
+            <div className="col-span-full text-xs text-vault-text-muted mt-1">
+              {t('queue.moreViaGalleryDl')}
+            </div>
           </div>
         )}
+      </div>
 
-        {/* Completed Jobs */}
-        {!isLoading && sortedCompleted.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-3">
-              <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
-                {t('queue.completedFailed')} ({sortedCompleted.length})
-              </h2>
-              <button
-                onClick={handleClear}
-                disabled={isClearing || sortedCompleted.length === 0}
-                className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-vault-card border border-vault-border hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 text-vault-text-muted transition-colors disabled:opacity-40"
-              >
-                <Trash2 size={13} />
-                {isClearing ? t('queue.clearing') : t('queue.clear')}
-              </button>
-            </div>
+      {isLoading && (
+        <div className="flex justify-center py-16">
+          <LoadingSpinner />
+        </div>
+      )}
 
+      {error && (
+        <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4 text-red-400 text-sm">
+          {error.message || t('common.failedToLoad')}
+        </div>
+      )}
+
+      {/* WebSocket Fallback Warning */}
+      {showFallbackWarning && (
+        <div className="bg-yellow-500/10 border border-yellow-500/30 rounded-lg p-3 mb-4 flex items-center gap-2 text-yellow-400 text-sm">
+          <WifiOff size={15} className="shrink-0" />
+          {t('queue.wsFallback')}
+        </div>
+      )}
+
+      {/* Active Jobs */}
+      {!isLoading && (
+        <div className="mb-6">
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
+              {t('queue.active')} ({sortedActive.length})
+            </h2>
+            <span className="text-xs text-vault-text-muted">
+              {connected ? t('queue.autoRefreshWs') : t('queue.autoRefresh')}
+            </span>
+          </div>
+
+          {sortedActive.length === 0 ? (
+            <EmptyState icon={Download} title={t('queue.noActive')} />
+          ) : (
             <div className="space-y-2">
-              {sortedCompleted.map((job) => (
+              {sortedActive.map((job) => (
                 <JobRow
                   key={job.id}
                   job={job}
@@ -587,8 +600,41 @@ export default function QueuePage() {
                 />
               ))}
             </div>
+          )}
+        </div>
+      )}
+
+      {/* Completed Jobs */}
+      {!isLoading && sortedCompleted.length > 0 && (
+        <div>
+          <div className="flex items-center justify-between mb-3">
+            <h2 className="text-sm font-semibold text-vault-text-muted uppercase tracking-wide">
+              {t('queue.completedFailed')} ({sortedCompleted.length})
+            </h2>
+            <button
+              onClick={handleClear}
+              disabled={isClearing || sortedCompleted.length === 0}
+              className="flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-lg bg-vault-card border border-vault-border hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 text-vault-text-muted transition-colors disabled:opacity-40"
+            >
+              <Trash2 size={13} />
+              {isClearing ? t('queue.clearing') : t('queue.clear')}
+            </button>
           </div>
-        )}
+
+          <div className="space-y-2">
+            {sortedCompleted.map((job) => (
+              <JobRow
+                key={job.id}
+                job={job}
+                onCancel={handleCancel}
+                onPause={handlePause}
+                onRetry={handleRetry}
+                isCancelling={false}
+              />
+            ))}
+          </div>
+        </div>
+      )}
     </div>
   )
 }

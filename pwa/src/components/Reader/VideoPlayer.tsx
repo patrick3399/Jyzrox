@@ -20,7 +20,15 @@ interface VideoPlayerProps {
   overlayVisible?: boolean
 }
 
-export default function VideoPlayer({ image, className, style, innerRef, onLoad, onToggleOverlay, overlayVisible }: VideoPlayerProps) {
+export default function VideoPlayer({
+  image,
+  className,
+  style,
+  innerRef,
+  onLoad,
+  onToggleOverlay,
+  overlayVisible,
+}: VideoPlayerProps) {
   const videoRef = useRef<HTMLVideoElement | null>(null)
   const containerRef = useRef<HTMLDivElement>(null)
 
@@ -33,7 +41,8 @@ export default function VideoPlayer({ image, className, style, innerRef, onLoad,
     (el: HTMLVideoElement | null) => {
       videoRef.current = el
       if (typeof innerRef === 'function') innerRef(el)
-      else if (innerRef && 'current' in innerRef) (innerRef as React.MutableRefObject<HTMLVideoElement | null>).current = el
+      else if (innerRef && 'current' in innerRef)
+        (innerRef as React.MutableRefObject<HTMLVideoElement | null>).current = el
     },
     [innerRef],
   )
@@ -41,8 +50,13 @@ export default function VideoPlayer({ image, className, style, innerRef, onLoad,
   const togglePlay = useCallback(() => {
     const v = videoRef.current
     if (!v) return
-    if (v.paused) { v.play(); setPlaying(true) }
-    else { v.pause(); setPlaying(false) }
+    if (v.paused) {
+      v.play()
+      setPlaying(true)
+    } else {
+      v.pause()
+      setPlaying(false)
+    }
   }, [])
 
   const toggleMute = useCallback(() => {
@@ -108,7 +122,9 @@ export default function VideoPlayer({ image, className, style, innerRef, onLoad,
           right: 0,
           zIndex: 2,
           background: 'linear-gradient(transparent, rgba(0,0,0,0.7))',
-          padding: overlayVisible ? '24px 12px 8px' : '24px 12px calc(8px + env(safe-area-inset-bottom))',
+          padding: overlayVisible
+            ? '24px 12px 8px'
+            : '24px 12px calc(8px + env(safe-area-inset-bottom))',
           display: 'flex',
           flexDirection: 'column',
           gap: '4px',
@@ -131,7 +147,15 @@ export default function VideoPlayer({ image, className, style, innerRef, onLoad,
         />
 
         {/* Bottom row */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px', color: '#fff', fontSize: '13px' }}>
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            color: '#fff',
+            fontSize: '13px',
+          }}
+        >
           {/* Play/Pause */}
           <button
             onClick={togglePlay}
@@ -199,7 +223,6 @@ export default function VideoPlayer({ image, className, style, innerRef, onLoad,
               </svg>
             )}
           </button>
-
         </div>
       </div>
     </div>

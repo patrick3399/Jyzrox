@@ -80,18 +80,20 @@ export function JustifiedGrid<T>({
 
     // Group boxes into rows by matching top values
     const rowMap = new Map<number, RowData<T>>()
-    layout.boxes.forEach((box: { top: number; left: number; width: number; height: number }, idx: number) => {
-      const roundedTop = Math.round(box.top)
-      if (!rowMap.has(roundedTop)) {
-        rowMap.set(roundedTop, { top: roundedTop, height: Math.round(box.height), items: [] })
-      }
-      rowMap.get(roundedTop)!.items.push({
-        item: items[idx],
-        left: Math.round(box.left),
-        width: Math.round(box.width),
-        height: Math.round(box.height),
-      })
-    })
+    layout.boxes.forEach(
+      (box: { top: number; left: number; width: number; height: number }, idx: number) => {
+        const roundedTop = Math.round(box.top)
+        if (!rowMap.has(roundedTop)) {
+          rowMap.set(roundedTop, { top: roundedTop, height: Math.round(box.height), items: [] })
+        }
+        rowMap.get(roundedTop)!.items.push({
+          item: items[idx],
+          left: Math.round(box.left),
+          width: Math.round(box.width),
+          height: Math.round(box.height),
+        })
+      },
+    )
 
     const sortedRows = Array.from(rowMap.values()).sort((a, b) => a.top - b.top)
     return { rows: sortedRows, totalHeight: Math.ceil(layout.containerHeight) }
@@ -121,7 +123,9 @@ export function JustifiedGrid<T>({
 
   // Load more trigger
   const onLoadMoreRef = useRef(onLoadMore)
-  useEffect(() => { onLoadMoreRef.current = onLoadMore }, [onLoadMore])
+  useEffect(() => {
+    onLoadMoreRef.current = onLoadMore
+  }, [onLoadMore])
   const loadMoreFiredRef = useRef(-1)
 
   const lastVirtualItem = virtualItems[virtualItems.length - 1]
@@ -187,9 +191,7 @@ export function JustifiedGrid<T>({
         })}
       </div>
       {(isLoading || hasMore) && (
-        <div className="flex justify-center py-4">
-          {isLoading ? <LoadingSpinner /> : null}
-        </div>
+        <div className="flex justify-center py-4">{isLoading ? <LoadingSpinner /> : null}</div>
       )}
     </div>
   )

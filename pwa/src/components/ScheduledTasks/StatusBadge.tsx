@@ -21,9 +21,5 @@ export function StatusBadge({ status }: StatusBadgeProps) {
     }
   })()
 
-  return (
-    <span className={`text-[10px] font-medium ${config.color}`}>
-      {config.label}
-    </span>
-  )
+  return <span className={`text-[10px] font-medium ${config.color}`}>{config.label}</span>
 }

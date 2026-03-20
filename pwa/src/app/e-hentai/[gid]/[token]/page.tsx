@@ -226,7 +226,11 @@ export default function EhGalleryDetailPage() {
   // Comments state
   const [showComments, setShowComments] = useState(false)
   const [showAllComments, setShowAllComments] = useState(false)
-  const { data: commentsData, isLoading: commentsLoading } = useEhGalleryComments(gid, token, showComments)
+  const { data: commentsData, isLoading: commentsLoading } = useEhGalleryComments(
+    gid,
+    token,
+    showComments,
+  )
   const comments = commentsData?.comments
 
   // Favorite state
@@ -622,7 +626,11 @@ export default function EhGalleryDetailPage() {
                       className={`text-xs px-2 py-1 rounded border transition-all cursor-pointer
                                   ${style.bg} ${style.border} ${style.text}
                                   hover:brightness-125 hover:scale-[1.02] active:scale-[0.98]`}
-                      title={tagTranslations?.[`${ns}:${name}`] ? `${ns}:${name}` : `Search for ${ns}:${name}`}
+                      title={
+                        tagTranslations?.[`${ns}:${name}`]
+                          ? `${ns}:${name}`
+                          : `Search for ${ns}:${name}`
+                      }
                     >
                       {tagTranslations?.[`${ns}:${name}`] || name}
                     </button>
@@ -650,7 +658,10 @@ export default function EhGalleryDetailPage() {
                   {t('browse.comments')}
                 </h2>
                 <button
-                  onClick={() => { setShowComments(false); setShowAllComments(false) }}
+                  onClick={() => {
+                    setShowComments(false)
+                    setShowAllComments(false)
+                  }}
                   className="text-xs text-vault-text-muted hover:text-vault-text transition-colors"
                 >
                   {t('browse.hideComments')}
@@ -666,21 +677,27 @@ export default function EhGalleryDetailPage() {
                 <>
                   <div className="space-y-3">
                     {(showAllComments ? comments : comments.slice(0, 3)).map((comment, i) => (
-                      <div key={i} className="rounded-lg border border-vault-border bg-vault-card p-3 space-y-2">
+                      <div
+                        key={i}
+                        className="rounded-lg border border-vault-border bg-vault-card p-3 space-y-2"
+                      >
                         <div className="flex items-center justify-between text-xs">
                           <div className="flex items-center gap-2">
                             <span className="font-medium text-vault-text">{comment.poster}</span>
                             <span className="text-vault-text-muted">{comment.posted_at}</span>
                           </div>
                           {comment.score !== null && (
-                            <span className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
-                              comment.score > 0
-                                ? 'bg-green-900/30 text-green-400 border border-green-700'
-                                : comment.score < 0
-                                  ? 'bg-red-900/30 text-red-400 border border-red-700'
-                                  : 'bg-gray-800 text-gray-400 border border-gray-600'
-                            }`}>
-                              {comment.score > 0 ? '+' : ''}{comment.score}
+                            <span
+                              className={`px-1.5 py-0.5 rounded text-[11px] font-medium ${
+                                comment.score > 0
+                                  ? 'bg-green-900/30 text-green-400 border border-green-700'
+                                  : comment.score < 0
+                                    ? 'bg-red-900/30 text-red-400 border border-red-700'
+                                    : 'bg-gray-800 text-gray-400 border border-gray-600'
+                              }`}
+                            >
+                              {comment.score > 0 ? '+' : ''}
+                              {comment.score}
                             </span>
                           )}
                         </div>

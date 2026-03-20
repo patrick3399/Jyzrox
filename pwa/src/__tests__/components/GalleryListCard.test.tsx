@@ -297,18 +297,14 @@ describe('GalleryListCard', () => {
 
   describe('selectMode checkbox overlay', () => {
     it('test_GalleryListCard_selectModeTrue_rendersCheckboxOverlay', () => {
-      const { container } = render(
-        <GalleryListCard gallery={makeGallery()} selectMode={true} />,
-      )
+      const { container } = render(<GalleryListCard gallery={makeGallery()} selectMode={true} />)
       // The overlay div has a fixed position class from the component
       const overlay = container.querySelector('.absolute.top-2.left-2')
       expect(overlay).toBeInTheDocument()
     })
 
     it('test_GalleryListCard_selectModeFalse_doesNotRenderCheckboxOverlay', () => {
-      const { container } = render(
-        <GalleryListCard gallery={makeGallery()} selectMode={false} />,
-      )
+      const { container } = render(<GalleryListCard gallery={makeGallery()} selectMode={false} />)
       const overlay = container.querySelector('.absolute.top-2.left-2')
       expect(overlay).not.toBeInTheDocument()
     })

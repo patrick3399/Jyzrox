@@ -27,19 +27,14 @@ import type { PixivIllust } from '@/lib/types'
 
 // ── Hoisted mock helpers ──────────────────────────────────────────────
 
-const {
-  mockEnqueue,
-  mockAddBookmark,
-  mockDeleteBookmark,
-  mockToastSuccess,
-  mockToastError,
-} = vi.hoisted(() => ({
-  mockEnqueue: vi.fn(),
-  mockAddBookmark: vi.fn(),
-  mockDeleteBookmark: vi.fn(),
-  mockToastSuccess: vi.fn(),
-  mockToastError: vi.fn(),
-}))
+const { mockEnqueue, mockAddBookmark, mockDeleteBookmark, mockToastSuccess, mockToastError } =
+  vi.hoisted(() => ({
+    mockEnqueue: vi.fn(),
+    mockAddBookmark: vi.fn(),
+    mockDeleteBookmark: vi.fn(),
+    mockToastSuccess: vi.fn(),
+    mockToastError: vi.fn(),
+  }))
 
 // ── Module mocks ──────────────────────────────────────────────────────
 
@@ -175,7 +170,11 @@ describe('useIllustActions — handleDownload()', () => {
   it('test_useIllustActions_handleDownload_setsDownloadingTrueWhileRunning_thenFalseAfter', async () => {
     const illust = makeIllust()
     let resolveEnqueue!: () => void
-    mockEnqueue.mockReturnValue(new Promise<void>((res) => { resolveEnqueue = res }))
+    mockEnqueue.mockReturnValue(
+      new Promise<void>((res) => {
+        resolveEnqueue = res
+      }),
+    )
 
     const { result } = renderHook(() => useIllustActions(illust))
     const event = makeMockEvent()
@@ -243,7 +242,11 @@ describe('useIllustActions — handleDownload()', () => {
   it('test_useIllustActions_handleDownload_secondCallWhileDownloading_isNoOp', async () => {
     const illust = makeIllust()
     let resolveEnqueue!: () => void
-    mockEnqueue.mockReturnValue(new Promise<void>((res) => { resolveEnqueue = res }))
+    mockEnqueue.mockReturnValue(
+      new Promise<void>((res) => {
+        resolveEnqueue = res
+      }),
+    )
 
     const { result } = renderHook(() => useIllustActions(illust))
     const event1 = makeMockEvent()
@@ -347,7 +350,11 @@ describe('useIllustActions — handleBookmark() guard', () => {
   it('test_useIllustActions_handleBookmark_guard_doesNothingWhenAlreadyBookmarking', async () => {
     const illust = makeIllust({ is_bookmarked: false })
     let resolveBookmark!: () => void
-    mockAddBookmark.mockReturnValue(new Promise<void>((res) => { resolveBookmark = res }))
+    mockAddBookmark.mockReturnValue(
+      new Promise<void>((res) => {
+        resolveBookmark = res
+      }),
+    )
 
     const { result } = renderHook(() => useIllustActions(illust))
     const event1 = makeMockEvent()

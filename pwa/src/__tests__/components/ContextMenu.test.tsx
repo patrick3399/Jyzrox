@@ -84,12 +84,7 @@ describe('ContextMenu', () => {
     it('test_contextMenu_rendersAllItemLabels', () => {
       const items = makeItems(3)
       render(
-        <ContextMenu
-          open={true}
-          onClose={vi.fn()}
-          position={{ x: 50, y: 50 }}
-          items={items}
-        />,
+        <ContextMenu open={true} onClose={vi.fn()} position={{ x: 50, y: 50 }} items={items} />,
       )
       for (const item of items) {
         expect(screen.getByText(item.label)).toBeInTheDocument()
@@ -112,12 +107,7 @@ describe('ContextMenu', () => {
     it('test_contextMenu_clickingItem_callsItemOnClick', () => {
       const items = makeItems(2)
       render(
-        <ContextMenu
-          open={true}
-          onClose={vi.fn()}
-          position={{ x: 50, y: 50 }}
-          items={items}
-        />,
+        <ContextMenu open={true} onClose={vi.fn()} position={{ x: 50, y: 50 }} items={items} />,
       )
       fireEvent.click(screen.getByText('Item 1'))
       expect(items[0].onClick).toHaveBeenCalledOnce()
@@ -127,12 +117,7 @@ describe('ContextMenu', () => {
       const onClose = vi.fn()
       const items = makeItems(2)
       render(
-        <ContextMenu
-          open={true}
-          onClose={onClose}
-          position={{ x: 50, y: 50 }}
-          items={items}
-        />,
+        <ContextMenu open={true} onClose={onClose} position={{ x: 50, y: 50 }} items={items} />,
       )
       fireEvent.click(screen.getByText('Item 1'))
       expect(onClose).toHaveBeenCalledOnce()

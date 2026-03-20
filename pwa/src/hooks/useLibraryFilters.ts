@@ -136,11 +136,7 @@ export function useLibraryFilters() {
   const router = useRouter()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  const [state, dispatch] = useReducer(
-    filterReducer,
-    searchParams,
-    initFilterState,
-  )
+  const [state, dispatch] = useReducer(filterReducer, searchParams, initFilterState)
 
   // Debounced URL sync — 500ms after last relevant state change
   useEffect(() => {

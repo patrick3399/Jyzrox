@@ -112,10 +112,7 @@ export function TimelineScrubber({
 
       // Map scroll position → image index → image timestamp → timeline ratio
       if (images && images.length > 0 && minAt && maxAt) {
-        const idx = Math.min(
-          images.length - 1,
-          Math.round(scrollRatio * (images.length - 1)),
-        )
+        const idx = Math.min(images.length - 1, Math.round(scrollRatio * (images.length - 1)))
         const img = images[idx]
         if (img.added_at) {
           const ratio =
@@ -255,9 +252,7 @@ export function TimelineScrubber({
           className={`timeline-scrubber__indicator ${thumbVisible ? 'timeline-scrubber__indicator--visible' : ''}`}
           style={{ top: `${thumbRatio * 100}%` }}
         >
-          {labelDate && (
-            <div className="timeline-scrubber__label">{formatDate(labelDate)}</div>
-          )}
+          {labelDate && <div className="timeline-scrubber__label">{formatDate(labelDate)}</div>}
           <div className="timeline-scrubber__thumb" />
         </div>
       </div>

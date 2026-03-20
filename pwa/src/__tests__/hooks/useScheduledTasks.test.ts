@@ -67,11 +67,7 @@ vi.mock('swr/mutation', () => ({
 
 // ── Import hooks after mocks ──────────────────────────────────────────
 
-import {
-  useScheduledTasks,
-  useUpdateTask,
-  useRunTask,
-} from '@/hooks/useScheduledTasks'
+import { useScheduledTasks, useUpdateTask, useRunTask } from '@/hooks/useScheduledTasks'
 
 // ── Setup ─────────────────────────────────────────────────────────────
 
@@ -126,7 +122,10 @@ describe('useUpdateTask', () => {
   it('test_useUpdateTask_trigger_callsApiScheduledTasksUpdateWithTaskIdAndData', async () => {
     const { trigger } = useUpdateTask()
     await trigger({ taskId: 'weekly-scan', data: { enabled: true, cron_expr: '0 3 * * 0' } })
-    expect(mockUpdate).toHaveBeenCalledWith('weekly-scan', { enabled: true, cron_expr: '0 3 * * 0' })
+    expect(mockUpdate).toHaveBeenCalledWith('weekly-scan', {
+      enabled: true,
+      cron_expr: '0 3 * * 0',
+    })
   })
 })
 

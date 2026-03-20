@@ -12,12 +12,22 @@ interface RelationshipCardProps {
   onImageClick: (url: string) => void
 }
 
-export function RelationshipCard({ item, onKeep, onWhitelist, onDismiss, onImageClick }: RelationshipCardProps) {
+export function RelationshipCard({
+  item,
+  onKeep,
+  onWhitelist,
+  onDismiss,
+  onImageClick,
+}: RelationshipCardProps) {
   const [loading, setLoading] = useState<string | null>(null)
 
   const handle = async (action: string, fn: () => Promise<void>) => {
     setLoading(action)
-    try { await fn() } finally { setLoading(null) }
+    try {
+      await fn()
+    } finally {
+      setLoading(null)
+    }
   }
 
   const isQualityConflict = item.relationship === 'quality_conflict'
@@ -64,17 +74,15 @@ export function RelationshipCard({ item, onKeep, onWhitelist, onDismiss, onImage
               {diffTypeBadge()}
             </span>
           )}
-          {reasonLabel() && (
-            <span className="text-xs text-vault-text-muted">
-              {reasonLabel()}
-            </span>
-          )}
+          {reasonLabel() && <span className="text-xs text-vault-text-muted">{reasonLabel()}</span>}
         </div>
-        <span className={`text-xs px-2 py-0.5 rounded border ${
-          isQualityConflict
-            ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
-            : 'bg-blue-500/10 border-blue-500/30 text-blue-400'
-        }`}>
+        <span
+          className={`text-xs px-2 py-0.5 rounded border ${
+            isQualityConflict
+              ? 'bg-orange-500/10 border-orange-500/30 text-orange-400'
+              : 'bg-blue-500/10 border-blue-500/30 text-blue-400'
+          }`}
+        >
           {isQualityConflict ? t('dedup.filterQuality') : t('dedup.filterVariant')}
         </span>
       </div>
@@ -84,7 +92,9 @@ export function RelationshipCard({ item, onKeep, onWhitelist, onDismiss, onImage
         {([item.blob_a, item.blob_b] as const).map((blob, idx) => {
           const isKeep = idx === 0 ? aIsKeep : bIsKeep
           const ringClass = isQualityConflict
-            ? (isKeep ? 'ring-2 ring-green-500' : 'ring-2 ring-red-500')
+            ? isKeep
+              ? 'ring-2 ring-green-500'
+              : 'ring-2 ring-red-500'
             : ''
           const clickUrl = isQualityConflict
             ? (blob.thumb_url ?? null)
@@ -129,7 +139,9 @@ export function RelationshipCard({ item, onKeep, onWhitelist, onDismiss, onImage
       <div className="flex items-center gap-2 pt-1">
         {isQualityConflict ? (
           <button
-            onClick={() => handle('keep', () => onKeep(item.id, item.suggested_keep ?? item.blob_a.sha256))}
+            onClick={() =>
+              handle('keep', () => onKeep(item.id, item.suggested_keep ?? item.blob_a.sha256))
+            }
             disabled={!!loading}
             className="flex-1 px-3 py-1.5 rounded text-xs font-medium bg-green-500/10 text-green-400 hover:bg-green-500/20 transition-colors disabled:opacity-50 flex items-center justify-center gap-1.5"
           >

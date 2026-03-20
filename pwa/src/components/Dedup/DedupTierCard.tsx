@@ -91,7 +91,8 @@ function ActionButton({
   variant?: 'default' | 'danger' | 'warning' | 'success'
 }) {
   const variantClass = {
-    default: 'bg-vault-border/40 border border-vault-border text-vault-text-muted hover:bg-vault-border/70 hover:text-vault-text',
+    default:
+      'bg-vault-border/40 border border-vault-border text-vault-text-muted hover:bg-vault-border/70 hover:text-vault-text',
     danger: 'bg-red-500/10 border border-red-500/20 text-red-400 hover:bg-red-500/20',
     warning: 'bg-amber-500/10 border border-amber-500/20 text-amber-400 hover:bg-amber-500/20',
     success: 'bg-green-500/10 border border-green-500/20 text-green-400 hover:bg-green-500/20',
@@ -158,16 +159,18 @@ export function DedupTierCard({
   }[tierStatus]
 
   // Toggle aria labels by tier
-  const enableLabel = tier === 1
-    ? t('dedup.enableTier1')
-    : tier === 2
-    ? t('dedup.enableTier2')
-    : t('dedup.enableTier3')
-  const disableLabel = tier === 1
-    ? t('dedup.disableTier1')
-    : tier === 2
-    ? t('dedup.disableTier2')
-    : t('dedup.disableTier3')
+  const enableLabel =
+    tier === 1
+      ? t('dedup.enableTier1')
+      : tier === 2
+        ? t('dedup.enableTier2')
+        : t('dedup.enableTier3')
+  const disableLabel =
+    tier === 1
+      ? t('dedup.disableTier1')
+      : tier === 2
+        ? t('dedup.disableTier2')
+        : t('dedup.disableTier3')
 
   return (
     <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
@@ -192,7 +195,9 @@ export function DedupTierCard({
               ariaLabel={enabled ? disableLabel : enableLabel}
               onToggle={() => !isDisabledByDep && onToggle(!enabled)}
             />
-            <span className={`text-sm font-medium ${!enabled || isDisabledByDep ? 'text-vault-text-muted' : 'text-vault-text'}`}>
+            <span
+              className={`text-sm font-medium ${!enabled || isDisabledByDep ? 'text-vault-text-muted' : 'text-vault-text'}`}
+            >
               {t(title)}
             </span>
             {statusLabel && (
@@ -212,7 +217,9 @@ export function DedupTierCard({
 
           {/* Dependency warning */}
           {isDisabledByDep && (
-            <p className="text-[10px] text-yellow-500/70 pl-[52px]">{t('dedup.tier2RequiresTier1')}</p>
+            <p className="text-[10px] text-yellow-500/70 pl-[52px]">
+              {t('dedup.tier2RequiresTier1')}
+            </p>
           )}
 
           {/* Threshold slider */}
@@ -221,9 +228,7 @@ export function DedupTierCard({
               <div className="flex items-center justify-between">
                 <p className="text-xs text-vault-text-muted">{t(thresholdLabel)}</p>
                 <span className="text-xs font-mono text-vault-text">
-                  {thresholdStep && thresholdStep < 1
-                    ? localThreshold.toFixed(2)
-                    : localThreshold}
+                  {thresholdStep && thresholdStep < 1 ? localThreshold.toFixed(2) : localThreshold}
                 </span>
               </div>
               <input

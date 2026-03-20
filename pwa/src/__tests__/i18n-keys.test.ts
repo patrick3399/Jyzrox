@@ -43,7 +43,7 @@ function collectSourceFiles(dir: string, skipDirs: string[]): string[] {
       const full = path.join(current, entry.name)
       if (entry.isDirectory()) {
         const rel = path.relative(SRC_ROOT, full)
-        if (skipDirs.some(s => rel === s || rel.startsWith(s + path.sep))) continue
+        if (skipDirs.some((s) => rel === s || rel.startsWith(s + path.sep))) continue
         walk(full)
       } else if (entry.isFile() && /\.(ts|tsx)$/.test(entry.name)) {
         results.push(full)
@@ -135,9 +135,7 @@ describe('i18n key consistency', () => {
     }
 
     if (missing.length > 0) {
-      const lines = missing.map(
-        ({ key, files }) => `  - ${key} (used in ${files.join(', ')})`,
-      )
+      const lines = missing.map(({ key, files }) => `  - ${key} (used in ${files.join(', ')})`)
       const message = `Missing i18n keys found:\n${lines.join('\n')}`
       expect.fail(message)
     }
@@ -156,7 +154,7 @@ describe('i18n key consistency', () => {
     if (unused.length > 0) {
       console.log(
         `[i18n] Potentially unused keys in en.ts (${unused.length}):\n` +
-          unused.map(k => `  - ${k}`).join('\n'),
+          unused.map((k) => `  - ${k}`).join('\n'),
       )
     }
 
@@ -176,7 +174,7 @@ describe('i18n key consistency', () => {
     const missing: { locale: string; keys: string[] }[] = []
 
     for (const [locale, dict] of Object.entries(locales)) {
-      const missingKeys = Object.keys(en).filter(key => !(key in dict))
+      const missingKeys = Object.keys(en).filter((key) => !(key in dict))
       if (missingKeys.length > 0) {
         missing.push({ locale, keys: missingKeys })
       }
@@ -185,7 +183,7 @@ describe('i18n key consistency', () => {
     if (missing.length > 0) {
       const lines = missing.map(
         ({ locale, keys }) =>
-          `  ${locale}: ${keys.length} missing keys\n${keys.map(k => `    - ${k}`).join('\n')}`,
+          `  ${locale}: ${keys.length} missing keys\n${keys.map((k) => `    - ${k}`).join('\n')}`,
       )
       console.log(`[i18n] Locale files missing keys from en.ts:\n${lines.join('\n')}`)
     }

@@ -49,7 +49,15 @@ vi.mock('next/navigation', () => ({
 }))
 
 vi.mock('next/link', () => ({
-  default: ({ children, href, className }: { children: React.ReactNode; href: string; className?: string }) => (
+  default: ({
+    children,
+    href,
+    className,
+  }: {
+    children: React.ReactNode
+    href: string
+    className?: string
+  }) => (
     <a href={href} className={className}>
       {children}
     </a>
@@ -206,7 +214,9 @@ describe('Sidebar', () => {
       mockUseProfile.mockReturnValue({ data: makeProfile() })
       const { container } = render(<Sidebar />)
       // The avatar is an img with empty alt (decorative), query via querySelector
-      const avatarImg = container.querySelector('img[src*="example.com/avatar"]') as HTMLImageElement
+      const avatarImg = container.querySelector(
+        'img[src*="example.com/avatar"]',
+      ) as HTMLImageElement
       expect(avatarImg).not.toBeNull()
       expect(avatarImg).toHaveAttribute('src', 'https://example.com/avatar.jpg')
     })

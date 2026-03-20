@@ -101,7 +101,9 @@ export default function ExplorerPage() {
     mutate: mutateFiles,
     isLoading: filesLoading,
   } = useSWR(
-    currentGallery !== null ? ['explorer-files', currentGallery.source, currentGallery.sourceId] : null,
+    currentGallery !== null
+      ? ['explorer-files', currentGallery.source, currentGallery.sourceId]
+      : null,
     () => api.library.listGalleryFiles(currentGallery!.source, currentGallery!.sourceId),
   )
 
@@ -118,7 +120,11 @@ export default function ExplorerPage() {
   function handleDoubleClickGallery(id: string | number) {
     const dir = filteredDirectories.find((d) => d.gallery_id === (id as number))
     if (dir && dir.source) {
-      setCurrentGallery({ source: dir.source, sourceId: dir.source_id, title: dir.title ?? undefined })
+      setCurrentGallery({
+        source: dir.source,
+        sourceId: dir.source_id,
+        title: dir.title ?? undefined,
+      })
       setSelectedItems(new Set())
     }
   }
@@ -126,7 +132,9 @@ export default function ExplorerPage() {
   function handleDoubleClickFile(id: string | number) {
     const file = fileData?.files.find((f) => f.filename === id)
     if (file?.page_num != null) {
-      router.push(`/reader/${currentGallery!.source}/${currentGallery!.sourceId}?page=${file.page_num}`)
+      router.push(
+        `/reader/${currentGallery!.source}/${currentGallery!.sourceId}?page=${file.page_num}`,
+      )
     } else {
       router.push(`/reader/${currentGallery!.source}/${currentGallery!.sourceId}`)
     }
@@ -159,9 +167,7 @@ export default function ExplorerPage() {
         return next
       })
     } else {
-      setSelectedItems((prev) =>
-        prev.has(id) && prev.size === 1 ? new Set() : new Set([id]),
-      )
+      setSelectedItems((prev) => (prev.has(id) && prev.size === 1 ? new Set() : new Set([id])))
     }
   }
 
@@ -180,13 +186,16 @@ export default function ExplorerPage() {
 
       const galleryIds = Array.from(selectedItems) as number[]
       try {
-        const result = await api.library.batchGalleries({ action: 'delete', gallery_ids: galleryIds })
+        const result = await api.library.batchGalleries({
+          action: 'delete',
+          gallery_ids: galleryIds,
+        })
         const skipped = count - result.affected
         if (skipped > 0) {
           toast.success(
             t('explorer.galleriesDeleted', { count: String(result.affected) }) +
-            ' ' +
-            t('explorer.galleriesDeleteSkipped', { count: String(skipped) }),
+              ' ' +
+              t('explorer.galleriesDeleteSkipped', { count: String(skipped) }),
           )
         } else {
           toast.success(t('explorer.galleriesDeleted', { count: String(result.affected) }))
@@ -210,7 +219,11 @@ export default function ExplorerPage() {
         const file = fileData?.files.find((f) => f.filename === filename)
         if (!file || file.page_num == null) continue
         try {
-          const result = await api.library.deleteImage(currentGallery.source, currentGallery.sourceId, file.page_num)
+          const result = await api.library.deleteImage(
+            currentGallery.source,
+            currentGallery.sourceId,
+            file.page_num,
+          )
           successCount++
           lastRemainingPages = result.remaining_pages
         } catch (err) {
@@ -260,7 +273,10 @@ export default function ExplorerPage() {
 
   // Group all directories by source for the root view
   const sourceGroups = (() => {
-    const groups: Map<string, { galleries: LibraryDirectory[]; totalFiles: number; totalSize: number }> = new Map()
+    const groups: Map<
+      string,
+      { galleries: LibraryDirectory[]; totalFiles: number; totalSize: number }
+    > = new Map()
     for (const dir of allDirectories) {
       const src = dir.source ?? 'local'
       if (!groups.has(src)) {
@@ -378,7 +394,11 @@ export default function ExplorerPage() {
                 setCurrentGallery(null)
                 setSelectedItems(new Set())
               }}
-              className={isSourceView ? 'text-vault-text font-medium truncate' : 'text-vault-accent hover:underline truncate'}
+              className={
+                isSourceView
+                  ? 'text-vault-text font-medium truncate'
+                  : 'text-vault-accent hover:underline truncate'
+              }
             >
               {sourceDisplayName(currentSource!)}
             </button>
@@ -477,7 +497,10 @@ export default function ExplorerPage() {
 // ── Source View (top-level: grouped by source) ────────────────────────
 
 interface SourceViewProps {
-  sourceGroups: Map<string, { galleries: LibraryDirectory[]; totalFiles: number; totalSize: number }>
+  sourceGroups: Map<
+    string,
+    { galleries: LibraryDirectory[]; totalFiles: number; totalSize: number }
+  >
   loading: boolean
   viewMode: 'grid' | 'list'
   onSourceDoubleClick: (source: string) => void
@@ -558,9 +581,13 @@ function SourceView({ sourceGroups, loading, viewMode, onSourceDoubleClick }: So
             <Folder size={16} className="text-vault-accent shrink-0" />
             <span className="text-sm text-vault-text truncate">{sourceDisplayName(source)}</span>
           </div>
-          <span className="text-xs text-vault-text-secondary text-right">{info.galleries.length}</span>
+          <span className="text-xs text-vault-text-secondary text-right">
+            {info.galleries.length}
+          </span>
           <span className="text-xs text-vault-text-secondary text-right">{info.totalFiles}</span>
-          <span className="text-xs text-vault-text-secondary text-right">{formatSize(info.totalSize)}</span>
+          <span className="text-xs text-vault-text-secondary text-right">
+            {formatSize(info.totalSize)}
+          </span>
         </div>
       ))}
     </div>
@@ -657,7 +684,9 @@ function RootView({ directories, loading, viewMode, selectedItems, onItemClick }
               <span className="text-sm text-vault-text truncate">{dir.title}</span>
             </div>
             <span className="text-xs text-vault-text-secondary text-right">{dir.file_count}</span>
-            <span className="text-xs text-vault-text-secondary text-right">{formatSize(dir.disk_size)}</span>
+            <span className="text-xs text-vault-text-secondary text-right">
+              {formatSize(dir.disk_size)}
+            </span>
             <StarRating rating={dir.my_rating ?? dir.rating} />
             <span className="text-xs text-vault-text-secondary truncate">{dir.source ?? '—'}</span>
           </div>
@@ -722,7 +751,9 @@ function GalleryView({ files, loading, viewMode, selectedItems, onItemClick }: G
                   />
                 ) : (
                   <div className="w-full h-full flex items-center justify-center">
-                    <span className="text-vault-text-secondary text-xs">{t('library.noCover')}</span>
+                    <span className="text-vault-text-secondary text-xs">
+                      {t('library.noCover')}
+                    </span>
                   </div>
                 )}
                 {file.is_broken && (
@@ -738,7 +769,9 @@ function GalleryView({ files, loading, viewMode, selectedItems, onItemClick }: G
               <div className="p-1.5 bg-vault-card">
                 <p className="text-[11px] text-vault-text truncate">{file.filename}</p>
                 {file.file_size != null && (
-                  <p className="text-[10px] text-vault-text-secondary">{formatSize(file.file_size)}</p>
+                  <p className="text-[10px] text-vault-text-secondary">
+                    {formatSize(file.file_size)}
+                  </p>
                 )}
               </div>
             </div>
@@ -775,12 +808,7 @@ function GalleryView({ files, loading, viewMode, selectedItems, onItemClick }: G
             {/* Small thumbnail */}
             <div className="w-10 h-10 rounded overflow-hidden bg-vault-input shrink-0 relative">
               {thumbSrc ? (
-                <img
-                  src={thumbSrc}
-                  alt=""
-                  loading="lazy"
-                  className="w-full h-full object-cover"
-                />
+                <img src={thumbSrc} alt="" loading="lazy" className="w-full h-full object-cover" />
               ) : (
                 <div className="w-full h-full flex items-center justify-center">
                   <span className="text-[8px] text-vault-text-secondary">—</span>
@@ -798,9 +826,7 @@ function GalleryView({ files, loading, viewMode, selectedItems, onItemClick }: G
               {file.filename}
             </span>
             <span className="text-xs text-vault-text-secondary">
-              {file.width != null && file.height != null
-                ? `${file.width}×${file.height}`
-                : '—'}
+              {file.width != null && file.height != null ? `${file.width}×${file.height}` : '—'}
             </span>
             <span className="text-xs text-vault-text-secondary text-right">
               {file.file_size != null ? formatSize(file.file_size) : '—'}

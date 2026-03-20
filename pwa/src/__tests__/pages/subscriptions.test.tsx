@@ -30,13 +30,14 @@ import { render, screen } from '@testing-library/react'
 
 // ── Hoisted mock helpers ───────────────────────────────────────────────
 
-const { mockUseSubscriptions, mockCreateSub, mockDeleteSub, mockUpdateSub, mockCheckSub } = vi.hoisted(() => ({
-  mockUseSubscriptions: vi.fn(),
-  mockCreateSub: vi.fn(),
-  mockDeleteSub: vi.fn(),
-  mockUpdateSub: vi.fn(),
-  mockCheckSub: vi.fn(),
-}))
+const { mockUseSubscriptions, mockCreateSub, mockDeleteSub, mockUpdateSub, mockCheckSub } =
+  vi.hoisted(() => ({
+    mockUseSubscriptions: vi.fn(),
+    mockCreateSub: vi.fn(),
+    mockDeleteSub: vi.fn(),
+    mockUpdateSub: vi.fn(),
+    mockCheckSub: vi.fn(),
+  }))
 
 // ── Module mocks ───────────────────────────────────────────────────────
 
@@ -84,7 +85,9 @@ vi.mock('swr', async (importOriginal) => {
   const actual = await importOriginal<typeof import('swr')>()
   return {
     ...actual,
-    default: vi.fn().mockReturnValue({ data: undefined, error: undefined, isLoading: false, mutate: vi.fn() }),
+    default: vi
+      .fn()
+      .mockReturnValue({ data: undefined, error: undefined, isLoading: false, mutate: vi.fn() }),
   }
 })
 

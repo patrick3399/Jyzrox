@@ -2,7 +2,17 @@
 
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
-import { ChevronUp, ChevronDown, Eye, EyeOff, RefreshCw, Trash2, Key, ExternalLink, Search } from 'lucide-react'
+import {
+  ChevronUp,
+  ChevronDown,
+  Eye,
+  EyeOff,
+  RefreshCw,
+  Trash2,
+  Key,
+  ExternalLink,
+  Search,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
@@ -79,11 +89,7 @@ function EhExtras({
 
       {/* Refresh account button */}
       <div className="mb-3">
-        <button
-          onClick={onRefresh}
-          disabled={ehAccountLoading}
-          className={btnSecondary}
-        >
+        <button onClick={onRefresh} disabled={ehAccountLoading} className={btnSecondary}>
           <RefreshCw size={14} className="inline mr-1.5" />
           {ehAccountLoading ? t('settings.refreshing') : t('settings.refreshAccount')}
         </button>
@@ -116,9 +122,7 @@ function EhExtras({
                 <span className="text-vault-text-secondary">{ehAccount.hath_perks}</span>
               </div>
             )}
-            {ehAccount.error && (
-              <p className="text-xs text-red-400 mt-1">{ehAccount.error}</p>
-            )}
+            {ehAccount.error && <p className="text-xs text-red-400 mt-1">{ehAccount.error}</p>}
           </div>
         </div>
       )}
@@ -128,11 +132,7 @@ function EhExtras({
 
 // ── EhFieldsFlow ──────────────────────────────────────────────────────────
 
-function EhFieldsFlow({
-  onSaved,
-}: {
-  onSaved: (account: EhAccount) => void
-}) {
+function EhFieldsFlow({ onSaved }: { onSaved: (account: EhAccount) => void }) {
   const [memberId, setMemberId] = useState('')
   const [passHash, setPassHash] = useState('')
   const [sk, setSk] = useState('')
@@ -214,7 +214,11 @@ function EhFieldsFlow({
           className={inputClass}
         />
       </div>
-      <button onClick={handleSave} disabled={saving || !memberId.trim() || !passHash.trim()} className={btnPrimary}>
+      <button
+        onClick={handleSave}
+        disabled={saving || !memberId.trim() || !passHash.trim()}
+        className={btnPrimary}
+      >
         {saving ? t('settings.saving') : t('settings.saveCookies')}
       </button>
     </div>
@@ -270,7 +274,10 @@ function PixivOAuthFlow({ onSaved }: { onSaved: (username: string) => void }) {
         </p>
         <p className="text-yellow-400/70">{t('settings.pixivOauthHint2')}</p>
       </div>
-      <button onClick={handleGetUrl} className={`${btnSecondary} w-full flex items-center justify-center gap-2`}>
+      <button
+        onClick={handleGetUrl}
+        className={`${btnSecondary} w-full flex items-center justify-center gap-2`}
+      >
         <ExternalLink size={14} />
         {t('credentials.oauthGetUrl')}
       </button>
@@ -431,7 +438,10 @@ function PluginCredentialSection({
 
   useEffect(() => {
     if (isEh && isOpen) {
-      api.settings.getEhSite().then((res) => setUseEx(res.use_ex)).catch(() => {})
+      api.settings
+        .getEhSite()
+        .then((res) => setUseEx(res.use_ex))
+        .catch(() => {})
     }
   }, [isEh, isOpen])
 
@@ -582,7 +592,13 @@ function PluginCredentialSection({
               className="mt-4 px-3 py-1.5 bg-red-600/20 border border-red-500/30 text-red-400 rounded text-sm hover:bg-red-600/30 transition-colors disabled:opacity-40 flex items-center gap-1.5"
             >
               <Trash2 size={13} />
-              {deleting ? t('credentials.saving') : isEh ? t('settings.clearCookie') : isPixiv ? t('settings.clearToken') : t('credentials.clearFailed')}
+              {deleting
+                ? t('credentials.saving')
+                : isEh
+                  ? t('settings.clearCookie')
+                  : isPixiv
+                    ? t('settings.clearToken')
+                    : t('credentials.clearFailed')}
             </button>
           )}
         </div>
@@ -696,8 +712,7 @@ function SiteCredentialSection({
   }
 
   const canSave =
-    sourceName.trim() &&
-    (activeTab === 'cookies' ? cookiesText.trim() : username.trim())
+    sourceName.trim() && (activeTab === 'cookies' ? cookiesText.trim() : username.trim())
 
   return (
     <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
@@ -750,11 +765,7 @@ function SiteCredentialSection({
                       className="text-xs text-red-400/70 hover:text-red-400 transition-colors flex items-center gap-1 px-2 py-1 disabled:opacity-40"
                       aria-label={t('credentials.clearConfirm', { source })}
                     >
-                      {clearingSource === source ? (
-                        <span>...</span>
-                      ) : (
-                        <Trash2 size={13} />
-                      )}
+                      {clearingSource === source ? <span>...</span> : <Trash2 size={13} />}
                     </button>
                   </div>
                 ))}
@@ -879,11 +890,7 @@ function SiteCredentialSection({
                 </div>
               )}
 
-              <button
-                onClick={handleSave}
-                disabled={saving || !canSave}
-                className={btnPrimary}
-              >
+              <button onClick={handleSave} disabled={saving || !canSave} className={btnPrimary}>
                 {saving ? t('credentials.saving') : t('credentials.save')}
               </button>
             </div>
@@ -939,7 +946,10 @@ export default function CredentialsPage() {
 
   // Refresh credentials after a save/delete action
   const refreshCredentials = useCallback(() => {
-    api.settings.getCredentials().then(setCredentials).catch(() => {})
+    api.settings
+      .getCredentials()
+      .then(setCredentials)
+      .catch(() => {})
   }, [])
 
   const toggleSection = useCallback((sourceId: string) => {

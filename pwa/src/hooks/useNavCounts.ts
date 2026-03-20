@@ -15,12 +15,20 @@ const SWR_CONFIG = {
 } as const
 
 function useLibraryCount(): number {
-  const { data } = useSWR('nav-counts/library', () => api.library.getGalleries({ limit: 1 }), SWR_CONFIG)
+  const { data } = useSWR(
+    'nav-counts/library',
+    () => api.library.getGalleries({ limit: 1 }),
+    SWR_CONFIG,
+  )
   return data?.total ?? 0
 }
 
 function useSubscriptionsCount(): number {
-  const { data } = useSWR('nav-counts/subscriptions', () => api.subscriptions.list({ enabled: true, limit: 1 }), SWR_CONFIG)
+  const { data } = useSWR(
+    'nav-counts/subscriptions',
+    () => api.subscriptions.list({ enabled: true, limit: 1 }),
+    SWR_CONFIG,
+  )
   return data?.total ?? 0
 }
 

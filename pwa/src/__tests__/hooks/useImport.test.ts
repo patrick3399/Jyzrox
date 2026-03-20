@@ -108,12 +108,7 @@ vi.mock('swr/mutation', () => ({
 
 // ── Import hooks after mocks ──────────────────────────────────────────
 
-import {
-  useImportProgress,
-  useBatchScan,
-  useBatchStart,
-  useRescanLibrary,
-} from '@/hooks/useImport'
+import { useImportProgress, useBatchScan, useBatchStart, useRescanLibrary } from '@/hooks/useImport'
 
 // ── Setup ─────────────────────────────────────────────────────────────
 

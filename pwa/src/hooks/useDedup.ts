@@ -18,27 +18,22 @@ export function useUpdateDedupSetting() {
   return useSWRMutation(
     'dedup-features',
     (_key: string, { arg }: { arg: { feature: string; enabled: boolean } }) =>
-      api.settings.setFeature(arg.feature, arg.enabled)
+      api.settings.setFeature(arg.feature, arg.enabled),
   )
 }
 
 export function useUpdateDedupThreshold() {
-  return useSWRMutation(
-    'dedup-features',
-    (_key: string, { arg }: { arg: number }) =>
-      api.settings.setFeatureValue('dedup_phash_threshold', arg)
+  return useSWRMutation('dedup-features', (_key: string, { arg }: { arg: number }) =>
+    api.settings.setFeatureValue('dedup_phash_threshold', arg),
   )
 }
 
 export function useDedupScanProgress() {
-  const { data, mutate } = useSWR(
-    'dedup-scan-progress',
-    () => api.dedup.getScanProgress(),
-    {
-      refreshInterval: (d) => (d as DedupScanProgress | undefined)?.status === 'idle' ? 10_000 : 1_500,
-      revalidateOnFocus: false,
-    }
-  )
+  const { data, mutate } = useSWR('dedup-scan-progress', () => api.dedup.getScanProgress(), {
+    refreshInterval: (d) =>
+      (d as DedupScanProgress | undefined)?.status === 'idle' ? 10_000 : 1_500,
+    revalidateOnFocus: false,
+  })
   const startScan = async (mode: 'reset' | 'pending') => {
     await api.dedup.startScan(mode)
     mutate()
@@ -58,25 +53,28 @@ export function useDedupReview(relationship?: string) {
   const [hasMore, setHasMore] = useState(false)
   const [isLoading, setIsLoading] = useState(false)
 
-  const load = useCallback(async (reset: boolean) => {
-    const generation = reset ? ++generationRef.current : generationRef.current
-    setIsLoading(true)
-    try {
-      const params: { relationship?: string; cursor?: string } = {}
-      if (relationship) params.relationship = relationship
-      if (!reset && cursorRef.current) params.cursor = cursorRef.current
-      const res = await api.dedup.getReview(params)
-      // Discard stale responses
-      if (generation !== generationRef.current) return
-      setItems(prev => reset ? res.items : [...prev, ...res.items])
-      cursorRef.current = res.next_cursor ?? undefined
-      setHasMore(!!res.next_cursor)
-    } catch {
-      // ignore errors gracefully
-    } finally {
-      if (generation === generationRef.current) setIsLoading(false)
-    }
-  }, [relationship])
+  const load = useCallback(
+    async (reset: boolean) => {
+      const generation = reset ? ++generationRef.current : generationRef.current
+      setIsLoading(true)
+      try {
+        const params: { relationship?: string; cursor?: string } = {}
+        if (relationship) params.relationship = relationship
+        if (!reset && cursorRef.current) params.cursor = cursorRef.current
+        const res = await api.dedup.getReview(params)
+        // Discard stale responses
+        if (generation !== generationRef.current) return
+        setItems((prev) => (reset ? res.items : [...prev, ...res.items]))
+        cursorRef.current = res.next_cursor ?? undefined
+        setHasMore(!!res.next_cursor)
+      } catch {
+        // ignore errors gracefully
+      } finally {
+        if (generation === generationRef.current) setIsLoading(false)
+      }
+    },
+    [relationship],
+  )
 
   const loadMore = useCallback(() => load(false), [load])
 

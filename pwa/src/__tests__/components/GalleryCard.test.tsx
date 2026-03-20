@@ -106,14 +106,18 @@ describe('LibraryGalleryCard', () => {
     })
 
     it('test_libraryGalleryCard_noTitle_fallsBackToTitleJpn', () => {
-      render(<LibraryGalleryCard gallery={makeGallery({ title: '', title_jpn: 'Japanese Title' })} />)
+      render(
+        <LibraryGalleryCard gallery={makeGallery({ title: '', title_jpn: 'Japanese Title' })} />,
+      )
       expect(screen.getByText('Japanese Title')).toBeInTheDocument()
     })
   })
 
   describe('thumbnail', () => {
     it('test_libraryGalleryCard_withThumbUrl_rendersImg', () => {
-      render(<LibraryGalleryCard gallery={makeGallery()} thumbUrl="https://example.com/cover.jpg" />)
+      render(
+        <LibraryGalleryCard gallery={makeGallery()} thumbUrl="https://example.com/cover.jpg" />,
+      )
       const img = screen.getByRole('img')
       expect(img).toBeInTheDocument()
       expect(img).toHaveAttribute('src', 'https://example.com/cover.jpg')
@@ -216,9 +220,7 @@ describe('LibraryGalleryCard', () => {
 
   describe('selectMode checkbox overlay', () => {
     it('test_libraryGalleryCard_selectModeTrue_rendersCheckboxOverlay', () => {
-      const { container } = render(
-        <LibraryGalleryCard gallery={makeGallery()} selectMode={true} />,
-      )
+      const { container } = render(<LibraryGalleryCard gallery={makeGallery()} selectMode={true} />)
       const overlay = container.querySelector('.absolute.top-1\\.5.left-1\\.5.z-10')
       expect(overlay).toBeInTheDocument()
     })

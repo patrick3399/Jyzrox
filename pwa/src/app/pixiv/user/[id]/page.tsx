@@ -73,10 +73,11 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
   const validId = !isNaN(userId)
 
   // User profile + first batch of recent works
-  const { data: userResult, error, isLoading } = useSWR(
-    validId ? `/api/pixiv/user/${userId}` : null,
-    () => api.pixiv.getUser(userId),
-  )
+  const {
+    data: userResult,
+    error,
+    isLoading,
+  } = useSWR(validId ? `/api/pixiv/user/${userId}` : null, () => api.pixiv.getUser(userId))
 
   const [isFollowing, setIsFollowing] = useState(false)
   const [followLoading, setFollowLoading] = useState(false)
@@ -127,7 +128,8 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
   const allWorks = worksData?.flatMap((page) => page.illusts) ?? []
   const hasMoreWorks = worksData ? worksData[worksData.length - 1]?.next_offset !== null : false
 
-  if (!validId) return <div className="p-8 text-center text-vault-text-secondary">{t('common.invalidId')}</div>
+  if (!validId)
+    return <div className="p-8 text-center text-vault-text-secondary">{t('common.invalidId')}</div>
 
   if (isLoading) {
     return (
@@ -141,7 +143,10 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
     return (
       <div className="p-6 text-center text-vault-text-secondary">
         <p>{t('common.failedToLoad')}</p>
-        <button onClick={() => router.back()} className="text-vault-accent underline mt-2 inline-block">
+        <button
+          onClick={() => router.back()}
+          className="text-vault-accent underline mt-2 inline-block"
+        >
           <ArrowLeft size={14} className="inline mr-1" />
           {t('pixiv.title')}
         </button>
@@ -189,7 +194,11 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
                       : 'bg-vault-accent text-white hover:bg-vault-accent/80'
                   }`}
                 >
-                  {followLoading ? t('pixiv.loading') : isFollowing ? t('pixiv.unfollow') : t('pixiv.follow')}
+                  {followLoading
+                    ? t('pixiv.loading')
+                    : isFollowing
+                      ? t('pixiv.unfollow')
+                      : t('pixiv.follow')}
                 </button>
                 <a
                   href={`https://www.pixiv.net/users/${user.id}`}

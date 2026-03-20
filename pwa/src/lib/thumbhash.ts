@@ -3,7 +3,7 @@
  * Ported from https://evanw.github.io/thumbhash/
  */
 export function thumbHashToRGBA(base64: string): { w: number; h: number; rgba: Uint8Array } {
-  const hash = Uint8Array.from(atob(base64), c => c.charCodeAt(0))
+  const hash = Uint8Array.from(atob(base64), (c) => c.charCodeAt(0))
 
   const header = hash[0] | (hash[1] << 8) | (hash[2] << 16)
   const l_dc = (header & 63) / 63
@@ -17,7 +17,7 @@ export function thumbHashToRGBA(base64: string): { w: number; h: number; rgba: U
   const a_scale = hasAlpha ? ((hash[5] >> 4) & 15) / 15 : 0
   const isLandscape = (hash[4] >> 7) & 1
   const lx = Math.max(3, isLandscape ? (hasAlpha ? 5 : 7) : (hash[4] >> 4) & 7)
-  const ly = Math.max(3, isLandscape ? (hash[4] >> 4) & 7 : (hasAlpha ? 5 : 7))
+  const ly = Math.max(3, isLandscape ? (hash[4] >> 4) & 7 : hasAlpha ? 5 : 7)
 
   let i = hasAlpha ? 6 : 5
   let bit = 0
@@ -29,7 +29,10 @@ export function thumbHashToRGBA(base64: string): { w: number; h: number; rgba: U
       for (let b = 0; b < 4; b++) {
         data |= ((hash[i] >> bit) & 1) << b
         bit++
-        if (bit >= 8) { bit = 0; i++ }
+        if (bit >= 8) {
+          bit = 0
+          i++
+        }
       }
       ac.push(((data + 0.5) / 16 - 0.5) * scale)
     }
@@ -54,21 +57,19 @@ export function thumbHashToRGBA(base64: string): { w: number; h: number; rgba: U
 
   for (let y = 0; y < h; y++) {
     for (let x = 0; x < w; x++) {
-      let l = l_dc, p = p_dc, q = q_dc, a = a_dc
+      let l = l_dc,
+        p = p_dc,
+        q = q_dc,
+        a = a_dc
 
-      for (let cx = 0; cx < lx; cx++)
-        fx_l[cx] = Math.cos((Math.PI / w) * (x + 0.5) * cx)
-      for (let cx = 0; cx < 3; cx++)
-        fx_p[cx] = Math.cos((Math.PI / w) * (x + 0.5) * cx)
-      for (let cx = 0; cx < 3; cx++)
-        fx_q[cx] = Math.cos((Math.PI / w) * (x + 0.5) * cx)
-      if (fx_a) for (let cx = 0; cx < 5; cx++)
-        fx_a[cx] = Math.cos((Math.PI / w) * (x + 0.5) * cx)
+      for (let cx = 0; cx < lx; cx++) fx_l[cx] = Math.cos((Math.PI / w) * (x + 0.5) * cx)
+      for (let cx = 0; cx < 3; cx++) fx_p[cx] = Math.cos((Math.PI / w) * (x + 0.5) * cx)
+      for (let cx = 0; cx < 3; cx++) fx_q[cx] = Math.cos((Math.PI / w) * (x + 0.5) * cx)
+      if (fx_a) for (let cx = 0; cx < 5; cx++) fx_a[cx] = Math.cos((Math.PI / w) * (x + 0.5) * cx)
 
       for (let cy = 0; cy < ly; cy++) {
         const fy = Math.cos((Math.PI / h) * (y + 0.5) * cy)
-        for (let cx = cy === 0 ? 1 : 0; cx < lx; cx++)
-          l += l_ac[cy * lx + cx - 1] * fx_l[cx] * fy
+        for (let cx = cy === 0 ? 1 : 0; cx < lx; cx++) l += l_ac[cy * lx + cx - 1] * fx_l[cx] * fy
       }
 
       for (let cy = 0; cy < 3; cy++) {
@@ -83,12 +84,11 @@ export function thumbHashToRGBA(base64: string): { w: number; h: number; rgba: U
       if (fx_a) {
         for (let cy = 0; cy < 5; cy++) {
           const fy = Math.cos((Math.PI / h) * (y + 0.5) * cy)
-          for (let cx = cy === 0 ? 1 : 0; cx < 5; cx++)
-            a += a_ac[cy * 5 + cx - 1] * fx_a[cx] * fy
+          for (let cx = cy === 0 ? 1 : 0; cx < 5; cx++) a += a_ac[cy * 5 + cx - 1] * fx_a[cx] * fy
         }
       }
 
-      const b = l - 2 / 3 * p
+      const b = l - (2 / 3) * p
       const r = (3 * l - b + q) / 2
       const g = r - q
 
@@ -108,7 +108,7 @@ function thumbHashToApproximateAspectRatio(hash: Uint8Array): number {
   const hasAlpha = (header >> 23) & 1
   const isLandscape = (hash[4] >> 7) & 1
   const lx = Math.max(3, isLandscape ? (hasAlpha ? 5 : 7) : (hash[4] >> 4) & 7)
-  const ly = Math.max(3, isLandscape ? (hash[4] >> 4) & 7 : (hasAlpha ? 5 : 7))
+  const ly = Math.max(3, isLandscape ? (hash[4] >> 4) & 7 : hasAlpha ? 5 : 7)
   return lx / ly
 }
 

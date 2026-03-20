@@ -2,12 +2,16 @@
 import { useRef, useCallback } from 'react'
 
 interface UseLongPressOptions {
-  threshold?: number      // ms, default 500
-  moveThreshold?: number  // px, default 10
+  threshold?: number // ms, default 500
+  moveThreshold?: number // px, default 10
   onLongPress: (e: React.TouchEvent | React.MouseEvent) => void
 }
 
-export function useLongPress({ threshold = 500, moveThreshold = 10, onLongPress }: UseLongPressOptions) {
+export function useLongPress({
+  threshold = 500,
+  moveThreshold = 10,
+  onLongPress,
+}: UseLongPressOptions) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const startPosRef = useRef<{ x: number; y: number } | null>(null)
   const firedRef = useRef(false)

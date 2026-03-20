@@ -36,7 +36,7 @@ export function ImageModal({ url, onClose }: ImageModalProps) {
         src={url}
         alt=""
         className="max-w-full max-h-full object-contain"
-        onClick={e => e.stopPropagation()}
+        onClick={(e) => e.stopPropagation()}
       />
     </div>
   )

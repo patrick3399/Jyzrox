@@ -126,7 +126,9 @@ export function TaskCard({ task, onToggle, onCronUpdate, onReset, onRunNow }: Ta
           {/* Enable toggle */}
           <button
             onClick={() => onToggle(task.id, task.enabled)}
-            aria-label={task.enabled ? t('settings.tasks.disableTask') : t('settings.tasks.enableTask')}
+            aria-label={
+              task.enabled ? t('settings.tasks.disableTask') : t('settings.tasks.enableTask')
+            }
             aria-pressed={task.enabled}
             className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
               task.enabled ? 'bg-green-600' : 'bg-vault-border'

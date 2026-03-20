@@ -37,12 +37,12 @@ export function useLogStream() {
 
   useEffect(() => {
     if (lastLogEntry && !pausedRef.current) {
-      setStreamedLogs(prev => [lastLogEntry, ...prev].slice(0, 500))
+      setStreamedLogs((prev) => [lastLogEntry, ...prev].slice(0, 500))
     }
   }, [lastLogEntry])
 
   const clearStream = useCallback(() => setStreamedLogs([]), [])
-  const togglePause = useCallback(() => setIsPaused(p => !p), [])
+  const togglePause = useCallback(() => setIsPaused((p) => !p), [])
 
   return { streamedLogs, clearStream, isPaused, togglePause }
 }

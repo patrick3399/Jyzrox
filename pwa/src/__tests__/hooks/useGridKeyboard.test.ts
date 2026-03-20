@@ -41,17 +41,13 @@ describe('useGridKeyboard', () => {
   })
 
   it('test_useGridKeyboard_initial_state_focusedIndex_is_null', () => {
-    const { result } = renderHook(() =>
-      useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }),
-    )
+    const { result } = renderHook(() => useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }))
 
     expect(result.current.focusedIndex).toBeNull()
   })
 
   it('test_useGridKeyboard_arrowRight_from_null_starts_at_index_0', () => {
-    const { result } = renderHook(() =>
-      useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }),
-    )
+    const { result } = renderHook(() => useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }))
 
     act(() => {
       simulateKeydown('ArrowRight')
@@ -61,9 +57,7 @@ describe('useGridKeyboard', () => {
   })
 
   it('test_useGridKeyboard_arrowRight_increments_focused_index', () => {
-    const { result } = renderHook(() =>
-      useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }),
-    )
+    const { result } = renderHook(() => useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }))
 
     // Navigate to index 0 first
     act(() => {
@@ -79,9 +73,7 @@ describe('useGridKeyboard', () => {
   })
 
   it('test_useGridKeyboard_arrowRight_at_last_item_stays_at_last_item', () => {
-    const { result } = renderHook(() =>
-      useGridKeyboard({ totalItems: 3, colCount: 3, onEnter }),
-    )
+    const { result } = renderHook(() => useGridKeyboard({ totalItems: 3, colCount: 3, onEnter }))
 
     // Navigate to index 2 (last)
     act(() => {
@@ -99,9 +91,7 @@ describe('useGridKeyboard', () => {
   })
 
   it('test_useGridKeyboard_arrowDown_moves_by_colCount', () => {
-    const { result } = renderHook(() =>
-      useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }),
-    )
+    const { result } = renderHook(() => useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }))
 
     // Navigate to index 1 (null → 0 → 1)
     act(() => {
@@ -118,15 +108,13 @@ describe('useGridKeyboard', () => {
   })
 
   it('test_useGridKeyboard_arrowUp_moves_by_negative_colCount', () => {
-    const { result } = renderHook(() =>
-      useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }),
-    )
+    const { result } = renderHook(() => useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }))
 
     // Navigate to index 4
     act(() => {
       simulateKeydown('ArrowRight') // 0
       simulateKeydown('ArrowRight') // 1
-      simulateKeydown('ArrowDown')  // 4
+      simulateKeydown('ArrowDown') // 4
     })
     expect(result.current.focusedIndex).toBe(4)
 
@@ -138,9 +126,7 @@ describe('useGridKeyboard', () => {
   })
 
   it('test_useGridKeyboard_enter_calls_onEnter_with_current_index', () => {
-    const { result } = renderHook(() =>
-      useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }),
-    )
+    const { result } = renderHook(() => useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }))
 
     // Navigate to index 2
     act(() => {
@@ -159,9 +145,7 @@ describe('useGridKeyboard', () => {
   })
 
   it('test_useGridKeyboard_escape_resets_focusedIndex_to_null', () => {
-    const { result } = renderHook(() =>
-      useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }),
-    )
+    const { result } = renderHook(() => useGridKeyboard({ totalItems: 9, colCount: 3, onEnter }))
 
     // Navigate somewhere
     act(() => {

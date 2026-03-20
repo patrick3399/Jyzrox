@@ -195,10 +195,7 @@ describe('useLibraryFilters — URL sync debounce', () => {
       vi.advanceTimersByTime(500)
     })
 
-    expect(mockReplace).toHaveBeenCalledWith(
-      expect.stringContaining('q=test'),
-      expect.anything(),
-    )
+    expect(mockReplace).toHaveBeenCalledWith(expect.stringContaining('q=test'), expect.anything())
 
     vi.useRealTimers()
   })

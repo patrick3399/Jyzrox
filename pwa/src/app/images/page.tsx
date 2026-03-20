@@ -46,8 +46,11 @@ function ImageBrowserInner() {
   const sourceParam = searchParams.get('source') ?? ''
   const categoryParam = searchParams.get('category') ?? ''
 
-  const tags = useMemo(() => tagsParam ? tagsParam.split(',').filter(Boolean) : [], [tagsParam])
-  const excludeTags = useMemo(() => excludeParam ? excludeParam.split(',').filter(Boolean) : [], [excludeParam])
+  const tags = useMemo(() => (tagsParam ? tagsParam.split(',').filter(Boolean) : []), [tagsParam])
+  const excludeTags = useMemo(
+    () => (excludeParam ? excludeParam.split(',').filter(Boolean) : []),
+    [excludeParam],
+  )
 
   const [sourceFilter, setSourceFilter] = useState(sourceParam)
   const [categoryFilter, setCategoryFilter] = useState(categoryParam)
@@ -113,22 +116,26 @@ function ImageBrowserInner() {
     setJumpAt(undefined)
   }, [sourceFilter, categoryFilter, tags, excludeTags, favoritedFilter])
 
-  const filterParams = useMemo(() => ({
-    tags: tags.length > 0 ? tags : undefined,
-    exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
-    source: sourceFilter || undefined,
-    category: categoryFilter || undefined,
-    favorited: favoritedFilter || undefined,
-  }), [tags, excludeTags, sourceFilter, categoryFilter, favoritedFilter])
+  const filterParams = useMemo(
+    () => ({
+      tags: tags.length > 0 ? tags : undefined,
+      exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
+      source: sourceFilter || undefined,
+      category: categoryFilter || undefined,
+      favorited: favoritedFilter || undefined,
+    }),
+    [tags, excludeTags, sourceFilter, categoryFilter, favoritedFilter],
+  )
 
   const { minAt, maxAt } = useTimeRange(filterParams)
   const { percentiles } = useTimelinePercentiles(filterParams)
 
-  const { images, favoritedImageIds, mutate, isLoading, isLoadingMore, isReachingEnd, loadMore } = useImageBrowser({
-    ...filterParams,
-    limit: 60,
-    jumpAt,
-  })
+  const { images, favoritedImageIds, mutate, isLoading, isLoadingMore, isReachingEnd, loadMore } =
+    useImageBrowser({
+      ...filterParams,
+      limit: 60,
+      jumpAt,
+    })
 
   const uniqueHashes = useMemo(() => {
     const seen = new Set<string>()
@@ -155,39 +162,54 @@ function ImageBrowserInner() {
     setTagInput('')
   }, [tagInput, tags, searchParams, router])
 
-  const handleRemoveTag = useCallback((tag: string) => {
-    const newTags = tags.filter((tg) => tg !== tag)
-    const params = new URLSearchParams(searchParams.toString())
-    if (newTags.length > 0) {
-      params.set('tags', newTags.join(','))
-    } else {
-      params.delete('tags')
-    }
-    router.replace(`/images?${params.toString()}`)
-  }, [tags, searchParams, router])
+  const handleRemoveTag = useCallback(
+    (tag: string) => {
+      const newTags = tags.filter((tg) => tg !== tag)
+      const params = new URLSearchParams(searchParams.toString())
+      if (newTags.length > 0) {
+        params.set('tags', newTags.join(','))
+      } else {
+        params.delete('tags')
+      }
+      router.replace(`/images?${params.toString()}`)
+    },
+    [tags, searchParams, router],
+  )
 
-  const handleImageClick = useCallback((img: BrowseImage) => {
-    if (img.source && img.source_id) {
-      router.push(`/reader/${encodeURIComponent(img.source)}/${encodeURIComponent(img.source_id)}?page=${img.page_num}`)
-    }
-  }, [router])
+  const handleImageClick = useCallback(
+    (img: BrowseImage) => {
+      if (img.source && img.source_id) {
+        router.push(
+          `/reader/${encodeURIComponent(img.source)}/${encodeURIComponent(img.source_id)}?page=${img.page_num}`,
+        )
+      }
+    },
+    [router],
+  )
 
   const handleTimelineJump = useCallback((timestamp: string) => {
     setJumpAt(timestamp)
     scrollRef.current?.scrollTo({ top: 0, behavior: 'instant' })
   }, [])
 
-  const isFavorited = useCallback((imageId: number) => {
-    if (localFavOverrides.has(imageId)) return localFavOverrides.get(imageId)!
-    return favoritedImageIds.has(imageId)
-  }, [localFavOverrides, favoritedImageIds])
+  const isFavorited = useCallback(
+    (imageId: number) => {
+      if (localFavOverrides.has(imageId)) return localFavOverrides.get(imageId)!
+      return favoritedImageIds.has(imageId)
+    },
+    [localFavOverrides, favoritedImageIds],
+  )
 
   const handleLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     const img = activeImageRef.current
     if (!img) return
-    const pos = 'touches' in e
-      ? { x: (e as React.TouchEvent).touches[0].clientX, y: (e as React.TouchEvent).touches[0].clientY }
-      : { x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY }
+    const pos =
+      'touches' in e
+        ? {
+            x: (e as React.TouchEvent).touches[0].clientX,
+            y: (e as React.TouchEvent).touches[0].clientY,
+          }
+        : { x: (e as React.MouseEvent).clientX, y: (e as React.MouseEvent).clientY }
     setImageMenu({
       open: true,
       position: pos,
@@ -200,7 +222,12 @@ function ImageBrowserInner() {
     })
   }, [])
 
-  const { onTouchStart: lpStart, onTouchMove: lpMove, onTouchEnd: lpEnd, onContextMenu: lpMenu } = useLongPress({ onLongPress: handleLongPress })
+  const {
+    onTouchStart: lpStart,
+    onTouchMove: lpMove,
+    onTouchEnd: lpEnd,
+    onContextMenu: lpMenu,
+  } = useLongPress({ onLongPress: handleLongPress })
 
   const handleToggleFavorite = useCallback(async () => {
     if (!imageMenu) return
@@ -210,7 +237,7 @@ function ImageBrowserInner() {
     setImageMenu(null)
 
     // Optimistic update
-    setLocalFavOverrides(prev => new Map(prev).set(imageId, !wasFavorited))
+    setLocalFavOverrides((prev) => new Map(prev).set(imageId, !wasFavorited))
 
     try {
       if (wasFavorited) {
@@ -219,23 +246,26 @@ function ImageBrowserInner() {
         await api.library.favoriteImage(imageId)
       }
       toast.success(wasFavorited ? t('reader.imageUnfavorited') : t('reader.imageFavorited'))
-      mutate(prev => {
-        if (!prev) return prev
-        return prev.map(page => ({
-          ...page,
-          favorited_image_ids: wasFavorited
-            ? page.favorited_image_ids.filter(id => id !== imageId)
-            : [...page.favorited_image_ids, imageId],
-        }))
-      }, { revalidate: false })
-      setLocalFavOverrides(prev => {
+      mutate(
+        (prev) => {
+          if (!prev) return prev
+          return prev.map((page) => ({
+            ...page,
+            favorited_image_ids: wasFavorited
+              ? page.favorited_image_ids.filter((id) => id !== imageId)
+              : [...page.favorited_image_ids, imageId],
+          }))
+        },
+        { revalidate: false },
+      )
+      setLocalFavOverrides((prev) => {
         const next = new Map(prev)
         next.delete(imageId)
         return next
       })
     } catch {
       // Revert
-      setLocalFavOverrides(prev => {
+      setLocalFavOverrides((prev) => {
         const next = new Map(prev)
         next.delete(imageId)
         return next
@@ -270,58 +300,76 @@ function ImageBrowserInner() {
     }
   }, [imageMenu, mutate])
 
-  const renderItem = useCallback((img: BrowseImage, geometry: { width: number; height: number }) => {
-    const thumbhashUrl = thumbhashUrls.get(img.thumbhash || '') || null
-    const favorited = isFavorited(img.id)
-    const isSelected = imageMenu?.imageId === img.id
+  const renderItem = useCallback(
+    (img: BrowseImage, geometry: { width: number; height: number }) => {
+      const thumbhashUrl = thumbhashUrls.get(img.thumbhash || '') || null
+      const favorited = isFavorited(img.id)
+      const isSelected = imageMenu?.imageId === img.id
 
-    return (
-      <button
-        onClick={() => handleImageClick(img)}
-        onTouchStart={(e) => { activeImageRef.current = img; lpStart(e) }}
-        onTouchMove={lpMove}
-        onTouchEnd={lpEnd}
-        onContextMenu={(e) => { activeImageRef.current = img; lpMenu(e) }}
-        className="block w-full h-full overflow-hidden rounded-sm relative group cursor-pointer select-none [&_img]:pointer-events-none"
-        style={{ WebkitTouchCallout: 'none' }}
-      >
-        {/* Thumbhash placeholder */}
-        {thumbhashUrl && (
-          <img
-            src={thumbhashUrl}
-            alt=""
-            draggable={false}
-            className="absolute inset-0 w-full h-full object-cover"
-            aria-hidden
-          />
-        )}
-        {/* Actual image */}
-        <img
-          src={img.thumb_path || ''}
-          alt=""
-          loading="lazy"
-          draggable={false}
-          className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
-          onLoad={(e) => {
-            e.currentTarget.style.opacity = '1'
+      return (
+        <button
+          onClick={() => handleImageClick(img)}
+          onTouchStart={(e) => {
+            activeImageRef.current = img
+            lpStart(e)
           }}
-          style={{ opacity: img.thumbhash ? 0 : undefined }}
-        />
-        {/* Favorite indicator */}
-        {favorited && (
-          <div className="absolute top-1 right-1 z-10">
-            <Heart className="w-4 h-4 fill-red-500 text-red-500 drop-shadow-md" />
-          </div>
-        )}
-        {/* Selection highlight */}
-        {isSelected && (
-          <div className="absolute inset-0 z-20 border-2 border-vault-accent rounded-sm" />
-        )}
-        {/* Hover overlay */}
-        <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
-      </button>
-    )
-  }, [handleImageClick, thumbhashUrls, lpStart, lpMove, lpEnd, lpMenu, isFavorited, imageMenu?.imageId])
+          onTouchMove={lpMove}
+          onTouchEnd={lpEnd}
+          onContextMenu={(e) => {
+            activeImageRef.current = img
+            lpMenu(e)
+          }}
+          className="block w-full h-full overflow-hidden rounded-sm relative group cursor-pointer select-none [&_img]:pointer-events-none"
+          style={{ WebkitTouchCallout: 'none' }}
+        >
+          {/* Thumbhash placeholder */}
+          {thumbhashUrl && (
+            <img
+              src={thumbhashUrl}
+              alt=""
+              draggable={false}
+              className="absolute inset-0 w-full h-full object-cover"
+              aria-hidden
+            />
+          )}
+          {/* Actual image */}
+          <img
+            src={img.thumb_path || ''}
+            alt=""
+            loading="lazy"
+            draggable={false}
+            className="absolute inset-0 w-full h-full object-cover transition-opacity duration-300"
+            onLoad={(e) => {
+              e.currentTarget.style.opacity = '1'
+            }}
+            style={{ opacity: img.thumbhash ? 0 : undefined }}
+          />
+          {/* Favorite indicator */}
+          {favorited && (
+            <div className="absolute top-1 right-1 z-10">
+              <Heart className="w-4 h-4 fill-red-500 text-red-500 drop-shadow-md" />
+            </div>
+          )}
+          {/* Selection highlight */}
+          {isSelected && (
+            <div className="absolute inset-0 z-20 border-2 border-vault-accent rounded-sm" />
+          )}
+          {/* Hover overlay */}
+          <div className="absolute inset-0 bg-black/0 group-hover:bg-black/20 transition-colors" />
+        </button>
+      )
+    },
+    [
+      handleImageClick,
+      thumbhashUrls,
+      lpStart,
+      lpMove,
+      lpEnd,
+      lpMenu,
+      isFavorited,
+      imageMenu?.imageId,
+    ],
+  )
 
   // Suppress the native viewport scrollbar: lock html/body overflow so the
   // only scroll surface is our wrapper div (which hides its own scrollbar).
@@ -385,7 +433,9 @@ function ImageBrowserInner() {
                 <option value="">{t('library.allCategories')}</option>
                 <option value="__uncategorized__">{t('library.categoryUncategorized')}</option>
                 {categoriesData.categories.map((cat) => (
-                  <option key={cat} value={cat}>{cat}</option>
+                  <option key={cat} value={cat}>
+                    {cat}
+                  </option>
                 ))}
               </select>
             </div>
@@ -404,7 +454,9 @@ function ImageBrowserInner() {
               type="text"
               value={tagInput}
               onChange={(e) => setTagInput(e.target.value)}
-              onKeyDown={(e) => { if (e.key === 'Enter') handleAddTag() }}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') handleAddTag()
+              }}
               placeholder={t('images.filterByTags')}
               className="bg-vault-input border border-vault-border rounded px-3 py-1.5 text-sm text-vault-text placeholder:text-vault-text-secondary focus:outline-none focus:border-vault-accent"
             />
@@ -450,9 +502,7 @@ function ImageBrowserInner() {
         </div>
 
         {!isLoading && images.length === 0 && (
-          <div className="text-center text-vault-text-secondary py-12">
-            {t('images.noResults')}
-          </div>
+          <div className="text-center text-vault-text-secondary py-12">{t('images.noResults')}</div>
         )}
       </div>
 

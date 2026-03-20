@@ -87,9 +87,7 @@ function ShareTargetContent() {
               {/* URL preview */}
               <div className="flex items-start gap-2 p-3 rounded-lg bg-vault-bg border border-vault-border">
                 <ExternalLink className="w-4 h-4 mt-0.5 shrink-0 text-vault-text-muted" />
-                <span className="text-sm text-white break-all line-clamp-3">
-                  {detectedUrl}
-                </span>
+                <span className="text-sm text-white break-all line-clamp-3">{detectedUrl}</span>
               </div>
 
               {/* Actions */}

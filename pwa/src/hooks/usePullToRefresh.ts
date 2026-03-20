@@ -81,7 +81,9 @@ export function usePullToRefresh({
       const clamped = Math.min(deltaY * 0.5, MAX_PULL)
       pullDistanceRef.current = clamped
       setPullDistance(clamped)
-      setPullState(clamped >= THRESHOLD * 0.5 ? (clamped >= THRESHOLD ? 'ready' : 'pulling') : 'idle')
+      setPullState(
+        clamped >= THRESHOLD * 0.5 ? (clamped >= THRESHOLD ? 'ready' : 'pulling') : 'idle',
+      )
     }
 
     const handleTouchEnd = async () => {

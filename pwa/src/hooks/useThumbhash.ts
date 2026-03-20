@@ -26,10 +26,9 @@ function getWorker(): Worker | null {
   if (sharedWorker) return sharedWorker
 
   try {
-    sharedWorker = new Worker(
-      new URL('../lib/thumbhash.worker.ts', import.meta.url),
-      { type: 'module' },
-    )
+    sharedWorker = new Worker(new URL('../lib/thumbhash.worker.ts', import.meta.url), {
+      type: 'module',
+    })
 
     sharedWorker.onmessage = (e: MessageEvent<WorkerResponse>) => {
       const { id, results } = e.data

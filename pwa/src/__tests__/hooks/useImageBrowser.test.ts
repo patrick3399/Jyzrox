@@ -158,7 +158,10 @@ describe('useImageBrowser', () => {
   it('excludes jump_at from subsequent page keys using cursor', () => {
     useImageBrowser({ tags: ['tag1'], jumpAt: '2024-06-01T00:00:00Z' })
     const { getKey } = lastInfiniteCall()
-    const key = getKey(1, { images: [], has_next: true, next_cursor: 'cursor-xyz' }) as [string, Record<string, unknown>]
+    const key = getKey(1, { images: [], has_next: true, next_cursor: 'cursor-xyz' }) as [
+      string,
+      Record<string, unknown>,
+    ]
     expect(key[1]).not.toHaveProperty('jump_at')
     expect(key[1]).not.toHaveProperty('jumpAt')
     expect(key[1]).toHaveProperty('cursor', 'cursor-xyz')

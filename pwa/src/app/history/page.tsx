@@ -172,62 +172,62 @@ export default function HistoryPage() {
 
   return (
     <>
-        {/* Header */}
-        <div className="flex items-center justify-between mb-6">
-          <div>
-            <h1 className="text-xl font-bold text-vault-text">{t('history.title')}</h1>
-            <p className="text-sm text-vault-text-muted mt-0.5">{t('history.subtitle')}</p>
-          </div>
-          {items.length > 0 && (
-            <button
-              onClick={handleClearAll}
-              disabled={clearing}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-700/50
-                         bg-red-900/20 text-red-400 hover:bg-red-900/40 transition-colors text-sm"
-            >
-              <Trash2 size={14} />
-              {clearing ? '...' : t('history.clearAll')}
-            </button>
-          )}
+      {/* Header */}
+      <div className="flex items-center justify-between mb-6">
+        <div>
+          <h1 className="text-xl font-bold text-vault-text">{t('history.title')}</h1>
+          <p className="text-sm text-vault-text-muted mt-0.5">{t('history.subtitle')}</p>
         </div>
-
-        {/* Count */}
-        {!loading && total > 0 && (
-          <p className="text-xs text-vault-text-muted mb-4">
-            {items.length} / {total}
-          </p>
+        {items.length > 0 && (
+          <button
+            onClick={handleClearAll}
+            disabled={clearing}
+            className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-red-700/50
+                         bg-red-900/20 text-red-400 hover:bg-red-900/40 transition-colors text-sm"
+          >
+            <Trash2 size={14} />
+            {clearing ? '...' : t('history.clearAll')}
+          </button>
         )}
+      </div>
 
-        {/* Content */}
-        {loading ? (
-          <div className="flex justify-center py-20">
-            <LoadingSpinner />
-          </div>
-        ) : items.length === 0 ? (
-          <div className="flex flex-col items-center justify-center py-20 text-center">
-            <Clock size={48} className="text-vault-text-muted mb-4" />
-            <p className="text-vault-text-secondary font-medium">{t('history.noHistory')}</p>
-            <p className="text-vault-text-muted text-sm mt-1">{t('history.noHistoryHint')}</p>
-          </div>
-        ) : (
-          <VirtualGrid
-            items={items}
-            columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 12, xxl: 15 }}
-            gap={12}
-            estimateHeight={250}
-            renderItem={(item) => (
-              <HistoryCard
-                key={item.id}
-                item={item}
-                onDelete={handleDelete}
-                onClick={() => handleClick(item)}
-              />
-            )}
-            onLoadMore={() => loadPage(items.length, false)}
-            hasMore={hasMore}
-            isLoading={loadingMore}
-          />
-        )}
+      {/* Count */}
+      {!loading && total > 0 && (
+        <p className="text-xs text-vault-text-muted mb-4">
+          {items.length} / {total}
+        </p>
+      )}
+
+      {/* Content */}
+      {loading ? (
+        <div className="flex justify-center py-20">
+          <LoadingSpinner />
+        </div>
+      ) : items.length === 0 ? (
+        <div className="flex flex-col items-center justify-center py-20 text-center">
+          <Clock size={48} className="text-vault-text-muted mb-4" />
+          <p className="text-vault-text-secondary font-medium">{t('history.noHistory')}</p>
+          <p className="text-vault-text-muted text-sm mt-1">{t('history.noHistoryHint')}</p>
+        </div>
+      ) : (
+        <VirtualGrid
+          items={items}
+          columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 12, xxl: 15 }}
+          gap={12}
+          estimateHeight={250}
+          renderItem={(item) => (
+            <HistoryCard
+              key={item.id}
+              item={item}
+              onDelete={handleDelete}
+              onClick={() => handleClick(item)}
+            />
+          )}
+          onLoadMore={() => loadPage(items.length, false)}
+          hasMore={hasMore}
+          isLoading={loadingMore}
+        />
+      )}
     </>
   )
 }

@@ -11,7 +11,13 @@ import type { GalleryImage } from '@/lib/types'
 
 export default function EhProxyReaderPageWrapper() {
   return (
-    <Suspense fallback={<div className="flex items-center justify-center h-screen"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white" /></div>}>
+    <Suspense
+      fallback={
+        <div className="flex items-center justify-center h-screen">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-white" />
+        </div>
+      }
+    >
       <EhProxyReaderPage />
     </Suspense>
   )
@@ -120,7 +126,11 @@ function EhProxyReaderPage() {
                 ? t('reader.loadingTokens')
                 : t('reader.preparingReader')}
           </p>
-          {gallery && <p className="mt-1 text-xs opacity-30">{gallery.pages} {t('browse.pages')}</p>}
+          {gallery && (
+            <p className="mt-1 text-xs opacity-30">
+              {gallery.pages} {t('browse.pages')}
+            </p>
+          )}
           {loadingTooLong && (
             <div className="mt-4 space-y-2">
               <p className="text-xs text-yellow-500">{t('reader.loadingTooLong')}</p>

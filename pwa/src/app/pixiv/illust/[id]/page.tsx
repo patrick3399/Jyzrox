@@ -21,9 +21,12 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
 
   const router = useRouter()
 
-  const { data: illust, error, isLoading } = useSWR(
-    isNaN(illustId) ? null : `/api/pixiv/illust/${illustId}`,
-    () => api.pixiv.getIllust(illustId),
+  const {
+    data: illust,
+    error,
+    isLoading,
+  } = useSWR(isNaN(illustId) ? null : `/api/pixiv/illust/${illustId}`, () =>
+    api.pixiv.getIllust(illustId),
   )
 
   const { data: bookmarkData, mutate: mutateBookmark } = useSWR(
@@ -51,7 +54,8 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
     return () => window.removeEventListener('keydown', handler)
   }, [illustId, router])
 
-  if (isNaN(illustId)) return <div className="p-8 text-center text-vault-text-secondary">{t('common.invalidId')}</div>
+  if (isNaN(illustId))
+    return <div className="p-8 text-center text-vault-text-secondary">{t('common.invalidId')}</div>
 
   const handleBookmark = async () => {
     if (bookmarking) return
@@ -95,7 +99,10 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
     return (
       <div className="p-6 text-center text-vault-text-secondary">
         <p>{t('common.failedToLoad')}</p>
-        <button onClick={() => router.back()} className="text-vault-accent underline mt-2 inline-block">
+        <button
+          onClick={() => router.back()}
+          className="text-vault-accent underline mt-2 inline-block"
+        >
           <ArrowLeft size={14} className="inline mr-1" />
           {t('pixiv.title')}
         </button>

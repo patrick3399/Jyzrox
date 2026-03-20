@@ -36,10 +36,7 @@ export function useImageBrowser(params: UseImageBrowserParams = {}) {
     { revalidateOnFocus: false },
   )
 
-  const images = useMemo(
-    () => (data ? data.flatMap((page) => page.images) : []),
-    [data],
-  )
+  const images = useMemo(() => (data ? data.flatMap((page) => page.images) : []), [data])
 
   const favoritedImageIds = useMemo(() => {
     const set = new Set<number>()
@@ -53,7 +50,8 @@ export function useImageBrowser(params: UseImageBrowserParams = {}) {
     return set
   }, [data])
 
-  const isLoadingMore = isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
+  const isLoadingMore =
+    isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
   const isEmpty = data?.[0]?.images.length === 0
   const lastPage = data?.[data.length - 1]
   const isReachingEnd = isEmpty || (lastPage !== undefined && !lastPage.has_next)

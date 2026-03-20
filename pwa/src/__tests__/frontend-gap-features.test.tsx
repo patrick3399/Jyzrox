@@ -96,7 +96,9 @@ vi.mock('sonner', () => ({
 vi.mock('@/lib/api', () => ({
   api: {
     system: {
-      health: vi.fn().mockResolvedValue({ status: 'ok', services: { postgres: 'ok', redis: 'ok' } }),
+      health: vi
+        .fn()
+        .mockResolvedValue({ status: 'ok', services: { postgres: 'ok', redis: 'ok' } }),
       info: vi.fn().mockResolvedValue({
         versions: { jyzrox: '0.1', python: '3.13', fastapi: '0.115' },
         eh_max_concurrency: 4,
@@ -110,7 +112,12 @@ vi.mock('@/lib/api', () => ({
       getReconcileStatus: mockGetReconcileStatus,
     },
     auth: {
-      getProfile: vi.fn().mockResolvedValue({ username: 'admin', email: null, avatar_url: '', avatar_style: 'gravatar' }),
+      getProfile: vi.fn().mockResolvedValue({
+        username: 'admin',
+        email: null,
+        avatar_url: '',
+        avatar_style: 'gravatar',
+      }),
       updateProfile: vi.fn().mockResolvedValue({}),
       uploadAvatar: vi.fn().mockResolvedValue({ avatar_url: '' }),
       deleteAvatar: vi.fn().mockResolvedValue({ avatar_url: '' }),
@@ -123,7 +130,9 @@ vi.mock('@/lib/api', () => ({
       setFeature: vi.fn().mockResolvedValue({}),
       setFeatureValue: vi.fn().mockResolvedValue({}),
       getRateLimits: vi.fn().mockResolvedValue({ sites: {}, schedule: {}, override_active: false }),
-      patchRateLimits: vi.fn().mockResolvedValue({ sites: {}, schedule: {}, override_active: false }),
+      patchRateLimits: vi
+        .fn()
+        .mockResolvedValue({ sites: {}, schedule: {}, override_active: false }),
       setRateLimitOverride: vi.fn().mockResolvedValue({}),
     },
     tags: {
@@ -271,7 +280,12 @@ vi.mock('@/lib/swCacheConfig', () => ({
 // SWR stub: returns data immediately
 vi.mock('swr', () => ({
   default: vi.fn((_key: unknown, fetcher: (() => unknown) | null) => {
-    return { data: fetcher ? undefined : undefined, isLoading: false, error: undefined, mutate: vi.fn() }
+    return {
+      data: fetcher ? undefined : undefined,
+      isLoading: false,
+      error: undefined,
+      mutate: vi.fn(),
+    }
   }),
   mutate: vi.fn(),
 }))
@@ -430,9 +444,7 @@ describe('Feature 1: Per-Gallery Tag Editing UI', () => {
 
     // Setup gallery with tags and gallery tag data marking one as manual
     mockGetGalleryTags.mockResolvedValue({
-      tags: [
-        { namespace: 'artist', name: 'someartist', confidence: 1, source: 'manual' },
-      ],
+      tags: [{ namespace: 'artist', name: 'someartist', confidence: 1, source: 'manual' }],
     })
 
     render(<GalleryDetailPage />)
@@ -460,9 +472,7 @@ describe('Feature 1: Per-Gallery Tag Editing UI', () => {
 
     // Mark 'artist:someartist' as a manual tag
     mockGetGalleryTags.mockResolvedValue({
-      tags: [
-        { namespace: 'artist', name: 'someartist', confidence: 1, source: 'manual' },
-      ],
+      tags: [{ namespace: 'artist', name: 'someartist', confidence: 1, source: 'manual' }],
     })
 
     render(<GalleryDetailPage />)
@@ -481,10 +491,10 @@ describe('Feature 1: Per-Gallery Tag Editing UI', () => {
     await user.click(removeBtn)
 
     await waitFor(() => {
-      expect(mockUpdateGalleryTags).toHaveBeenCalledWith(
-        42,
-        { tags: ['artist:someartist'], action: 'remove' },
-      )
+      expect(mockUpdateGalleryTags).toHaveBeenCalledWith(42, {
+        tags: ['artist:someartist'],
+        action: 'remove',
+      })
     })
   })
 
@@ -493,9 +503,7 @@ describe('Feature 1: Per-Gallery Tag Editing UI', () => {
 
     // Only AI-sourced tags
     mockGetGalleryTags.mockResolvedValue({
-      tags: [
-        { namespace: 'artist', name: 'someartist', confidence: 0.9, source: 'ai' },
-      ],
+      tags: [{ namespace: 'artist', name: 'someartist', confidence: 0.9, source: 'ai' }],
     })
 
     render(<GalleryDetailPage />)
@@ -574,8 +582,12 @@ describe('Feature 2: Reconciliation UI in Settings', () => {
 
     // Open system section (click toggle twice: close then open)
     const systemHeader = screen.getByText('settings.system').closest('button')!
-    await act(async () => { systemHeader.click() })
-    await act(async () => { systemHeader.click() })
+    await act(async () => {
+      systemHeader.click()
+    })
+    await act(async () => {
+      systemHeader.click()
+    })
 
     await waitFor(() => {
       expect(screen.getByText('settings.reconcileRun')).toBeInTheDocument()
@@ -588,8 +600,12 @@ describe('Feature 2: Reconciliation UI in Settings', () => {
 
     // Open system section
     const systemHeader = screen.getByText('settings.system').closest('button')!
-    await act(async () => { systemHeader.click() })
-    await act(async () => { systemHeader.click() })
+    await act(async () => {
+      systemHeader.click()
+    })
+    await act(async () => {
+      systemHeader.click()
+    })
 
     await waitFor(() => {
       expect(screen.getByText('settings.reconcileRun')).toBeInTheDocument()
@@ -609,8 +625,12 @@ describe('Feature 2: Reconciliation UI in Settings', () => {
 
     // Open system section
     const systemHeader = screen.getByText('settings.system').closest('button')!
-    await act(async () => { systemHeader.click() })
-    await act(async () => { systemHeader.click() })
+    await act(async () => {
+      systemHeader.click()
+    })
+    await act(async () => {
+      systemHeader.click()
+    })
 
     await waitFor(() => {
       expect(screen.getByText('settings.reconcileRun')).toBeInTheDocument()
@@ -631,8 +651,12 @@ describe('Feature 2: Reconciliation UI in Settings', () => {
     render(<SettingsPage />)
 
     const systemHeader = screen.getByText('settings.system').closest('button')!
-    await act(async () => { systemHeader.click() })
-    await act(async () => { systemHeader.click() })
+    await act(async () => {
+      systemHeader.click()
+    })
+    await act(async () => {
+      systemHeader.click()
+    })
 
     await waitFor(() => {
       expect(screen.getByText('settings.reconcileRun')).toBeInTheDocument()
@@ -650,8 +674,12 @@ describe('Feature 2: Reconciliation UI in Settings', () => {
     render(<SettingsPage />)
 
     const systemHeader = screen.getByText('settings.system').closest('button')!
-    await act(async () => { systemHeader.click() })
-    await act(async () => { systemHeader.click() })
+    await act(async () => {
+      systemHeader.click()
+    })
+    await act(async () => {
+      systemHeader.click()
+    })
 
     await waitFor(() => {
       expect(screen.getByText('settings.reconcileNeverRun')).toBeInTheDocument()
@@ -661,13 +689,20 @@ describe('Feature 2: Reconciliation UI in Settings', () => {
   it('test_settings_completed_reconcile_shows_stats', async () => {
     // Ensure all system APIs return proper data including completed reconcile
     const { api } = await import('@/lib/api')
-    vi.mocked(api.system.health).mockResolvedValue({ status: 'ok', services: { postgres: 'ok', redis: 'ok' } })
+    vi.mocked(api.system.health).mockResolvedValue({
+      status: 'ok',
+      services: { postgres: 'ok', redis: 'ok' },
+    })
     vi.mocked(api.system.info).mockResolvedValue({
       versions: { jyzrox: '0.1', python: '3.13', fastapi: '0.115' },
       eh_max_concurrency: 4,
       tag_model_enabled: false,
     } as never)
-    vi.mocked(api.system.getCache).mockResolvedValue({ total_memory: '1MB', total_keys: 10, breakdown: {} } as never)
+    vi.mocked(api.system.getCache).mockResolvedValue({
+      total_memory: '1MB',
+      total_keys: 10,
+      breakdown: {},
+    } as never)
     vi.mocked(api.system.getStorage).mockResolvedValue(null as never)
     vi.mocked(api.system.getReconcileStatus).mockResolvedValue({
       status: 'completed',
@@ -681,9 +716,12 @@ describe('Feature 2: Reconciliation UI in Settings', () => {
 
     // System section is open by default and auto-loads; wait for stats to appear
     // Text includes ": N" suffix so use regex substring match
-    await waitFor(() => {
-      expect(screen.getByText(/settings\.reconcileRemovedImages/)).toBeInTheDocument()
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        expect(screen.getByText(/settings\.reconcileRemovedImages/)).toBeInTheDocument()
+      },
+      { timeout: 3000 },
+    )
 
     expect(screen.getByText(/settings\.reconcileRemovedGalleries/)).toBeInTheDocument()
     expect(screen.getByText(/settings\.reconcileOrphanBlobs/)).toBeInTheDocument()
@@ -691,13 +729,20 @@ describe('Feature 2: Reconciliation UI in Settings', () => {
 
   it('test_settings_completed_reconcile_shows_correct_stats_values', async () => {
     const { api } = await import('@/lib/api')
-    vi.mocked(api.system.health).mockResolvedValue({ status: 'ok', services: { postgres: 'ok', redis: 'ok' } })
+    vi.mocked(api.system.health).mockResolvedValue({
+      status: 'ok',
+      services: { postgres: 'ok', redis: 'ok' },
+    })
     vi.mocked(api.system.info).mockResolvedValue({
       versions: { jyzrox: '0.1', python: '3.13', fastapi: '0.115' },
       eh_max_concurrency: 4,
       tag_model_enabled: false,
     } as never)
-    vi.mocked(api.system.getCache).mockResolvedValue({ total_memory: '1MB', total_keys: 10, breakdown: {} } as never)
+    vi.mocked(api.system.getCache).mockResolvedValue({
+      total_memory: '1MB',
+      total_keys: 10,
+      breakdown: {},
+    } as never)
     vi.mocked(api.system.getStorage).mockResolvedValue(null as never)
     vi.mocked(api.system.getReconcileStatus).mockResolvedValue({
       status: 'completed',
@@ -710,9 +755,12 @@ describe('Feature 2: Reconciliation UI in Settings', () => {
     render(<SettingsPage />)
 
     // Wait for system data to load and reconcile stats to appear
-    await waitFor(() => {
-      expect(screen.getByText(/settings\.reconcileRemovedImages/)).toBeInTheDocument()
-    }, { timeout: 3000 })
+    await waitFor(
+      () => {
+        expect(screen.getByText(/settings\.reconcileRemovedImages/)).toBeInTheDocument()
+      },
+      { timeout: 3000 },
+    )
 
     // Verify the stat values appear alongside labels
     expect(screen.getByText(/settings\.reconcileRemovedImages/).textContent).toContain('7')
@@ -850,8 +898,18 @@ describe('Feature 3: Tag Translation API contract', () => {
 
   it('test_upsertTranslation_can_be_called_multiple_times_for_different_tags', async () => {
     const { api } = await import('@/lib/api')
-    await api.tags.upsertTranslation({ namespace: 'artist', name: 'foo', language: 'zh', translation: 'Foo中' })
-    await api.tags.upsertTranslation({ namespace: 'artist', name: 'bar', language: 'zh', translation: 'Bar中' })
+    await api.tags.upsertTranslation({
+      namespace: 'artist',
+      name: 'foo',
+      language: 'zh',
+      translation: 'Foo中',
+    })
+    await api.tags.upsertTranslation({
+      namespace: 'artist',
+      name: 'bar',
+      language: 'zh',
+      translation: 'Bar中',
+    })
     expect(mockUpsertTranslation).toHaveBeenCalledTimes(2)
   })
 
@@ -864,7 +922,10 @@ describe('Feature 3: Tag Translation API contract', () => {
   it('test_updateGalleryTags_remove_action_calls_api_with_correct_shape', async () => {
     const { api } = await import('@/lib/api')
     await api.tags.updateGalleryTags(42, { tags: ['artist:foo'], action: 'remove' })
-    expect(mockUpdateGalleryTags).toHaveBeenCalledWith(42, { tags: ['artist:foo'], action: 'remove' })
+    expect(mockUpdateGalleryTags).toHaveBeenCalledWith(42, {
+      tags: ['artist:foo'],
+      action: 'remove',
+    })
   })
 
   it('test_updateGalleryTags_resolves_with_status_and_affected_count', async () => {

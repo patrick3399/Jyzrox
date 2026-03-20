@@ -68,7 +68,12 @@ function readerReducer(state: ReaderState, action: ReaderAction): ReaderState {
   }
 }
 
-export function useReaderState(initialPage: number, totalPages: number, source: string, sourceId: string) {
+export function useReaderState(
+  initialPage: number,
+  totalPages: number,
+  source: string,
+  sourceId: string,
+) {
   const settings = loadReaderSettings()
   const savedDirection = loadDirection(source, sourceId)
 
@@ -338,14 +343,20 @@ export function useKeyboardNav(
         case 'ArrowRight':
         case 'd':
           e.preventDefault()
-          if (isWebtoon) { onNext() }
-          else { isRtl ? onPrev() : onNext() }
+          if (isWebtoon) {
+            onNext()
+          } else {
+            isRtl ? onPrev() : onNext()
+          }
           break
         case 'ArrowLeft':
         case 'a':
           e.preventDefault()
-          if (isWebtoon) { onPrev() }
-          else { isRtl ? onNext() : onPrev() }
+          if (isWebtoon) {
+            onPrev()
+          } else {
+            isRtl ? onNext() : onPrev()
+          }
           break
         case 'ArrowDown':
         case 's':
@@ -548,7 +559,9 @@ export function usePinchZoom(
 
   // Keep callback ref stable so the touch effect doesn't re-register on every render
   const onDoubleTapDetectedRef = useRef(onDoubleTapDetected)
-  useEffect(() => { onDoubleTapDetectedRef.current = onDoubleTapDetected }, [onDoubleTapDetected])
+  useEffect(() => {
+    onDoubleTapDetectedRef.current = onDoubleTapDetected
+  }, [onDoubleTapDetected])
 
   const resetTriggerInitRef = useRef(true)
   useEffect(() => {

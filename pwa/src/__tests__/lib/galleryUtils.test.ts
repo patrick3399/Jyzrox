@@ -110,10 +110,16 @@ describe('getSourceStyle', () => {
 
 // Minimal event stubs — only fields read by getEventPosition
 
-function makeTouchEvent(touches: { clientX: number; clientY: number }[], changedTouches: { clientX: number; clientY: number }[] = []) {
+function makeTouchEvent(
+  touches: { clientX: number; clientY: number }[],
+  changedTouches: { clientX: number; clientY: number }[] = [],
+) {
   return {
     touches: { ...touches, length: touches.length } as unknown as React.TouchEvent['touches'],
-    changedTouches: { ...changedTouches, length: changedTouches.length } as unknown as React.TouchEvent['changedTouches'],
+    changedTouches: {
+      ...changedTouches,
+      length: changedTouches.length,
+    } as unknown as React.TouchEvent['changedTouches'],
   } as unknown as React.TouchEvent
 }
 

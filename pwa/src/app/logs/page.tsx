@@ -22,7 +22,9 @@ const LEVEL_COLORS: Record<string, string> = {
 
 function LevelBadge({ level }: { level: string }) {
   return (
-    <span className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${LEVEL_COLORS[level] ?? 'bg-gray-500/20 text-gray-400'}`}>
+    <span
+      className={`px-1.5 py-0.5 rounded text-[10px] font-bold uppercase ${LEVEL_COLORS[level] ?? 'bg-gray-500/20 text-gray-400'}`}
+    >
       {level}
     </span>
   )
@@ -60,7 +62,9 @@ function LogRow({ entry }: { entry: LogEntry }) {
           </pre>
           {entry.traceback && (
             <div>
-              <p className="text-[10px] font-bold text-vault-text-muted uppercase mb-1">{t('logs.traceback')}</p>
+              <p className="text-[10px] font-bold text-vault-text-muted uppercase mb-1">
+                {t('logs.traceback')}
+              </p>
               <pre className="text-xs text-red-400 whitespace-pre-wrap break-all bg-red-500/5 rounded p-3 font-mono">
                 {entry.traceback}
               </pre>
@@ -80,9 +84,12 @@ function RetentionSettings() {
   useEffect(() => {
     if (open && !loaded.current) {
       loaded.current = true
-      api.logs.getRetention().then(d => {
-        setMaxEntries(d.max_entries)
-      }).catch(() => {})
+      api.logs
+        .getRetention()
+        .then((d) => {
+          setMaxEntries(d.max_entries)
+        })
+        .catch(() => {})
     }
   }, [open])
 
@@ -105,19 +112,25 @@ function RetentionSettings() {
           <Settings2 size={14} className="text-vault-text-muted" />
           <span className="text-sm font-medium text-vault-text">{t('logs.retention')}</span>
         </div>
-        {open ? <ChevronUp size={14} className="text-vault-text-muted" /> : <ChevronDown size={14} className="text-vault-text-muted" />}
+        {open ? (
+          <ChevronUp size={14} className="text-vault-text-muted" />
+        ) : (
+          <ChevronDown size={14} className="text-vault-text-muted" />
+        )}
       </button>
       {open && (
         <div className="px-4 pb-4 border-t border-vault-border pt-3 space-y-3">
           <div className="flex items-center gap-4">
-            <label className="text-xs text-vault-text-muted w-28 shrink-0">{t('logs.maxEntries')}</label>
+            <label className="text-xs text-vault-text-muted w-28 shrink-0">
+              {t('logs.maxEntries')}
+            </label>
             <input
               type="number"
               min={500}
               max={20000}
               step={1000}
               value={maxEntries}
-              onChange={e => setMaxEntries(Number(e.target.value))}
+              onChange={(e) => setMaxEntries(Number(e.target.value))}
               className="w-24 px-2 py-1 text-sm bg-vault-input border border-vault-border rounded text-vault-text"
             />
           </div>
@@ -171,8 +184,8 @@ export default function LogsPage() {
   }, [role, router])
 
   const toggleLevel = (level: string) => {
-    setSelectedLevels(prev =>
-      prev.includes(level) ? prev.filter(l => l !== level) : [...prev, level]
+    setSelectedLevels((prev) =>
+      prev.includes(level) ? prev.filter((l) => l !== level) : [...prev, level],
     )
   }
 
@@ -198,7 +211,7 @@ export default function LogsPage() {
 
       {/* Filter toolbar */}
       <div className="flex flex-wrap items-center gap-2">
-        {LEVELS.map(level => (
+        {LEVELS.map((level) => (
           <button
             key={level}
             onClick={() => toggleLevel(level)}
@@ -216,7 +229,7 @@ export default function LogsPage() {
 
         <select
           value={source}
-          onChange={e => setSource(e.target.value)}
+          onChange={(e) => setSource(e.target.value)}
           className="px-2 py-1.5 text-xs bg-vault-input border border-vault-border rounded text-vault-text"
         >
           <option value="">{t('logs.allSources')}</option>
@@ -225,11 +238,14 @@ export default function LogsPage() {
         </select>
 
         <div className="relative flex-1 min-w-[150px] max-w-xs">
-          <Search size={14} className="absolute left-2 top-1/2 -translate-y-1/2 text-vault-text-muted" />
+          <Search
+            size={14}
+            className="absolute left-2 top-1/2 -translate-y-1/2 text-vault-text-muted"
+          />
           <input
             type="text"
             value={search}
-            onChange={e => setSearch(e.target.value)}
+            onChange={(e) => setSearch(e.target.value)}
             placeholder={t('logs.filterSearch')}
             className="w-full pl-7 pr-2 py-1.5 text-xs bg-vault-input border border-vault-border rounded text-vault-text placeholder:text-vault-text-muted"
           />
@@ -237,7 +253,10 @@ export default function LogsPage() {
 
         <div className="flex items-center gap-2 ml-auto">
           <button
-            onClick={() => { setRealTime(!realTime); if (!realTime) clearStream() }}
+            onClick={() => {
+              setRealTime(!realTime)
+              if (!realTime) clearStream()
+            }}
             className={`flex items-center gap-1.5 px-3 py-1.5 rounded text-xs font-medium transition-colors ${
               realTime
                 ? 'bg-green-500/20 text-green-400 border border-green-500/30'
@@ -273,7 +292,9 @@ export default function LogsPage() {
       </div>
 
       {!realTime && (
-        <p className="text-xs text-vault-text-muted">{t('logs.entries', { count: String(total) })}</p>
+        <p className="text-xs text-vault-text-muted">
+          {t('logs.entries', { count: String(total) })}
+        </p>
       )}
 
       <div className="bg-vault-card rounded-lg border border-vault-border overflow-hidden">
@@ -289,7 +310,7 @@ export default function LogsPage() {
       {!realTime && hasMore && (
         <div className="flex justify-center">
           <button
-            onClick={() => setOffset(prev => prev + limit)}
+            onClick={() => setOffset((prev) => prev + limit)}
             disabled={isLoading}
             className="px-4 py-2 bg-vault-input border border-vault-border rounded text-sm text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-50"
           >

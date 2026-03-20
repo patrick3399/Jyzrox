@@ -65,7 +65,10 @@ const fullColumns: ColumnConfig = {
 }
 
 /** Reset virtualizer mocks to sane defaults between tests. */
-function setupVirtualizer(virtualItems: { key: number; index: number; start: number; size: number }[], totalSize = 0) {
+function setupVirtualizer(
+  virtualItems: { key: number; index: number; start: number; size: number }[],
+  totalSize = 0,
+) {
   mockGetVirtualItems.mockReturnValue(virtualItems)
   mockGetTotalSize.mockReturnValue(totalSize)
 }
@@ -120,11 +123,7 @@ describe('getColumnCount', () => {
 describe('VirtualGrid', () => {
   it('renders an empty container when items array is empty', () => {
     const { container } = render(
-      <VirtualGrid
-        items={[]}
-        columns={{ base: 3 }}
-        renderItem={() => <div />}
-      />
+      <VirtualGrid items={[]} columns={{ base: 3 }} renderItem={() => <div />} />,
     )
     // The component returns early: a single <div> with no children.
     const root = container.firstElementChild!
@@ -147,7 +146,7 @@ describe('VirtualGrid', () => {
         items={items}
         columns={{ base: 3 }}
         renderItem={(item) => <div data-testid={`item-${item}`}>{item}</div>}
-      />
+      />,
     )
 
     // Row 0 contains items a, b, c — all should be in the DOM.
@@ -159,21 +158,12 @@ describe('VirtualGrid', () => {
   })
 
   it('calls renderItem with the correct (item, globalIndex) arguments', () => {
-    setupVirtualizer(
-      [{ key: 0, index: 0, start: 0, size: 280 }],
-      280,
-    )
+    setupVirtualizer([{ key: 0, index: 0, start: 0, size: 280 }], 280)
 
     const renderItem = vi.fn((item: string) => <div key={item}>{item}</div>)
     const items = ['x', 'y', 'z']
 
-    render(
-      <VirtualGrid
-        items={items}
-        columns={{ base: 3 }}
-        renderItem={renderItem}
-      />
-    )
+    render(<VirtualGrid items={items} columns={{ base: 3 }} renderItem={renderItem} />)
 
     // Row 0 spans globalIndex 0-2.
     expect(renderItem).toHaveBeenCalledWith('x', 0)
@@ -192,7 +182,7 @@ describe('VirtualGrid', () => {
         renderItem={() => <div />}
         isLoading={true}
         hasMore={true}
-      />
+      />,
     )
 
     expect(screen.getByTestId('loading-spinner')).toBeInTheDocument()
@@ -209,7 +199,7 @@ describe('VirtualGrid', () => {
         isLoading={true}
         hasMore={true}
         loadingElement={<div data-testid="custom-loader">loading…</div>}
-      />
+      />,
     )
 
     expect(screen.getByTestId('custom-loader')).toBeInTheDocument()
@@ -226,7 +216,7 @@ describe('VirtualGrid', () => {
         renderItem={() => <div />}
         isLoading={false}
         hasMore={true}
-      />
+      />,
     )
 
     // The load-more wrapper div (flex justify-center py-4) is present but empty
@@ -246,17 +236,14 @@ describe('VirtualGrid', () => {
         renderItem={() => <div />}
         isLoading={false}
         hasMore={false}
-      />
+      />,
     )
 
     expect(container.querySelector('.flex.justify-center.py-4')).toBeNull()
   })
 
   it('renders without crashing when all optional props are supplied', () => {
-    setupVirtualizer(
-      [{ key: 0, index: 0, start: 0, size: 280 }],
-      280,
-    )
+    setupVirtualizer([{ key: 0, index: 0, start: 0, size: 280 }], 280)
 
     const onLoadMore = vi.fn()
     const onColCountChange = vi.fn()
@@ -278,8 +265,8 @@ describe('VirtualGrid', () => {
           onColCountChange={onColCountChange}
           onRegisterElement={onRegisterElement}
           renderItem={(item) => <div>{item}</div>}
-        />
-      )
+        />,
+      ),
     ).not.toThrow()
   })
 })

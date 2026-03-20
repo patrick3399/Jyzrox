@@ -47,10 +47,15 @@ export function t(key: string, params?: Record<string, string | number>): string
     const forms = value.split('|')
     const count = Number(params.count)
     // CJK languages have no plural distinction — use first form
-    if (currentLocale === 'zh-TW' || currentLocale === 'zh-CN' || currentLocale === 'ja' || currentLocale === 'ko') {
+    if (
+      currentLocale === 'zh-TW' ||
+      currentLocale === 'zh-CN' ||
+      currentLocale === 'ja' ||
+      currentLocale === 'ko'
+    ) {
       value = forms[0]
     } else {
-      value = count === 1 ? forms[0] : (forms[1] || forms[0])
+      value = count === 1 ? forms[0] : forms[1] || forms[0]
     }
   }
 
@@ -63,11 +68,11 @@ export function t(key: string, params?: Record<string, string | number>): string
 }
 
 const LOCALE_TO_INTL: Record<string, string> = {
-  'en': 'en-US',
+  en: 'en-US',
   'zh-TW': 'zh-TW',
   'zh-CN': 'zh-CN',
-  'ja': 'ja-JP',
-  'ko': 'ko-KR',
+  ja: 'ja-JP',
+  ko: 'ko-KR',
 }
 
 /** Format a date string or Date object according to the current locale */
@@ -76,11 +81,14 @@ export function formatDate(date: string | Date, options?: Intl.DateTimeFormatOpt
     const d = typeof date === 'string' ? new Date(date) : date
     if (isNaN(d.getTime())) return ''
     const intlLocale = LOCALE_TO_INTL[currentLocale] || 'en-US'
-    return new Intl.DateTimeFormat(intlLocale, options ?? {
-      year: 'numeric',
-      month: 'short',
-      day: 'numeric',
-    }).format(d)
+    return new Intl.DateTimeFormat(
+      intlLocale,
+      options ?? {
+        year: 'numeric',
+        month: 'short',
+        day: 'numeric',
+      },
+    ).format(d)
   } catch {
     return ''
   }

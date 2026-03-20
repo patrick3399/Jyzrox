@@ -117,9 +117,13 @@ vi.mock('@/components/RatingStars', () => ({
 }))
 
 vi.mock('@/components/VirtualGrid', () => ({
-  VirtualGrid: ({ items, renderItem }: { items: unknown[]; renderItem: (item: unknown, index: number) => React.ReactNode }) => (
-    <div data-testid="virtual-grid">{items.map((item, i) => renderItem(item, i))}</div>
-  ),
+  VirtualGrid: ({
+    items,
+    renderItem,
+  }: {
+    items: unknown[]
+    renderItem: (item: unknown, index: number) => React.ReactNode
+  }) => <div data-testid="virtual-grid">{items.map((item, i) => renderItem(item, i))}</div>,
 }))
 
 // ── Import page after mocks ──────────────────────────────────────────
@@ -155,10 +159,22 @@ const EMPTY_TOPLIST_RESULT = { galleries: [], total: 0, page: 0 }
 
 function setDefaultHooks() {
   mockUseEhSearch.mockReturnValue({ data: EMPTY_SEARCH_RESULT, isLoading: false, error: null })
-  mockUseEhPopular.mockReturnValue({ data: { galleries: [], total: 0 }, isLoading: false, error: null })
+  mockUseEhPopular.mockReturnValue({
+    data: { galleries: [], total: 0 },
+    isLoading: false,
+    error: null,
+  })
   mockUseEhToplist.mockReturnValue({ data: EMPTY_TOPLIST_RESULT, isLoading: false, error: null })
   mockUseEhFavorites.mockReturnValue({
-    data: { galleries: [], total: 0, has_next: false, has_prev: false, next_cursor: null, prev_cursor: null, categories: [] },
+    data: {
+      galleries: [],
+      total: 0,
+      has_next: false,
+      has_prev: false,
+      next_cursor: null,
+      prev_cursor: null,
+      categories: [],
+    },
     isLoading: false,
     error: null,
   })

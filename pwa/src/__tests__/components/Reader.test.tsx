@@ -40,7 +40,12 @@ vi.mock('next/navigation', () => ({
 
 // Mock all Reader hooks so we don't need a real API / Redis / etc.
 vi.mock('@/components/Reader/hooks', () => ({
-  useReaderState: (initialPage: number, _totalPages: number, _source: string, _sourceId: string) => ({
+  useReaderState: (
+    initialPage: number,
+    _totalPages: number,
+    _source: string,
+    _sourceId: string,
+  ) => ({
     state: {
       currentPage: initialPage,
       viewMode: 'single' as const,
@@ -244,7 +249,7 @@ describe('Reader — proxy mode', () => {
           gallery_id: 1,
           page_num: 1,
           filename: '1.jpg',
-          file_path: null,   // no local file → proxy URL
+          file_path: null, // no local file → proxy URL
           thumb_path: null,
           width: null,
           height: null,

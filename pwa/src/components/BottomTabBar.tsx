@@ -76,9 +76,7 @@ export function BottomTabBar({ onMoreClick }: BottomTabBarProps) {
             key={href}
             href={href}
             className={`flex flex-col items-center justify-center flex-1 gap-1 text-xs transition-colors relative ${
-              isActive
-                ? 'text-vault-accent'
-                : 'text-vault-text-secondary hover:text-vault-text'
+              isActive ? 'text-vault-accent' : 'text-vault-text-secondary hover:text-vault-text'
             }`}
           >
             <span className="relative">

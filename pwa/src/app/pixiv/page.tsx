@@ -21,14 +21,18 @@ import type { PixivIllust, PixivSearchResult, PixivUserPreview } from '@/lib/typ
 // ── Pixiv illust list-view row ────────────────────────────────────────
 
 function IllustListRow({ illust }: { illust: PixivIllust }) {
-  const { downloading, bookmarked, bookmarking, handleDownload, handleBookmark } = useIllustActions(illust)
+  const { downloading, bookmarked, bookmarking, handleDownload, handleBookmark } =
+    useIllustActions(illust)
   const thumbUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
 
   const visibleTags = illust.tags.slice(0, 4)
   const extraTagCount = illust.tags.length - visibleTags.length
 
   return (
-    <Link href={`/pixiv/illust/${illust.id}`} className="group flex gap-3 p-3 bg-vault-card border border-vault-border rounded-lg hover:border-vault-accent transition-colors">
+    <Link
+      href={`/pixiv/illust/${illust.id}`}
+      className="group flex gap-3 p-3 bg-vault-card border border-vault-border rounded-lg hover:border-vault-accent transition-colors"
+    >
       {/* Thumbnail */}
       <div className="shrink-0 w-[72px] h-[72px] rounded overflow-hidden bg-vault-input relative">
         <img
@@ -64,15 +68,25 @@ function IllustListRow({ illust }: { illust: PixivIllust }) {
               </span>
             ))}
             {extraTagCount > 0 && (
-              <span className="px-1 py-0.5 text-[10px] text-vault-text-muted">+{extraTagCount}</span>
+              <span className="px-1 py-0.5 text-[10px] text-vault-text-muted">
+                +{extraTagCount}
+              </span>
             )}
           </div>
         )}
 
         {/* Bottom row */}
         <div className="flex items-center gap-3 mt-auto text-[10px] text-vault-text-secondary">
-          {illust.total_view > 0 && <span>{illust.total_view.toLocaleString()} {t('pixiv.views')}</span>}
-          {illust.total_bookmarks > 0 && <span>{illust.total_bookmarks.toLocaleString()} {t('pixiv.bookmarks')}</span>}
+          {illust.total_view > 0 && (
+            <span>
+              {illust.total_view.toLocaleString()} {t('pixiv.views')}
+            </span>
+          )}
+          {illust.total_bookmarks > 0 && (
+            <span>
+              {illust.total_bookmarks.toLocaleString()} {t('pixiv.bookmarks')}
+            </span>
+          )}
           <div className="ml-auto flex items-center gap-1.5">
             <button
               onClick={handleBookmark}
@@ -98,7 +112,8 @@ function IllustListRow({ illust }: { illust: PixivIllust }) {
 // ── Illust card ──────────────────────────────────────────────────────────
 
 function IllustCard({ illust }: { illust: PixivIllust }) {
-  const { downloading, bookmarked, bookmarking, handleDownload, handleBookmark } = useIllustActions(illust)
+  const { downloading, bookmarked, bookmarking, handleDownload, handleBookmark } =
+    useIllustActions(illust)
   const thumbUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
 
   return (
@@ -139,8 +154,12 @@ function IllustCard({ illust }: { illust: PixivIllust }) {
         <p className="text-xs text-vault-text-secondary truncate">{illust.user.name}</p>
         {(illust.total_view > 0 || illust.total_bookmarks > 0) && (
           <div className="flex items-center gap-2 mt-0.5 text-[10px] text-vault-text-secondary">
-            <span>{illust.total_view.toLocaleString()} {t('pixiv.views')}</span>
-            <span>{illust.total_bookmarks.toLocaleString()} {t('pixiv.bookmarks')}</span>
+            <span>
+              {illust.total_view.toLocaleString()} {t('pixiv.views')}
+            </span>
+            <span>
+              {illust.total_bookmarks.toLocaleString()} {t('pixiv.bookmarks')}
+            </span>
           </div>
         )}
       </div>
@@ -191,7 +210,8 @@ function SearchResults({
   viewMode: 'grid' | 'list'
 }) {
   // Map sort values for public API: date_desc→date_d, date_asc→date, popular_desc→popular_d
-  const publicOrder = sort === 'date_asc' ? 'date' : sort === 'popular_desc' ? 'popular_d' : 'date_d'
+  const publicOrder =
+    sort === 'date_asc' ? 'date' : sort === 'popular_desc' ? 'popular_d' : 'date_d'
 
   const getKey = (pageIndex: number, previous: PixivSearchResult | null) => {
     if (!query) return null
@@ -453,14 +473,21 @@ function UserPreviewCard({ preview }: { preview: PixivUserPreview }) {
                 src={api.pixiv.imageProxyUrl(illust.image_urls.square_medium)}
                 alt=""
                 className="absolute inset-0 w-full h-full object-cover"
-                onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+                onError={(e) => {
+                  ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+                }}
               />
             </div>
           ))}
         </div>
       ) : (
-        <div className="flex items-center justify-center bg-vault-input" style={{ aspectRatio: '3/1' }}>
-          <span className="text-[10px] text-vault-text-muted uppercase tracking-widest">{t('pixiv.noWorks')}</span>
+        <div
+          className="flex items-center justify-center bg-vault-input"
+          style={{ aspectRatio: '3/1' }}
+        >
+          <span className="text-[10px] text-vault-text-muted uppercase tracking-widest">
+            {t('pixiv.noWorks')}
+          </span>
         </div>
       )}
       {/* Artist info row */}
@@ -470,21 +497,19 @@ function UserPreviewCard({ preview }: { preview: PixivUserPreview }) {
             src={api.pixiv.imageProxyUrl(preview.user.profile_image)}
             alt={preview.user.name}
             className="w-7 h-7 rounded-full object-cover bg-vault-input shrink-0"
-            onError={(e) => { (e.currentTarget as HTMLImageElement).style.display = 'none' }}
+            onError={(e) => {
+              ;(e.currentTarget as HTMLImageElement).style.display = 'none'
+            }}
           />
         ) : (
           <div className="w-7 h-7 rounded-full bg-vault-input shrink-0" />
         )}
-        <p className="text-xs font-medium text-vault-text truncate flex-1">
-          {preview.user.name}
-        </p>
+        <p className="text-xs font-medium text-vault-text truncate flex-1">{preview.user.name}</p>
         <button
           onClick={handleToggleFollow}
           disabled={toggling}
           className={`shrink-0 text-[10px] px-1.5 py-0.5 rounded transition-colors disabled:opacity-50 ${
-            followed
-              ? 'text-vault-text-secondary hover:text-red-400'
-              : 'text-vault-accent'
+            followed ? 'text-vault-text-secondary hover:text-red-400' : 'text-vault-accent'
           }`}
         >
           {toggling ? '...' : followed ? t('pixiv.unfollow') : t('pixiv.follow')}
@@ -505,7 +530,10 @@ function FollowingTab({
   focusedIndex: number | null
   onColCountChange: (count: number) => void
 }) {
-  const getKey = (pageIndex: number, previous: { user_previews: PixivUserPreview[]; next_offset: number | null } | null) => {
+  const getKey = (
+    pageIndex: number,
+    previous: { user_previews: PixivUserPreview[]; next_offset: number | null } | null,
+  ) => {
     if (credentialsMissing) return null
     if (pageIndex > 0 && previous?.next_offset === null) return null
     const offset = pageIndex === 0 ? 0 : (previous?.next_offset ?? 0)
@@ -765,7 +793,8 @@ function RankingTab({
 
   const { data, size, setSize, isValidating, error } = useSWRInfinite<RankingPage>(
     getKey,
-    ([, m, c, p]) => api.pixiv.ranking({ mode: m as string, content: c as string, page: p as number }),
+    ([, m, c, p]) =>
+      api.pixiv.ranking({ mode: m as string, content: c as string, page: p as number }),
     { revalidateFirstPage: false },
   )
 
@@ -805,11 +834,13 @@ function RankingTab({
           onChange={(e) => onModeChange(e.target.value)}
           className="px-3 py-1.5 rounded-lg bg-vault-input border border-vault-border text-vault-text text-sm focus:outline-none focus:border-vault-accent"
         >
-          {RANKING_MODES.filter((o) => !r18 || o.value === 'daily' || o.value === 'weekly').map((o) => (
-            <option key={o.value} value={o.value}>
-              {o.label()}
-            </option>
-          ))}
+          {RANKING_MODES.filter((o) => !r18 || o.value === 'daily' || o.value === 'weekly').map(
+            (o) => (
+              <option key={o.value} value={o.value}>
+                {o.label()}
+              </option>
+            ),
+          )}
         </select>
         <button
           type="button"
@@ -932,7 +963,9 @@ function PixivPageInner() {
   const [searchDuration, setSearchDuration] = useState(searchParams.get('duration') ?? '')
 
   // ── Bookmarks sub-filter state (lifted for URL sync) ──
-  const [bookmarksRestrict, setBookmarksRestrict] = useState(searchParams.get('restrict') ?? 'public')
+  const [bookmarksRestrict, setBookmarksRestrict] = useState(
+    searchParams.get('restrict') ?? 'public',
+  )
 
   // Each tab manages its own colCount internally; this no-op satisfies the prop interface
   const noop = () => {}
@@ -996,10 +1029,22 @@ function PixivPageInner() {
 
   // ── Scroll restoration (per tab) ──
   // isReady is approximated by active tab match; actual data readiness is inside each tab
-  const { saveScroll: saveRankingScroll } = useScrollRestore('pixiv_ranking_scrollY', activeTab === 'ranking')
-  const { saveScroll: saveFeedScroll } = useScrollRestore('pixiv_feed_scrollY', activeTab === 'feed')
-  const { saveScroll: saveBookmarksScroll } = useScrollRestore('pixiv_bookmarks_scrollY', activeTab === 'bookmarks')
-  const { saveScroll: saveSearchScroll } = useScrollRestore('pixiv_search_scrollY', submittedQuery.length > 0)
+  const { saveScroll: saveRankingScroll } = useScrollRestore(
+    'pixiv_ranking_scrollY',
+    activeTab === 'ranking',
+  )
+  const { saveScroll: saveFeedScroll } = useScrollRestore(
+    'pixiv_feed_scrollY',
+    activeTab === 'feed',
+  )
+  const { saveScroll: saveBookmarksScroll } = useScrollRestore(
+    'pixiv_bookmarks_scrollY',
+    activeTab === 'bookmarks',
+  )
+  const { saveScroll: saveSearchScroll } = useScrollRestore(
+    'pixiv_search_scrollY',
+    submittedQuery.length > 0,
+  )
 
   // focusedIndex is managed inside each tab component using useGridKeyboard
   // we only need to pass down saveScroll and onColCountChange
@@ -1135,11 +1180,7 @@ function PixivPageInner() {
             />
           )}
           {activeTab === 'following' && !credentialsMissing && (
-            <FollowingTab
-              credentialsMissing={false}
-              focusedIndex={null}
-              onColCountChange={noop}
-            />
+            <FollowingTab credentialsMissing={false} focusedIndex={null} onColCountChange={noop} />
           )}
           {activeTab === 'bookmarks' && !credentialsMissing && (
             <BookmarksTab

@@ -57,15 +57,16 @@ export function ReviewList() {
   }
 
   if (settingsLoading) {
-    return <div className="flex justify-center py-8"><LoadingSpinner /></div>
+    return (
+      <div className="flex justify-center py-8">
+        <LoadingSpinner />
+      </div>
+    )
   }
 
   if (!phashEnabled) {
     return (
-      <EmptyState
-        title={t('dedup.emptyNotEnabled')}
-        description={t('dedup.emptyNotEnabledDesc')}
-      />
+      <EmptyState title={t('dedup.emptyNotEnabled')} description={t('dedup.emptyNotEnabledDesc')} />
     )
   }
 
@@ -75,7 +76,7 @@ export function ReviewList() {
         <h2 className="font-medium text-vault-text text-sm">{t('dedup.reviewTitle')}</h2>
         {/* Filter tabs */}
         <div className="flex gap-1">
-          {FILTERS.map(f => (
+          {FILTERS.map((f) => (
             <button
               key={f.key}
               onClick={() => setFilter(f.key)}
@@ -92,16 +93,15 @@ export function ReviewList() {
       </div>
 
       {isLoading && items.length === 0 ? (
-        <div className="flex justify-center py-8"><LoadingSpinner /></div>
+        <div className="flex justify-center py-8">
+          <LoadingSpinner />
+        </div>
       ) : items.length === 0 ? (
-        <EmptyState
-          title={t('dedup.emptyDone')}
-          description={t('dedup.emptyDoneDesc')}
-        />
+        <EmptyState title={t('dedup.emptyDone')} description={t('dedup.emptyDoneDesc')} />
       ) : (
         <>
           <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {items.map(item => (
+            {items.map((item) => (
               <RelationshipCard
                 key={item.id}
                 item={item}

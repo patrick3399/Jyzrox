@@ -16,7 +16,9 @@ export function RatingStars({ rating, readonly = false, onChange }: RatingStarsP
     <div
       className="inline-flex items-center gap-0.5"
       role={readonly ? undefined : 'group'}
-      aria-label={readonly ? t('common.ratingOf', { rating: String(rating) }) : t('common.setRating')}
+      aria-label={
+        readonly ? t('common.ratingOf', { rating: String(rating) }) : t('common.setRating')
+      }
     >
       {Array.from({ length: 5 }, (_, i) => {
         const starIndex = i + 1

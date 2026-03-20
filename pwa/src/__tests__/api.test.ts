@@ -378,9 +378,7 @@ describe('apiFetch — HTTP status codes', () => {
       value: { pathname: '/library', href: '' } as Location,
     })
 
-    vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ status: 401, ok: false, jsonBody: {} }),
-    )
+    vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ status: 401, ok: false, jsonBody: {} }))
 
     await expect(api.library.getGalleries()).rejects.toThrow('Unauthorized')
     expect(window.location.href).toBe('/login')
@@ -405,9 +403,7 @@ describe('apiFetch — HTTP status codes', () => {
       value: { pathname: '/library', href: '' } as Location,
     })
 
-    vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ status: 403, ok: false, jsonBody: {} }),
-    )
+    vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ status: 403, ok: false, jsonBody: {} }))
 
     await expect(api.library.getGalleries()).rejects.toThrow('Forbidden')
     expect(window.location.href).toBe('/forbidden')
@@ -422,9 +418,7 @@ describe('apiFetch — HTTP status codes', () => {
   it('should throw the rate-limit error message on 429 response', async () => {
     const { api } = await import('../lib/api')
 
-    vi.mocked(fetch).mockResolvedValueOnce(
-      makeResponse({ status: 429, ok: false, jsonBody: {} }),
-    )
+    vi.mocked(fetch).mockResolvedValueOnce(makeResponse({ status: 429, ok: false, jsonBody: {} }))
 
     await expect(api.library.getGalleries()).rejects.toThrow()
   })
