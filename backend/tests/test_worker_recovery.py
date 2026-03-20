@@ -175,6 +175,7 @@ def _startup_patches(session, mock_enqueue=None, mock_emit=None):
         patch("core.site_config.site_config_service", mock_site_config),
         patch("core.adaptive.adaptive_engine", mock_adaptive),
         patch("worker.ensure_venv", new_callable=AsyncMock),
+        patch("worker._ensure_archive_table_schema", new_callable=AsyncMock),
         patch("core.database.AsyncSessionLocal", return_value=session),
         patch("worker.enqueue_download_job", mock_enqueue),
         patch("worker.compute_arq_job_id", side_effect=lambda jid, rc: f"arq-{jid}-{rc}"),
