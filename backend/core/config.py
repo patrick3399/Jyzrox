@@ -52,8 +52,6 @@ class Settings(BaseSettings):
     data_avatars_path: str = "/data/avatars"
     data_cas_path: str = "/data/cas"
     data_library_path: str = "/data/library"
-    data_archive_path: str = "/data/archive"
-
     # Disk space
     disk_min_free_gb: float = 2.0
 
@@ -77,6 +75,15 @@ class Settings(BaseSettings):
     library_base_path: str = "/mnt"  # Default root for user-mounted external media
     watcher_use_polling: bool = False
     watcher_polling_interval: int = 60  # seconds
+
+    @property
+    def gdl_archive_dsn(self) -> str:
+        """Build a psycopg-compatible DSN from the asyncpg database_url.
+
+        Converts: postgresql+asyncpg://user:pass@host:port/db
+        To:       postgresql://user:pass@host:port/db
+        """
+        return self.database_url.replace("+asyncpg", "")
 
     model_config = {"env_file": ".env", "case_sensitive": False}
 

@@ -78,7 +78,7 @@ def mock_config_path(tmp_path):
     with patch("plugins.builtin.gallery_dl.source.settings") as mock_settings:
         mock_settings.data_gallery_path = "/data/gallery"
         mock_settings.gallery_dl_config = str(config_file)
-        mock_settings.data_archive_path = str(tmp_path / "archive")
+        mock_settings.gdl_archive_dsn = "postgresql://test:test@localhost:5432/test"
         yield config_file
 
 
@@ -157,3 +157,149 @@ async def test_empty_value_skipped(mock_config_path):
 
     config = json.loads(mock_config_path.read_text())
     assert "twitter" not in config["extractor"]
+
+
+# ── v3.0 config tests ──
+
+
+@pytest.mark.asyncio
+async def test_v3_config_has_pg_archive(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    assert "archive" in config["extractor"]
+    assert config["extractor"]["archive"].startswith("postgresql://")
+    assert config["extractor"]["archive-table"] == "{category}"
+
+
+@pytest.mark.asyncio
+async def test_v3_config_has_native_rate_limiting(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    assert "sleep-429" in config["extractor"]
+    assert "sleep-retries" in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_v3_config_has_file_unique(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    assert config["extractor"]["file-unique"] is True
+
+
+@pytest.mark.asyncio
+async def test_v3_subscription_has_archive_mode_memory(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({}, job_context="subscription")
+    config = json.loads(mock_config_path.read_text())
+    assert config["extractor"]["archive-mode"] == "memory"
+
+
+@pytest.mark.asyncio
+async def test_v3_manual_no_archive_mode_memory(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    assert "archive-mode" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_v3_config_has_postprocessors(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    pp_names = [pp["name"] for pp in config.get("postprocessors", [])]
+    assert "hash" in pp_names
+    assert "mtime" in pp_names
+
+
+@pytest.mark.asyncio
+async def test_v3_metadata_pp_with_include_filter(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    meta_pps = [pp for pp in config["postprocessors"] if pp["name"] == "metadata"]
+    assert len(meta_pps) == 1
+    assert "include" in meta_pps[0]
+    assert "title" in meta_pps[0]["include"]
+    assert "tags" in meta_pps[0]["include"]
+
+
+@pytest.mark.asyncio
+async def test_v3_config_has_content_integrity(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    assert config["extractor"]["filesize-min"] == "1k"
+    assert config["downloader"]["adjust-extensions"] is True
+
+
+@pytest.mark.asyncio
+async def test_v3_subscription_context_has_abort_and_date(mock_config_path):
+    from datetime import UTC, datetime
+
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    last = datetime(2026, 3, 15, 8, 0, 0, tzinfo=UTC)
+    await _build_gallery_dl_config({}, job_context="subscription", last_completed_at=last)
+    config = json.loads(mock_config_path.read_text())
+    assert config["extractor"]["skip"] == "abort:10"
+    assert "date-after" in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_v3_manual_context_no_abort(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    assert "skip" not in config["extractor"]
+
+
+@pytest.mark.asyncio
+async def test_v3_pixiv_has_ugoira_pp(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({"pixiv": "token123"})
+    config = json.loads(mock_config_path.read_text())
+    pp_names = [pp["name"] for pp in config.get("postprocessors", [])]
+    assert "ugoira" in pp_names
+
+
+@pytest.mark.asyncio
+async def test_v3_non_pixiv_no_ugoira(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'})
+    config = json.loads(mock_config_path.read_text())
+    pp_names = [pp["name"] for pp in config.get("postprocessors", [])]
+    assert "ugoira" not in pp_names
+
+
+@pytest.mark.asyncio
+async def test_v3_archive_format_not_overridden(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    assert "archive-format" not in config["extractor"]
+    assert config["extractor"]["archive-table"] == "{category}"
+
+
+@pytest.mark.asyncio
+async def test_v3_cookie_source_has_cookies_update(mock_config_path):
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'})
+    config = json.loads(mock_config_path.read_text())
+    assert config["extractor"]["ehentai"].get("cookies-update") is True

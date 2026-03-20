@@ -13,6 +13,7 @@ import logging
 import os
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
+from datetime import datetime
 from pathlib import Path
 
 from core.config import settings
@@ -83,14 +84,19 @@ def _is_fragment(cred_val: str) -> bool:
     return _try_parse_fragment(cred_val) is not None
 
 
-async def _build_gallery_dl_config(credentials: dict, config_id: str | None = None) -> Path:
-    """Write source-specific credentials and tuning params into the gallery-dl config file.
+async def _build_gallery_dl_config(
+    credentials: dict,
+    config_id: str | None = None,
+    job_context: str = "manual",
+    last_completed_at: datetime | None = None,
+) -> Path:
+    """Write gallery-dl config with v3.0 features: PG archive, native rate-limiting, postprocessors.
 
     Args:
         credentials: Dict mapping source name -> credential value string.
-                     e.g. {"ehentai": '{"ipb_member_id": ...}', "pixiv": "token..."}
-        config_id: When provided, writes to /app/config/gallery-dl-{config_id}.json
-                   instead of the shared config file. Enables per-job config isolation.
+        config_id: Per-job config isolation key.
+        job_context: "manual" or "subscription" — controls archive-mode and skip behavior.
+        last_completed_at: For subscription context, enables date-after optimization.
 
     Returns:
         Path to the config file written.
@@ -101,21 +107,89 @@ async def _build_gallery_dl_config(credentials: dict, config_id: str | None = No
         "extractor": {
             "base-directory": settings.data_gallery_path,
             "directory": [],
+            # N1: PostgreSQL archive — tables pre-created in init.sql
+            "archive": settings.gdl_archive_dsn,
+            "archive-table": "{category}",
+            # N3: native rate limiting (offloaded from adaptive engine)
+            "sleep-429": 60,
+            "sleep-retries": 10,
+            # N4: content integrity
+            "filesize-min": "1k",
+            # N10b: file-unique prevents duplicate URLs within a single run
+            "file-unique": True,
         },
+        "downloader": {
+            # N4: adjust-extensions ensures correct file extensions
+            "adjust-extensions": True,
+        },
+        "postprocessors": [
+            # N5: hash PP — sha256 streamed via --Print
+            {"name": "hash", "algorithm": "sha256"},
+            # N5: mtime PP — preserves original upload timestamp
+            {"name": "mtime"},
+            # N10d: metadata PP with include filter (replaces --write-metadata --write-tags)
+            {
+                "name": "metadata",
+                "mode": "json",
+                "include": [
+                    "category",
+                    "subcategory",
+                    "title",
+                    "title_en",
+                    "title_jpn",
+                    "tags",
+                    "tag_string",
+                    "description",
+                    "id",
+                    "gallery_id",
+                    "uploader",
+                    "user",
+                    "artist",
+                    "date",
+                    "posted_at",
+                    "count",
+                    "num",
+                    "rating",
+                    "language",
+                ],
+            },
+        ],
     }
 
-    # Inject per-site sleep-request via SiteConfigService (config file method)
+    # N2: subscription optimization
+    if job_context == "subscription":
+        config["extractor"]["skip"] = "abort:10"
+        # N10a: archive-mode memory for batch writes (subscription)
+        config["extractor"]["archive-mode"] = "memory"
+        if last_completed_at:
+            from datetime import datetime as _dt
+
+            if isinstance(last_completed_at, _dt):
+                config["extractor"]["date-after"] = last_completed_at.strftime("%Y-%m-%dT%H:%M:%S")
+
+    # Inject per-site sleep-request via SiteConfigService
     from core.site_config import site_config_service
 
     all_params = await site_config_service.get_all_download_params()
     for site_cfg in GDL_SITES:
         params = all_params.get(site_cfg.source_id)
-        if params and params.sleep_request is not None:
-            ext = site_cfg.extractor or site_cfg.source_id
-            entry = config["extractor"].setdefault(ext, {})
+        if not params:
+            continue
+        ext = site_cfg.extractor or site_cfg.source_id
+        entry = config["extractor"].setdefault(ext, {})
+
+        if params.sleep_request is not None:
             entry["sleep-request"] = (
                 list(params.sleep_request) if isinstance(params.sleep_request, tuple) else params.sleep_request
             )
+
+        # N7: per-site browser profile for anti-bot defense
+        if params.browser_profile:
+            entry["browser"] = params.browser_profile
+
+        # N7: per-site proxy
+        if params.proxy_url:
+            entry["proxy"] = params.proxy_url
 
     # Merge credentials on top
     for src, cred_val in credentials.items():
@@ -126,13 +200,13 @@ async def _build_gallery_dl_config(credentials: dict, config_id: str | None = No
 
         fragment = _try_parse_fragment(cred_val)
         if fragment is not None:
-            # New format: merge gallery-dl config fragment directly
             config["extractor"].setdefault(ext, {}).update(fragment)
             if "cookies" in fragment:
                 for extra in cfg.extra_extractors:
                     config["extractor"].setdefault(extra, {})["cookies"] = fragment["cookies"]
+                # N8: cookies-update for sources with cookie auth
+                config["extractor"][ext]["cookies-update"] = True
         else:
-            # Legacy format: existing 3-way branch (EH cookies, Pixiv token, etc.)
             if cfg.credential_type == "refresh_token":
                 config["extractor"].setdefault(ext, {})["refresh-token"] = cred_val
             elif cfg.credential_type == "cookies":
@@ -141,9 +215,20 @@ async def _build_gallery_dl_config(credentials: dict, config_id: str | None = No
                     config["extractor"].setdefault(ext, {})["cookies"] = cookies
                     for extra in cfg.extra_extractors:
                         config["extractor"].setdefault(extra, {})["cookies"] = cookies
+                    # N8: cookies-update for legacy format too
+                    config["extractor"][ext]["cookies-update"] = True
                 except (json.JSONDecodeError, TypeError):
                     logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
-            # credential_type == "none" → skip
+
+    # N6: ugoira PP for Pixiv (convert animated illustrations to MP4)
+    if "pixiv" in credentials and credentials["pixiv"]:
+        config["postprocessors"].append(
+            {
+                "name": "ugoira",
+                "ffmpeg-output": True,
+                "extension": "mp4",
+            }
+        )
 
     config_path = Path(f"/app/config/gallery-dl-{config_id}.json") if config_id else Path(settings.gallery_dl_config)
     tmp_path = config_path.with_suffix(".tmp")
@@ -458,6 +543,8 @@ class GalleryDlPlugin(SourcePlugin):
         config_path = await _build_gallery_dl_config(
             credentials,
             config_id=options.get("config_id") if options else None,
+            job_context=options.get("job_context", "manual") if options else "manual",
+            last_completed_at=options.get("last_completed_at") if options else None,
         )
 
         from worker.gallery_dl_venv import get_gdl_bin
@@ -467,19 +554,9 @@ class GalleryDlPlugin(SourcePlugin):
             "--config-ignore",
             "--config",
             str(config_path),
-            "--write-metadata",
-            "--write-tags",
             "--directory",
             str(dest_dir),
         ]
-
-        # Download archive — skip already-downloaded URLs (unless skip_archive requested)
-        if not (options and options.get("skip_archive")):
-            from pathlib import Path as _Path
-
-            archive_dir = _Path(settings.data_archive_path)
-            archive_dir.mkdir(parents=True, exist_ok=True)
-            cmd += ["--download-archive", str(archive_dir / "gallery-dl.db")]
 
         # Per-site download tuning via SiteConfigService
         from urllib.parse import urlparse as _urlparse
