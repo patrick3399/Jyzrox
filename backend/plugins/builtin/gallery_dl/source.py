@@ -38,7 +38,7 @@ _PROGRESS_EVERY_S = 10.0
 _MAX_STDERR_LINES = 10000
 
 # Fields included in the metadata postprocessor JSON output.
-_METADATA_INCLUDE = [
+_METADATA_INCLUDE = (
     "category",
     "subcategory",
     "title",
@@ -58,7 +58,7 @@ _METADATA_INCLUDE = [
     "num",
     "rating",
     "language",
-]
+)
 
 
 def _build_supported_sites() -> list[SiteInfo]:
@@ -496,11 +496,11 @@ async def _on_file_with_validation(
 def _read_url_file(path: Path) -> list[str]:
     """Read and delete a URL file (--write-unsupported / --error-file output)."""
     try:
-        lines = [line.strip() for line in path.read_text().splitlines() if line.strip()]
-        path.unlink(missing_ok=True)
-        return lines
+        return [line.strip() for line in path.read_text().splitlines() if line.strip()]
     except OSError:
         return []
+    finally:
+        path.unlink(missing_ok=True)
 
 
 class GalleryDlPlugin(SourcePlugin):
