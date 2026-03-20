@@ -1207,16 +1207,17 @@ function ThumbnailStrip({
                 const ox = Number(parts[1])
                 const cellW = Number(parts[2]) || 200
                 const cellH = Number(parts[3]) || 300
-                // Always scale by height to fill 80px; crop excess width
-                const scale = thumbH / cellH
+                const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
+                const naturalSize = spriteNaturalSizes[proxyUrl]
+                // Use sprite's actual height for scale when available; fall back to HTML cellH
+                const spriteH = naturalSize?.h ?? cellH
+                const scale = thumbH / spriteH
                 const scaledOx = Math.abs(ox) * scale
                 // Center the crop horizontally within the 60px button
                 const scaledCellW = cellW * scale
                 const cropOffset = scaledCellW > thumbW ? (scaledCellW - thumbW) / 2 : 0
-                const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
-                const naturalSize = spriteNaturalSizes[proxyUrl]
                 const bgSize = naturalSize
-                  ? `${naturalSize.w * scale}px ${naturalSize.h * scale}px`
+                  ? `${naturalSize.w * scale}px ${thumbH}px`
                   : `auto ${thumbH}px`
                 spriteStyle = {
                   backgroundImage: `url(${proxyUrl})`,
