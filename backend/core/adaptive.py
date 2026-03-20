@@ -1,8 +1,8 @@
-"""Adaptive rate limiting engine — M6.
+"""Adaptive engine — v3.0.
 
-Tracks per-source download signals (429s, timeouts, successes) in Redis and
-auto-tunes sleep multipliers and HTTP timeouts.  DB persistence is handled by
-adaptive_persist_job (cron every 5 minutes).
+Tracks per-source credential health signals in Redis and persists warnings to
+PostgreSQL.  Sleep multipliers and timeout tuning removed in v3; those
+responsibilities moved to the download worker directly.
 """
 
 from __future__ import annotations
@@ -16,35 +16,22 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
-# ── Compiled regex patterns for signal detection ──────────────────────
+# ── Compiled regex patterns ────────────────────────────────────────────
 
-_RE_429 = re.compile(r"HTTP Error 429|429 Too Many", re.IGNORECASE)
-_RE_503 = re.compile(r"HTTP Error 503|503 Service", re.IGNORECASE)
 _RE_403 = re.compile(r"HTTP Error 403|403 Forbidden", re.IGNORECASE)
-_RE_TIMEOUT = re.compile(r"timed out|TimeoutError|Read timed out", re.IGNORECASE)
-_RE_CONN = re.compile(r"ConnectionError|Name.*not known|Connection refused", re.IGNORECASE)
 
 
 # ── Data models ───────────────────────────────────────────────────────
 
 
 class AdaptiveSignal(str, Enum):
-    HTTP_429 = "http_429"
-    HTTP_503 = "http_503"
     HTTP_403 = "http_403"
-    TIMEOUT = "timeout"
-    CONNECTION_ERROR = "connection_error"
-    SUCCESS = "success"
     HTML_RESPONSE = "html_response"
-    EMPTY_FILE = "empty_file"
 
 
 @dataclass
 class AdaptiveState:
-    sleep_multiplier: float = 1.0
-    http_timeout_add: int = 0
     credential_warning: bool = False
-    consecutive_success: int = 0
     last_signal: str | None = None
     last_signal_at: str | None = None
 
@@ -53,33 +40,12 @@ class AdaptiveState:
         """Reconstruct AdaptiveState from JSON dict, safely coercing types."""
         try:
             return AdaptiveState(
-                sleep_multiplier=float(data.get("sleep_multiplier", 1.0)),
-                http_timeout_add=int(data.get("http_timeout_add", 0)),
                 credential_warning=bool(data.get("credential_warning", False)),
-                consecutive_success=int(data.get("consecutive_success", 0)),
                 last_signal=data.get("last_signal") or None,
                 last_signal_at=data.get("last_signal_at") or None,
             )
         except (ValueError, TypeError, AttributeError):
             return AdaptiveState()
-
-
-# ── Pure signal parser ────────────────────────────────────────────────
-
-
-def parse_adaptive_signal(line: str) -> AdaptiveSignal | None:
-    """Parse a gallery-dl stderr line and return an AdaptiveSignal if recognised."""
-    if _RE_429.search(line):
-        return AdaptiveSignal.HTTP_429
-    if _RE_503.search(line):
-        return AdaptiveSignal.HTTP_503
-    if _RE_403.search(line):
-        return AdaptiveSignal.HTTP_403
-    if _RE_TIMEOUT.search(line):
-        return AdaptiveSignal.TIMEOUT
-    if _RE_CONN.search(line):
-        return AdaptiveSignal.CONNECTION_ERROR
-    return None
 
 
 # ── AdaptiveEngine ────────────────────────────────────────────────────
@@ -97,20 +63,18 @@ class AdaptiveEngine:
 
     _DIRTY_KEY = "adaptive:dirty"
 
-    # Lua: atomic read-modify-write for all signal types.
+    # Lua: atomic read-modify-write for credential signals only.
     # KEYS[1] = adaptive:{source_id}
     # ARGV[1] = source_id (for dirty tracking)
     # ARGV[2] = signal string
-    # ARGV[3] = batch count (for SUCCESS signal)
-    # ARGV[4] = TTL seconds
-    # ARGV[5] = now ISO string
+    # ARGV[3] = TTL seconds
+    # ARGV[4] = now ISO string
     _SIGNAL_LUA = """
 local key = KEYS[1]
 local source_id = ARGV[1]
 local signal = ARGV[2]
-local count = tonumber(ARGV[3])
-local ttl = tonumber(ARGV[4])
-local now_str = ARGV[5]
+local ttl = tonumber(ARGV[3])
+local now_str = ARGV[4]
 local dirty_key = "adaptive:dirty"
 
 local raw = redis.call('GET', key)
@@ -118,49 +82,13 @@ local state
 if raw then
     state = cjson.decode(raw)
 else
-    state = {
-        sleep_multiplier = 1.0,
-        http_timeout_add = 0,
-        credential_warning = false,
-        consecutive_success = 0,
-        last_signal = false,
-        last_signal_at = false
-    }
+    state = {credential_warning = false, last_signal = false, last_signal_at = false}
 end
 
-local sm = tonumber(state['sleep_multiplier']) or 1.0
-local hta = tonumber(state['http_timeout_add']) or 0
-local cs = tonumber(state['consecutive_success']) or 0
-
-if signal == 'http_429' then
-    sm = math.min(sm * 2, 8)
-    cs = 0
-elseif signal == 'http_503' then
-    sm = math.min(sm * 1.5, 8)
-    cs = 0
-elseif signal == 'http_403' then
+if signal == 'http_403' or signal == 'html_response' then
     state['credential_warning'] = true
-    cs = 0
-elseif signal == 'timeout' or signal == 'connection_error' or signal == 'empty_file' then
-    hta = math.min(hta + 15, 120)
-    cs = 0
-elseif signal == 'success' then
-    cs = cs + count
-    if cs % 20 == 0 then
-        sm = math.max(sm * 0.8, 1.0)
-    end
-    if cs % 100 == 0 then
-        hta = math.max(hta - 5, 0)
-        cs = 0
-    end
-elseif signal == 'html_response' then
-    state['credential_warning'] = true
-    cs = 0
 end
 
-state['sleep_multiplier'] = sm
-state['http_timeout_add'] = hta
-state['consecutive_success'] = cs
 state['last_signal'] = signal
 state['last_signal_at'] = now_str
 
@@ -180,12 +108,7 @@ return new_raw
         except (json.JSONDecodeError, TypeError):
             return AdaptiveState()
 
-    async def record_signal(
-        self,
-        source_id: str,
-        signal: AdaptiveSignal,
-        count: int = 1,
-    ) -> AdaptiveState:
+    async def record_signal(self, source_id: str, signal: AdaptiveSignal) -> AdaptiveState:
         """Record a signal using Lua script for atomic read-modify-write."""
         from core.redis_client import get_redis
 
@@ -198,7 +121,6 @@ return new_raw
             key,
             source_id,
             signal.value,
-            str(count),
             str(_ADAPTIVE_TTL),
             now_str,
         )
@@ -221,9 +143,9 @@ return new_raw
             async with AsyncSessionLocal() as session:
                 row = await session.get(SiteConfig, source_id)
             if row and row.adaptive:
-                engine_state = row.adaptive.get("adaptive_engine")
-                if engine_state:
-                    state = AdaptiveState.from_dict(engine_state)
+                cw = row.adaptive.get("credential_warning", False)
+                if cw:
+                    state = AdaptiveState(credential_warning=True)
                     # Re-populate Redis for subsequent reads
                     await r.set(
                         f"adaptive:{source_id}",
@@ -287,17 +209,16 @@ return new_raw
                 source_id = raw_sid.decode() if isinstance(raw_sid, bytes) else raw_sid
                 try:
                     state = await self.get_state(source_id)
-                    state_dict = asdict(state)
                     stmt = (
                         pg_insert(SiteConfig)
                         .values(
                             source_id=source_id,
                             overrides={},
-                            adaptive={"adaptive_engine": state_dict},
+                            adaptive={"credential_warning": state.credential_warning},
                         )
                         .on_conflict_do_update(
                             index_elements=["source_id"],
-                            set_={"adaptive": {"adaptive_engine": state_dict}},
+                            set_={"adaptive": {"credential_warning": state.credential_warning}},
                         )
                     )
                     await session.execute(stmt)
@@ -337,10 +258,8 @@ return new_raw
         r = get_redis()
         pipe = r.pipeline(transaction=False)
         for row in rows:
-            engine_state = row.adaptive.get("adaptive_engine")
-            if not engine_state:
-                continue
-            state = AdaptiveState.from_dict(engine_state)
+            cw = row.adaptive.get("credential_warning", False) if row.adaptive else False
+            state = AdaptiveState(credential_warning=bool(cw))
             pipe.set(f"adaptive:{row.source_id}", json.dumps(asdict(state)), ex=_ADAPTIVE_TTL)
             loaded += 1
 
