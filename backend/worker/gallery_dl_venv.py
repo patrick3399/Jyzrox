@@ -169,7 +169,7 @@ async def ensure_venv() -> None:
     # Install gallery-dl
     pip_bin = str(v1 / "bin" / "pip")
     logger.info("[gallery-dl venv] Installing gallery-dl into %s", v1)
-    rc, _, stderr = await _run([pip_bin, "install", "gallery-dl"], timeout=120)
+    rc, _, stderr = await _run([pip_bin, "install", "gallery-dl", "psycopg[binary]"], timeout=120)
     if rc != 0:
         logger.error("[gallery-dl venv] pip install failed: %s", stderr)
         await asyncio.to_thread(shutil.rmtree, v1, True)
@@ -274,7 +274,7 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
         pip_bin = str(new_dir / "bin" / "pip")
         pkg = f"gallery-dl=={version}" if version else "gallery-dl"
         logger.info("[gallery-dl venv] Installing %s", pkg)
-        rc, _, stderr = await _run([pip_bin, "install", "--upgrade", pkg], timeout=120)
+        rc, _, stderr = await _run([pip_bin, "install", "--upgrade", pkg, "psycopg[binary]"], timeout=120)
         if rc != 0:
             await _cleanup_new_dir(new_dir)
             return {"status": "failed", "error": f"pip install failed: {stderr}"}
