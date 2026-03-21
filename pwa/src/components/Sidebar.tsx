@@ -1,55 +1,18 @@
 'use client'
 
-import { useState, useEffect, useMemo } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
-import { useTheme } from 'next-themes'
-import { Settings, LogOut, Sun, Moon, Monitor } from 'lucide-react'
-import { useAuth } from '@/hooks/useAuth'
-import { useProfile } from '@/hooks/useProfile'
-import { useDownloadStats } from '@/hooks/useDownloadQueue'
+import { Settings, LogOut } from 'lucide-react'
+import { useNavigation } from '@/hooks/useNavigation'
 import { t } from '@/lib/i18n'
-import { useLocale } from '@/components/LocaleProvider'
-import { PAGE_REGISTRY, hasRole, type PageDef } from '@/lib/pageRegistry'
-import { loadSidebarConfig, SIDEBAR_CONFIG_KEY } from '@/components/SidebarConfig'
 
-const themeCycle = ['light', 'dark', 'amoled', 'system'] as const
-const themeIcon = { light: Sun, dark: Moon, amoled: Moon, system: Monitor }
-const themeLabel = {
-  light: () => t('common.light'),
-  dark: () => t('common.dark'),
-  amoled: () => t('common.amoled'),
-  system: () => t('common.system'),
+interface SidebarProps {
+  downloadStats?: { running: number; finished: number }
 }
 
-export function Sidebar() {
-  useLocale()
+export function Sidebar({ downloadStats: stats }: SidebarProps) {
   const pathname = usePathname()
-  const { theme, setTheme } = useTheme()
-  const { logout } = useAuth()
-  const { data: profile } = useProfile()
-  const { data: stats } = useDownloadStats()
-
-  const [sidebarConfig, setSidebarConfig] = useState(() => loadSidebarConfig())
-
-  useEffect(() => {
-    const handler = (e: StorageEvent) => {
-      if (e.key === SIDEBAR_CONFIG_KEY) setSidebarConfig(loadSidebarConfig())
-    }
-    window.addEventListener('storage', handler)
-    return () => window.removeEventListener('storage', handler)
-  }, [])
-
-  const visibleLinks = useMemo(() => {
-    return sidebarConfig.order
-      .map((href) => PAGE_REGISTRY.find((p) => p.href === href))
-      .filter((p): p is PageDef => p != null && hasRole(profile?.role, p.minRole ?? 'viewer'))
-  }, [sidebarConfig.order, profile?.role])
-
-  const cycleTheme = () => {
-    const idx = themeCycle.indexOf(theme as (typeof themeCycle)[number])
-    setTheme(themeCycle[(idx + 1) % themeCycle.length])
-  }
+  const { profile, logout, visibleLinks, cycleTheme, ThemeIcon, themeLabel } = useNavigation()
 
   return (
     <aside className="hidden lg:flex fixed inset-y-0 left-0 z-40 w-56 flex-col bg-vault-card border-r border-vault-border">
@@ -100,7 +63,6 @@ export function Sidebar() {
         {/* User avatar + name */}
         {profile && (
           <div className="flex items-center gap-3 px-3 py-2">
-            {}
             <img
               src={profile.avatar_url}
               alt=""
@@ -124,20 +86,14 @@ export function Sidebar() {
         </Link>
 
         {/* Theme toggle */}
-        {(() => {
-          const key = (theme as keyof typeof themeIcon) || 'system'
-          const Icon = themeIcon[key] ?? Monitor
-          return (
-            <button
-              onClick={cycleTheme}
-              className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
-              title={themeLabel[key]?.() ?? ''}
-            >
-              <Icon size={18} />
-              <span>{themeLabel[key]?.() ?? t('common.theme')}</span>
-            </button>
-          )
-        })()}
+        <button
+          onClick={cycleTheme}
+          className="flex items-center gap-3 w-full px-3 py-2 rounded-lg text-sm text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover transition-colors"
+          title={themeLabel}
+        >
+          <ThemeIcon size={18} />
+          <span>{themeLabel}</span>
+        </button>
 
         {/* Logout */}
         <button

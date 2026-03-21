@@ -1,12 +1,14 @@
 import useSWR from 'swr'
 import { useEffect, useRef } from 'react'
 import { api } from '@/lib/api'
-import { useWs } from '@/lib/ws'
+import { useWsConnection, useWsJobs, useWsEvents } from '@/lib/ws'
 
 const THROTTLE_MS = 2000
 
 export function useDashboard() {
-  const { connected, lastJobUpdate, lastEvent } = useWs()
+  const { connected } = useWsConnection()
+  const { lastJobUpdate } = useWsJobs()
+  const { lastEvent } = useWsEvents()
   const lastFiredRef = useRef<number>(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 

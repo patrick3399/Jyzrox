@@ -1,7 +1,7 @@
 import useSWR from 'swr'
 import { useState, useEffect, useCallback, useRef } from 'react'
 import { api } from '@/lib/api'
-import { useWs } from '@/lib/ws'
+import { useWsLogs } from '@/lib/ws'
 import type { LogEntry } from '@/lib/types'
 
 interface LogParams {
@@ -26,7 +26,7 @@ export function useLogs(params: LogParams) {
 }
 
 export function useLogStream() {
-  const { lastLogEntry } = useWs()
+  const { lastLogEntry } = useWsLogs()
   const [streamedLogs, setStreamedLogs] = useState<LogEntry[]>([])
   const [isPaused, setIsPaused] = useState(false)
   const pausedRef = useRef(false)

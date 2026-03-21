@@ -30,7 +30,7 @@ import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { t } from '@/lib/i18n'
-import { useWs } from '@/lib/ws'
+import { useWsConnection } from '@/lib/ws'
 import type { DownloadJob, DownloadPreview } from '@/lib/types'
 
 const STATUS_STYLES: Record<string, string> = {
@@ -353,7 +353,7 @@ export default function QueuePage() {
   const { trigger: pauseJob } = usePauseJob()
   const { trigger: retryJob } = useRetryJob()
 
-  const { connected } = useWs()
+  const { connected } = useWsConnection()
   const [showFallbackWarning, setShowFallbackWarning] = useState(false)
 
   useEffect(() => {

@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   BookOpen,
@@ -78,18 +78,16 @@ export function EhGalleryCard({ gallery, onClick }: EhCardProps) {
     }
   }, [gallery, router])
 
-  const contextItems = [
-    {
-      label: t('contextMenu.read'),
-      icon: BookOpen,
-      onClick: () => onClick?.(),
-    },
-    {
-      label: t('contextMenu.openDetail'),
-      icon: ExternalLink,
-      onClick: handleOpenDetail,
-    },
-  ]
+  const contextItems = useMemo(
+    () =>
+      menuOpen
+        ? [
+            { label: t('contextMenu.read'), icon: BookOpen, onClick: () => onClick?.() },
+            { label: t('contextMenu.openDetail'), icon: ExternalLink, onClick: handleOpenDetail },
+          ]
+        : [],
+    [menuOpen, onClick, handleOpenDetail],
+  )
 
   return (
     <>
@@ -194,57 +192,55 @@ export function LibraryGalleryCard({
 
   const sourceStyle = getSourceStyle(gallery)
 
-  const contextItems = [
-    {
-      label: t('contextMenu.read'),
-      icon: BookOpen,
-      onClick: () => router.push(`/reader/${gallery.source}/${gallery.source_id}`),
-    },
-    {
-      label: t('contextMenu.openDetail'),
-      icon: ExternalLink,
-      onClick: () => router.push(`/library/${gallery.source}/${gallery.source_id}`),
-    },
-    ...(onFavoriteToggle
-      ? [
-          {
-            label: gallery.is_favorited ? t('contextMenu.unfavorite') : t('contextMenu.favorite'),
-            icon: Heart,
-            onClick: () => onFavoriteToggle(gallery),
-          },
-        ]
-      : []),
-    ...(onReadingListToggle
-      ? [
-          {
-            label: gallery.in_reading_list
-              ? t('contextMenu.removeFromReadingList')
-              : t('contextMenu.addToReadingList'),
-            icon: gallery.in_reading_list ? BookmarkCheck : Bookmark,
-            onClick: () => onReadingListToggle(gallery),
-          },
-        ]
-      : []),
-    ...(onDownload
-      ? [
-          {
-            label: t('contextMenu.download'),
-            icon: Download,
-            onClick: () => onDownload(gallery),
-          },
-        ]
-      : []),
-    ...(onDelete
-      ? [
-          {
-            label: t('contextMenu.delete'),
-            icon: Trash2,
-            className: 'text-red-400',
-            onClick: () => onDelete(gallery),
-          },
-        ]
-      : []),
-  ]
+  const contextItems = useMemo(() => {
+    if (!menuOpen) return []
+    return [
+      {
+        label: t('contextMenu.read'),
+        icon: BookOpen,
+        onClick: () => router.push(`/reader/${gallery.source}/${gallery.source_id}`),
+      },
+      {
+        label: t('contextMenu.openDetail'),
+        icon: ExternalLink,
+        onClick: () => router.push(`/library/${gallery.source}/${gallery.source_id}`),
+      },
+      ...(onFavoriteToggle
+        ? [
+            {
+              label: gallery.is_favorited ? t('contextMenu.unfavorite') : t('contextMenu.favorite'),
+              icon: Heart,
+              onClick: () => onFavoriteToggle(gallery),
+            },
+          ]
+        : []),
+      ...(onReadingListToggle
+        ? [
+            {
+              label: gallery.in_reading_list
+                ? t('contextMenu.removeFromReadingList')
+                : t('contextMenu.addToReadingList'),
+              icon: gallery.in_reading_list ? BookmarkCheck : Bookmark,
+              onClick: () => onReadingListToggle(gallery),
+            },
+          ]
+        : []),
+      ...(onDownload
+        ? [{ label: t('contextMenu.download'), icon: Download, onClick: () => onDownload(gallery) }]
+        : []),
+      ...(onDelete
+        ? [
+            {
+              label: t('contextMenu.delete'),
+              icon: Trash2,
+              className: 'text-red-400',
+              onClick: () => onDelete(gallery),
+            },
+          ]
+        : []),
+    ]
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [menuOpen, gallery, onFavoriteToggle, onReadingListToggle, onDownload, onDelete, router])
 
   return (
     <>

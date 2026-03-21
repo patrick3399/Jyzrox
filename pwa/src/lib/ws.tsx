@@ -15,25 +15,64 @@ export interface SubCheckEvent {
   job_id: string | null
 }
 
-interface WsContextValue {
-  alerts: string[]
+// ── Granular context types ─────────────────────────────────────────────
+
+interface WsConnectionContextValue {
   connected: boolean
-  dismissAlert: (index: number) => void
+}
+
+interface WsJobContextValue {
   lastJobUpdate: JobUpdateEvent | null
   lastSubCheck: SubCheckEvent | null
+}
+
+interface WsAlertContextValue {
+  alerts: string[]
+  dismissAlert: (index: number) => void
+}
+
+interface WsEventContextValue {
   lastEvent: WsMessage | null
+}
+
+interface WsLogContextValue {
   lastLogEntry: LogEntry | null
 }
 
-const WsContext = createContext<WsContextValue>({
-  alerts: [],
+// ── Granular contexts ──────────────────────────────────────────────────
+
+const WsConnectionContext = createContext<WsConnectionContextValue>({
   connected: false,
-  dismissAlert: () => {},
+})
+
+const WsJobContext = createContext<WsJobContextValue>({
   lastJobUpdate: null,
   lastSubCheck: null,
+})
+
+const WsAlertContext = createContext<WsAlertContextValue>({
+  alerts: [],
+  dismissAlert: () => {},
+})
+
+const WsEventContext = createContext<WsEventContextValue>({
   lastEvent: null,
+})
+
+const WsLogContext = createContext<WsLogContextValue>({
   lastLogEntry: null,
 })
+
+// ── Composite type (backward compat) ──────────────────────────────────
+
+interface WsContextValue
+  extends WsConnectionContextValue,
+    WsJobContextValue,
+    WsAlertContextValue,
+    WsEventContextValue,
+    WsLogContextValue {}
+
+// ── Provider ──────────────────────────────────────────────────────────
 
 export function WsProvider({ children }: { children: React.ReactNode }) {
   const [alerts, setAlerts] = useState<string[]>([])
@@ -114,24 +153,55 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <WsContext.Provider
-      value={{
-        alerts,
-        connected,
-        dismissAlert,
-        lastJobUpdate,
-        lastSubCheck,
-        lastEvent,
-        lastLogEntry,
-      }}
-    >
-      {children}
-    </WsContext.Provider>
+    <WsConnectionContext.Provider value={{ connected }}>
+      <WsJobContext.Provider value={{ lastJobUpdate, lastSubCheck }}>
+        <WsAlertContext.Provider value={{ alerts, dismissAlert }}>
+          <WsEventContext.Provider value={{ lastEvent }}>
+            <WsLogContext.Provider value={{ lastLogEntry }}>{children}</WsLogContext.Provider>
+          </WsEventContext.Provider>
+        </WsAlertContext.Provider>
+      </WsJobContext.Provider>
+    </WsConnectionContext.Provider>
   )
 }
 
+// ── Focused hooks ──────────────────────────────────────────────────────
+
+export function useWsConnection(): WsConnectionContextValue {
+  return useContext(WsConnectionContext)
+}
+
+export function useWsJobs(): WsJobContextValue {
+  return useContext(WsJobContext)
+}
+
+export function useWsAlerts(): WsAlertContextValue {
+  return useContext(WsAlertContext)
+}
+
+export function useWsEvents(): WsEventContextValue {
+  return useContext(WsEventContext)
+}
+
+export function useWsLogs(): WsLogContextValue {
+  return useContext(WsLogContext)
+}
+
+// ── Backward-compatible composite hook ────────────────────────────────
+
 export function useWs(): WsContextValue {
-  return useContext(WsContext)
+  const connection = useContext(WsConnectionContext)
+  const jobs = useContext(WsJobContext)
+  const alerts = useContext(WsAlertContext)
+  const events = useContext(WsEventContext)
+  const logs = useContext(WsLogContext)
+  return {
+    ...connection,
+    ...jobs,
+    ...alerts,
+    ...events,
+    ...logs,
+  }
 }
 
 // Backward-compatible alias

@@ -1,15 +1,20 @@
 'use client'
 
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef } from 'react'
 import { ArrowUp } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
 export function FloatingActions() {
   const [showScrollTop, setShowScrollTop] = useState(false)
+  const showRef = useRef(false)
 
   useEffect(() => {
     const handler = () => {
-      setShowScrollTop(window.scrollY > 300)
+      const shouldShow = window.scrollY > 300
+      if (shouldShow !== showRef.current) {
+        showRef.current = shouldShow
+        setShowScrollTop(shouldShow)
+      }
     }
     window.addEventListener('scroll', handler, { passive: true })
     return () => window.removeEventListener('scroll', handler)

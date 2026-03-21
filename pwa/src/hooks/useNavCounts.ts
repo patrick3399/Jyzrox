@@ -14,33 +14,37 @@ const SWR_CONFIG = {
   onError: () => undefined,
 } as const
 
-function useLibraryCount(): number {
+function useLibraryCount(enabled: boolean): number {
   const { data } = useSWR(
-    'nav-counts/library',
+    enabled ? 'nav-counts/library' : null,
     () => api.library.getGalleries({ limit: 1 }),
     SWR_CONFIG,
   )
   return data?.total ?? 0
 }
 
-function useSubscriptionsCount(): number {
+function useSubscriptionsCount(enabled: boolean): number {
   const { data } = useSWR(
-    'nav-counts/subscriptions',
+    enabled ? 'nav-counts/subscriptions' : null,
     () => api.subscriptions.list({ enabled: true, limit: 1 }),
     SWR_CONFIG,
   )
   return data?.total ?? 0
 }
 
-function useCollectionsCount(): number {
-  const { data } = useSWR('nav-counts/collections', () => api.collections.list(), SWR_CONFIG)
+function useCollectionsCount(enabled: boolean): number {
+  const { data } = useSWR(
+    enabled ? 'nav-counts/collections' : null,
+    () => api.collections.list(),
+    SWR_CONFIG,
+  )
   return data?.collections.length ?? 0
 }
 
-export function useNavCounts(): NavCounts {
-  const library = useLibraryCount()
-  const subscriptions = useSubscriptionsCount()
-  const collections = useCollectionsCount()
+export function useNavCounts(enabled = true): NavCounts {
+  const library = useLibraryCount(enabled)
+  const subscriptions = useSubscriptionsCount(enabled)
+  const collections = useCollectionsCount(enabled)
 
   return {
     '/library': library,

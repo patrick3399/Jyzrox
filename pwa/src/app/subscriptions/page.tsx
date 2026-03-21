@@ -25,7 +25,7 @@ import { toast } from 'sonner'
 import Link from 'next/link'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
-import { useWs } from '@/lib/ws'
+import { useWsJobs } from '@/lib/ws'
 import {
   useSubscriptions,
   useCreateSubscription,
@@ -708,7 +708,7 @@ export default function SubscriptionsPage() {
   const { trigger: resumeGroupTrigger } = useResumeGroup()
   const { trigger: bulkMoveTrigger } = useBulkMove()
 
-  const { lastSubCheck, lastJobUpdate } = useWs()
+  const { lastSubCheck, lastJobUpdate } = useWsJobs()
 
   const groups = groupsData?.groups ?? []
 

@@ -10,6 +10,7 @@ import { SWUpdatePrompt } from './SWUpdatePrompt'
 import { FloatingActions } from './FloatingActions'
 import { WsProvider } from '@/lib/ws'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
+import { useDownloadStats } from '@/hooks/useDownloadQueue'
 
 const AUTH_PATHS = ['/login', '/setup']
 
@@ -35,14 +36,44 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
 
   return (
     <WsProvider>
+      <LayoutShellInner
+        isReader={isReader}
+        drawerOpen={drawerOpen}
+        onDrawerClose={handleDrawerClose}
+        onDrawerOpen={handleDrawerOpen}
+      >
+        {children}
+      </LayoutShellInner>
+    </WsProvider>
+  )
+}
+
+/** Inner component lives inside WsProvider so it can call useDownloadStats */
+function LayoutShellInner({
+  children,
+  isReader,
+  drawerOpen,
+  onDrawerClose,
+  onDrawerOpen,
+}: {
+  children: React.ReactNode
+  isReader: boolean
+  drawerOpen: boolean
+  onDrawerClose: () => void
+  onDrawerOpen: () => void
+}) {
+  const { data: downloadStats } = useDownloadStats()
+
+  return (
+    <>
       {/* Desktop sidebar — hidden on mobile */}
-      <Sidebar />
+      <Sidebar downloadStats={downloadStats} />
 
       {/* Mobile drawer nav — controlled by BottomTabBar More button */}
-      <MobileNav open={drawerOpen} onClose={handleDrawerClose} />
+      <MobileNav open={drawerOpen} onClose={onDrawerClose} downloadStats={downloadStats} />
 
-      {/* Mobile bottom tab bar — hidden on desktop */}
-      <BottomTabBar onMoreClick={handleDrawerOpen} />
+      {/* Mobile bottom tab bar — hidden on desktop, skip on reader pages */}
+      {!isReader && <BottomTabBar onMoreClick={onDrawerOpen} downloadStats={downloadStats} />}
 
       {/* Main content */}
       <main className="lg:pl-56 pb-[calc(4rem+var(--sab))] lg:pb-0 min-h-screen bg-vault-bg text-vault-text">
@@ -54,6 +85,6 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
       <Toaster position="bottom-right" richColors />
       <SWUpdatePrompt />
       {!isReader && <FloatingActions />}
-    </WsProvider>
+    </>
   )
 }

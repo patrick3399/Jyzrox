@@ -79,7 +79,8 @@ vi.mock('react', async () => {
 // React Context.  Provide a plain stub so no context provider is needed.
 
 vi.mock('@/lib/ws', () => ({
-  useWs: () => ({ connected: false, lastJobUpdate: null, lastSubCheck: null }),
+  useWsConnection: () => ({ connected: false }),
+  useWsJobs: () => ({ lastJobUpdate: null, lastSubCheck: null }),
 }))
 
 // ── swr / swr/mutation mocks ──────────────────────────────────────────

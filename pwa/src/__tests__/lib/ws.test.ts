@@ -56,7 +56,16 @@ if (typeof window !== 'undefined') {
 
 // ── Import after global stubs ──────────────────────────────────────────
 
-import { WsProvider, useWs, useWebSocket } from '@/lib/ws'
+import {
+  WsProvider,
+  useWs,
+  useWebSocket,
+  useWsConnection,
+  useWsJobs,
+  useWsAlerts,
+  useWsEvents,
+  useWsLogs,
+} from '@/lib/ws'
 
 // ── Setup ─────────────────────────────────────────────────────────────
 
@@ -247,5 +256,133 @@ describe('WsProvider', () => {
 
     expect(result.current.alerts).toHaveLength(1)
     expect(result.current.alerts[0]).toBe('Second')
+  })
+})
+
+describe('focused hooks — granular context isolation', () => {
+  const wrapper = ({ children }: { children: React.ReactNode }) =>
+    React.createElement(WsProvider, null, children)
+
+  it('test_useWsConnection_outsideProvider_connectedIsFalse', () => {
+    const { result } = renderHook(() => useWsConnection())
+    expect(result.current.connected).toBe(false)
+  })
+
+  it('test_useWsJobs_outsideProvider_returnsNulls', () => {
+    const { result } = renderHook(() => useWsJobs())
+    expect(result.current.lastJobUpdate).toBeNull()
+    expect(result.current.lastSubCheck).toBeNull()
+  })
+
+  it('test_useWsAlerts_outsideProvider_returnsEmptyArray', () => {
+    const { result } = renderHook(() => useWsAlerts())
+    expect(result.current.alerts).toEqual([])
+  })
+
+  it('test_useWsEvents_outsideProvider_returnsNull', () => {
+    const { result } = renderHook(() => useWsEvents())
+    expect(result.current.lastEvent).toBeNull()
+  })
+
+  it('test_useWsLogs_outsideProvider_returnsNull', () => {
+    const { result } = renderHook(() => useWsLogs())
+    expect(result.current.lastLogEntry).toBeNull()
+  })
+
+  it('test_useWsConnection_insideProvider_connectedStartsFalse', () => {
+    const { result } = renderHook(() => useWsConnection(), { wrapper })
+    expect(result.current.connected).toBe(false)
+  })
+
+  it('test_useWsJobs_onmessageJobUpdate_setsLastJobUpdate', async () => {
+    const { result } = renderHook(() => useWsJobs(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({
+        data: JSON.stringify({
+          type: 'job_update',
+          job_id: 'j-99',
+          status: 'done',
+          progress: null,
+        }),
+      })
+    })
+
+    expect(result.current.lastJobUpdate?.job_id).toBe('j-99')
+    expect(result.current.lastJobUpdate?.status).toBe('done')
+  })
+
+  it('test_useWsJobs_onmessageSubscriptionChecked_setsLastSubCheck', async () => {
+    const { result } = renderHook(() => useWsJobs(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({
+        data: JSON.stringify({
+          type: 'subscription_checked',
+          sub_id: 7,
+          status: 'checked',
+          new_works: 1,
+          job_id: null,
+        }),
+      })
+    })
+
+    expect(result.current.lastSubCheck?.sub_id).toBe(7)
+  })
+
+  it('test_useWsAlerts_onmessageAlert_appendsToAlerts', async () => {
+    const { result } = renderHook(() => useWsAlerts(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({ data: JSON.stringify({ type: 'alert', message: 'Focused!' }) })
+    })
+
+    expect(result.current.alerts).toContain('Focused!')
+  })
+
+  it('test_useWsAlerts_dismissAlert_removesAlert', async () => {
+    const { result } = renderHook(() => useWsAlerts(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({ data: JSON.stringify({ type: 'alert', message: 'A' }) })
+      mockWsInstance?.onmessage?.({ data: JSON.stringify({ type: 'alert', message: 'B' }) })
+    })
+    expect(result.current.alerts).toHaveLength(2)
+
+    await act(async () => {
+      result.current.dismissAlert(0)
+    })
+    expect(result.current.alerts).toEqual(['B'])
+  })
+
+  it('test_useWsEvents_onmessageEventBusType_setsLastEvent', async () => {
+    const { result } = renderHook(() => useWsEvents(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({
+        data: JSON.stringify({ type: 'gallery.updated', resource_id: 5 }),
+      })
+    })
+
+    expect(result.current.lastEvent?.type).toBe('gallery.updated')
+  })
+
+  it('test_useWsLogs_onmessageLogEntry_setsLastLogEntry', async () => {
+    const logEntry = {
+      id: 1,
+      level: 'info',
+      message: 'test log',
+      source: 'worker',
+      created_at: '2024-01-01T00:00:00Z',
+    }
+    const { result } = renderHook(() => useWsLogs(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({
+        data: JSON.stringify({ type: 'log_entry', log: logEntry }),
+      })
+    })
+
+    expect(result.current.lastLogEntry).toEqual(logEntry)
   })
 })

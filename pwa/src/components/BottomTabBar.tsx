@@ -3,7 +3,6 @@
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Menu } from 'lucide-react'
-import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useState, useEffect } from 'react'
@@ -44,12 +43,12 @@ function getDefaultTabs(): TabDefinition[] {
 
 interface BottomTabBarProps {
   onMoreClick: () => void
+  downloadStats?: { running: number; finished: number }
 }
 
-export function BottomTabBar({ onMoreClick }: BottomTabBarProps) {
+export function BottomTabBar({ onMoreClick, downloadStats: stats }: BottomTabBarProps) {
   useLocale()
   const pathname = usePathname()
-  const { data: stats } = useDownloadStats()
   const [tabs, setTabs] = useState<TabDefinition[]>(loadTabConfig)
 
   useEffect(() => {
@@ -61,8 +60,6 @@ export function BottomTabBar({ onMoreClick }: BottomTabBarProps) {
     window.addEventListener('storage', onStorage)
     return () => window.removeEventListener('storage', onStorage)
   }, [])
-
-  if (pathname.startsWith('/reader/')) return null
 
   return (
     <nav

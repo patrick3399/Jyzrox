@@ -187,4 +187,36 @@ describe('useNavCounts', () => {
       }
     })
   })
+
+  describe('enabled=false skips fetching (null SWR keys)', () => {
+    it('test_useNavCounts_disabledEnabled_libraryKeyIsNull', () => {
+      useNavCounts(false)
+      const nullCalls = swrCalls.filter((c) => c.key === null)
+      expect(nullCalls).toHaveLength(3)
+    })
+
+    it('test_useNavCounts_disabledEnabled_noStringKeysRegistered', () => {
+      useNavCounts(false)
+      expect(swrCallForKey('nav-counts/library')).toBeUndefined()
+      expect(swrCallForKey('nav-counts/subscriptions')).toBeUndefined()
+      expect(swrCallForKey('nav-counts/collections')).toBeUndefined()
+    })
+
+    it('test_useNavCounts_disabledEnabled_returnsAllZeroCounts', () => {
+      useNavCounts(false)
+      const result = useNavCounts(false)
+      expect(result).toEqual({
+        '/library': 0,
+        '/subscriptions': 0,
+        '/collections': 0,
+      })
+    })
+
+    it('test_useNavCounts_enabledTrueByDefault_usesStringKeys', () => {
+      useNavCounts()
+      expect(swrCallForKey('nav-counts/library')).toBeDefined()
+      expect(swrCallForKey('nav-counts/subscriptions')).toBeDefined()
+      expect(swrCallForKey('nav-counts/collections')).toBeDefined()
+    })
+  })
 })

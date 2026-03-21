@@ -2,13 +2,14 @@ import useSWR, { useSWRConfig } from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { useEffect, useRef } from 'react'
 import { api } from '@/lib/api'
-import { useWs } from '@/lib/ws'
+import { useWsConnection, useWsJobs } from '@/lib/ws'
 import type { JobListParams, DownloadPreview } from '@/lib/types'
 
 const THROTTLE_MS = 1000
 
 export function useDownloadJobs(params: JobListParams = {}) {
-  const { connected, lastJobUpdate, lastSubCheck } = useWs()
+  const { connected } = useWsConnection()
+  const { lastJobUpdate, lastSubCheck } = useWsJobs()
   const { mutate } = useSWRConfig()
   const lastFiredRef = useRef<number>(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -56,7 +57,8 @@ export function useClearFinishedJobs() {
 }
 
 export function useDownloadStats() {
-  const { connected, lastJobUpdate, lastSubCheck } = useWs()
+  const { connected } = useWsConnection()
+  const { lastJobUpdate, lastSubCheck } = useWsJobs()
   const { mutate } = useSWRConfig()
   const lastFiredRef = useRef<number>(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)

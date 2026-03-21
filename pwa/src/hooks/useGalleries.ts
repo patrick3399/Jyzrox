@@ -3,7 +3,7 @@ import useSWRInfinite from 'swr/infinite'
 import useSWRMutation from 'swr/mutation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api'
-import { useWs } from '@/lib/ws'
+import { useWsJobs } from '@/lib/ws'
 import type { GalleryListResponse, GallerySearchParams, EhSearchParams } from '@/lib/types'
 import type { SearchGalleriesResponse } from '@/lib/api'
 
@@ -46,7 +46,7 @@ export function useInfiniteLibraryGalleries(
     return ['library/galleries/infinite', { ...params, page: pageIndex }]
   }
 
-  const { lastJobUpdate } = useWs()
+  const { lastJobUpdate } = useWsJobs()
   const { mutate: globalMutate } = useSWRConfig()
   const lastFiredRef = useRef<number>(0)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
