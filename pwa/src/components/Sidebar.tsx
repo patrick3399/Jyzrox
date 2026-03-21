@@ -12,7 +12,7 @@ interface SidebarProps {
 
 export function Sidebar({ downloadStats: stats }: SidebarProps) {
   const pathname = usePathname()
-  const { profile, logout, visibleLinks, cycleTheme, ThemeIcon, themeLabel } = useNavigation()
+  const { profile, logout, groupedLinks, cycleTheme, ThemeIcon, themeLabel } = useNavigation()
 
   return (
     <aside className="hidden lg:flex fixed inset-y-0 left-0 z-40 w-56 flex-col bg-vault-card border-r border-vault-border">
@@ -21,41 +21,51 @@ export function Sidebar({ downloadStats: stats }: SidebarProps) {
         <span className="text-vault-accent font-bold text-lg tracking-wide">Jyzrox</span>
       </div>
 
-      {/* Nav links */}
-      <nav className="flex-1 px-3 py-2 space-y-0.5 overflow-y-auto no-scrollbar">
-        {visibleLinks.map((link) => {
-          const Icon = link.icon
-          const isActive =
-            pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
-          return (
-            <Link
-              key={link.href}
-              href={link.href}
-              className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
-                isActive
-                  ? 'bg-vault-accent/10 text-vault-accent font-medium'
-                  : 'text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover'
-              }`}
-            >
-              <Icon size={18} />
-              <span>{t(link.labelKey)}</span>
-              {link.href === '/queue' && stats && (
-                <span className="ml-auto flex items-center gap-1">
-                  {stats.running > 0 && (
-                    <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1">
-                      {stats.running}
-                    </span>
-                  )}
-                  {stats.finished > 0 && (
-                    <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold px-1">
-                      {stats.finished}
-                    </span>
-                  )}
-                </span>
-              )}
-            </Link>
-          )
-        })}
+      {/* Nav links — grouped by role tier */}
+      <nav className="flex-1 px-3 py-2 overflow-y-auto no-scrollbar">
+        {groupedLinks.map((section, sectionIdx) => (
+          <div key={sectionIdx}>
+            {sectionIdx > 0 && <div className="my-1 border-t border-vault-border" />}
+            <div className="text-[10px] uppercase tracking-wider text-vault-text-muted px-3 pt-3 pb-1">
+              {t(section.labelKey)}
+            </div>
+            <div className="space-y-0.5">
+              {section.links.map((link) => {
+                const Icon = link.icon
+                const isActive =
+                  pathname === link.href || (link.href !== '/' && pathname.startsWith(link.href))
+                return (
+                  <Link
+                    key={link.href}
+                    href={link.href}
+                    className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
+                      isActive
+                        ? 'bg-vault-accent/10 text-vault-accent font-medium'
+                        : 'text-vault-text-secondary hover:text-vault-text hover:bg-vault-card-hover'
+                    }`}
+                  >
+                    <Icon size={18} />
+                    <span>{t(link.labelKey)}</span>
+                    {link.href === '/queue' && stats && (
+                      <span className="ml-auto flex items-center gap-1">
+                        {stats.running > 0 && (
+                          <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-blue-500/20 text-blue-400 text-[10px] font-bold px-1">
+                            {stats.running}
+                          </span>
+                        )}
+                        {stats.finished > 0 && (
+                          <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-green-500/20 text-green-400 text-[10px] font-bold px-1">
+                            {stats.finished}
+                          </span>
+                        )}
+                      </span>
+                    )}
+                  </Link>
+                )
+              })}
+            </div>
+          </div>
+        ))}
       </nav>
 
       {/* Bottom section */}

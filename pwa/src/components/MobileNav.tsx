@@ -1,13 +1,12 @@
 'use client'
 
-import { useMemo, useEffect } from 'react'
+import { useEffect } from 'react'
 import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Settings, LogOut, X } from 'lucide-react'
 import { useNavigation } from '@/hooks/useNavigation'
 import { useNavCounts } from '@/hooks/useNavCounts'
 import { t } from '@/lib/i18n'
-import type { PageDef } from '@/lib/pageRegistry'
 
 interface MobileNavProps {
   open: boolean
@@ -64,26 +63,8 @@ function MobileNavContent({
   downloadStats?: { running: number; finished: number }
 }) {
   const pathname = usePathname()
-  const { profile, logout, visibleLinks, cycleTheme, ThemeIcon, themeLabel } = useNavigation()
+  const { profile, logout, groupedLinks, cycleTheme, ThemeIcon, themeLabel } = useNavigation()
   const navCounts = useNavCounts(true)
-
-  const sections = useMemo(() => {
-    const groups: { label: () => string; links: PageDef[] }[] = [
-      {
-        label: () => t('nav.sectionBrowse'),
-        links: visibleLinks.filter((p) => !p.minRole || p.minRole === 'viewer'),
-      },
-      {
-        label: () => t('nav.sectionManage'),
-        links: visibleLinks.filter((p) => p.minRole === 'member'),
-      },
-      {
-        label: () => t('nav.sectionAdmin'),
-        links: visibleLinks.filter((p) => p.minRole === 'admin'),
-      },
-    ]
-    return groups.filter((g) => g.links.length > 0)
-  }, [visibleLinks])
 
   return (
     <>
@@ -113,11 +94,11 @@ function MobileNavContent({
 
       {/* Nav links */}
       <nav className="flex-1 px-3 py-3 overflow-y-auto no-scrollbar">
-        {sections.map((section, sectionIdx) => (
+        {groupedLinks.map((section, sectionIdx) => (
           <div key={sectionIdx}>
             {sectionIdx > 0 && <div className="my-1 border-t border-vault-border" />}
             <div className="text-[10px] uppercase tracking-wider text-vault-text-muted px-3 pt-3 pb-1">
-              {section.label()}
+              {t(section.labelKey)}
             </div>
             <div className="space-y-0.5">
               {section.links.map((link) => {

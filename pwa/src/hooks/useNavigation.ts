@@ -47,6 +47,25 @@ export function useNavigation() {
       .filter((p): p is PageDef => p != null && hasRole(profile?.role, p.minRole ?? 'viewer'))
   }, [sidebarConfig.order, profile?.role])
 
+  // Grouped links by role tier (for sidebar/mobile nav section headers)
+  const groupedLinks = useMemo(() => {
+    const groups: { labelKey: string; links: PageDef[] }[] = [
+      {
+        labelKey: 'nav.sectionBrowse',
+        links: visibleLinks.filter((p) => !p.minRole || p.minRole === 'viewer'),
+      },
+      {
+        labelKey: 'nav.sectionManage',
+        links: visibleLinks.filter((p) => p.minRole === 'member'),
+      },
+      {
+        labelKey: 'nav.sectionAdmin',
+        links: visibleLinks.filter((p) => p.minRole === 'admin'),
+      },
+    ]
+    return groups.filter((g) => g.links.length > 0)
+  }, [visibleLinks])
+
   // Theme cycling
   const cycleTheme = useCallback(() => {
     const idx = THEME_CYCLE.indexOf(theme as (typeof THEME_CYCLE)[number])
@@ -61,6 +80,7 @@ export function useNavigation() {
     profile,
     logout,
     visibleLinks,
+    groupedLinks,
     cycleTheme,
     ThemeIcon,
     themeLabel,
