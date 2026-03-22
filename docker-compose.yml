@@ -94,7 +94,7 @@ services:
 
   worker:
     build: ./backend
-    command: arq worker.WorkerSettings
+    command: python -m worker
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 120s
     environment:
