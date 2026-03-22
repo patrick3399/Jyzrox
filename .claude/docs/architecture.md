@@ -12,7 +12,7 @@
 |---------|--------------|------|----------|-----------------|
 | `nginx` | `./nginx` | `${HTTP_PORT:-35689}:80` | frontend | 1 CPU / 256 MB |
 | `api` | `./backend` (uvicorn, port 8000) | internal | frontend + backend | 2 CPU / 2 GB |
-| `worker` | `./backend` (arq worker.WorkerSettings) | — | frontend + backend | 2 CPU / 2 GB |
+| `worker` | `./backend` (python -m worker) | — | frontend + backend | 2 CPU / 2 GB |
 | `pwa` | `./pwa` (Next.js, port 3000) | internal | frontend | 1 CPU / 512 MB |
 | `postgres` | `postgres:18-alpine` | internal | backend | 2 CPU / 2 GB |
 | `redis` | `redis:8-alpine` | internal | backend | 1 CPU / 1 GB |
@@ -118,7 +118,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `tag_implications` | Tag inference rules | `(antecedent_id, consequent_id)` PK |
 | `gallery_tags` | Gallery↔Tag join | `(gallery_id, tag_id)` PK, `confidence`, `source` |
 | `image_tags` | Image↔Tag join | `(image_id, tag_id)` PK, `confidence` |
-| `download_jobs` | ARQ job tracking | `id` UUID PK, `user_id` FK, `url`, `source`, `status` (queued/running/done/failed/cancelled/paused/partial), `progress` JSONB (may contain `failed_pages`, `permanently_failed`), `error`, `retry_count SMALLINT`, `max_retries SMALLINT`, `next_retry_at`, `gallery_id BIGINT FK` (progressive import link), `subscription_id BIGINT FK` (subscription → job link) |
+| `download_jobs` | Download job tracking | `id` UUID PK, `user_id` FK, `url`, `source`, `status` (queued/running/done/failed/cancelled/paused/partial), `progress` JSONB (may contain `failed_pages`, `permanently_failed`), `error`, `retry_count SMALLINT`, `max_retries SMALLINT`, `next_retry_at`, `gallery_id BIGINT FK` (progressive import link), `subscription_id BIGINT FK` (subscription → job link) |
 | `read_progress` | Per-gallery read cursor | `(user_id, gallery_id)` PK, `last_page`, `last_read_at` |
 | `credentials` | Source credentials (encrypted) | `source` PK, `credential_type`, `value_encrypted` BYTEA |
 | `api_tokens` | External API tokens | `id` UUID PK, `user_id` FK, `token_hash` UNIQUE, `token_plain`, `expires_at` |
@@ -202,11 +202,11 @@ All models are in `backend/db/models.py`.
 
 ---
 
-### Worker Pipeline (ARQ)
+### Worker Pipeline (SAQ)
 
-Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `tag_helpers.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `subscription_group.py`, `dedup.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`, `thumbhash_backfill.py`, `retry.py`, `progressive.py`, `trash.py`, `ehtag_sync.py`)
+Entry: `python -m worker` (package: `backend/worker/` with `__init__.py`, `constants.py`, `helpers.py`, `download.py`, `importer.py`, `scan.py`, `tagging.py`, `tag_helpers.py`, `thumbnail.py`, `reconciliation.py`, `subscription.py`, `subscription_group.py`, `dedup.py`, `dedup_scan.py`, `dedup_tier1.py`, `dedup_tier2.py`, `dedup_tier3.py`, `dedup_helpers.py`, `thumbhash_backfill.py`, `retry.py`, `progressive.py`, `trash.py`, `ehtag_sync.py`)
 
-> **`helpers.py` shared utilities:** `compute_arq_job_id(job_id, retry_count)` generates unique ARQ job IDs; `enqueue_download_job(arq_pool, job, arq_job_id)` standardizes download job enqueue parameters; `check_disk_space(path, min_free_gb)` returns `(ok, free_gb)` with fail-open on OSError; `acquire_lock(redis, key, ttl)` / `release_lock(redis, key, value)` distributed lock with Lua compare-and-delete; `validate_cron(expr)` in `core/utils.py` — shared cron validation raising HTTPException(400).
+> **`helpers.py` shared utilities:** `compute_job_key(job_id, retry_count)` generates unique job keys; `enqueue_download_job(job, job_key)` standardizes download job enqueue parameters; `check_disk_space(path, min_free_gb)` returns `(ok, free_gb)` with fail-open on OSError; `acquire_lock(redis, key, ttl)` / `release_lock(redis, key, value)` distributed lock with Lua compare-and-delete; `validate_cron(expr)` in `core/utils.py` — shared cron validation raising HTTPException(400).
 
 #### Job Functions
 
@@ -223,9 +223,9 @@ Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py
 | `auto_discover_job` | `/api/import/discover` | Auto-discover new galleries under all library paths |
 | `rescan_by_path_job` | File watcher event | Rescan a specific directory triggered by inotify/polling |
 | `rescan_library_path_job` | `/api/import/rescan/path/{id}` | Rescan one configured library path |
-| `scheduled_scan_job` | ARQ cron | Periodic full library scan (interval from `library_scan_interval_hours`) |
+| `scheduled_scan_job` | SAQ cron | Periodic full library scan (interval from `library_scan_interval_hours`) |
 | `toggle_watcher_job` | `/api/import/monitor/toggle` | Start/stop the LibraryWatcher file monitor |
-| `subscription_scheduler` | ARQ cron (every minute) | 1-minute dispatcher: queries enabled+idle groups by priority, checks cron schedule via `_cron_is_due()`, atomically claims groups (`UPDATE WHERE status='idle' RETURNING`), enqueues `check_subscription_group` |
+| `subscription_scheduler` | SAQ cron (every minute) | 1-minute dispatcher: queries enabled+idle groups by priority, checks cron schedule via `_cron_is_due()`, atomically claims groups (`UPDATE WHERE status='idle' RETURNING`), enqueues `check_subscription_group` |
 | `check_subscription_group` | Via `subscription_scheduler` / manual | Check all enabled+auto_download subscriptions in a group with `asyncio.Semaphore(concurrency)` + 30-min deadline (`asyncio.timeout`); calls `_enqueue_for_subscription()` per sub; resets group to idle on completion or exception |
 | `check_followed_artists` | Manual trigger only (per-user) | Legacy: checks ungrouped subscriptions only (`group_id IS NULL`); kept for per-user manual trigger via API |
 | `check_single_subscription` | `/api/subscriptions/{id}/check` | Check a single subscription for new works |
@@ -235,13 +235,13 @@ Entry: `arq worker.WorkerSettings` (package: `backend/worker/` with `__init__.py
 | `dedup_tier2_job` | Via `dedup_scan_job` | Heuristic classification: fills `relationship` (`quality_conflict`/`variant`) + `suggested_keep` |
 | `dedup_tier3_job` | Via `dedup_scan_job` (when `dedup_opencv_enabled`) | OpenCV pixel-diff validates `needs_t3` pairs → confirms or resolves as false positive |
 | `thumbhash_backfill_job` | Manual | Batch-generates base64 thumbhash for existing blobs missing `thumbhash`; reads `thumb_160.webp` via Pillow + `thumbhash` library; processes in batches of 500 using keyset pagination on `sha256` |
-| `rate_limit_schedule_job` | ARQ cron (*/10) | Checks rate limit schedule config in Redis; sets/clears `rate_limit:schedule:active` flag based on current hour vs configured start/end hours |
-| `retry_failed_downloads_job` | ARQ cron (*/15) | **Stale reaper** marks running jobs >60min and queued jobs >30min as failed; then scans failed/partial jobs with `retry_count < max_retries`; re-queues with exponential backoff; `LIMIT 10` + `FOR UPDATE SKIP LOCKED`; skips entirely when `system:disk_low` Redis flag is set |
-| `trash_gc_job` | ARQ cron | Permanently deletes galleries whose `deleted_at` has exceeded the retention period; when trash is disabled, hard-deletes all soft-deleted galleries |
-| `ehtag_sync_job` | ARQ cron (`30 4 * * 0`, `run_at_startup=True`) | Syncs EhTag translations from CDN (`cdn.jsdelivr.net`); runs immediately on first boot, then weekly; delegates to `services/ehtag_importer.py`; registered in `scheduled_tasks.py` TASK_DEFS |
-| `log_cleanup_job` | ARQ cron (`30 3 * * *`) | Trim `system_logs` Redis list: remove entries older than `log_retention_days`, cap at `log_max_entries` |
-| `disk_monitor_job` | ARQ cron (*/5, `run_at_startup`) | Check disk space via `shutil.disk_usage("/data")`; sets `system:disk_low` Redis key (TTL 600s) with free GB value when below `disk_min_free_gb`, deletes key when recovered; emits `SYSTEM_DISK_LOW` event |
-| `adaptive_persist_job` | ARQ cron (*/5) | Flush dirty adaptive states from Redis to DB. SPOP up to 200 items, batch upsert in single session, re-add failed items. Registered in `worker/__init__.py` |
+| `rate_limit_schedule_job` | SAQ cron (*/10) | Checks rate limit schedule config in Redis; sets/clears `rate_limit:schedule:active` flag based on current hour vs configured start/end hours |
+| `retry_failed_downloads_job` | SAQ cron (*/15) | **Stale reaper** marks running jobs >60min and queued jobs >30min as failed; then scans failed/partial jobs with `retry_count < max_retries`; re-queues with exponential backoff; `LIMIT 10` + `FOR UPDATE SKIP LOCKED`; skips entirely when `system:disk_low` Redis flag is set |
+| `trash_gc_job` | SAQ cron | Permanently deletes galleries whose `deleted_at` has exceeded the retention period; when trash is disabled, hard-deletes all soft-deleted galleries |
+| `ehtag_sync_job` | SAQ cron (`30 4 * * 0`, `run_at_startup=True`) | Syncs EhTag translations from CDN (`cdn.jsdelivr.net`); runs immediately on first boot, then weekly; delegates to `services/ehtag_importer.py`; registered in `scheduled_tasks.py` TASK_DEFS |
+| `log_cleanup_job` | SAQ cron (`30 3 * * *`) | Trim `system_logs` Redis list: remove entries older than `log_retention_days`, cap at `log_max_entries` |
+| `disk_monitor_job` | SAQ cron (*/5, `run_at_startup`) | Check disk space via `shutil.disk_usage("/data")`; sets `system:disk_low` Redis key (TTL 600s) with free GB value when below `disk_min_free_gb`, deletes key when recovered; emits `SYSTEM_DISK_LOW` event |
+| `adaptive_persist_job` | SAQ cron (*/5) | Flush dirty adaptive states from Redis to DB. SPOP up to 200 items, batch upsert in single session, re-add failed items. Registered in `worker/__init__.py` |
 
 #### Standard Pipeline
 
@@ -307,14 +307,14 @@ On startup, the worker performs crash-recovery housekeeping with configurable st
 
 1. **Orphaned gallery statuses** — resets `downloading` galleries back to `partial` (always runs, regardless of strategy)
 2. **Stale running jobs** — strategy `auto_retry` (default): re-enqueue with `retry_count++`; strategy `mark_failed`: set `status=failed`
-3. **Stale queued jobs** — re-enqueues `queued` jobs that survived a crash (new ARQ task via `enqueue_download_job`)
+3. **Stale queued jobs** — re-enqueues `queued` jobs that survived a crash (new SAQ task via `enqueue_download_job`)
 4. **Stale paused jobs** — strategy `keep_paused` (default): re-enqueue for pause gate; strategy `auto_retry`: delete pause key + re-enqueue as retry; strategy `mark_failed`: delete pause key + mark failed
 5. **Subscription group reset** — marks `running` groups as `idle`
 6. **Emit `SYSTEM_WORKER_RECOVERED`** — event with strategy names + recovery counts (running_retried, running_failed, paused_kept, paused_retried, paused_failed, queued_requeued)
 
 #### Resume Re-enqueue (`routers/download.py`)
 
-When resuming a paused job, the router checks if the ARQ coroutine is still alive (`arq:result:{job_id}` key). If dead, it re-enqueues as a new ARQ job with incremented `retry_count` rather than just flipping the status flag.
+When resuming a paused job, the router checks if the SAQ job is still alive (`arq:result:{job_id}` key). If dead, it re-enqueues as a new SAQ job with incremented `retry_count` rather than just flipping the status flag.
 
 #### Library Watcher
 
@@ -411,7 +411,7 @@ Used by: `routers/library.py` (cover selection, image ordering, `display_order` 
 |------|-------------|
 | `auth.py` | Session auth (`require_auth`), RBAC (`require_role`), gallery access filter |
 | `audit.py` | `log_audit()` — fire-and-forget audit trail writer (raw SQL insert to `audit_logs`) |
-| `compat.py` | Python 3.14 asyncio compatibility patch (`get_event_loop()` fallback) |
+| `queue.py` | SAQ queue abstraction layer (init/close/get/enqueue) |
 | `config.py` | Pydantic `BaseSettings` — all env-based configuration (incl. `disk_min_free_gb` default 2.0 GB) |
 | `csrf.py` | CSRF token middleware (`CSRFMiddleware`) |
 | `database.py` | SQLAlchemy async engine + `AsyncSessionLocal` factory |
@@ -769,7 +769,7 @@ Source root: `pwa/src/`
 | `Pagination` | `components/Pagination.tsx` | Page cursor-based pagination control |
 | `RatingStars` | `components/RatingStars.tsx` | 5-star rating widget |
 | `DownloadStatusBadge` | `components/DownloadStatusBadge.tsx` | Gallery download status indicator |
-| `JobStatusBadge` | `components/JobStatusBadge.tsx` | ARQ job status badge |
+| `JobStatusBadge` | `components/JobStatusBadge.tsx` | Job status badge |
 | `EmptyState` | `components/EmptyState.tsx` | Empty list placeholder |
 | `LoadingSpinner` | `components/LoadingSpinner.tsx` | Loading indicator |
 | `SWUpdatePrompt` | `components/SWUpdatePrompt.tsx` | PWA service worker update prompt |
@@ -1008,7 +1008,7 @@ Credentials are read from `.env` at project root. DB user/name default to `vault
 |---------|-------|----------|
 | `nginx` | `wget -q --spider http://127.0.0.1/nginx-health` | 15s |
 | `api` | `wget -qO /dev/null http://localhost:8000/api/health` | 15s |
-| `worker` | Redis `PING` + `pgrep arq worker.WorkerSettings` | 15s |
+| `worker` | Redis `PING` + `python3 -c 'import os,signal; os.kill(1, 0)'` | 15s |
 | `pwa` | `wget -q --spider http://127.0.0.1:3000` | 15s |
 | `postgres` | `pg_isready` + `SELECT 1` | 5s |
 | `redis` | `redis-cli ping` | 5s |
@@ -1121,7 +1121,7 @@ Sort options: `added_at` (default), `rating`, `posted_at`, `pages`, `title`
 
 | 項目 | 限制 | 原因 |
 |------|------|------|
-| Python ≤ 3.13 | arq 0.27 不支援 3.14+ | `asyncio.get_event_loop()` 在 3.14 已移除 |
+| ~~Python ≤ 3.13~~ | ~~arq 0.27~~ → SAQ 0.26 已解決 | 已遷移至 SAQ + Python 3.14 |
 | numpy ≥ 2.4 | slim 映像無 gcc | 2.3.x 無 cp314 wheel，需 source build |
 | opencc-python-reimplemented | 0.1.7 | 繁中轉換（`s2twp`），`routers/tag.py` 用 |
 | Tailwind 4 | CSS-first，無 JS config | `@theme inline` + `@custom-variant dark` |

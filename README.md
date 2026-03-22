@@ -21,7 +21,7 @@ A self-hosted gallery management platform built with Docker Compose. Browse, dow
 
 | Layer | Technology |
 |-------|-----------|
-| Backend | FastAPI + SQLAlchemy (asyncpg) + ARQ |
+| Backend | FastAPI + SQLAlchemy (asyncpg) + SAQ |
 | Frontend | Next.js 16 App Router (PWA) |
 | Database | PostgreSQL 18 + Redis 8 |
 | Proxy | Nginx |
