@@ -6,6 +6,7 @@ const nextPkg = require('next/package.json')
 
 const config: NextConfig = {
   output: 'standalone',
+  reactCompiler: true,
   env: {
     NEXT_PUBLIC_NEXTJS_VERSION: nextPkg.version,
   },

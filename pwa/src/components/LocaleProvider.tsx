@@ -57,7 +57,7 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
     localStorage.setItem(STORAGE_KEY, locale)
   }, [locale])
 
-  return <LocaleContext.Provider value={{ locale, setLocale }}>{children}</LocaleContext.Provider>
+  return <LocaleContext value={{ locale, setLocale }}>{children}</LocaleContext>
 }
 
 export function useLocale() {

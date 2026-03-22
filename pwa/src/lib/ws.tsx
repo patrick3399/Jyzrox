@@ -153,15 +153,15 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   }, [])
 
   return (
-    <WsConnectionContext.Provider value={{ connected }}>
-      <WsJobContext.Provider value={{ lastJobUpdate, lastSubCheck }}>
-        <WsAlertContext.Provider value={{ alerts, dismissAlert }}>
-          <WsEventContext.Provider value={{ lastEvent }}>
-            <WsLogContext.Provider value={{ lastLogEntry }}>{children}</WsLogContext.Provider>
-          </WsEventContext.Provider>
-        </WsAlertContext.Provider>
-      </WsJobContext.Provider>
-    </WsConnectionContext.Provider>
+    <WsConnectionContext value={{ connected }}>
+      <WsJobContext value={{ lastJobUpdate, lastSubCheck }}>
+        <WsAlertContext value={{ alerts, dismissAlert }}>
+          <WsEventContext value={{ lastEvent }}>
+            <WsLogContext value={{ lastLogEntry }}>{children}</WsLogContext>
+          </WsEventContext>
+        </WsAlertContext>
+      </WsJobContext>
+    </WsConnectionContext>
   )
 }
 
