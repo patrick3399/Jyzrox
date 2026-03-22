@@ -9,6 +9,7 @@ from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth
+import core.queue
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
 from core.utils import normalize_subscription_url
@@ -190,12 +191,10 @@ async def patch_follow(
 @router.post("/check-updates")
 async def check_updates(
     auth: dict = Depends(require_auth),
-    request: Request = None,
 ):
     """Manually trigger update check for followed artists."""
     try:
-        arq = request.app.state.arq
-        await arq.enqueue_job("check_followed_artists", auth["user_id"])
+        await core.queue.enqueue("check_followed_artists", user_id=auth["user_id"])
     except Exception as e:
         logger.error("Failed to enqueue check_followed_artists: %s", e)
         raise HTTPException(status_code=500, detail=str(e))

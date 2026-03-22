@@ -46,7 +46,7 @@ class RedisLogHandler(logging.Handler):
             })
 
             try:
-                loop = asyncio.get_event_loop()
+                loop = asyncio.get_running_loop()
                 if loop.is_running():
                     loop.create_task(self._async_emit(payload))
             except RuntimeError:

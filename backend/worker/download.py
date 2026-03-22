@@ -13,6 +13,7 @@ from core.redis_client import DownloadSemaphore
 from services.credential import get_credential
 from worker.constants import DISK_LOW_KEY, logger
 from worker.helpers import _set_job_progress, _set_job_status, check_disk_space
+import core.queue
 
 
 async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> None:
@@ -425,7 +426,7 @@ async def download_job(
             logger.info("[download] progressive import finalized: gallery_id=%s", gallery_id)
         else:
             # Safety fallback: no progressive import occurred (should be rare)
-            await ctx["redis"].enqueue_job("import_job", str(target_dir), db_job_id, import_user_id, url)
+            await core.queue.enqueue("import_job", path=str(target_dir), db_job_id=db_job_id, user_id=import_user_id, source_url=url)
     elif result.downloaded == 0:
         logger.info("[download] no new files downloaded (all skipped by archive), skipping import: %s", url)
 

@@ -7,6 +7,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from core.auth import require_role
+import core.queue
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["gallery-dl admin"])
@@ -34,10 +35,9 @@ async def upgrade_gallery_dl(
     _: dict = Depends(_admin),
 ):
     """Enqueue gallery-dl upgrade job."""
-    arq = request.app.state.arq
     version = body.version if body else None
-    job = await arq.enqueue_job("gdl_upgrade_job", version)
-    return {"job_id": job.job_id}
+    job = await core.queue.enqueue("gdl_upgrade_job", version=version)
+    return {"job_id": job.key if job else "unknown"}
 
 
 @router.post("/rollback")
@@ -50,6 +50,5 @@ async def rollback_gallery_dl(
 
     if _previous_version_dir() is None:
         raise HTTPException(status_code=409, detail="No previous version to rollback to")
-    arq = request.app.state.arq
-    job = await arq.enqueue_job("gdl_rollback_job")
-    return {"job_id": job.job_id}
+    job = await core.queue.enqueue("gdl_rollback_job")
+    return {"job_id": job.key if job else "unknown"}

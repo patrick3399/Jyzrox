@@ -16,6 +16,7 @@ from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
 from core.utils import detect_source
+import core.queue
 from db.models import ApiToken, Blob, DownloadJob, Gallery, Image, Tag
 from services.cas import cas_url, thumb_url as cas_thumb_url, resolve_blob_path
 from sqlalchemy.orm import selectinload
@@ -426,20 +427,19 @@ async def enqueue_download(
     job_id = _uuid.uuid4()
     source = detect_source(resolved_url)
 
-    # 1. Enqueue ARQ job first — if this fails, no DB record is created.
-    arq = request.app.state.arq
+    # 1. Enqueue job first — if this fails, no DB record is created.
     try:
-        await arq.enqueue_job(
+        await core.queue.enqueue(
             "download_job",
-            resolved_url,
-            source,
-            None,   # options
-            str(job_id),
-            None,   # total
             _job_id=str(job_id),
+            url=resolved_url,
+            source=source,
+            options=None,
+            db_job_id=str(job_id),
+            total=None,
         )
     except Exception as exc:
-        logger.error("[external/enqueue] ARQ enqueue failed: %s", exc)
+        logger.error("[external/enqueue] enqueue failed: %s", exc)
         raise HTTPException(status_code=503, detail="Failed to enqueue download job")
 
     # 2. Persist DB record. If this fails, log a warning; the ARQ job will

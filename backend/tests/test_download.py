@@ -1025,23 +1025,20 @@ class TestCheckSourceEnabled:
 class TestEnqueueFailurePaths:
     """Unit tests for _enqueue helper failure branches."""
 
-    async def test_enqueue_arq_failure_marks_job_failed(self, db_session, mock_redis):
-        """When ARQ.enqueue_job raises, the DB job record is marked failed and 503 is raised."""
+    async def test_enqueue_failure_marks_job_failed(self, db_session, mock_redis):
+        """When enqueue raises, the DB job record is marked failed and 503 is raised."""
         from fastapi import HTTPException
         from routers.download import _enqueue
-
-        arq = AsyncMock()
-        arq.enqueue_job = AsyncMock(side_effect=RuntimeError("arq down"))
 
         with (
             patch("routers.download.get_redis", return_value=mock_redis),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
             patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("core.queue.enqueue", new_callable=AsyncMock, side_effect=RuntimeError("queue down")),
         ):
             with pytest.raises(HTTPException) as exc_info:
                 await _enqueue(
                     "https://e-hentai.org/g/777/arqfail/",
-                    arq,
                     db_session,
                     user_id=1,
                 )
@@ -1055,9 +1052,6 @@ class TestEnqueueFailurePaths:
         # Pre-insert a queued job
         job_id = await _insert_job(db_session, url="https://e-hentai.org/g/999/dupe/", status="queued", user_id=42)
 
-        arq = AsyncMock()
-        arq.enqueue_job = AsyncMock()
-
         with (
             patch("routers.download.get_redis", return_value=mock_redis),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
@@ -1065,24 +1059,19 @@ class TestEnqueueFailurePaths:
         ):
             result = await _enqueue(
                 "https://e-hentai.org/g/999/dupe/",
-                arq,
                 db_session,
                 user_id=42,
             )
 
-        # Should return the existing job — ARQ should NOT be called again
+        # Should return the existing job — enqueue should NOT be called again
         assert result["job_id"] == job_id
         assert result["status"] == "queued"
-        arq.enqueue_job.assert_not_called()
 
     async def test_enqueue_duplicate_running_url_same_user_returns_existing_job(self, db_session, mock_redis):
         """When same URL + user has a running job, _enqueue returns existing running job."""
         from routers.download import _enqueue
 
         job_id = await _insert_job(db_session, url="https://e-hentai.org/g/998/running/", status="running", user_id=7)
-
-        arq = AsyncMock()
-        arq.enqueue_job = AsyncMock()
 
         with (
             patch("routers.download.get_redis", return_value=mock_redis),
@@ -1091,14 +1080,12 @@ class TestEnqueueFailurePaths:
         ):
             result = await _enqueue(
                 "https://e-hentai.org/g/998/running/",
-                arq,
                 db_session,
                 user_id=7,
             )
 
         assert result["job_id"] == job_id
         assert result["status"] == "running"
-        arq.enqueue_job.assert_not_called()
 
 
 # ---------------------------------------------------------------------------
@@ -1539,19 +1526,15 @@ class TestRetryJobBranches:
         if resp.status_code == 400:
             assert "cannot retry" in resp.json()["detail"].lower()
 
-    async def test_retry_arq_failure_reverts_and_returns_503(self, member_client, db_session, mock_redis):
-        """When ARQ enqueue fails during retry, job status is reverted to failed and 503 is returned."""
-        import sys
-
+    async def test_retry_enqueue_failure_reverts_and_returns_503(self, member_client, db_session, mock_redis):
+        """When enqueue fails during retry, job status is reverted to failed and 503 is returned."""
         mock_redis.get = AsyncMock(return_value=None)
         job_id = await _insert_job(db_session, status="failed", user_id=1, retry_count=0)
 
-        # Make the app's arq raise on enqueue
-        _conftest = sys.modules.get("conftest") or sys.modules.get("tests.conftest")
-        _app = _conftest._app
-        _app.state.arq.enqueue_job = AsyncMock(side_effect=RuntimeError("arq unavailable"))
-
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("core.queue.enqueue", new_callable=AsyncMock, side_effect=RuntimeError("queue unavailable")),
+        ):
             resp = await member_client.post(f"/api/download/jobs/{job_id}/retry")
         # 503 on PG; 404 on SQLite UUID mismatch
         assert resp.status_code in (503, 404)

@@ -1,5 +1,5 @@
 # ── Stage 1: builder ──────────────────────────────────────────────────────────
-FROM python:3.13-slim AS builder
+FROM python:3.14-slim AS builder
 
 # Install wheels for packages with C extensions (pillow, lxml, onnxruntime, etc.)
 RUN pip install --no-cache-dir --upgrade pip
@@ -18,7 +18,7 @@ urllib.request.urlretrieve('https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagg
 urllib.request.urlretrieve('https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagger-ui.css', '/install/swagger-ui.css')"
 
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
-FROM python:3.13-slim AS runtime
+FROM python:3.14-slim AS runtime
 
 # gosu: privilege-drop in entrypoint; wget: healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \

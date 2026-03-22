@@ -1,7 +1,7 @@
 """
-ARQ Worker entry point.
+SAQ Worker entry point.
 
-Run with:  arq worker.WorkerSettings
+Run with:  python -m worker
 """
 
 import asyncio
@@ -9,29 +9,23 @@ import json
 import logging
 import os
 
-from core.compat import patch_asyncio_for_314
-
-patch_asyncio_for_314()
-
 from datetime import UTC
 
-from arq.connections import RedisSettings
-from arq.cron import cron
-from arq.worker import func as arq_func
+from saq import CronJob
 
 from core.config import get_all_library_paths, settings
-from core.redis_client import close_redis, init_redis
+from core.redis_client import close_redis
 from core.watcher import LibraryWatcher
 from worker.dedup_scan import dedup_scan_job
 from worker.dedup_tier1 import dedup_tier1_job
 from worker.dedup_tier2 import dedup_tier2_job
 from worker.dedup_tier3 import dedup_tier3_job
-from worker.download import download_job as _download_job
+from worker.download import download_job
 from worker.ehtag_sync import ehtag_sync_job
 from worker.gallery_dl_venv import ensure_venv
 from worker.gallery_dl_venv import rollback_job as gdl_rollback_job
 from worker.gallery_dl_venv import upgrade_job as gdl_upgrade_job
-from worker.helpers import _sha256, compute_arq_job_id, enqueue_download_job
+from worker.helpers import _sha256, compute_job_key, enqueue_download_job
 from worker.importer import (
     _build_gallery,
     _extract_tags,
@@ -158,8 +152,17 @@ async def _ensure_archive_table_schema() -> None:
 
 
 async def startup(ctx: dict) -> None:
-    logger.info("ARQ Worker started — Jyzrox")
+    logger.info("SAQ Worker started — Jyzrox")
+    import core.queue as _core_queue
+    from core.redis_client import get_redis, init_redis
+
     await init_redis()
+    r = get_redis()
+    # Register the Worker's own Queue into core.queue so that enqueue() works
+    # throughout the codebase without creating a second Redis connection.
+    saq_queue = ctx["worker"].queue
+    _core_queue._queue = saq_queue
+    ctx["redis"] = r  # plain Redis client
     from core.log_handler import apply_log_level_from_redis, install_log_handler
 
     install_log_handler("worker")
@@ -242,7 +245,7 @@ async def startup(ctx: dict) -> None:
             (await session.execute(select(DownloadJob).where(DownloadJob.status == "running"))).scalars().all()
         )
         if running_jobs:
-            arq_pool = ctx["redis"]
+
 
             # Fix orphaned galleries stuck in "downloading" status (batch query)
             from db.models import Image
@@ -272,9 +275,9 @@ async def startup(ctx: dict) -> None:
             for job in running_jobs:
                 if running_strategy == "auto_retry":
                     job.retry_count = (job.retry_count or 0) + 1
-                    arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                    job_key = compute_job_key(job.id, job.retry_count)
                     try:
-                        await enqueue_download_job(arq_pool, job, arq_job_id)
+                        await enqueue_download_job(job, job_key)
                         job.status = "queued"
                         job.error = None
                         job.finished_at = None
@@ -299,11 +302,11 @@ async def startup(ctx: dict) -> None:
             (await session.execute(select(DownloadJob).where(DownloadJob.status == "queued"))).scalars().all()
         )
         if stale_queued:
-            arq_pool = ctx["redis"]
+
             for job in stale_queued:
-                arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                job_key = compute_job_key(job.id, job.retry_count)
                 try:
-                    await enqueue_download_job(arq_pool, job, arq_job_id)
+                    await enqueue_download_job(job, job_key)
                     recovery_counts["queued_requeued"] += 1
                     logger.info("Re-enqueued stale queued job %s", job.id)
                 except Exception as exc:
@@ -321,12 +324,12 @@ async def startup(ctx: dict) -> None:
         # to "running" without re-enqueueing — leaving the job stuck forever.
         paused_jobs = (await session.execute(select(DownloadJob).where(DownloadJob.status == "paused"))).scalars().all()
         if paused_jobs:
-            arq_pool = ctx["redis"]
+
             for job in paused_jobs:
                 if paused_strategy == "keep_paused":
-                    arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                    job_key = compute_job_key(job.id, job.retry_count)
                     try:
-                        await enqueue_download_job(arq_pool, job, arq_job_id)
+                        await enqueue_download_job(job, job_key)
                         recovery_counts["paused_kept"] += 1
                         logger.info("Re-enqueued paused job %s (pause gate will catch it)", job.id)
                     except Exception as exc:
@@ -334,9 +337,9 @@ async def startup(ctx: dict) -> None:
                 elif paused_strategy == "auto_retry":
                     await r.delete(f"download:pause:{job.id}")
                     job.retry_count = (job.retry_count or 0) + 1
-                    arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                    job_key = compute_job_key(job.id, job.retry_count)
                     try:
-                        await enqueue_download_job(arq_pool, job, arq_job_id)
+                        await enqueue_download_job(job, job_key)
                         job.status = "queued"
                         job.error = None
                         job.finished_at = None
@@ -403,11 +406,14 @@ async def startup(ctx: dict) -> None:
 
     if watcher_should_start:
         paths = await get_all_library_paths()
-        loop = asyncio.get_event_loop()
-        arq_pool = ctx["redis"]
+        loop = asyncio.get_running_loop()
 
         def enqueue_sync(job_name: str, *args):
-            asyncio.run_coroutine_threadsafe(arq_pool.enqueue_job(job_name, *args), loop)
+            import core.queue
+
+            # Watcher passes: ("auto_discover_job",) or ("rescan_by_path_job", path)
+            kwargs = {"dir_path": args[0]} if args else {}
+            asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
         _watcher.start(paths, enqueue_sync)
         await r.set(
@@ -415,9 +421,15 @@ async def startup(ctx: dict) -> None:
             json.dumps({"running": True, "paths": paths}),
         )
 
+    # Jobs that were marked run_at_startup=True in the old arq config.
+    import core.queue as _q
+
+    await _q.enqueue("ehtag_sync_job")
+    await _q.enqueue("disk_monitor_job")
+
 
 async def shutdown(ctx: dict) -> None:
-    logger.info("ARQ Worker shutting down")
+    logger.info("SAQ Worker shutting down")
     _watcher.stop()
     # Cancel log level subscriber
     log_level_task = ctx.get("_log_level_task")
@@ -458,11 +470,14 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
             await r.set("watcher:status", json.dumps({"running": False, "paths": []}))
             return {"status": "no_paths"}
 
-        loop = asyncio.get_event_loop()
-        arq_pool = ctx["redis"]
+        loop = asyncio.get_running_loop()
 
         def enqueue_sync(job_name: str, *args):
-            asyncio.run_coroutine_threadsafe(arq_pool.enqueue_job(job_name, *args), loop)
+            import core.queue
+
+            # Watcher passes: ("auto_discover_job",) or ("rescan_by_path_job", path)
+            kwargs = {"dir_path": args[0]} if args else {}
+            asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
         _watcher.start(paths, enqueue_sync)
         await r.set("watcher:status", json.dumps({"running": True, "paths": paths}))
@@ -616,128 +631,71 @@ async def adaptive_persist_job(ctx: dict) -> dict:
     return {"persisted": count}
 
 
-# ── ARQ Worker Settings ──────────────────────────────────────────────
+# ── SAQ Worker Factory ───────────────────────────────────────────────
 
 
-class WorkerSettings:
-    redis_settings = RedisSettings.from_dsn(settings.redis_url)
-    functions = [
-        arq_func(_download_job, name="download_job", max_tries=1),
-        import_job,
-        local_import_job,
-        batch_import_job,
-        rescan_library_job,
-        rescan_gallery_job,
-        rescan_by_path_job,
-        rescan_library_path_job,
-        auto_discover_job,
-        tag_job,
-        thumbnail_job,
-        reconciliation_job,
-        scheduled_scan_job,
-        toggle_watcher_job,
-        check_followed_artists,
-        check_single_subscription,
-        check_subscription_group,
-        dedup_tier1_job,
-        dedup_tier2_job,
-        dedup_tier3_job,
-        dedup_scan_job,
-        rate_limit_schedule_job,
-        thumbhash_backfill_job,
-        retry_failed_downloads_job,
-        trash_gc_job,
-        ehtag_sync_job,
-        log_cleanup_job,
-        arq_func(gdl_upgrade_job, name="gdl_upgrade_job", max_tries=1),
-        arq_func(gdl_rollback_job, name="gdl_rollback_job", max_tries=1),
-        disk_monitor_job,
-        adaptive_persist_job,
-    ]
-    cron_jobs = [
-        cron(
-            scheduled_scan_job,
-            hour=None,  # every hour
-            minute=0,  # at :00
-            run_at_startup=False,
-            unique=True,
-            timeout=7200,
-        ),
-        cron(
+def build_worker():
+    """Build and return a configured SAQ Worker instance."""
+    from saq import Queue, Worker
+
+    queue = Queue.from_url(settings.redis_url)
+
+    return Worker(
+        queue,
+        functions=[
+            download_job,
+            import_job,
+            local_import_job,
+            batch_import_job,
+            rescan_library_job,
+            rescan_gallery_job,
+            rescan_by_path_job,
+            rescan_library_path_job,
+            auto_discover_job,
+            tag_job,
+            thumbnail_job,
             reconciliation_job,
-            weekday=0,  # Monday
-            hour=3,
-            minute=0,
-            unique=True,
-            timeout=3600,
-        ),
-        cron(
-            subscription_scheduler,
-            minute=None,  # every minute
-            run_at_startup=False,
-            unique=True,
-            timeout=120,
-        ),
-        cron(
+            scheduled_scan_job,
+            toggle_watcher_job,
+            check_followed_artists,
+            check_single_subscription,
+            check_subscription_group,
+            dedup_tier1_job,
+            dedup_tier2_job,
+            dedup_tier3_job,
+            dedup_scan_job,
             rate_limit_schedule_job,
-            minute={0, 10, 20, 30, 40, 50},
-            run_at_startup=False,
-            unique=True,
-            timeout=60,
-        ),
-        cron(
+            thumbhash_backfill_job,
             retry_failed_downloads_job,
-            minute={0, 15, 30, 45},
-            run_at_startup=False,
-            unique=True,
-            timeout=300,
-        ),
-        cron(
             trash_gc_job,
-            hour=4,
-            minute=0,
-            unique=True,
-            timeout=3600,
-        ),
-        cron(
             ehtag_sync_job,
-            hour=4,
-            minute=30,
-            run_at_startup=True,  # ensures first-boot import
-            unique=True,
-            timeout=300,
-        ),
-        cron(
             log_cleanup_job,
-            hour=3,
-            minute=30,
-            unique=True,
-            timeout=300,
-        ),
-        cron(
+            # Registered under explicit names (source functions are upgrade_job/rollback_job).
+            ("gdl_upgrade_job", gdl_upgrade_job),
+            ("gdl_rollback_job", gdl_rollback_job),
             disk_monitor_job,
-            minute=set(range(0, 60, 5)),
-            run_at_startup=True,
-            unique=True,
-            timeout=30,
-        ),
-        cron(
             adaptive_persist_job,
-            minute=set(range(0, 60, 5)),
-            run_at_startup=False,
-            unique=True,
-            timeout=60,
-        ),
-    ]
-    on_startup = startup
-    on_shutdown = shutdown
-    max_jobs = int(os.environ.get("MAX_WORKER_JOBS", "8"))
-    job_timeout = 3600
-    poll_delay = 2
+        ],
+        cron_jobs=[
+            CronJob(scheduled_scan_job, cron="0 * * * *", unique=True, timeout=7200),
+            CronJob(reconciliation_job, cron="0 3 * * 1", unique=True, timeout=3600),
+            CronJob(subscription_scheduler, cron="* * * * *", unique=True, timeout=120),
+            CronJob(rate_limit_schedule_job, cron="*/10 * * * *", unique=True, timeout=60),
+            CronJob(retry_failed_downloads_job, cron="*/15 * * * *", unique=True, timeout=300),
+            CronJob(trash_gc_job, cron="0 4 * * *", unique=True, timeout=3600),
+            CronJob(ehtag_sync_job, cron="30 4 * * *", unique=True, timeout=300),
+            CronJob(log_cleanup_job, cron="30 3 * * *", unique=True, timeout=300),
+            CronJob(disk_monitor_job, cron="*/5 * * * *", unique=True, timeout=30),
+            CronJob(adaptive_persist_job, cron="*/5 * * * *", unique=True, timeout=60),
+        ],
+        concurrency=int(os.environ.get("MAX_WORKER_JOBS", "8")),
+        startup=startup,
+        shutdown=shutdown,
+    )
 
 
 __all__ = [
-    "_download_job",
+    "download_job",
     "import_job",
     "local_import_job",
     "batch_import_job",
@@ -771,13 +729,13 @@ __all__ = [
     "adaptive_persist_job",
     "startup",
     "shutdown",
-    "WorkerSettings",
+    "build_worker",
     # Internal helpers re-exported for tests
     "_extract_tags",
     "_normalize_tags",
     "_build_gallery",
     "_upsert_tags",
     "_sha256",
-    "compute_arq_job_id",
+    "compute_job_key",
     "enqueue_download_job",
 ]

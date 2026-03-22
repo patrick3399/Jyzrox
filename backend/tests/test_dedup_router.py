@@ -331,8 +331,8 @@ async def test_dedup_scan_start_enqueues_job(client, mock_redis):
     assert resp.status_code == 200
     assert resp.json()["status"] == "queued"
     from main import app
-    app.state.arq.enqueue_job.assert_called_once_with(
-        "dedup_scan_job", "pending", _job_id="dedup_scan:singleton"
+    app.state.enqueue.assert_called_once_with(
+        "dedup_scan_job", _job_id="dedup_scan:singleton", mode="pending"
     )
 
 

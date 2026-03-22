@@ -9,6 +9,7 @@ from sqlalchemy import select, update
 from core.database import AsyncSessionLocal
 from db.models import Subscription, SubscriptionGroup
 from worker.constants import logger
+import core.queue
 
 GROUP_MAX_DURATION = 1800  # 30 minutes
 
@@ -71,7 +72,7 @@ async def subscription_scheduler(ctx: dict) -> dict:
 
             # Enqueue the group check job
             try:
-                await pool.enqueue_job("check_subscription_group", group.id)
+                await core.queue.enqueue("check_subscription_group", group_id=group.id)
                 dispatched += 1
                 logger.info("[scheduler] Dispatched group %d (%s)", group.id, group.name)
             except Exception as exc:

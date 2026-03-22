@@ -99,7 +99,7 @@ class EhSemaphore:
     @asynccontextmanager
     async def acquire(self):
         r = get_redis()
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         deadline = loop.time() + self.acquire_timeout
 
         val = await r.get("rate_limit:config:ehentai:concurrency")
@@ -197,7 +197,7 @@ class DownloadSemaphore:
         """
         r = get_redis()
         _timeout = timeout if timeout is not None else self.acquire_timeout
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         deadline = loop.time() + _timeout
         wait_start = loop.time()
 

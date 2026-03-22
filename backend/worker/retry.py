@@ -8,7 +8,7 @@ from sqlalchemy import select, update
 from core.database import AsyncSessionLocal
 from db.models import DownloadJob
 from worker.constants import DISK_LOW_KEY
-from worker.helpers import _cron_record, _cron_should_run, compute_arq_job_id, enqueue_download_job
+from worker.helpers import _cron_record, _cron_should_run, compute_job_key, enqueue_download_job
 
 logger = logging.getLogger("worker")
 
@@ -118,9 +118,9 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 backoff_minutes = min(base_delay * (2**job.retry_count), _MAX_BACKOFF_MINUTES)
                 job.next_retry_at = now + timedelta(minutes=backoff_minutes)
 
-                arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+                arq_job_id = compute_job_key(job.id, job.retry_count)
                 try:
-                    await enqueue_download_job(r, job, arq_job_id)
+                    await enqueue_download_job(job, arq_job_id)
                     retried += 1
                     logger.info(
                         "[retry] re-queued job %s (attempt %d/%d)",

@@ -67,14 +67,14 @@ class TestCheckDns:
     async def _run_check_dns(self, hostname: str, resolved_ip: str) -> None:
         """Helper: mock getaddrinfo to return resolved_ip, then call _check_dns."""
         fake_info = [(None, None, None, None, (resolved_ip, 0))]
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         with patch.object(loop, "getaddrinfo", new=AsyncMock(return_value=fake_info)):
             await _check_dns(hostname)
 
     async def _run_check_dns_expect_error(self, hostname: str, resolved_ip: str) -> None:
         """Helper: assert that _check_dns raises ValueError for the given resolved IP."""
         fake_info = [(None, None, None, None, (resolved_ip, 0))]
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         with patch.object(loop, "getaddrinfo", new=AsyncMock(return_value=fake_info)):
             with pytest.raises(ValueError, match="private/reserved"):
                 await _check_dns(hostname)
@@ -107,7 +107,7 @@ class TestCheckDns:
         """socket.gaierror during resolution is surfaced as ValueError."""
         import socket
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         with patch.object(
             loop,
             "getaddrinfo",
@@ -377,7 +377,7 @@ class TestProbeUrl:
     async def test_probe_url_handles_private_ip(self):
         """URL resolving to private IP → ProbeResult with success=False."""
         fake_info = [(None, None, None, None, ("127.0.0.1", 0))]
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         with patch.object(loop, "getaddrinfo", new=AsyncMock(return_value=fake_info)):
             result = await probe_url("https://localhost/gallery/1")
 
@@ -437,7 +437,7 @@ class TestProbeUrl:
         """DNS resolution failure → ProbeResult with success=False."""
         import socket
 
-        loop = asyncio.get_event_loop()
+        loop = asyncio.get_running_loop()
         with patch.object(
             loop,
             "getaddrinfo",

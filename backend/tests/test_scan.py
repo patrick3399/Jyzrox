@@ -28,7 +28,6 @@ def _make_redis() -> AsyncMock:
     r.set = AsyncMock(return_value=True)
     r.setex = AsyncMock(return_value=True)
     r.delete = AsyncMock(return_value=1)
-    r.enqueue_job = AsyncMock(return_value=None)
     return r
 
 
@@ -324,10 +323,11 @@ class TestRescanLibraryJob:
             patch("worker.scan.resolve_blob_path", return_value=existing_path),
             patch("worker.scan.thumb_dir", return_value=thumb_path),
             patch("core.watcher.watcher_instance", None),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             await rescan_library_job({"redis": r})
 
-        r.enqueue_job.assert_awaited_with("thumbnail_job", 40)
+        mock_enqueue.assert_awaited_with("thumbnail_job", gallery_id=40)
 
     async def test_watcher_paused_and_resumed(self):
         """Watcher should be paused at the start and resumed at the end."""
@@ -398,10 +398,11 @@ class TestRescanLibraryJob:
             patch("worker.scan.resolve_blob_path", return_value=existing_path),
             patch("worker.scan.thumb_dir", return_value=thumb_path),
             patch("core.watcher.watcher_instance", None),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             await rescan_library_job({"redis": r})
 
-        r.enqueue_job.assert_not_awaited()
+        mock_enqueue.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
@@ -820,13 +821,14 @@ class TestAutoDiscoverJob:
             with (
                 patch("worker.scan.get_all_library_paths", new_callable=AsyncMock, return_value=[tmpdir]),
                 patch("worker.scan.AsyncSessionLocal", return_value=session),
+                patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
             ):
                 result = await auto_discover_job({"redis": r})
 
         assert result["discovered"] == 1
-        r.enqueue_job.assert_awaited_once()
-        enqueue_args = r.enqueue_job.call_args.args
-        assert enqueue_args[0] == "local_import_job"
+        mock_enqueue.assert_awaited_once()
+        enqueue_kwargs = mock_enqueue.call_args.kwargs
+        assert mock_enqueue.call_args.args[0] == "local_import_job"
 
     async def test_only_directories_with_supported_extensions_counted(self):
         """Directory containing only unsupported file types should not create a gallery."""
@@ -948,12 +950,13 @@ class TestRescanByPathJob:
         with (
             patch("worker.scan.AsyncSessionLocal", return_value=session),
             patch("worker.scan.settings") as mock_settings,
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             mock_settings.data_library_path = "/data/library"
             result = await rescan_by_path_job({"redis": r}, dir_path="/some/external/path")
 
         assert result["status"] == "no_gallery_found"
-        r.enqueue_job.assert_awaited_with("auto_discover_job")
+        mock_enqueue.assert_awaited_with("auto_discover_job")
 
     async def test_gallery_found_by_library_path_delegates_to_rescan_gallery(self):
         """Path under data_library_path resolves gallery and delegates to rescan_gallery_job."""

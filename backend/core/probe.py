@@ -182,7 +182,7 @@ async def _check_dns(hostname: str) -> None:
 
     Checks ALL returned addresses, not just the first.
     """
-    loop = asyncio.get_event_loop()
+    loop = asyncio.get_running_loop()
     try:
         infos = await loop.getaddrinfo(hostname, None)
     except socket.gaierror as exc:

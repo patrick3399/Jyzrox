@@ -154,7 +154,7 @@ async def test_system_reconcile_trigger_enqueues_job(client):
     assert resp.json()["status"] == "enqueued"
     from main import app
 
-    app.state.arq.enqueue_job.assert_called_with("reconciliation_job")
+    app.state.enqueue.assert_called_with("reconciliation_job")
 
 
 async def test_system_reconcile_result_when_never_run_returns_never_run(client, mock_redis):

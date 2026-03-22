@@ -16,6 +16,7 @@ from core.config import get_all_library_paths, settings
 from core.database import async_session
 from core.redis_client import get_redis
 from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
+import core.queue
 from db.models import Gallery, LibraryPath
 
 router = APIRouter(tags=["import"])
@@ -187,9 +188,7 @@ async def batch_start(
             )
             await session.execute(stmt)
             await session.commit()
-
-    arq = request.app.state.arq
-    await arq.enqueue_job("batch_import_job", real_root, req.mode, req.galleries, batch_id, auth["user_id"])
+    await core.queue.enqueue("batch_import_job", root_dir=real_root, mode=req.mode, galleries=req.galleries, batch_id=batch_id, user_id=auth["user_id"])
 
     return {"batch_id": batch_id, "total": total}
 
@@ -364,8 +363,7 @@ async def rescan_status(_: dict = Depends(_member)):
 @router.post("/rescan")
 async def rescan_library(request: Request, _: dict = Depends(_admin)):
     """Enqueue a full library rescan job."""
-    arq = request.app.state.arq
-    await arq.enqueue_job("rescan_library_job")
+    await core.queue.enqueue("rescan_library_job")
     return {"status": "enqueued"}
 
 
@@ -390,8 +388,7 @@ async def rescan_library_path(library_id: int, request: Request, _: dict = Depen
         lp = await session.get(LibraryPath, library_id)
         if not lp:
             raise HTTPException(404, "Library path not found")
-    arq = request.app.state.arq
-    await arq.enqueue_job("rescan_library_path_job", lp.path)
+    await core.queue.enqueue("rescan_library_path_job", library_path=lp.path)
     return {"status": "enqueued", "path": lp.path}
 
 
@@ -412,8 +409,7 @@ async def rescan_gallery(
             and gallery.created_by_user_id != auth["user_id"]
         ):
             raise HTTPException(403, "Not your gallery")
-    arq = request.app.state.arq
-    await arq.enqueue_job("rescan_gallery_job", gallery_id)
+    await core.queue.enqueue("rescan_gallery_job", gallery_id=gallery_id)
     return {"status": "enqueued", "gallery_id": gallery_id}
 
 
@@ -578,6 +574,5 @@ async def toggle_monitor(
     current = await r.get("watcher:status")
     paths = json.loads(current).get("paths", []) if current else []
     await r.set("watcher:status", json.dumps({"running": req.enabled, "paths": paths if req.enabled else []}))
-    arq = request.app.state.arq
-    await arq.enqueue_job("toggle_watcher_job", req.enabled)
+    await core.queue.enqueue("toggle_watcher_job", enabled=req.enabled)
     return {"status": "enabled" if req.enabled else "disabled"}

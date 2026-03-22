@@ -71,7 +71,6 @@ def _make_ctx():
     redis.get = AsyncMock(return_value=None)
     redis.set = AsyncMock(return_value=True)
     redis.delete = AsyncMock(return_value=1)
-    redis.enqueue_job = AsyncMock()
     mock_pipe = MagicMock()
     mock_pipe.set = MagicMock()
     mock_pipe.delete = MagicMock()
@@ -220,12 +219,13 @@ class TestEnqueueForSubscription:
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             result = await _enqueue_for_subscription(ctx, sub)
 
         assert result["status"] == "ok"
         assert "job_id" in result
-        ctx["redis"].enqueue_job.assert_awaited_once()
+        mock_enqueue.assert_awaited_once()
 
     async def test_no_redis_pool_in_ctx_returns_failed(self):
         """If ctx has no redis key, function returns failed immediately."""

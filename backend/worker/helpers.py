@@ -124,23 +124,25 @@ async def _set_job_progress(job_id: str | None, progress: dict) -> None:
         logger.warning("[download] failed to update job progress: %s", exc)
 
 
-def compute_arq_job_id(job_id, retry_count: int) -> str:
-    """Compute unique ARQ job ID based on retry count."""
+def compute_job_key(job_id, retry_count: int) -> str:
+    """Compute unique job key based on retry count."""
     if retry_count > 0:
         return f"retry:{job_id}:{retry_count}"
     return str(job_id)
 
 
-async def enqueue_download_job(arq_pool, job, arq_job_id: str) -> None:
-    """Enqueue a download job to ARQ with standard parameters."""
-    await arq_pool.enqueue_job(
+async def enqueue_download_job(job, job_key: str) -> None:
+    """Enqueue a download job with standard parameters."""
+    import core.queue
+
+    await core.queue.enqueue(
         "download_job",
-        job.url,
-        job.source or "",
-        None,  # options
-        str(job.id),
-        job.progress.get("total") if job.progress else None,
-        _job_id=arq_job_id,
+        _job_id=job_key,
+        url=job.url,
+        source=job.source or "",
+        options=None,
+        db_job_id=str(job.id),
+        total=job.progress.get("total") if job.progress else None,
     )
 
 

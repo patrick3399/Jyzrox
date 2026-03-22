@@ -7,7 +7,6 @@ import signal
 import urllib.parse
 import uuid
 
-from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from sqlalchemy import delete, desc, func, select, text
@@ -17,11 +16,12 @@ from core.auth import require_auth, require_role
 from core.config import settings as app_settings
 from core.database import get_db
 from core.errors import api_error, parse_accept_language
+import core.queue
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites
 from db.models import DownloadJob, Gallery
 from services.credential import get_credential
-from worker.helpers import compute_arq_job_id, enqueue_download_job
+from worker.helpers import compute_job_key, enqueue_download_job
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["download"])
@@ -98,16 +98,15 @@ async def _check_source_enabled(source: str) -> None:
 
 async def _enqueue(
     url: str,
-    arq,
     db: AsyncSession,
     *,
     options: dict | None = None,
     total: int | None = None,
     user_id: int | None = None,
 ) -> dict:
-    """Shared enqueue logic: DB record first, then ARQ.
+    """Shared enqueue logic: DB record first, then queue.
 
-    Order: create DB record first, then enqueue ARQ job.  If the ARQ enqueue
+    Order: create DB record first, then enqueue job.  If the enqueue
     fails the DB record is updated to "failed" so the user can see what
     happened.  This avoids the race where a worker picks up the ARQ job before
     the DB row exists.
@@ -151,19 +150,19 @@ async def _enqueue(
         logger.error("[enqueue] DB insert failed: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to persist download job to database")
 
-    # 2. Enqueue ARQ job. If this fails, mark the DB record as failed.
+    # 2. Enqueue job. If this fails, mark the DB record as failed.
     try:
-        await arq.enqueue_job(
+        await core.queue.enqueue(
             "download_job",
-            url,
-            source,
-            options,
-            str(job_id),
-            total,
             _job_id=str(job_id),
+            url=url,
+            source=source,
+            options=options,
+            db_job_id=str(job_id),
+            total=total,
         )
     except Exception as exc:
-        logger.error("[enqueue] ARQ enqueue failed for job %s: %s", job_id, exc)
+        logger.error("[enqueue] enqueue failed for job %s: %s", job_id, exc)
         try:
             job.status = "failed"
             job.error = f"Failed to enqueue job: {exc}"
@@ -188,7 +187,7 @@ async def enqueue_download(
     if req.filesize_max:
         merged_options["filesize_max"] = req.filesize_max
     result = await _enqueue(
-        req.url, request.app.state.arq, db, options=merged_options or None, total=req.total, user_id=auth["user_id"]
+        req.url, db, options=merged_options or None, total=req.total, user_id=auth["user_id"]
     )
     from core.events import EventType, emit_safe
 
@@ -213,7 +212,7 @@ async def quick_download(
     Designed for the PWA Web Share Target API — mobile users share a URL
     directly to the app and the download is enqueued immediately.
     """
-    return await _enqueue(req.url, request.app.state.arq, db, user_id=auth["user_id"])
+    return await _enqueue(req.url, db, user_id=auth["user_id"])
 
 
 @router.get("/jobs")
@@ -505,7 +504,7 @@ async def pause_resume_job(
 
         # Check if the ARQ coroutine is still alive.
         # ARQ writes arq:result:{job_id} when a job finishes (success or failure).
-        arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+        arq_job_id = compute_job_key(job.id, job.retry_count)
         arq_result = await redis.get(f"arq:result:{arq_job_id}")
 
         if arq_result is not None:
@@ -513,11 +512,9 @@ async def pause_resume_job(
             # Prepare re-enqueue before committing DB changes to avoid orphaning
             # the job in "queued" state if the enqueue fails after commit.
             new_retry_count = job.retry_count + 1
-            new_arq_id = compute_arq_job_id(job.id, new_retry_count)
-            arq_pool: ArqRedis = request.app.state.arq
-
+            new_arq_id = compute_job_key(job.id, new_retry_count)
             try:
-                await enqueue_download_job(arq_pool, job, new_arq_id)
+                await enqueue_download_job(job, new_arq_id)
             except Exception:
                 raise HTTPException(status_code=503, detail="Failed to re-enqueue job")
 
@@ -627,10 +624,9 @@ async def retry_job(
 
     await db.commit()
 
-    arq_job_id = compute_arq_job_id(job.id, job.retry_count)
+    arq_job_id = compute_job_key(job.id, job.retry_count)
     try:
-        arq: ArqRedis = request.app.state.arq
-        await enqueue_download_job(arq, job, arq_job_id)
+        await enqueue_download_job(job, arq_job_id)
     except Exception as exc:
         logger.error("[retry] manual retry enqueue failed for %s: %s", job_id, exc)
         job.retry_count -= 1

@@ -6,6 +6,8 @@ import os
 from datetime import UTC, datetime, timezone
 from pathlib import Path
 
+import core.queue
+
 from sqlalchemy import text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
@@ -203,7 +205,7 @@ async def rescan_library_job(ctx: dict) -> dict:
 
                 # Enqueue thumbnail jobs outside the transaction
                 for gid in galleries_needing_thumbs:
-                    await r.enqueue_job("thumbnail_job", gid)
+                    await core.queue.enqueue("thumbnail_job", gallery_id=gid)
                     logger.info(
                         "[rescan_library] gallery_id=%d: enqueued thumbnail_job (missing thumbs)",
                         gid,
@@ -403,7 +405,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         await session.commit()
 
     if missing_thumb:
-        await ctx["redis"].enqueue_job("thumbnail_job", gallery_id)
+        await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id)
         logger.info("[rescan_gallery] gallery_id=%d: enqueued thumbnail_job", gallery_id)
 
     logger.info(
@@ -486,7 +488,7 @@ async def auto_discover_job(ctx: dict) -> dict:
                     gallery_id = row
                     discovered += 1
                     logger.info("[auto_discover] New gallery: %s (%d files)", rel_path, file_count)
-                    await ctx["redis"].enqueue_job("local_import_job", str(current), "link", gallery_id)
+                    await core.queue.enqueue("local_import_job", source_dir=str(current), mode="link", gallery_id=gallery_id)
 
         await session.commit()
 
@@ -538,7 +540,7 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
         return await rescan_gallery_job(ctx, gallery_id)
 
     # No existing gallery found — might be a new directory, trigger auto-discover
-    await ctx["redis"].enqueue_job("auto_discover_job")
+    await core.queue.enqueue("auto_discover_job")
     return {"status": "no_gallery_found", "path": dir_path}
 
 

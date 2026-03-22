@@ -224,8 +224,6 @@ sys.modules["core.database"] = _fake_db_mod
 
 @asynccontextmanager
 async def _noop_lifespan(app):
-    app.state.arq = AsyncMock()
-    app.state.arq.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job"))
     yield
 
 
@@ -233,6 +231,11 @@ async def _noop_lifespan(app):
 _lifespan_patch = patch("main.lifespan", _noop_lifespan)
 _redis_init_patch = patch("core.redis_client.init_redis", new_callable=AsyncMock)
 _redis_close_patch = patch("core.redis_client.close_redis", new_callable=AsyncMock)
+# Patch core.queue.enqueue BEFORE routers import it, so `from core.queue import enqueue`
+# binds to the mock. Must start before `import main`.
+_enqueue_patch = patch("core.queue.enqueue", new_callable=AsyncMock)
+_init_queue_patch = patch("core.queue.init_queue", new_callable=AsyncMock)
+_close_queue_patch = patch("core.queue.close_queue", new_callable=AsyncMock)
 
 # Patch StaticFiles to skip directory check (swagger-ui dir only exists in Docker)
 import starlette.staticfiles as _sf_mod
@@ -254,6 +257,9 @@ _sf_mod.StaticFiles = _NoCheckStaticFiles
 _lifespan_patch.start()
 _redis_init_patch.start()
 _redis_close_patch.start()
+_enqueue_patch.start()
+_init_queue_patch.start()
+_close_queue_patch.start()
 
 # NOW import main — this happens once, routers register once
 import main as _main_mod  # noqa: E402
@@ -731,11 +737,12 @@ async def client(db_session, db_session_factory, mock_redis):
     _app.dependency_overrides[_fake_get_db] = _override_get_db
     _app.dependency_overrides[require_auth] = _override_require_auth
 
-    # Set app.state.arq since ASGITransport doesn't trigger lifespan
-    _app.state.arq = AsyncMock()
-    _app.state.arq.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job"))
+    # Patch core.queue.enqueue so router enqueue calls are captured
+    _mock_enqueue = AsyncMock()
+    _app.state.enqueue = _mock_enqueue
 
     _patches = [
+        patch("core.queue.enqueue", _mock_enqueue),
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),
         patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),
@@ -964,10 +971,12 @@ def make_client(db_session, db_session_factory, mock_redis):
         _app.dependency_overrides[_fake_get_db] = _override_get_db
         _app.dependency_overrides[require_auth] = _override_require_auth
 
-        _app.state.arq = AsyncMock()
-        _app.state.arq.enqueue_job = AsyncMock(return_value=MagicMock(job_id=f"test-job-{user_id}"))
+        # Patch core.queue.enqueue so router enqueue calls are captured
+        _mock_enqueue = AsyncMock()
+        _app.state.enqueue = _mock_enqueue
 
         _make_patches = [
+            patch("core.queue.enqueue", _mock_enqueue),
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("core.rate_limit.get_redis", return_value=mock_redis),
             patch("core.rate_limit.check_rate_limit", new_callable=AsyncMock),

@@ -2,12 +2,6 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from core.compat import patch_asyncio_for_314
-
-patch_asyncio_for_314()
-
-from arq import create_pool
-from arq.connections import RedisSettings
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
@@ -18,6 +12,7 @@ from core.config import settings
 from core.csrf import CSRFMiddleware
 from core.database import engine
 from core.rate_limit import RateLimitMiddleware
+from core.queue import close_queue, init_queue
 from core.redis_client import close_redis, init_redis
 from routers import (
     artists,
@@ -71,8 +66,8 @@ async def lifespan(app: FastAPI):
     install_log_handler("api", extra_loggers=["uvicorn", "uvicorn.access"])
     level = await apply_log_level_from_redis("api")
     logger.info("Log handler installed, level=%s", level)
-    app.state.arq = await create_pool(RedisSettings.from_dsn(settings.redis_url))
-    logger.info("Redis + ARQ pool ready")
+    await init_queue()
+    logger.info("Redis + SAQ queue ready")
     from plugins import init_plugins
 
     await init_plugins()
@@ -92,7 +87,7 @@ async def lifespan(app: FastAPI):
     yield
     logger.info("Shutting down...")
     await site_config_service.stop_listener()
-    await app.state.arq.aclose()
+    await close_queue()
     await close_redis()
     await engine.dispose()
     logger.info("Shutdown complete")

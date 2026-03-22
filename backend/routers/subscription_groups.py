@@ -11,6 +11,7 @@ from sqlalchemy import select, update
 from core.auth import require_role
 from core.database import async_session
 from core.utils import validate_cron
+import core.queue
 from db.models import Subscription, SubscriptionGroup
 
 logger = logging.getLogger(__name__)
@@ -186,8 +187,7 @@ async def run_group(group_id: int, request: Request, auth: dict = Depends(_admin
             raise HTTPException(status_code=404, detail="Group not found")
 
     try:
-        arq = request.app.state.arq
-        await arq.enqueue_job("check_subscription_group", group_id)
+        await core.queue.enqueue("check_subscription_group", group_id=group_id)
     except Exception as exc:
         logger.error("Failed to enqueue check_subscription_group: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))

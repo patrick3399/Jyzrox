@@ -15,6 +15,7 @@ from opencc import OpenCC
 
 from core.auth import require_auth, require_role
 from core.database import async_session, get_db
+import core.queue
 from db.models import BlockedTag, Gallery, GalleryTag, Tag, TagAlias, TagImplication, TagTranslation
 
 _s2twp = OpenCC('s2twp')
@@ -764,9 +765,7 @@ async def retag_gallery(
     gallery = await db.get(Gallery, gallery_id)
     if not gallery:
         raise HTTPException(status_code=404, detail="Gallery not found")
-
-    arq = request.app.state.arq
-    await arq.enqueue_job("tag_job", gallery_id)
+    await core.queue.enqueue("tag_job", gallery_id=gallery_id)
     return {"status": "enqueued", "gallery_id": gallery_id}
 
 
@@ -785,8 +784,6 @@ async def retag_all_galleries(
 
     if not app_settings.tag_model_enabled:
         raise HTTPException(status_code=400, detail="AI tagging is not enabled (TAG_MODEL_ENABLED=false)")
-
-    arq = request.app.state.arq
     enqueued = 0
     CHUNK = 1000
     offset = 0
@@ -800,7 +797,7 @@ async def retag_all_galleries(
             break
 
         for gid in chunk:
-            await arq.enqueue_job("tag_job", gid)
+            await core.queue.enqueue("tag_job", gallery_id=gid)
             enqueued += 1
 
         offset += CHUNK

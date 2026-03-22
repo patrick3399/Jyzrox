@@ -31,7 +31,6 @@ if os.path.abspath(_backend_dir) not in sys.path:
 def _make_ctx():
     """Build a minimal ARQ ctx dict with a mock Redis."""
     redis = AsyncMock()
-    redis.enqueue_job = AsyncMock()
     return {"redis": redis}
 
 
@@ -389,11 +388,12 @@ class TestImportJob:
             patch("worker.importer.upsert_tag_translations", AsyncMock()),
             patch("shutil.rmtree"),
             patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             ctx = _make_ctx()
             await import_job(ctx, path=str(gallery_dir))
 
-        ctx["redis"].enqueue_job.assert_any_call("thumbnail_job", 1)
+        mock_enqueue.assert_any_call("thumbnail_job", gallery_id=1)
 
     async def test_tag_job_enqueued_when_tag_model_enabled(self, tmp_path):
         """When tag_model_enabled=True, tag_job must be enqueued after import."""
@@ -438,11 +438,12 @@ class TestImportJob:
             patch("shutil.rmtree"),
             # tag_model_enabled = True
             patch("worker.importer.settings", MagicMock(tag_model_enabled=True)),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             ctx = _make_ctx()
             await import_job(ctx, path=str(gallery_dir))
 
-        enqueued_calls = [c.args[0] for c in ctx["redis"].enqueue_job.call_args_list]
+        enqueued_calls = [c.args[0] for c in mock_enqueue.call_args_list]
         assert "tag_job" in enqueued_calls
 
     async def test_files_with_invalid_magic_bytes_are_skipped(self, tmp_path):

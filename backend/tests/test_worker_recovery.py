@@ -149,12 +149,11 @@ def _make_session(running_jobs=None, queued_jobs=None, paused_jobs=None):
 
 
 @contextmanager
-def _startup_patches(session, mock_enqueue=None, mock_emit=None):
+def _startup_patches(redis_mock, session, mock_enqueue=None, mock_emit=None):
     """Context manager that patches all startup() side-effects.
 
-    This covers: init_redis, log_handler, plugins, site_config,
-    adaptive_engine, ensure_venv, AsyncSessionLocal, enqueue_download_job,
-    emit_safe, _watcher, asyncio helpers, and glob.
+    redis_mock is used as the return value for get_redis(), so that
+    RedisWithQueue delegates to the test's mock (which carries strategy settings).
     """
     if mock_enqueue is None:
         mock_enqueue = AsyncMock()
@@ -168,7 +167,8 @@ def _startup_patches(session, mock_enqueue=None, mock_emit=None):
     mock_site_config.start_listener = AsyncMock()
 
     with (
-        patch("worker.init_redis", new_callable=AsyncMock),
+        patch("core.redis_client.init_redis", new_callable=AsyncMock),
+        patch("core.redis_client.get_redis", return_value=redis_mock),
         patch("core.log_handler.install_log_handler"),
         patch("core.log_handler.apply_log_level_from_redis", new_callable=AsyncMock),
         patch("plugins.init_plugins", new_callable=AsyncMock),
@@ -178,13 +178,14 @@ def _startup_patches(session, mock_enqueue=None, mock_emit=None):
         patch("worker._ensure_archive_table_schema", new_callable=AsyncMock),
         patch("core.database.AsyncSessionLocal", return_value=session),
         patch("worker.enqueue_download_job", mock_enqueue),
-        patch("worker.compute_arq_job_id", side_effect=lambda jid, rc: f"arq-{jid}-{rc}"),
+        patch("worker.compute_job_key", side_effect=lambda jid, rc: f"arq-{jid}-{rc}"),
         patch("core.events.emit_safe", mock_emit),
         patch("worker._watcher") as mock_watcher,
         patch("worker.asyncio.ensure_future"),
-        patch("worker.asyncio.get_event_loop", return_value=MagicMock()),
+        patch("worker.asyncio.get_running_loop", return_value=MagicMock()),
         patch("worker.get_all_library_paths", new_callable=AsyncMock, return_value=[]),
         patch("glob.glob", return_value=[]),
+        patch("core.queue.enqueue", new_callable=AsyncMock),
     ):
         mock_watcher.start = MagicMock()
         yield {"enqueue": mock_enqueue, "emit": mock_emit}
@@ -192,10 +193,12 @@ def _startup_patches(session, mock_enqueue=None, mock_emit=None):
 
 async def _run_startup(redis, session, mock_enqueue=None, mock_emit=None):
     """Run worker.startup() with all side-effects patched."""
-    with _startup_patches(session, mock_enqueue, mock_emit) as mocks:
+    with _startup_patches(redis, session, mock_enqueue, mock_emit) as mocks:
         from worker import startup
 
-        await startup({"redis": redis})
+        mock_worker = MagicMock()
+        mock_worker.queue = AsyncMock()
+        await startup({"redis": redis, "worker": mock_worker})
     return mocks
 
 

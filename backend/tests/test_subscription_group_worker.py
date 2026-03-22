@@ -88,7 +88,6 @@ def _make_ctx():
     redis.get = AsyncMock(return_value=None)
     redis.set = AsyncMock(return_value=True)
     redis.delete = AsyncMock(return_value=1)
-    redis.enqueue_job = AsyncMock()
     redis.eval = AsyncMock(return_value=1)
     return {"redis": redis}
 
@@ -204,11 +203,14 @@ class TestSubscriptionScheduler:
 
         session = _make_mock_session(scalars_result=[group])
         ctx = _make_ctx()
-        with patch("worker.subscription_group.AsyncSessionLocal", return_value=session):
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", return_value=session),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
             result = await subscription_scheduler(ctx)
 
         assert result["dispatched"] == 0
-        ctx["redis"].enqueue_job.assert_not_awaited()
+        mock_enqueue.assert_not_awaited()
 
     async def test_due_group_is_dispatched(self):
         """A group whose schedule is overdue gets claimed and dispatched."""
@@ -235,12 +237,15 @@ class TestSubscriptionScheduler:
         session.__aexit__ = AsyncMock(return_value=False)
 
         ctx = _make_ctx()
-        with patch("worker.subscription_group.AsyncSessionLocal", return_value=session):
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", return_value=session),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
             result = await subscription_scheduler(ctx)
 
         assert result["status"] == "ok"
         assert result["dispatched"] == 1
-        ctx["redis"].enqueue_job.assert_awaited_once()
+        mock_enqueue.assert_awaited_once()
 
     async def test_claim_race_lost_is_not_counted(self):
         """If the atomic claim returns no row (another worker won), dispatched stays 0."""
@@ -266,11 +271,14 @@ class TestSubscriptionScheduler:
         session.__aexit__ = AsyncMock(return_value=False)
 
         ctx = _make_ctx()
-        with patch("worker.subscription_group.AsyncSessionLocal", return_value=session):
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", return_value=session),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
             result = await subscription_scheduler(ctx)
 
         assert result["dispatched"] == 0
-        ctx["redis"].enqueue_job.assert_not_awaited()
+        mock_enqueue.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------

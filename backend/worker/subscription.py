@@ -10,6 +10,7 @@ from core.database import AsyncSessionLocal
 from db.models import DownloadJob, Subscription
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
+import core.queue
 
 
 async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
@@ -117,15 +118,14 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
             )
             await session.commit()
 
-        # Enqueue ARQ job
-        await pool.enqueue_job(
+        await core.queue.enqueue(
             "download_job",
-            sub.url,
-            sub.source or "gallery_dl",
-            options,
-            str(job_id),
-            None,
             _job_id=str(job_id),
+            url=sub.url,
+            source=sub.source or "gallery_dl",
+            options=options,
+            db_job_id=str(job_id),
+            total=None,
         )
 
         # Update subscription (scheduling is now group-driven; no next_check_at update)

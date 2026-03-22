@@ -16,6 +16,7 @@ from services.cas import cas_path, create_library_symlink, decrement_ref_count, 
 from worker.constants import _VIDEO_EXTS, logger
 from worker.helpers import _sha256, _validate_image_magic
 from worker.thumbnail import generate_single_thumbnail
+import core.queue
 
 
 class ProgressiveImporter:
@@ -449,7 +450,7 @@ class ProgressiveImporter:
             from core.redis_client import get_redis
 
             r = get_redis()
-            await r.enqueue_job("tag_job", self.gallery_id)
+            await core.queue.enqueue("tag_job", gallery_id=self.gallery_id)
 
         return self.gallery_id
 

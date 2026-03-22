@@ -16,6 +16,7 @@ from core.config import settings
 from core.database import AsyncSessionLocal
 from core.redis_client import get_redis
 from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
+import core.queue
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])
@@ -361,9 +362,8 @@ async def trigger_reconcile(
     request: Request,
     _: dict = Depends(_admin),
 ):
-    """Manually trigger the reconciliation job via ARQ."""
-    arq = request.app.state.arq
-    await arq.enqueue_job("reconciliation_job")
+    """Manually trigger the reconciliation job."""
+    await core.queue.enqueue("reconciliation_job")
     return {"status": "enqueued"}
 
 

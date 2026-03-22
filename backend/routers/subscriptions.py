@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from core.auth import require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source, normalize_subscription_url, validate_cron
+import core.queue
 from db.models import Subscription
 
 logger = logging.getLogger(__name__)
@@ -379,8 +380,7 @@ async def check_subscription(
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     try:
-        arq = request.app.state.arq
-        await arq.enqueue_job("check_single_subscription", sub_id)
+        await core.queue.enqueue("check_single_subscription", sub_id=sub_id)
     except Exception as exc:
         logger.error("Failed to enqueue check_single_subscription: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))

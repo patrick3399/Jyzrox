@@ -3,7 +3,7 @@ Tests for import endpoints (/api/import/*).
 
 Uses the `client` fixture (pre-authenticated). The import router:
 - Validates root_dir against library paths and internal data dir
-- Enqueues an ARQ job via request.app.state.arq (mocked in conftest lifespan)
+- Enqueues a job via core.queue.enqueue (mocked in conftest lifespan)
 - Reads/writes Redis for batch progress data
 - For link mode, upserts into LibraryPath table via async_session
 
@@ -216,8 +216,8 @@ class TestBatchStart:
         batch_keys = [call[0][0] for call in mock_redis.setex.call_args_list]
         assert any(k.startswith("import:batch:") for k in batch_keys)
 
-        app.state.arq.enqueue_job.assert_called()
-        enqueue_call = app.state.arq.enqueue_job.call_args
+        app.state.enqueue.assert_called()
+        enqueue_call = app.state.enqueue.call_args
         assert enqueue_call[0][0] == "batch_import_job"
 
     async def test_start_link_mode_registers_library(self, client, mock_redis):
@@ -408,7 +408,6 @@ def _make_session_factory(session):
 def _make_ctx():
     """Return a minimal ARQ worker ctx dict."""
     redis = AsyncMock()
-    redis.enqueue_job = AsyncMock()
     redis.setex = AsyncMock()
     return {"redis": redis}
 
@@ -557,12 +556,13 @@ class TestImportJob:
             patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
             patch("worker.importer._upsert_tags", AsyncMock()),
             patch("shutil.rmtree"),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             result = await import_job(ctx, str(gallery_dir))
 
         assert result["status"] == "done"
         assert result["gallery_id"] == 7
-        ctx["redis"].enqueue_job.assert_any_call("thumbnail_job", 7)
+        mock_enqueue.assert_any_call("thumbnail_job", gallery_id=7)
 
     async def test_source_url_stored_in_gallery(self, tmp_path):
         """source_url parameter should be passed through to the gallery upsert values."""
@@ -671,12 +671,13 @@ class TestImportJob:
             patch("worker.importer._upsert_tags", AsyncMock()),
             patch("worker.importer.settings") as mock_settings,
             patch("shutil.rmtree"),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
         ):
             mock_settings.tag_model_enabled = True
             result = await import_job(ctx, str(gallery_dir))
 
         assert result["status"] == "done"
-        enqueue_calls = [c[0][0] for c in ctx["redis"].enqueue_job.call_args_list]
+        enqueue_calls = [c.args[0] for c in mock_enqueue.call_args_list]
         assert "thumbnail_job" in enqueue_calls
         assert "tag_job" in enqueue_calls
 
@@ -1450,7 +1451,7 @@ class TestRescan:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "enqueued"
-        app.state.arq.enqueue_job.assert_any_call("rescan_library_job")
+        app.state.enqueue.assert_any_call("rescan_library_job")
 
     async def test_rescan_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""
@@ -1573,7 +1574,7 @@ class TestMonitorToggle:
         data = resp.json()
         assert data["status"] == "enabled"
         mock_redis.set.assert_called()
-        app.state.arq.enqueue_job.assert_any_call("toggle_watcher_job", True)
+        app.state.enqueue.assert_any_call("toggle_watcher_job", enabled=True)
 
     async def test_monitor_toggle_disable(self, client, mock_redis):
         """Toggling monitor off should return status=disabled."""

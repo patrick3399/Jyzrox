@@ -271,7 +271,7 @@ async def _read_stdout(
     assert proc.stdout is not None
 
     async for raw_line in proc.stdout:
-        now = asyncio.get_event_loop().time()
+        now = asyncio.get_running_loop().time()
         if timing_ctx is not None:
             timing_ctx["idle_ms"] = round((now - state.last_activity) * 1000) if state.last_activity > 0 else 0
             timing_ctx["total_pause_ms"] = round(state.total_paused * 1000)
@@ -369,7 +369,7 @@ async def _inactivity_watchdog(
         await asyncio.sleep(10)
         if state.cancelled:
             return "cancelled"
-        elapsed = asyncio.get_event_loop().time() - state.last_activity
+        elapsed = asyncio.get_running_loop().time() - state.last_activity
         if elapsed >= timeout:
             logger.error("[gallery_dl] inactivity timeout (%ds) — killing process", timeout)
             try:
@@ -403,7 +403,7 @@ async def _pause_cancel_watcher(
         if pause_check is not None and await pause_check():
             import signal
 
-            pause_start = asyncio.get_event_loop().time()
+            pause_start = asyncio.get_running_loop().time()
             logger.info("[gallery_dl] pausing process")
             try:
                 proc.send_signal(signal.SIGSTOP)
@@ -422,9 +422,9 @@ async def _pause_cancel_watcher(
                 await asyncio.sleep(0.5)
 
             # Resume
-            paused_duration = asyncio.get_event_loop().time() - pause_start
+            paused_duration = asyncio.get_running_loop().time() - pause_start
             state.total_paused += paused_duration
-            state.last_activity = asyncio.get_event_loop().time()  # reset inactivity after resume
+            state.last_activity = asyncio.get_running_loop().time()  # reset inactivity after resume
             logger.info("[gallery_dl] resumed after %.1fs", paused_duration)
             try:
                 proc.send_signal(signal.SIGCONT)
@@ -634,8 +634,8 @@ class GalleryDlPlugin(SourcePlugin):
                 logger.warning("[gallery_dl] pid_callback failed: %s", exc)
 
         state = _DownloadState(
-            last_activity=asyncio.get_event_loop().time(),
-            last_progress_update=asyncio.get_event_loop().time(),
+            last_activity=asyncio.get_running_loop().time(),
+            last_progress_update=asyncio.get_running_loop().time(),
             source_id=_site_cfg.source_id,
         )
 

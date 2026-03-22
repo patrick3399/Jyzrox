@@ -6,14 +6,14 @@ import hmac
 import logging
 import os
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
-from arq.connections import ArqRedis
+from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import joinedload
 
 from core.auth import require_role
 from core.database import async_session
+import core.queue
 from db.models import Blob, BlobRelationship, Image
 from services.cas import cas_url, thumb_url
 
@@ -270,7 +270,6 @@ async def get_scan_progress(_: dict = Depends(_admin)):
 @router.post("/scan/start")
 async def start_scan(
     req: ScanStartRequest,
-    request: Request,
     _: dict = Depends(_admin),
 ):
     """Enqueue a dedup scan job. 409 if already running/paused."""
@@ -284,8 +283,7 @@ async def start_scan(
     if req.mode not in ("reset", "pending"):
         raise HTTPException(status_code=422, detail="mode must be 'reset' or 'pending'")
 
-    arq: ArqRedis = request.app.state.arq
-    await arq.enqueue_job("dedup_scan_job", req.mode, _job_id="dedup_scan:singleton")
+    await core.queue.enqueue("dedup_scan_job", _job_id="dedup_scan:singleton", mode=req.mode)
     from core.events import EventType, emit_safe
     await emit_safe(EventType.DEDUP_SCAN_STARTED, actor_user_id=_["user_id"], resource_type="system")
     return {"status": "queued"}

@@ -6,6 +6,8 @@ import os
 from datetime import UTC, datetime
 from pathlib import Path
 
+import core.queue
+
 from collections import Counter
 
 from sqlalchemy import func, text, update
@@ -230,9 +232,9 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     logger.info("[import] gallery_id=%d source=%s/%s", gallery_id, source, source_id)
 
     # Trigger thumbnail generation
-    await ctx["redis"].enqueue_job("thumbnail_job", gallery_id)
+    await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id)
     if settings.tag_model_enabled:
-        await ctx["redis"].enqueue_job("tag_job", gallery_id)
+        await core.queue.enqueue("tag_job", gallery_id=gallery_id)
 
     from core.events import EventType, emit_safe
     await emit_safe(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=len(allowed_pairs), source=source)
@@ -472,11 +474,11 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     logger.info("[local_import] gallery_id=%d: %d files imported", gallery_id, processed)
 
     # Trigger thumbnail generation
-    await ctx["redis"].enqueue_job("thumbnail_job", gallery_id)
+    await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id)
 
     # Trigger AI tagging if enabled
     if settings.tag_model_enabled:
-        await ctx["redis"].enqueue_job("tag_job", gallery_id)
+        await core.queue.enqueue("tag_job", gallery_id=gallery_id)
 
     from core.events import EventType, emit_safe
     await emit_safe(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=processed, source="local")

@@ -3,12 +3,12 @@
 import logging
 import uuid
 
-from arq.connections import ArqRedis
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
 from core.auth import require_role
 from core.redis_client import get_redis
+import core.queue
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["scheduled-tasks"])
@@ -149,8 +149,7 @@ async def run_scheduled_task(
     job_name = defn["job"]
 
     try:
-        arq: ArqRedis = request.app.state.arq
-        await arq.enqueue_job(job_name, _job_id=f"manual:{task_id}:{uuid.uuid4().hex[:8]}")
+        await core.queue.enqueue(job_name, _job_id=f"manual:{task_id}:{uuid.uuid4().hex[:8]}")
     except Exception as exc:
         logger.error("Failed to enqueue %s: %s", job_name, exc)
         raise HTTPException(status_code=500, detail=str(exc))

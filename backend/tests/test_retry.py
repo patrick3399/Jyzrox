@@ -94,11 +94,13 @@ class TestRetryFailedDownloadsJob:
         mock_session.__aenter__ = AsyncMock(return_value=mock_session)
         mock_session.__aexit__ = AsyncMock(return_value=False)
 
+        mock_enqueue = AsyncMock()
         with (
             patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
             patch("worker.retry._cron_record", new_callable=AsyncMock),
             patch("worker.retry.AsyncSessionLocal", return_value=mock_session),
             patch("core.events.emit_safe", new_callable=AsyncMock),
+            patch("core.queue.enqueue", mock_enqueue),
         ):
             from worker.retry import retry_failed_downloads_job
 
@@ -111,13 +113,12 @@ class TestRetryFailedDownloadsJob:
         assert mock_job.status == "queued"
         assert mock_job.finished_at is None
         assert mock_job.error is None
-        mock_redis.enqueue_job.assert_called_once()
+        mock_enqueue.assert_called_once()
 
     async def test_retries_partial_job(self):
         """Should re-queue a partial job."""
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=None)
-        mock_redis.enqueue_job = AsyncMock()
 
         mock_job = _make_mock_job(status="partial", retry_count=1, progress={"failed_pages": [3, 7]})
 
@@ -207,10 +208,9 @@ class TestRetryFailedDownloadsJob:
         assert result["stale_reaped"] == 0
 
     async def test_enqueue_failure_reverts_job(self):
-        """If ARQ enqueue fails, job should be reverted to failed status."""
+        """If enqueue fails, job should be reverted to failed status."""
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=None)
-        mock_redis.enqueue_job = AsyncMock(side_effect=Exception("Redis down"))
 
         mock_job = _make_mock_job(status="failed", retry_count=0)
 
@@ -229,6 +229,7 @@ class TestRetryFailedDownloadsJob:
             patch("worker.retry._cron_record", new_callable=AsyncMock),
             patch("worker.retry.AsyncSessionLocal", return_value=mock_session),
             patch("core.events.emit_safe", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock, side_effect=Exception("Redis down")),
         ):
             from worker.retry import retry_failed_downloads_job
 
