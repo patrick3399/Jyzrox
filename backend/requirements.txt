@@ -3,7 +3,7 @@ uvicorn[standard]==0.42.0
 sqlalchemy[asyncio]==2.0.48
 asyncpg==0.31.0
 alembic==1.18.4
-redis[hiredis]==5.3.1
+redis[hiredis]==6.4.0
 saq[redis]>=0.22,<1.0
 httpx==0.28.1
 pillow==12.1.1
