@@ -11,8 +11,6 @@ Covers:
 - rss_subscription: nonexistent subscription returns 404
 """
 
-from __future__ import annotations
-
 import hashlib
 import os
 import sys
@@ -27,15 +25,12 @@ _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend_dir))
 
-
 # ---------------------------------------------------------------------------
 # Fixtures
 # ---------------------------------------------------------------------------
 
-
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
-
 
 async def _insert_token(db_session, user_id: int = 1, token: str = "test-rss-token") -> str:
     """Insert a user + api_token row for RSS auth and return the raw token."""
@@ -58,7 +53,6 @@ async def _insert_token(db_session, user_id: int = 1, token: str = "test-rss-tok
     await db_session.commit()
     return token
 
-
 async def _insert_gallery(db_session, gallery_id: int = 1, title: str = "Test Gallery") -> None:
     """Insert a minimal gallery row."""
     from sqlalchemy import text
@@ -72,7 +66,6 @@ async def _insert_gallery(db_session, gallery_id: int = 1, title: str = "Test Ga
         {"id": gallery_id, "src_id": str(gallery_id), "title": title},
     )
     await db_session.commit()
-
 
 async def _insert_subscription(
     db_session,
@@ -93,11 +86,9 @@ async def _insert_subscription(
     )
     await db_session.commit()
 
-
 # ---------------------------------------------------------------------------
 # rss_client fixture — like `client` but also patches routers.rss.async_session
 # ---------------------------------------------------------------------------
-
 
 @pytest.fixture
 async def rss_client(db_session, db_session_factory, mock_redis):
@@ -136,11 +127,9 @@ async def rss_client(db_session, db_session_factory, mock_redis):
         ) as ac:
             yield ac
 
-
 # ---------------------------------------------------------------------------
 # Tests: GET /api/rss/recent
 # ---------------------------------------------------------------------------
-
 
 class TestRssRecent:
     """Tests for GET /api/rss/recent."""
@@ -210,11 +199,9 @@ class TestRssRecent:
         assert resp.status_code == 200
         assert "<?xml" in resp.text
 
-
 # ---------------------------------------------------------------------------
 # Tests: GET /api/rss/subscriptions/{sub_id}
 # ---------------------------------------------------------------------------
-
 
 class TestRssSubscription:
     """Tests for GET /api/rss/subscriptions/{sub_id}."""

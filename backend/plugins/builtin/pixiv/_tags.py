@@ -1,7 +1,5 @@
 """Shared Pixiv tag processing utilities."""
 
-from __future__ import annotations
-
 
 def process_pixiv_tags(detail: dict) -> tuple[list[str], list[dict]]:
     """Extract, deduplicate, and auto-tag from Pixiv API detail.

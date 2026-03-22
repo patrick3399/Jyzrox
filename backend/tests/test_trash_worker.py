@@ -8,8 +8,6 @@ Covers:
 - trash_gc_job: exception in _hard_delete_galleries propagates
 """
 
-from __future__ import annotations
-
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,11 +17,9 @@ _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend_dir))
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _make_mock_session(galleries: list | None = None):
     """Return a mock async context-manager session."""
@@ -43,7 +39,6 @@ def _make_mock_session(galleries: list | None = None):
     session.__aexit__ = AsyncMock(return_value=False)
     return session
 
-
 def _make_gallery(gallery_id: int = 1):
     """Return a MagicMock representing a Gallery row."""
     g = MagicMock()
@@ -51,18 +46,15 @@ def _make_gallery(gallery_id: int = 1):
     g.title = f"Gallery {gallery_id}"
     return g
 
-
 def _make_redis(retention_raw=None):
     """Return an AsyncMock Redis with get returning retention_raw."""
     redis = AsyncMock()
     redis.get = AsyncMock(return_value=retention_raw)
     return redis
 
-
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-
 
 class TestTrashGcJob:
     """Unit tests for trash_gc_job()."""

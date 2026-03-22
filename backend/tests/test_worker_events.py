@@ -1,7 +1,5 @@
 """Tests that worker jobs emit correct EventBus events after completion."""
 
-from __future__ import annotations
-
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -13,11 +11,9 @@ _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend_dir))
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _make_redis(return_value=None):
     """Return an AsyncMock Redis client."""
@@ -27,7 +23,6 @@ def _make_redis(return_value=None):
     redis.setex = AsyncMock()
     redis.delete = AsyncMock()
     return redis
-
 
 def _make_session(scalars_return=None):
     """Return a mock async context-manager session."""
@@ -47,11 +42,9 @@ def _make_session(scalars_return=None):
     session.__aexit__ = AsyncMock(return_value=False)
     return session
 
-
 # ---------------------------------------------------------------------------
 # trash_gc_job
 # ---------------------------------------------------------------------------
-
 
 class TestTrashGcJobEmitsEvent:
     """trash_gc_job emits TRASH_CLEANED on successful deletion."""
@@ -123,11 +116,9 @@ class TestTrashGcJobEmitsEvent:
         # Job must succeed despite emit failure
         assert result["status"] == "ok"
 
-
 # ---------------------------------------------------------------------------
 # retry_failed_downloads_job
 # ---------------------------------------------------------------------------
-
 
 class TestRetryJobEmitsEvent:
     """retry_failed_downloads_job emits RETRY_PROCESSED on success."""
@@ -225,11 +216,9 @@ class TestRetryJobEmitsEvent:
 
         assert result["status"] in ("ok", "error")
 
-
 # ---------------------------------------------------------------------------
 # thumbnail_job
 # ---------------------------------------------------------------------------
-
 
 class TestThumbnailJobEmitsEvent:
     """thumbnail_job emits THUMBNAILS_GENERATED after processing."""
@@ -286,11 +275,9 @@ class TestThumbnailJobEmitsEvent:
 
         assert result["status"] == "done"
 
-
 # ---------------------------------------------------------------------------
 # dedup_scan_job
 # ---------------------------------------------------------------------------
-
 
 class TestDedupScanJobEmitsEvent:
     """dedup_scan_job emits DEDUP_SCAN_COMPLETED after successful completion."""
@@ -339,11 +326,9 @@ class TestDedupScanJobEmitsEvent:
         assert result["status"] == "already_running"
         mock_emit.assert_not_awaited()
 
-
 # ---------------------------------------------------------------------------
 # reconciliation_job
 # ---------------------------------------------------------------------------
-
 
 class TestReconciliationJobEmitsEvent:
     """reconciliation_job emits RECONCILIATION_COMPLETED on success."""
@@ -384,11 +369,9 @@ class TestReconciliationJobEmitsEvent:
         # Library path does not exist → returns early with done status
         assert result["status"] == "done"
 
-
 # ---------------------------------------------------------------------------
 # ehtag_sync_job
 # ---------------------------------------------------------------------------
-
 
 class TestEhtagSyncJobEmitsEvent:
     """ehtag_sync_job emits EHTAG_SYNC_COMPLETED after successful sync."""
@@ -472,11 +455,9 @@ class TestEhtagSyncJobEmitsEvent:
         # The important thing is no unhandled exception escapes the function.
         assert result["status"] in ("ok", "error")
 
-
 # ---------------------------------------------------------------------------
 # tag_job  (tagging worker)
 # ---------------------------------------------------------------------------
-
 
 class TestTaggingJobEmitsEvent:
     """tag_job emits GALLERY_TAGGED after successful AI tagging."""
@@ -598,11 +579,9 @@ class TestTaggingJobEmitsEvent:
         if raised is not None:
             assert "bus error" in str(raised)
 
-
 # ---------------------------------------------------------------------------
 # import_job  (importer worker)
 # ---------------------------------------------------------------------------
-
 
 class TestImporterJobEmitsEvent:
     """import_job emits IMPORT_COMPLETED after successfully ingesting a gallery."""
@@ -745,11 +724,9 @@ class TestImporterJobEmitsEvent:
                 except RuntimeError as exc:
                     assert "bus error" in str(exc)
 
-
 # ---------------------------------------------------------------------------
 # scan jobs (rescan_library_job, auto_discover_job)
 # ---------------------------------------------------------------------------
-
 
 class TestScanJobEmitsEvent:
     """rescan_library_job emits RESCAN_COMPLETED; auto_discover_job emits GALLERY_DISCOVERED."""

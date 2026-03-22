@@ -186,7 +186,7 @@ async def download_pixiv_illust(
                 posted_ts = int(
                     _dt.fromisoformat(create_date.replace("Z", "+00:00")).timestamp()
                 )
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pass
 
         metadata = {

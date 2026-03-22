@@ -4,11 +4,8 @@ Single source of truth for all gallery-dl supported sites.
 Replaces scattered config in source.py, _subscribe.py, _metadata.py, and importer.py.
 """
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Literal
-
 
 @dataclass(frozen=True, slots=True)
 class GdlSiteConfig:
@@ -62,7 +59,6 @@ class GdlSiteConfig:
     http_timeout: int = 30  # seconds
     sleep_request: float | tuple[float, float] | None = None  # seconds between requests
     inactivity_timeout: int = 300  # seconds before killing process on no output
-
 
 GDL_SITES: tuple[GdlSiteConfig, ...] = (
     # ── EH / Pixiv (added before social/booru so _BY_SOURCE gets ehentai from e-hentai.org first) ──
@@ -426,12 +422,10 @@ _DEFAULT_CONFIG = GdlSiteConfig(
 
 _ALIASES: dict[str, str] = {"exhentai": "ehentai"}
 
-
 def get_site_config(source: str) -> GdlSiteConfig:
     """Look up site config by source_id. Unknown sites → _DEFAULT_CONFIG."""
     resolved = _ALIASES.get(source, source)
     return _BY_SOURCE.get(resolved, _DEFAULT_CONFIG)
-
 
 def get_site_by_domain(domain: str) -> GdlSiteConfig:
     """Look up site config by domain. Unknown domains → _DEFAULT_CONFIG."""

@@ -12,8 +12,6 @@ Covers:
 - Invalid date string handled gracefully
 """
 
-from __future__ import annotations
-
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -23,11 +21,9 @@ _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend_dir))
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _make_illust(illust_id: int, title: str = "Test", create_date: str = "2024-01-01T12:00:00"):
     """Return a dict mimicking a Pixiv illust object."""
@@ -41,7 +37,6 @@ def _make_illust(illust_id: int, title: str = "Test", create_date: str = "2024-0
         },
     }
 
-
 def _make_pixiv_client_mock(illusts: list) -> MagicMock:
     """Build an async context-manager mock for PixivClient."""
     client = AsyncMock()
@@ -53,11 +48,9 @@ def _make_pixiv_client_mock(illusts: list) -> MagicMock:
     cm.__aexit__ = AsyncMock(return_value=False)
     return cm
 
-
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
-
 
 class TestCheckPixivNewWorks:
     """Unit tests for check_pixiv_new_works()."""

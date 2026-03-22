@@ -1,7 +1,5 @@
 """Pixiv metadata parsing for the Parseable protocol."""
 
-from __future__ import annotations
-
 import json
 import logging
 from datetime import UTC, datetime
@@ -10,7 +8,6 @@ from pathlib import Path
 from plugins.models import GalleryImportData
 
 logger = logging.getLogger(__name__)
-
 
 def parse_pixiv_import(dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
     """Parse a Pixiv gallery directory into GalleryImportData."""
@@ -48,7 +45,7 @@ def parse_pixiv_import(dest_dir: Path, raw_meta: dict | None = None) -> GalleryI
                 posted_at = datetime.fromtimestamp(raw_date, tz=UTC)
             else:
                 posted_at = datetime.fromisoformat(str(raw_date))
-        except (ValueError, TypeError, OverflowError):
+        except ValueError, TypeError, OverflowError:
             pass
 
     return GalleryImportData(

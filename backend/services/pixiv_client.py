@@ -268,7 +268,7 @@ class PixivClient:
                 return int(offset_vals[0])
             if max_bookmark_id_vals:
                 return int(max_bookmark_id_vals[0])
-        except (ValueError, KeyError):
+        except ValueError, KeyError:
             pass
         return None
 

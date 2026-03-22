@@ -41,7 +41,7 @@ async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> Non
                 original_raw = credentials.get(src, "{}")
                 try:
                     original = json.loads(original_raw) if isinstance(original_raw, str) else {}
-                except (json.JSONDecodeError, TypeError):
+                except json.JSONDecodeError, TypeError:
                     original = {}
                 if updated != original:
                     await set_credential(src, json.dumps(updated), "cookies")

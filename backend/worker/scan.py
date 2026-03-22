@@ -519,7 +519,7 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
                     select(Gallery.id).where(Gallery.source == source, Gallery.source_id == source_id)
                 )
                 gallery_id = result.scalar_one_or_none()
-    except (ValueError, IndexError):
+    except ValueError, IndexError:
         pass
 
     if not gallery_id:

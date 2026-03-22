@@ -140,7 +140,7 @@ class EventBus:
                     raw = raw.decode()
                 try:
                     events.append(json.loads(raw))
-                except (json.JSONDecodeError, TypeError):
+                except json.JSONDecodeError, TypeError:
                     pass
             return events
         except Exception as exc:

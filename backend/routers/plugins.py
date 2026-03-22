@@ -1,14 +1,11 @@
 """Plugin management API endpoints."""
 
-from __future__ import annotations
-
 from fastapi import APIRouter, Depends
 
 from core.auth import require_auth
 from plugins.registry import plugin_registry
 
 router = APIRouter(tags=["plugins"])
-
 
 @router.get("/")
 async def list_plugins(_: dict = Depends(require_auth)):

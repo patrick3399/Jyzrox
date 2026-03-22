@@ -1,10 +1,7 @@
 """Per-source display configuration for cover selection and image ordering."""
 
-from __future__ import annotations
-
 from dataclasses import dataclass
 from typing import Literal
-
 
 @dataclass(frozen=True, slots=True)
 class SourceDisplayConfig:
@@ -13,9 +10,7 @@ class SourceDisplayConfig:
     image_order: Literal["asc", "desc"] = "asc"
     cover_page: Literal["first", "last"] = "first"
 
-
 _DEFAULT = SourceDisplayConfig()
-
 
 def get_display_config(source: str) -> SourceDisplayConfig:
     """Return display config for the given source.

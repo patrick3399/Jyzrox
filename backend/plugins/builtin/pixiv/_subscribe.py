@@ -1,14 +1,11 @@
 """Pixiv subscription check for the Subscribable protocol."""
 
-from __future__ import annotations
-
 import logging
 from datetime import UTC, datetime
 
 from plugins.models import NewWork
 
 logger = logging.getLogger(__name__)
-
 
 async def check_pixiv_new_works(
     artist_id: str,
@@ -56,7 +53,7 @@ async def check_pixiv_new_works(
         if raw_date:
             try:
                 posted_at = datetime.fromisoformat(str(raw_date))
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pass
 
         # Get thumbnail URL

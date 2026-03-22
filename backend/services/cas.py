@@ -95,8 +95,7 @@ async def store_blob(
                 os.link(str(file_path), str(dest))
             except OSError:
                 # Cross-device link: fallback to copy
-                import shutil
-                shutil.copy2(str(file_path), str(dest))
+                file_path.copy(dest)
 
     # Upsert blob record.
     # ref_count starts at 0 here; callers must increment it only when a new

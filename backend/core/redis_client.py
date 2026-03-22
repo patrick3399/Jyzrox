@@ -50,7 +50,7 @@ async def get_download_delay(source: str, default_ms: int = 0) -> float:
     if val is not None:
         try:
             return int(val) / 1000.0
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
     return default_ms / 1000.0
 
@@ -65,7 +65,7 @@ async def get_typed_download_delay(source: str, delay_type: str, default_ms: int
     if val is not None:
         try:
             return int(val) / 1000.0
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
     return default_ms / 1000.0
 
@@ -77,7 +77,7 @@ async def get_image_concurrency(source: str, default: int = 1) -> int:
     if val is not None:
         try:
             return int(val)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
     return default
 
@@ -106,7 +106,7 @@ class EhSemaphore:
         if val is not None:
             try:
                 max_count = int(val)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 max_count = settings.eh_max_concurrency
         else:
             max_count = settings.eh_max_concurrency
@@ -184,7 +184,7 @@ class DownloadSemaphore:
         if val is not None:
             try:
                 return int(val)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pass
         base = source.split(":")[0] if ":" in source else source
         return cls._LIMITS.get(source, cls._LIMITS.get(base, default))

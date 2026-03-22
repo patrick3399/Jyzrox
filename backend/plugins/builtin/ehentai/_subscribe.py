@@ -1,7 +1,5 @@
 """E-Hentai subscription check for the Subscribable protocol."""
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -13,7 +11,6 @@ logger = logging.getLogger(__name__)
 
 MAX_PAGES = 10
 PAGE_DELAY = 3  # seconds between page fetches
-
 
 async def check_eh_new_works(
     query: str,              # EH search query (e.g. "uploader:Foo", "female:catgirl")
@@ -38,7 +35,7 @@ async def check_eh_new_works(
     elif isinstance(credentials, str):
         try:
             cookies = json.loads(credentials)
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             logger.warning("[eh_subscribe] credentials JSON is malformed, using empty cookies")
             cookies = {}
     else:
@@ -98,7 +95,7 @@ async def check_eh_new_works(
                     if posted_raw:
                         try:
                             posted_at = datetime.fromtimestamp(int(posted_raw), tz=timezone.utc)
-                        except (ValueError, TypeError, OSError):
+                        except ValueError, TypeError, OSError:
                             pass
 
                     url = f"https://e-hentai.org/g/{gid}/{token}/"

@@ -331,7 +331,7 @@ def get_error_message(code: str, locale: str = "en", **kwargs) -> str:
     if kwargs:
         try:
             msg = msg.format(**kwargs)
-        except (KeyError, IndexError):
+        except KeyError, IndexError:
             pass
     return msg
 

@@ -13,8 +13,6 @@ Covers:
 - verify_pixiv_credential: string credential used as refresh_token
 """
 
-from __future__ import annotations
-
 import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -26,11 +24,9 @@ _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend_dir))
 
-
 # ---------------------------------------------------------------------------
 # Tests: pixiv_credential_flows()
 # ---------------------------------------------------------------------------
-
 
 class TestPixivCredentialFlows:
     """Unit tests for pixiv_credential_flows()."""
@@ -101,11 +97,9 @@ class TestPixivCredentialFlows:
         field_names = [f.name for f in login_flow.fields]
         assert "phpsessid" in field_names
 
-
 # ---------------------------------------------------------------------------
 # Tests: verify_pixiv_credential()
 # ---------------------------------------------------------------------------
-
 
 class TestVerifyPixivCredential:
     """Unit tests for verify_pixiv_credential()."""

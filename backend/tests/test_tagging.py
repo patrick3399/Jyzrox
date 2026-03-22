@@ -11,19 +11,15 @@ Strategy:
 - Mock `worker.tagging.resolve_blob_path` to control file-existence checks.
 """
 
-from __future__ import annotations
-
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _mock_settings(tag_model_enabled: bool = True) -> MagicMock:
     s = MagicMock()
@@ -33,7 +29,6 @@ def _mock_settings(tag_model_enabled: bool = True) -> MagicMock:
     s.tag_general_threshold = 0.35
     s.tag_character_threshold = 0.85
     return s
-
 
 def _mock_http_client(available: bool = True, tags: list | None = None):
     """Build an httpx.AsyncClient mock with pre-configured /health and /predict."""
@@ -57,13 +52,11 @@ def _mock_http_client(available: bool = True, tags: list | None = None):
     client.post = AsyncMock(return_value=predict_resp)
     return client
 
-
 def _make_mock_blob(sha256: str = "aa" * 32, extension: str = ".jpg") -> MagicMock:
     blob = MagicMock()
     blob.sha256 = sha256
     blob.extension = extension
     return blob
-
 
 def _make_mock_image(
     img_id: int,
@@ -77,7 +70,6 @@ def _make_mock_image(
     img.blob = blob
     img.tags_array = tags_array or []
     return img
-
 
 def _make_mock_session(images: list) -> MagicMock:
     """Return a mock async session that yields `images` from a scalars().all() query."""
@@ -97,7 +89,6 @@ def _make_mock_session(images: list) -> MagicMock:
     session.commit = AsyncMock()
     return session
 
-
 def _make_session_factory_from_mock(mock_session: MagicMock):
     """Wrap a mock session so ``async with AsyncSessionLocal() as s:`` yields it."""
 
@@ -111,11 +102,9 @@ def _make_session_factory_from_mock(mock_session: MagicMock):
 
     return _Factory()
 
-
 # ---------------------------------------------------------------------------
 # TestTaggingJob
 # ---------------------------------------------------------------------------
-
 
 class TestTaggingJob:
     """Tests for worker.tagging.tag_job."""

@@ -38,7 +38,7 @@ async def _get_int_setting(redis_key: str, default: int) -> int:
     if val is not None:
         try:
             return int(val)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
     return default
 
@@ -100,7 +100,7 @@ async def get_logs(
     for raw in raw_list:
         try:
             entry = json.loads(raw.decode() if isinstance(raw, bytes) else raw)
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             continue
 
         if level_filter and entry.get("level", "").upper() not in level_filter:

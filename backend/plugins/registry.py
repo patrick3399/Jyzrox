@@ -1,7 +1,5 @@
 """Plugin registry — singleton that holds all registered plugins."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -19,7 +17,6 @@ from plugins.base import (
 from plugins.models import PluginMeta, SiteInfo
 
 logger = logging.getLogger(__name__)
-
 
 class PluginRegistry:
     def __init__(self) -> None:
@@ -222,6 +219,5 @@ class PluginRegistry:
 
     def get_downloader(self, source_id: str) -> Any:
         return self._downloadable.get(source_id)
-
 
 plugin_registry = PluginRegistry()

@@ -11,8 +11,6 @@ Strategy:
 - Mock settings.tag_model_enabled=False to prevent tagger job enqueue in finalize().
 """
 
-from __future__ import annotations
-
 from contextlib import asynccontextmanager
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -22,7 +20,6 @@ from sqlalchemy import text
 # ---------------------------------------------------------------------------
 # Helpers — insert records via raw SQL (SQLite-compatible, no pg_insert)
 # ---------------------------------------------------------------------------
-
 
 async def _insert_gallery(
     db_session,
@@ -51,7 +48,6 @@ async def _insert_gallery(
     row = result.fetchone()
     return row[0]
 
-
 async def _insert_blob(
     db_session,
     sha256: str,
@@ -67,7 +63,6 @@ async def _insert_blob(
         {"sha256": sha256, "file_size": 1024, "ext": extension, "ref_count": ref_count},
     )
     await db_session.commit()
-
 
 async def _insert_image(
     db_session,
@@ -89,7 +84,6 @@ async def _insert_image(
     row = result.fetchone()
     return row[0]
 
-
 def _make_session_factory_cm(factory):
     """Wrap an async_sessionmaker so it works as an async context manager.
 
@@ -110,11 +104,9 @@ def _make_session_factory_cm(factory):
 
     return _Factory()
 
-
 # ---------------------------------------------------------------------------
 # TestProgressiveImporterCleanup
 # ---------------------------------------------------------------------------
-
 
 class TestProgressiveImporterCleanup:
     """Tests for ProgressiveImporter.cleanup()."""
@@ -240,11 +232,9 @@ class TestProgressiveImporterCleanup:
             # Must complete without raising
             await importer.cleanup()
 
-
 # ---------------------------------------------------------------------------
 # TestProgressiveImporterAbort
 # ---------------------------------------------------------------------------
-
 
 class TestProgressiveImporterAbort:
     """Tests for ProgressiveImporter.abort()."""
@@ -307,11 +297,9 @@ class TestProgressiveImporterAbort:
         assert row[0] == "downloading", "Gallery download_status should remain 'downloading' when no images"
         assert row[1] == 0, "Gallery pages should be 0 when no images"
 
-
 # ---------------------------------------------------------------------------
 # TestProgressiveImporterFinalize
 # ---------------------------------------------------------------------------
-
 
 class TestProgressiveImporterFinalize:
     """Tests for ProgressiveImporter.finalize()."""
@@ -415,11 +403,9 @@ class TestProgressiveImporterFinalize:
         result = await importer.finalize(dest_dir, partial=False)
         assert result is None, "finalize() should return None when gallery_id is not set"
 
-
 # ---------------------------------------------------------------------------
 # TestProgressiveImporterEnsureGallery
 # ---------------------------------------------------------------------------
-
 
 def _make_mock_session_for_ensure(gallery_id: int):
     """Return a fully-mocked async session that pretends to execute pg_insert/RETURNING."""
@@ -450,7 +436,6 @@ def _make_mock_session_for_ensure(gallery_id: int):
             return _cm()
 
     return _Factory(), session
-
 
 class TestProgressiveImporterEnsureGallery:
     """Tests for ProgressiveImporter.ensure_gallery_from_url."""
@@ -499,11 +484,9 @@ class TestProgressiveImporterEnsureGallery:
         assert isinstance(gid1, int)
         assert isinstance(gid2, int)
 
-
 # ---------------------------------------------------------------------------
 # TestProgressiveImporterImportFile
 # ---------------------------------------------------------------------------
-
 
 class TestProgressiveImporterImportFile:
     """Tests for ProgressiveImporter._import_single (via import_file)."""
@@ -620,11 +603,9 @@ class TestProgressiveImporterImportFile:
 
         assert importer._page_counter == 1
 
-
 # ---------------------------------------------------------------------------
 # TestProgressiveImporterPageNumbering
 # ---------------------------------------------------------------------------
-
 
 class TestProgressiveImporterPageNumbering:
     """Tests for the page numbering behaviour of ProgressiveImporter."""

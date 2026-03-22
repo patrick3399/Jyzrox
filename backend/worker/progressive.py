@@ -310,7 +310,7 @@ class ProgressiveImporter:
                     added_at = datetime.fromtimestamp(mtime, tz=UTC)
                     if added_at.year < 2000 or added_at > datetime.now(UTC):
                         added_at = datetime.now(UTC)
-                except (OSError, ValueError, OverflowError):
+                except OSError, ValueError, OverflowError:
                     added_at = datetime.now(UTC)
 
                 img_stmt = (

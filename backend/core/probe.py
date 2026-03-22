@@ -5,8 +5,6 @@ runs gallery-dl as a subprocess, and produces field-level metadata analysis
 with suggested Jyzrox field mappings.
 """
 
-from __future__ import annotations
-
 import asyncio
 import ipaddress
 import json
@@ -92,9 +90,7 @@ _PRIVATE_NETWORKS = [
     ipaddress.ip_network("ff00::/8"),  # multicast
 ]
 
-
 # ── Dataclasses ───────────────────────────────────────────────────────────────
-
 
 @dataclass
 class ProbeField:
@@ -103,14 +99,12 @@ class ProbeField:
     sample_value: str
     level: str  # "gallery" or "page"
 
-
 @dataclass
 class FieldMapping:
     jyzrox_field: str
     gdl_field: str | None  # None = unmapped
     confidence: float
     suggested: bool
-
 
 @dataclass
 class ProbeResult:
@@ -121,9 +115,7 @@ class ProbeResult:
     suggested_mappings: list[FieldMapping] = field(default_factory=list)
     detected_source: str | None = None
 
-
 # ── Public entry point ────────────────────────────────────────────────────────
-
 
 async def probe_url(url: str) -> ProbeResult:
     """Full orchestration: validate → SSRF check → run gallery-dl → analyze.
@@ -164,9 +156,7 @@ async def probe_url(url: str) -> ProbeResult:
         detected_source=detected,
     )
 
-
 # ── Internal helpers ──────────────────────────────────────────────────────────
-
 
 def _validate_url(url: str) -> None:
     """Allow only http/https schemes. Raise ValueError otherwise."""
@@ -175,7 +165,6 @@ def _validate_url(url: str) -> None:
         raise ValueError(f"Unsupported URL scheme '{parsed.scheme}'. Only http and https are allowed.")
     if not parsed.netloc:
         raise ValueError("URL has no network location (host)")
-
 
 async def _check_dns(hostname: str) -> None:
     """Resolve hostname and reject private/loopback/reserved IPs (SSRF prevention).
@@ -203,7 +192,6 @@ async def _check_dns(hostname: str) -> None:
         for network in _PRIVATE_NETWORKS:
             if addr in network:
                 raise ValueError(f"Blocked: '{hostname}' resolves to private/reserved IP {addr} (matches {network})")
-
 
 async def _run_gallery_dl_probe(url: str) -> list[dict]:
     """Run gallery-dl --dump-json and parse each output line as JSON.
@@ -288,7 +276,6 @@ async def _run_gallery_dl_probe(url: str) -> list[dict]:
         logger.warning("[probe] gallery-dl subprocess error: %s", exc)
         return []
 
-
 def _validate_probe_output(raw: list[dict]) -> list[dict]:
     """Truncate any string fields longer than 10 KB to prevent UI bloat."""
     cleaned: list[dict] = []
@@ -301,7 +288,6 @@ def _validate_probe_output(raw: list[dict]) -> list[dict]:
                 new_item[key] = val
         cleaned.append(new_item)
     return cleaned
-
 
 def _diff_fields(items: list[dict]) -> list[ProbeField]:
     """Classify each field as gallery-level (constant) or page-level (varies).
@@ -346,7 +332,6 @@ def _diff_fields(items: list[dict]) -> list[ProbeField]:
 
     return result
 
-
 def _fingerprint_field(_key: str, values: list) -> str:
     """Infer the semantic type of a field from its values."""
     # Use the first non-None value for type detection.
@@ -388,7 +373,6 @@ def _fingerprint_field(_key: str, values: list) -> str:
         return "text"
 
     return "text"
-
 
 def _score_mappings(fields: list[ProbeField], _items: list[dict]) -> list[FieldMapping]:
     """For each Jyzrox canonical field, find the best-matching gallery-dl field.
@@ -453,7 +437,6 @@ def _score_mappings(fields: list[ProbeField], _items: list[dict]) -> list[FieldM
             )
 
     return mappings
-
 
 def _detect_source(raw: list[dict]) -> str | None:
     """Detect the gallery-dl source_id by matching 'category' in GDL_SITES."""

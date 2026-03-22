@@ -5,8 +5,6 @@ Delegates to services.pixiv_downloader so the import pipeline receives
 standard metadata.json and numbered image files.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import re
@@ -33,7 +31,6 @@ logger = logging.getLogger(__name__)
 _PIXIV_ART_RE = re.compile(r"pixiv\.net/(?:en/)?(?:artworks|i)/(\d+)")
 # Matches: /users/12345
 _PIXIV_USER_RE = re.compile(r"pixiv\.net/(?:en/)?users/(\d+)")
-
 
 class PixivSourcePlugin(SourcePlugin):
     """SourcePlugin for Pixiv illustrations and user galleries."""
@@ -109,7 +106,7 @@ class PixivSourcePlugin(SourcePlugin):
             try:
                 from datetime import datetime as _dt
                 posted_ts = int(_dt.fromisoformat(create_date.replace("Z", "+00:00")).timestamp())
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pass
 
         metadata_dict = {
@@ -284,7 +281,7 @@ class PixivSourcePlugin(SourcePlugin):
         if posted_raw:
             try:
                 posted_at = datetime.fromtimestamp(int(posted_raw), tz=timezone.utc)
-            except (ValueError, TypeError, OSError):
+            except ValueError, TypeError, OSError:
                 pass
 
         return GalleryMetadata(

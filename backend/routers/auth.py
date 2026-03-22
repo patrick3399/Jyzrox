@@ -243,7 +243,7 @@ async def list_sessions(
                 raw_str = raw if isinstance(raw, str) else raw.decode()
                 verified = _verify_session(raw_str)
                 meta = json.loads(verified) if verified else {}
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except json.JSONDecodeError, UnicodeDecodeError:
                 meta = {}
 
             sessions.append(

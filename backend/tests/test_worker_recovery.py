@@ -8,8 +8,6 @@ Tests cover:
   - SYSTEM_WORKER_RECOVERED event is emitted with the correct recovery counts
 """
 
-from __future__ import annotations
-
 import os
 import sys
 from contextlib import contextmanager
@@ -20,17 +18,14 @@ _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend_dir))
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 async def _async_iter(items):
     """Yield items as an async iterator (mimics Redis scan_iter)."""
     for item in items:
         yield item
-
 
 def _make_redis(strategy_running: str | None = None, strategy_paused: str | None = None):
     """Return an AsyncMock Redis with optional recovery strategy pre-seeded."""
@@ -54,7 +49,6 @@ def _make_redis(strategy_running: str | None = None, strategy_paused: str | None
     redis.get = AsyncMock(side_effect=_get)
     return redis
 
-
 def _make_job(
     job_id: str = "job-1",
     status: str = "running",
@@ -73,7 +67,6 @@ def _make_job(
     job.error = None
     job.finished_at = None
     return job
-
 
 def _make_session(running_jobs=None, queued_jobs=None, paused_jobs=None):
     """Return an AsyncMock DB session that returns the given job lists.
@@ -147,7 +140,6 @@ def _make_session(running_jobs=None, queued_jobs=None, paused_jobs=None):
     session.__aexit__ = AsyncMock(return_value=False)
     return session
 
-
 @contextmanager
 def _startup_patches(redis_mock, session, mock_enqueue=None, mock_emit=None):
     """Context manager that patches all startup() side-effects.
@@ -190,7 +182,6 @@ def _startup_patches(redis_mock, session, mock_enqueue=None, mock_emit=None):
         mock_watcher.start = MagicMock()
         yield {"enqueue": mock_enqueue, "emit": mock_emit}
 
-
 async def _run_startup(redis, session, mock_enqueue=None, mock_emit=None):
     """Run worker.startup() with all side-effects patched."""
     with _startup_patches(redis, session, mock_enqueue, mock_emit) as mocks:
@@ -201,11 +192,9 @@ async def _run_startup(redis, session, mock_enqueue=None, mock_emit=None):
         await startup({"redis": redis, "worker": mock_worker})
     return mocks
 
-
 # ---------------------------------------------------------------------------
 # Running-job recovery: mark_failed strategy
 # ---------------------------------------------------------------------------
-
 
 class TestStartupMarkFailedStrategy:
     """When setting:recovery_running = mark_failed, running jobs are failed."""
@@ -238,11 +227,9 @@ class TestStartupMarkFailedStrategy:
         assert kwargs.get("running_failed") == 3
         assert kwargs.get("running_retried") == 0
 
-
 # ---------------------------------------------------------------------------
 # Paused-job recovery: auto_retry strategy
 # ---------------------------------------------------------------------------
-
 
 class TestStartupPausedAutoRetry:
     """When setting:recovery_paused = auto_retry, paused jobs are re-enqueued."""
@@ -276,11 +263,9 @@ class TestStartupPausedAutoRetry:
         assert kwargs.get("paused_retried") == 2
         assert kwargs.get("paused_kept") == 0
 
-
 # ---------------------------------------------------------------------------
 # Event emission: SYSTEM_WORKER_RECOVERED
 # ---------------------------------------------------------------------------
-
 
 class TestStartupEmitsWorkerRecoveredEvent:
     """startup() must emit SYSTEM_WORKER_RECOVERED with correct recovery counts."""

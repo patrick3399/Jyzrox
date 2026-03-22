@@ -5,8 +5,6 @@ PostgreSQL.  Sleep multipliers and timeout tuning removed in v3; those
 responsibilities moved to the download worker directly.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import re
@@ -20,14 +18,11 @@ logger = logging.getLogger(__name__)
 
 _RE_403 = re.compile(r"HTTP Error 403|403 Forbidden", re.IGNORECASE)
 
-
 # ── Data models ───────────────────────────────────────────────────────
-
 
 class AdaptiveSignal(str, Enum):
     HTTP_403 = "http_403"
     HTML_RESPONSE = "html_response"
-
 
 @dataclass
 class AdaptiveState:
@@ -44,15 +39,13 @@ class AdaptiveState:
                 last_signal=data.get("last_signal") or None,
                 last_signal_at=data.get("last_signal_at") or None,
             )
-        except (ValueError, TypeError, AttributeError):
+        except ValueError, TypeError, AttributeError:
             return AdaptiveState()
-
 
 # ── AdaptiveEngine ────────────────────────────────────────────────────
 
 _ADAPTIVE_TTL = 86400  # 24 hours
 _MAX_PERSIST_PER_RUN = 200
-
 
 class AdaptiveEngine:
     """Redis-backed adaptive state manager.
@@ -105,7 +98,7 @@ return new_raw
             raw = raw.decode()
         try:
             return AdaptiveState.from_dict(json.loads(raw))
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             return AdaptiveState()
 
     async def record_signal(self, source_id: str, signal: AdaptiveSignal) -> AdaptiveState:
@@ -267,7 +260,6 @@ return new_raw
             await pipe.execute()
 
         return loaded
-
 
 # ── Singleton ─────────────────────────────────────────────────────────
 

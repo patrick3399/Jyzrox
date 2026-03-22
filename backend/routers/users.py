@@ -162,7 +162,7 @@ async def update_user(
                         data = json.loads(verified)
                         data["role"] = req.role
                         await redis.setex(key_str, ttl, _sign_session(json.dumps(data)))
-                    except (json.JSONDecodeError, TypeError):
+                    except json.JSONDecodeError, TypeError:
                         pass
                 if cursor == 0:
                     break

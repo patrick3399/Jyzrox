@@ -1,12 +1,9 @@
 """Plugin system Pydantic models."""
 
-from __future__ import annotations
-
 from datetime import datetime
 from typing import Literal
 
 from pydantic import BaseModel
-
 
 class FieldDef(BaseModel):
     name: str
@@ -15,7 +12,6 @@ class FieldDef(BaseModel):
     required: bool = False
     placeholder: str = ""
 
-
 class SiteInfo(BaseModel):
     domain: str
     name: str
@@ -23,12 +19,10 @@ class SiteInfo(BaseModel):
     category: str
     has_tags: bool = False
 
-
 class OAuthConfig(BaseModel):
     auth_url_endpoint: str
     callback_endpoint: str
     display_name: str
-
 
 class CredentialFlow(BaseModel):
     flow_type: Literal["fields", "oauth", "login"]
@@ -37,13 +31,11 @@ class CredentialFlow(BaseModel):
     login_endpoint: str | None = None
     verify_endpoint: str | None = None
 
-
 class CredentialStatus(BaseModel):
     valid: bool
     username: str | None = None
     error: str | None = None
     expires_at: datetime | None = None
-
 
 class GalleryImportData(BaseModel):
     source: str
@@ -59,14 +51,12 @@ class GalleryImportData(BaseModel):
     uploader: str = ""
     extra: dict = {}
 
-
 class NewWork(BaseModel):
     url: str
     title: str = ""
     source_id: str = ""
     thumbnail_url: str | None = None
     posted_at: datetime | None = None
-
 
 class PluginMeta(BaseModel):
     name: str
@@ -80,7 +70,6 @@ class PluginMeta(BaseModel):
     semaphore_key: str | None = None
     needs_all_credentials: bool = False
 
-
 class GalleryMetadata(BaseModel):
     source: str
     source_id: str
@@ -91,7 +80,6 @@ class GalleryMetadata(BaseModel):
     posted_at: datetime | None = None
     extra: dict = {}
 
-
 class DownloadResult(BaseModel):
     status: Literal["done", "cancelled", "failed", "partial"]
     downloaded: int
@@ -100,7 +88,6 @@ class DownloadResult(BaseModel):
     error: str | None = None
     unsupported_urls: list[str] = []
     error_urls: list[str] = []
-
 
 class SearchResult(BaseModel):
     galleries: list[dict]
@@ -112,13 +99,11 @@ class SearchResult(BaseModel):
     prev_cursor: str | None = None
     extra: dict = {}
 
-
 class BrowseSchema(BaseModel):
     search_fields: list[FieldDef]
     supports_favorites: bool = False
     supports_popular: bool = False
     supports_toplist: bool = False
-
 
 class TagResult(BaseModel):
     image_path: str

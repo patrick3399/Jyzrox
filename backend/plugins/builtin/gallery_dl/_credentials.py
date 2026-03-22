@@ -1,11 +1,8 @@
 """Generic cookie credential flows for gallery-dl."""
 
-from __future__ import annotations
-
 import json
 
 from plugins.models import CredentialFlow, CredentialStatus, FieldDef
-
 
 def parse_cookie_input(raw: str) -> dict[str, str]:
     """Parse cookie input in multiple formats: JSON, per-line key=val, browser semicolon format, or single key=val."""
@@ -19,7 +16,7 @@ def parse_cookie_input(raw: str) -> dict[str, str]:
             parsed = json.loads(raw)
             if isinstance(parsed, dict):
                 return {str(k): str(v) for k, v in parsed.items()}
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             pass
 
     def _split_pairs(text: str, delimiter: str) -> dict[str, str]:
@@ -47,7 +44,6 @@ def parse_cookie_input(raw: str) -> dict[str, str]:
         return {raw[:eq].strip(): raw[eq + 1:].strip()}
 
     return {}
-
 
 def gallery_dl_credential_flows() -> list[CredentialFlow]:
     """Return the generic cookie credential flow.
@@ -77,7 +73,6 @@ def gallery_dl_credential_flows() -> list[CredentialFlow]:
             verify_endpoint=None,
         ),
     ]
-
 
 async def verify_gallery_dl_credential(credentials: dict) -> CredentialStatus:
     """Generic credentials cannot be verified — accept as-is."""

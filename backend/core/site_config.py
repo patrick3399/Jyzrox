@@ -5,8 +5,6 @@ Merge priority:  manual override (DB)  >  adaptive auto-tune (DB)  >  _sites.py 
 Cache: in-memory dict, 30s TTL, immediate invalidation via Redis Pub/Sub.
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import time
@@ -50,7 +48,6 @@ JYZROX_FIELDS = frozenset(
     }
 )
 
-
 @dataclass(frozen=True, slots=True)
 class DownloadParams:
     """Effective download parameters for a source (after merge)."""
@@ -63,7 +60,6 @@ class DownloadParams:
     browser_profile: str | None = None
     proxy_url: str | None = None
     rate_limit: str | None = None
-
 
 class SiteConfigService:
     """Singleton service for per-site download configuration.
@@ -381,9 +377,7 @@ class SiteConfigService:
         if fm:
             _validate_field_mapping(fm)
 
-
 # ── Module-level helpers ──────────────────────────────────────────────
-
 
 def _validate_field_mapping(field_mapping: dict) -> None:
     """Validate a field_mapping dict: keys must be Jyzrox fields, values str or None."""
@@ -393,7 +387,6 @@ def _validate_field_mapping(field_mapping: dict) -> None:
     for val in field_mapping.values():
         if val is not None and not isinstance(val, str):
             raise ValueError(f"field_mapping values must be strings or null, got {type(val).__name__}")
-
 
 # ── Module-level singleton ────────────────────────────────────────────
 

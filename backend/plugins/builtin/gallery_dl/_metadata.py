@@ -1,7 +1,5 @@
 """Generic gallery-dl metadata parsing for the Parseable protocol."""
 
-from __future__ import annotations
-
 import json
 import logging
 import re
@@ -22,9 +20,7 @@ NAMESPACE_MAP = {
     "species": "species",
 }
 
-
 _DIR_FMT_FIELD_RE = re.compile(r"\{(\w+)(?:\[(\w+)\])?\}")
-
 
 @lru_cache(maxsize=64)
 def _get_identity_field(category: str) -> tuple[str, str | None] | None:
@@ -45,10 +41,9 @@ def _get_identity_field(category: str) -> tuple[str, str | None] | None:
         m = _DIR_FMT_FIELD_RE.search(last)
         if m:
             return (m.group(1), m.group(2))  # (field, subfield_or_None)
-    except (ImportError, AttributeError, IndexError, TypeError):
+    except ImportError, AttributeError, IndexError, TypeError:
         pass
     return None
-
 
 def _resolve_source_id(meta: dict, cfg, dest_dir_name: str) -> str:
     """Resolve source_id from metadata, using gallery-dl directory_fmt when available."""
@@ -83,7 +78,6 @@ def _resolve_source_id(meta: dict, cfg, dest_dir_name: str) -> str:
 
     return dest_dir_name
 
-
 def _extract_title(source: str, meta: dict, source_id: str) -> str:
     """Extract title from metadata using per-source field priority."""
     from plugins.builtin.gallery_dl._sites import get_site_config
@@ -111,7 +105,6 @@ def _extract_title(source: str, meta: dict, source_id: str) -> str:
         or (meta.get("content") or "")[:120]
         or f"{source}_{source_id}"
     )
-
 
 def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fallback_source: str | None = None) -> GalleryImportData:
     """Parse a gallery-dl download directory into GalleryImportData.
@@ -156,7 +149,7 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fal
                 posted_at = datetime.fromtimestamp(raw_date, tz=UTC)
             else:
                 posted_at = datetime.fromisoformat(str(raw_date))
-        except (ValueError, TypeError, OverflowError):
+        except ValueError, TypeError, OverflowError:
             pass
 
     return GalleryImportData(
@@ -172,7 +165,6 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fal
         uploader=meta.get("uploader") or meta.get("username") or "",
         extra={},
     )
-
 
 def _extract_tags(gallery_path: Path, metadata: dict, source: str | None = None) -> list[str]:
     """Extract tags in 'namespace:name' format from metadata or tags.txt."""
@@ -214,7 +206,6 @@ def _extract_tags(gallery_path: Path, metadata: dict, source: str | None = None)
 
     return tags
 
-
 def _normalize_tags(tags: list[str], source: str) -> list[str]:
     """Normalize namespace names across booru sources for consistency."""
     from plugins.builtin.gallery_dl._sites import get_site_config
@@ -230,7 +221,6 @@ def _normalize_tags(tags: list[str], source: str) -> list[str]:
         else:
             normalized.append(tag)
     return normalized
-
 
 def _extract_artist(source: str, meta: dict, tags: list[str]) -> str | None:
     """Extract artist_id from metadata based on source type (data-driven)."""

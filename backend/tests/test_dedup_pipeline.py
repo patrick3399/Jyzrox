@@ -9,8 +9,6 @@ Strategy:
 - Insert blobs / blob_relationships directly via raw SQL (SQLite-compatible).
 """
 
-from __future__ import annotations
-
 import sys
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -19,11 +17,9 @@ import pytest
 from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _make_session_cm(factory):
     """Wrap async_sessionmaker so ``async with async_session() as s:`` works."""
@@ -38,7 +34,6 @@ def _make_session_cm(factory):
             return _cm()
 
     return _Factory()
-
 
 async def _insert_blob(
     session,
@@ -76,7 +71,6 @@ async def _insert_blob(
     )
     await session.commit()
 
-
 async def _insert_relationship(
     session,
     sha_a: str,
@@ -103,7 +97,6 @@ async def _insert_relationship(
     await session.commit()
     return result.fetchone()[0]
 
-
 def _make_redis(overrides: dict | None = None) -> AsyncMock:
     r = AsyncMock()
     r.get = AsyncMock(return_value=None)
@@ -120,11 +113,9 @@ def _make_redis(overrides: dict | None = None) -> AsyncMock:
             setattr(r, k, v)
     return r
 
-
 # ---------------------------------------------------------------------------
 # TestDedupTier1
 # ---------------------------------------------------------------------------
-
 
 class TestDedupTier1:
     """Tests for worker.dedup_tier1.dedup_tier1_job."""
@@ -389,11 +380,9 @@ class TestDedupTier1:
         ).scalar()
         assert count == 0
 
-
 # ---------------------------------------------------------------------------
 # TestDedupTier2
 # ---------------------------------------------------------------------------
-
 
 class TestDedupTier2:
     """Tests for worker.dedup_tier2.dedup_tier2_job."""
@@ -676,11 +665,9 @@ class TestDedupTier2:
 
         assert result["status"] == "skipped"
 
-
 # ---------------------------------------------------------------------------
 # TestDedupTier3
 # ---------------------------------------------------------------------------
-
 
 class TestDedupTier3:
     """Tests for worker.dedup_tier3.dedup_tier3_job."""

@@ -12,8 +12,6 @@ Volume layout:
     └── v2/                 ← after first upgrade
 """
 
-from __future__ import annotations
-
 import asyncio
 import logging
 import re
@@ -29,9 +27,7 @@ GDL_BIN = VENV_ACTIVE / "bin" / "gallery-dl"
 
 _VERSION_DIR_RE = re.compile(r"^v\d+$")
 
-
 _gdl_bin_cache: str | None = None
-
 
 def get_gdl_bin() -> str:
     """Return gallery-dl binary path — venv if available, else system PATH fallback."""
@@ -40,12 +36,10 @@ def get_gdl_bin() -> str:
         _gdl_bin_cache = str(GDL_BIN) if GDL_BIN.exists() else "gallery-dl"
     return _gdl_bin_cache
 
-
 def invalidate_gdl_bin_cache() -> None:
     """Clear cached binary path. Called after upgrade/rollback."""
     global _gdl_bin_cache
     _gdl_bin_cache = None
-
 
 async def _run(cmd: list[str], timeout: float = 300) -> tuple[int, str, str]:
     """Run a subprocess and return (returncode, stdout, stderr)."""
@@ -64,7 +58,6 @@ async def _run(cmd: list[str], timeout: float = 300) -> tuple[int, str, str]:
     # After communicate() returns, returncode is guaranteed non-None
     return rc if rc is not None else -1, stdout.decode(), stderr.decode()
 
-
 def _version_dirs() -> list[Path]:
     """Return sorted list of v{N} directories under VENV_BASE."""
     if not VENV_BASE.exists():
@@ -74,7 +67,6 @@ def _version_dirs() -> list[Path]:
         key=lambda d: int(d.name[1:]),
     )
 
-
 def _next_version_dir() -> Path:
     """Find the next available v{N} directory."""
     existing = _version_dirs()
@@ -83,7 +75,6 @@ def _next_version_dir() -> Path:
     last_num = int(existing[-1].name[1:])
     return VENV_BASE / f"v{last_num + 1}"
 
-
 def _current_version_dir() -> Path | None:
     """Return the directory the 'active' symlink points to, or None."""
     if VENV_ACTIVE.is_symlink():
@@ -91,7 +82,6 @@ def _current_version_dir() -> Path | None:
         if target.exists():
             return target
     return None
-
 
 def _previous_version_dir() -> Path | None:
     """Find the previous version directory (one before current)."""
@@ -104,7 +94,6 @@ def _previous_version_dir() -> Path | None:
             return dirs[i - 1]
     return None
 
-
 def _swap_active_symlink(target_dir: Path) -> None:
     """Atomically swap the 'active' symlink to point at target_dir."""
     tmp_link = VENV_BASE / "active.tmp"
@@ -112,7 +101,6 @@ def _swap_active_symlink(target_dir: Path) -> None:
         tmp_link.unlink()
     tmp_link.symlink_to(target_dir.name)
     tmp_link.rename(VENV_ACTIVE)  # atomic on same filesystem
-
 
 async def _check_running_downloads() -> int:
     """Return count of currently running download jobs."""
@@ -126,7 +114,6 @@ async def _check_running_downloads() -> int:
             await session.execute(select(func.count()).select_from(DownloadJob).where(DownloadJob.status == "running"))
         ).scalar_one()
 
-
 async def _get_version(gdl_bin: str) -> str | None:
     """Run gallery-dl --version and return the version string."""
     try:
@@ -136,7 +123,6 @@ async def _get_version(gdl_bin: str) -> str | None:
     except Exception:
         pass
     return None
-
 
 async def ensure_venv() -> None:
     """Ensure the venv exists and the 'active' symlink is valid.
@@ -184,7 +170,6 @@ async def ensure_venv() -> None:
     logger.info("[gallery-dl venv] Initial venv ready: gallery-dl %s", ver)
     invalidate_gdl_bin_cache()
 
-
 async def get_current_version() -> str | None:
     """Return the currently active gallery-dl version.
 
@@ -213,7 +198,6 @@ async def get_current_version() -> str | None:
     # Fallback: system gallery-dl (e.g. baked into Docker image)
     return await _get_version("gallery-dl")
 
-
 async def get_latest_pypi_version() -> str | None:
     """Fetch the latest gallery-dl version from PyPI."""
     try:
@@ -227,11 +211,9 @@ async def get_latest_pypi_version() -> str | None:
         logger.warning("[gallery-dl venv] Failed to fetch PyPI version: %s", exc)
     return None
 
-
 async def _cleanup_new_dir(new_dir: Path) -> None:
     """Remove a failed upgrade directory."""
     await asyncio.to_thread(shutil.rmtree, new_dir, True)
-
 
 async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: ARG001
     """ARQ job: upgrade gallery-dl to a specific version (or latest).
@@ -315,7 +297,6 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
         "new_version": new_version,
     }
 
-
 async def rollback_job(ctx: dict) -> dict:  # noqa: ARG001
     """ARQ job: rollback gallery-dl to the previous version."""
     from core.events import EventType, emit_safe
@@ -360,7 +341,6 @@ async def rollback_job(ctx: dict) -> dict:  # noqa: ARG001
         "old_version": old_version,
         "new_version": new_version,
     }
-
 
 async def _cleanup_old_versions() -> None:
     """Remove all version dirs except current and one most recent other."""

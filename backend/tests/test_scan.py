@@ -7,19 +7,15 @@ Redis is provided via ctx["redis"] as an AsyncMock.
 Filesystem operations are mocked via patch on resolve_blob_path / thumb_dir.
 """
 
-from __future__ import annotations
-
 import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch, call
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
-
 
 def _make_redis() -> AsyncMock:
     """Return a fully-wired mock Redis compatible with worker.scan usage."""
@@ -30,7 +26,6 @@ def _make_redis() -> AsyncMock:
     r.delete = AsyncMock(return_value=1)
     return r
 
-
 def _make_blob(sha: str = "abc123", ext: str = ".jpg", storage: str = "cas") -> MagicMock:
     blob = MagicMock()
     blob.sha256 = sha
@@ -38,7 +33,6 @@ def _make_blob(sha: str = "abc123", ext: str = ".jpg", storage: str = "cas") -> 
     blob.storage = storage
     blob.external_path = None
     return blob
-
 
 def _make_image(
     image_id: int = 1,
@@ -54,7 +48,6 @@ def _make_image(
     img.blob_sha256 = blob.sha256 if blob else None
     img.blob = blob
     return img
-
 
 def _make_gallery(
     gallery_id: int = 10,
@@ -75,7 +68,6 @@ def _make_gallery(
     g.library_path = library_path
     g.last_scanned_at = None
     return g
-
 
 def _make_session(
     gallery_ids: list[int] | None = None,
@@ -116,11 +108,9 @@ def _make_session(
     session.__aexit__ = AsyncMock(return_value=False)
     return session
 
-
 # ---------------------------------------------------------------------------
 # TestRescanLibraryJob
 # ---------------------------------------------------------------------------
-
 
 class TestRescanLibraryJob:
     """Tests for rescan_library_job(ctx)."""
@@ -404,11 +394,9 @@ class TestRescanLibraryJob:
 
         mock_enqueue.assert_not_awaited()
 
-
 # ---------------------------------------------------------------------------
 # TestRescanGalleryJob
 # ---------------------------------------------------------------------------
-
 
 class TestRescanGalleryJob:
     """Tests for rescan_gallery_job(ctx, gallery_id)."""
@@ -697,11 +685,9 @@ class TestRescanGalleryJob:
 
         assert gallery.download_status == "missing"
 
-
 # ---------------------------------------------------------------------------
 # TestAutoDiscoverJob
 # ---------------------------------------------------------------------------
-
 
 class TestAutoDiscoverJob:
     """Tests for auto_discover_job(ctx)."""
@@ -861,11 +847,9 @@ class TestAutoDiscoverJob:
 
         assert result["discovered"] == 0
 
-
 # ---------------------------------------------------------------------------
 # TestScheduledScanJob
 # ---------------------------------------------------------------------------
-
 
 class TestScheduledScanJob:
     """Tests for scheduled_scan_job(ctx)."""
@@ -925,11 +909,9 @@ class TestScheduledScanJob:
         assert "running" in record_statuses
         assert "ok" in record_statuses
 
-
 # ---------------------------------------------------------------------------
 # TestRescanByPathJob
 # ---------------------------------------------------------------------------
-
 
 class TestRescanByPathJob:
     """Tests for rescan_by_path_job(ctx, dir_path)."""

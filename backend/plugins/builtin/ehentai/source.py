@@ -4,8 +4,6 @@ Delegates to services.eh_downloader.download_eh_gallery so that all existing
 import pipeline code continues to work unchanged.
 """
 
-from __future__ import annotations
-
 import json
 import logging
 import re
@@ -29,7 +27,6 @@ from plugins.models import (
 logger = logging.getLogger(__name__)
 
 _EH_URL_RE = re.compile(r"https?://(?:e-hentai|exhentai)\.org/g/(\d+)/([a-f0-9]+)")
-
 
 class EhSourcePlugin(SourcePlugin):
     """SourcePlugin for E-Hentai and ExHentai galleries."""
@@ -102,7 +99,7 @@ class EhSourcePlugin(SourcePlugin):
         elif isinstance(credentials, str):
             try:
                 cookies = json.loads(credentials)
-            except (json.JSONDecodeError, TypeError):
+            except json.JSONDecodeError, TypeError:
                 return None
         else:
             cookies = credentials
@@ -181,7 +178,7 @@ class EhSourcePlugin(SourcePlugin):
         elif isinstance(credentials, str):
             try:
                 cookies = json.loads(credentials)
-            except (json.JSONDecodeError, TypeError):
+            except json.JSONDecodeError, TypeError:
                 err = "E-Hentai credentials JSON is malformed"
                 return DownloadResult(status="failed", downloaded=0, total=0, error=err)
         else:
@@ -263,7 +260,7 @@ class EhSourcePlugin(SourcePlugin):
         if posted_raw:
             try:
                 posted_at = datetime.fromtimestamp(int(posted_raw), tz=timezone.utc)
-            except (ValueError, TypeError, OSError):
+            except ValueError, TypeError, OSError:
                 pass
 
         return GalleryMetadata(

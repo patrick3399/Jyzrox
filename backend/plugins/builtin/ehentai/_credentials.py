@@ -1,14 +1,11 @@
 """E-Hentai credential flows and verification."""
 
-from __future__ import annotations
-
 import json
 import logging
 
 from plugins.models import CredentialFlow, CredentialStatus, FieldDef
 
 logger = logging.getLogger(__name__)
-
 
 def eh_credential_flows() -> list[CredentialFlow]:
     """Return the supported credential flows for E-Hentai."""
@@ -30,7 +27,6 @@ def eh_credential_flows() -> list[CredentialFlow]:
         ),
     ]
 
-
 async def verify_eh_credential(credentials: dict) -> CredentialStatus:
     """Verify E-Hentai cookies by testing access against EhClient."""
     from services.eh_client import EhClient
@@ -39,7 +35,7 @@ async def verify_eh_credential(credentials: dict) -> CredentialStatus:
     if isinstance(credentials, str):
         try:
             cookies = json.loads(credentials)
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             return CredentialStatus(valid=False, error="Malformed credentials JSON")
 
     if not cookies.get("ipb_member_id") or not cookies.get("ipb_pass_hash"):

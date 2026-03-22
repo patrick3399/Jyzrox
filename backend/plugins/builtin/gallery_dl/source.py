@@ -5,8 +5,6 @@ plugin registry while preserving all existing behaviour (PID tracking,
 cancel support, progress reporting, config file generation).
 """
 
-from __future__ import annotations
-
 import asyncio
 import json
 import logging
@@ -60,7 +58,6 @@ _METADATA_INCLUDE = (
     "language",
 )
 
-
 def _build_supported_sites() -> list[SiteInfo]:
     """Generate SiteInfo list from unified site registry."""
     from plugins.builtin.gallery_dl._sites import GDL_SITES
@@ -76,7 +73,6 @@ def _build_supported_sites() -> list[SiteInfo]:
         for s in GDL_SITES
     ]
 
-
 def _source_to_extractor(source: str) -> str:
     """Map our source name to gallery-dl extractor name."""
     from plugins.builtin.gallery_dl._sites import get_site_config
@@ -84,9 +80,7 @@ def _source_to_extractor(source: str) -> str:
     cfg = get_site_config(source)
     return cfg.extractor or cfg.source_id
 
-
 FRAGMENT_KEYS = {"cookies", "username", "password", "refresh-token", "api-key"}
-
 
 def _try_parse_fragment(cred_val: str) -> dict | None:
     """Try to parse a credential value as a gallery-dl config fragment (new format).
@@ -97,15 +91,13 @@ def _try_parse_fragment(cred_val: str) -> dict | None:
         parsed = json.loads(cred_val)
         if isinstance(parsed, dict) and (FRAGMENT_KEYS & parsed.keys()):
             return parsed
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError, TypeError:
         pass
     return None
-
 
 def _is_fragment(cred_val: str) -> bool:
     """Check if a credential value is a gallery-dl config fragment (new format)."""
     return _try_parse_fragment(cred_val) is not None
-
 
 async def _build_gallery_dl_config(
     credentials: dict,
@@ -220,7 +212,7 @@ async def _build_gallery_dl_config(
                         config["extractor"].setdefault(extra, {})["cookies"] = cookies
                     # N8: cookies-update for legacy format too
                     config["extractor"][ext]["cookies-update"] = True
-                except (json.JSONDecodeError, TypeError):
+                except json.JSONDecodeError, TypeError:
                     logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
 
     # N6: ugoira PP for Pixiv (convert animated illustrations to MP4)
@@ -243,7 +235,6 @@ async def _build_gallery_dl_config(
     os.rename(tmp_path, config_path)
     return config_path
 
-
 @dataclass
 class _DownloadState:
     """Shared mutable state for the download task group."""
@@ -258,7 +249,6 @@ class _DownloadState:
     html_response_count: int = 0
     source_id: str = ""
     last_page_time: float = 0.0
-
 
 async def _read_stdout(
     proc: asyncio.subprocess.Process,
@@ -309,7 +299,6 @@ async def _read_stdout(
                 except Exception:
                     pass
 
-
 async def _read_stderr(
     proc: asyncio.subprocess.Process,
     state: _DownloadState,
@@ -332,7 +321,6 @@ async def _read_stderr(
                 await adaptive_engine.record_signal(state.source_id, AdaptiveSignal.HTTP_403)
             except Exception:
                 pass
-
 
 async def _heartbeat_loop(
     state: _DownloadState,
@@ -358,7 +346,6 @@ async def _heartbeat_loop(
         except Exception as exc:
             logger.warning("[gallery_dl] heartbeat callback error: %s", exc)
 
-
 async def _inactivity_watchdog(
     state: _DownloadState,
     timeout: int,
@@ -377,7 +364,6 @@ async def _inactivity_watchdog(
             except ProcessLookupError:
                 pass
             return "inactivity_timeout"
-
 
 async def _pause_cancel_watcher(
     state: _DownloadState,
@@ -407,7 +393,7 @@ async def _pause_cancel_watcher(
             logger.info("[gallery_dl] pausing process")
             try:
                 proc.send_signal(signal.SIGSTOP)
-            except (ProcessLookupError, OSError):
+            except ProcessLookupError, OSError:
                 pass
 
             while await pause_check():
@@ -416,7 +402,7 @@ async def _pause_cancel_watcher(
                     try:
                         proc.send_signal(signal.SIGCONT)
                         proc.kill()
-                    except (ProcessLookupError, OSError):
+                    except ProcessLookupError, OSError:
                         pass
                     return "cancelled"
                 await asyncio.sleep(0.5)
@@ -428,9 +414,8 @@ async def _pause_cancel_watcher(
             logger.info("[gallery_dl] resumed after %.1fs", paused_duration)
             try:
                 proc.send_signal(signal.SIGCONT)
-            except (ProcessLookupError, OSError):
+            except ProcessLookupError, OSError:
                 pass
-
 
 def _validate_download_content(file_path: Path) -> str | None:
     """Check downloaded file content. Returns 'html', 'empty', or None (ok)."""
@@ -449,7 +434,6 @@ def _validate_download_content(file_path: Path) -> str | None:
         except OSError:
             pass
     return None
-
 
 async def _on_file_with_validation(
     file_path: Path,
@@ -502,7 +486,6 @@ async def _on_file_with_validation(
     if inner_on_file:
         await inner_on_file(file_path, sha256)
 
-
 def _read_url_file(path: Path) -> list[str]:
     """Read and delete a URL file (--write-unsupported / --error-file output)."""
     try:
@@ -511,7 +494,6 @@ def _read_url_file(path: Path) -> list[str]:
         return []
     finally:
         path.unlink(missing_ok=True)
-
 
 class GalleryDlPlugin(SourcePlugin):
     """Fallback SourcePlugin that delegates to gallery-dl subprocess."""

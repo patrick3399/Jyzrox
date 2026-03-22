@@ -542,7 +542,7 @@ async def _get_int_setting(redis_key: str, default: int) -> int:
     if val is not None:
         try:
             return int(val)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
     return default
 
@@ -553,7 +553,7 @@ async def _get_float_setting(redis_key: str, default: float) -> float:
     if val is not None:
         try:
             return float(val)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
     return default
 
@@ -910,7 +910,7 @@ async def _build_rate_limit_response(redis) -> dict:
         if val is not None:
             try:
                 return int(val)
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 pass
         return default
 
@@ -1080,11 +1080,11 @@ async def patch_rate_limits(
             end_val = await redis.get("rate_limit:schedule:end_hour")
             try:
                 start_hour = int(start_val) if start_val is not None else 0
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 start_hour = 0
             try:
                 end_hour = int(end_val) if end_val is not None else 6
-            except (ValueError, TypeError):
+            except ValueError, TypeError:
                 end_hour = 6
 
             current_hour = datetime.now(UTC).hour

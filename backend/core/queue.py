@@ -1,7 +1,5 @@
 """SAQ queue abstraction layer."""
 
-from __future__ import annotations
-
 import logging
 from typing import Any
 
@@ -13,11 +11,9 @@ logger = logging.getLogger(__name__)
 
 _queue: Queue | None = None
 
-
 # ---------------------------------------------------------------------------
 # Queue lifecycle
 # ---------------------------------------------------------------------------
-
 
 async def init_queue(redis_url: str | None = None) -> Queue:
     """Initialize the global SAQ Queue instance."""
@@ -30,7 +26,6 @@ async def init_queue(redis_url: str | None = None) -> Queue:
     logger.info("SAQ queue connected")
     return _queue
 
-
 async def close_queue() -> None:
     """Disconnect and clean up the global SAQ Queue."""
     global _queue
@@ -39,18 +34,15 @@ async def close_queue() -> None:
         _queue = None
         logger.info("SAQ queue disconnected")
 
-
 def get_queue() -> Queue:
     """Return the global SAQ Queue. Raises if not initialized."""
     if _queue is None:
         raise RuntimeError("SAQ queue not initialized — call init_queue() first")
     return _queue
 
-
 # ---------------------------------------------------------------------------
 # Enqueue (kwargs-only)
 # ---------------------------------------------------------------------------
-
 
 async def enqueue(
     job_name: str,

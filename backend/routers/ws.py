@@ -28,7 +28,7 @@ async def _validate_ws_session(ws: WebSocket) -> tuple[str, str] | None:
         try:
             data = json.loads(raw if isinstance(raw, str) else raw.decode())
             role = data.get("role", "viewer")
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             role = "viewer"
         return (user_id_str, role)
     except (ValueError, ConnectionError, OSError) as exc:
@@ -112,7 +112,7 @@ async def _pubsub_listener(ws: WebSocket, user_id: str, role: str) -> None:
                 # Parse event for filtering
                 try:
                     event_data = json.loads(data)
-                except (json.JSONDecodeError, TypeError):
+                except json.JSONDecodeError, TypeError:
                     # Non-JSON data — forward as-is (backward compat)
                     if role == "admin":
                         await ws.send_text(data)
@@ -127,7 +127,7 @@ async def _pubsub_listener(ws: WebSocket, user_id: str, role: str) -> None:
                 # Translate to legacy WS format
                 ws_message = _event_to_ws_message(event_data)
                 await ws.send_text(ws_message)
-    except (WebSocketDisconnect, asyncio.CancelledError):
+    except WebSocketDisconnect, asyncio.CancelledError:
         raise
     except Exception as exc:
         logger.warning("_pubsub_listener error: %s", exc)
@@ -151,7 +151,7 @@ async def _ping_loop(ws: WebSocket) -> None:
 
             await ws.send_json({"type": "ping", "ts": datetime.datetime.now(datetime.UTC).isoformat()})
             await asyncio.sleep(2)
-    except (WebSocketDisconnect, asyncio.CancelledError):
+    except WebSocketDisconnect, asyncio.CancelledError:
         raise
     except (ConnectionError, RuntimeError) as exc:
         logger.error("_ping_loop error: %s", exc)
@@ -163,7 +163,7 @@ async def _ws_receiver(ws: WebSocket) -> None:
     try:
         while True:
             await ws.receive()
-    except (WebSocketDisconnect, asyncio.CancelledError, RuntimeError):
+    except WebSocketDisconnect, asyncio.CancelledError, RuntimeError:
         raise
 
 
@@ -178,7 +178,7 @@ async def _log_stream_listener(ws: WebSocket) -> None:
                 if isinstance(data, bytes):
                     data = data.decode()
                 await ws.send_text(json.dumps({"type": "log_entry", "log": json.loads(data)}))
-    except (WebSocketDisconnect, asyncio.CancelledError):
+    except WebSocketDisconnect, asyncio.CancelledError:
         raise
     finally:
         with contextlib.suppress(Exception):

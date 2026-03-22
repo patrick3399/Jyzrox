@@ -5,8 +5,6 @@ endpoints previously in routers/eh.py are now owned by this module and
 exposed via get_browse_router().
 """
 
-from __future__ import annotations
-
 import asyncio
 import hashlib
 import json
@@ -42,11 +40,9 @@ from services.eh_client import EhClient
 
 logger = logging.getLogger(__name__)
 
-
 # ---------------------------------------------------------------------------
 # EhBrowsePlugin class
 # ---------------------------------------------------------------------------
-
 
 class EhBrowsePlugin(BrowsePlugin):
     """BrowsePlugin for E-Hentai / ExHentai."""
@@ -124,7 +120,7 @@ class EhBrowsePlugin(BrowsePlugin):
             if isinstance(credentials, str):
                 try:
                     cookies = json.loads(credentials)
-                except (json.JSONDecodeError, TypeError):
+                except json.JSONDecodeError, TypeError:
                     logger.warning("[eh_browse] malformed credentials JSON")
             else:
                 cookies = credentials  # type: ignore[assignment]
@@ -173,7 +169,7 @@ class EhBrowsePlugin(BrowsePlugin):
             if isinstance(credentials, str):
                 try:
                     cookies = json.loads(credentials)
-                except (json.JSONDecodeError, TypeError):
+                except json.JSONDecodeError, TypeError:
                     pass
             else:
                 cookies = credentials  # type: ignore[assignment]
@@ -205,20 +201,16 @@ class EhBrowsePlugin(BrowsePlugin):
         """Return the EH browse router."""
         return _browse_router
 
-
 # ---------------------------------------------------------------------------
 # Browse router — formerly routers/eh.py
 # ---------------------------------------------------------------------------
 
 _browse_router = APIRouter(tags=["e-hentai"])
 
-
 def _locale(request: Request) -> str:
     return parse_accept_language(request.headers.get("accept-language"))
 
-
 # ── Blocked tag helpers ───────────────────────────────────────────────
-
 
 async def _get_blocked_tags(user_id: int) -> set[str]:
     """Return set of 'namespace:name' blocked tag strings for the user."""
@@ -230,13 +222,11 @@ async def _get_blocked_tags(user_id: int) -> set[str]:
         ).all()
     return {f"{r.namespace}:{r.name}" for r in rows}
 
-
 def _filter_blocked(galleries: list[dict], blocked: set[str]) -> list[dict]:
     """Filter out galleries that contain any blocked tag."""
     if not blocked:
         return galleries
     return [g for g in galleries if not blocked.intersection(set(g.get("tags", [])))]
-
 
 async def _make_client() -> EhClient:
     """Load EH cookies from DB and return a configured client (guest if no creds)."""
@@ -250,9 +240,7 @@ async def _make_client() -> EhClient:
         use_ex = app_settings.eh_use_ex or bool(cookies.get("igneous"))
     return EhClient(cookies=cookies, use_ex=use_ex)
 
-
 # ── Search ───────────────────────────────────────────────────────────
-
 
 @_browse_router.get("/search")
 async def search(
@@ -329,9 +317,7 @@ async def search(
 
     return result
 
-
 # ── Popular ──────────────────────────────────────────────────────────
-
 
 @_browse_router.get("/popular")
 async def get_popular(
@@ -374,12 +360,9 @@ async def get_popular(
 
     return result
 
-
 # ── Top Lists ─────────────────────────────────────────────────────────
 
-
 _VALID_TL = {11, 12, 13, 15}
-
 
 @_browse_router.get("/toplists")
 async def get_toplist(
@@ -427,9 +410,7 @@ async def get_toplist(
 
     return result
 
-
 # ── Gallery Comments ──────────────────────────────────────────────────
-
 
 @_browse_router.get("/gallery/{gid}/{token}/comments")
 async def get_gallery_comments(
@@ -461,9 +442,7 @@ async def get_gallery_comments(
     await cache.set_json(cache_key, comments, 600)  # 10min
     return {"gid": gid, "comments": comments}
 
-
 # ── Gallery metadata ─────────────────────────────────────────────────
-
 
 @_browse_router.get("/gallery/{gid}/{token}")
 async def get_gallery(
@@ -500,9 +479,7 @@ async def get_gallery(
         headers={"Cache-Control": "private, max-age=3600"},  # 1h browser cache
     )
 
-
 # ── Preview thumbnails (lightweight — single page scrape) ────────────
-
 
 @_browse_router.get("/gallery/{gid}/{token}/previews")
 async def get_gallery_previews(
@@ -544,9 +521,7 @@ async def get_gallery_previews(
         headers={"Cache-Control": "private, max-age=3600"},
     )
 
-
 # ── Image token list ─────────────────────────────────────────────────
-
 
 @_browse_router.get("/gallery/{gid}/{token}/images")
 async def get_gallery_images(
@@ -597,9 +572,7 @@ async def get_gallery_images(
         headers={"Cache-Control": "private, max-age=86400"},
     )
 
-
 # ── Paginated image token list ───────────────────────────────────────
-
 
 @_browse_router.get("/gallery/{gid}/{token}/images-paginated")
 async def get_gallery_images_paginated(
@@ -743,9 +716,7 @@ async def get_gallery_images_paginated(
         headers={"Cache-Control": "private, max-age=86400"},
     )
 
-
 # ── Image proxy ──────────────────────────────────────────────────────
-
 
 @_browse_router.get("/image-proxy/{gid}/{page}")
 async def image_proxy(
@@ -814,9 +785,7 @@ async def image_proxy(
         headers={"Cache-Control": "private, max-age=86400"},
     )
 
-
 # ── Favorites ─────────────────────────────────────────────────────────
-
 
 @_browse_router.get("/favorites")
 async def get_favorites(
@@ -860,9 +829,7 @@ async def get_favorites(
     await cache.set_json(cache_key, result, 120)  # 2min cache — favorites change often
     return result
 
-
 # ── Favorite management ──────────────────────────────────────────────
-
 
 @_browse_router.post("/favorites/{gid}/{token}")
 async def add_favorite(
@@ -890,7 +857,6 @@ async def add_favorite(
 
     return {"status": "ok"}
 
-
 @_browse_router.delete("/favorites/{gid}/{token}")
 async def remove_favorite(
     request: Request,
@@ -915,12 +881,10 @@ async def remove_favorite(
 
     return {"status": "ok"}
 
-
 # ── Thumbnail proxy ───────────────────────────────────────────────────
 
 _thumb_semaphore = asyncio.Semaphore(4)
 _ALLOWED_THUMB_HOSTS = {"ehgt.org", "e-hentai.org", "exhentai.org", "s.exhentai.org", "ul.ehgt.org", "hath.network"}
-
 
 @_browse_router.get("/thumb-proxy")
 async def thumb_proxy(

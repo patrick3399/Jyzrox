@@ -7,8 +7,6 @@ Covers:
 - acquire_lock / release_lock helpers
 """
 
-from __future__ import annotations
-
 import os
 import sys
 from datetime import UTC, datetime, timedelta
@@ -18,11 +16,9 @@ _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend_dir))
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _make_group(
     group_id: int = 1,
@@ -49,7 +45,6 @@ def _make_group(
     g.last_completed_at = last_completed_at
     return g
 
-
 def _make_sub(
     sub_id: int = 1,
     group_id: int = 1,
@@ -68,7 +63,6 @@ def _make_sub(
     s.cron_expr = "0 */2 * * *"
     return s
 
-
 def _make_mock_session(get_result=None, scalars_result=None):
     """Return a mock async context-manager session."""
     session = AsyncMock()
@@ -82,7 +76,6 @@ def _make_mock_session(get_result=None, scalars_result=None):
     session.__aexit__ = AsyncMock(return_value=False)
     return session
 
-
 def _make_ctx():
     redis = AsyncMock()
     redis.get = AsyncMock(return_value=None)
@@ -91,14 +84,11 @@ def _make_ctx():
     redis.eval = AsyncMock(return_value=1)
     return {"redis": redis}
 
-
 # ---------------------------------------------------------------------------
 # TestCronIsDue
 # ---------------------------------------------------------------------------
 
-
 _FIXED_NOW = datetime(2026, 1, 15, 10, 0, 0, tzinfo=UTC)
-
 
 def _make_frozen_datetime(fixed_now: datetime):
     """Return a datetime subclass whose now() always returns fixed_now.
@@ -114,7 +104,6 @@ def _make_frozen_datetime(fixed_now: datetime):
             return fixed_now
 
     return _FrozenDatetime
-
 
 class TestCronIsDue:
     """Unit tests for _cron_is_due helper.
@@ -166,11 +155,9 @@ class TestCronIsDue:
         with patch("worker.subscription_group.datetime", _make_frozen_datetime(_FIXED_NOW)):
             assert _cron_is_due("0 3 * * *", one_hour_ago) is False
 
-
 # ---------------------------------------------------------------------------
 # TestSubscriptionScheduler
 # ---------------------------------------------------------------------------
-
 
 class TestSubscriptionScheduler:
     """Unit tests for subscription_scheduler."""
@@ -280,11 +267,9 @@ class TestSubscriptionScheduler:
         assert result["dispatched"] == 0
         mock_enqueue.assert_not_awaited()
 
-
 # ---------------------------------------------------------------------------
 # TestCheckSubscriptionGroup
 # ---------------------------------------------------------------------------
-
 
 class TestCheckSubscriptionGroup:
     """Unit tests for check_subscription_group."""
@@ -503,11 +488,9 @@ class TestCheckSubscriptionGroup:
         assert result["status"] == "ok"
         session2.commit.assert_awaited()
 
-
 # ---------------------------------------------------------------------------
 # TestRenewableLock
 # ---------------------------------------------------------------------------
-
 
 class TestRenewableLock:
     """Unit tests for acquire_lock / release_lock in worker.helpers."""

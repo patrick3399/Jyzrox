@@ -8,8 +8,6 @@ Covers:
   resilience, user_id filter
 """
 
-from __future__ import annotations
-
 import os
 import sys
 import uuid
@@ -20,11 +18,9 @@ _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
     sys.path.insert(0, os.path.abspath(_backend_dir))
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
-
 
 def _make_sub(
     sub_id: int = 1,
@@ -49,7 +45,6 @@ def _make_sub(
     sub.name = f"sub-{sub_id}"
     return sub
 
-
 def _make_mock_session(scalar_result=None):
     """Return a mock async context-manager session."""
     session = AsyncMock()
@@ -64,7 +59,6 @@ def _make_mock_session(scalar_result=None):
     session.__aexit__ = AsyncMock(return_value=False)
     return session
 
-
 def _make_ctx():
     """Build a minimal worker ctx dict."""
     redis = AsyncMock()
@@ -78,11 +72,9 @@ def _make_ctx():
     redis.pipeline = MagicMock(return_value=mock_pipe)
     return {"redis": redis}
 
-
 # ---------------------------------------------------------------------------
 # TestEnqueueForSubscription
 # ---------------------------------------------------------------------------
-
 
 class TestEnqueueForSubscription:
     """Unit tests for _enqueue_for_subscription()."""
@@ -238,11 +230,9 @@ class TestEnqueueForSubscription:
         assert result["status"] == "failed"
         assert "no redis" in result["error"]
 
-
 # ---------------------------------------------------------------------------
 # TestCheckSingleSubscription
 # ---------------------------------------------------------------------------
-
 
 class TestCheckSingleSubscription:
     """Unit tests for check_single_subscription()."""
@@ -342,11 +332,9 @@ class TestCheckSingleSubscription:
         # It passes through whatever _enqueue_for_subscription returns
         assert result["status"] == "skipped"
 
-
 # ---------------------------------------------------------------------------
 # TestCheckFollowedArtists
 # ---------------------------------------------------------------------------
-
 
 class TestCheckFollowedArtists:
     """Unit tests for check_followed_artists()."""
@@ -483,11 +471,9 @@ class TestCheckFollowedArtists:
         assert result["status"] == "ok"
         assert result["checked"] == 1
 
-
 # ---------------------------------------------------------------------------
 # TestDuplicateGuardIncludesPaused
 # ---------------------------------------------------------------------------
-
 
 class TestDuplicateGuardIncludesPaused:
     """Regression: duplicate guard must include 'paused' status to prevent re-enqueue.

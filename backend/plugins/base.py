@@ -1,7 +1,5 @@
 """Abstract base classes and Protocol interfaces for the Jyzrox plugin system."""
 
-from __future__ import annotations
-
 from abc import ABC, abstractmethod
 from collections.abc import Awaitable, Callable
 from pathlib import Path
@@ -25,11 +23,9 @@ from plugins.models import (
 # Protocol interfaces (Phase 2)
 # ---------------------------------------------------------------------------
 
-
 @runtime_checkable
 class HasMeta(Protocol):
     meta: PluginMeta
-
 
 @runtime_checkable
 class Downloadable(Protocol):
@@ -60,20 +56,17 @@ class Downloadable(Protocol):
         credentials: dict | str | None,
     ) -> GalleryImportData | None: ...
 
-
 @runtime_checkable
 class Browsable(Protocol):
     meta: PluginMeta
 
     def get_browse_router(self) -> APIRouter: ...
 
-
 @runtime_checkable
 class Parseable(Protocol):
     meta: PluginMeta
 
     def parse_import(self, dest_dir: Path, raw_meta: dict | None) -> GalleryImportData: ...
-
 
 @runtime_checkable
 class CredentialProvider(Protocol):
@@ -83,18 +76,15 @@ class CredentialProvider(Protocol):
 
     async def verify_credential(self, credentials: dict) -> CredentialStatus: ...
 
-
 @runtime_checkable
 class Taggable(Protocol):
     meta: PluginMeta
 
     async def tag_images(self, image_paths: list[Path]) -> list[TagResult]: ...
 
-
 # ---------------------------------------------------------------------------
 # Legacy ABCs — DEPRECATED — use Protocol interfaces above
 # ---------------------------------------------------------------------------
-
 
 class SourcePlugin(ABC):
     """Plugin that can download galleries from a specific source.
@@ -138,7 +128,6 @@ class SourcePlugin(ABC):
         """Pre-download metadata resolution. Override in subclasses."""
         return None
 
-
 class BrowsePlugin(ABC):
     """Plugin that supports browsing/searching a remote source.
 
@@ -169,7 +158,6 @@ class BrowsePlugin(ABC):
     ) -> tuple[bytes, str]:
         """Fetch image bytes and content-type for proxying."""
         ...
-
 
 class TaggerPlugin(ABC):
     """Plugin that tags images using AI/ML models.
