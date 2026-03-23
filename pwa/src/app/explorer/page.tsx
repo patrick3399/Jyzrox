@@ -209,6 +209,9 @@ export default function ExplorerPage() {
       mutateDirs()
     } else {
       // Deleting individual files
+      const source = currentGallery?.source ?? ''
+      const sourceId = currentGallery?.sourceId ?? ''
+
       const confirmed = window.confirm(
         t('explorer.deleteFilesConfirm', { count: String(selectedItems.size) }),
       )
@@ -221,11 +224,7 @@ export default function ExplorerPage() {
         const file = fileData?.files.find((f) => f.filename === filename)
         if (!file || file.page_num == null) continue
         try {
-          const result = await api.library.deleteImage(
-            currentGallery?.source ?? '',
-            currentGallery?.sourceId ?? '',
-            file.page_num,
-          )
+          const result = await api.library.deleteImage(source, sourceId, file.page_num)
           successCount++
           lastRemainingPages = result.remaining_pages
         } catch (err) {
@@ -245,7 +244,7 @@ export default function ExplorerPage() {
         const deleteGallery = window.confirm(t('explorer.emptyGalleryPrompt'))
         if (deleteGallery) {
           try {
-            await api.library.deleteGallery(currentGallery?.source ?? '', currentGallery?.sourceId ?? '')
+            await api.library.deleteGallery(source, sourceId)
             toast.success(t('explorer.galleryDeleted'))
             setCurrentGallery(null)
             mutateDirs()

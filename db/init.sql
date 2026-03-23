@@ -545,3 +545,28 @@ CREATE TABLE IF NOT EXISTS rule34 (
     gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
     created_at  TIMESTAMPTZ DEFAULT now()
 );
+
+-- ── Performance indexes (benchmark-driven) ─────────────────────────────
+
+-- Image composite: serves browse_images ORDER BY added_at DESC when filtered by gallery_id
+CREATE INDEX IF NOT EXISTS idx_images_gallery_added_at_id
+  ON images (gallery_id, added_at DESC, id DESC);
+
+-- Gallery partial indexes: avoid scanning deleted rows in common listing queries
+CREATE INDEX IF NOT EXISTS idx_galleries_live_added_at_id
+  ON galleries (added_at DESC, id DESC)
+  WHERE deleted_at IS NULL;
+
+CREATE INDEX IF NOT EXISTS idx_galleries_public_added_at_id
+  ON galleries (added_at DESC, id DESC)
+  WHERE deleted_at IS NULL AND visibility = 'public';
+
+CREATE INDEX IF NOT EXISTS idx_galleries_owner_added_at_id
+  ON galleries (created_by_user_id, added_at DESC, id DESC)
+  WHERE deleted_at IS NULL AND created_by_user_id IS NOT NULL;
+
+-- ── PostgreSQL 18 features ─────────────────────────────────────────────
+
+-- UUIDv7: timestamp-ordered UUIDs for better B-tree index write performance
+ALTER TABLE download_jobs ALTER COLUMN id SET DEFAULT uuidv7();
+ALTER TABLE api_tokens ALTER COLUMN id SET DEFAULT uuidv7();

@@ -169,7 +169,7 @@ class ImageTag(Base):
 class DownloadJob(Base):
     __tablename__ = "download_jobs"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("uuidv7()"))
     url: Mapped[str] = mapped_column(Text, nullable=False)
     source: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, default="queued")
@@ -215,7 +215,7 @@ class Credential(Base):
 class ApiToken(Base):
     __tablename__ = "api_tokens"
 
-    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("uuidv7()"))
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str | None] = mapped_column(Text)
     token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)

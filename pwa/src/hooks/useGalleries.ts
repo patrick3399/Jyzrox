@@ -149,10 +149,12 @@ export function useUpdateGallery(source: string, sourceId: string) {
 
 // ── E-Hentai ──────────────────────────────────────────────────────────
 
+type SwrOpts = { signal?: AbortSignal }
+
 export function useEhSearch(params: EhSearchParams, enabled = true) {
   return useSWR(
     enabled ? ['eh/search', params] : null,
-    (_: unknown, { signal }: { signal?: AbortSignal } = {}) => api.eh.search(params, { signal }),
+    (_: unknown, { signal }: SwrOpts = {}) => api.eh.search(params, { signal }),
     {
       revalidateOnFocus: false,
       revalidateOnReconnect: false,
@@ -164,7 +166,7 @@ export function useEhSearch(params: EhSearchParams, enabled = true) {
 export function useEhGallery(gid: number | null, token: string | null) {
   return useSWR(
     gid && token ? ['eh/gallery', gid, token] : null,
-    ([, g, t]: [string, number, string], { signal }: { signal?: AbortSignal } = {}) =>
+    ([, g, t]: [string, number, string], { signal }: SwrOpts = {}) =>
       api.eh.getGallery(g, t, { signal }),
     { revalidateOnFocus: false },
   )
@@ -173,7 +175,7 @@ export function useEhGallery(gid: number | null, token: string | null) {
 export function useEhGalleryImages(gid: number | null, token: string | null) {
   return useSWR(
     gid && token ? ['eh/images', gid, token] : null,
-    ([, g, t]: [string, number, string], { signal }: { signal?: AbortSignal } = {}) =>
+    ([, g, t]: [string, number, string], { signal }: SwrOpts = {}) =>
       api.eh.getImages(g, t, { signal }),
     { revalidateOnFocus: false },
   )
@@ -185,7 +187,7 @@ export function useEhFavorites(
 ) {
   return useSWR(
     enabled ? ['eh/favorites', params] : null,
-    (_: unknown, { signal }: { signal?: AbortSignal } = {}) => api.eh.getFavorites(params, { signal }),
+    (_: unknown, { signal }: SwrOpts = {}) => api.eh.getFavorites(params, { signal }),
     { revalidateOnFocus: false },
   )
 }
@@ -194,7 +196,7 @@ export function useEhFavorites(
 export function useEhGalleryPreviews(gid: number | null, token: string | null) {
   return useSWR(
     gid && token ? ['eh/previews', gid, token] : null,
-    ([, g, t]: [string, number, string], { signal }: { signal?: AbortSignal } = {}) =>
+    ([, g, t]: [string, number, string], { signal }: SwrOpts = {}) =>
       api.eh.getPreviews(g, t, { signal }),
     { revalidateOnFocus: false },
   )
@@ -409,7 +411,7 @@ export function useSearchGalleries(q: string, options?: { sort?: string; limit?:
 export function useEhPopular(enabled = true) {
   return useSWR(
     enabled ? 'eh/popular' : null,
-    (_: unknown, { signal }: { signal?: AbortSignal } = {}) => api.eh.getPopular({ signal }),
+    (_: unknown, { signal }: SwrOpts = {}) => api.eh.getPopular({ signal }),
     { revalidateOnFocus: false },
   )
 }
@@ -417,7 +419,7 @@ export function useEhPopular(enabled = true) {
 export function useEhToplist(tl: number, page = 0, enabled = true) {
   return useSWR(
     enabled ? ['eh/toplist', tl, page] : null,
-    (_: unknown, { signal }: { signal?: AbortSignal } = {}) => api.eh.getToplist({ tl, page }, { signal }),
+    (_: unknown, { signal }: SwrOpts = {}) => api.eh.getToplist({ tl, page }, { signal }),
     { revalidateOnFocus: false },
   )
 }
