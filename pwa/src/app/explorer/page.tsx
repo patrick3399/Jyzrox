@@ -85,6 +85,7 @@ export default function ExplorerPage() {
     data: dirData,
     mutate: mutateDirs,
     isLoading: dirsLoading,
+    error: dirsError,
   } = useSWR(
     currentGallery === null ? ['explorer-dirs', debouncedQuery, page, currentSource] : null,
     () =>
@@ -100,11 +101,12 @@ export default function ExplorerPage() {
     data: fileData,
     mutate: mutateFiles,
     isLoading: filesLoading,
+    error: filesError,
   } = useSWR(
     currentGallery !== null
       ? ['explorer-files', currentGallery.source, currentGallery.sourceId]
       : null,
-    () => api.library.listGalleryFiles(currentGallery!.source, currentGallery!.sourceId),
+    ([, source, sourceId]) => api.library.listGalleryFiles(source, sourceId),
   )
 
   // ── Click / selection logic ────────────────────────────────────────
@@ -419,7 +421,20 @@ export default function ExplorerPage() {
           if (e.target === e.currentTarget) setSelectedItems(new Set())
         }}
       >
-        {isGalleryView ? (
+        {dirsError || filesError ? (
+          <div className="flex flex-col items-center justify-center py-16 gap-3">
+            <AlertTriangle size={32} className="text-red-400" />
+            <p className="text-sm text-vault-text-secondary">
+              {(dirsError ?? filesError)?.message ?? t('common.errorOccurred')}
+            </p>
+            <button
+              onClick={() => (filesError ? mutateFiles() : mutateDirs())}
+              className="px-3 py-1.5 bg-vault-accent text-white rounded-lg text-sm"
+            >
+              {t('common.retry')}
+            </button>
+          </div>
+        ) : isGalleryView ? (
           <GalleryView
             files={files}
             loading={filesLoading}
