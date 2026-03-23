@@ -8,6 +8,7 @@ import logging
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
+from core.auth import verify_session
 from core.redis_client import get_pubsub, get_redis
 from services.cache import clear_system_alerts, get_system_alerts
 
@@ -25,11 +26,16 @@ async def _validate_ws_session(ws: WebSocket) -> tuple[str, str] | None:
         raw = await get_redis().get(f"session:{user_id_str}:{token}")
         if not raw:
             return None
+        raw_str = raw if isinstance(raw, str) else raw.decode()
+        verified = verify_session(raw_str)
+        if verified is None:
+            return None
+        role = "viewer"
         try:
-            data = json.loads(raw if isinstance(raw, str) else raw.decode())
+            data = json.loads(verified)
             role = data.get("role", "viewer")
-        except json.JSONDecodeError, TypeError:
-            role = "viewer"
+        except (json.JSONDecodeError, TypeError):
+            pass
         return (user_id_str, role)
     except (ValueError, ConnectionError, OSError) as exc:
         logger.warning("WS session validation failed: %s", exc)

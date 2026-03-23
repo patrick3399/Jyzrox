@@ -36,13 +36,17 @@ async def _hashpw_async(password: bytes, salt: bytes) -> bytes:
     return await asyncio.to_thread(bcrypt.hashpw, password, salt)
 
 
-def _sign_session(data: str) -> str:
+def sign_session(data: str) -> str:
     """Append HMAC-SHA256 signature to session metadata string."""
     sig = hmac.new(settings.credential_encrypt_key.encode(), data.encode(), hashlib.sha256).hexdigest()
     return f"{data}:{sig}"
 
 
-def _verify_session(raw: str) -> str | None:
+# Private alias kept for backward compatibility with existing callers.
+_sign_session = sign_session
+
+
+def verify_session(raw: str) -> str | None:
     """Verify HMAC signature and return the original data, or None on failure.
 
     Returns the data portion without the signature.  For backward-compat,
@@ -66,6 +70,10 @@ def _verify_session(raw: str) -> str | None:
         return data
     logger.warning("Session HMAC signature mismatch — possible tampering")
     return None
+
+
+# Private alias kept for backward compatibility with existing callers.
+_verify_session = verify_session
 
 
 async def require_auth(

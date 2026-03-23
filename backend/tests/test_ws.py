@@ -1148,3 +1148,105 @@ class TestWebsocketEndpointTaskCleanup:
 
         ws.close.assert_called_once_with(code=4001, reason="Unauthorized")
         ws.accept.assert_not_called()
+
+
+# ---------------------------------------------------------------------------
+# Regression tests — HMAC-signed session parsing bug
+#
+# Bug: _validate_ws_session called json.loads(raw) directly on the Redis value,
+# which has format "{JSON}:{HMAC_hex_64chars}".  The HMAC suffix caused
+# json.JSONDecodeError, so role defaulted to "viewer" even for admin sessions.
+# This broke admin-only features like log streaming.
+#
+# Fix: _validate_ws_session now calls verify_session() / _verify_session() from
+# core.auth to strip the HMAC before JSON parsing.
+# ---------------------------------------------------------------------------
+
+
+class TestValidateWsSessionHmacRegression:
+    """Regression tests for HMAC-signed session parsing in _validate_ws_session."""
+
+    def _make_signed_redis(self, user_id: str = "1", role: str = "admin"):
+        """Return an AsyncMock Redis that returns a properly HMAC-signed session."""
+        # Import whichever name exists — the parallel fix renames _sign_session to
+        # sign_session (public).  Fall back to the private name so the test also
+        # runs before the rename lands.
+        try:
+            from core.auth import sign_session as _signer
+        except ImportError:
+            from core.auth import _sign_session as _signer
+
+        payload = json.dumps({"role": role})
+        signed_value = _signer(payload)  # "{payload}:{64-char-hex-digest}"
+        redis = AsyncMock()
+        redis.get = AsyncMock(return_value=signed_value.encode())
+        return redis
+
+    async def test_validate_ws_session_with_signed_session_returns_correct_role(self):
+        """HMAC-signed session in Redis → role parsed correctly, NOT defaulted to 'viewer'.
+
+        Regression: the old code did json.loads(raw) on the full signed string which
+        raised JSONDecodeError, silently falling back to role='viewer'.  The fix
+        calls _verify_session / verify_session to strip the HMAC first.
+        """
+        from routers.ws import _validate_ws_session
+
+        ws = MagicMock()
+        ws.cookies = {"vault_session": "1:admintoken"}
+
+        redis = self._make_signed_redis(user_id="1", role="admin")
+        with patch("routers.ws.get_redis", return_value=redis):
+            result = await _validate_ws_session(ws)
+
+        # The key assertion: must NOT return ("1", "viewer") which the bug caused.
+        assert result == ("1", "admin"), (
+            f"Expected ('1', 'admin') but got {result!r}. "
+            "Likely the HMAC suffix was not stripped before JSON parsing."
+        )
+
+    async def test_validate_ws_session_with_unsigned_legacy_session_still_works(self):
+        """Plain JSON session (no HMAC) → still accepted for backward compatibility.
+
+        Servers that deployed before HMAC signing was introduced have existing
+        sessions stored as plain JSON.  The fix must continue to accept these.
+        """
+        from routers.ws import _validate_ws_session
+
+        ws = MagicMock()
+        ws.cookies = {"vault_session": "1:legacytoken"}
+
+        # Plain JSON, no HMAC suffix — the legacy format
+        redis = AsyncMock()
+        redis.get = AsyncMock(return_value=json.dumps({"role": "admin"}).encode())
+        with patch("routers.ws.get_redis", return_value=redis):
+            result = await _validate_ws_session(ws)
+
+        assert result == ("1", "admin"), (
+            f"Expected ('1', 'admin') for legacy unsigned session but got {result!r}."
+        )
+
+    async def test_validate_ws_session_with_tampered_signature_returns_none(self):
+        """Session value with a wrong 64-char HMAC suffix → returns None (rejected).
+
+        A valid-looking signed payload with an incorrect digest must be rejected,
+        not silently accepted with a fallback role.
+        """
+        from routers.ws import _validate_ws_session
+
+        ws = MagicMock()
+        ws.cookies = {"vault_session": "1:tamperedtoken"}
+
+        # Build a value that looks signed (64-char hex suffix) but the digest is wrong
+        wrong_64hex = "a" * 64
+        payload = json.dumps({"role": "admin"})
+        tampered_value = f"{payload}:{wrong_64hex}".encode()
+
+        redis = AsyncMock()
+        redis.get = AsyncMock(return_value=tampered_value)
+        with patch("routers.ws.get_redis", return_value=redis):
+            result = await _validate_ws_session(ws)
+
+        assert result is None, (
+            f"Expected None for tampered HMAC but got {result!r}. "
+            "Signature mismatch should reject the session."
+        )
