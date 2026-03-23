@@ -54,7 +54,7 @@ vi.mock('@/lib/api', () => ({
 
 interface SwrCall {
   key: unknown
-  fetcher: (() => unknown) | null
+  fetcher: ((...args: unknown[]) => unknown) | null
   options: Record<string, unknown>
 }
 
@@ -268,8 +268,9 @@ describe('useEhSearch', () => {
   it('test_useEhSearch_fetcher_callsApiEhSearchWithParams', async () => {
     const params = { q: 'reimu' }
     useEhSearch(params)
-    await lastSwrCall().fetcher!()
-    expect(mockEhSearch).toHaveBeenCalledWith(params)
+    const ac = new AbortController()
+    await lastSwrCall().fetcher!(null, { signal: ac.signal })
+    expect(mockEhSearch).toHaveBeenCalledWith(params, { signal: ac.signal })
   })
 })
 
@@ -286,7 +287,8 @@ describe('useEhPopular', () => {
 
   it('test_useEhPopular_fetcher_callsApiEhGetPopular', async () => {
     useEhPopular()
-    await lastSwrCall().fetcher!()
-    expect(mockEhGetPopular).toHaveBeenCalledOnce()
+    const ac = new AbortController()
+    await lastSwrCall().fetcher!(null, { signal: ac.signal })
+    expect(mockEhGetPopular).toHaveBeenCalledWith({ signal: ac.signal })
   })
 })

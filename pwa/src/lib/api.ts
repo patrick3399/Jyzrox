@@ -248,26 +248,27 @@ const auth = {
 // ── E-Hentai ─────────────────────────────────────────────────────────
 
 const eh = {
-  search: (params: EhSearchParams = {}) =>
-    apiFetch<EhSearchResult>(`/api/eh/search${qs(params as Record<string, unknown>)}`),
+  search: (params: EhSearchParams = {}, init?: RequestInit) =>
+    apiFetch<EhSearchResult>(`/api/eh/search${qs(params as Record<string, unknown>)}`, init),
 
-  getGallery: (gid: number, token: string) =>
-    apiFetch<EhGallery>(`/api/eh/gallery/${gid}/${token}`),
+  getGallery: (gid: number, token: string, init?: RequestInit) =>
+    apiFetch<EhGallery>(`/api/eh/gallery/${gid}/${token}`, init),
 
-  getImages: (gid: number, token: string) =>
-    apiFetch<EhImageMap>(`/api/eh/gallery/${gid}/${token}/images`),
+  getImages: (gid: number, token: string, init?: RequestInit) =>
+    apiFetch<EhImageMap>(`/api/eh/gallery/${gid}/${token}/images`, init),
 
   /** Lightweight: only scrapes page 0 for ~20 preview thumbnails */
-  getPreviews: (gid: number, token: string) =>
+  getPreviews: (gid: number, token: string, init?: RequestInit) =>
     apiFetch<{ gid: number; previews: Record<string, string> }>(
       `/api/eh/gallery/${gid}/${token}/previews`,
+      init,
     ),
 
   /** Proxy an EH CDN thumbnail through our server */
   thumbProxyUrl: (url: string): string => `/api/eh/thumb-proxy?url=${encodeURIComponent(url)}`,
 
-  getFavorites: (params: { favcat?: string; q?: string; next?: string; prev?: string } = {}) =>
-    apiFetch<EhFavoritesResult>(`/api/eh/favorites${qs(params as Record<string, unknown>)}`),
+  getFavorites: (params: { favcat?: string; q?: string; next?: string; prev?: string } = {}, init?: RequestInit) =>
+    apiFetch<EhFavoritesResult>(`/api/eh/favorites${qs(params as Record<string, unknown>)}`, init),
 
   addFavorite: (gid: number, token: string, favcat?: number, note?: string) =>
     apiFetch<{ status: string }>(`/api/eh/favorites/${gid}/${token}${qs({ favcat, note })}`, {
@@ -279,10 +280,10 @@ const eh = {
       method: 'DELETE',
     }),
 
-  getPopular: () => apiFetch<EhSearchResult>('/api/eh/popular'),
+  getPopular: (init?: RequestInit) => apiFetch<EhSearchResult>('/api/eh/popular', init),
 
-  getToplist: (params: { tl?: number; page?: number } = {}) =>
-    apiFetch<EhSearchResult>(`/api/eh/toplists${qs(params as Record<string, unknown>)}`),
+  getToplist: (params: { tl?: number; page?: number } = {}, init?: RequestInit) =>
+    apiFetch<EhSearchResult>(`/api/eh/toplists${qs(params as Record<string, unknown>)}`, init),
 
   getComments: (gid: number, token: string) =>
     apiFetch<{ comments: EhComment[] }>(`/api/eh/gallery/${gid}/${token}/comments`),

@@ -135,10 +135,10 @@ export default function ExplorerPage() {
     const file = fileData?.files.find((f) => f.filename === id)
     if (file?.page_num != null) {
       router.push(
-        `/reader/${currentGallery!.source}/${currentGallery!.sourceId}?page=${file.page_num}`,
+        `/reader/${currentGallery?.source}/${currentGallery?.sourceId}?page=${file.page_num}`,
       )
     } else {
-      router.push(`/reader/${currentGallery!.source}/${currentGallery!.sourceId}`)
+      router.push(`/reader/${currentGallery?.source}/${currentGallery?.sourceId}`)
     }
   }
 
@@ -222,8 +222,8 @@ export default function ExplorerPage() {
         if (!file || file.page_num == null) continue
         try {
           const result = await api.library.deleteImage(
-            currentGallery.source,
-            currentGallery.sourceId,
+            currentGallery?.source ?? '',
+            currentGallery?.sourceId ?? '',
             file.page_num,
           )
           successCount++
@@ -245,7 +245,7 @@ export default function ExplorerPage() {
         const deleteGallery = window.confirm(t('explorer.emptyGalleryPrompt'))
         if (deleteGallery) {
           try {
-            await api.library.deleteGallery(currentGallery.source, currentGallery.sourceId)
+            await api.library.deleteGallery(currentGallery?.source ?? '', currentGallery?.sourceId ?? '')
             toast.success(t('explorer.galleryDeleted'))
             setCurrentGallery(null)
             mutateDirs()
@@ -402,7 +402,7 @@ export default function ExplorerPage() {
                   : 'text-vault-accent hover:underline truncate'
               }
             >
-              {sourceDisplayName(currentSource!)}
+              {sourceDisplayName(currentSource ?? '')}
             </button>
           </>
         )}

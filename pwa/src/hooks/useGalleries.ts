@@ -150,17 +150,22 @@ export function useUpdateGallery(source: string, sourceId: string) {
 // ── E-Hentai ──────────────────────────────────────────────────────────
 
 export function useEhSearch(params: EhSearchParams, enabled = true) {
-  return useSWR(enabled ? ['eh/search', params] : null, () => api.eh.search(params), {
-    revalidateOnFocus: false,
-    revalidateOnReconnect: false,
-    dedupingInterval: 60000,
-  })
+  return useSWR(
+    enabled ? ['eh/search', params] : null,
+    (_: unknown, { signal }: { signal?: AbortSignal } = {}) => api.eh.search(params, { signal }),
+    {
+      revalidateOnFocus: false,
+      revalidateOnReconnect: false,
+      dedupingInterval: 60000,
+    },
+  )
 }
 
 export function useEhGallery(gid: number | null, token: string | null) {
   return useSWR(
     gid && token ? ['eh/gallery', gid, token] : null,
-    () => api.eh.getGallery(gid!, token!),
+    ([, g, t]: [string, number, string], { signal }: { signal?: AbortSignal } = {}) =>
+      api.eh.getGallery(g, t, { signal }),
     { revalidateOnFocus: false },
   )
 }
@@ -168,7 +173,8 @@ export function useEhGallery(gid: number | null, token: string | null) {
 export function useEhGalleryImages(gid: number | null, token: string | null) {
   return useSWR(
     gid && token ? ['eh/images', gid, token] : null,
-    () => api.eh.getImages(gid!, token!),
+    ([, g, t]: [string, number, string], { signal }: { signal?: AbortSignal } = {}) =>
+      api.eh.getImages(g, t, { signal }),
     { revalidateOnFocus: false },
   )
 }
@@ -177,16 +183,19 @@ export function useEhFavorites(
   params: { favcat?: string; q?: string; next?: string; prev?: string },
   enabled = true,
 ) {
-  return useSWR(enabled ? ['eh/favorites', params] : null, () => api.eh.getFavorites(params), {
-    revalidateOnFocus: false,
-  })
+  return useSWR(
+    enabled ? ['eh/favorites', params] : null,
+    (_: unknown, { signal }: { signal?: AbortSignal } = {}) => api.eh.getFavorites(params, { signal }),
+    { revalidateOnFocus: false },
+  )
 }
 
 /** Lightweight hook — only fetches first detail page for ~20 preview thumbs */
 export function useEhGalleryPreviews(gid: number | null, token: string | null) {
   return useSWR(
     gid && token ? ['eh/previews', gid, token] : null,
-    () => api.eh.getPreviews(gid!, token!),
+    ([, g, t]: [string, number, string], { signal }: { signal?: AbortSignal } = {}) =>
+      api.eh.getPreviews(g, t, { signal }),
     { revalidateOnFocus: false },
   )
 }
@@ -194,7 +203,7 @@ export function useEhGalleryPreviews(gid: number | null, token: string | null) {
 export function useEhGalleryComments(gid: number | null, token: string | null, enabled = false) {
   return useSWR(
     enabled && gid && token ? ['eh/comments', gid, token] : null,
-    () => api.eh.getComments(gid!, token!),
+    ([, g, t]: [string, number, string]) => api.eh.getComments(g, t),
     { revalidateOnFocus: false },
   )
 }
@@ -398,13 +407,17 @@ export function useSearchGalleries(q: string, options?: { sort?: string; limit?:
 }
 
 export function useEhPopular(enabled = true) {
-  return useSWR(enabled ? 'eh/popular' : null, () => api.eh.getPopular(), {
-    revalidateOnFocus: false,
-  })
+  return useSWR(
+    enabled ? 'eh/popular' : null,
+    (_: unknown, { signal }: { signal?: AbortSignal } = {}) => api.eh.getPopular({ signal }),
+    { revalidateOnFocus: false },
+  )
 }
 
 export function useEhToplist(tl: number, page = 0, enabled = true) {
-  return useSWR(enabled ? ['eh/toplist', tl, page] : null, () => api.eh.getToplist({ tl, page }), {
-    revalidateOnFocus: false,
-  })
+  return useSWR(
+    enabled ? ['eh/toplist', tl, page] : null,
+    (_: unknown, { signal }: { signal?: AbortSignal } = {}) => api.eh.getToplist({ tl, page }, { signal }),
+    { revalidateOnFocus: false },
+  )
 }
