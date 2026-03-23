@@ -1,4 +1,4 @@
-FROM nginx:1.27-alpine
+FROM nginx:1.29-alpine
 
 # envsubst template: only substitute our custom vars, not nginx $variables
 COPY nginx.conf.template /etc/nginx/templates/nginx.conf.template
