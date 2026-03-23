@@ -25,6 +25,7 @@ import {
   Globe,
   Activity,
   ListTodo,
+  FolderHeart,
 } from 'lucide-react'
 import type { UserRole } from '@/lib/types'
 
@@ -108,6 +109,16 @@ export const PAGE_REGISTRY: PageDef[] = [
     dashboard: true,
     sidebar: true,
     minRole: 'viewer',
+  },
+  {
+    href: '/collections',
+    labelKey: 'nav.collections',
+    descKey: 'dashboard.quickLinks.collectionsDesc',
+    icon: FolderHeart,
+    nav: false,
+    dashboard: true,
+    sidebar: true,
+    minRole: 'viewer' as const,
   },
   {
     href: '/images',

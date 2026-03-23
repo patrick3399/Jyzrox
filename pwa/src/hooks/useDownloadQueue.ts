@@ -173,3 +173,10 @@ export function useDownloadPreview(url: string) {
     { dedupingInterval: 30000, keepPreviousData: true },
   )
 }
+
+export function useDownloadJob(jobId: string | null) {
+  return useSWR(
+    jobId ? ['download/job', jobId] : null,
+    () => api.download.getJob(jobId!),
+  )
+}

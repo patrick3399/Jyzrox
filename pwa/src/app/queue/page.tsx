@@ -68,18 +68,47 @@ function formatDuration(seconds: number): string {
   return `${h}h ${m}m`
 }
 
+function JobDetailPanel({ job }: { job: DownloadJob }) {
+  return (
+    <div className="px-4 py-3 bg-vault-bg border-t border-vault-border space-y-2 text-sm">
+      {job.error && (
+        <div className="text-red-400">
+          <span className="font-medium">{t('queue.jobError')}:</span> {job.error}
+        </div>
+      )}
+      {typeof job.progress?.percent === 'number' && (
+        <div className="text-vault-text-muted">
+          <span className="font-medium">{t('queue.jobProgress')}:</span> {job.progress.percent}%
+        </div>
+      )}
+      {job.progress && Object.keys(job.progress).length > 0 && (
+        <div className="text-vault-text-muted">
+          <span className="font-medium">{t('queue.jobMeta')}:</span>
+          <pre className="mt-1 text-xs bg-vault-card rounded p-2 overflow-auto max-h-40">
+            {JSON.stringify(job.progress, null, 2)}
+          </pre>
+        </div>
+      )}
+    </div>
+  )
+}
+
 function JobRow({
   job,
   onCancel,
   onPause,
   onRetry,
   isCancelling,
+  expandedJobId,
+  onToggleExpand,
 }: {
   job: DownloadJob
   onCancel: (id: string) => void
   onPause: (id: string, action: 'pause' | 'resume') => void
   onRetry: (id: string) => void
   isCancelling: boolean
+  expandedJobId: string | null
+  onToggleExpand: (id: string) => void
 }) {
   const canCancel = job.status === 'queued' || job.status === 'running' || job.status === 'paused'
   const createdAt = new Date(job.created_at).toLocaleString()
@@ -88,9 +117,14 @@ function JobRow({
   const gallerySourceId = job.gallery_source_id
   const galleryTitle = job.progress?.title
 
+  const isExpanded = expandedJobId === job.id
+
   return (
-    <div className="bg-vault-card border border-vault-border rounded-lg p-4">
-      <div className="flex items-start justify-between gap-3">
+    <div
+      className="bg-vault-card border border-vault-border rounded-lg overflow-hidden cursor-pointer"
+      onClick={() => onToggleExpand(job.id)}
+    >
+      <div className="flex items-start justify-between gap-3 p-4">
         <div className="flex-1 min-w-0">
           {galleryTitle ? (
             <div className="mb-1">
@@ -220,7 +254,7 @@ function JobRow({
           )}
         </div>
 
-        <div className="flex items-center gap-2 shrink-0">
+        <div className="flex items-center gap-2 shrink-0" onClick={(e) => e.stopPropagation()}>
           <StatusBadge status={job.status} />
           {job.status === 'running' && (
             <button
@@ -262,6 +296,7 @@ function JobRow({
             )}
         </div>
       </div>
+      {isExpanded && <JobDetailPanel job={job} />}
     </div>
   )
 }
@@ -336,6 +371,7 @@ export default function QueuePage() {
   const [urlInput, setUrlInput] = useState('')
   const [sitesOpen, setSitesOpen] = useState(false)
   const [debouncedUrl, setDebouncedUrl] = useState('')
+  const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedUrl(urlInput), 300)
@@ -597,6 +633,8 @@ export default function QueuePage() {
                   onPause={handlePause}
                   onRetry={handleRetry}
                   isCancelling={false}
+                  expandedJobId={expandedJobId}
+                  onToggleExpand={(id) => setExpandedJobId((prev) => (prev === id ? null : id))}
                 />
               ))}
             </div>
@@ -630,6 +668,8 @@ export default function QueuePage() {
                 onPause={handlePause}
                 onRetry={handleRetry}
                 isCancelling={false}
+                expandedJobId={expandedJobId}
+                onToggleExpand={(id) => setExpandedJobId((prev) => (prev === id ? null : id))}
               />
             ))}
           </div>

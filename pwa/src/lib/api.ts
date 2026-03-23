@@ -263,9 +263,6 @@ const eh = {
       `/api/eh/gallery/${gid}/${token}/previews`,
     ),
 
-  /** Returns the URL string — caller uses it as <img src> */
-  imageProxyUrl: (gid: number, page: number): string => `/api/eh/image-proxy/${gid}/${page}`,
-
   /** Proxy an EH CDN thumbnail through our server */
   thumbProxyUrl: (url: string): string => `/api/eh/thumb-proxy?url=${encodeURIComponent(url)}`,
 
@@ -593,6 +590,12 @@ const download = {
         ...(total !== undefined && { total }),
         ...(Object.keys(options).length > 0 && { options }),
       }),
+    }),
+
+  quickDownload: (url: string) =>
+    apiFetch<{ job_id: string; status: string }>('/api/download/quick', {
+      method: 'POST',
+      body: JSON.stringify({ url }),
     }),
 
   getJobs: (params: JobListParams = {}) =>

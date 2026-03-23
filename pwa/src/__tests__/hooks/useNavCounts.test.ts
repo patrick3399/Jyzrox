@@ -36,7 +36,7 @@ vi.mock('swr', () => ({
 
 vi.mock('@/lib/api', () => ({
   api: {
-    library: { getGalleries: vi.fn() },
+    library: { getGalleries: vi.fn(), trashCount: vi.fn() },
     subscriptions: { list: vi.fn() },
     collections: { list: vi.fn() },
   },
@@ -95,6 +95,7 @@ describe('useNavCounts', () => {
         '/library': 0,
         '/subscriptions': 0,
         '/collections': 0,
+        '/trash': 0,
       })
     })
   })
@@ -124,11 +125,13 @@ describe('useNavCounts', () => {
       swrDataMap['nav-counts/library'] = { total: 10 }
       swrDataMap['nav-counts/subscriptions'] = { total: 5 }
       swrDataMap['nav-counts/collections'] = { collections: [{ id: 1 }] }
+      swrDataMap['nav-counts/trash'] = { count: 3 }
       const result = useNavCounts()
       expect(result).toEqual({
         '/library': 10,
         '/subscriptions': 5,
         '/collections': 1,
+        '/trash': 3,
       })
     })
 
@@ -155,9 +158,9 @@ describe('useNavCounts', () => {
       expect(swrCallForKey('nav-counts/collections')).toBeDefined()
     })
 
-    it('test_useNavCounts_keys_callsUseSWRThreeTimes', () => {
+    it('test_useNavCounts_keys_callsUseSWRFourTimes', () => {
       useNavCounts()
-      expect(mockUseSWR).toHaveBeenCalledTimes(3)
+      expect(mockUseSWR).toHaveBeenCalledTimes(4)
     })
   })
 
@@ -189,10 +192,10 @@ describe('useNavCounts', () => {
   })
 
   describe('enabled=false skips fetching (null SWR keys)', () => {
-    it('test_useNavCounts_disabledEnabled_libraryKeyIsNull', () => {
+    it('test_useNavCounts_disabledEnabled_allKeysAreNull', () => {
       useNavCounts(false)
       const nullCalls = swrCalls.filter((c) => c.key === null)
-      expect(nullCalls).toHaveLength(3)
+      expect(nullCalls).toHaveLength(4)
     })
 
     it('test_useNavCounts_disabledEnabled_noStringKeysRegistered', () => {
@@ -209,6 +212,7 @@ describe('useNavCounts', () => {
         '/library': 0,
         '/subscriptions': 0,
         '/collections': 0,
+        '/trash': 0,
       })
     })
 

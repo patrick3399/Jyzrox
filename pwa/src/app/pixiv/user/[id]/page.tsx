@@ -82,6 +82,14 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
   const [isFollowing, setIsFollowing] = useState(false)
   const [followLoading, setFollowLoading] = useState(false)
 
+  const [activeTab, setActiveTab] = useState<'works' | 'bookmarks'>('works')
+  const [bookmarkOffset, setBookmarkOffset] = useState(0)
+
+  const { data: bookmarksData, isLoading: bookmarksLoading } = useSWR(
+    activeTab === 'bookmarks' && validId ? ['pixiv-user-bookmarks', userId, bookmarkOffset] : null,
+    () => api.pixiv.getUserBookmarks(userId, bookmarkOffset),
+  )
+
   useEffect(() => {
     if (userResult?.user.is_followed !== undefined) {
       setIsFollowing(userResult.user.is_followed)
@@ -236,44 +244,108 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
         </div>
       </div>
 
-      {/* Recent works */}
-      {recentWorks.length > 0 && (
-        <div className="space-y-3">
-          <h2 className="text-lg font-semibold text-vault-text">{t('pixiv.recentWorks')}</h2>
-          <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-            {recentWorks.map((illust) => (
-              <IllustCard key={illust.id} illust={illust} />
-            ))}
+      {/* Tab bar */}
+      <div className="flex gap-1 bg-vault-card border border-vault-border rounded-lg p-1 w-fit">
+        <button
+          onClick={() => setActiveTab('works')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'works' ? 'bg-vault-accent text-white' : 'text-vault-text-secondary hover:text-vault-text'
+          }`}
+        >
+          {t('pixiv.userWorks')}
+        </button>
+        <button
+          onClick={() => setActiveTab('bookmarks')}
+          className={`px-4 py-2 rounded-md text-sm font-medium transition-colors ${
+            activeTab === 'bookmarks' ? 'bg-vault-accent text-white' : 'text-vault-text-secondary hover:text-vault-text'
+          }`}
+        >
+          {t('pixiv.userBookmarks')}
+        </button>
+      </div>
+
+      {/* Works tab */}
+      {activeTab === 'works' && (
+        <>
+          {/* Recent works */}
+          {recentWorks.length > 0 && (
+            <div className="space-y-3">
+              <h2 className="text-lg font-semibold text-vault-text">{t('pixiv.recentWorks')}</h2>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                {recentWorks.map((illust) => (
+                  <IllustCard key={illust.id} illust={illust} />
+                ))}
+              </div>
+            </div>
+          )}
+
+          {/* All works (paginated) */}
+          <div className="space-y-3">
+            <h2 className="text-lg font-semibold text-vault-text">{t('pixiv.allWorks')}</h2>
+
+            {allWorks.length === 0 && !worksLoading && (
+              <p className="text-vault-text-secondary text-sm">{t('pixiv.noResults')}</p>
+            )}
+
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+              {allWorks.map((illust) => (
+                <IllustCard key={illust.id} illust={illust} />
+              ))}
+            </div>
+
+            {hasMoreWorks && (
+              <div className="flex justify-center pt-2">
+                <button
+                  onClick={() => setSize(size + 1)}
+                  disabled={worksLoading}
+                  className="px-6 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors disabled:opacity-50"
+                >
+                  {worksLoading ? t('pixiv.loading') : t('pixiv.loadMore')}
+                </button>
+              </div>
+            )}
           </div>
-        </div>
+        </>
       )}
 
-      {/* All works (paginated) */}
-      <div className="space-y-3">
-        <h2 className="text-lg font-semibold text-vault-text">{t('pixiv.allWorks')}</h2>
-
-        {allWorks.length === 0 && !worksLoading && (
-          <p className="text-vault-text-secondary text-sm">{t('pixiv.noResults')}</p>
-        )}
-
-        <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-          {allWorks.map((illust) => (
-            <IllustCard key={illust.id} illust={illust} />
-          ))}
+      {/* Bookmarks tab */}
+      {activeTab === 'bookmarks' && (
+        <div className="space-y-3">
+          {bookmarksLoading ? (
+            <div className="flex items-center justify-center py-16">
+              <LoadingSpinner size="lg" />
+            </div>
+          ) : !bookmarksData?.illusts?.length ? (
+            <p className="text-center py-8 text-vault-text-muted">{t('pixiv.noBookmarks')}</p>
+          ) : (
+            <>
+              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
+                {bookmarksData.illusts.map((illust) => (
+                  <IllustCard key={illust.id} illust={illust} />
+                ))}
+              </div>
+              <div className="flex justify-center gap-2 pt-2">
+                {bookmarkOffset > 0 && (
+                  <button
+                    onClick={() => setBookmarkOffset((prev) => Math.max(0, prev - 30))}
+                    className="px-4 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors"
+                  >
+                    {t('common.previousPage')}
+                  </button>
+                )}
+                {bookmarksData.next_offset !== null && (
+                  <button
+                    onClick={() => setBookmarkOffset(bookmarksData.next_offset ?? bookmarkOffset + 30)}
+                    className="px-4 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors"
+                  >
+                    {t('pixiv.loadMore')}
+                  </button>
+                )}
+              </div>
+            </>
+          )}
         </div>
-
-        {hasMoreWorks && (
-          <div className="flex justify-center pt-2">
-            <button
-              onClick={() => setSize(size + 1)}
-              disabled={worksLoading}
-              className="px-6 py-2 rounded-lg bg-vault-card border border-vault-border text-vault-text text-sm hover:bg-vault-card-hover transition-colors disabled:opacity-50"
-            >
-              {worksLoading ? t('pixiv.loading') : t('pixiv.loadMore')}
-            </button>
-          </div>
-        )}
-      </div>
+      )}
     </div>
   )
 }

@@ -2,7 +2,7 @@
 
 import { useState, useEffect } from 'react'
 import { useParams, useRouter } from 'next/navigation'
-import { Grid, Image as ImageIcon, BookOpen, Users } from 'lucide-react'
+import { Grid, Image as ImageIcon, BookOpen, Users, Heart, Download } from 'lucide-react'
 import { BackButton } from '@/components/BackButton'
 import { useArtistSummary, useArtistImages } from '@/hooks/useArtists'
 import { useLibraryGalleries } from '@/hooks/useGalleries'
@@ -10,6 +10,8 @@ import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { Pagination } from '@/components/Pagination'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+import { useFollowedArtists, useFollowArtist, useUnfollowArtist, usePatchFollow } from '@/hooks/useFollowedArtists'
+import { toast } from 'sonner'
 
 function getGalleryColCount() {
   if (typeof window === 'undefined') return 2
@@ -52,6 +54,14 @@ export default function ArtistDetailPage() {
   }, [])
 
   const { data: summary, isLoading: summaryLoading } = useArtistSummary(artistId)
+
+  const { data: followedData } = useFollowedArtists()
+  const { trigger: followArtist, isMutating: isFollowing } = useFollowArtist()
+  const { trigger: unfollowArtist, isMutating: isUnfollowing } = useUnfollowArtist()
+  const { trigger: patchFollow } = usePatchFollow()
+
+  const followEntry = followedData?.artists?.find((a) => a.artist_id === artistId)
+  const isFollowed = !!followEntry
 
   const {
     data: galleriesData,
@@ -130,6 +140,66 @@ export default function ArtistDetailPage() {
           <BookOpen size={16} />
           {t('artists.readAll')}
         </button>
+
+        {/* Follow/Unfollow button */}
+        <button
+          onClick={async () => {
+            try {
+              if (isFollowed) {
+                await unfollowArtist({ artistId, source: followEntry?.source ?? 'local' })
+                toast.success(t('artists.unfollowSuccess', { name: artistId }))
+              } else {
+                await followArtist({
+                  source: summary?.source ?? 'local',
+                  artist_id: artistId,
+                  artist_name: summary?.artist_name ?? artistId,
+                })
+                toast.success(t('artists.followSuccess', { name: artistId }))
+              }
+            } catch {
+              toast.error(t('common.error'))
+            }
+          }}
+          disabled={isFollowing || isUnfollowing}
+          className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors shrink-0 ${
+            isFollowed
+              ? 'bg-vault-accent text-indigo-300 hover:bg-red-500/20 hover:text-red-400'
+              : 'bg-indigo-600 text-white hover:bg-indigo-500'
+          }`}
+        >
+          <Heart size={14} className={isFollowed ? 'fill-current' : ''} />
+          {isFollowed ? t('artists.following') : t('artists.follow')}
+        </button>
+
+        {/* Auto-download toggle when followed */}
+        {isFollowed && (
+          <button
+            onClick={async () => {
+              try {
+                await patchFollow({
+                  artistId,
+                  data: { auto_download: !followEntry.auto_download },
+                  source: followEntry.source,
+                })
+                toast.success(
+                  followEntry.auto_download
+                    ? t('artists.autoDownloadOff')
+                    : t('artists.autoDownloadOn'),
+                )
+              } catch {
+                toast.error(t('common.error'))
+              }
+            }}
+            className={`flex items-center gap-2 px-3 py-2 rounded-lg text-xs font-medium transition-colors shrink-0 ${
+              followEntry.auto_download
+                ? 'bg-green-500/20 text-green-400'
+                : 'bg-vault-accent text-vault-text-muted'
+            }`}
+          >
+            <Download size={12} />
+            {t('artists.autoDownload')}
+          </button>
+        )}
       </div>
 
       {/* Tab Switcher */}

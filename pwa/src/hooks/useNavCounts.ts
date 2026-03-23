@@ -5,12 +5,13 @@ export interface NavCounts {
   '/library': number
   '/subscriptions': number
   '/collections': number
+  '/trash': number
 }
 
 const SWR_CONFIG = {
   refreshInterval: 30000,
   revalidateOnFocus: false,
-  dedupingInterval: 10000,
+  dedupingInterval: 30000,
   onError: () => undefined,
 } as const
 
@@ -41,14 +42,25 @@ function useCollectionsCount(enabled: boolean): number {
   return data?.collections.length ?? 0
 }
 
+function useTrashCount(enabled: boolean): number {
+  const { data } = useSWR(
+    enabled ? 'nav-counts/trash' : null,
+    () => api.library.trashCount(),
+    SWR_CONFIG,
+  )
+  return data?.count ?? 0
+}
+
 export function useNavCounts(enabled = true): NavCounts {
   const library = useLibraryCount(enabled)
   const subscriptions = useSubscriptionsCount(enabled)
   const collections = useCollectionsCount(enabled)
+  const trash = useTrashCount(enabled)
 
   return {
     '/library': library,
     '/subscriptions': subscriptions,
     '/collections': collections,
+    '/trash': trash,
   }
 }

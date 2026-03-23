@@ -36,25 +36,31 @@ function ShareTargetContent() {
     }
   }, [detectedUrl])
 
+  function onSuccess(result: { job_id?: string }) {
+    toast.success(t('share.queued'))
+    if (result.job_id && !result.job_id.startsWith('offline-')) {
+      toast.info(t('share.queuedJob', { jobId: result.job_id }))
+    }
+    if (window.history.length > 1) {
+      router.back()
+    } else {
+      window.close()
+    }
+  }
+
   async function handleDownload() {
     if (!detectedUrl) return
     setDownloading(true)
     try {
-      const result = await api.download.enqueue(detectedUrl)
-      toast.success(t('share.queued'))
-      // Show job ID in a second toast for traceability
-      if (result.job_id && !result.job_id.startsWith('offline-')) {
-        toast.info(t('share.queuedJob', { jobId: result.job_id }))
+      onSuccess(await api.download.quickDownload(detectedUrl))
+    } catch {
+      try {
+        onSuccess(await api.download.enqueue(detectedUrl))
+      } catch (fallbackErr) {
+        const message = fallbackErr instanceof Error ? fallbackErr.message : t('share.failed')
+        toast.error(message)
+        setDownloading(false)
       }
-      if (window.history.length > 1) {
-        router.back()
-      } else {
-        window.close()
-      }
-    } catch (err) {
-      const message = err instanceof Error ? err.message : t('share.failed')
-      toast.error(message)
-      setDownloading(false)
     }
   }
 

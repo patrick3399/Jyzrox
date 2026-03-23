@@ -4,6 +4,7 @@ import Link from 'next/link'
 import { usePathname } from 'next/navigation'
 import { Settings, LogOut } from 'lucide-react'
 import { useNavigation } from '@/hooks/useNavigation'
+import { useNavCounts } from '@/hooks/useNavCounts'
 import { t } from '@/lib/i18n'
 
 interface SidebarProps {
@@ -13,6 +14,7 @@ interface SidebarProps {
 export function Sidebar({ downloadStats: stats }: SidebarProps) {
   const pathname = usePathname()
   const { profile, logout, groupedLinks, cycleTheme, ThemeIcon, themeLabel } = useNavigation()
+  const navCounts = useNavCounts()
 
   return (
     <aside className="hidden lg:flex fixed inset-y-0 left-0 z-40 w-56 flex-col bg-vault-card border-r border-vault-border">
@@ -58,6 +60,13 @@ export function Sidebar({ downloadStats: stats }: SidebarProps) {
                             {stats.finished}
                           </span>
                         )}
+                      </span>
+                    )}
+                    {link.href === '/trash' && navCounts['/trash'] > 0 && (
+                      <span className="ml-auto">
+                        <span className="min-w-[18px] h-[18px] flex items-center justify-center rounded-full bg-orange-500/20 text-orange-400 text-[10px] font-bold px-1">
+                          {navCounts['/trash']}
+                        </span>
                       </span>
                     )}
                   </Link>
