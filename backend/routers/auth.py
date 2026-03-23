@@ -418,9 +418,10 @@ async def upload_avatar(
         logger.warning("Avatar upload failed: %s", exc)
         raise HTTPException(status_code=400, detail="Invalid image file")
 
-    avatars_dir = Path(settings.data_avatars_path)
+    avatars_dir = Path(settings.data_avatars_path).resolve()
     avatars_dir.mkdir(parents=True, exist_ok=True)
-    out_path = avatars_dir / f"{auth['user_id']}.webp"
+    user_id = int(auth["user_id"])
+    out_path = avatars_dir / f"{user_id}.webp"
     tmp_path = out_path.with_suffix(".webp.tmp")
     await asyncio.to_thread(img.save, str(tmp_path), "WEBP", quality=85)
     await asyncio.to_thread(tmp_path.replace, out_path)
@@ -442,7 +443,8 @@ async def upload_avatar(
 @router.delete("/avatar")
 async def delete_avatar(auth: dict = Depends(require_auth)):
     """Remove custom avatar and revert to Gravatar."""
-    avatar_file = Path(settings.data_avatars_path) / f"{auth['user_id']}.webp"
+    user_id = int(auth["user_id"])
+    avatar_file = Path(settings.data_avatars_path).resolve() / f"{user_id}.webp"
     if avatar_file.exists():
         avatar_file.unlink()
 

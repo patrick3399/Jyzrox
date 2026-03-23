@@ -79,7 +79,7 @@ class TestTrustedNetworks:
             with caplog.at_level(logging.WARNING):
                 nets = mod._trusted_networks()
         assert len(nets) == 1
-        assert any("NOT_VALID" in r.message for r in caplog.records)
+        assert any("Invalid trusted proxy entry" in r.message for r in caplog.records)
 
     def test_empty_string_returns_empty_list(self):
         with patch("core.rate_limit.settings", _make_settings(trusted_proxies="")):

@@ -71,12 +71,20 @@ async def _validate_root_dir(root_dir: str) -> str:
 
 
 def _build_pattern_regex(pattern: str) -> re.Pattern:
-    """Build a full-match regex from a pattern string with {name} placeholders."""
+    """Build a full-match regex from a pattern string with {name} placeholders.
+
+    Security: non-placeholder text is re.escape()d so user content never
+    contributes regex metacharacters.  Placeholders are hardcoded to ``[^/]+``.
+    """
+    if len(pattern) > 500:
+        raise HTTPException(status_code=400, detail="Pattern too long")
     parts = re.split(r"(\{[^}]+\})", pattern)
     regex_parts = []
     for part in parts:
         if part.startswith("{") and part.endswith("}"):
             name = part[1:-1]
+            if name != "_" and not re.fullmatch(r"[a-zA-Z_]\w*", name):
+                raise HTTPException(status_code=400, detail=f"Invalid placeholder name: {{{name}}}")
             if name == "_":
                 regex_parts.append(r"(?:[^/]+)")
             else:

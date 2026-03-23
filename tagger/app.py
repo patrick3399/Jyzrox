@@ -19,6 +19,7 @@ MODEL_FILENAME = "model.onnx"
 TAGS_FILENAME = "selected_tags.csv"
 INPUT_SIZE = 448
 ONNX_PROVIDERS = os.environ.get("ONNX_PROVIDERS", "CPUExecutionProvider").split(",")
+_ALLOWED_IMAGE_ROOTS = (Path("/data").resolve(), Path("/mnt").resolve())
 
 # ── Global model state ─────────────────────────────────────────────────
 _model = None
@@ -122,9 +123,11 @@ async def predict(req: PredictRequest):
     if _model is None or _tags is None:
         raise HTTPException(status_code=503, detail="Model not loaded")
 
-    path = Path(req.image_path)
+    path = Path(req.image_path).resolve()
+    if not any(path.is_relative_to(r) for r in _ALLOWED_IMAGE_ROOTS):
+        raise HTTPException(status_code=400, detail="Image path must be within /data/ or /mnt/")
     if not path.exists():
-        raise HTTPException(status_code=400, detail=f"Image not found: {req.image_path}")
+        raise HTTPException(status_code=400, detail="Image not found")
 
     import asyncio
     try:
@@ -133,7 +136,7 @@ async def predict(req: PredictRequest):
         )
     except Exception as exc:
         logger.error("Inference failed for %s: %s", req.image_path, exc)
-        raise HTTPException(status_code=500, detail=str(exc))
+        raise HTTPException(status_code=500, detail="Inference failed") from None
 
     return PredictResponse(tags=tags)
 

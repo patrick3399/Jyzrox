@@ -168,10 +168,16 @@ async def eh_login_with_password(
         cookies["igneous"] = igneous
 
     use_ex = bool(igneous)
-    async with EhClient(cookies=cookies, use_ex=use_ex) as client:
-        if not await client.check_cookies():
-            raise HTTPException(status_code=400, detail="Login succeeded but cookies are invalid")
-        account = await client.get_account_info()
+    try:
+        async with EhClient(cookies=cookies, use_ex=use_ex) as client:
+            if not await client.check_cookies():
+                raise HTTPException(status_code=400, detail="Login succeeded but cookies are invalid")
+            account = await client.get_account_info()
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.error("EH cookie validation failed: %s", exc)
+        raise HTTPException(status_code=502, detail="Failed to validate cookies with E-Hentai") from None
 
     await set_credential("ehentai", json.dumps(cookies), "cookie")
     return {"status": "ok", "account": account, "use_ex": use_ex}

@@ -18,14 +18,14 @@ logger = logging.getLogger(__name__)
 def _trusted_networks() -> list[ipaddress.IPv4Network | ipaddress.IPv6Network]:
     """Parse trusted_proxies setting into network objects (cached)."""
     nets = []
-    for entry in settings.trusted_proxies.split(","):
+    for i, entry in enumerate(settings.trusted_proxies.split(",")):
         entry = entry.strip()
         if not entry:
             continue
         try:
             nets.append(ipaddress.ip_network(entry, strict=False))
         except ValueError:
-            logger.warning("Invalid trusted proxy entry: %s", entry)
+            logger.warning("Invalid trusted proxy entry at position %d", i)
     return nets
 
 
