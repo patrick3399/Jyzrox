@@ -838,3 +838,33 @@ export interface DashboardResponse {
   global: DashboardGlobal
   system: DashboardSystem
 }
+
+// ── SAQ Queue Admin ──────────────────────────────────────────────────
+
+export interface SaqJob {
+  key: string
+  function: string
+  status: string
+  kwargs: Record<string, unknown>
+  result: string | null
+  error: string | null
+  queued: number | null
+  started: number | null
+  completed: number | null
+  progress: number
+  attempts: number
+  meta: Record<string, unknown>
+}
+
+export interface SaqWorker {
+  id: string
+  stats: { complete: number; failed: number; retried: number; aborted: number; uptime: number }
+}
+
+export interface QueueOverview {
+  name: string
+  queued: number
+  active: number
+  scheduled: number
+  workers: SaqWorker[]
+}

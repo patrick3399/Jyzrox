@@ -56,6 +56,8 @@ import type {
   SiteConfigItem,
   ProbeResult,
   DashboardResponse,
+  SaqJob,
+  QueueOverview,
 } from './types'
 
 // ── Local types ───────────────────────────────────────────────────────
@@ -1584,6 +1586,25 @@ const galleryDl = {
     apiFetch<{ job_id: string }>('/api/admin/gallery-dl/rollback', { method: 'POST' }),
 }
 
+// ── Admin Queue ────────────────────────────────────────────────────────
+
+const adminQueue = {
+  overview: () => apiFetch<QueueOverview>('/api/admin/queue/'),
+  jobs: (params?: { status?: string; function?: string; offset?: number; limit?: number }) =>
+    apiFetch<{ jobs: SaqJob[]; total: number }>(
+      `/api/admin/queue/jobs${qs(params as Record<string, unknown>)}`,
+    ),
+  job: (key: string) => apiFetch<SaqJob>(`/api/admin/queue/jobs/${encodeURIComponent(key)}`),
+  retryJob: (key: string) =>
+    apiFetch<{ status: string }>(`/api/admin/queue/jobs/${encodeURIComponent(key)}/retry`, {
+      method: 'POST',
+    }),
+  abortJob: (key: string) =>
+    apiFetch<{ status: string }>(`/api/admin/queue/jobs/${encodeURIComponent(key)}/abort`, {
+      method: 'POST',
+    }),
+}
+
 // ── Search ────────────────────────────────────────────────────────────
 
 export type SearchGalleryItem = {
@@ -1655,5 +1676,6 @@ export const api = {
   logs,
   adminSites,
   galleryDl,
+  adminQueue,
   search,
 }

@@ -24,6 +24,7 @@ import {
   ShieldCheck,
   Globe,
   Activity,
+  ListTodo,
 } from 'lucide-react'
 import type { UserRole } from '@/lib/types'
 
@@ -282,5 +283,14 @@ export const PAGE_REGISTRY: PageDef[] = [
     dashboard: false,
     sidebar: true,
     minRole: 'admin',
+  },
+  {
+    href: '/admin/queue',
+    labelKey: 'nav.queueDashboard',
+    icon: ListTodo,
+    nav: false,
+    dashboard: false,
+    sidebar: true,
+    minRole: 'admin' as UserRole,
   },
 ]

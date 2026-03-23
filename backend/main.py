@@ -26,6 +26,7 @@ from routers import (
     import_router,
     library,
     opds,
+    queue_admin,
     rss,
     scheduled_tasks,
     search,
@@ -158,6 +159,7 @@ app.include_router(rss.router, prefix="/api/rss")
 app.include_router(logs_router.router, prefix="/api/logs")
 app.include_router(gallery_dl_admin.router, prefix="/api/admin/gallery-dl")
 app.include_router(site_config_router.router, prefix="/api/admin/sites")
+app.include_router(queue_admin.router, prefix="/api/admin/queue")
 
 
 @app.get("/api/health")
