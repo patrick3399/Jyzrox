@@ -13,6 +13,7 @@ dist/
 build/
 .pytest_cache/
 .ruff_cache/
+.coverage
 
 # gallery-dl live config (contains credentials)
 config/gallery-dl/config.json
