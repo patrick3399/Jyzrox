@@ -1,2 +1,5 @@
 # Generated build artifacts
 public/sw.js
+
+# Test coverage reports
+coverage/
