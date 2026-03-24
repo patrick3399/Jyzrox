@@ -349,7 +349,7 @@ class TestCheckUpdates:
     """POST /api/artists/check-updates — enqueue check_followed_artists job."""
 
     async def test_check_updates_enqueues_job(self, client):
-        """Should return status=queued when ARQ enqueue succeeds."""
+        """Should return status=queued when SAQ enqueue succeeds."""
         resp = await client.post("/api/artists/check-updates")
         assert resp.status_code == 200
         assert resp.json()["status"] == "queued"

@@ -9,6 +9,7 @@ from fastapi.responses import HTMLResponse
 from fastapi.staticfiles import StaticFiles
 
 from core.config import settings
+from core.version import __version__
 from core.csrf import CSRFMiddleware
 from core.database import engine
 from core.rate_limit import RateLimitMiddleware
@@ -96,7 +97,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Jyzrox API",
-    version="0.1",
+    version=__version__,
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,

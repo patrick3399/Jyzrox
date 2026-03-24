@@ -406,7 +406,7 @@ def _make_session_factory(session):
 
 
 def _make_ctx():
-    """Return a minimal ARQ worker ctx dict."""
+    """Return a minimal SAQ worker ctx dict."""
     redis = AsyncMock()
     redis.setex = AsyncMock()
     return {"redis": redis}

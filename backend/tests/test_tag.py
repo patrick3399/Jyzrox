@@ -535,7 +535,7 @@ class TestManualTagGallery:
         Inject a fake worker.tag_helpers module into sys.modules so that
         ``from worker.tag_helpers import rebuild_gallery_tags_array``
         inside the endpoint resolves without importing the real worker
-        package (which pulls in arq and heavy deps unavailable in tests).
+        package (which pulls in saq and heavy deps unavailable in tests).
         """
         import sys
         import types

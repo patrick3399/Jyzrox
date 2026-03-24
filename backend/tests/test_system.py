@@ -184,41 +184,47 @@ async def test_system_reconcile_result_when_result_exists_returns_parsed_json(cl
 # ---------------------------------------------------------------------------
 
 
-# -- _detect_jyzrox_version (lines 35-36) ------------------------------------
+# -- core.version._detect_version --------------------------------------------
 
 
 def test_detect_jyzrox_version_returns_tag_when_git_succeeds():
-    """_detect_jyzrox_version returns the stdout tag when git exits cleanly (line 35-36)."""
-    from routers.system import _detect_jyzrox_version
+    """_detect_version returns the stdout tag when git exits cleanly."""
+    from core.version import _detect_version
 
     fake_result = MagicMock()
     fake_result.stdout = "v1.2.3\n"
 
-    with patch("subprocess.run", return_value=fake_result):
-        version = _detect_jyzrox_version()
+    with patch("subprocess.run", return_value=fake_result), patch.dict("os.environ", {}, clear=False):
+        import os
+        os.environ.pop("APP_VERSION", None)
+        version = _detect_version()
 
     assert version == "v1.2.3"
 
 
 def test_detect_jyzrox_version_returns_dev_when_git_output_is_empty():
-    """_detect_jyzrox_version returns 'dev' when git stdout is blank."""
-    from routers.system import _detect_jyzrox_version
+    """_detect_version returns 'dev' when git stdout is blank."""
+    from core.version import _detect_version
 
     fake_result = MagicMock()
     fake_result.stdout = ""
 
-    with patch("subprocess.run", return_value=fake_result):
-        version = _detect_jyzrox_version()
+    with patch("subprocess.run", return_value=fake_result), patch.dict("os.environ", {}, clear=False):
+        import os
+        os.environ.pop("APP_VERSION", None)
+        version = _detect_version()
 
     assert version == "dev"
 
 
 def test_detect_jyzrox_version_returns_dev_on_exception():
-    """_detect_jyzrox_version returns 'dev' when subprocess.run raises."""
-    from routers.system import _detect_jyzrox_version
+    """_detect_version returns 'dev' when subprocess.run raises."""
+    from core.version import _detect_version
 
-    with patch("subprocess.run", side_effect=FileNotFoundError("git not found")):
-        version = _detect_jyzrox_version()
+    with patch("subprocess.run", side_effect=FileNotFoundError("git not found")), patch.dict("os.environ", {}, clear=False):
+        import os
+        os.environ.pop("APP_VERSION", None)
+        version = _detect_version()
 
     assert version == "dev"
 

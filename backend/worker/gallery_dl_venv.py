@@ -216,7 +216,7 @@ async def _cleanup_new_dir(new_dir: Path) -> None:
     await asyncio.to_thread(shutil.rmtree, new_dir, True)
 
 async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: ARG001
-    """ARQ job: upgrade gallery-dl to a specific version (or latest).
+    """SAQ job: upgrade gallery-dl to a specific version (or latest).
 
     Steps:
     1. Check no downloads are running
@@ -298,7 +298,7 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
     }
 
 async def rollback_job(ctx: dict) -> dict:  # noqa: ARG001
-    """ARQ job: rollback gallery-dl to the previous version."""
+    """SAQ job: rollback gallery-dl to the previous version."""
     from core.events import EventType, emit_safe
 
     # Check for running downloads

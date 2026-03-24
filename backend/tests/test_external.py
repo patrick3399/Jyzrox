@@ -427,7 +427,7 @@ class TestExternalDownload:
     """POST /api/external/v1/download"""
 
     async def test_enqueue_download_success(self, ext_client, db_session):
-        """Valid token + valid URL → ARQ enqueue attempted (200 or 500 on SQLite)."""
+        """Valid token + valid URL → SAQ enqueue attempted (200 or 500 on SQLite)."""
         user_id = await _insert_user(db_session)
         await _insert_token(db_session, user_id, _TEST_TOKEN_HASH)
 
@@ -438,8 +438,8 @@ class TestExternalDownload:
         )
         # The route creates a DownloadJob with UUID/JSONB columns. SQLite
         # doesn't fully support these PostgreSQL types, so the DB insert may
-        # fail even though ARQ enqueue succeeds. Accept both 200 and 500
-        # (the 500 path means ARQ succeeded but DB persist failed — documented
+        # fail even though SAQ enqueue succeeds. Accept both 200 and 500
+        # (the 500 path means SAQ succeeded but DB persist failed — documented
         # behaviour in the router itself).
         assert resp.status_code in (200, 500)
         if resp.status_code == 200:

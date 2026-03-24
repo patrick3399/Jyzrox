@@ -15,6 +15,7 @@ from datetime import datetime
 from pathlib import Path
 
 from core.config import settings
+from core.version import __version__
 from plugins.base import SourcePlugin
 from plugins.builtin.gallery_dl._metadata import _resolve_source_id
 from plugins.models import (
@@ -501,7 +502,7 @@ class GalleryDlPlugin(SourcePlugin):
     meta = PluginMeta(
         name="gallery-dl (Fallback)",
         source_id="gallery_dl",
-        version="1.0.0",
+        version=__version__,
         description="Universal gallery-dl fallback downloader",
         url_patterns=[],  # handles everything — it is the fallback
         credential_schema=[],

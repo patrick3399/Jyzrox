@@ -410,9 +410,9 @@ async def enqueue_download(
     parameter ``url``.  JSON body takes priority; if both are absent a 422 is
     returned.
 
-    Order: ARQ enqueue first, then DB commit. If ARQ fails we never create the
-    DB record. If DB insert fails after a successful ARQ enqueue we log a
-    warning — the ARQ job will time out naturally without a matching DB record.
+    Order: SAQ enqueue first, then DB commit. If SAQ fails we never create the
+    DB record. If DB insert fails after a successful SAQ enqueue we log a
+    warning — the SAQ job will time out naturally without a matching DB record.
     """
     resolved_url = (body.url if body else None) or url
     if not resolved_url:
@@ -442,7 +442,7 @@ async def enqueue_download(
         logger.error("[external/enqueue] enqueue failed: %s", exc)
         raise HTTPException(status_code=503, detail="Failed to enqueue download job")
 
-    # 2. Persist DB record. If this fails, log a warning; the ARQ job will
+    # 2. Persist DB record. If this fails, log a warning; the SAQ job will
     #    eventually time out without a matching DB row.
     try:
         async with async_session() as session:
@@ -450,7 +450,7 @@ async def enqueue_download(
             await session.commit()
     except Exception as exc:
         logger.warning(
-            "[external/enqueue] ARQ job %s enqueued but DB insert failed: %s — job will time out naturally",
+            "[external/enqueue] SAQ job %s enqueued but DB insert failed: %s — job will time out naturally",
             job_id,
             exc,
         )

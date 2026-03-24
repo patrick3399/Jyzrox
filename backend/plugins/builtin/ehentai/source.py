@@ -11,6 +11,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core.version import __version__
 from plugins.base import SourcePlugin
 from plugins.models import (
     CredentialFlow,
@@ -34,7 +35,7 @@ class EhSourcePlugin(SourcePlugin):
     meta = PluginMeta(
         name="E-Hentai",
         source_id="ehentai",
-        version="1.0.0",
+        version=__version__,
         description="E-Hentai / ExHentai gallery downloader",
         url_patterns=["e-hentai.org", "exhentai.org"],
         credential_schema=[

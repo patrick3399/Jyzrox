@@ -48,8 +48,6 @@ async def viewer_client(db_session, db_session_factory, mock_redis):
     _app.dependency_overrides[_fake_get_db] = _override_get_db
     _app.dependency_overrides[require_auth] = _override_require_auth
 
-    _app.state.arq = AsyncMock()
-
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
         patch("core.rate_limit.get_redis", return_value=mock_redis),

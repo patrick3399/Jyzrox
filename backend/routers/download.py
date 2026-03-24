@@ -21,6 +21,7 @@ from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites
 from db.models import DownloadJob, Gallery
 from services.credential import get_credential
+from saq.job import TERMINAL_STATUSES as SAQ_TERMINAL_STATUSES
 from worker.helpers import compute_job_key, enqueue_download_job
 
 logger = logging.getLogger(__name__)
@@ -108,7 +109,7 @@ async def _enqueue(
 
     Order: create DB record first, then enqueue job.  If the enqueue
     fails the DB record is updated to "failed" so the user can see what
-    happened.  This avoids the race where a worker picks up the ARQ job before
+    happened.  This avoids the race where a worker picks up the SAQ job before
     the DB row exists.
 
     Returns a dict suitable for use as the HTTP response body.
@@ -502,19 +503,21 @@ async def pause_resume_job(
         # job.status == "paused" or "queued" — valid transition
         await redis.delete(pause_key)
 
-        # Check if the ARQ coroutine is still alive.
-        # ARQ writes arq:result:{job_id} when a job finishes (success or failure).
-        arq_job_id = compute_job_key(job.id, job.retry_count)
-        arq_result = await redis.get(f"arq:result:{arq_job_id}")
+        # Check if the SAQ worker coroutine is still alive.
+        # SAQ exposes job state via queue.job(key); a None return means the job
+        # has been cleared from Redis (e.g. TTL expired or never enqueued).
+        saq_job_key = compute_job_key(job.id, job.retry_count)
+        saq_job = await core.queue.get_queue().job(saq_job_key)
+        saq_job_dead = saq_job is None or saq_job.status in SAQ_TERMINAL_STATUSES
 
-        if arq_result is not None:
-            # Coroutine is dead — re-enqueue as a new ARQ job.
+        if saq_job_dead:
+            # Coroutine is dead — re-enqueue as a new SAQ job.
             # Prepare re-enqueue before committing DB changes to avoid orphaning
             # the job in "queued" state if the enqueue fails after commit.
             new_retry_count = job.retry_count + 1
-            new_arq_id = compute_job_key(job.id, new_retry_count)
+            new_saq_key = compute_job_key(job.id, new_retry_count)
             try:
-                await enqueue_download_job(job, new_arq_id)
+                await enqueue_download_job(job, new_saq_key)
             except Exception:
                 raise HTTPException(status_code=503, detail="Failed to re-enqueue job")
 
@@ -624,9 +627,9 @@ async def retry_job(
 
     await db.commit()
 
-    arq_job_id = compute_job_key(job.id, job.retry_count)
+    job_key = compute_job_key(job.id, job.retry_count)
     try:
-        await enqueue_download_job(job, arq_job_id)
+        await enqueue_download_job(job, job_key)
     except Exception as exc:
         logger.error("[retry] manual retry enqueue failed for %s: %s", job_id, exc)
         job.retry_count -= 1

@@ -318,7 +318,7 @@ async def startup(ctx: dict) -> None:
             logger.info("Processed %d stale queued jobs", len(stale_queued))
 
         # Paused jobs: apply paused_strategy (keep_paused / auto_retry / mark_failed)
-        # keep_paused: re-enqueue so ARQ result is written (pause gate catches them).
+        # keep_paused: re-enqueue so SAQ result is written (pause gate catches them).
         # This ensures the resume endpoint can detect "coroutine dead" and re-enqueue properly.
         # Without this, resume after restart thinks the coroutine is alive and sets status
         # to "running" without re-enqueueing — leaving the job stuck forever.
@@ -421,7 +421,7 @@ async def startup(ctx: dict) -> None:
             json.dumps({"running": True, "paths": paths}),
         )
 
-    # Jobs that were marked run_at_startup=True in the old arq config.
+    # Jobs that were marked run_at_startup=True in the old config.
     import core.queue as _q
 
     await _q.enqueue("ehtag_sync_job")

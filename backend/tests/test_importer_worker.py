@@ -29,7 +29,7 @@ if os.path.abspath(_backend_dir) not in sys.path:
 
 
 def _make_ctx():
-    """Build a minimal ARQ ctx dict with a mock Redis."""
+    """Build a minimal SAQ ctx dict with a mock Redis."""
     redis = AsyncMock()
     return {"redis": redis}
 

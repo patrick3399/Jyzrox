@@ -167,7 +167,7 @@ async def test_enqueue_download_emits_download_enqueued(client):
             json={"url": "https://e-hentai.org/g/1234567/abcdef1234/"},
         )
 
-    # The endpoint may return 200 or 503 (if ARQ mock isn't perfect),
+    # The endpoint may return 200 or 503 (if SAQ mock isn't perfect),
     # but emit_safe is only called on success (200).
     if resp.status_code == 200:
         mock_emit.assert_called_once()

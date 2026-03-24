@@ -10,6 +10,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth
+from core.version import __version__
 from core.database import AsyncSessionLocal
 from core.errors import api_error, parse_accept_language
 from core.rate_limit import check_rate_limit, get_client_ip, _is_private
@@ -42,7 +43,7 @@ class PixivBrowsePlugin(BrowsePlugin):
     meta = PluginMeta(
         name="Pixiv",
         source_id="pixiv",
-        version="1.0.0",
+        version=__version__,
         description="Pixiv artwork browser",
         url_patterns=["pixiv.net"],
         credential_schema=[

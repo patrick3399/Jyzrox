@@ -14,7 +14,7 @@ _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", "
 
 
 class _LibraryHandler(FileSystemEventHandler):
-    """Debounced handler that enqueues ARQ jobs on file/dir changes."""
+    """Debounced handler that enqueues SAQ jobs on file/dir changes."""
 
     def __init__(self, enqueue_fn, debounce_secs: int = 30):
         self._enqueue = enqueue_fn

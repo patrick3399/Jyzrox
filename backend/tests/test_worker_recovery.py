@@ -170,7 +170,7 @@ def _startup_patches(redis_mock, session, mock_enqueue=None, mock_emit=None):
         patch("worker._ensure_archive_table_schema", new_callable=AsyncMock),
         patch("core.database.AsyncSessionLocal", return_value=session),
         patch("worker.enqueue_download_job", mock_enqueue),
-        patch("worker.compute_job_key", side_effect=lambda jid, rc: f"arq-{jid}-{rc}"),
+        patch("worker.compute_job_key", side_effect=lambda jid, rc: f"retry:{jid}:{rc}" if rc > 0 else str(jid)),
         patch("core.events.emit_safe", mock_emit),
         patch("worker._watcher") as mock_watcher,
         patch("worker.asyncio.ensure_future"),

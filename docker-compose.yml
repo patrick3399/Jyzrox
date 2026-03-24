@@ -58,7 +58,10 @@ services:
     logging: *default-logging
 
   api:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --proxy-headers --forwarded-allow-ips='*'
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 30s
@@ -93,7 +96,10 @@ services:
     logging: *default-logging
 
   worker:
-    build: ./backend
+    build:
+      context: ./backend
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
     command: python -m worker
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
     stop_grace_period: 120s
@@ -129,7 +135,10 @@ services:
     logging: *default-logging
 
   pwa:
-    build: ./pwa
+    build:
+      context: ./pwa
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
     environment:
       - TZ=${TZ:-Asia/Taipei}
       - NODE_ENV=production

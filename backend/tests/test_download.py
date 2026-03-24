@@ -1,8 +1,8 @@
 """
 Tests for download endpoints (/api/download/*).
 
-Uses the `client` fixture (pre-authenticated). ARQ pool is mocked via
-app.state.arq. Download jobs are stored in SQLite test DB.
+Uses the `client` fixture (pre-authenticated). SAQ queue is mocked via
+core.queue. Download jobs are stored in SQLite test DB.
 """
 
 import sys
@@ -73,9 +73,6 @@ async def member_client(db_session, db_session_factory, mock_redis):
 
     _app.dependency_overrides[_fake_get_db] = _override_get_db
     _app.dependency_overrides[require_auth] = _override_require_auth
-
-    _app.state.arq = AsyncMock()
-    _app.state.arq.enqueue_job = AsyncMock(return_value=MagicMock(job_id="test-job"))
 
     with (
         patch("core.redis_client.get_redis", return_value=mock_redis),
@@ -1018,7 +1015,7 @@ class TestCheckSourceEnabled:
 
 
 # ---------------------------------------------------------------------------
-# _enqueue failure paths (unit tests using mocked DB and ARQ)
+# _enqueue failure paths (unit tests using mocked DB and SAQ)
 # ---------------------------------------------------------------------------
 
 
@@ -1339,9 +1336,14 @@ class TestPauseResumeJobBranches:
             assert resp.json()["status"] == "paused"
 
     async def test_resume_paused_job_transitions_to_running(self, member_client, db_session, mock_redis):
-        """Resuming a paused job should set status to running and clear Redis key."""
+        """Resuming a paused job should set status to running when SAQ job is still alive."""
         job_id = await _insert_job(db_session, status="paused", user_id=1)
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        mock_saq_job = MagicMock()
+        mock_saq_job.status = "active"  # SAQ Status.ACTIVE — job still alive
+        mock_queue = MagicMock()
+        mock_queue.job = AsyncMock(return_value=mock_saq_job)
+        with patch("routers.download.get_redis", return_value=mock_redis), \
+             patch("core.queue.get_queue", return_value=mock_queue):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "resume"},
@@ -1353,17 +1355,15 @@ class TestPauseResumeJobBranches:
     async def test_resume_paused_job_with_dead_coroutine_re_enqueues(
         self, member_client, db_session, mock_redis
     ):
-        """Resume with dead ARQ coroutine (arq:result key exists) should re-enqueue the job."""
+        """Resume with dead SAQ job (queue.job returns None) should re-enqueue the job."""
         job_id = await _insert_job(db_session, status="paused", user_id=1, retry_count=0)
 
-        async def redis_get_side_effect(key):
-            if key == f"arq:result:{job_id}":
-                return b'{"success": true}'  # ARQ result exists = dead coroutine
-            return None
+        mock_queue = MagicMock()
+        mock_queue.job = AsyncMock(return_value=None)  # None = job cleared from SAQ/Redis
 
-        mock_redis.get = AsyncMock(side_effect=redis_get_side_effect)
-
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download.get_redis", return_value=mock_redis), \
+             patch("core.queue.get_queue", return_value=mock_queue), \
+             patch("routers.download.enqueue_download_job", new_callable=AsyncMock):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "resume"},
@@ -1377,17 +1377,15 @@ class TestPauseResumeJobBranches:
     async def test_resume_paused_job_with_dead_coroutine_and_retries_re_enqueues(
         self, member_client, db_session, mock_redis
     ):
-        """Resume with dead ARQ coroutine for a retried job uses retry-prefixed arq key."""
+        """Resume with dead SAQ job for a retried job (queue.job returns None) should re-enqueue."""
         job_id = await _insert_job(db_session, status="paused", user_id=1, retry_count=2)
 
-        async def redis_get_side_effect(key):
-            if key == f"arq:result:retry:{job_id}:2":
-                return b'{"success": true}'  # dead coroutine for the retried job
-            return None
+        mock_queue = MagicMock()
+        mock_queue.job = AsyncMock(return_value=None)  # None = job cleared from SAQ/Redis
 
-        mock_redis.get = AsyncMock(side_effect=redis_get_side_effect)
-
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download.get_redis", return_value=mock_redis), \
+             patch("core.queue.get_queue", return_value=mock_queue), \
+             patch("routers.download.enqueue_download_job", new_callable=AsyncMock):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "resume"},
@@ -1401,12 +1399,15 @@ class TestPauseResumeJobBranches:
     async def test_resume_paused_job_with_alive_coroutine_transitions_to_running(
         self, member_client, db_session, mock_redis
     ):
-        """Resume when ARQ coroutine is still alive (no arq:result key) should flip to running."""
+        """Resume when SAQ job is still alive (status ACTIVE) should flip status to running."""
         job_id = await _insert_job(db_session, status="paused", user_id=1, retry_count=0)
-        # mock_redis.get returns None by default — coroutine alive
-        mock_redis.get = AsyncMock(return_value=None)
+        mock_saq_job = MagicMock()
+        mock_saq_job.status = "active"  # SAQ Status.ACTIVE — coroutine still alive
+        mock_queue = MagicMock()
+        mock_queue.job = AsyncMock(return_value=mock_saq_job)
 
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("routers.download.get_redis", return_value=mock_redis), \
+             patch("core.queue.get_queue", return_value=mock_queue):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "resume"},
@@ -1500,7 +1501,7 @@ class TestCancelJobBranches:
 
 
 # ---------------------------------------------------------------------------
-# retry_job — happy path and ARQ failure (lines 428-477)
+# retry_job — happy path and SAQ failure (lines 428-477)
 # ---------------------------------------------------------------------------
 
 

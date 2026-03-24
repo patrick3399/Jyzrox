@@ -3,7 +3,6 @@ import json
 import logging
 import os
 import shutil
-import subprocess
 import sys
 
 import fastapi
@@ -12,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
 
 from core.auth import require_auth, require_role
+from core.version import __version__
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.redis_client import get_redis
@@ -27,21 +27,6 @@ _admin = require_role("admin")
 # ── Static version detection (executed once at import time) ───────────
 
 
-def _detect_jyzrox_version() -> str:
-    """Return output of `git describe --tags --always`, fallback 'dev'."""
-    try:
-        result = subprocess.run(
-            ["git", "describe", "--tags", "--always"],
-            capture_output=True,
-            text=True,
-            timeout=5,
-        )
-        tag = result.stdout.strip()
-        return tag if tag else "dev"
-    except Exception:
-        return "dev"
-
-
 def _detect_python_version() -> str:
     """Return Python version string (major.minor.micro)."""
     v = sys.version_info
@@ -49,7 +34,7 @@ def _detect_python_version() -> str:
 
 
 _STATIC_VERSIONS: dict[str, str | None] = {
-    "jyzrox": _detect_jyzrox_version(),
+    "jyzrox": __version__,
     "python": _detect_python_version(),
     "fastapi": fastapi.__version__,
 }

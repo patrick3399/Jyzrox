@@ -12,6 +12,7 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timezone
 from pathlib import Path
 
+from core.version import __version__
 from plugins.base import SourcePlugin
 from plugins.models import (
     CredentialFlow,
@@ -38,7 +39,7 @@ class PixivSourcePlugin(SourcePlugin):
     meta = PluginMeta(
         name="Pixiv",
         source_id="pixiv",
-        version="1.0.0",
+        version=__version__,
         description="Pixiv artwork and user downloader",
         url_patterns=["pixiv.net"],
         credential_schema=[

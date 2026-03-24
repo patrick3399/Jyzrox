@@ -20,6 +20,9 @@ urllib.request.urlretrieve('https://cdn.jsdelivr.net/npm/swagger-ui-dist@5/swagg
 # ── Stage 2: runtime ──────────────────────────────────────────────────────────
 FROM python:3.14-slim AS runtime
 
+ARG APP_VERSION=dev
+ENV APP_VERSION=$APP_VERSION
+
 # gosu: privilege-drop in entrypoint; wget: healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
         gosu \

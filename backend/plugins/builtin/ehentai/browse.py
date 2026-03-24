@@ -17,6 +17,7 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from core.auth import require_auth
+from core.version import __version__
 from core.config import settings as app_settings
 from core.errors import api_error, parse_accept_language
 from core.database import async_session
@@ -50,7 +51,7 @@ class EhBrowsePlugin(BrowsePlugin):
     meta = PluginMeta(
         name="E-Hentai",
         source_id="ehentai",
-        version="1.0.0",
+        version=__version__,
         description="E-Hentai / ExHentai gallery downloader",
         url_patterns=["e-hentai.org", "exhentai.org"],
         credential_schema=[
