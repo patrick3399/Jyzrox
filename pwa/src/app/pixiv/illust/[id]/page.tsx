@@ -7,6 +7,7 @@ import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { TagSearchPopover } from '@/components/TagSearchPopover'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
@@ -37,6 +38,10 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
 
   const [downloading, setDownloading] = useState(false)
   const [bookmarking, setBookmarking] = useState(false)
+  const [pixivTagPopover, setPixivTagPopover] = useState<{
+    anchor: HTMLElement
+    tag: string
+  } | null>(null)
 
   useEffect(() => {
     const handler = (e: KeyboardEvent) => {
@@ -240,8 +245,23 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
                 {illust.tags.map((tag) => (
                   <span
                     key={tag.name}
-                    className="px-2 py-0.5 rounded-full bg-vault-input text-xs text-vault-text border border-vault-border"
+                    className="px-2 py-0.5 rounded-full bg-vault-input text-xs text-vault-text border border-vault-border cursor-pointer hover:brightness-125 transition-all"
                     title={tag.translated_name ?? undefined}
+                    onClick={(e) =>
+                      setPixivTagPopover({
+                        anchor: e.currentTarget,
+                        tag: `general:${tag.name}`,
+                      })
+                    }
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter')
+                        setPixivTagPopover({
+                          anchor: e.currentTarget as HTMLElement,
+                          tag: `general:${tag.name}`,
+                        })
+                    }}
                   >
                     {tag.name}
                     {tag.translated_name && (
@@ -252,6 +272,14 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
                   </span>
                 ))}
               </div>
+              {pixivTagPopover && (
+                <TagSearchPopover
+                  tag={pixivTagPopover.tag}
+                  gallerySource="pixiv"
+                  anchorEl={pixivTagPopover.anchor}
+                  onClose={() => setPixivTagPopover(null)}
+                />
+              )}
             </div>
           )}
 

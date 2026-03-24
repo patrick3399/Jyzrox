@@ -172,6 +172,9 @@ const en: Record<string, string> = {
   'queue.previewNotAvailable': 'Preview not available for this source',
 
   // ── Tags ──
+  'tags.searchLocal': 'Search Local Library',
+  'tags.searchEhentai': 'Search E-Hentai',
+  'tags.searchPixiv': 'Search Pixiv',
   'tags.title': 'Tag Management',
   'tags.searchPlaceholder': 'Search by name...',
   'tags.namespacePlaceholder': 'Namespace filter...',
@@ -1701,6 +1704,14 @@ const en: Record<string, string> = {
   'library.syntaxRating': 'minimum rating',
   'library.syntaxFavorited': 'favorites only',
   'library.syntaxSort': 'sort override',
+  'library.syntaxNameOnly': 'search all namespaces for tag',
+  'library.syntaxCollection': 'filter by collection',
+  'library.syntaxArtistId': 'filter by artist',
+  'library.syntaxCategory': 'filter by category',
+  'library.syntaxImportMode': 'filter by import mode',
+  'library.syntaxReadingList': 'reading list only',
+  'library.datePosted': 'Date Posted',
+  'library.titleSort': 'Title',
 
   // ── Similar Images ──
   'similar.title': 'Similar Images',

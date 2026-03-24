@@ -1,6 +1,8 @@
 """Unified search endpoint for galleries."""
 
 import base64
+import hashlib
+import hmac
 import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -8,8 +10,25 @@ from pydantic import BaseModel
 from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, func, or_, select
 
 from core.auth import gallery_access_filter, require_auth
+from core.config import settings
 from core.database import async_session
-from db.models import BlockedTag, Gallery, SavedSearch, Tag, TagAlias, UserFavorite, UserRating
+from core.gallery_helpers import (
+    build_cover_map,
+    get_favorite_set,
+    get_rating_map,
+    get_reading_list_set,
+)
+from db.models import (
+    BlockedTag,
+    CollectionGallery,
+    Gallery,
+    SavedSearch,
+    Tag,
+    TagAlias,
+    UserFavorite,
+    UserRating,
+    UserReadingList,
+)
 
 router = APIRouter(tags=["search"])
 
@@ -17,7 +36,16 @@ router = APIRouter(tags=["search"])
 # ── Cursor helpers ────────────────────────────────────────────────────
 
 
+def _cursor_secret() -> bytes:
+    """Return the HMAC signing key derived from the app's credential_encrypt_key."""
+    return settings.credential_encrypt_key.encode()
+
+
 def _encode_cursor(row: Gallery, sort: str) -> str:
+    """Encode sort key + id into a signed URL-safe base64 cursor string.
+
+    Format: <base64url(json)>.<hmac-sha256-hex>
+    """
     sort_val = {
         "added_at": row.added_at.isoformat() if row.added_at else "",
         "rating": row.rating,
@@ -26,12 +54,39 @@ def _encode_cursor(row: Gallery, sort: str) -> str:
         "title": row.title or "",
     }[sort]
     payload = {"id": row.id, "v": str(sort_val), "s": sort}
-    return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode()
+    encoded = base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
+    sig = hmac.new(_cursor_secret(), encoded.encode(), hashlib.sha256).hexdigest()
+    return f"{encoded}.{sig}"
 
 
 def _decode_cursor(cursor: str) -> dict:
+    """Decode a cursor string.
+
+    Accepts both:
+    - New HMAC-signed cursors: <base64url>.<hmac-sha256-hex>
+    - Legacy unsigned cursors (no '.' separator) for backward compatibility
+    """
+    if "." not in cursor:
+        # Legacy unsigned cursor — attempt to decode directly for backward compat
+        try:
+            return json.loads(base64.urlsafe_b64decode(cursor + "=="))
+        except Exception:
+            raise HTTPException(status_code=400, detail="Invalid cursor")
+
+    # Split on the last dot; HMAC hex is always 64 hex chars
+    encoded, _, sig = cursor.rpartition(".")
+    if not encoded or not sig:
+        raise HTTPException(status_code=400, detail="Invalid cursor")
+
+    # Verify HMAC signature
+    expected_sig = hmac.new(_cursor_secret(), encoded.encode(), hashlib.sha256).hexdigest()
+    if not hmac.compare_digest(expected_sig, sig):
+        raise HTTPException(status_code=400, detail="Invalid cursor: signature mismatch")
+
     try:
-        return json.loads(base64.urlsafe_b64decode(cursor + "=="))
+        # Re-add stripped padding before decoding
+        padded = encoded + "=" * (-len(encoded) % 4)
+        return json.loads(base64.urlsafe_b64decode(padded))
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid cursor")
 
@@ -40,7 +95,14 @@ def _decode_cursor(cursor: str) -> dict:
 async def search_galleries(
     q: str = Query(
         "",
-        description='Search query: tags (character:rem), exclude (-general:sketch), title (title:"re zero"), source (source:ehentai), rating (rating:>=4), favorited (favorited:true), sort (sort:rating)',
+        description=(
+            "Search query: tags (character:rem), exclude (-general:sketch), "
+            "title (title:\"re zero\"), source (source:ehentai), rating (rating:>=4), "
+            "favorited (favorited:true), sort (sort:rating), "
+            "collection (collection:N), artist_id (artist_id:X), "
+            "category (category:doujinshi), import (import:manual), "
+            "reading list (rl:true)"
+        ),
     ),
     sort: str = "added_at",
     page: int = 1,
@@ -57,6 +119,11 @@ async def search_galleries(
       rating:>=4                        → minimum rating
       favorited:true                    → favorited only
       sort:rating                       → override sort order
+      collection:5                      → galleries in collection #5
+      artist_id:pixiv123                → galleries by artist_id
+      category:doujinshi                → galleries in category
+      import:manual                     → galleries by import mode
+      rl:true                           → galleries in reading list
 
     Supports cursor-based pagination (cursor=) for deep pages without COUNT(*)/OFFSET cost.
     When cursor is absent, falls back to OFFSET-based pagination (page-based, max page 500).
@@ -68,6 +135,11 @@ async def search_galleries(
     source_filter: str | None = None
     rating_filter: int | None = None
     favorited_filter: bool | None = None
+    collection_filter: int | None = None
+    artist_id_filter: str | None = None
+    category_filter: str | None = None
+    import_filter: str | None = None
+    rl_filter: bool | None = None
 
     for t in tokens:
         if t.startswith("title:"):
@@ -84,6 +156,19 @@ async def search_galleries(
             favorited_filter = t[10:].lower() == "true"
         elif t.startswith("sort:"):
             sort = t[5:]
+        elif t.startswith("collection:"):
+            try:
+                collection_filter = int(t[11:])
+            except ValueError:
+                pass
+        elif t.startswith("artist_id:"):
+            artist_id_filter = t[10:]
+        elif t.startswith("category:"):
+            category_filter = t[9:]
+        elif t.startswith("import:"):
+            import_filter = t[7:]
+        elif t.startswith("rl:"):
+            rl_filter = t[3:].lower() == "true"
         elif t.startswith("-"):
             exclude_tags.append(t[1:])
         else:
@@ -102,8 +187,30 @@ async def search_galleries(
     if exclude_tags:
         filters.append(~Gallery.tags_array.overlap(cast(exclude_tags, ARRAY(Text))))
 
+    if collection_filter is not None:
+        filters.append(
+            Gallery.id.in_(
+                select(CollectionGallery.gallery_id).where(
+                    CollectionGallery.collection_id == collection_filter
+                )
+            )
+        )
+
+    if artist_id_filter is not None:
+        filters.append(Gallery.artist_id == artist_id_filter)
+
+    if category_filter is not None:
+        if category_filter == "__uncategorized__":
+            filters.append(
+                or_(Gallery.category.is_(None), Gallery.category == "")
+            )
+        else:
+            filters.append(Gallery.category == category_filter)
+
+    if import_filter is not None:
+        filters.append(Gallery.import_mode == import_filter)
+
     # Sort — DESC for numeric/date columns, ASC for title
-    _desc_sorts = {"added_at", "rating", "pages", "posted_at"}
     sort_map = {
         "added_at": desc(Gallery.added_at),
         "rating": desc(Gallery.rating),
@@ -114,23 +221,37 @@ async def search_galleries(
     order = sort_map.get(sort, desc(Gallery.added_at))
     effective_sort = sort if sort in sort_map else "added_at"
 
-    def _row_to_item(r: Gallery) -> dict:
+    def _row_to_item(
+        r: Gallery,
+        fav_set: set[int],
+        rating_map: dict[int, int],
+        rl_set: set[int],
+        cover_map: dict[int, str],
+    ) -> dict:
         return {
             "id": r.id,
             "title": r.title,
             "title_jpn": r.title_jpn,
             "source": r.source,
             "source_id": r.source_id,
+            "source_url": r.source_url,
+            "artist_id": r.artist_id,
+            "import_mode": r.import_mode,
             "category": r.category,
             "language": r.language,
             "pages": r.pages,
             "rating": r.rating,
             "favorited": False,
+            "is_favorited": r.id in fav_set,
+            "my_rating": rating_map.get(r.id),
+            "in_reading_list": r.id in rl_set,
+            "cover_thumb": cover_map.get(r.id),
             "uploader": r.uploader,
             "download_status": r.download_status,
             "added_at": r.added_at.isoformat() if r.added_at else None,
             "posted_at": r.posted_at.isoformat() if r.posted_at else None,
             "tags": r.tags_array or [],
+            "tags_array": r.tags_array or [],
         }
 
     async with async_session() as session:
@@ -146,110 +267,153 @@ async def search_galleries(
             blocked_strings = [f"{r.namespace}:{r.name}" for r in blocked_rows]
             filters.append(~Gallery.tags_array.overlap(cast(blocked_strings, ARRAY(Text))))
 
-        # ── Alias expansion — batch resolve all include tags ──
-        if include_tags:
-            parsed_includes: list[tuple[str, str]] = []
-            for tag_str in include_tags:
-                if ":" in tag_str:
-                    ns, name = tag_str.split(":", 1)
-                else:
-                    ns, name = "general", tag_str
-                parsed_includes.append((ns, name))
-
-            # Batch 1: Find which include tags are aliases
-            alias_map: dict[tuple[str, str], int] = {}
-            alias_rows = (
-                await session.execute(
-                    select(
-                        TagAlias.alias_namespace,
-                        TagAlias.alias_name,
-                        TagAlias.canonical_id,
-                    ).where(
-                        or_(
-                            *[
-                                (TagAlias.alias_namespace == ns) & (TagAlias.alias_name == name)
-                                for ns, name in parsed_includes
-                            ]
-                        )
+        # ── Reading list filter ──
+        if rl_filter is not None and rl_filter:
+            filters.append(
+                Gallery.id.in_(
+                    select(UserReadingList.gallery_id).where(
+                        UserReadingList.user_id == auth["user_id"]
                     )
                 )
-            ).all()
-            for row in alias_rows:
-                alias_map[(row.alias_namespace, row.alias_name)] = row.canonical_id
+            )
 
-            # Batch 2: For non-alias tags, check if they are canonical tags
-            non_alias_pairs = [
-                (ns, name) for ns, name in parsed_includes
-                if (ns, name) not in alias_map
-            ]
-            tag_id_map: dict[tuple[str, str], int] = {}
-            if non_alias_pairs:
-                tag_rows = (
+        # ── Alias expansion — batch resolve all include tags ──
+        if include_tags:
+            # Separate name-only tags (no colon) from namespaced tags (have colon)
+            name_only_tags: list[str] = []
+            namespaced_tags: list[str] = []
+            for tag_str in include_tags:
+                if ":" in tag_str:
+                    namespaced_tags.append(tag_str)
+                else:
+                    name_only_tags.append(tag_str)
+
+            # Handle name-only tags: lookup across all namespaces
+            if name_only_tags:
+                name_rows = (
                     await session.execute(
-                        select(Tag.id, Tag.namespace, Tag.name).where(
+                        select(Tag.namespace, Tag.name).where(
+                            Tag.name.in_(name_only_tags)
+                        )
+                    )
+                ).all()
+                # Group matches by bare name
+                name_to_variants: dict[str, list[str]] = {}
+                for row in name_rows:
+                    tag_str = f"{row.namespace}:{row.name}"
+                    name_to_variants.setdefault(row.name, []).append(tag_str)
+
+                for bare_name in name_only_tags:
+                    variants = name_to_variants.get(bare_name)
+                    if not variants:
+                        # No matches — fall back to general:name for compat
+                        variants = [f"general:{bare_name}"]
+                    if len(variants) == 1:
+                        filters.append(Gallery.tags_array.contains(cast(variants, ARRAY(Text))))
+                    else:
+                        filters.append(Gallery.tags_array.overlap(cast(variants, ARRAY(Text))))
+
+            # Handle namespaced tags through existing alias expansion
+            if namespaced_tags:
+                parsed_includes: list[tuple[str, str]] = []
+                for tag_str in namespaced_tags:
+                    ns, name = tag_str.split(":", 1)
+                    parsed_includes.append((ns, name))
+
+                # Batch 1: Find which include tags are aliases
+                alias_map: dict[tuple[str, str], int] = {}
+                alias_rows = (
+                    await session.execute(
+                        select(
+                            TagAlias.alias_namespace,
+                            TagAlias.alias_name,
+                            TagAlias.canonical_id,
+                        ).where(
                             or_(
                                 *[
-                                    (Tag.namespace == ns) & (Tag.name == name)
-                                    for ns, name in non_alias_pairs
+                                    (TagAlias.alias_namespace == ns) & (TagAlias.alias_name == name)
+                                    for ns, name in parsed_includes
                                 ]
                             )
                         )
                     )
                 ).all()
-                for row in tag_rows:
-                    tag_id_map[(row.namespace, row.name)] = row.id
+                for row in alias_rows:
+                    alias_map[(row.alias_namespace, row.alias_name)] = row.canonical_id
 
-            # Collect all canonical_ids we need to expand
-            all_canonical_ids: set[int] = set(alias_map.values())
-            all_canonical_ids.update(tag_id_map.values())
-
-            # Batch 3: Fetch canonical tag names + all aliases for all canonical_ids
-            canonical_name_map: dict[int, str] = {}
-            canonical_aliases_map: dict[int, list[str]] = {}
-            if all_canonical_ids:
-                canon_rows = (
-                    await session.execute(
-                        select(Tag.id, Tag.namespace, Tag.name).where(
-                            Tag.id.in_(all_canonical_ids)
+                # Batch 2: For non-alias tags, check if they are canonical tags
+                non_alias_pairs = [
+                    (ns, name) for ns, name in parsed_includes
+                    if (ns, name) not in alias_map
+                ]
+                tag_id_map: dict[tuple[str, str], int] = {}
+                if non_alias_pairs:
+                    tag_rows = (
+                        await session.execute(
+                            select(Tag.id, Tag.namespace, Tag.name).where(
+                                or_(
+                                    *[
+                                        (Tag.namespace == ns) & (Tag.name == name)
+                                        for ns, name in non_alias_pairs
+                                    ]
+                                )
+                            )
                         )
-                    )
-                ).all()
-                for row in canon_rows:
-                    canonical_name_map[row.id] = f"{row.namespace}:{row.name}"
+                    ).all()
+                    for row in tag_rows:
+                        tag_id_map[(row.namespace, row.name)] = row.id
 
-                all_alias_rows = (
-                    await session.execute(
-                        select(
-                            TagAlias.canonical_id,
-                            TagAlias.alias_namespace,
-                            TagAlias.alias_name,
-                        ).where(TagAlias.canonical_id.in_(all_canonical_ids))
-                    )
-                ).all()
-                for row in all_alias_rows:
-                    canonical_aliases_map.setdefault(row.canonical_id, []).append(
-                        f"{row.alias_namespace}:{row.alias_name}"
-                    )
+                # Collect all canonical_ids we need to expand
+                all_canonical_ids: set[int] = set(alias_map.values())
+                all_canonical_ids.update(tag_id_map.values())
 
-            # Build filter per include tag: AND across tags, OR across aliases
-            for i, tag_str in enumerate(include_tags):
-                ns, name = parsed_includes[i]
-                canonical_id = alias_map.get((ns, name)) or tag_id_map.get((ns, name))
-                if not canonical_id:
-                    # No aliases found — exact match only
-                    filters.append(Gallery.tags_array.contains(cast([tag_str], ARRAY(Text))))
-                else:
-                    variants = [tag_str]
-                    canon_str = canonical_name_map.get(canonical_id)
-                    if canon_str and canon_str not in variants:
-                        variants.append(canon_str)
-                    for alias_str in canonical_aliases_map.get(canonical_id, []):
-                        if alias_str not in variants:
-                            variants.append(alias_str)
-                    if len(variants) == 1:
-                        filters.append(Gallery.tags_array.contains(cast(variants, ARRAY(Text))))
+                # Batch 3: Fetch canonical tag names + all aliases for all canonical_ids
+                canonical_name_map: dict[int, str] = {}
+                canonical_aliases_map: dict[int, list[str]] = {}
+                if all_canonical_ids:
+                    canon_rows = (
+                        await session.execute(
+                            select(Tag.id, Tag.namespace, Tag.name).where(
+                                Tag.id.in_(all_canonical_ids)
+                            )
+                        )
+                    ).all()
+                    for row in canon_rows:
+                        canonical_name_map[row.id] = f"{row.namespace}:{row.name}"
+
+                    all_alias_rows = (
+                        await session.execute(
+                            select(
+                                TagAlias.canonical_id,
+                                TagAlias.alias_namespace,
+                                TagAlias.alias_name,
+                            ).where(TagAlias.canonical_id.in_(all_canonical_ids))
+                        )
+                    ).all()
+                    for row in all_alias_rows:
+                        canonical_aliases_map.setdefault(row.canonical_id, []).append(
+                            f"{row.alias_namespace}:{row.alias_name}"
+                        )
+
+                # Build filter per namespaced include tag: AND across tags, OR across aliases
+                for i, tag_str in enumerate(namespaced_tags):
+                    ns, name = parsed_includes[i]
+                    canonical_id = alias_map.get((ns, name)) or tag_id_map.get((ns, name))
+                    if not canonical_id:
+                        # No aliases found — exact match only
+                        filters.append(Gallery.tags_array.contains(cast([tag_str], ARRAY(Text))))
                     else:
-                        filters.append(Gallery.tags_array.overlap(cast(variants, ARRAY(Text))))
+                        variants = [tag_str]
+                        canon_str = canonical_name_map.get(canonical_id)
+                        if canon_str and canon_str not in variants:
+                            variants.append(canon_str)
+                        for alias_str in canonical_aliases_map.get(canonical_id, []):
+                            if alias_str not in variants:
+                                variants.append(alias_str)
+                        if len(variants) == 1:
+                            filters.append(Gallery.tags_array.contains(cast(variants, ARRAY(Text))))
+                        else:
+                            filters.append(Gallery.tags_array.overlap(cast(variants, ARRAY(Text))))
 
         if rating_filter is not None:
             filters.append(
@@ -268,6 +432,7 @@ async def search_galleries(
                         select(UserFavorite.gallery_id).where(UserFavorite.user_id == auth["user_id"])
                     )
                 )
+
         if cursor is not None:
             # Keyset pagination — no COUNT(*), no OFFSET
             c = _decode_cursor(cursor)
@@ -347,10 +512,18 @@ async def search_galleries(
             if has_next:
                 rows = rows[:limit]
 
+            # Enrich results
+            gallery_ids = [g.id for g in rows]
+            source_map = {g.id: g.source or "" for g in rows}
+            fav_set = await get_favorite_set(session, auth["user_id"], gallery_ids)
+            rating_map = await get_rating_map(session, auth["user_id"], gallery_ids)
+            rl_set = await get_reading_list_set(session, auth["user_id"], gallery_ids)
+            cover_map = await build_cover_map(session, gallery_ids, source_map)
+
             next_cursor = _encode_cursor(rows[-1], effective_sort) if has_next and rows else None
             return {
                 "query": q,
-                "items": [_row_to_item(r) for r in rows],
+                "items": [_row_to_item(r, fav_set, rating_map, rl_set, cover_map) for r in rows],
                 "next_cursor": next_cursor,
                 "has_next": has_next,
             }
@@ -367,14 +540,28 @@ async def search_galleries(
             count_query = select(func.count()).select_from(Gallery).where(*filters, gallery_access_filter(auth))
             total = (await session.execute(count_query)).scalar()
 
-            data_query = select(Gallery).where(*filters, gallery_access_filter(auth)).order_by(order).limit(limit).offset(offset)
+            data_query = (
+                select(Gallery)
+                .where(*filters, gallery_access_filter(auth))
+                .order_by(order)
+                .limit(limit)
+                .offset(offset)
+            )
             rows = (await session.execute(data_query)).scalars().all()
+
+            # Enrich results
+            gallery_ids = [g.id for g in rows]
+            source_map = {g.id: g.source or "" for g in rows}
+            fav_set = await get_favorite_set(session, auth["user_id"], gallery_ids)
+            rating_map = await get_rating_map(session, auth["user_id"], gallery_ids)
+            rl_set = await get_reading_list_set(session, auth["user_id"], gallery_ids)
+            cover_map = await build_cover_map(session, gallery_ids, source_map)
 
     return {
         "total": total,
         "page": page,
         "query": q,
-        "items": [_row_to_item(r) for r in rows],
+        "items": [_row_to_item(r, fav_set, rating_map, rl_set, cover_map) for r in rows],
     }
 
 

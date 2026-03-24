@@ -379,7 +379,38 @@ export function useSearchGalleries(q: string, options?: { sort?: string; limit?:
     return ['search/galleries', q, { ...options, page: pageIndex + 1 }]
   }
 
-  const { data, error, size, setSize, isLoading } = useSWRInfinite<SearchGalleriesResponse>(
+  const { lastJobUpdate } = useWsJobs()
+  const { mutate: globalMutate } = useSWRConfig()
+  const lastFiredRef = useRef<number>(0)
+  const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+
+  const SEARCH_THROTTLE_MS = 2000
+
+  useEffect(() => {
+    if (!lastJobUpdate) return
+    if (lastJobUpdate.status !== 'done' && lastJobUpdate.status !== 'partial') return
+
+    const now = Date.now()
+    const elapsed = now - lastFiredRef.current
+    const doMutate = () => {
+      lastFiredRef.current = Date.now()
+      globalMutate(
+        (key: unknown) => Array.isArray(key) && key[0] === 'search/galleries',
+        undefined,
+        { revalidate: true },
+      )
+    }
+
+    if (elapsed >= SEARCH_THROTTLE_MS) {
+      doMutate()
+    } else {
+      clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(doMutate, SEARCH_THROTTLE_MS - elapsed)
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [lastJobUpdate])
+
+  const { data, error, size, setSize, isLoading, mutate } = useSWRInfinite<SearchGalleriesResponse>(
     getKey,
     ([, query, opts]: [
       string,
@@ -404,6 +435,7 @@ export function useSearchGalleries(q: string, options?: { sort?: string; limit?:
     isReachingEnd,
     size,
     setSize,
+    mutate,
     loadMore: () => setSize(size + 1),
   }
 }

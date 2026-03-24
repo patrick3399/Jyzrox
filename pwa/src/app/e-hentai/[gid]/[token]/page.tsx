@@ -12,6 +12,7 @@ import { ChevronDown, ChevronUp } from 'lucide-react'
 import DOMPurify from 'dompurify'
 import { BackButton } from '@/components/BackButton'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
+import { TagSearchPopover } from '@/components/TagSearchPopover'
 
 // ── Preview grid with scaled sprite offsets ─────────────────────────────
 
@@ -248,6 +249,12 @@ function EhGalleryDetail() {
   const [isFavorited, setIsFavorited] = useState(() => searchParams.get('fav') === '1')
   const favRef = useRef<HTMLDivElement>(null)
 
+  // Tag popover state
+  const [tagPopover, setTagPopover] = useState<{
+    anchor: HTMLElement
+    tag: string
+  } | null>(null)
+
   // Load More previews state
   const [extraPreviews, setExtraPreviews] = useState<Record<string, string>>({})
   const [hasMore, setHasMore] = useState(true)
@@ -379,11 +386,11 @@ function EhGalleryDetail() {
   }, [previewData, extraPreviews, gallery])
 
   const handleTagClick = useCallback(
-    (ns: string, name: string) => {
+    (ns: string, name: string, anchorEl: HTMLElement) => {
       const query = name.includes(' ') ? `${ns}:"${name}"` : `${ns}:${name}`
-      router.push(`/e-hentai?q=${encodeURIComponent(query)}`)
+      setTagPopover({ anchor: anchorEl, tag: query })
     },
-    [router],
+    [],
   )
 
   const handleDownload = useCallback(async () => {
@@ -631,7 +638,7 @@ function EhGalleryDetail() {
                   {names.map((name) => (
                     <button
                       key={`${ns}:${name}`}
-                      onClick={() => handleTagClick(ns, name)}
+                      onClick={(e) => handleTagClick(ns, name, e.currentTarget)}
                       className={`text-xs px-2 py-1 rounded border transition-all cursor-pointer
                                   ${style.bg} ${style.border} ${style.text}
                                   hover:brightness-125 hover:scale-[1.02] active:scale-[0.98]`}
@@ -648,6 +655,14 @@ function EhGalleryDetail() {
               )
             })}
           </div>
+          {tagPopover && (
+            <TagSearchPopover
+              tag={tagPopover.tag}
+              gallerySource="ehentai"
+              anchorEl={tagPopover.anchor}
+              onClose={() => setTagPopover(null)}
+            />
+          )}
         </div>
 
         {/* ── Comments ── */}

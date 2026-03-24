@@ -992,9 +992,10 @@ function PixivPageInner() {
   // URL sync for search sub-filters (only when search is active)
   // search query is transient — not persisted to URL to keep it simple
 
-  // Search state
-  const [searchQuery, setSearchQuery] = useState('')
-  const [submittedQuery, setSubmittedQuery] = useState('')
+  // Search state — initialize from URL ?q= param (e.g., from tag click navigation)
+  const urlQ = searchParams.get('q') ?? ''
+  const [searchQuery, setSearchQuery] = useState(urlQ)
+  const [submittedQuery, setSubmittedQuery] = useState(urlQ)
   const searchInputRef = useRef<HTMLInputElement>(null)
 
   // Check credentials

@@ -4,8 +4,6 @@ import { useState, useCallback, Suspense, useEffect, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   BookOpen,
-  Plus,
-  Minus,
   X,
   ChevronDown,
   LayoutGrid,
@@ -15,7 +13,6 @@ import {
   HelpCircle,
 } from 'lucide-react'
 import {
-  useInfiniteLibraryGalleries,
   useGalleryCategories,
   useLibrarySources,
   useSearchGalleries,
@@ -24,7 +21,7 @@ import type { Gallery } from '@/lib/types'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { useCollections } from '@/hooks/useCollections'
-import { useLibraryFilters } from '@/hooks/useLibraryFilters'
+import { useUnifiedSearch } from '@/hooks/useUnifiedSearch'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { GalleryListCard } from '@/components/GalleryListCard'
 import { SkeletonGrid } from '@/components/Skeleton'
@@ -34,54 +31,61 @@ import { t, formatNumber } from '@/lib/i18n'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { useSWRConfig } from 'swr'
+import type { SearchGalleryItem } from '@/lib/api'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
+  { value: 'posted_at', label: () => t('library.datePosted') },
   { value: 'rating', label: () => t('library.rating') },
   { value: 'pages', label: () => t('library.pagesSort') },
+  { value: 'title', label: () => t('library.titleSort') },
 ] as const
 
 const PAGE_SIZE = 24
 
-function isAdvancedQuery(q: string): boolean {
-  if (!q) return false
-  return (
-    /(?:^|\s)(?:character|artist|parody|group|male|female|general|language|source|rating|favorited|title|sort):/.test(
-      q,
-    ) || /(?:^|\s)-\w+:/.test(q)
-  )
+function mapSearchItemToGallery(item: SearchGalleryItem): Gallery {
+  return {
+    id: item.id,
+    title: item.title,
+    title_jpn: item.title_jpn ?? '',
+    source: item.source,
+    source_id: item.source_id,
+    category: item.category ?? '',
+    language: item.language ?? '',
+    pages: item.pages,
+    rating: item.rating,
+    favorited: item.favorited,
+    is_favorited: item.is_favorited,
+    my_rating: item.my_rating,
+    in_reading_list: item.in_reading_list,
+    uploader: item.uploader ?? '',
+    artist_id: item.artist_id,
+    download_status: item.download_status as Gallery['download_status'],
+    added_at: item.added_at ?? '',
+    posted_at: item.posted_at,
+    tags_array: item.tags_array ?? item.tags,
+    cover_thumb: item.cover_thumb ?? null,
+    import_mode: item.import_mode,
+    source_url: item.source_url,
+  }
 }
 
 function LibraryContent() {
   const router = useRouter()
   const { mutate: globalMutate } = useSWRConfig()
-  const {
-    state,
-    dispatch,
-    parsedSource,
-    parsedImportMode,
-    handleSearchChange,
-    handleSearchCommit,
-  } = useLibraryFilters()
 
   const {
-    searchInput,
-    searchQuery,
-    includeTags,
-    excludeTags,
-    includeInput,
-    excludeInput,
-    minRating,
-    onlyFavorited,
-    inReadingList,
-    sourceFilter,
-    artistFilter,
-    sort,
-    collectionFilter,
-    categoryFilter,
+    rawQuery,
+    inputValue,
+    parsed,
+    setFilter,
+    commitSearch,
+    handleInputChange,
     selectMode,
+    setSelectMode,
     selectedIds,
-  } = state
+    setSelectedIds,
+  } = useUnifiedSearch()
 
   const { data: categoriesData } = useGalleryCategories()
   const { data: sourcesData } = useLibrarySources()
@@ -120,94 +124,23 @@ function LibraryContent() {
 
   const { data: collectionsData } = useCollections()
 
-  const handleSearchKeyDown = useCallback(
-    (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
-        handleSearchCommit(searchInput)
-      }
-    },
-    [searchInput, handleSearchCommit],
+  // Derive sort from parsed filters (default 'added_at')
+  const sortValue = parsed.sort ?? 'added_at'
+
+  // Derive combined source filter for the dropdown (source + import_mode → "local:link")
+  const combinedSource = parsed.source
+    ? parsed.importMode
+      ? `${parsed.source}:${parsed.importMode}`
+      : parsed.source
+    : ''
+
+  const { items: searchItems, total, isLoading, error, isReachingEnd, loadMore, mutate } =
+    useSearchGalleries(rawQuery || ' ', { sort: sortValue, limit: PAGE_SIZE })
+
+  const displayGalleries = useMemo<Gallery[]>(
+    () => (searchItems ? searchItems.map(mapSearchItemToGallery) : []),
+    [searchItems],
   )
-
-  const addIncludeTag = useCallback(() => {
-    dispatch({ type: 'ADD_INCLUDE_TAG', payload: includeInput })
-  }, [dispatch, includeInput])
-
-  const addExcludeTag = useCallback(() => {
-    dispatch({ type: 'ADD_EXCLUDE_TAG', payload: excludeInput })
-  }, [dispatch, excludeInput])
-
-  const removeIncludeTag = useCallback(
-    (tag: string) => dispatch({ type: 'REMOVE_INCLUDE_TAG', payload: tag }),
-    [dispatch],
-  )
-
-  const removeExcludeTag = useCallback(
-    (tag: string) => dispatch({ type: 'REMOVE_EXCLUDE_TAG', payload: tag }),
-    [dispatch],
-  )
-
-  const { galleries, total, isLoading, error, isLoadingMore, isReachingEnd, loadMore, mutate } =
-    useInfiniteLibraryGalleries({
-      q: searchQuery || undefined,
-      tags: includeTags.length > 0 ? includeTags : undefined,
-      exclude_tags: excludeTags.length > 0 ? excludeTags : undefined,
-      min_rating: minRating,
-      favorited: onlyFavorited || undefined,
-      in_reading_list: inReadingList || undefined,
-      source: parsedSource,
-      import_mode: parsedImportMode,
-      artist: artistFilter || undefined,
-      sort,
-      limit: PAGE_SIZE,
-      collection: collectionFilter,
-      category: categoryFilter || undefined,
-    })
-
-  // Advanced search: detect tag syntax in committed search query
-  const advancedSearch = isAdvancedQuery(searchQuery)
-  const {
-    items: searchItems,
-    isLoading: searchLoading,
-    isReachingEnd: searchEnd,
-    loadMore: searchLoadMore,
-    total: searchTotal,
-  } = useSearchGalleries(advancedSearch ? searchQuery || '' : '', { sort, limit: PAGE_SIZE })
-
-  const searchGalleries: Gallery[] = useMemo(() => {
-    if (!advancedSearch || !searchItems) return []
-    return searchItems.map((item) => ({
-      id: item.id,
-      title: item.title,
-      title_jpn: item.title_jpn ?? '',
-      source: item.source,
-      source_id: item.source_id,
-      category: item.category ?? '',
-      language: item.language ?? '',
-      pages: item.pages,
-      rating: item.rating,
-      favorited: item.favorited,
-      is_favorited: item.favorited,
-      my_rating: null,
-      uploader: item.uploader ?? '',
-      artist_id: null,
-      download_status: item.download_status as Gallery['download_status'],
-      added_at: item.added_at ?? '',
-      posted_at: item.posted_at,
-      tags_array: item.tags,
-      cover_thumb: null,
-      in_reading_list: false,
-      source_url: null,
-      import_mode: null,
-    }))
-  }, [advancedSearch, searchItems])
-
-  const displayGalleries = advancedSearch ? searchGalleries : galleries
-  const displayTotal = advancedSearch ? searchTotal : total
-  const displayLoading = advancedSearch ? searchLoading : isLoading
-  const displayLoadMore = advancedSearch ? searchLoadMore : loadMore
-  const displayReachingEnd = advancedSearch ? searchEnd : isReachingEnd
-  const displayLoadingMore = advancedSearch ? searchLoading : isLoadingMore
 
   const handleFavoriteToggle = useCallback(
     async (gallery: Gallery) => {
@@ -245,7 +178,9 @@ function LibraryContent() {
           in_reading_list: !g.in_reading_list,
         })
         globalMutate(
-          (key: unknown) => typeof key === 'string' && key.startsWith('library-galleries'),
+          (key: unknown) => Array.isArray(key) && key[0] === 'search/galleries',
+          undefined,
+          { revalidate: true },
         )
         toast.success(
           g.in_reading_list
@@ -274,6 +209,21 @@ function LibraryContent() {
       }
     },
   })
+
+  const toggleSelectedId = useCallback(
+    (id: number) => {
+      setSelectedIds((prev) => {
+        const next = new Set(prev)
+        if (next.has(id)) {
+          next.delete(id)
+        } else {
+          next.add(id)
+        }
+        return next
+      })
+    },
+    [setSelectedIds],
+  )
 
   return (
     <div>
@@ -306,9 +256,11 @@ function LibraryContent() {
                 <div className="flex items-center gap-2">
                   <input
                     type="text"
-                    value={searchInput}
-                    onChange={(e) => handleSearchChange(e.target.value)}
-                    onKeyDown={handleSearchKeyDown}
+                    value={inputValue}
+                    onChange={(e) => handleInputChange(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') commitSearch(inputValue)
+                    }}
                     placeholder={t('library.searchPlaceholder')}
                     className="flex-1 bg-vault-input border border-vault-border rounded-lg px-3 py-2 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
                   />
@@ -320,95 +272,23 @@ function LibraryContent() {
                     <HelpCircle size={16} />
                   </button>
                 </div>
-                {advancedSearch && searchQuery && (
-                  <p className="text-xs text-vault-accent mt-1">
-                    {t('library.advancedSearchActive')}
-                  </p>
-                )}
                 {syntaxHelpOpen && (
                   <div className="mt-2 p-3 bg-vault-input border border-vault-border rounded-lg text-xs text-vault-text-secondary space-y-1 font-mono">
                     <p>character:rem — {t('library.syntaxTagSearch')}</p>
+                    <p>rem — {t('library.syntaxNameOnly')}</p>
                     <p>-general:sketch — {t('library.syntaxExclude')}</p>
                     <p>title:&quot;re zero&quot; — {t('library.syntaxTitle')}</p>
                     <p>source:ehentai — {t('library.syntaxSource')}</p>
                     <p>rating:&gt;=4 — {t('library.syntaxRating')}</p>
                     <p>favorited:true — {t('library.syntaxFavorited')}</p>
                     <p>sort:rating — {t('library.syntaxSort')}</p>
+                    <p>collection:5 — {t('library.syntaxCollection')}</p>
+                    <p>artist_id:xxx — {t('library.syntaxArtistId')}</p>
+                    <p>category:doujinshi — {t('library.syntaxCategory')}</p>
+                    <p>import:link — {t('library.syntaxImportMode')}</p>
+                    <p>rl:true — {t('library.syntaxReadingList')}</p>
                   </div>
                 )}
-              </div>
-
-              {/* Tag Filters */}
-              <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                <div>
-                  <label className="block text-xs text-vault-text-muted uppercase tracking-wide mb-1">
-                    {t('library.includeTags')}
-                  </label>
-                  <div className="flex gap-1 mb-2">
-                    <input
-                      type="text"
-                      value={includeInput}
-                      onChange={(e) =>
-                        dispatch({ type: 'SET_INCLUDE_INPUT', payload: e.target.value })
-                      }
-                      onKeyDown={(e) => e.key === 'Enter' && addIncludeTag()}
-                      placeholder={t('library.tagFilterPlaceholder')}
-                      className="flex-1 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
-                    />
-                    <button
-                      onClick={addIncludeTag}
-                      className="p-1.5 bg-green-600 hover:bg-green-700 rounded text-white transition-colors"
-                    >
-                      <Plus size={14} />
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {includeTags.map((tag) => (
-                      <button
-                        key={tag}
-                        onClick={() => removeIncludeTag(tag)}
-                        className="flex items-center gap-1 px-2 py-0.5 bg-green-500/10 border border-green-500/30 text-green-400 rounded text-xs hover:bg-red-500/10 hover:border-red-500/30 hover:text-red-400 transition-colors"
-                      >
-                        {tag} <span className="text-xs">×</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
-
-                <div>
-                  <label className="block text-xs text-vault-text-muted uppercase tracking-wide mb-1">
-                    {t('library.excludeTags')}
-                  </label>
-                  <div className="flex gap-1 mb-2">
-                    <input
-                      type="text"
-                      value={excludeInput}
-                      onChange={(e) =>
-                        dispatch({ type: 'SET_EXCLUDE_INPUT', payload: e.target.value })
-                      }
-                      onKeyDown={(e) => e.key === 'Enter' && addExcludeTag()}
-                      placeholder={t('library.excludeTagPlaceholder')}
-                      className="flex-1 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-border-hover text-sm"
-                    />
-                    <button
-                      onClick={addExcludeTag}
-                      className="p-1.5 bg-red-600 hover:bg-red-700 rounded text-white transition-colors"
-                    >
-                      <Minus size={14} />
-                    </button>
-                  </div>
-                  <div className="flex flex-wrap gap-1">
-                    {excludeTags.map((tag) => (
-                      <button
-                        key={tag}
-                        onClick={() => removeExcludeTag(tag)}
-                        className="flex items-center gap-1 px-2 py-0.5 bg-red-500/10 border border-red-500/30 text-red-400 rounded text-xs hover:bg-green-500/10 hover:border-green-500/30 hover:text-green-400 transition-colors"
-                      >
-                        -{tag} <span className="text-xs">×</span>
-                      </button>
-                    ))}
-                  </div>
-                </div>
               </div>
 
               {/* Additional Filters */}
@@ -418,12 +298,9 @@ function LibraryContent() {
                     {t('library.minRating')}
                   </label>
                   <select
-                    value={minRating ?? ''}
+                    value={parsed.rating ?? ''}
                     onChange={(e) => {
-                      dispatch({
-                        type: 'SET_MIN_RATING',
-                        payload: e.target.value ? Number(e.target.value) : undefined,
-                      })
+                      setFilter('rating', e.target.value ? e.target.value : null)
                     }}
                     className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
                   >
@@ -441,9 +318,22 @@ function LibraryContent() {
                     {t('library.source')}
                   </label>
                   <select
-                    value={sourceFilter}
+                    value={combinedSource}
                     onChange={(e) => {
-                      dispatch({ type: 'SET_SOURCE_FILTER', payload: e.target.value })
+                      const val = e.target.value
+                      if (!val) {
+                        setFilter('source', null)
+                        setFilter('import', null)
+                      } else {
+                        const colonIdx = val.indexOf(':')
+                        if (colonIdx !== -1) {
+                          setFilter('source', val.slice(0, colonIdx))
+                          setFilter('import', val.slice(colonIdx + 1))
+                        } else {
+                          setFilter('source', val)
+                          setFilter('import', null)
+                        }
+                      }
                     }}
                     className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
                   >
@@ -466,9 +356,9 @@ function LibraryContent() {
                       {t('library.filterCategory')}
                     </label>
                     <select
-                      value={categoryFilter}
+                      value={parsed.category ?? ''}
                       onChange={(e) => {
-                        dispatch({ type: 'SET_CATEGORY', payload: e.target.value })
+                        setFilter('category', e.target.value || null)
                       }}
                       className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
                     >
@@ -491,12 +381,9 @@ function LibraryContent() {
                       {t('collections.filterByCollection')}
                     </label>
                     <select
-                      value={collectionFilter ?? ''}
+                      value={parsed.collection ?? ''}
                       onChange={(e) =>
-                        dispatch({
-                          type: 'SET_COLLECTION_FILTER',
-                          payload: e.target.value ? Number(e.target.value) : undefined,
-                        })
+                        setFilter('collection', e.target.value || null)
                       }
                       className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
                     >
@@ -515,9 +402,9 @@ function LibraryContent() {
                     {t('library.sort')}
                   </label>
                   <select
-                    value={sort}
+                    value={sortValue}
                     onChange={(e) => {
-                      dispatch({ type: 'SET_SORT', payload: e.target.value as typeof sort })
+                      setFilter('sort', e.target.value === 'added_at' ? null : e.target.value || null)
                     }}
                     className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text text-sm focus:outline-none"
                   >
@@ -532,9 +419,9 @@ function LibraryContent() {
                 <label className="flex items-center gap-2 cursor-pointer">
                   <input
                     type="checkbox"
-                    checked={onlyFavorited}
+                    checked={parsed.favorited}
                     onChange={(e) => {
-                      dispatch({ type: 'SET_ONLY_FAVORITED', payload: e.target.checked })
+                      setFilter('favorited', e.target.checked ? 'true' : null)
                     }}
                     className="w-4 h-4 accent-yellow-500"
                   />
@@ -546,9 +433,9 @@ function LibraryContent() {
                 <label className="flex items-center gap-2 text-sm text-vault-text-secondary cursor-pointer whitespace-nowrap">
                   <input
                     type="checkbox"
-                    checked={inReadingList}
+                    checked={parsed.readingList}
                     onChange={(e) =>
-                      dispatch({ type: 'SET_IN_READING_LIST', payload: e.target.checked })
+                      setFilter('rl', e.target.checked ? 'true' : null)
                     }
                     className="rounded border-vault-border"
                   />
@@ -557,8 +444,8 @@ function LibraryContent() {
 
                 <button
                   onClick={() => {
-                    dispatch({ type: 'SET_SELECT_MODE', payload: !selectMode })
-                    dispatch({ type: 'SET_SELECTED_IDS', payload: new Set() })
+                    setSelectMode(!selectMode)
+                    setSelectedIds(new Set())
                   }}
                   className={`px-3 py-1 rounded text-sm font-medium border transition-colors ${
                     selectMode
@@ -574,15 +461,15 @@ function LibraryContent() {
         </div>
       </div>
 
-      {artistFilter && (
+      {parsed.artistId && (
         <div className="flex items-center gap-2 mb-4">
           <span className="text-xs text-vault-text-muted uppercase tracking-wide">
             {t('library.artistFilter')}:
           </span>
           <span className="flex items-center gap-1 px-2 py-0.5 bg-vault-accent/10 border border-vault-accent/30 text-vault-accent rounded text-xs">
-            {artistFilter}
+            {parsed.artistId}
             <button
-              onClick={() => dispatch({ type: 'SET_ARTIST_FILTER', payload: '' })}
+              onClick={() => setFilter('artist_id', null)}
               className="ml-1 hover:text-red-400 transition-colors"
               aria-label={t('library.clearArtistFilter')}
             >
@@ -592,10 +479,10 @@ function LibraryContent() {
         </div>
       )}
 
-      {displayTotal !== undefined && (
+      {total !== undefined && (
         <div className="flex items-center justify-between mb-4">
           <span className="text-sm text-vault-text-muted">
-            {`${formatNumber(displayTotal)} ${t('library.galleries')}`}
+            {`${formatNumber(total)} ${t('library.galleries')}`}
           </span>
           {/* View mode toggle */}
           <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
@@ -617,7 +504,7 @@ function LibraryContent() {
         </div>
       )}
 
-      {displayLoading && <SkeletonGrid />}
+      {isLoading && <SkeletonGrid />}
 
       {error && (
         <div className="bg-red-500/10 border border-red-500/30 rounded-lg p-4 mb-4 text-red-400">
@@ -625,7 +512,7 @@ function LibraryContent() {
         </div>
       )}
 
-      {!displayLoading && displayGalleries.length > 0 && (
+      {!isLoading && displayGalleries.length > 0 && (
         <VirtualGrid
           items={displayGalleries}
           columns={
@@ -643,7 +530,7 @@ function LibraryContent() {
               return (
                 <div
                   onClick={() => {
-                    dispatch({ type: 'TOGGLE_SELECTED_ID', payload: gallery.id })
+                    toggleSelectedId(gallery.id)
                   }}
                   onContextMenu={(e) => e.preventDefault()}
                 >
@@ -673,13 +560,13 @@ function LibraryContent() {
               />
             )
           }}
-          onLoadMore={displayLoadMore}
-          hasMore={!displayReachingEnd}
-          isLoading={displayLoadingMore}
+          onLoadMore={loadMore}
+          hasMore={!isReachingEnd}
+          isLoading={isLoading}
         />
       )}
 
-      {!displayLoading && displayGalleries.length === 0 && !error && (
+      {!isLoading && displayGalleries.length === 0 && !error && (
         <EmptyState icon={BookOpen} title={t('library.noGalleries')} />
       )}
 
@@ -691,17 +578,14 @@ function LibraryContent() {
             </span>
             <button
               onClick={() =>
-                dispatch({
-                  type: 'SET_SELECTED_IDS',
-                  payload: new Set(displayGalleries.map((g) => g.id)),
-                })
+                setSelectedIds(new Set(displayGalleries.map((g) => g.id)))
               }
               className="text-xs text-vault-accent hover:underline"
             >
               {t('library.selectAll')}
             </button>
             <button
-              onClick={() => dispatch({ type: 'SET_SELECTED_IDS', payload: new Set() })}
+              onClick={() => setSelectedIds(new Set())}
               className="text-xs text-vault-text-muted hover:underline"
             >
               {t('library.deselectAll')}
@@ -751,7 +635,8 @@ function LibraryContent() {
                   })
                   toast.success(t('library.batchSuccess', { count: String(res.affected) }))
                   globalMutate(() => true)
-                  dispatch({ type: 'CLEAR_SELECTION' })
+                  setSelectedIds(new Set())
+                  setSelectMode(false)
                 } catch {
                   toast.error(t('library.updateFailed'))
                 }
@@ -770,7 +655,8 @@ function LibraryContent() {
                   })
                   toast.success(t('library.batchSuccess', { count: String(res.affected) }))
                   globalMutate(() => true)
-                  dispatch({ type: 'CLEAR_SELECTION' })
+                  setSelectedIds(new Set())
+                  setSelectMode(false)
                 } catch {
                   toast.error(t('library.updateFailed'))
                 }
@@ -824,7 +710,8 @@ function LibraryContent() {
                     toast.success(
                       t('collections.addedToCollection', { count: String(res.affected) }),
                     )
-                    dispatch({ type: 'CLEAR_SELECTION' })
+                    setSelectedIds(new Set())
+                    setSelectMode(false)
                   } catch {
                     toast.error(t('collections.addFailed'))
                   }
@@ -867,7 +754,7 @@ function LibraryContent() {
                 if (!confirm(t('library.batchDeleteConfirm', { count: String(selectedIds.size) })))
                   return
                 try {
-                  const res = await api.library.batchGalleries({
+                  await api.library.batchGalleries({
                     action: 'delete',
                     gallery_ids: [...selectedIds],
                   })
@@ -882,7 +769,10 @@ function LibraryContent() {
               {t('library.batchDelete')}
             </button>
             <button
-              onClick={() => dispatch({ type: 'CLEAR_SELECTION' })}
+              onClick={() => {
+                setSelectMode(false)
+                setSelectedIds(new Set())
+              }}
               className="px-3 py-1.5 text-vault-text-muted hover:text-vault-text text-sm transition-colors"
             >
               {t('common.cancel')}

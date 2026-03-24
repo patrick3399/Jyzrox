@@ -1622,6 +1622,13 @@ export type SearchGalleryItem = {
   pages: number
   rating: number
   favorited: boolean
+  is_favorited: boolean
+  my_rating: number | null
+  in_reading_list: boolean
+  artist_id: string | null
+  import_mode: string | null
+  source_url: string | null
+  tags_array: string[]
   uploader: string | null
   download_status: string
   added_at: string | null

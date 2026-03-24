@@ -99,6 +99,7 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `/api/logs` | `routers/logs.py` | Admin | Log viewer: entries, level control, retention settings |
 | `/api/admin/sites` | `routers/site_config.py` | Admin | Per-site download config: list, get, update overrides, reset field, reset adaptive, probe URL (gallery-dl --dump-json analysis with SSRF protection), save field mappings |
 | `/api/admin/gallery-dl` | `routers/gallery_dl_admin.py` | Admin | Gallery-dl venv: version, upgrade, rollback |
+| `/api/admin/queue` | `routers/queue_admin.py` | Admin | SAQ queue dashboard: overview (counts + workers), job list with status/function filter, job detail, retry, abort |
 | `/api/health` | `main.py` inline | Public | Liveness probe |
 
 ---
@@ -160,6 +161,10 @@ Middlewares: `CORSMiddleware`, `CSRFMiddleware`, `RateLimitMiddleware`
 | `idx_galleries_deleted_at` | `galleries` | BTree (partial) | Soft-delete query: `WHERE deleted_at IS NOT NULL` |
 | `idx_uif_image` | `user_image_favorites` | BTree | Image favorite lookup |
 | `idx_subscriptions_group` | `subscriptions` | BTree | Group-based subscription lookup |
+| `idx_images_gallery_added_at_id` | `images` | BTree | Composite: `(gallery_id, added_at DESC, id DESC)` for per-gallery image browsing |
+| `idx_galleries_live_added_at_id` | `galleries` | BTree (partial) | `WHERE deleted_at IS NULL` — admin gallery listing |
+| `idx_galleries_public_added_at_id` | `galleries` | BTree (partial) | `WHERE deleted_at IS NULL AND visibility = 'public'` — public gallery listing |
+| `idx_galleries_owner_added_at_id` | `galleries` | BTree (partial) | `WHERE deleted_at IS NULL AND created_by_user_id IS NOT NULL` — owner-scoped listing |
 
 ---
 
@@ -740,6 +745,7 @@ Source root: `pwa/src/`
 | `/admin/users` | `app/admin/users/page.tsx` | User management (admin only) |
 | `/admin/sites` | `app/admin/sites/page.tsx` | Site config builder (admin only) — category-grouped site list, slide-out editor (download settings + field mapping), probe dialog with auto-detection |
 | `/admin/dashboard` | `app/admin/dashboard/page.tsx` | Live download dashboard (admin only) — global status bar, per-site semaphore/speed/delay table, active jobs with STALLING detection, queued jobs with wait reasons |
+| `/admin/queue` | `app/admin/queue/page.tsx` | SAQ queue dashboard (admin only) — queue stats, worker table, job list with status/function filter, expandable job detail, retry/abort actions |
 | `/artists/[artistId]` | `app/artists/[artistId]/page.tsx` | Individual artist detail page |
 | `/reader/artist/[artistId]` | `app/reader/artist/[artistId]/page.tsx` | Artist gallery reader |
 | `/reader/pixiv/[id]` | `app/reader/pixiv/[id]/page.tsx` | Pixiv online reader |
@@ -861,6 +867,7 @@ Single `apiFetch` base function with automatic 401 redirect and CSRF header inje
 | `users` | User list, create, update, delete |
 | `logs` | Log entries list/clear, log level get/set, retention get/set |
 | `adminSites` | Site config list/get/update, probe URL, field mapping, reset field, reset adaptive |
+| `adminQueue` | SAQ queue overview, job list/detail, retry job, abort job |
 
 #### Image Browser Endpoint
 

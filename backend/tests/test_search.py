@@ -18,7 +18,6 @@ reads through the patched async_session.
 
 import json
 
-import pytest
 from sqlalchemy import text
 
 
@@ -735,3 +734,590 @@ class TestCursorPagination:
         data = resp.json()
         assert data["has_next"] is False
         assert data["next_cursor"] is None
+
+
+# ---------------------------------------------------------------------------
+# New search features — name-only tags, collection, artist_id, category,
+# import mode, reading list, enriched response, signed cursor
+# ---------------------------------------------------------------------------
+
+
+class TestSearchNameOnlyTag:
+    """Search with a bare tag name (no namespace prefix) matches all namespaces."""
+
+    async def test_search_name_only_tag_matches_across_namespaces(self, client, db_session):
+        """Bare 'rem' should match galleries tagged female:rem AND character:rem.
+
+        The name-only path performs a Tags table lookup then builds an ARRAY
+        overlap filter — which requires PostgreSQL.  On SQLite we accept 500
+        alongside 200 (same policy as blocked_tags and alias tests).
+        """
+        # Insert tags in two different namespaces with the same name
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO tags (namespace, name, count) VALUES ('female', 'rem', 1)")
+        )
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO tags (namespace, name, count) VALUES ('character', 'rem', 1)")
+        )
+        await db_session.commit()
+
+        await _insert_gallery(
+            db_session,
+            source="ns_test",
+            source_id="ns1",
+            title="Female Rem Gallery",
+            tags_array='["female:rem"]',
+        )
+        await _insert_gallery(
+            db_session,
+            source="ns_test",
+            source_id="ns2",
+            title="Character Rem Gallery",
+            tags_array='["character:rem"]',
+        )
+        await _insert_gallery(
+            db_session,
+            source="ns_test",
+            source_id="ns3",
+            title="Unrelated Gallery",
+            tags_array='["general:blue_hair"]',
+        )
+
+        resp = await client.get("/api/search/", params={"q": "rem source:ns_test"})
+        # PostgreSQL ARRAY operators work; SQLite returns 500
+        assert resp.status_code in (200, 500)
+        if resp.status_code == 200:
+            titles = {item["title"] for item in resp.json()["items"]}
+            assert "Female Rem Gallery" in titles
+            assert "Character Rem Gallery" in titles
+            assert "Unrelated Gallery" not in titles
+
+    async def test_search_namespaced_tag_matches_only_exact_namespace(self, client, db_session):
+        """'female:rem' should NOT match the gallery tagged only with 'character:rem'.
+
+        Uses the namespaced tag path (alias expansion), which also relies on
+        ARRAY operators — accept 200 or 500 on SQLite.
+        """
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO tags (namespace, name, count) VALUES ('female', 'rem', 1)")
+        )
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO tags (namespace, name, count) VALUES ('character', 'rem', 1)")
+        )
+        await db_session.commit()
+
+        await _insert_gallery(
+            db_session,
+            source="ns_exact",
+            source_id="ne1",
+            title="Female Rem",
+            tags_array='["female:rem"]',
+        )
+        await _insert_gallery(
+            db_session,
+            source="ns_exact",
+            source_id="ne2",
+            title="Character Rem",
+            tags_array='["character:rem"]',
+        )
+
+        resp = await client.get("/api/search/", params={"q": "female:rem source:ns_exact"})
+        assert resp.status_code in (200, 500)
+        if resp.status_code == 200:
+            titles = [item["title"] for item in resp.json()["items"]]
+            assert "Female Rem" in titles
+            assert "Character Rem" not in titles
+
+
+class TestSearchCollectionFilter:
+    """collection:N returns only galleries belonging to that collection."""
+
+    async def test_search_collection_filter_returns_only_member_gallery(self, client, db_session):
+        """Searching collection:<id> returns only galleries in that collection."""
+        await _insert_user(db_session, user_id=1)
+
+        # Insert two galleries
+        gid_in = await _insert_gallery(db_session, source_id="col_in", title="In Collection")
+        gid_out = await _insert_gallery(db_session, source_id="col_out", title="Not In Collection")
+
+        # Create a collection owned by user 1
+        await db_session.execute(
+            text(
+                "INSERT INTO collections (user_id, name) VALUES (1, 'Test Collection')"
+            )
+        )
+        await db_session.commit()
+        col_id = (
+            await db_session.execute(text("SELECT last_insert_rowid()"))
+        ).scalar()
+
+        # Add only the first gallery to the collection
+        await db_session.execute(
+            text(
+                "INSERT INTO collection_galleries (collection_id, gallery_id) "
+                "VALUES (:cid, :gid)"
+            ),
+            {"cid": col_id, "gid": gid_in},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/search/", params={"q": f"collection:{col_id}"})
+        assert resp.status_code == 200
+        data = resp.json()
+        ids = {item["id"] for item in data["items"]}
+        assert gid_in in ids
+        assert gid_out not in ids
+
+    async def test_search_collection_filter_empty_collection_returns_zero(self, client, db_session):
+        """collection:<id> with no member galleries should return zero results."""
+        await _insert_user(db_session, user_id=1)
+        await _insert_gallery(db_session, source_id="col_none", title="Random Gallery")
+
+        # Collection with no galleries
+        await db_session.execute(
+            text("INSERT INTO collections (user_id, name) VALUES (1, 'Empty Collection')")
+        )
+        await db_session.commit()
+        empty_col_id = (
+            await db_session.execute(text("SELECT last_insert_rowid()"))
+        ).scalar()
+
+        resp = await client.get("/api/search/", params={"q": f"collection:{empty_col_id}"})
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+
+class TestSearchArtistIdFilter:
+    """artist_id:X returns only galleries with that artist_id."""
+
+    async def test_search_artist_id_filter_matches_correct_gallery(self, client, db_session):
+        """artist_id:<value> returns only galleries with that exact artist_id."""
+        # Use raw SQL to set artist_id (not part of _insert_gallery's fixed column list)
+        for sid, title, artist in [
+            ("art1", "Artist A Gallery", "pixiv_111"),
+            ("art2", "Artist B Gallery", "pixiv_222"),
+        ]:
+            await db_session.execute(
+                text(
+                    "INSERT INTO galleries "
+                    "(source, source_id, title, category, language, pages, rating, "
+                    "favorited, download_status, tags_array, artist_id) "
+                    "VALUES ('artist_test', :sid, :title, 'doujinshi', 'english', "
+                    "10, 0, 0, 'completed', '[]', :artist)"
+                ),
+                {"sid": sid, "title": title, "artist": artist},
+            )
+        await _insert_gallery(
+            db_session, source="artist_test", source_id="art3", title="No Artist Gallery"
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/search/", params={"q": "artist_id:pixiv_111 source:artist_test"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["title"] == "Artist A Gallery"
+        assert data["items"][0]["artist_id"] == "pixiv_111"
+
+    async def test_search_artist_id_filter_no_match_returns_zero(self, client, db_session):
+        """artist_id:<nonexistent> should return zero results."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, artist_id) "
+                "VALUES ('artist_nomatch', 'anm1', 'Some Gallery', 'doujinshi', "
+                "'english', 10, 0, 0, 'completed', '[]', 'pixiv_999')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get(
+            "/api/search/", params={"q": "artist_id:nonexistent source:artist_nomatch"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+
+class TestSearchCategoryFilter:
+    """category:X and category:__uncategorized__ filter by gallery category."""
+
+    async def test_search_category_filter_matches_named_category(self, client, db_session):
+        """category:doujinshi returns only galleries with category='doujinshi'."""
+        await _insert_gallery(
+            db_session,
+            source="cat_test",
+            source_id="cat1",
+            title="Doujinshi Gallery",
+            category="doujinshi",
+        )
+        await _insert_gallery(
+            db_session,
+            source="cat_test",
+            source_id="cat2",
+            title="Manga Gallery",
+            category="manga",
+        )
+
+        resp = await client.get(
+            "/api/search/", params={"q": "category:doujinshi source:cat_test"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["title"] == "Doujinshi Gallery"
+
+    async def test_search_category_filter_uncategorized_matches_null_category(self, client, db_session):
+        """category:__uncategorized__ returns galleries with NULL or empty category."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array) "
+                "VALUES ('cat_null_test', 'cn1', 'No Category Gallery', NULL, "
+                "'english', 10, 0, 0, 'completed', '[]')"
+            )
+        )
+        await _insert_gallery(
+            db_session,
+            source="cat_null_test",
+            source_id="cn2",
+            title="Has Category Gallery",
+            category="artbook",
+        )
+        await db_session.commit()
+
+        resp = await client.get(
+            "/api/search/", params={"q": "category:__uncategorized__ source:cat_null_test"}
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["title"] == "No Category Gallery"
+
+    async def test_search_category_filter_uncategorized_does_not_match_named(self, client, db_session):
+        """category:__uncategorized__ must not return galleries with a non-null category."""
+        await _insert_gallery(
+            db_session,
+            source="cat_excl_test",
+            source_id="ce1",
+            title="Categorized Gallery",
+            category="doujinshi",
+        )
+
+        resp = await client.get(
+            "/api/search/", params={"q": "category:__uncategorized__ source:cat_excl_test"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+
+class TestSearchImportModeFilter:
+    """import:<mode> returns only galleries with that import_mode."""
+
+    async def test_search_import_mode_filter_matches_link_mode(self, client, db_session):
+        """import:link returns only galleries with import_mode='link'."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, import_mode) "
+                "VALUES ('import_test', 'im1', 'Link Gallery', 'doujinshi', "
+                "'english', 10, 0, 0, 'completed', '[]', 'link')"
+            )
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, import_mode) "
+                "VALUES ('import_test', 'im2', 'Manual Gallery', 'doujinshi', "
+                "'english', 10, 0, 0, 'completed', '[]', 'manual')"
+            )
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, import_mode) "
+                "VALUES ('import_test', 'im3', 'No Import Mode Gallery', 'doujinshi', "
+                "'english', 10, 0, 0, 'completed', '[]', NULL)"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/search/", params={"q": "import:link source:import_test"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["title"] == "Link Gallery"
+        assert data["items"][0]["import_mode"] == "link"
+
+    async def test_search_import_mode_filter_does_not_match_other_modes(self, client, db_session):
+        """import:download should not return galleries with import_mode='link'."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, import_mode) "
+                "VALUES ('import_excl', 'iex1', 'Link Only Gallery', 'doujinshi', "
+                "'english', 10, 0, 0, 'completed', '[]', 'link')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get(
+            "/api/search/", params={"q": "import:download source:import_excl"}
+        )
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+
+class TestSearchReadingListFilter:
+    """rl:true returns only galleries in the current user's reading list."""
+
+    async def test_search_reading_list_filter_returns_only_rl_gallery(self, client, db_session):
+        """rl:true returns only galleries in the user's reading list."""
+        await _insert_user(db_session, user_id=1)
+        rl_gid = await _insert_gallery(db_session, source_id="rl_in", title="In Reading List")
+        await _insert_gallery(db_session, source_id="rl_out", title="Not In Reading List")
+
+        await db_session.execute(
+            text(
+                "INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"
+            ),
+            {"gid": rl_gid},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/search/", params={"q": "rl:true"})
+        assert resp.status_code == 200
+        data = resp.json()
+        ids = {item["id"] for item in data["items"]}
+        assert rl_gid in ids
+        # The gallery not in the reading list must not appear
+        for item in data["items"]:
+            assert item["in_reading_list"] is True
+
+    async def test_search_reading_list_filter_empty_rl_returns_zero(self, client, db_session):
+        """rl:true with an empty reading list should return zero results."""
+        await _insert_user(db_session, user_id=1)
+        await _insert_gallery(db_session, source_id="rl_none", title="Random Gallery")
+
+        resp = await client.get("/api/search/", params={"q": "rl:true"})
+        assert resp.status_code == 200
+        assert resp.json()["total"] == 0
+
+
+class TestSearchEnrichedResponse:
+    """Search response includes per-user enrichment fields."""
+
+    async def test_search_enriched_response_includes_all_user_fields(self, client, db_session):
+        """Search result item must carry is_favorited, my_rating, in_reading_list,
+        tags_array, source_url, artist_id, import_mode, and cover_thumb fields."""
+        await _insert_user(db_session, user_id=1)
+
+        # Insert gallery with extra fields via raw SQL to set source_url, artist_id, import_mode
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, source_url, artist_id, import_mode) "
+                "VALUES ('enrich_src', 'enr1', 'Enriched Gallery', 'doujinshi', "
+                "'english', 20, 3, 0, 'completed', '[\"general:test\"]', "
+                "'https://example.com/g/1', 'pixiv_enr', 'download')"
+            )
+        )
+        await db_session.commit()
+
+        gid = (
+            await db_session.execute(
+                text("SELECT id FROM galleries WHERE source_id='enr1'")
+            )
+        ).scalar()
+
+        # Add to favorites
+        await db_session.execute(
+            text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, :gid)"),
+            {"gid": gid},
+        )
+        # Add per-user rating
+        await db_session.execute(
+            text(
+                "INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 4)"
+            ),
+            {"gid": gid},
+        )
+        # Add to reading list
+        await db_session.execute(
+            text(
+                "INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"
+            ),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/search/", params={"q": "source:enrich_src"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+
+        item = data["items"][0]
+        # Per-user enrichment
+        assert item["is_favorited"] is True
+        assert item["my_rating"] == 4
+        assert item["in_reading_list"] is True
+        # Metadata fields
+        assert item["source_url"] == "https://example.com/g/1"
+        assert item["artist_id"] == "pixiv_enr"
+        assert item["import_mode"] == "download"
+        # Tags array must be present and be a list
+        assert isinstance(item["tags_array"], list)
+        # cover_thumb key must exist (None when no images exist)
+        assert "cover_thumb" in item
+
+    async def test_search_enriched_response_non_favorited_gallery(self, client, db_session):
+        """Gallery not favorited / rated / in RL must have is_favorited=False,
+        my_rating=None, in_reading_list=False."""
+        await _insert_user(db_session, user_id=1)
+        await _insert_gallery(
+            db_session, source="plain_enrich", source_id="pe1", title="Plain Gallery"
+        )
+
+        resp = await client.get("/api/search/", params={"q": "source:plain_enrich"})
+        assert resp.status_code == 200
+        item = resp.json()["items"][0]
+        assert item["is_favorited"] is False
+        assert item["my_rating"] is None
+        assert item["in_reading_list"] is False
+
+
+class TestSearchSignedCursor:
+    """Cursor returned by search endpoint is HMAC-signed and tamper-resistant."""
+
+    async def test_search_signed_cursor_contains_dot_separator(self, client, db_session):
+        """next_cursor returned by search must contain a '.' (base64.hmac format)."""
+        for i in range(3):
+            await _insert_gallery(
+                db_session,
+                source="signed_cur_src",
+                source_id=f"sc{i}",
+                title=f"Signed Cursor Gallery {i}",
+            )
+
+        # Use a legacy (unsigned) bootstrap cursor to get the first real page
+        start_cursor = _make_cursor(
+            gallery_id=999999999,
+            sort_value="2099-12-31T00:00:00",
+            sort_key="added_at",
+        )
+        resp = await client.get(
+            "/api/search/",
+            params={"q": "source:signed_cur_src", "limit": 1, "cursor": start_cursor},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["has_next"] is True
+        next_cursor = data["next_cursor"]
+        assert next_cursor is not None
+        # Signed cursor must contain exactly one dot separating payload and signature
+        assert "." in next_cursor
+        # The part after the last dot must look like a hex string (64 chars)
+        sig_part = next_cursor.rpartition(".")[2]
+        assert len(sig_part) == 64
+        assert all(c in "0123456789abcdef" for c in sig_part)
+
+    async def test_search_signed_cursor_can_fetch_next_page(self, client, db_session):
+        """A signed next_cursor returned by page N can be used to retrieve page N+1."""
+        # Use explicit distinct timestamps (ISO T-format) so the keyset cursor works
+        # correctly on SQLite, which stores DEFAULT CURRENT_TIMESTAMP with a space
+        # separator but isoformat() produces a T separator.
+        timestamps = [
+            "2024-06-04T00:00:00",
+            "2024-06-03T00:00:00",
+            "2024-06-02T00:00:00",
+            "2024-06-01T00:00:00",
+        ]
+        for i, ts in enumerate(timestamps):
+            await db_session.execute(
+                text(
+                    "INSERT INTO galleries "
+                    "(source, source_id, title, category, language, pages, rating, "
+                    "favorited, download_status, tags_array, added_at) "
+                    "VALUES ('signed_page_src', :sid, :title, 'doujinshi', 'english', "
+                    "10, 0, 0, 'completed', '[]', :added_at)"
+                ),
+                {"sid": f"sp{i}", "title": f"Signed Page Gallery {i}", "added_at": ts},
+            )
+        await db_session.commit()
+
+        start_cursor = _make_cursor(
+            gallery_id=999999999,
+            sort_value="2099-12-31T00:00:00",
+            sort_key="added_at",
+        )
+        # Fetch first page (limit=2, should have 2 more → has_next=True)
+        resp1 = await client.get(
+            "/api/search/",
+            params={"q": "source:signed_page_src", "limit": 2, "cursor": start_cursor},
+        )
+        assert resp1.status_code == 200
+        data1 = resp1.json()
+        assert data1["has_next"] is True
+        assert len(data1["items"]) == 2
+        first_ids = {item["id"] for item in data1["items"]}
+
+        # Fetch second page using the signed cursor
+        resp2 = await client.get(
+            "/api/search/",
+            params={
+                "q": "source:signed_page_src",
+                "limit": 2,
+                "cursor": data1["next_cursor"],
+            },
+        )
+        assert resp2.status_code == 200
+        data2 = resp2.json()
+        assert len(data2["items"]) >= 1
+        second_ids = {item["id"] for item in data2["items"]}
+        # Pages must not overlap
+        assert first_ids.isdisjoint(second_ids)
+
+    async def test_search_tampered_cursor_signature_rejected_with_400(self, client, db_session):
+        """A signed cursor with a modified signature byte must be rejected with 400."""
+        for i in range(3):
+            await _insert_gallery(
+                db_session,
+                source="tamper_src",
+                source_id=f"tam{i}",
+                title=f"Tamper Test Gallery {i}",
+            )
+
+        start_cursor = _make_cursor(
+            gallery_id=999999999,
+            sort_value="2099-12-31T00:00:00",
+            sort_key="added_at",
+        )
+        resp = await client.get(
+            "/api/search/",
+            params={"q": "source:tamper_src", "limit": 1, "cursor": start_cursor},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["has_next"] is True
+        valid_cursor = data["next_cursor"]
+        assert "." in valid_cursor
+
+        # Tamper: flip the last character of the HMAC signature
+        payload_part, _, sig_part = valid_cursor.rpartition(".")
+        # Replace last hex char with a different one
+        last_char = sig_part[-1]
+        replacement = "0" if last_char != "0" else "1"
+        tampered_cursor = f"{payload_part}.{sig_part[:-1]}{replacement}"
+
+        resp_tampered = await client.get(
+            "/api/search/",
+            params={"q": "source:tamper_src", "limit": 1, "cursor": tampered_cursor},
+        )
+        assert resp_tampered.status_code == 400
+        assert "cursor" in resp_tampered.json()["detail"].lower()

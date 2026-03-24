@@ -24,6 +24,13 @@ from sqlalchemy.sql import text as sql_text
 from core.auth import gallery_access_filter, require_auth, require_role
 from core.config import settings
 from core.database import get_db
+from core.gallery_helpers import (
+    build_cover_map,
+    get_blocked_tag_strings,
+    get_favorite_set,
+    get_rating_map,
+    get_reading_list_set,
+)
 from core.redis_client import get_redis
 from core.source_display import get_display_config
 from db.models import (
@@ -116,30 +123,9 @@ def _decode_cursor(cursor: str) -> dict:
 # ── Gallery list ─────────────────────────────────────────────────────
 
 
-async def _get_favorite_set(db: AsyncSession, user_id: int, gallery_ids: list[int]) -> set[int]:
-    """Return set of gallery_ids that are favorited by this user."""
-    if not gallery_ids:
-        return set()
-    result = await db.execute(
-        select(UserFavorite.gallery_id).where(
-            UserFavorite.user_id == user_id,
-            UserFavorite.gallery_id.in_(gallery_ids),
-        )
-    )
-    return {row[0] for row in result}
-
-
-async def _get_reading_list_set(db: AsyncSession, user_id: int, gallery_ids: list[int]) -> set[int]:
-    """Return set of gallery_ids that are in this user's reading list."""
-    if not gallery_ids:
-        return set()
-    result = await db.execute(
-        select(UserReadingList.gallery_id).where(
-            UserReadingList.user_id == user_id,
-            UserReadingList.gallery_id.in_(gallery_ids),
-        )
-    )
-    return {row[0] for row in result}
+# Backward-compat aliases — functions now live in core.gallery_helpers
+_get_favorite_set = get_favorite_set
+_get_reading_list_set = get_reading_list_set
 
 
 async def _get_image_favorite_set(db: AsyncSession, user_id: int, image_ids: list[int]) -> set[int]:
@@ -155,85 +141,9 @@ async def _get_image_favorite_set(db: AsyncSession, user_id: int, image_ids: lis
     return {row[0] for row in result}
 
 
-async def _get_rating_map(db: AsyncSession, user_id: int, gallery_ids: list[int]) -> dict[int, int]:
-    """Return {gallery_id: rating} for this user."""
-    if not gallery_ids:
-        return {}
-    result = await db.execute(
-        select(UserRating.gallery_id, UserRating.rating).where(
-            UserRating.user_id == user_id,
-            UserRating.gallery_id.in_(gallery_ids),
-        )
-    )
-    return {row[0]: row[1] for row in result}
-
-
-async def _get_blocked_tag_strings(db: AsyncSession, user_id: int) -> list[str]:
-    """Return list of 'namespace:name' blocked tag strings for the user."""
-    rows = (await db.execute(select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == user_id))).all()
-    return [f"{r.namespace}:{r.name}" for r in rows]
-
-
-async def _build_cover_map(
-    db: AsyncSession,
-    gallery_ids: list[int],
-    source_map: dict[int, str] | None = None,
-) -> dict[int, str]:
-    """Build gallery_id -> cover_thumb_url map, respecting per-source cover_page config.
-
-    Args:
-        db: Database session.
-        gallery_ids: Gallery IDs to fetch covers for.
-        source_map: Optional {gallery_id: source} mapping. If None, all use page_num=1.
-    """
-    if not gallery_ids:
-        return {}
-
-    # Split galleries by cover strategy
-    first_ids: list[int] = []
-    last_ids: list[int] = []
-    for gid in gallery_ids:
-        source = (source_map or {}).get(gid, "")
-        cfg = get_display_config(source)
-        if cfg.cover_page == "last":
-            last_ids.append(gid)
-        else:
-            first_ids.append(gid)
-
-    cover_map: dict[int, str] = {}
-
-    # Batch query: first page covers
-    if first_ids:
-        stmt = (
-            select(Image.gallery_id, Blob.sha256)
-            .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .where(Image.gallery_id.in_(first_ids), Image.page_num == 1)
-        )
-        for r in (await db.execute(stmt)).all():
-            cover_map[r.gallery_id] = cas_thumb_url(r.sha256)
-
-    # Batch query: last page covers
-    if last_ids:
-        max_page_sub = (
-            select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
-            .where(Image.gallery_id.in_(last_ids))
-            .group_by(Image.gallery_id)
-        ).subquery()
-        stmt = (
-            select(Image.gallery_id, Blob.sha256)
-            .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .join(
-                max_page_sub,
-                and_(
-                    Image.gallery_id == max_page_sub.c.gallery_id,
-                    Image.page_num == max_page_sub.c.max_page,
-                ),
-            )
-        )
-        for r in (await db.execute(stmt)).all():
-            cover_map[r.gallery_id] = cas_thumb_url(r.sha256)
-
-    return cover_map
+_get_rating_map = get_rating_map
+_get_blocked_tag_strings = get_blocked_tag_strings
+_build_cover_map = build_cover_map
 
 
 async def _single_cover_thumb(db: AsyncSession, gallery_id: int, source: str) -> str | None:

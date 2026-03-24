@@ -18,6 +18,7 @@ import { BackButton } from '@/components/BackButton'
 import { TagAutocomplete } from '@/components/TagAutocomplete'
 import { Pencil, Heart, Bookmark, BookmarkCheck } from 'lucide-react'
 import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
+import { TagSearchPopover } from '@/components/TagSearchPopover'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
   character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
@@ -114,6 +115,11 @@ export default function GalleryDetailPage() {
   >([])
   const [confidenceThreshold, setConfidenceThreshold] = useState(0.35)
   const [editingTags, setEditingTags] = useState(false)
+  const [tagPopover, setTagPopover] = useState<{
+    anchor: HTMLElement
+    tag: string
+    source: string
+  } | null>(null)
 
   // Image multi-select & exclusion state
   const [selectMode, setSelectMode] = useState(false)
@@ -921,14 +927,49 @@ export default function GalleryDetailPage() {
                     return (
                       <span
                         key={value}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs ${getTagColor(fullTag)}`}
+                        role="button"
+                        tabIndex={0}
+                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs cursor-pointer hover:brightness-125 ${getTagColor(fullTag)}`}
                         title={translation ? `${namespace}:${value}` : undefined}
+                        onClick={(e) => {
+                          if (editingTags) return
+                          const src = gallery?.source ?? ''
+                          if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
+                            const bare = fullTag.includes(':')
+                              ? fullTag.split(':').slice(1).join(':')
+                              : fullTag
+                            router.push(`/library?q=${encodeURIComponent(bare)}`)
+                          } else {
+                            setTagPopover({ anchor: e.currentTarget, tag: fullTag, source: src })
+                          }
+                        }}
+                        onKeyDown={(e) => {
+                          if (e.key === 'Enter' || e.key === ' ') {
+                            e.preventDefault()
+                            const src = gallery?.source ?? ''
+                            if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
+                              const bare = fullTag.includes(':')
+                                ? fullTag.split(':').slice(1).join(':')
+                                : fullTag
+                              router.push(`/library?q=${encodeURIComponent(bare)}`)
+                            } else {
+                              setTagPopover({
+                                anchor: e.currentTarget,
+                                tag: fullTag,
+                                source: src,
+                              })
+                            }
+                          }
+                        }}
                       >
                         {translation || value}
                         {editingTags && isManual && (
                           <button
                             type="button"
-                            onClick={() => handleUpdateTag(fullTag, 'remove')}
+                            onClick={(e) => {
+                              e.stopPropagation()
+                              handleUpdateTag(fullTag, 'remove')
+                            }}
                             className="ml-0.5 opacity-60 hover:opacity-100 leading-none"
                             aria-label={t('common.removeTag', { tag: fullTag })}
                           >
@@ -967,26 +1008,63 @@ export default function GalleryDetailPage() {
             </div>
             {aiTags.length > 0 ? (
               <div className="flex flex-wrap gap-1">
-                {aiTags.map((tag) => (
-                  <span
-                    key={`${tag.namespace}:${tag.name}`}
-                    className="inline-flex items-center gap-1 px-2 py-0.5 rounded border bg-purple-900/30 border-purple-700/40 text-purple-300 text-xs"
-                    title={`${Math.round(tag.confidence * 100)}% confidence`}
-                  >
-                    {tag.namespace !== 'general' && (
-                      <span className="text-purple-400/60">{tag.namespace}:</span>
-                    )}
-                    {tag.name}
-                    <span className="text-purple-400/50 text-[10px]">
-                      {Math.round(tag.confidence * 100)}%
+                {aiTags.map((tag) => {
+                  const aiFullTag =
+                    tag.namespace === 'general' ? tag.name : `${tag.namespace}:${tag.name}`
+                  return (
+                    <span
+                      key={`${tag.namespace}:${tag.name}`}
+                      role="button"
+                      tabIndex={0}
+                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded border bg-purple-900/30 border-purple-700/40 text-purple-300 text-xs cursor-pointer hover:brightness-125"
+                      title={`${Math.round(tag.confidence * 100)}% confidence`}
+                      onClick={(e) => {
+                        const src = gallery?.source ?? ''
+                        if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
+                          router.push(`/library?q=${encodeURIComponent(tag.name)}`)
+                        } else {
+                          setTagPopover({ anchor: e.currentTarget, tag: aiFullTag, source: src })
+                        }
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter' || e.key === ' ') {
+                          e.preventDefault()
+                          const src = gallery?.source ?? ''
+                          if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
+                            router.push(`/library?q=${encodeURIComponent(tag.name)}`)
+                          } else {
+                            setTagPopover({
+                              anchor: e.currentTarget,
+                              tag: aiFullTag,
+                              source: src,
+                            })
+                          }
+                        }
+                      }}
+                    >
+                      {tag.namespace !== 'general' && (
+                        <span className="text-purple-400/60">{tag.namespace}:</span>
+                      )}
+                      {tag.name}
+                      <span className="text-purple-400/50 text-[10px]">
+                        {Math.round(tag.confidence * 100)}%
+                      </span>
                     </span>
-                  </span>
-                ))}
+                  )
+                })}
               </div>
             ) : (
               <p className="text-xs text-vault-text-muted">{t('library.noAiTagsAboveThreshold')}</p>
             )}
           </div>
+        )}
+        {tagPopover && (
+          <TagSearchPopover
+            tag={tagPopover.tag}
+            gallerySource={tagPopover.source}
+            anchorEl={tagPopover.anchor}
+            onClose={() => setTagPopover(null)}
+          />
         )}
       </div>
 

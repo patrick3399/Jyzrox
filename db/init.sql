@@ -171,6 +171,10 @@ CREATE INDEX IF NOT EXISTS idx_galleries_source_only ON galleries (source);
 -- #5: tags.count DESC — used in ORDER BY count DESC for tag listing
 CREATE INDEX IF NOT EXISTS idx_tags_count ON tags (count DESC);
 
+-- #6: tags.name — UNIQUE (namespace, name) index doesn't cover name-only lookups
+--     (name is the second column), so WHERE name = '...' needs this dedicated index.
+CREATE INDEX IF NOT EXISTS idx_tags_name ON tags (name);
+
 CREATE INDEX IF NOT EXISTS idx_gallery_tags_tag ON gallery_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs (status);
