@@ -52,6 +52,9 @@ LICENSE
 .pre-commit-config.yaml
 .github/
 
+# Screenshots (not referenced by README)
+screenshots/
+
 # Original icon sources (moved to pwa/public/)
 /icon.png
 /icon_clean.png
