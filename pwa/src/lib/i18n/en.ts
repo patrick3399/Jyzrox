@@ -1718,6 +1718,25 @@ const en: Record<string, string> = {
   'similar.noResults': 'No similar images found',
   'similar.distance': 'd={d}',
   'similar.findSimilar': 'Find Similar',
+
+  // ── SauceNAO ──
+  'saucenao.findSource': 'Find Source',
+  'saucenao.title': 'SauceNAO Results',
+  'saucenao.searching': 'Searching...',
+  'saucenao.noResults': 'No results found',
+  'saucenao.similarity': '{value}% match',
+  'saucenao.openLink': 'Open',
+  'saucenao.notConfigured': 'SauceNAO API key not configured. Set it in Credentials.',
+  'saucenao.rateLimited': 'Rate limit exceeded. Please wait a moment.',
+  'saucenao.error': 'Search failed. Please try again.',
+  'saucenao.apiKey': 'API Key',
+  'saucenao.apiKeyPlaceholder': 'Enter your SauceNAO API key',
+  'saucenao.apiKeyHint': 'Get a free API key at saucenao.com/user.php',
+  'saucenao.saveApiKey': 'Save API Key',
+  'saucenao.apiKeySaved': 'SauceNAO API key saved',
+  'saucenao.apiKeyCleared': 'SauceNAO API key cleared',
+  'saucenao.clearApiKey': 'Clear API Key',
+  'saucenao.localOnly': 'Source lookup is only available for downloaded images',
 }
 
 export default en

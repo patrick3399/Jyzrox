@@ -79,6 +79,10 @@ class SiteCredentialRequest(BaseModel):
     password: str | None = None
 
 
+class SaucenaoApiKeyRequest(BaseModel):
+    api_key: str
+
+
 # ── Credentials ──────────────────────────────────────────────────────
 
 
@@ -390,6 +394,22 @@ async def set_pixiv_cookie_credentials(
     # Step 3: Save the credential
     await set_credential("pixiv", refresh_token, "oauth_token")
     return {"status": "ok", "username": username}
+
+
+# ── SauceNAO ─────────────────────────────────────────────────────────
+
+
+@router.post("/credentials/saucenao")
+async def set_saucenao_credential(
+    req: SaucenaoApiKeyRequest,
+    _: dict = Depends(_admin),
+):
+    """Save SauceNAO API key."""
+    api_key = req.api_key.strip()
+    if not api_key:
+        raise HTTPException(status_code=400, detail="API key is required")
+    await set_credential("saucenao", api_key, "api_key")
+    return {"status": "ok"}
 
 
 @router.post("/credentials/generic")

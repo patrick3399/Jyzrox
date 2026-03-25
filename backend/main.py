@@ -41,6 +41,9 @@ from routers import (
     dedup as dedup_router,
 )
 from routers import (
+    saucenao as saucenao_router,
+)
+from routers import (
     logs as logs_router,
 )
 from routers import (
@@ -161,6 +164,7 @@ app.include_router(logs_router.router, prefix="/api/logs")
 app.include_router(gallery_dl_admin.router, prefix="/api/admin/gallery-dl")
 app.include_router(site_config_router.router, prefix="/api/admin/sites")
 app.include_router(queue_admin.router, prefix="/api/admin/queue")
+app.include_router(saucenao_router.router, prefix="/api/saucenao")
 
 
 @app.get("/api/health")

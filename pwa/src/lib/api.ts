@@ -731,6 +731,12 @@ const settings = {
       body: JSON.stringify({ source, ...data }),
     }),
 
+  setSaucenaoApiKey: (api_key: string) =>
+    apiFetch<{ status: string }>('/api/settings/credentials/saucenao', {
+      method: 'POST',
+      body: JSON.stringify({ api_key }),
+    }),
+
   getEhSite: () => apiFetch<{ use_ex: boolean }>('/api/settings/eh-site'),
 
   setEhSite: (use_ex: boolean) =>
@@ -1660,6 +1666,26 @@ const search = {
   },
 }
 
+// ── SauceNAO ─────────────────────────────────────────────────────────
+
+export interface SauceNaoResult {
+  similarity: number
+  source_url: string
+  title: string
+  author: string
+  source_name: string
+  thumbnail: string
+  ext_urls: string[]
+}
+
+const saucenao = {
+  search: (imageId: number) =>
+    apiFetch<{ results: SauceNaoResult[] }>('/api/saucenao/search', {
+      method: 'POST',
+      body: JSON.stringify({ image_id: imageId }),
+    }),
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
 export const api = {
@@ -1689,4 +1715,5 @@ export const api = {
   galleryDl,
   adminQueue,
   search,
+  saucenao,
 }

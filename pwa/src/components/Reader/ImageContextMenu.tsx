@@ -10,6 +10,7 @@ import {
   Heart,
   ExternalLink,
   Search,
+  ScanSearch,
   type LucideIcon,
 } from 'lucide-react'
 import { t } from '@/lib/i18n'
@@ -25,6 +26,7 @@ interface ImageContextMenuProps {
   onToggleFavorite?: () => void
   onViewGallery?: () => void
   onFindSimilar?: () => void
+  onFindSource?: () => void
 }
 
 export function ImageContextMenu({
@@ -38,6 +40,7 @@ export function ImageContextMenu({
   onToggleFavorite,
   onViewGallery,
   onFindSimilar,
+  onFindSource,
 }: ImageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -136,7 +139,8 @@ export function ImageContextMenu({
     (hasShare ? 3 : 2) +
     (onToggleFavorite ? 1 : 0) +
     (onViewGallery ? 1 : 0) +
-    (onFindSimilar ? 1 : 0)
+    (onFindSimilar ? 1 : 0) +
+    (onFindSource ? 1 : 0)
   const MENU_HEIGHT = baseItems * ITEM_HEIGHT + (onHide ? SEPARATOR_HEIGHT + ITEM_HEIGHT : 0)
 
   const x = Math.min(position.x, window.innerWidth - MENU_WIDTH - 8)
@@ -178,6 +182,18 @@ export function ImageContextMenu({
               icon: Search,
               onClick: () => {
                 onFindSimilar()
+                onClose()
+              },
+            },
+          ]
+        : []),
+      ...(onFindSource
+        ? [
+            {
+              label: t('saucenao.findSource'),
+              icon: ScanSearch,
+              onClick: () => {
+                onFindSource()
                 onClose()
               },
             },

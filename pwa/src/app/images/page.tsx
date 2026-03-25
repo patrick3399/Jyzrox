@@ -10,6 +10,7 @@ import { useLongPress } from '@/hooks/useLongPress'
 import { JustifiedGrid } from '@/components/JustifiedGrid'
 import { TimelineScrubber } from '@/components/TimelineScrubber'
 import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
+import { SauceNaoModal } from '@/components/SauceNaoModal'
 import { t } from '@/lib/i18n'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
@@ -73,6 +74,9 @@ function ImageBrowserInner() {
     source: string
     sourceId: string
   } | null>(null)
+
+  // SauceNAO modal state
+  const [saucenaoImageId, setSaucenaoImageId] = useState<number | null>(null)
 
   const activeImageRef = useRef<BrowseImage | null>(null)
 
@@ -527,7 +531,15 @@ function ImageBrowserInner() {
           isFavorited={isFavorited(imageMenu.imageId)}
           onToggleFavorite={handleToggleFavorite}
           onViewGallery={imageMenu.source && imageMenu.sourceId ? handleViewGallery : undefined}
+          onFindSource={() => {
+            setSaucenaoImageId(imageMenu.imageId)
+            setImageMenu(null)
+          }}
         />
+      )}
+
+      {saucenaoImageId && (
+        <SauceNaoModal imageId={saucenaoImageId} onClose={() => setSaucenaoImageId(null)} />
       )}
     </div>
   )

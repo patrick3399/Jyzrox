@@ -21,6 +21,7 @@ import {
 } from './hooks'
 import VideoPlayer from './VideoPlayer'
 import { ImageContextMenu } from './ImageContextMenu'
+import { SauceNaoModal } from '@/components/SauceNaoModal'
 
 // ── URL resolver ──────────────────────────────────────────────────────
 
@@ -1855,6 +1856,8 @@ export default function Reader({
     pageNum: number
   } | null>(null)
 
+  const [saucenaoImageId, setSaucenaoImageId] = useState<number | null>(null)
+
   const longPressTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const longPressStartRef = useRef<{ x: number; y: number } | null>(null)
 
@@ -2182,10 +2185,26 @@ export default function Reader({
               ? handleHideImage
               : undefined
           }
-          isFavorited={canFavoriteContextImg ? favImageIds.has(contextMenuImg!.id) : undefined}
+          isFavorited={
+            canFavoriteContextImg && contextMenuImg
+              ? favImageIds.has(contextMenuImg.id)
+              : undefined
+          }
           onToggleFavorite={canFavoriteContextImg ? handleToggleFavorite : undefined}
           onViewGallery={handleViewGallery}
+          onFindSource={
+            canFavoriteContextImg && contextMenuImg
+              ? () => {
+                  setSaucenaoImageId(contextMenuImg.id)
+                  setImageMenu(null)
+                }
+              : undefined
+          }
         />
+      )}
+
+      {saucenaoImageId && (
+        <SauceNaoModal imageId={saucenaoImageId} onClose={() => setSaucenaoImageId(null)} />
       )}
     </div>
   )

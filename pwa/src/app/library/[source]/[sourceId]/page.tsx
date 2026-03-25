@@ -18,6 +18,7 @@ import { BackButton } from '@/components/BackButton'
 import { TagAutocomplete } from '@/components/TagAutocomplete'
 import { Pencil, Heart, Bookmark, BookmarkCheck } from 'lucide-react'
 import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
+import { SauceNaoModal } from '@/components/SauceNaoModal'
 import { TagSearchPopover } from '@/components/TagSearchPopover'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
@@ -145,6 +146,8 @@ export default function GalleryDetailPage() {
 
   // Similar images modal state
   const [similarImageId, setSimilarImageId] = useState<number | null>(null)
+  // SauceNAO modal state
+  const [saucenaoImageId, setSaucenaoImageId] = useState<number | null>(null)
 
   // Track favorited image IDs from API response + optimistic overrides
   const [localFavOverrides, setLocalFavOverrides] = useState<Map<number, boolean>>(new Map())
@@ -1291,11 +1294,19 @@ export default function GalleryDetailPage() {
             setSimilarImageId(imageMenu.imageId)
             setImageMenu(null)
           }}
+          onFindSource={() => {
+            setSaucenaoImageId(imageMenu.imageId)
+            setImageMenu(null)
+          }}
         />
       )}
 
       {similarImageId && (
         <SimilarImagesPanel imageId={similarImageId} onClose={() => setSimilarImageId(null)} />
+      )}
+
+      {saucenaoImageId && (
+        <SauceNaoModal imageId={saucenaoImageId} onClose={() => setSaucenaoImageId(null)} />
       )}
     </div>
   )
