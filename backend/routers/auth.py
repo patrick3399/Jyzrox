@@ -11,10 +11,10 @@ from pathlib import Path
 
 import bcrypt
 from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Request, Response, UploadFile
-from starlette import status
 from PIL import Image, ImageOps
 from pydantic import BaseModel
 from sqlalchemy import text
+from starlette import status
 
 from core.audit import log_audit
 from core.auth import _DUMMY_HASH, _checkpw_async, _hashpw_async, _sign_session, _verify_session, require_auth
@@ -177,14 +177,16 @@ async def check_auth(
     authorization: str | None = Header(default=None),
 ):
     """Lightweight session validation for nginx auth_request subrequest."""
-    # Try cookie first (existing logic)
+    # Try cookie first — validate session exists AND has valid HMAC
     if vault_session:
         try:
             user_id_str, token = vault_session.split(":", 1)
             session_data = await get_redis().get(f"session:{user_id_str}:{token}")
             if session_data:
-                return {"status": "ok"}
-        except ValueError:
+                raw = session_data if isinstance(session_data, str) else session_data.decode()
+                if _verify_session(raw) is not None:
+                    return {"status": "ok"}
+        except (ValueError, UnicodeDecodeError):
             pass
 
     # Fallback to Basic Auth (for OPDS clients)
@@ -243,7 +245,7 @@ async def list_sessions(
                 raw_str = raw if isinstance(raw, str) else raw.decode()
                 verified = _verify_session(raw_str)
                 meta = json.loads(verified) if verified else {}
-            except json.JSONDecodeError, UnicodeDecodeError:
+            except (json.JSONDecodeError, UnicodeDecodeError):
                 meta = {}
 
             sessions.append(

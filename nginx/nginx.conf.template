@@ -44,7 +44,7 @@ http {
         add_header X-Content-Type-Options "nosniff" always;
         add_header Referrer-Policy "strict-origin-when-cross-origin" always;
         add_header Permissions-Policy "camera=(), microphone=(), geolocation=()" always;
-        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline' 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' wss:; font-src 'self'; frame-ancestors 'none';" always;
+        add_header Content-Security-Policy "default-src 'self'; script-src 'self' 'unsafe-inline'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https:; media-src 'self' blob:; connect-src 'self' wss:; font-src 'self'; frame-ancestors 'none';" always;
 
         # ── Internal auth endpoint (used by auth_request) ─────────
         location = /_auth {
@@ -94,6 +94,7 @@ http {
         location /media/libraries/ {
             auth_request /_auth;
             alias /mnt/;
+            disable_symlinks on;
             expires 1d;
             add_header Cache-Control "private";
             add_header X-Content-Type-Options "nosniff" always;

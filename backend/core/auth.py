@@ -12,9 +12,9 @@ import bcrypt
 from fastapi import Cookie, Depends, Header, HTTPException, Request, status
 from sqlalchemy import text
 
-from core.config import settings
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
+from core.keys import session_hmac_key
 from core.rate_limit import get_client_ip
 from core.redis_client import get_redis
 
@@ -38,7 +38,7 @@ async def _hashpw_async(password: bytes, salt: bytes) -> bytes:
 
 def sign_session(data: str) -> str:
     """Append HMAC-SHA256 signature to session metadata string."""
-    sig = hmac.new(settings.credential_encrypt_key.encode(), data.encode(), hashlib.sha256).hexdigest()
+    sig = hmac.new(session_hmac_key(), data.encode(), hashlib.sha256).hexdigest()
     return f"{data}:{sig}"
 
 
@@ -49,23 +49,18 @@ _sign_session = sign_session
 def verify_session(raw: str) -> str | None:
     """Verify HMAC signature and return the original data, or None on failure.
 
-    Returns the data portion without the signature.  For backward-compat,
-    if the raw value contains no ':'-separated signature segment that looks
-    like a 64-char hex digest, the data is returned as-is with a warning so
-    that existing sessions are not immediately invalidated after deployment.
+    Returns the data portion without the signature.
+    Unsigned/legacy sessions are rejected — all valid sessions must have HMAC.
     """
     idx = raw.rfind(":")
     if idx == -1:
-        # No separator at all — treat as unsigned legacy session
-        logger.warning("Session data has no HMAC signature (legacy session); treating as valid")
-        return raw
+        logger.warning("Session data has no HMAC signature — rejected")
+        return None
     data, sig = raw[:idx], raw[idx + 1:]
-    # A SHA-256 hex digest is always 64 characters
     if len(sig) != 64:
-        # Looks like the ':' was part of the JSON, not a signature separator — legacy session
-        logger.warning("Session data appears to be an unsigned legacy session; treating as valid")
-        return raw
-    expected = hmac.new(settings.credential_encrypt_key.encode(), data.encode(), hashlib.sha256).hexdigest()
+        logger.warning("Session data has invalid signature format — rejected")
+        return None
+    expected = hmac.new(session_hmac_key(), data.encode(), hashlib.sha256).hexdigest()
     if hmac.compare_digest(sig, expected):
         return data
     logger.warning("Session HMAC signature mismatch — possible tampering")
@@ -219,6 +214,7 @@ def gallery_access_filter(auth: dict):
     Usage: stmt = stmt.where(gallery_access_filter(auth))
     """
     from sqlalchemy import and_, or_
+
     from db.models import Gallery
 
     not_deleted = Gallery.deleted_at.is_(None)

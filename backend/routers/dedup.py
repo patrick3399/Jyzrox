@@ -4,16 +4,16 @@ import base64
 import hashlib
 import hmac
 import logging
-import os
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import func, select, update
 from sqlalchemy.orm import joinedload
 
+import core.queue
 from core.auth import require_role
 from core.database import async_session
-import core.queue
+from core.keys import cursor_hmac_key
 from db.models import Blob, BlobRelationship, Image
 from services.cas import cas_url, thumb_url
 
@@ -22,24 +22,26 @@ router = APIRouter(tags=["dedup"])
 
 _admin = require_role("admin")
 
-_CURSOR_SECRET = os.environ.get("SECRET_KEY", "dev-secret")
-
 REVIEW_RELATIONSHIPS = {"quality_conflict", "variant"}
 
 
 # ── Cursor helpers ────────────────────────────────────────────────────
 
 
+def _cursor_secret() -> bytes:
+    return cursor_hmac_key()
+
+
 def _encode_cursor(id: int) -> str:
     payload = base64.urlsafe_b64encode(str(id).encode()).decode()
-    sig = hmac.new(_CURSOR_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+    sig = hmac.new(_cursor_secret(), payload.encode(), hashlib.sha256).hexdigest()[:16]
     return f"{payload}.{sig}"
 
 
 def _decode_cursor(cursor: str) -> int | None:
     try:
         payload, sig = cursor.rsplit(".", 1)
-        expected = hmac.new(_CURSOR_SECRET.encode(), payload.encode(), hashlib.sha256).hexdigest()[:16]
+        expected = hmac.new(_cursor_secret(), payload.encode(), hashlib.sha256).hexdigest()[:16]
         if not hmac.compare_digest(sig, expected):
             return None
         return int(base64.urlsafe_b64decode(payload).decode())

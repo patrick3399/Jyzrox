@@ -2,19 +2,20 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
-from fastapi.responses import HTMLResponse
+from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 
+from core.auth import require_auth
 from core.config import settings
-from core.version import __version__
 from core.csrf import CSRFMiddleware
 from core.database import engine
-from core.rate_limit import RateLimitMiddleware
 from core.queue import close_queue, init_queue
+from core.rate_limit import RateLimitMiddleware
 from core.redis_client import close_redis, init_redis
+from core.version import __version__
 from routers import (
     artists,
     auth,
@@ -41,13 +42,13 @@ from routers import (
     dedup as dedup_router,
 )
 from routers import (
-    saucenao as saucenao_router,
-)
-from routers import (
     logs as logs_router,
 )
 from routers import (
     plugins as plugins_router,
+)
+from routers import (
+    saucenao as saucenao_router,
 )
 from routers import settings as settings_router
 from routers import site_config as site_config_router
@@ -104,15 +105,20 @@ app = FastAPI(
     lifespan=lifespan,
     docs_url=None,
     redoc_url=None,
-    openapi_url="/api/openapi.json",
+    openapi_url=None,  # served manually with auth below
 )
 
 # Mount swagger-ui static assets
 app.mount("/api/docs/static", StaticFiles(directory="/app/static/swagger-ui"), name="swagger-static")
 
 
+@app.get("/api/openapi.json", include_in_schema=False)
+async def openapi_schema(_: dict = Depends(require_auth)):
+    return JSONResponse(content=app.openapi())
+
+
 @app.get("/api/docs", include_in_schema=False)
-async def custom_swagger_ui() -> HTMLResponse:
+async def custom_swagger_ui(_: dict = Depends(require_auth)) -> HTMLResponse:
     return get_swagger_ui_html(
         openapi_url="/api/openapi.json",
         title="Jyzrox API",

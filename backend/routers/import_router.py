@@ -11,12 +11,12 @@ from pydantic import BaseModel
 from sqlalchemy import desc, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+import core.queue
 from core.auth import require_role
 from core.config import get_all_library_paths, settings
 from core.database import async_session
 from core.redis_client import get_redis
 from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
-import core.queue
 from db.models import Gallery, LibraryPath
 
 router = APIRouter(tags=["import"])
@@ -298,7 +298,13 @@ async def browse_filesystem(path: str = "/mnt", _: dict = Depends(_member)):
         "/run",
         "/boot",
         "/srv",
+        "/app",
+        "/data/avatars",
+        "/data/training",
         os.path.realpath(settings.data_gallery_path),
+        os.path.realpath(settings.data_cas_path),
+        os.path.realpath(settings.data_thumbs_path),
+        os.path.realpath(settings.data_library_path),
     ]
     for b in blocked:
         if real_target == b or real_target.startswith(b + os.sep):

@@ -1,45 +1,28 @@
 """AES-256-GCM credential encryption + DB persistence."""
 
 import os
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
-from cryptography.hazmat.primitives import hashes
 from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-from cryptography.hazmat.primitives.kdf.hkdf import HKDF
 from sqlalchemy import select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from core.config import settings
 from core.database import AsyncSessionLocal
+from core.keys import credential_aes_key
 from db.models import Credential
-
-_KEY: bytes | None = None
-
-
-def _get_key() -> bytes:
-    global _KEY
-    if _KEY is None:
-        kdf = HKDF(
-            algorithm=hashes.SHA256(),
-            length=32,
-            salt=b"jyzrox-v1",
-            info=b"credential-encryption",
-        )
-        _KEY = kdf.derive(settings.credential_encrypt_key.encode())
-    return _KEY
 
 
 def encrypt(plaintext: str) -> bytes:
     """Encrypt with AES-256-GCM. Returns nonce(12 bytes) + ciphertext."""
     nonce = os.urandom(12)
-    ct = AESGCM(_get_key()).encrypt(nonce, plaintext.encode(), None)
+    ct = AESGCM(credential_aes_key()).encrypt(nonce, plaintext.encode(), None)
     return nonce + ct
 
 
 def decrypt(data: bytes) -> str:
     """Decrypt AES-256-GCM. Input must be nonce(12) + ciphertext."""
     nonce, ct = data[:12], data[12:]
-    return AESGCM(_get_key()).decrypt(nonce, ct, None).decode()
+    return AESGCM(credential_aes_key()).decrypt(nonce, ct, None).decode()
 
 
 async def get_credential(source: str) -> str | None:
@@ -53,8 +36,8 @@ async def get_credential(source: str) -> str | None:
             # Normalise to offset-aware UTC for comparison
             expires = cred.expires_at
             if expires.tzinfo is None:
-                expires = expires.replace(tzinfo=timezone.utc)
-            if expires < datetime.now(timezone.utc):
+                expires = expires.replace(tzinfo=UTC)
+            if expires < datetime.now(UTC):
                 return None
         return decrypt(bytes(cred.value_encrypted))
 

@@ -10,7 +10,6 @@ from pydantic import BaseModel
 from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, func, or_, select
 
 from core.auth import gallery_access_filter, require_auth
-from core.config import settings
 from core.database import async_session
 from core.gallery_helpers import (
     build_cover_map,
@@ -37,8 +36,10 @@ router = APIRouter(tags=["search"])
 
 
 def _cursor_secret() -> bytes:
-    """Return the HMAC signing key derived from the app's credential_encrypt_key."""
-    return settings.credential_encrypt_key.encode()
+    """Return the HMAC signing key for pagination cursors."""
+    from core.keys import cursor_hmac_key
+
+    return cursor_hmac_key()
 
 
 def _encode_cursor(row: Gallery, sort: str) -> str:

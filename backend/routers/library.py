@@ -80,8 +80,10 @@ def _trash_filter(auth: dict):
 
 
 def _cursor_secret() -> bytes:
-    """Return the HMAC signing key derived from the app's credential_encrypt_key."""
-    return settings.credential_encrypt_key.encode()
+    """Return the HMAC signing key for pagination cursors."""
+    from core.keys import cursor_hmac_key
+
+    return cursor_hmac_key()
 
 
 def _encode_cursor(gallery: Gallery, sort: str) -> str:
