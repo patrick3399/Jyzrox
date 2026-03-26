@@ -1,6 +1,7 @@
 """Queue administration endpoints — SAQ job and worker monitoring."""
 
 import logging
+import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from saq.job import TERMINAL_STATUSES, Status
@@ -15,10 +16,22 @@ _admin = require_role("admin")
 
 def _serialize_job(job) -> dict:
     """Convert SAQ Job to JSON-serializable dict."""
+    raw_status = job.status.value if isinstance(job.status, Status) else job.status
+
+    # SAQ stores cron jobs with status="queued" even when they are future-scheduled.
+    # Derive a "scheduled" display status for jobs whose scheduled time is in the future.
+    if raw_status == "queued" and job.scheduled and job.scheduled > time.time():
+        display_status = "scheduled"
+    else:
+        display_status = raw_status
+
+    is_cron = bool(job.key and job.key.startswith("cron:"))
+
     return {
         "key": job.key,
         "function": job.function,
-        "status": job.status.value if isinstance(job.status, Status) else job.status,
+        "status": display_status,
+        "is_cron": is_cron,
         "kwargs": job.kwargs or {},
         "result": repr(job.result) if job.result is not None else None,
         "error": job.error,

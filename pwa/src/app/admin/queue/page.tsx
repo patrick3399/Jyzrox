@@ -27,12 +27,22 @@ function formatUptime(ms: number): string {
   return h > 0 ? `${h}h ${m}m` : `${m}m`
 }
 
-const STATUSES = ['new', 'queued', 'active', 'aborting', 'aborted', 'failed', 'complete'] as const
+const STATUSES = [
+  'new',
+  'queued',
+  'active',
+  'scheduled',
+  'aborting',
+  'aborted',
+  'failed',
+  'complete',
+] as const
 
 const STATUS_STYLES: Record<string, string> = {
   new: 'bg-gray-500/20 text-gray-400',
   queued: 'bg-yellow-500/20 text-yellow-400',
   active: 'bg-blue-500/20 text-blue-400',
+  scheduled: 'bg-purple-500/20 text-purple-400',
   aborting: 'bg-orange-500/20 text-orange-400',
   aborted: 'bg-vault-border/50 text-vault-text-muted',
   failed: 'bg-red-500/20 text-red-400',
@@ -110,6 +120,11 @@ function JobRow({
       {/* Collapsed row */}
       <div className="flex items-center gap-3 px-4 py-2.5 text-sm">
         <span className="text-vault-text font-mono truncate flex-1 min-w-0">{job.function}</span>
+        {job.is_cron && (
+          <span className="px-1.5 py-0.5 rounded text-[10px] font-bold uppercase bg-vault-border/50 text-vault-text-muted">
+            cron
+          </span>
+        )}
         <StatusBadge status={job.status} />
         <span className="text-vault-text-secondary text-xs shrink-0 hidden sm:inline">
           {timeAgo(job.queued)}

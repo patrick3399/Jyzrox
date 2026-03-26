@@ -845,6 +845,7 @@ export interface SaqJob {
   key: string
   function: string
   status: string
+  is_cron: boolean
   kwargs: Record<string, unknown>
   result: string | null
   error: string | null

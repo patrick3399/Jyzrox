@@ -203,7 +203,7 @@ services:
       -c log_disconnections=on
     env_file: .env
     volumes:
-      - postgres_data:/var/lib/postgresql/data
+      - postgres_data:/var/lib/postgresql
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-vault} -d $${POSTGRES_DB:-vault} && psql -U $${POSTGRES_USER:-vault} -d $${POSTGRES_DB:-vault} -c 'SELECT 1' -q -t"]
@@ -248,10 +248,30 @@ services:
 
 volumes:
   app_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/G500/app_data/jyzrox/data
   postgres_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/G500/app_data/jyzrox/postgres
   redis_data:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/G500/app_data/jyzrox/redis
   tagger_models:
   gallery_dl_venv:
+    driver: local
+    driver_opts:
+      type: none
+      o: bind
+      device: /mnt/G500/app_data/jyzrox/gallery-dl-venv
 
 networks:
   frontend:
