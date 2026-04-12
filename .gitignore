@@ -43,6 +43,9 @@ Makefile
 .claude/
 CLAUDE.md
 
+# Codex session artifacts
+.codex
+
 # Refer specs
 docs/ref/
 
