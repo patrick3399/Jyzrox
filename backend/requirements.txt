@@ -10,7 +10,7 @@ pillow==12.2.0
 cryptography==46.0.7
 pixivpy3==3.7.5
 pydantic-settings==2.13.1
-python-multipart==0.0.22
+python-multipart==0.0.26
 beautifulsoup4==4.14.3
 lxml==6.0.4
 bcrypt==5.0.0
