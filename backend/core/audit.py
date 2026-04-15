@@ -32,7 +32,7 @@ async def log_audit(
             await session.execute(
                 text(
                     "INSERT INTO audit_logs (user_id, action, details, ip_address, created_at) "
-                    "VALUES (:uid, :act, :det::jsonb, :ip::inet, now())"
+                    "VALUES (:uid, :act, CAST(:det AS jsonb), CAST(:ip AS inet), now())"
                 ),
                 {
                     "uid": user_id,

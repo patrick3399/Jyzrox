@@ -8,6 +8,8 @@ WORKDIR /app
 COPY --from=deps /app/node_modules ./node_modules
 ARG APP_VERSION=dev
 ENV NEXT_PUBLIC_APP_VERSION=$APP_VERSION
+# Limit Node.js heap to 2GB to prevent OOM on hosts with limited RAM
+ENV NODE_OPTIONS="--max-old-space-size=2048"
 COPY . .
 RUN npm run build
 
