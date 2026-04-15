@@ -42,6 +42,7 @@ Makefile
 # Claude Code
 .claude/
 CLAUDE.md
+AGENTS.md
 
 # Codex session artifacts
 .codex
