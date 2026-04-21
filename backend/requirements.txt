@@ -12,7 +12,7 @@ pixivpy3==3.7.5
 pydantic-settings==2.13.1
 python-multipart==0.0.22
 beautifulsoup4==4.14.3
-lxml==6.0.4
+lxml==6.1.0
 bcrypt==5.0.0
 psutil==7.2.2
 imagehash==4.3.2
