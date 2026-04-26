@@ -1609,3 +1609,644 @@ class TestRetryJobDiskLow:
         result = await retry_failed_downloads_job(ctx)
 
         assert result["status"] == "skipped_disk_low"
+
+# ---------------------------------------------------------------------------
+# TestOnFileConcurrency
+# ---------------------------------------------------------------------------
+
+class TestOnFileConcurrency:
+    """Tests for the on_file callback's double-checked locking and media-ext filtering."""
+
+    async def test_concurrent_on_file_calls_create_gallery_exactly_once(self):
+        """Concurrent on_file calls must invoke ensure_gallery_from_url exactly once.
+
+        Without the double-checked locking pattern, multiple coroutines that all see
+        importer.gallery_id is None before any lock is acquired would each enter the
+        creation path and produce duplicate galleries.  The asyncio.Lock serialises
+        them and the inner check (second read of gallery_id) ensures only the first
+        caller does real work.
+        """
+        from worker.download import download_job
+
+        captured_on_file: list = []
+
+        async def _capturing_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
+            captured_on_file.append(on_file)
+            # Yield control so all concurrent on_file calls can be scheduled before
+            # the first one finishes, then return a completed result.
+            await asyncio.sleep(0)
+            return _make_plugin_result()
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = _capturing_download
+
+        # importer.gallery_id starts as None; ensure_gallery_from_url sets it.
+        importer = MagicMock()
+        importer.gallery_id = None
+        importer.title = None
+        importer.source_url = None
+        importer.import_file = AsyncMock()
+        importer.finalize = AsyncMock(return_value="gal-race")
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+        importer.ensure_gallery = AsyncMock()
+
+        ensure_gallery_from_url_call_count = [0]
+
+        async def _slow_ensure_gallery_from_url(url, target_dir):
+            ensure_gallery_from_url_call_count[0] += 1
+            # Simulate I/O latency so other coroutines can reach the outer if-check
+            # before this call returns and sets gallery_id.
+            await asyncio.sleep(0.02)
+            importer.gallery_id = "gal-race"
+            importer.title = "Race Gallery"
+
+        importer.ensure_gallery_from_url = _slow_ensure_gallery_from_url
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("worker.helpers._validate_image_magic", return_value=True),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-race-01")
+
+        assert len(captured_on_file) == 1, "plugin.download should have been called once"
+        on_file = captured_on_file[0]
+
+        # Reset state: gallery_id is None again so all concurrent calls see the None.
+        importer.gallery_id = None
+        importer.title = None
+        ensure_gallery_from_url_call_count[0] = 0
+
+        # Fire 8 concurrent on_file calls for a valid media file.
+        media_path = Path("/data/gallery/image001.jpg")
+        await asyncio.gather(*[on_file(media_path) for _ in range(8)])
+
+        # The double-checked lock must have allowed only one call through.
+        assert ensure_gallery_from_url_call_count[0] == 1, (
+            f"ensure_gallery_from_url was called {ensure_gallery_from_url_call_count[0]} times; "
+            "expected exactly 1 (double-checked locking broken)"
+        )
+        # import_file should still have been called for every file.
+        assert importer.import_file.await_count == 8
+
+    async def test_on_file_skips_non_media_extensions(self):
+        """on_file must silently ignore files with non-media extensions (e.g. .txt, .json).
+
+        gallery-dl occasionally emits metadata sidecar files alongside images.
+        Importing them would pollute the gallery with non-image entries.
+        """
+        from worker.download import download_job
+
+        captured_on_file: list = []
+
+        async def _capturing_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
+            captured_on_file.append(on_file)
+            await asyncio.sleep(0)
+            return _make_plugin_result()
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = _capturing_download
+
+        importer = MagicMock()
+        importer.gallery_id = "gal-ext"
+        importer.title = "Ext Gallery"
+        importer.source_url = None
+        importer.import_file = AsyncMock()
+        importer.ensure_gallery = AsyncMock()
+        importer.ensure_gallery_from_url = AsyncMock()
+        importer.finalize = AsyncMock(return_value="gal-ext")
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("worker.helpers._validate_image_magic", return_value=True),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            await download_job(_make_ctx(), "https://example.com/gallery/1", db_job_id="job-ext-01")
+
+        assert len(captured_on_file) == 1
+        on_file = captured_on_file[0]
+
+        non_media_paths = [
+            Path("/data/gallery/metadata.json"),
+            Path("/data/gallery/notes.txt"),
+            Path("/data/gallery/readme.html"),
+            Path("/data/gallery/data.xml"),
+            Path("/data/gallery/archive.zip"),
+        ]
+        for path in non_media_paths:
+            await on_file(path)
+
+        importer.import_file.assert_not_awaited()
+
+# ---------------------------------------------------------------------------
+# TestDownloadJobCancellation
+# ---------------------------------------------------------------------------
+
+class TestDownloadJobCancellation:
+    """State machine tests for job cancellation paths in download_job()."""
+
+    async def test_download_job_cancelled_before_start_sets_status_cancelled(self):
+        """cancel_check() returning True inside the plugin causes download_job to return cancelled.
+
+        This tests the scenario where the cancel flag is set in Redis before the plugin
+        begins downloading — the cancel_check closure is injected into the plugin and
+        the plugin immediately detects it and returns status=cancelled.
+        """
+        from worker.download import download_job
+
+        async def _immediate_cancel_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
+            # Plugin checks cancel before doing any work — already cancelled
+            if await cancel_check():
+                result = MagicMock()
+                result.status = "cancelled"
+                result.downloaded = 0
+                result.total = 0
+                result.error = None
+                result.failed_pages = []
+                return result
+            raise AssertionError("Plugin should have detected cancellation before doing any work")
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = _immediate_cancel_download
+
+        importer = MagicMock()
+        importer.gallery_id = None
+        importer.title = None
+        importer.source_url = None
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+        importer.import_file = AsyncMock()
+        importer.ensure_gallery_from_url = AsyncMock()
+        importer.finalize = AsyncMock()
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        ctx = _make_ctx()
+
+        # cancel key is set from the very start (before plugin runs); pause key absent
+        async def _get_cancel_set(key):
+            if key.startswith("download:cancel:"):
+                return b"1"
+            return None
+
+        ctx["redis"].get = _get_cancel_set
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock) as mock_status,
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            result = await download_job(ctx, "https://example.com/gallery/1", db_job_id="job-cancel-before")
+
+        assert result["status"] == "cancelled"
+        mock_status.assert_any_call("job-cancel-before", "cancelled")
+        importer.cleanup.assert_awaited_once()
+
+    async def test_cancel_check_returns_true_when_job_cancelled_in_redis(self):
+        """cancel_check() closure reads the cancel flag key and returns True when present.
+
+        This test isolates the cancel_check() closure itself: it must return True exactly
+        when `download:cancel:{db_job_id}` is present in Redis, regardless of what the
+        plugin does with that result.
+        """
+        from worker.download import download_job
+
+        observed_cancel_results: list[bool] = []
+
+        async def _spy_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
+            # Call cancel_check three times to verify consistent True result
+            for _ in range(3):
+                observed_cancel_results.append(await cancel_check())
+            result = MagicMock()
+            result.status = "cancelled"
+            result.downloaded = 0
+            result.total = 0
+            result.error = None
+            result.failed_pages = []
+            return result
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = _spy_download
+
+        importer = MagicMock()
+        importer.gallery_id = None
+        importer.title = None
+        importer.source_url = None
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+        importer.import_file = AsyncMock()
+        importer.ensure_gallery_from_url = AsyncMock()
+        importer.finalize = AsyncMock()
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        ctx = _make_ctx()
+
+        async def _redis_cancel_present(key):
+            # pause gate returns None so job proceeds past pre-semaphore gate
+            if key.startswith("download:pause:"):
+                return None
+            if key.startswith("download:cancel:"):
+                return b"1"
+            return None
+
+        ctx["redis"].get = _redis_cancel_present
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            result = await download_job(ctx, "https://example.com/gallery/2", db_job_id="job-cancel-redis")
+
+        # The cancel_check closure must have consistently reported True
+        assert all(observed_cancel_results), (
+            f"cancel_check() should always return True when cancel key is set, got: {observed_cancel_results}"
+        )
+        assert result["status"] == "cancelled"
+
+    async def test_cancel_check_returns_false_when_no_cancel_key_in_redis(self):
+        """cancel_check() returns False when the cancel key is absent from Redis.
+
+        Non-cancellation path: when no cancel flag is present, the closure must return
+        False so the download proceeds normally.
+        """
+        from worker.download import download_job
+
+        observed_cancel_results: list[bool] = []
+
+        async def _spy_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
+            observed_cancel_results.append(await cancel_check())
+            result = MagicMock()
+            result.status = "done"
+            result.downloaded = 1
+            result.total = 1
+            result.error = None
+            result.failed_pages = []
+            return result
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = _spy_download
+
+        importer = MagicMock()
+        importer.gallery_id = "gal-nocancel"
+        importer.title = "No Cancel Gallery"
+        importer.source_url = None
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+        importer.import_file = AsyncMock()
+        importer.ensure_gallery_from_url = AsyncMock()
+        importer.ensure_gallery = AsyncMock()
+        importer.finalize = AsyncMock(return_value="gal-nocancel")
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        ctx = _make_ctx()
+        ctx["redis"].get = AsyncMock(return_value=None)  # no cancel key, no pause key
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("worker.helpers._validate_image_magic", return_value=True),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            result = await download_job(ctx, "https://example.com/gallery/3", db_job_id="job-nocancel")
+
+        assert observed_cancel_results == [False], (
+            f"cancel_check() must return False when no cancel key in Redis, got: {observed_cancel_results}"
+        )
+        assert result["status"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# TestDownloadJobPause
+# ---------------------------------------------------------------------------
+
+class TestDownloadJobPause:
+    """State machine tests for job pause paths in download_job()."""
+
+    async def test_pause_check_returns_false_when_not_paused(self):
+        """pause_check() returns False when no pause key is present in Redis.
+
+        Normal (non-paused) execution path: the closure must not block or return True,
+        so the plugin can proceed with the download unhindered.
+        """
+        from worker.download import download_job
+
+        observed_pause_results: list[bool] = []
+
+        async def _spy_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
+            observed_pause_results.append(await pause_check())
+            result = MagicMock()
+            result.status = "done"
+            result.downloaded = 2
+            result.total = 2
+            result.error = None
+            result.failed_pages = []
+            return result
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = _spy_download
+
+        importer = MagicMock()
+        importer.gallery_id = "gal-nopause"
+        importer.title = "No Pause Gallery"
+        importer.source_url = None
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+        importer.import_file = AsyncMock()
+        importer.ensure_gallery_from_url = AsyncMock()
+        importer.ensure_gallery = AsyncMock()
+        importer.finalize = AsyncMock(return_value="gal-nopause")
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        ctx = _make_ctx()
+        ctx["redis"].get = AsyncMock(return_value=None)  # no pause key, no cancel key
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("worker.helpers._validate_image_magic", return_value=True),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            result = await download_job(ctx, "https://example.com/gallery/4", db_job_id="job-nopause")
+
+        assert observed_pause_results == [False], (
+            f"pause_check() must return False when no pause key in Redis, got: {observed_pause_results}"
+        )
+        assert result["status"] == "done"
+
+    async def test_pre_semaphore_pause_gate_returns_paused_status_immediately(self):
+        """When pause key is set before the semaphore is acquired, download_job returns paused.
+
+        Tests the pre-semaphore pause gate (lines 283-288 in download.py): if
+        `download:pause:{job_id}` is present in Redis before the download slot is acquired,
+        the job must set its status to 'paused' and return `{"status": "paused"}` without
+        acquiring the semaphore or calling the plugin.
+        """
+        from worker.download import download_job
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = AsyncMock()  # must NOT be called
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        ctx = _make_ctx()
+
+        # pause key is set; no cancel key
+        async def _pause_gate_get(key):
+            if key.startswith("download:pause:"):
+                return b"1"
+            return None
+
+        ctx["redis"].get = _pause_gate_get
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock) as mock_status,
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch(
+                "worker.progressive.ProgressiveImporter",
+                return_value=MagicMock(
+                    gallery_id=None, title=None, source_url=None,
+                    abort=AsyncMock(), cleanup=AsyncMock(),
+                ),
+            ),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            result = await download_job(ctx, "https://example.com/gallery/5", db_job_id="job-pause-gate")
+
+        assert result["status"] == "paused"
+        mock_status.assert_any_call("job-pause-gate", "paused")
+        # Semaphore must NOT have been acquired — early return fired before step 5
+        mock_sem.acquire.assert_not_awaited()
+        # Plugin download must NOT have been called
+        plugin.download.assert_not_awaited()
+
+    async def test_pause_check_returns_true_when_pause_flag_cleared_then_set_again(self):
+        """pause_check() returns True when `download:pause:{job_id}` is present in Redis.
+
+        Simulates the flag being absent at the pre-semaphore gate (allowing the job to
+        proceed), then present when the plugin queries pause_check() mid-download.
+        This gives the plugin the signal to stall/pause its work.
+        """
+        from worker.download import download_job
+
+        observed_pause_results: list[bool] = []
+
+        async def _spy_download(
+            url, dest_dir, credentials, on_progress, cancel_check, pid_callback, pause_check, on_file, **kwargs
+        ):
+            observed_pause_results.append(await pause_check())
+            result = MagicMock()
+            result.status = "done"
+            result.downloaded = 1
+            result.total = 1
+            result.error = None
+            result.failed_pages = []
+            return result
+
+        plugin = MagicMock()
+        plugin.meta.source_id = "gallery_dl"
+        plugin.meta.name = "Gallery-DL"
+        plugin.meta.semaphore_key = None
+        plugin.meta.needs_all_credentials = False
+        plugin.meta.concurrency = 1
+        plugin.download = _spy_download
+
+        importer = MagicMock()
+        importer.gallery_id = "gal-pausecheck"
+        importer.title = "Pause Check Gallery"
+        importer.source_url = None
+        importer.abort = AsyncMock()
+        importer.cleanup = AsyncMock()
+        importer.import_file = AsyncMock()
+        importer.ensure_gallery_from_url = AsyncMock()
+        importer.ensure_gallery = AsyncMock()
+        importer.finalize = AsyncMock(return_value="gal-pausecheck")
+
+        mock_registry = MagicMock()
+        mock_registry.get_handler = AsyncMock(return_value=plugin)
+        mock_registry.get_fallback = MagicMock(return_value=None)
+        mock_registry.get_downloader = MagicMock(return_value=None)
+
+        mock_sem = _make_mock_sem()
+        mock_sem_cls = MagicMock(return_value=mock_sem)
+
+        ctx = _make_ctx()
+
+        # First call to pause key is the pre-semaphore gate — return None to let through.
+        # Subsequent calls (from pause_check() closure inside plugin) — return b"1".
+        pause_gate_call_count = [0]
+
+        async def _selective_pause_get(key):
+            if key.startswith("download:pause:"):
+                pause_gate_call_count[0] += 1
+                if pause_gate_call_count[0] == 1:
+                    return None  # gate: not paused, proceed
+                return b"1"     # mid-download: pause flag is now set
+            return None
+
+        ctx["redis"].get = _selective_pause_get
+
+        with (
+            patch("plugins.registry.plugin_registry", mock_registry),
+            patch("worker.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.download._set_job_status", new_callable=AsyncMock),
+            patch("worker.download._set_job_progress", new_callable=AsyncMock),
+            patch("core.database.AsyncSessionLocal", return_value=_make_mock_session()),
+            patch("worker.progressive.ProgressiveImporter", return_value=importer),
+            patch("worker.download.DownloadSemaphore", mock_sem_cls),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+            patch("worker.helpers._validate_image_magic", return_value=True),
+            patch("pathlib.Path.exists", return_value=False),
+            patch("core.site_config.site_config_service", make_mock_site_config_svc()),
+        ):
+            result = await download_job(ctx, "https://example.com/gallery/6", db_job_id="job-pausecheck")
+
+        assert observed_pause_results == [True], (
+            f"pause_check() must return True when pause key is set in Redis, got: {observed_pause_results}"
+        )

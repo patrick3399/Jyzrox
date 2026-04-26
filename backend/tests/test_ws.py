@@ -51,10 +51,12 @@ def _make_pubsub_mock(messages=None):
 
 
 def _redis_with_session(user_id: str = "1", role: str = "admin"):
-    """Return an AsyncMock Redis that returns a valid session for user_id."""
+    """Return an AsyncMock Redis that returns a valid HMAC-signed session for user_id."""
+    from core.auth import sign_session
+
     redis = AsyncMock()
-    session_data = json.dumps({"role": role}).encode()
-    redis.get = AsyncMock(return_value=session_data)
+    signed = sign_session(json.dumps({"role": role}))
+    redis.get = AsyncMock(return_value=signed.encode())
     return redis
 
 
@@ -138,7 +140,7 @@ class TestValidateWsSession:
         assert result is None
 
     async def test_validate_ws_session_invalid_json_defaults_to_viewer_role(self):
-        """Redis returns non-JSON bytes → role defaults to 'viewer'."""
+        """Redis returns non-JSON bytes without HMAC → rejected (returns None)."""
         from routers.ws import _validate_ws_session
 
         ws = MagicMock()
@@ -149,17 +151,19 @@ class TestValidateWsSession:
         with patch("routers.ws.get_redis", return_value=redis):
             result = await _validate_ws_session(ws)
 
-        assert result == ("3", "viewer")
+        assert result is None
 
     async def test_validate_ws_session_raw_string_data_decoded_correctly(self):
-        """Redis returns str instead of bytes → still parsed correctly."""
+        """Redis returns signed str (not bytes) → still parsed correctly."""
+        from core.auth import sign_session
         from routers.ws import _validate_ws_session
 
         ws = MagicMock()
         ws.cookies = {"vault_session": "5:strtoken"}
 
+        signed = sign_session(json.dumps({"role": "admin"}))
         redis = AsyncMock()
-        redis.get = AsyncMock(return_value=json.dumps({"role": "admin"}))
+        redis.get = AsyncMock(return_value=signed)  # str, not bytes
         with patch("routers.ws.get_redis", return_value=redis):
             result = await _validate_ws_session(ws)
 
@@ -850,7 +854,9 @@ class TestWebsocketEndpoint:
 
     def test_ws_connect_authed_admin_receives_ping(self):
         """Valid admin session → connection accepted and ping message received."""
-        session_data = json.dumps({"role": "admin"}).encode()
+        from core.auth import sign_session
+
+        session_data = sign_session(json.dumps({"role": "admin"})).encode()
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=session_data)
         pubsub = self._make_pubsub_blocking()
@@ -870,7 +876,9 @@ class TestWebsocketEndpoint:
 
     def test_ws_connect_authed_member_receives_ping(self):
         """Valid member session → connection accepted and ping message received."""
-        session_data = json.dumps({"role": "member"}).encode()
+        from core.auth import sign_session
+
+        session_data = sign_session(json.dumps({"role": "member"})).encode()
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=session_data)
         pubsub = self._make_pubsub_blocking()
@@ -889,7 +897,9 @@ class TestWebsocketEndpoint:
 
     def test_ws_connect_authed_viewer_receives_ping(self):
         """Valid viewer session → connection accepted and ping message received."""
-        session_data = json.dumps({"role": "viewer"}).encode()
+        from core.auth import sign_session
+
+        session_data = sign_session(json.dumps({"role": "viewer"})).encode()
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=session_data)
         pubsub = self._make_pubsub_blocking()
@@ -908,7 +918,9 @@ class TestWebsocketEndpoint:
 
     def test_ws_connect_authed_receives_alert_then_ping(self):
         """When system alerts exist, they arrive before the ping message."""
-        session_data = json.dumps({"role": "admin"}).encode()
+        from core.auth import sign_session
+
+        session_data = sign_session(json.dumps({"role": "admin"})).encode()
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=session_data)
         pubsub = self._make_pubsub_blocking()
@@ -929,7 +941,9 @@ class TestWebsocketEndpoint:
 
     def test_ws_connect_authed_receives_multiple_alerts(self):
         """Multiple alerts are all sent before the ping message."""
-        session_data = json.dumps({"role": "admin"}).encode()
+        from core.auth import sign_session
+
+        session_data = sign_session(json.dumps({"role": "admin"})).encode()
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=session_data)
         pubsub = self._make_pubsub_blocking()
@@ -1075,7 +1089,9 @@ class TestWebsocketEndpointTaskCleanup:
         """
         from routers.ws import websocket_endpoint
 
-        session_data = json.dumps({"role": "admin"})
+        from core.auth import sign_session
+
+        session_data = sign_session(json.dumps({"role": "admin"}))
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=session_data.encode())
 
@@ -1204,11 +1220,11 @@ class TestValidateWsSessionHmacRegression:
             "Likely the HMAC suffix was not stripped before JSON parsing."
         )
 
-    async def test_validate_ws_session_with_unsigned_legacy_session_still_works(self):
-        """Plain JSON session (no HMAC) → still accepted for backward compatibility.
+    async def test_validate_ws_session_with_unsigned_legacy_session_is_rejected(self):
+        """Plain JSON session (no HMAC) → rejected; all sessions must be HMAC-signed.
 
-        Servers that deployed before HMAC signing was introduced have existing
-        sessions stored as plain JSON.  The fix must continue to accept these.
+        Legacy unsigned sessions are no longer accepted.  Clients must re-authenticate
+        to obtain a properly signed session.
         """
         from routers.ws import _validate_ws_session
 
@@ -1221,8 +1237,9 @@ class TestValidateWsSessionHmacRegression:
         with patch("routers.ws.get_redis", return_value=redis):
             result = await _validate_ws_session(ws)
 
-        assert result == ("1", "admin"), (
-            f"Expected ('1', 'admin') for legacy unsigned session but got {result!r}."
+        assert result is None, (
+            f"Expected None for unsigned legacy session but got {result!r}. "
+            "All sessions must carry a valid HMAC signature."
         )
 
     async def test_validate_ws_session_with_tampered_signature_returns_none(self):

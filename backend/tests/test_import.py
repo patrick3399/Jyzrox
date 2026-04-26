@@ -1456,7 +1456,7 @@ class TestRescan:
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "enqueued"
-        app.state.enqueue.assert_any_call("rescan_library_job")
+        app.state.enqueue.assert_any_call("rescan_library_job", _timeout=7200)
 
     async def test_rescan_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""

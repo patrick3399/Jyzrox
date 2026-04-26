@@ -11,6 +11,7 @@ to work with the basic query paths or are noted as SQLite-limited.
 
 import pytest
 from sqlalchemy import text
+from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -1402,7 +1403,8 @@ class TestBuildCoverMap:
         )
         await db_session.commit()
 
-        result = await _single_cover_thumb(db_session, gid, "ehentai")
+        with patch("core.gallery_helpers._existing_thumb_url", side_effect=lambda sha: f"/thumbs/{sha}.webp"):
+            result = await _single_cover_thumb(db_session, gid, "ehentai")
         assert result is not None
         assert isinstance(result, str)
 

@@ -800,14 +800,17 @@ class TestAutoDiscoverJob:
             gallery_dir.mkdir()
             (gallery_dir / "image.jpg").write_bytes(b"data")
 
-            # No existing galleries
+            # _get_library_specs: SELECT FROM library_paths
+            library_paths_res = MagicMock()
+            library_paths_res.scalars.return_value.all.return_value = []
+            # SELECT Gallery.id: check if gallery already exists
             existing_res = MagicMock()
-            existing_res.all.return_value = []
+            existing_res.scalar_one_or_none.return_value = None
             # INSERT RETURNING id result
             insert_res = MagicMock()
             insert_res.scalar_one_or_none.return_value = 99
 
-            session.execute = AsyncMock(side_effect=[existing_res, insert_res])
+            session.execute = AsyncMock(side_effect=[library_paths_res, existing_res, insert_res])
 
             with (
                 patch("worker.scan.get_all_library_paths", new_callable=AsyncMock, return_value=[tmpdir]),

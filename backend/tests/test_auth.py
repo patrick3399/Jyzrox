@@ -141,7 +141,9 @@ class TestCheckAuth:
 
     async def test_check_valid_session(self, unauthed_client, mock_redis):
         """Valid session cookie should return 200."""
-        session_data = json.dumps({"user_id": 1, "role": "admin"}).encode()
+        from core.auth import sign_session
+
+        session_data = sign_session(json.dumps({"user_id": 1, "role": "admin"})).encode()
         mock_redis.get = AsyncMock_returning(session_data)
 
         resp = await unauthed_client.get(
@@ -460,22 +462,22 @@ class TestChangePassword:
 class TestVerifySession:
     """Unit tests for core.auth._verify_session helper."""
 
-    def test_verify_session_no_separator_returns_raw(self):
-        """Legacy session with no ':' is returned as-is (backward compat)."""
+    def test_verify_session_no_separator_returns_none(self):
+        """Session with no ':' has no HMAC signature → rejected (returns None)."""
         from core.auth import _verify_session
 
         raw = "somerawdata"
         result = _verify_session(raw)
-        assert result == raw
+        assert result is None
 
-    def test_verify_session_short_sig_treated_as_legacy(self):
-        """If the segment after last ':' is shorter than 64 chars, treat as unsigned legacy."""
+    def test_verify_session_short_sig_returns_none(self):
+        """Segment after last ':' shorter than 64 chars → not a valid HMAC → rejected."""
         from core.auth import _verify_session
 
         # The last ':' separates a non-64-char segment — looks like part of JSON
         raw = '{"user_id":1,"role":"admin"}'
         result = _verify_session(raw)
-        assert result == raw
+        assert result is None
 
     def test_verify_session_valid_hmac_returns_data(self):
         """Properly signed session data is accepted and the data portion returned."""
