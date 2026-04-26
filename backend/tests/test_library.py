@@ -9,9 +9,11 @@ are not available in SQLite. Tests that would exercise those features are struct
 to work with the basic query paths or are noted as SQLite-limited.
 """
 
+import uuid
+from unittest.mock import patch
+
 import pytest
 from sqlalchemy import text
-from unittest.mock import patch
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -67,6 +69,19 @@ async def _insert_image(db_session, gallery_id, page_num=1, filename="001.jpg"):
         {"gid": gallery_id, "pn": page_num, "fn": filename, "sha": sha},
     )
     await db_session.commit()
+
+
+async def _insert_download_job(db_session, *, gallery_id, status="running", user_id=1):
+    job_id = str(uuid.uuid4())
+    await db_session.execute(
+        text(
+            "INSERT INTO download_jobs (id, url, source, status, progress, user_id, gallery_id) "
+            "VALUES (:id, 'https://e-hentai.org/g/123/abc/', 'ehentai', :status, '{}', :user_id, :gallery_id)"
+        ),
+        {"id": job_id, "status": status, "user_id": user_id, "gallery_id": gallery_id},
+    )
+    await db_session.commit()
+    return job_id
 
 
 # ---------------------------------------------------------------------------
@@ -2651,15 +2666,27 @@ class TestDeleteGalleryEdgeCases:
         assert resp.status_code == 401
 
     async def test_delete_gallery_while_downloading_returns_409(self, client, db_session):
-        """DELETE gallery with download_status=downloading should return 409."""
-        await _insert_gallery(
+        """DELETE gallery with an active download job should return 409."""
+        gallery_id = await _insert_gallery(
             db_session,
             source="ehentai",
             source_id="del02",
             download_status="downloading",
         )
+        await _insert_download_job(db_session, gallery_id=gallery_id, status="running")
         resp = await client.delete("/api/library/galleries/ehentai/del02")
         assert resp.status_code == 409
+
+    async def test_delete_gallery_with_stale_downloading_status_returns_ok(self, client, db_session):
+        """A stale download_status=downloading should not block deletion without an active job."""
+        await _insert_gallery(
+            db_session,
+            source="ehentai",
+            source_id="del_stale",
+            download_status="downloading",
+        )
+        resp = await client.delete("/api/library/galleries/ehentai/del_stale")
+        assert resp.status_code == 200
 
 
 # ---------------------------------------------------------------------------
@@ -3426,14 +3453,15 @@ class TestTrashEndpoints:
         assert trash_resp.json()["total"] == 1
 
     async def test_delete_gallery_with_active_download_returns_409(self, client, db_session):
-        """Deleting a gallery with download_status=downloading should return 409."""
-        await _insert_gallery(
+        """Deleting a gallery with an active download job should return 409."""
+        gallery_id = await _insert_gallery(
             db_session,
             source="local",
             source_id="dl_block_01",
             title="Downloading",
             download_status="downloading",
         )
+        await _insert_download_job(db_session, gallery_id=gallery_id, status="paused")
         resp = await client.delete("/api/library/galleries/local/dl_block_01")
         assert resp.status_code == 409
 

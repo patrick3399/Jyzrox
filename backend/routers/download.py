@@ -9,19 +9,19 @@ import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
-from sqlalchemy import delete, desc, func, select, text
+from saq.job import TERMINAL_STATUSES as SAQ_TERMINAL_STATUSES
+from sqlalchemy import delete, desc, func, select, text, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import core.queue
 from core.auth import require_auth, require_role
 from core.config import settings as app_settings
 from core.database import get_db
 from core.errors import api_error, parse_accept_language
-import core.queue
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites
 from db.models import DownloadJob, Gallery
 from services.credential import get_credential
-from saq.job import TERMINAL_STATUSES as SAQ_TERMINAL_STATUSES
 from worker.helpers import compute_job_key, enqueue_download_job
 
 logger = logging.getLogger(__name__)
@@ -58,6 +58,58 @@ class PreviewResponse(BaseModel):
     rating: float | None = None
     thumb_url: str | None = None
     category: str | None = None
+
+
+async def _normalize_finished_gallery_statuses(db: AsyncSession, gallery_ids: list[int]) -> None:
+    """Clear stale downloading states for galleries with no active download job."""
+    if not gallery_ids:
+        return
+
+    unique_gallery_ids = list(set(gallery_ids))
+    active_ids = set(
+        (
+            await db.execute(
+                select(DownloadJob.gallery_id).where(
+                    DownloadJob.gallery_id.in_(unique_gallery_ids),
+                    DownloadJob.status.in_(["queued", "running", "paused"]),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    stale_ids = [gid for gid in unique_gallery_ids if gid not in active_ids]
+    if not stale_ids:
+        return
+
+    from db.models import Image
+
+    image_counts = {
+        gid: count
+        for gid, count in (
+            await db.execute(
+                select(Image.gallery_id, func.count())
+                .where(Image.gallery_id.in_(stale_ids))
+                .group_by(Image.gallery_id)
+            )
+        ).all()
+    }
+
+    partial_ids = [gid for gid in stale_ids if image_counts.get(gid, 0) > 0]
+    empty_ids = [gid for gid in stale_ids if image_counts.get(gid, 0) == 0]
+
+    if partial_ids:
+        await db.execute(
+            update(Gallery)
+            .where(Gallery.id.in_(partial_ids), Gallery.download_status == "downloading")
+            .values(download_status="partial")
+        )
+    if empty_ids:
+        await db.execute(
+            update(Gallery)
+            .where(Gallery.id.in_(empty_ids), Gallery.download_status == "downloading")
+            .values(download_status="proxy_only", pages=0)
+        )
 
 
 async def _credential_warning(source: str) -> str | None:
@@ -269,6 +321,21 @@ async def clear_finished_jobs(
     conditions = [DownloadJob.status.in_(["done", "failed", "cancelled", "partial"])]
     if auth["role"] != "admin":
         conditions.append(DownloadJob.user_id == auth["user_id"])
+
+    gallery_ids = (
+        (
+            await db.execute(
+                select(DownloadJob.gallery_id).where(
+                    *conditions,
+                    DownloadJob.gallery_id.is_not(None),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    await _normalize_finished_gallery_statuses(db, gallery_ids)
+
     stmt = delete(DownloadJob).where(*conditions)
     result = await db.execute(stmt)
     await db.commit()

@@ -23,6 +23,7 @@ async def _insert_job(
     status="queued",
     source="ehentai",
     user_id: int | None = None,
+    gallery_id: int | None = None,
     retry_count: int = 0,
     max_retries: int = 3,
     next_retry_at: str | None = None,
@@ -31,18 +32,33 @@ async def _insert_job(
     job_id = str(uuid.uuid4())
     await db_session.execute(
         text(
-            "INSERT INTO download_jobs (id, url, source, status, progress, user_id, retry_count, max_retries, next_retry_at) "
-            "VALUES (:id, :url, :source, :status, :progress, :user_id, :retry_count, :max_retries, :next_retry_at)"
+            "INSERT INTO download_jobs (id, url, source, status, progress, user_id, gallery_id, retry_count, max_retries, next_retry_at) "
+            "VALUES (:id, :url, :source, :status, :progress, :user_id, :gallery_id, :retry_count, :max_retries, :next_retry_at)"
         ),
         {
             "id": job_id, "url": url, "source": source, "status": status,
-            "progress": "{}", "user_id": user_id,
+            "progress": "{}", "user_id": user_id, "gallery_id": gallery_id,
             "retry_count": retry_count, "max_retries": max_retries,
             "next_retry_at": next_retry_at,
         },
     )
     await db_session.commit()
     return job_id
+
+
+async def _insert_gallery(db_session, *, source_id: str = "12345", download_status: str = "downloading"):
+    await db_session.execute(
+        text(
+            "INSERT INTO galleries (source, source_id, title, title_jpn, category, language, pages, rating, "
+            "favorited, download_status, tags_array, artist_id, uploader) "
+            "VALUES ('ehentai', :source_id, 'Test Gallery', NULL, 'doujinshi', 'english', 0, 0, "
+            "0, :download_status, '[]', NULL, NULL)"
+        ),
+        {"source_id": source_id, "download_status": download_status},
+    )
+    await db_session.commit()
+    result = await db_session.execute(text("SELECT last_insert_rowid()"))
+    return result.scalar()
 
 
 # ---------------------------------------------------------------------------
@@ -525,6 +541,23 @@ class TestClearJobs:
         resp = await member_client.delete("/api/download/jobs")
         assert resp.status_code == 200
         assert resp.json()["deleted"] == 1
+
+    async def test_clear_normalizes_stale_downloading_gallery(self, member_client, db_session):
+        """Clearing a failed job should clear a linked empty gallery's stale downloading status."""
+        gallery_id = await _insert_gallery(db_session, source_id="stale-clear")
+        await _insert_job(db_session, status="failed", user_id=1, gallery_id=gallery_id)
+
+        resp = await member_client.delete("/api/download/jobs")
+        assert resp.status_code == 200
+        assert resp.json()["deleted"] == 1
+
+        row = (
+            await db_session.execute(
+                text("SELECT download_status, pages FROM galleries WHERE id = :gallery_id"),
+                {"gallery_id": gallery_id},
+            )
+        ).fetchone()
+        assert row == ("proxy_only", 0)
 
     async def test_clear_jobs_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""

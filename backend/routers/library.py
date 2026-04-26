@@ -1458,12 +1458,11 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
     active_gallery_ids_result = await db.execute(
         select(DownloadJob.gallery_id).where(
             DownloadJob.gallery_id.in_([g.id for g in galleries]),
-            DownloadJob.status.in_(["queued", "running"]),
+            DownloadJob.status.in_(["queued", "running", "paused"]),
         )
     )
     active_gallery_ids = set(active_gallery_ids_result.scalars().all())
-    downloading_ids = {g.id for g in galleries if g.download_status == "downloading"}
-    skip_ids = active_gallery_ids | downloading_ids
+    skip_ids = active_gallery_ids
     if skip_ids:
         galleries = [g for g in galleries if g.id not in skip_ids]
         if not galleries:
@@ -1918,11 +1917,6 @@ async def delete_gallery(
     g = await _get_or_404_by_source(db, source, source_id, auth)
     _check_write_access(auth, g)
 
-    # Prevent deletion while download is active
-    if g.download_status == "downloading":
-        raise HTTPException(
-            status_code=409, detail="Cannot delete gallery while downloading. Cancel the download first."
-        )
     from db.models import DownloadJob
 
     active_job = (
@@ -1930,7 +1924,7 @@ async def delete_gallery(
             select(DownloadJob.id)
             .where(
                 DownloadJob.gallery_id == g.id,
-                DownloadJob.status.in_(["queued", "running"]),
+                DownloadJob.status.in_(["queued", "running", "paused"]),
             )
             .limit(1)
         )
