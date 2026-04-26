@@ -158,6 +158,14 @@ function qs(params: Record<string, unknown>): string {
   return s ? `?${s}` : ''
 }
 
+function encodeOpaquePathId(value: string): string {
+  return encodeURIComponent(encodeURIComponent(value))
+}
+
+function galleryApiPath(source: string, sourceId: string, suffix = ''): string {
+  return `/api/library/galleries/${encodeURIComponent(source)}/${encodeOpaquePathId(sourceId)}${suffix}`
+}
+
 // ── Auth ─────────────────────────────────────────────────────────────
 
 const auth = {
@@ -309,9 +317,7 @@ const library = {
     apiFetch<GalleryListResponse>(`/api/library/galleries${qs(params as Record<string, unknown>)}`),
 
   getGallery: (source: string, sourceId: string) =>
-    apiFetch<Gallery>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`,
-    ),
+    apiFetch<Gallery>(galleryApiPath(source, sourceId)),
 
   getImages: (source: string, sourceId: string, opts?: { page?: number; limit?: number }) => {
     const params = new URLSearchParams()
@@ -326,7 +332,7 @@ const library = {
       has_next?: boolean
       favorited_image_ids?: number[]
     }>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/images${qs ? `?${qs}` : ''}`,
+      `${galleryApiPath(source, sourceId, '/images')}${qs ? `?${qs}` : ''}`,
     )
   },
 
@@ -342,13 +348,10 @@ const library = {
       in_reading_list?: boolean
     },
   ) =>
-    apiFetch<Gallery>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`,
-      {
-        method: 'PATCH',
-        body: JSON.stringify(patch),
-      },
-    ),
+    apiFetch<Gallery>(galleryApiPath(source, sourceId), {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
 
   batchGalleries: (body: {
     action:
@@ -375,26 +378,18 @@ const library = {
     ),
 
   deleteGallery: (source: string, sourceId: string) =>
-    apiFetch<{ status: string; deleted_files: number }>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`,
-      {
-        method: 'DELETE',
-      },
-    ),
+    apiFetch<{ status: string; deleted_files: number }>(galleryApiPath(source, sourceId), {
+      method: 'DELETE',
+    }),
 
   getProgress: (source: string, sourceId: string) =>
-    apiFetch<ReadProgress>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/progress`,
-    ),
+    apiFetch<ReadProgress>(galleryApiPath(source, sourceId, '/progress')),
 
   saveProgress: (source: string, sourceId: string, last_page: number) =>
-    apiFetch<{ status: string }>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/progress`,
-      {
-        method: 'POST',
-        body: JSON.stringify({ last_page }),
-      },
-    ),
+    apiFetch<{ status: string }>(galleryApiPath(source, sourceId, '/progress'), {
+      method: 'POST',
+      body: JSON.stringify({ last_page }),
+    }),
 
   getGalleryTags: (source: string, sourceId: string) =>
     apiFetch<{
@@ -405,7 +400,7 @@ const library = {
         confidence: number
         source: string
       }>
-    }>(`/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/tags`),
+    }>(galleryApiPath(source, sourceId, '/tags')),
 
   getArtists: (
     params: { q?: string; source?: string; sort?: string; page?: number; limit?: number } = {},
@@ -445,11 +440,11 @@ const library = {
       category: string | null
       files: LibraryFile[]
       total_files: number
-    }>(`/api/library/files/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`),
+    }>(`/api/library/files/${encodeURIComponent(source)}/${encodeOpaquePathId(sourceId)}`),
 
   deleteImage: (source: string, sourceId: string, pageNum: number) =>
     apiFetch<{ status: string; remaining_pages: number }>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/delete-image`,
+      galleryApiPath(source, sourceId, '/delete-image'),
       { method: 'POST', body: JSON.stringify({ page_num: pageNum }) },
     ),
 
@@ -457,13 +452,11 @@ const library = {
     apiFetch<{
       gallery_id: number
       excluded: Array<{ blob_sha256: string; excluded_at: string | null }>
-    }>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/excluded`,
-    ),
+    }>(galleryApiPath(source, sourceId, '/excluded')),
 
   restoreExcluded: (source: string, sourceId: string, sha256: string) =>
     apiFetch<{ status: string }>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/excluded/${encodeURIComponent(sha256)}`,
+      `${galleryApiPath(source, sourceId, '/excluded')}/${encodeURIComponent(sha256)}`,
       { method: 'DELETE' },
     ),
 
@@ -528,16 +521,13 @@ const library = {
   trashCount: () => apiFetch<{ count: number }>('/api/library/trash/count'),
 
   restore: (source: string, sourceId: string) =>
-    apiFetch<{ status: string }>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/restore`,
-      {
-        method: 'POST',
-      },
-    ),
+    apiFetch<{ status: string }>(galleryApiPath(source, sourceId, '/restore'), {
+      method: 'POST',
+    }),
 
   permanentDelete: (source: string, sourceId: string) =>
     apiFetch<{ status: string; affected: number; deleted_dirs: number }>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/permanent-delete`,
+      galleryApiPath(source, sourceId, '/permanent-delete'),
       {
         method: 'POST',
       },
@@ -555,10 +545,7 @@ const library = {
       gallery?: Gallery
       changed_fields?: string[]
       pages_diff?: { old: number; new: number } | null
-    }>(
-      `/api/library/galleries/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}/check-update`,
-      { method: 'POST' },
-    ),
+    }>(galleryApiPath(source, sourceId, '/check-update'), { method: 'POST' }),
 
   findSimilar: (
     imageId: number,
@@ -1075,6 +1062,10 @@ const import_ = {
         label: string
         enabled: boolean
         monitor: boolean
+        pattern: string
+        import_mode: string
+        display_pattern: string
+        gallery_count: number
         is_primary: boolean
         exists: boolean
         added_at: string | null

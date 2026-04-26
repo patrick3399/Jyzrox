@@ -10,6 +10,7 @@ import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { Pagination } from '@/components/Pagination'
 import { t } from '@/lib/i18n'
+import { galleryHref } from '@/lib/galleryRoutes'
 import { useLocale } from '@/components/LocaleProvider'
 
 const PAGE_LIMIT = 24
@@ -180,7 +181,7 @@ function CollectionDetailInner() {
           {galleries.map((g) => (
             <div key={g.id} className="group relative">
               <Link
-                href={`/library/${g.source}/${g.source_id}`}
+                href={galleryHref(g.source, g.source_id)}
                 className="block bg-vault-card border border-vault-border rounded-lg overflow-hidden hover:border-vault-accent/50 transition-all"
               >
                 <div className="aspect-[3/4] bg-vault-bg overflow-hidden">

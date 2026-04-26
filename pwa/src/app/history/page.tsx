@@ -3,6 +3,7 @@
 import { useState, useEffect, useCallback } from 'react'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
+import { galleryHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -162,7 +163,7 @@ export default function HistoryPage() {
       if (item.gid != null && item.token) {
         router.push(`/e-hentai/${item.gid}/${item.token}`)
       } else {
-        router.push(`/library/${item.source}/${item.source_id}`)
+        router.push(galleryHref(item.source, item.source_id))
       }
     },
     [router],

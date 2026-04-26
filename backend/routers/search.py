@@ -544,11 +544,14 @@ async def search_galleries(
             data_query = (
                 select(Gallery)
                 .where(*filters, gallery_access_filter(auth))
-                .order_by(order)
-                .limit(limit)
+                .order_by(order, asc(Gallery.id) if effective_sort == "title" else desc(Gallery.id))
+                .limit(limit + 1)
                 .offset(offset)
             )
             rows = (await session.execute(data_query)).scalars().all()
+            has_next = len(rows) > limit
+            if has_next:
+                rows = rows[:limit]
 
             # Enrich results
             gallery_ids = [g.id for g in rows]
@@ -558,12 +561,14 @@ async def search_galleries(
             rl_set = await get_reading_list_set(session, auth["user_id"], gallery_ids)
             cover_map = await build_cover_map(session, gallery_ids, source_map)
 
-    return {
-        "total": total,
-        "page": page,
-        "query": q,
-        "items": [_row_to_item(r, fav_set, rating_map, rl_set, cover_map) for r in rows],
-    }
+            return {
+                "total": total,
+                "page": page,
+                "query": q,
+                "items": [_row_to_item(r, fav_set, rating_map, rl_set, cover_map) for r in rows],
+                "next_cursor": _encode_cursor(rows[-1], effective_sort) if has_next and rows else None,
+                "has_next": has_next,
+            }
 
 
 # ── Saved Searches ────────────────────────────────────────────────────

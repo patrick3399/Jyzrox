@@ -33,6 +33,7 @@ CREATE TABLE IF NOT EXISTS galleries (
     uploader        TEXT,
     download_status TEXT DEFAULT 'proxy_only',
     import_mode     TEXT,
+    source_path     TEXT,
     tags_array      TEXT[] DEFAULT '{}',
     source_url      TEXT,
     metadata_updated_at TIMESTAMPTZ,
@@ -240,6 +241,8 @@ CREATE TABLE IF NOT EXISTS library_paths (
     id          SERIAL PRIMARY KEY,
     path        TEXT NOT NULL UNIQUE,
     label       TEXT,
+    pattern     TEXT NOT NULL DEFAULT '{title}',
+    import_mode TEXT NOT NULL DEFAULT 'link',
     enabled     BOOLEAN NOT NULL DEFAULT TRUE,
     monitor     BOOLEAN NOT NULL DEFAULT TRUE,
     added_at    TIMESTAMPTZ NOT NULL DEFAULT NOW()
@@ -248,6 +251,9 @@ CREATE TABLE IF NOT EXISTS library_paths (
 -- Gallery extensions for library management
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS last_scanned_at TIMESTAMPTZ;
 ALTER TABLE galleries ADD COLUMN IF NOT EXISTS library_path TEXT;
+ALTER TABLE galleries ADD COLUMN IF NOT EXISTS source_path TEXT;
+ALTER TABLE library_paths ADD COLUMN IF NOT EXISTS pattern TEXT NOT NULL DEFAULT '{title}';
+ALTER TABLE library_paths ADD COLUMN IF NOT EXISTS import_mode TEXT NOT NULL DEFAULT 'link';
 
 -- Image browser columns
 ALTER TABLE images ADD COLUMN IF NOT EXISTS added_at TIMESTAMPTZ;

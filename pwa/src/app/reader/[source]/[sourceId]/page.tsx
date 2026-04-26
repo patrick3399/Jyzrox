@@ -2,6 +2,7 @@
 import { useEffect, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
+import { decodeRouteSegment } from '@/lib/galleryRoutes'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { t } from '@/lib/i18n'
@@ -15,7 +16,9 @@ interface LoadedData {
 }
 
 export default function ReaderPage() {
-  const { source, sourceId } = useParams<{ source: string; sourceId: string }>()
+  const params = useParams<{ source: string; sourceId: string }>()
+  const source = decodeRouteSegment(params.source)
+  const sourceId = decodeRouteSegment(params.sourceId)
   const searchParams = useSearchParams()
   const urlPage = parseInt(searchParams.get('page') ?? '', 10) || 0
 
@@ -30,13 +33,15 @@ export default function ReaderPage() {
     }
 
     let cancelled = false
+    const currentSource = source
+    const currentSourceId = sourceId
 
     async function load() {
       try {
         const [gallery, imagesResp, progress] = await Promise.all([
-          api.library.getGallery(source, sourceId),
-          api.library.getImages(source, sourceId),
-          api.library.getProgress(source, sourceId).catch(() => null),
+          api.library.getGallery(currentSource, currentSourceId),
+          api.library.getImages(currentSource, currentSourceId),
+          api.library.getProgress(currentSource, currentSourceId).catch(() => null),
         ])
 
         if (!cancelled) {
@@ -80,13 +85,15 @@ export default function ReaderPage() {
   }, [source, sourceId])
 
   useEffect(() => {
-    if (data?.gallery.download_status !== 'downloading') return
+    if (data?.gallery.download_status !== 'downloading' || !source || !sourceId) return
     let cancelled = false
+    const currentSource = source
+    const currentSourceId = sourceId
     const interval = setInterval(async () => {
       try {
         const [gallery, imagesResp] = await Promise.all([
-          api.library.getGallery(source, sourceId),
-          api.library.getImages(source, sourceId),
+          api.library.getGallery(currentSource, currentSourceId),
+          api.library.getImages(currentSource, currentSourceId),
         ])
         if (!cancelled) {
           setData((prev) =>

@@ -6,6 +6,7 @@ import { toast } from 'sonner'
 import useSWR from 'swr'
 import { useRouter } from 'next/navigation'
 import { api } from '@/lib/api'
+import { galleryHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -68,7 +69,7 @@ export default function ReadingListPage() {
             <div
               key={g.id}
               className="bg-vault-card border border-vault-border rounded-lg p-3 flex items-center gap-3 cursor-pointer hover:border-vault-accent transition-colors"
-              onClick={() => router.push(`/library/${g.source}/${g.source_id}`)}
+              onClick={() => router.push(galleryHref(g.source, g.source_id))}
             >
               {g.cover_thumb && (
                 <img

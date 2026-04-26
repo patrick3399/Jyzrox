@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+from dataclasses import dataclass
 from datetime import UTC, datetime, timezone
 from pathlib import Path
 
@@ -14,7 +15,13 @@ from sqlalchemy.sql import select
 
 from core.config import get_all_library_paths, settings
 from core.database import AsyncSessionLocal
-from db.models import Blob, ExcludedBlob, Gallery, Image
+from core.local_patterns import (
+    DEFAULT_IMPORT_MODE,
+    DEFAULT_LIBRARY_PATTERN,
+    build_library_pattern_regex,
+    normalize_relative_path,
+)
+from db.models import Blob, ExcludedBlob, Gallery, Image, LibraryPath
 from services.cas import (
     create_library_symlink,
     decrement_ref_count,
@@ -27,6 +34,93 @@ from worker.constants import _IMAGE_EXTS, _MEDIA_EXTS, _VIDEO_EXTS, logger
 from worker.helpers import _cron_record, _cron_should_run, _sha256, _validate_image_magic
 
 _SUPPORTED_MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
+
+
+@dataclass(frozen=True)
+class _LibrarySpec:
+    path: str
+    pattern: str = DEFAULT_LIBRARY_PATTERN
+    import_mode: str = DEFAULT_IMPORT_MODE
+
+
+@dataclass(frozen=True)
+class _ImportRequest:
+    gallery_id: int
+    source_dir: str
+    mode: str
+
+
+async def _get_library_specs(session) -> list[_LibrarySpec]:
+    rows = (await session.execute(
+        select(LibraryPath).where(LibraryPath.enabled == True)  # noqa: E712
+    )).scalars().all()
+    specs = [
+        _LibrarySpec(path=row.path, pattern=row.pattern or DEFAULT_LIBRARY_PATTERN, import_mode=row.import_mode or DEFAULT_IMPORT_MODE)
+        for row in rows
+    ]
+    seen = {spec.path for spec in specs}
+
+    for path in await get_all_library_paths():
+        if path not in seen:
+            specs.append(_LibrarySpec(path=path))
+            seen.add(path)
+    return specs
+
+
+def _media_count(filenames: list[str]) -> int:
+    return sum(1 for f in filenames if Path(f).suffix.lower() in _SUPPORTED_MEDIA_EXTS)
+
+
+def _match_library_candidate(spec: _LibrarySpec, root: Path, candidate: Path) -> tuple[str, dict[str, str]] | None:
+    try:
+        rel_path = normalize_relative_path(str(candidate.relative_to(root)))
+    except ValueError:
+        return None
+    match = build_library_pattern_regex(spec.pattern).match(rel_path)
+    if not match:
+        return None
+    return rel_path, match.groupdict()
+
+
+async def _discover_single_library_dir(session, spec: _LibrarySpec, current: Path) -> _ImportRequest | None:
+    root = Path(spec.path)
+    matched = _match_library_candidate(spec, root, current)
+    if not matched:
+        return None
+    rel_path, groups = matched
+    title = groups.get("title") or current.name
+    artist = groups.get("artist")
+    source_path = os.path.realpath(current)
+
+    stmt = text(
+        "INSERT INTO galleries "
+        "(source, source_id, title, artist_id, uploader, library_path, source_path, import_mode, download_status) "
+        "VALUES ('local', :source_id, :title, :artist_id, :uploader, :library_path, :source_path, :import_mode, 'importing') "
+        "ON CONFLICT (source, source_id) DO UPDATE SET "
+        "title = EXCLUDED.title, "
+        "artist_id = EXCLUDED.artist_id, "
+        "uploader = EXCLUDED.uploader, "
+        "library_path = EXCLUDED.library_path, "
+        "source_path = EXCLUDED.source_path, "
+        "import_mode = EXCLUDED.import_mode "
+        "RETURNING id"
+    )
+    result = await session.execute(
+        stmt,
+        {
+            "source_id": rel_path,
+            "title": title,
+            "artist_id": f"local:{artist}" if artist else None,
+            "uploader": artist,
+            "library_path": spec.path,
+            "source_path": source_path,
+            "import_mode": spec.import_mode,
+        },
+    )
+    gallery_id = result.scalar_one_or_none()
+    if gallery_id is None:
+        return None
+    return _ImportRequest(gallery_id=gallery_id, source_dir=source_path, mode=spec.import_mode)
 
 
 async def rescan_library_job(ctx: dict) -> dict:
@@ -205,7 +299,7 @@ async def rescan_library_job(ctx: dict) -> dict:
 
                 # Enqueue thumbnail jobs outside the transaction
                 for gid in galleries_needing_thumbs:
-                    await core.queue.enqueue("thumbnail_job", gallery_id=gid)
+                    await core.queue.enqueue("thumbnail_job", gallery_id=gid, _timeout=3600)
                     logger.info(
                         "[rescan_library] gallery_id=%d: enqueued thumbnail_job (missing thumbs)",
                         gid,
@@ -303,26 +397,31 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             await session.flush()
 
         # --- Step 2: Discover new files in the gallery directory ---
-        # With CAS, the gallery directory is the library symlink directory.
+        # CAS/copy galleries scan the library symlink directory. Link-mode
+        # monitored galleries scan their original external source directory.
         gallery_dir: Path | None = None
         surviving_images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
             .options(selectinload(Image.blob))
         )).scalars().all()
 
-        gallery_dir = library_dir(gallery.source, gallery.source_id)
-        if not gallery_dir.exists():
-            gallery_dir = None
+        if gallery.import_mode == "link" and gallery.source_path:
+            source_dir = Path(gallery.source_path)
+            if source_dir.exists():
+                gallery_dir = source_dir
+        if gallery_dir is None:
+            symlink_dir = library_dir(gallery.source, gallery.source_id)
+            if symlink_dir.exists():
+                gallery_dir = symlink_dir
 
         new_files_added = 0
         if gallery_dir and gallery_dir.is_dir():
-            _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
             # Determine the next page_num
             max_page = max((img.page_num for img in surviving_images), default=0)
 
             try:
                 dir_files = sorted(
-                    [f for f in gallery_dir.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_EXTS],
+                    [f for f in gallery_dir.iterdir() if f.is_file() and f.suffix.lower() in _SUPPORTED_MEDIA_EXTS],
                     key=lambda f: f.name,
                 )
             except OSError as exc:
@@ -340,7 +439,10 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                     )
                     continue
                 # New file found on disk that is not in the DB.
-                blob = await store_blob(fpath, file_hash, session)
+                if gallery.import_mode == "link":
+                    blob = await store_blob(fpath, file_hash, session, storage="external", external_path=str(fpath))
+                else:
+                    blob = await store_blob(fpath, file_hash, session)
                 await create_library_symlink(gallery.source, gallery.source_id, fpath.name, blob)
                 await session.flush()
                 max_page += 1
@@ -405,7 +507,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         await session.commit()
 
     if missing_thumb:
-        await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id)
+        await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id, _timeout=3600)
         logger.info("[rescan_gallery] gallery_id=%d: enqueued thumbnail_job", gallery_id)
 
     logger.info(
@@ -428,19 +530,19 @@ async def auto_discover_job(ctx: dict) -> dict:
     """Scan all library paths recursively and auto-create galleries for undiscovered directories containing media files."""
     logger.info("[auto_discover] Starting auto-discovery")
 
-    paths = await get_all_library_paths()
-
     discovered = 0
+    import_requests: list[_ImportRequest] = []
     async with AsyncSessionLocal() as session:
-        # Get all existing source="local" galleries with their source_id and library_path
-        existing_rows = (await session.execute(
-            select(Gallery.source_id, Gallery.library_path).where(Gallery.source == "local")
-        )).all()
-        existing_set = {(row.source_id, row.library_path) for row in existing_rows}
+        specs = await _get_library_specs(session)
 
-        for lib_path in paths:
-            lib_dir = Path(lib_path)
+        for spec in specs:
+            lib_dir = Path(spec.path)
             if not lib_dir.is_dir():
+                continue
+            try:
+                pattern_re = build_library_pattern_regex(spec.pattern)
+            except ValueError as exc:
+                logger.warning("[auto_discover] skipping invalid pattern for %s: %s", spec.path, exc)
                 continue
 
             # Walk the directory tree recursively; os.walk is efficient for deep trees
@@ -453,44 +555,41 @@ async def auto_discover_job(ctx: dict) -> dict:
                 if current == lib_dir:
                     continue
 
-                # Use path relative to the library root as source_id for uniqueness
-                # (e.g. "artist/album" instead of just "album" to avoid collisions)
                 try:
-                    rel_path = str(current.relative_to(lib_dir))
+                    rel_path = normalize_relative_path(str(current.relative_to(lib_dir)))
                 except ValueError:
                     continue
 
-                if (rel_path, lib_path) in existing_set:
+                match = pattern_re.match(rel_path)
+                if not match:
                     continue
 
                 # Only create a gallery if the directory directly contains media files
-                file_count = sum(
-                    1 for f in filenames
-                    if Path(f).suffix.lower() in _SUPPORTED_MEDIA_EXTS
-                )
+                file_count = _media_count(filenames)
                 if file_count == 0:
                     continue
 
-                # Derive a human-readable title from the leaf directory name
-                title = current.name
+                existing = (await session.execute(
+                    select(Gallery.id).where(Gallery.source == "local", Gallery.source_id == rel_path)
+                )).scalar_one_or_none()
 
-                result = await session.execute(
-                    text(
-                        "INSERT INTO galleries (source, source_id, title, library_path, download_status)"
-                        " VALUES ('local', :source_id, :title, :lib_path, 'importing')"
-                        " ON CONFLICT (source, source_id) DO NOTHING"
-                        " RETURNING id"
-                    ),
-                    {"source_id": rel_path, "title": title, "lib_path": lib_path},
-                )
-                row = result.scalar_one_or_none()
-                if row:
-                    gallery_id = row
-                    discovered += 1
-                    logger.info("[auto_discover] New gallery: %s (%d files)", rel_path, file_count)
-                    await core.queue.enqueue("local_import_job", source_dir=str(current), mode="link", gallery_id=gallery_id)
+                import_request = await _discover_single_library_dir(session, spec, current)
+                if import_request:
+                    if existing is None:
+                        discovered += 1
+                    import_requests.append(import_request)
+                    logger.info("[auto_discover] Gallery matched: %s (%d files)", rel_path, file_count)
 
         await session.commit()
+
+    for item in import_requests:
+        await core.queue.enqueue(
+            "local_import_job",
+            source_dir=item.source_dir,
+            mode=item.mode,
+            gallery_id=item.gallery_id,
+            _timeout=3600,
+        )
 
     logger.info("[auto_discover] Discovered %d new galleries", discovered)
 
@@ -505,8 +604,43 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
     # In CAS mode, /data/library/{gallery_id}/ is the gallery directory.
     lib_base = Path(settings.data_library_path)
     dir_p = Path(dir_path)
+    real_dir = os.path.realpath(dir_path)
 
     gallery_id: int | None = None
+    async with AsyncSessionLocal() as session:
+        result = await session.execute(select(Gallery.id).where(Gallery.source_path == real_dir).limit(1))
+        gallery_id = result.scalar_one_or_none()
+
+    if gallery_id:
+        return await rescan_gallery_job(ctx, gallery_id)
+
+    async with AsyncSessionLocal() as session:
+        specs = await _get_library_specs(session)
+        matching_specs = [
+            spec for spec in specs
+            if real_dir == os.path.realpath(spec.path) or real_dir.startswith(os.path.realpath(spec.path) + os.sep)
+        ]
+        matching_specs.sort(key=lambda spec: len(os.path.realpath(spec.path)), reverse=True)
+        current = Path(real_dir)
+        if current.is_dir():
+            try:
+                filenames = [p.name for p in current.iterdir() if p.is_file()]
+            except OSError:
+                filenames = []
+            if _media_count(filenames) > 0:
+                for spec in matching_specs:
+                    import_request = await _discover_single_library_dir(session, spec, current)
+                    if import_request:
+                        await session.commit()
+                        await core.queue.enqueue(
+                            "local_import_job",
+                            source_dir=import_request.source_dir,
+                            mode=import_request.mode,
+                            gallery_id=import_request.gallery_id,
+                            _timeout=3600,
+                        )
+                        return {"status": "discovered", "path": real_dir, "gallery_id": import_request.gallery_id}
+
     # Check if this path is a library directory (or inside one).
     # Library structure is lib_base/source/source_id/.
     try:
@@ -519,7 +653,7 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
                     select(Gallery.id).where(Gallery.source == source, Gallery.source_id == source_id)
                 )
                 gallery_id = result.scalar_one_or_none()
-    except ValueError, IndexError:
+    except (ValueError, IndexError):
         pass
 
     if not gallery_id:
@@ -550,42 +684,61 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
 
     logger.info("[rescan_path] starting rescan for path: %s", library_path)
     r = ctx["redis"]
+    import_requests: list[_ImportRequest] = []
 
     async with AsyncSessionLocal() as session:
-        # Find all galleries with this library_path or whose images are under this path
-        gallery_rows = (await session.execute(
-            select(Gallery).where(
-                (Gallery.library_path == library_path) |
-                (Gallery.source == "local")
-            ).order_by(Gallery.id)
-        )).scalars().all()
+        specs = await _get_library_specs(session)
+        spec = next((item for item in specs if item.path == library_path), None)
+        if spec:
+            lib_dir = Path(spec.path)
+            if lib_dir.is_dir():
+                try:
+                    pattern_re = build_library_pattern_regex(spec.pattern)
+                except ValueError as exc:
+                    logger.warning("[rescan_path] skipping discovery for invalid pattern %s: %s", spec.path, exc)
+                else:
+                    for dirpath, dirnames, filenames in os.walk(str(lib_dir)):
+                        dirnames[:] = [d for d in dirnames if not d.startswith(".")]
+                        current = Path(dirpath)
+                        if current == lib_dir or _media_count(filenames) == 0:
+                            continue
+                        try:
+                            rel_path = normalize_relative_path(str(current.relative_to(lib_dir)))
+                        except ValueError:
+                            continue
+                        if pattern_re.match(rel_path):
+                            import_request = await _discover_single_library_dir(session, spec, current)
+                            if import_request:
+                                import_requests.append(import_request)
+                    await session.commit()
 
-        # Filter to galleries actually under this path
-        relevant = []
-        for g in gallery_rows:
-            if g.library_path == library_path:
-                relevant.append(g)
-            elif g.library_path is None and g.import_mode == "link":
-                # Check if any blob has external_path under this library_path
-                blob_row = (await session.execute(
-                    select(Blob.external_path)
-                    .join(Image, Image.blob_sha256 == Blob.sha256)
-                    .where(Image.gallery_id == g.id, Blob.storage == "external")
-                    .limit(1)
-                )).scalar_one_or_none()
-                if blob_row and blob_row.startswith(library_path):
-                    relevant.append(g)
+        relevant = (await session.execute(
+            select(Gallery).where(Gallery.library_path == library_path).order_by(Gallery.id)
+        )).scalars().all()
 
         total = len(relevant)
         logger.info("[rescan_path] %d galleries under %s", total, library_path)
 
-    # Rescan each gallery using existing job logic
+    for item in import_requests:
+        await core.queue.enqueue(
+            "local_import_job",
+            source_dir=item.source_dir,
+            mode=item.mode,
+            gallery_id=item.gallery_id,
+            _timeout=3600,
+        )
+
+    importing_gallery_ids = {item.gallery_id for item in import_requests}
+    # Enqueue each gallery rescan as a child job so a large library path does
+    # not exceed the parent job's timeout.
     for idx, gallery in enumerate(relevant):
+        if gallery.id in importing_gallery_ids:
+            continue
         await r.setex("rescan:progress", 3600, _json.dumps({
             "processed": idx, "total": total, "status": "running",
             "current_gallery": gallery.id,
         }))
-        await rescan_gallery_job(ctx, gallery.id)
+        await core.queue.enqueue("rescan_gallery_job", gallery_id=gallery.id, _timeout=3600)
 
     await r.setex("rescan:progress", 30, _json.dumps({
         "processed": total, "total": total, "status": "done",

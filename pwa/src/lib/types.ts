@@ -35,6 +35,7 @@ export interface Gallery {
   cover_thumb?: string | null
   display_order?: 'asc' | 'desc'
   source_url?: string | null
+  source_path?: string | null
   deleted_at?: string | null
   metadata_updated_at?: string | null
 }

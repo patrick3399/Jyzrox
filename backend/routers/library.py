@@ -8,7 +8,9 @@ import logging
 import re as _re
 from datetime import UTC, datetime
 from itertools import combinations
+from pathlib import Path
 from typing import Literal
+from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
@@ -1010,7 +1012,6 @@ async def list_files(
     """List gallery directories under data_library_path with DB metadata."""
     import asyncio
     import os
-    from pathlib import Path
 
     base = Path(settings.data_library_path)
 
@@ -1587,6 +1588,7 @@ async def restore_gallery(
     db: AsyncSession = Depends(get_db),
 ):
     """Restore a soft-deleted gallery from trash."""
+    source_id = unquote(source_id)
     g = (
         await db.execute(
             select(Gallery).where(
@@ -1617,6 +1619,7 @@ async def permanent_delete_gallery(
     db: AsyncSession = Depends(get_db),
 ):
     """Permanently delete a gallery (from trash). Irreversible."""
+    source_id = unquote(source_id)
     g = (
         await db.execute(
             select(Gallery).where(
@@ -2447,11 +2450,14 @@ def _thumb_url(blob) -> str | None:
     """Return the 160px thumbnail URL for a blob."""
     if not blob or not blob.sha256:
         return None
+    if not (thumb_dir(blob.sha256) / "thumb_160.webp").exists():
+        return None
     return cas_thumb_url(blob.sha256)
 
 
 async def _get_or_404_by_source(db: AsyncSession, source: str, source_id: str, auth: dict | None = None) -> Gallery:
     """Fetch a gallery by (source, source_id) with optional access filter. Raises 404 if not found."""
+    source_id = unquote(source_id)
     if auth is not None:
         stmt = select(Gallery).where(
             Gallery.source == source,
@@ -2514,6 +2520,7 @@ def _g(
         "tags_array": g.tags_array or [],
         "cover_thumb": cover_thumb,
         "source_url": g.source_url,
+        "source_path": g.source_path,
         "display_order": display_cfg.image_order,
         "metadata_updated_at": g.metadata_updated_at.isoformat() if g.metadata_updated_at else None,
     }

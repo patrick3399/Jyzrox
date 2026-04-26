@@ -15,6 +15,7 @@ import {
   RefreshCw,
 } from 'lucide-react'
 import { toast } from 'sonner'
+import { galleryHref } from '@/lib/galleryRoutes'
 import {
   useDownloadJobs,
   useEnqueueDownload,
@@ -131,7 +132,7 @@ function JobRow({
               <p className="text-sm font-medium truncate" title={galleryTitle}>
                 {gallerySource && gallerySourceId ? (
                   <a
-                    href={`/library/${gallerySource}/${gallerySourceId}`}
+                    href={galleryHref(gallerySource, gallerySourceId)}
                     onClick={(e) => e.stopPropagation()}
                     className="text-vault-accent hover:underline"
                   >

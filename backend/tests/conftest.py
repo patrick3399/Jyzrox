@@ -326,6 +326,7 @@ _SQLITE_SCHEMA = [
         uploader TEXT,
         download_status TEXT DEFAULT 'proxy_only',
         import_mode TEXT,
+        source_path TEXT,
         tags_array TEXT DEFAULT '[]',
         last_scanned_at TIMESTAMP,
         library_path TEXT,
@@ -505,6 +506,8 @@ _SQLITE_SCHEMA = [
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         path TEXT NOT NULL UNIQUE,
         label TEXT,
+        pattern TEXT DEFAULT '{title}' NOT NULL,
+        import_mode TEXT DEFAULT 'link' NOT NULL,
         enabled BOOLEAN DEFAULT 1 NOT NULL,
         monitor BOOLEAN DEFAULT 1 NOT NULL,
         added_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP

@@ -5,6 +5,7 @@ import useSWR from 'swr'
 import { useState, useCallback, useEffect } from 'react'
 import { ArrowRight, BookMarked, X, LayoutList, LayoutGrid } from 'lucide-react'
 import { api } from '@/lib/api'
+import { galleryHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { SkeletonGrid } from '@/components/Skeleton'
 import { EmptyState } from '@/components/EmptyState'
@@ -101,7 +102,7 @@ function SystemAlerts({ alerts }: { alerts: string[] }) {
 
 function GalleryThumb({ gallery }: { gallery: Gallery }) {
   return (
-    <Link href={`/library/${gallery.source}/${gallery.source_id}`} className="group block">
+    <Link href={galleryHref(gallery.source, gallery.source_id)} className="group block">
       <div className="aspect-[2/3] bg-vault-card rounded-lg overflow-hidden border border-vault-border group-hover:border-vault-border-hover transition-colors relative">
         {gallery.cover_thumb ? (
           <img

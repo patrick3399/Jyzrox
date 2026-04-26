@@ -65,6 +65,7 @@ class Gallery(Base):
         BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
     )
     source_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     metadata_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
@@ -276,6 +277,8 @@ class LibraryPath(Base):
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
     path: Mapped[str] = mapped_column(Text, nullable=False, unique=True)
     label: Mapped[str | None] = mapped_column(Text, nullable=True)
+    pattern: Mapped[str] = mapped_column(Text, default="{title}", server_default="{title}", nullable=False)
+    import_mode: Mapped[str] = mapped_column(Text, default="link", server_default="link", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     monitor: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())

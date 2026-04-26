@@ -15,6 +15,7 @@ import { RatingStars } from './RatingStars'
 import { ContextMenu } from './ContextMenu'
 import { useLongPress } from '@/hooks/useLongPress'
 import { getSourceStyle, getEventPosition } from '@/lib/galleryUtils'
+import { galleryHref, readerHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 
 // ── Category colours ──────────────────────────────────────────────────
@@ -198,12 +199,12 @@ export function LibraryGalleryCard({
       {
         label: t('contextMenu.read'),
         icon: BookOpen,
-        onClick: () => router.push(`/reader/${gallery.source}/${gallery.source_id}`),
+        onClick: () => router.push(readerHref(gallery.source, gallery.source_id)),
       },
       {
         label: t('contextMenu.openDetail'),
         icon: ExternalLink,
-        onClick: () => router.push(`/library/${gallery.source}/${gallery.source_id}`),
+        onClick: () => router.push(galleryHref(gallery.source, gallery.source_id)),
       },
       ...(onFavoriteToggle
         ? [

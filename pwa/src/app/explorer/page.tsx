@@ -4,6 +4,7 @@ import { useRouter } from 'next/navigation'
 import useSWR from 'swr'
 import { Folder, LayoutGrid, List, Star, AlertTriangle } from 'lucide-react'
 import { api } from '@/lib/api'
+import { readerHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { toast } from 'sonner'
 import type { LibraryDirectory, LibraryFile } from '@/lib/types'
@@ -132,13 +133,12 @@ export default function ExplorerPage() {
   }
 
   function handleDoubleClickFile(id: string | number) {
+    if (!currentGallery) return
     const file = fileData?.files.find((f) => f.filename === id)
     if (file?.page_num != null) {
-      router.push(
-        `/reader/${currentGallery?.source}/${currentGallery?.sourceId}?page=${file.page_num}`,
-      )
+      router.push(readerHref(currentGallery.source, currentGallery.sourceId, file.page_num))
     } else {
-      router.push(`/reader/${currentGallery?.source}/${currentGallery?.sourceId}`)
+      router.push(readerHref(currentGallery.source, currentGallery.sourceId))
     }
   }
 

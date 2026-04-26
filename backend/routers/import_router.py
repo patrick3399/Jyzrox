@@ -15,6 +15,14 @@ import core.queue
 from core.auth import require_role
 from core.config import get_all_library_paths, settings
 from core.database import async_session
+from core.local_patterns import (
+    DEFAULT_IMPORT_MODE,
+    DEFAULT_LIBRARY_PATTERN,
+    PatternError,
+    build_library_pattern_regex,
+    display_library_pattern,
+    split_library_pattern_path,
+)
 from core.redis_client import get_redis
 from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
 from db.models import Gallery, LibraryPath
@@ -76,22 +84,10 @@ def _build_pattern_regex(pattern: str) -> re.Pattern:
     Security: non-placeholder text is re.escape()d so user content never
     contributes regex metacharacters.  Placeholders are hardcoded to ``[^/]+``.
     """
-    if len(pattern) > 500:
-        raise HTTPException(status_code=400, detail="Pattern too long")
-    parts = re.split(r"(\{[^}]+\})", pattern)
-    regex_parts = []
-    for part in parts:
-        if part.startswith("{") and part.endswith("}"):
-            name = part[1:-1]
-            if name != "_" and not re.fullmatch(r"[a-zA-Z_]\w*", name):
-                raise HTTPException(status_code=400, detail=f"Invalid placeholder name: {{{name}}}")
-            if name == "_":
-                regex_parts.append(r"(?:[^/]+)")
-            else:
-                regex_parts.append(rf"(?P<{name}>[^/]+)")
-        else:
-            regex_parts.append(re.escape(part))
-    return re.compile("^" + "".join(regex_parts) + "$")
+    try:
+        return build_library_pattern_regex(pattern)
+    except PatternError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
 
 @router.post("/batch/scan")
@@ -191,6 +187,8 @@ async def batch_start(
                 .values(
                     path=real_root,
                     label=Path(real_root).name,
+                    pattern=DEFAULT_LIBRARY_PATTERN,
+                    import_mode=req.mode,
                 )
                 .on_conflict_do_nothing()
             )
@@ -377,7 +375,8 @@ async def rescan_status(_: dict = Depends(_member)):
 @router.post("/rescan")
 async def rescan_library(request: Request, _: dict = Depends(_admin)):
     """Enqueue a full library rescan job."""
-    await core.queue.enqueue("rescan_library_job")
+    await core.queue.enqueue("auto_discover_job", _timeout=3600)
+    await core.queue.enqueue("rescan_library_job", _timeout=7200)
     return {"status": "enqueued"}
 
 
@@ -402,7 +401,7 @@ async def rescan_library_path(library_id: int, request: Request, _: dict = Depen
         lp = await session.get(LibraryPath, library_id)
         if not lp:
             raise HTTPException(404, "Library path not found")
-    await core.queue.enqueue("rescan_library_path_job", library_path=lp.path)
+    await core.queue.enqueue("rescan_library_path_job", library_path=lp.path, _timeout=3600)
     return {"status": "enqueued", "path": lp.path}
 
 
@@ -494,6 +493,12 @@ async def list_libraries(_: dict = Depends(_member)):
                 "id": lp.id if lp else None,
                 "path": p,
                 "label": lp.label if lp else Path(p).name,
+                "pattern": lp.pattern if lp else DEFAULT_LIBRARY_PATTERN,
+                "import_mode": lp.import_mode if lp else DEFAULT_IMPORT_MODE,
+                "display_pattern": display_library_pattern(
+                    p,
+                    lp.pattern if lp else DEFAULT_LIBRARY_PATTERN,
+                ),
                 "enabled": lp.enabled if lp else True,
                 "monitor": lp.monitor if lp else True,
                 "exists": Path(p).is_dir(),
@@ -507,12 +512,20 @@ async def list_libraries(_: dict = Depends(_member)):
 class AddLibraryRequest(BaseModel):
     path: str
     label: str | None = None
+    import_mode: str = DEFAULT_IMPORT_MODE
 
 
 @router.post("/libraries")
 async def add_library(req: AddLibraryRequest, _: dict = Depends(_admin)):
     """Add a new library path."""
-    real_path = os.path.realpath(req.path)
+    if req.import_mode not in ("link", "copy"):
+        raise HTTPException(status_code=400, detail="import_mode must be 'link' or 'copy'")
+    try:
+        parsed = split_library_pattern_path(req.path)
+    except PatternError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+
+    real_path = parsed.root_path
     if not Path(real_path).is_dir():
         raise HTTPException(status_code=400, detail="Path does not exist or is not a directory")
 
@@ -522,13 +535,29 @@ async def add_library(req: AddLibraryRequest, _: dict = Depends(_admin)):
             .values(
                 path=real_path,
                 label=req.label or Path(real_path).name,
+                pattern=parsed.pattern,
+                import_mode=req.import_mode,
             )
-            .on_conflict_do_nothing()
+            .on_conflict_do_update(
+                index_elements=["path"],
+                set_={
+                    "label": req.label or Path(real_path).name,
+                    "pattern": parsed.pattern,
+                    "import_mode": req.import_mode,
+                    "enabled": True,
+                },
+            )
         )
         await session.execute(stmt)
         await session.commit()
 
-    return {"status": "added", "path": real_path}
+    return {
+        "status": "added",
+        "path": real_path,
+        "pattern": parsed.pattern,
+        "import_mode": req.import_mode,
+        "display_pattern": parsed.display_pattern,
+    }
 
 
 @router.delete("/libraries/{library_id}")

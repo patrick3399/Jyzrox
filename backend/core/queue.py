@@ -48,6 +48,7 @@ async def enqueue(
     job_name: str,
     *,  # force kwargs only
     _job_id: str | None = None,
+    _timeout: int | None = None,
     **kwargs: Any,
 ) -> Any:
     """Enqueue a job using SAQ.
@@ -61,6 +62,8 @@ async def enqueue(
     enqueue_kwargs: dict[str, Any] = {}
     if _job_id is not None:
         enqueue_kwargs["key"] = _job_id
+    if _timeout is not None:
+        enqueue_kwargs["timeout"] = _timeout
     if kwargs:
         enqueue_kwargs["kwargs"] = kwargs
     return await q.enqueue(job_name, **enqueue_kwargs)

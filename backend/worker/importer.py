@@ -232,7 +232,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     logger.info("[import] gallery_id=%d source=%s/%s", gallery_id, source, source_id)
 
     # Trigger thumbnail generation
-    await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id)
+    await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id, _timeout=3600)
     if settings.tag_model_enabled:
         await core.queue.enqueue("tag_job", gallery_id=gallery_id)
 
@@ -401,11 +401,21 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     excluded_set: set[str] = set(excluded_rows)
 
     async with AsyncSessionLocal() as session:
+        final_pages = processed
+        existing_rows = (await session.execute(
+            select(Image.page_num, Image.blob_sha256).where(Image.gallery_id == gallery_id)
+        )).all()
+        known_sha256s = {row.blob_sha256 for row in existing_rows}
+        max_page = max((row.page_num for row in existing_rows), default=0)
+
         for idx, f in enumerate(files):
             sha256 = await asyncio.to_thread(_sha256, f)
 
             if sha256 in excluded_set:
                 logger.debug("[local_import] gallery_id=%d: skipping excluded blob %s", gallery_id, sha256[:12])
+                continue
+            if sha256 in known_sha256s:
+                attempted += 1
                 continue
 
             if mode == "copy":
@@ -424,7 +434,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                 pg_insert(Image)
                 .values(
                     gallery_id=gallery_id,
-                    page_num=idx + 1,
+                    page_num=max_page + 1,
                     filename=f.name,
                     blob_sha256=sha256,
                     added_at=datetime.now(UTC),
@@ -443,6 +453,8 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                     .values(ref_count=Blob.ref_count + 1)
                 )
                 processed += 1
+                max_page += 1
+                known_sha256s.add(sha256)
 
             attempted += 1
 
@@ -458,8 +470,14 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         # Update gallery page count and status
         gallery = await session.get(Gallery, gallery_id)
         if gallery:
-            gallery.pages = processed
+            image_count = (await session.execute(
+                select(func.count(Image.id)).where(Image.gallery_id == gallery_id)
+            )).scalar_one()
+            final_pages = image_count
+            gallery.pages = image_count
             gallery.download_status = "complete"
+            if mode == "link" and not gallery.source_path:
+                gallery.source_path = os.path.realpath(src_path)
             gallery.metadata_updated_at = func.now()
 
         await session.commit()
@@ -474,14 +492,14 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     logger.info("[local_import] gallery_id=%d: %d files imported", gallery_id, processed)
 
     # Trigger thumbnail generation
-    await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id)
+    await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id, _timeout=3600)
 
     # Trigger AI tagging if enabled
     if settings.tag_model_enabled:
         await core.queue.enqueue("tag_job", gallery_id=gallery_id)
 
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=processed, source="local")
+    await emit_safe(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=final_pages, source="local")
 
     return {"status": "done", "processed": processed}
 
@@ -507,8 +525,10 @@ async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[
             async with AsyncSessionLocal() as session:
                 result = await session.execute(
                     text(
-                        "INSERT INTO galleries (source, source_id, title, import_mode, library_path, artist_id, created_by_user_id)"
-                        " VALUES (:source, :source_id, :title, :mode, :library_path, :artist_id, :user_id) RETURNING id"
+                        "INSERT INTO galleries "
+                        "(source, source_id, title, import_mode, library_path, source_path, artist_id, uploader, created_by_user_id)"
+                        " VALUES (:source, :source_id, :title, :mode, :library_path, :source_path, :artist_id, :uploader, :user_id) "
+                        "RETURNING id"
                     ),
                     {
                         "source": "local",
@@ -516,7 +536,9 @@ async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[
                         "title": title,
                         "mode": mode,
                         "library_path": root_dir if mode == "link" else None,
+                        "source_path": os.path.realpath(abs_path) if mode == "link" else None,
                         "artist_id": f"local:{artist}" if artist else None,
+                        "uploader": artist,
                         "user_id": user_id,
                     },
                 )

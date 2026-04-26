@@ -6,6 +6,7 @@ import type { ReaderImage, ViewMode, ScaleMode, ReadingDirection, ReaderSettings
 import { DEFAULT_READER_SETTINGS } from './types'
 import { t } from '@/lib/i18n'
 import { api } from '@/lib/api'
+import { galleryHref } from '@/lib/galleryRoutes'
 import { toast } from 'sonner'
 import {
   useReaderState,
@@ -1985,7 +1986,7 @@ export default function Reader({
   ])
 
   const handleViewGallery = useCallback(() => {
-    router.push(`/library/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`)
+    router.push(galleryHref(source, sourceId))
     setImageMenu(null)
   }, [source, sourceId, router])
 

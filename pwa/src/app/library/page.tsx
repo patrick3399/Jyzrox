@@ -30,6 +30,7 @@ import { VirtualGrid } from '@/components/VirtualGrid'
 import { t, formatNumber } from '@/lib/i18n'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { galleryHref } from '@/lib/galleryRoutes'
 import { useSWRConfig } from 'swr'
 import type { SearchGalleryItem } from '@/lib/api'
 
@@ -205,7 +206,7 @@ function LibraryContent() {
       const g = displayGalleries[i]
       if (g) {
         saveScroll()
-        router.push(`/library/${g.source}/${g.source_id}`)
+        router.push(galleryHref(g.source, g.source_id))
       }
     },
   })
@@ -552,7 +553,7 @@ function LibraryContent() {
                 thumbUrl={gallery.cover_thumb ?? undefined}
                 onClick={() => {
                   saveScroll()
-                  router.push(`/library/${gallery.source}/${gallery.source_id}`)
+                  router.push(galleryHref(gallery.source, gallery.source_id))
                 }}
                 onFavoriteToggle={handleFavoriteToggle}
                 onReadingListToggle={handleReadingListToggle}

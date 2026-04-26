@@ -8,6 +8,7 @@ import useSWR from 'swr'
 import { useLibraryGallery, useGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { api } from '@/lib/api'
+import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
 import type { GalleryImage } from '@/lib/types'
 import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -83,8 +84,8 @@ const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: stri
 export default function GalleryDetailPage() {
   const params = useParams<{ source: string; sourceId: string }>()
   const router = useRouter()
-  const source = params?.source ?? null
-  const sourceId = params?.sourceId ?? null
+  const source = decodeRouteSegment(params?.source)
+  const sourceId = decodeRouteSegment(params?.sourceId)
 
   const {
     data: gallery,
@@ -292,7 +293,7 @@ export default function GalleryDetailPage() {
       if (e.key === 'Enter' || e.key === ' ') {
         e.preventDefault()
         if (gallery?.source && gallery?.source_id) {
-          router.push(`/reader/${gallery.source}/${gallery.source_id}`)
+          router.push(readerHref(gallery.source, gallery.source_id))
         }
       }
       if (e.key === 'ArrowUp' || e.key === 'Escape') {
@@ -769,7 +770,7 @@ export default function GalleryDetailPage() {
             {/* Action Buttons */}
             <div className="flex flex-wrap gap-2">
               <Link
-                href={`/reader/${gallery.source}/${gallery.source_id}`}
+                href={readerHref(gallery.source, gallery.source_id)}
                 className="px-4 py-2 bg-blue-600 hover:bg-blue-700 rounded text-white text-sm font-medium transition-colors"
               >
                 {t('browse.read')}
@@ -1184,15 +1185,11 @@ export default function GalleryDetailPage() {
                   role="button"
                   tabIndex={0}
                   onClick={() =>
-                    router.push(
-                      `/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`,
-                    )
+                    router.push(readerHref(gallery.source, gallery.source_id, image.page_num))
                   }
                   onKeyDown={(e) => {
                     if (e.key === 'Enter')
-                      router.push(
-                        `/reader/${gallery.source}/${gallery.source_id}?page=${image.page_num}`,
-                      )
+                      router.push(readerHref(gallery.source, gallery.source_id, image.page_num))
                   }}
                   onTouchStart={(e) => {
                     activeImageRef.current = image
@@ -1235,7 +1232,7 @@ export default function GalleryDetailPage() {
               Array.from({ length: Math.min(gallery.pages, 40) }).map((_, i) => (
                 <Link
                   key={i}
-                  href={`/reader/${gallery.source}/${gallery.source_id}?page=${i + 1}`}
+                  href={readerHref(gallery.source, gallery.source_id, i + 1)}
                   className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors"
                 >
                   {i + 1}

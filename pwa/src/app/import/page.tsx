@@ -83,6 +83,11 @@ function FolderPicker({
   const handlePathSubmit = () => {
     const trimmed = editingPath.trim()
     if (trimmed && trimmed.startsWith('/')) {
+      if (trimmed.includes('{')) {
+        setEditingPath(trimmed)
+        setIsEditing(false)
+        return
+      }
       setCurrentPath(trimmed)
       setIsEditing(false)
     }
@@ -134,6 +139,7 @@ function FolderPicker({
                 onBlur={handlePathSubmit}
                 autoFocus
                 className="flex-1 bg-vault-input border border-vault-accent rounded px-2 py-1 text-xs font-mono text-vault-text focus:outline-none"
+                placeholder="/mnt/G500/images/{artist}/{_}/{title}"
               />
             ) : (
               <button
@@ -214,8 +220,17 @@ function FolderPicker({
         {/* Footer */}
         <div className="px-4 py-3 border-t border-vault-border">
           <button
-            onClick={() => onSelect(currentPath ?? '/')}
-            disabled={showMounts}
+            onClick={() => {
+              setEditingPath('/mnt/G500/images/{artist}/{_}/{title}')
+              setIsEditing(true)
+            }}
+            className="w-full mb-2 px-3 py-2 text-xs border border-vault-border text-vault-text rounded hover:border-vault-accent transition-colors font-mono"
+          >
+            /mnt/G500/images/{'{artist}'}/{'{_}'}/{'{title}'}
+          </button>
+          <button
+            onClick={() => onSelect(editingPath.trim() || currentPath || '/')}
+            disabled={showMounts && !editingPath.includes('{')}
             className="w-full px-3 py-2.5 text-sm bg-vault-accent text-white rounded font-medium hover:bg-vault-accent/90 transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
           >
             {t('import.folderPicker.select')}
@@ -316,8 +331,15 @@ function ZoneA({ isAdmin }: { isAdmin: boolean }) {
                 <HardDrive size={14} className="text-vault-text-muted shrink-0" />
                 <div className="flex-1 min-w-0">
                   <p className="text-xs font-mono text-vault-text truncate">{lib.path}</p>
+                  {lib.pattern && (
+                    <p className="text-[11px] font-mono text-vault-accent mt-0.5 truncate">
+                      {lib.pattern}
+                    </p>
+                  )}
                   {lib.label && (
-                    <p className="text-[11px] text-vault-text-muted mt-0.5">{lib.label}</p>
+                    <p className="text-[11px] text-vault-text-muted mt-0.5 truncate">
+                      {lib.label} · {lib.import_mode} · {lib.gallery_count ?? 0}
+                    </p>
                   )}
                 </div>
                 {/* Online/offline status */}

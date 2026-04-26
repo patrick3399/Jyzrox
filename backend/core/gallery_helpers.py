@@ -5,7 +5,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.source_display import get_display_config
 from db.models import Blob, Image, UserFavorite, UserRating, UserReadingList
-from services.cas import thumb_url as cas_thumb_url
+from services.cas import thumb_dir, thumb_url as cas_thumb_url
+
+
+def _existing_thumb_url(sha256: str) -> str | None:
+    if (thumb_dir(sha256) / "thumb_160.webp").exists():
+        return cas_thumb_url(sha256)
+    return None
 
 
 async def get_favorite_set(db: AsyncSession, user_id: int, gallery_ids: list[int]) -> set[int]:
@@ -95,7 +101,9 @@ async def build_cover_map(
             .where(Image.gallery_id.in_(first_ids), Image.page_num == 1)
         )
         for r in (await db.execute(stmt)).all():
-            cover_map[r.gallery_id] = cas_thumb_url(r.sha256)
+            thumb_url = _existing_thumb_url(r.sha256)
+            if thumb_url:
+                cover_map[r.gallery_id] = thumb_url
 
     # Batch query: last page covers
     if last_ids:
@@ -116,6 +124,8 @@ async def build_cover_map(
             )
         )
         for r in (await db.execute(stmt)).all():
-            cover_map[r.gallery_id] = cas_thumb_url(r.sha256)
+            thumb_url = _existing_thumb_url(r.sha256)
+            if thumb_url:
+                cover_map[r.gallery_id] = thumb_url
 
     return cover_map
