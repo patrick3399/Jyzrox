@@ -8,6 +8,7 @@ from saq.job import TERMINAL_STATUSES, Status
 
 from core.auth import require_role
 import core.queue
+from core.queue_config import ALL_QUEUES
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["queue admin"])
@@ -44,24 +45,54 @@ def _serialize_job(job) -> dict:
     }
 
 
+async def _find_job(job_key: str):
+    """Search all queues for a job by key. Returns (queue, job) or (None, None)."""
+    for name in ALL_QUEUES:
+        try:
+            q = core.queue.get_queue(name)
+        except (RuntimeError, KeyError):
+            continue
+        job = await q.job(job_key)
+        if job is not None:
+            return q, job
+    return None, None
+
+
 @router.get("/")
 async def queue_overview(_: dict = Depends(_admin)):
-    """Return queue overview: counts and worker list."""
-    q = core.queue.get_queue()
-    info = await q.info(jobs=False)
+    """Return aggregated overview across all queues, plus per-queue breakdown."""
+    total_queued = total_active = total_scheduled = 0
+    per_queue = []
+    all_workers: dict = {}
+
+    for name in ALL_QUEUES:
+        try:
+            q = core.queue.get_queue(name)
+        except (RuntimeError, KeyError):
+            continue
+        info = await q.info(jobs=False)
+        total_queued    += info.get("queued", 0)
+        total_active    += info.get("active", 0)
+        total_scheduled += info.get("scheduled", 0)
+        all_workers.update(info.get("workers") or {})
+        per_queue.append({
+            "name": name,
+            "queued":    info.get("queued", 0),
+            "active":    info.get("active", 0),
+            "scheduled": info.get("scheduled", 0),
+        })
+
     workers = [
-        {
-            "id": worker_id,
-            "stats": worker_info.get("stats") or {},
-        }
-        for worker_id, worker_info in (info.get("workers") or {}).items()
+        {"id": wid, "stats": winfo.get("stats") or {}}
+        for wid, winfo in all_workers.items()
     ]
     return {
-        "name": info["name"],
-        "queued": info["queued"],
-        "active": info["active"],
-        "scheduled": info["scheduled"],
-        "workers": workers,
+        "name": "all",
+        "queued":    total_queued,
+        "active":    total_active,
+        "scheduled": total_scheduled,
+        "workers":   workers,
+        "queues":    per_queue,
     }
 
 
@@ -69,28 +100,33 @@ async def queue_overview(_: dict = Depends(_admin)):
 async def list_jobs(
     status: str | None = None,
     function_name: str | None = Query(None, alias="function"),
+    queue: str | None = Query(None),
     offset: int = 0,
     limit: int = Query(20, ge=1, le=100),
     _: dict = Depends(_admin),
 ):
-    """List jobs with optional filtering by status and function name."""
-    q = core.queue.get_queue()
+    """List jobs. Optional ?queue= limits to one queue; default searches all."""
+    if queue is not None:
+        try:
+            queues_to_search = {queue: core.queue.get_queue(queue)}
+        except KeyError:
+            raise HTTPException(status_code=404, detail=f"Queue '{queue}' not found")
+    else:
+        queues_to_search = core.queue.get_all_queues()
 
-    if status is None and function_name is None:
-        # Fast path: use info() which reads from Redis structures directly
+    # Fast path: single queue, no filters
+    if queue is not None and status is None and function_name is None:
+        q = queues_to_search[queue]
         info = await q.info(jobs=True, offset=offset, limit=limit)
         raw_jobs = info.get("jobs") or []
-        # info returns list of dicts (to_dict() output), reconstruct Job objects for serialization
         serialized = []
         for job_dict in raw_jobs:
-            # Deserialize via queue so the queue reference is set correctly
             job_obj = q.deserialize(job_dict)
             if job_obj is not None:
                 serialized.append(_serialize_job(job_obj))
         return {"jobs": serialized, "total": len(serialized)}
 
-    # Filtered path: iterate all jobs and apply filters
-    matched: list[dict] = []
+    # Full scan path — iterate all relevant queues
     status_filter: Status | None = None
     if status is not None:
         try:
@@ -102,20 +138,21 @@ async def list_jobs(
             )
 
     statuses = [status_filter] if status_filter else list(Status)
-    async for job in q.iter_jobs(statuses=statuses):
-        if function_name is not None and job.function != function_name:
-            continue
-        matched.append(_serialize_job(job))
+    matched: list[dict] = []
+    for q in queues_to_search.values():
+        async for job in q.iter_jobs(statuses=statuses):
+            if function_name is not None and job.function != function_name:
+                continue
+            matched.append(_serialize_job(job))
 
     total = len(matched)
-    return {"jobs": matched[offset : offset + limit], "total": total}
+    return {"jobs": matched[offset: offset + limit], "total": total}
 
 
 @router.get("/jobs/{job_key}")
 async def job_detail(job_key: str, _: dict = Depends(_admin)):
-    """Return full details for a single job."""
-    q = core.queue.get_queue()
-    job = await q.job(job_key)
+    """Return full details for a single job (searches across all queues)."""
+    _, job = await _find_job(job_key)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_key}' not found")
     return _serialize_job(job)
@@ -124,8 +161,7 @@ async def job_detail(job_key: str, _: dict = Depends(_admin)):
 @router.post("/jobs/{job_key}/retry")
 async def retry_job(job_key: str, _: dict = Depends(_admin)):
     """Re-enqueue a terminal (completed/failed/aborted) job."""
-    q = core.queue.get_queue()
-    job = await q.job(job_key)
+    _, job = await _find_job(job_key)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_key}' not found")
 
@@ -145,13 +181,11 @@ async def retry_job(job_key: str, _: dict = Depends(_admin)):
 
 @router.post("/jobs/{job_key}/abort")
 async def abort_job(job_key: str, _: dict = Depends(_admin)):
-    """Abort an active or queued job."""
-    q = core.queue.get_queue()
-    job = await q.job(job_key)
+    """Abort an active or queued job (searches across all queues)."""
+    _, job = await _find_job(job_key)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_key}' not found")
 
-    # Only abort jobs that are not already in a terminal state
     if job.status in TERMINAL_STATUSES:
         raise HTTPException(
             status_code=409,
