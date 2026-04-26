@@ -151,18 +151,55 @@ async def _ensure_archive_table_schema() -> None:
         await session.commit()
 
 
+async def _migrate_default_queue(r) -> None:
+    """Move all jobs from the legacy 'default' queue to the correct new queues.
+
+    Runs once on startup. Safe to call repeatedly (no-op if queue is empty).
+    """
+    import json
+
+    from core.queue_config import JOB_QUEUE_ROUTING, QUEUE_INTERACTIVE
+
+    queue_len = await r.llen("saq:default:queued")
+    if queue_len == 0:
+        return
+
+    logger.info("[startup] Migrating %d jobs from legacy 'default' queue...", queue_len)
+    old_keys = await r.lrange("saq:default:queued", 0, -1)
+    migrated = 0
+
+    for raw_key in old_keys:
+        key = raw_key.decode() if isinstance(raw_key, bytes) else raw_key
+        try:
+            job_data_raw = await r.get(key)
+            if not job_data_raw:
+                continue
+            job_data = json.loads(job_data_raw)
+            job_name = job_data.get("function", "")
+            target = JOB_QUEUE_ROUTING.get(job_name, QUEUE_INTERACTIVE)
+            new_key = key.replace("saq:job:default:", f"saq:job:{target}:", 1)
+            job_data["queue"] = target
+            await r.set(new_key, json.dumps(job_data))
+            await r.rpush(f"saq:{target}:queued", new_key)
+            if new_key != key:
+                await r.delete(key)
+            migrated += 1
+        except Exception as exc:
+            logger.warning("[startup] Could not migrate job %s: %s", key, exc)
+
+    await r.delete("saq:default:queued")
+    logger.info("[startup] Migrated %d / %d jobs from 'default' queue", migrated, len(old_keys))
+
+
 async def startup(ctx: dict) -> None:
     logger.info("SAQ Worker started — Jyzrox")
-    import core.queue as _core_queue
     from core.redis_client import get_redis, init_redis
 
     await init_redis()
     r = get_redis()
-    # Register the Worker's own Queue into core.queue so that enqueue() works
-    # throughout the codebase without creating a second Redis connection.
-    saq_queue = ctx["worker"].queue
-    _core_queue._queue = saq_queue
     ctx["redis"] = r  # plain Redis client
+    # Migrate any jobs left in the legacy 'default' queue (one-time, idempotent)
+    await _migrate_default_queue(r)
     from core.log_handler import apply_log_level_from_redis, install_log_handler
 
     install_log_handler("worker")
@@ -631,30 +668,60 @@ async def adaptive_persist_job(ctx: dict) -> dict:
     return {"persisted": count}
 
 
+async def _ingest_startup(ctx: dict) -> None:
+    logger.info("SAQ ingest worker started")
+
+
+async def _render_startup(ctx: dict) -> None:
+    logger.info("SAQ render worker started")
+
+
 # ── SAQ Worker Factory ───────────────────────────────────────────────
 
 
-def build_worker():
-    """Build and return a configured SAQ Worker instance."""
+def build_workers() -> tuple:
+    """Build and return all three SAQ Worker instances.
+
+    Queue objects are pre-registered in core.queue._queues so that enqueue()
+    works immediately from startup() onwards without a separate init call.
+    """
+    import os
+
+    import core.queue as _cq
+    from core.queue_config import (
+        ALL_QUEUES,
+        DEFAULT_CONCURRENCY,
+        QUEUE_INTERACTIVE,
+        QUEUE_INGEST,
+        QUEUE_RENDER,
+    )
     from saq import Queue, Worker
 
-    queue = Queue.from_url(settings.redis_url)
+    # Build queue objects and pre-register for enqueue() routing
+    queues = {name: Queue.from_url(settings.redis_url, name=name) for name in ALL_QUEUES}
+    _cq._queues = queues
 
-    return Worker(
-        queue,
+    concurrency = {
+        QUEUE_INTERACTIVE: int(os.environ.get("WORKER_CONCURRENCY_INTERACTIVE", DEFAULT_CONCURRENCY[QUEUE_INTERACTIVE])),
+        QUEUE_INGEST:      int(os.environ.get("WORKER_CONCURRENCY_INGEST",       DEFAULT_CONCURRENCY[QUEUE_INGEST])),
+        QUEUE_RENDER:      int(os.environ.get("WORKER_CONCURRENCY_RENDER",        DEFAULT_CONCURRENCY[QUEUE_RENDER])),
+    }
+    logger.info(
+        "Worker concurrency — interactive: %d, ingest: %d, render: %d",
+        concurrency[QUEUE_INTERACTIVE], concurrency[QUEUE_INGEST], concurrency[QUEUE_RENDER],
+    )
+
+    worker_interactive = Worker(
+        queues[QUEUE_INTERACTIVE],
         functions=[
             download_job,
             import_job,
-            local_import_job,
             batch_import_job,
             rescan_library_job,
             rescan_gallery_job,
             rescan_by_path_job,
             rescan_library_path_job,
-            auto_discover_job,
             tag_job,
-            cover_thumbnail_job,
-            thumbnail_job,
             reconciliation_job,
             scheduled_scan_job,
             toggle_watcher_job,
@@ -666,33 +733,58 @@ def build_worker():
             dedup_tier3_job,
             dedup_scan_job,
             rate_limit_schedule_job,
-            thumbhash_backfill_job,
             retry_failed_downloads_job,
             trash_gc_job,
             ehtag_sync_job,
             log_cleanup_job,
-            # Registered under explicit names (source functions are upgrade_job/rollback_job).
             ("gdl_upgrade_job", gdl_upgrade_job),
             ("gdl_rollback_job", gdl_rollback_job),
             disk_monitor_job,
             adaptive_persist_job,
         ],
         cron_jobs=[
-            CronJob(scheduled_scan_job, cron="0 * * * *", unique=True, timeout=7200),
-            CronJob(reconciliation_job, cron="0 3 * * 1", unique=True, timeout=3600),
-            CronJob(subscription_scheduler, cron="* * * * *", unique=True, timeout=120),
-            CronJob(rate_limit_schedule_job, cron="*/10 * * * *", unique=True, timeout=60),
-            CronJob(retry_failed_downloads_job, cron="*/15 * * * *", unique=True, timeout=300),
-            CronJob(trash_gc_job, cron="0 4 * * *", unique=True, timeout=3600),
-            CronJob(ehtag_sync_job, cron="30 4 * * *", unique=True, timeout=300),
-            CronJob(log_cleanup_job, cron="30 3 * * *", unique=True, timeout=300),
-            CronJob(disk_monitor_job, cron="*/5 * * * *", unique=True, timeout=30),
-            CronJob(adaptive_persist_job, cron="*/5 * * * *", unique=True, timeout=60),
+            CronJob(scheduled_scan_job,         cron="0 * * * *",    unique=True, timeout=7200),
+            CronJob(reconciliation_job,          cron="0 3 * * 1",    unique=True, timeout=3600),
+            CronJob(subscription_scheduler,      cron="* * * * *",    unique=True, timeout=120),
+            CronJob(rate_limit_schedule_job,     cron="*/10 * * * *", unique=True, timeout=60),
+            CronJob(retry_failed_downloads_job,  cron="*/15 * * * *", unique=True, timeout=300),
+            CronJob(trash_gc_job,                cron="0 4 * * *",    unique=True, timeout=3600),
+            CronJob(ehtag_sync_job,              cron="30 4 * * *",   unique=True, timeout=300),
+            CronJob(log_cleanup_job,             cron="30 3 * * *",   unique=True, timeout=300),
+            CronJob(disk_monitor_job,            cron="*/5 * * * *",  unique=True, timeout=30),
+            CronJob(adaptive_persist_job,        cron="*/5 * * * *",  unique=True, timeout=60),
         ],
-        concurrency=int(os.environ.get("MAX_WORKER_JOBS", "8")),
+        concurrency=concurrency[QUEUE_INTERACTIVE],
         startup=startup,
         shutdown=shutdown,
     )
+
+    worker_ingest = Worker(
+        queues[QUEUE_INGEST],
+        functions=[
+            local_import_job,
+            cover_thumbnail_job,
+            auto_discover_job,
+        ],
+        concurrency=concurrency[QUEUE_INGEST],
+        startup=_ingest_startup,
+    )
+
+    worker_render = Worker(
+        queues[QUEUE_RENDER],
+        functions=[
+            thumbnail_job,
+            thumbhash_backfill_job,
+        ],
+        concurrency=concurrency[QUEUE_RENDER],
+        startup=_render_startup,
+    )
+
+    return worker_interactive, worker_ingest, worker_render
+
+
+# Keep old name as alias for any external scripts that import it
+build_worker = build_workers
 
 
 __all__ = [
@@ -731,6 +823,7 @@ __all__ = [
     "adaptive_persist_job",
     "startup",
     "shutdown",
+    "build_workers",
     "build_worker",
     # Internal helpers re-exported for tests
     "_extract_tags",
