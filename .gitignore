@@ -14,6 +14,7 @@ build/
 .pytest_cache/
 .ruff_cache/
 .coverage
+backend/coverage.json
 
 # gallery-dl live config (contains credentials)
 config/gallery-dl/config.json
