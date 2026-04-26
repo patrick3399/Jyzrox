@@ -31,8 +31,6 @@ services:
       - NGINX_CLIENT_MAX_BODY_SIZE=${NGINX_CLIENT_MAX_BODY_SIZE:-100m}
     volumes:
       - app_data:/data:ro
-      # NAS/SMB mount guide: docs/smb-storage.md
-      - ./mnt:/mnt:ro
     depends_on:
       api:
         condition: service_healthy
@@ -71,7 +69,6 @@ services:
     volumes:
       - app_data:/data
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
-      - ./mnt:/mnt:ro
       - gallery_dl_venv:/opt/gallery-dl:ro
     depends_on:
       <<: *backend-depends
@@ -110,7 +107,6 @@ services:
       - app_data:/data
       # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
-      - ./mnt:/mnt:ro
       - gallery_dl_venv:/opt/gallery-dl
     depends_on:
       <<: *backend-depends
@@ -171,7 +167,6 @@ services:
       - ONNX_PROVIDERS=${ONNX_PROVIDERS:-CPUExecutionProvider}
     volumes:
       - app_data:/data:ro
-      - ./mnt:/mnt:ro
       - tagger_models:/app/models
     networks:
       - backend
