@@ -102,6 +102,9 @@ services:
     stop_grace_period: 120s
     environment:
       <<: *backend-env
+      WORKER_CONCURRENCY_INTERACTIVE: ${WORKER_CONCURRENCY_INTERACTIVE:-6}
+      WORKER_CONCURRENCY_INGEST: ${WORKER_CONCURRENCY_INGEST:-4}
+      WORKER_CONCURRENCY_RENDER: ${WORKER_CONCURRENCY_RENDER:-2}
     env_file: .env
     volumes:
       - app_data:/data
