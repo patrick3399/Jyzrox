@@ -317,7 +317,12 @@ class TestRescanLibraryJob:
         ):
             await rescan_library_job({"redis": r})
 
-        mock_enqueue.assert_awaited_with("thumbnail_job", gallery_id=40)
+        assert [c.args[0] for c in mock_enqueue.call_args_list] == [
+            "cover_thumbnail_job",
+            "thumbnail_job",
+        ]
+        mock_enqueue.assert_any_call("cover_thumbnail_job", gallery_id=40, _timeout=300)
+        mock_enqueue.assert_any_call("thumbnail_job", gallery_id=40, _timeout=3600)
 
     async def test_watcher_paused_and_resumed(self):
         """Watcher should be paused at the start and resumed at the end."""

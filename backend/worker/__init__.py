@@ -55,7 +55,7 @@ from worker.subscription_group import (
 )
 from worker.tagging import tag_job
 from worker.thumbhash_backfill import thumbhash_backfill_job
-from worker.thumbnail import thumbnail_job
+from worker.thumbnail import cover_thumbnail_job, thumbnail_job
 from worker.trash import trash_gc_job
 
 logging.basicConfig(
@@ -516,12 +516,12 @@ async def rate_limit_schedule_job(ctx: dict) -> dict:
 
     try:
         start_hour = int(start_val) if start_val is not None else 0
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         start_hour = 0
 
     try:
         end_hour = int(end_val) if end_val is not None else 6
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         end_hour = 6
 
     current_hour = datetime.now(UTC).hour
@@ -557,12 +557,12 @@ async def log_cleanup_job(ctx: dict) -> dict:
 
     try:
         max_entries = int(max_entries_val) if max_entries_val is not None else 10000
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         max_entries = 10000
 
     try:
         retention_days = int(retention_days_val) if retention_days_val is not None else 7
-    except ValueError, TypeError:
+    except (ValueError, TypeError):
         retention_days = 7
 
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
@@ -653,6 +653,7 @@ def build_worker():
             rescan_library_path_job,
             auto_discover_job,
             tag_job,
+            cover_thumbnail_job,
             thumbnail_job,
             reconciliation_job,
             scheduled_scan_job,
@@ -705,6 +706,7 @@ __all__ = [
     "rescan_library_path_job",
     "auto_discover_job",
     "scheduled_scan_job",
+    "cover_thumbnail_job",
     "thumbnail_job",
     "reconciliation_job",
     "tag_job",

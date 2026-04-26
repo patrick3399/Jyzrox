@@ -393,7 +393,12 @@ class TestImportJob:
             ctx = _make_ctx()
             await import_job(ctx, path=str(gallery_dir))
 
-        mock_enqueue.assert_any_call("thumbnail_job", gallery_id=1)
+        mock_enqueue.assert_any_call("cover_thumbnail_job", gallery_id=1, _timeout=300)
+        mock_enqueue.assert_any_call("thumbnail_job", gallery_id=1, _timeout=3600)
+        assert [c.args[0] for c in mock_enqueue.call_args_list[:2]] == [
+            "cover_thumbnail_job",
+            "thumbnail_job",
+        ]
 
     async def test_tag_job_enqueued_when_tag_model_enabled(self, tmp_path):
         """When tag_model_enabled=True, tag_job must be enqueued after import."""

@@ -232,6 +232,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     logger.info("[import] gallery_id=%d source=%s/%s", gallery_id, source, source_id)
 
     # Trigger thumbnail generation
+    await core.queue.enqueue("cover_thumbnail_job", gallery_id=gallery_id, _timeout=300)
     await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id, _timeout=3600)
     if settings.tag_model_enabled:
         await core.queue.enqueue("tag_job", gallery_id=gallery_id)
@@ -492,6 +493,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     logger.info("[local_import] gallery_id=%d: %d files imported", gallery_id, processed)
 
     # Trigger thumbnail generation
+    await core.queue.enqueue("cover_thumbnail_job", gallery_id=gallery_id, _timeout=300)
     await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id, _timeout=3600)
 
     # Trigger AI tagging if enabled

@@ -21,6 +21,7 @@ from core.local_patterns import (
     build_library_pattern_regex,
     normalize_relative_path,
 )
+from core.source_display import get_display_config
 from db.models import Blob, ExcludedBlob, Gallery, Image, LibraryPath
 from services.cas import (
     create_library_symlink,
@@ -48,6 +49,18 @@ class _ImportRequest:
     gallery_id: int
     source_dir: str
     mode: str
+
+
+def _cover_image_for_gallery(gallery: Gallery, images: list[Image]) -> Image | None:
+    if not images:
+        return None
+    ordered = sorted(images, key=lambda img: img.page_num)
+    cfg = get_display_config(gallery.source or "")
+    return ordered[-1] if cfg.cover_page == "last" else ordered[0]
+
+
+def _has_thumb_160(blob: Blob) -> bool:
+    return (thumb_dir(blob.sha256) / "thumb_160.webp").exists()
 
 
 async def _get_library_specs(session) -> list[_LibrarySpec]:
@@ -163,6 +176,7 @@ async def rescan_library_job(ctx: dict) -> dict:
 
             CHUNK = 500
             processed = 0
+            pending_thumbnail_galleries: list[int] = []
 
             for chunk_start in range(0, total, CHUNK):
                 # Check for cancel signal once per chunk
@@ -184,6 +198,7 @@ async def rescan_library_job(ctx: dict) -> dict:
                 images_result = (await session.execute(
                     select(Image)
                     .where(Image.gallery_id.in_(chunk_ids))
+                    .order_by(Image.gallery_id.asc(), Image.page_num.asc())
                     .options(selectinload(Image.blob))
                 )).scalars().all()
 
@@ -203,6 +218,7 @@ async def rescan_library_job(ctx: dict) -> dict:
                 images_to_delete: list[int] = []
                 galleries_to_delete: list[int] = []
                 galleries_needing_thumbs: list[int] = []
+                galleries_needing_cover_thumbs: list[int] = []
 
                 for gid in chunk_ids:
                     gallery = gallery_map.get(gid)
@@ -211,7 +227,10 @@ async def rescan_library_job(ctx: dict) -> dict:
 
                     images = images_by_gallery.get(gid, [])
                     missing_thumb = False
+                    missing_cover_thumb = False
                     removed = 0
+                    cover_image = _cover_image_for_gallery(gallery, images)
+                    existing_images_for_cover: list[Image] = []
 
                     for img in images:
                         blob = img.blob
@@ -235,9 +254,12 @@ async def rescan_library_job(ctx: dict) -> dict:
                             images_to_delete.append(img.id)
                             removed += 1
                             continue
-                        td = thumb_dir(blob.sha256)
-                        if not (td / "thumb_160.webp").exists():
+                        existing_images_for_cover.append(img)
+                        has_thumb = _has_thumb_160(blob)
+                        if not has_thumb:
                             missing_thumb = True
+                            if img is cover_image:
+                                missing_cover_thumb = True
 
                     if removed:
                         gallery.pages = len(images) - removed
@@ -258,8 +280,15 @@ async def rescan_library_job(ctx: dict) -> dict:
                             gallery.pages,
                         )
 
+                    if missing_thumb and not missing_cover_thumb:
+                        current_cover = _cover_image_for_gallery(gallery, existing_images_for_cover)
+                        if current_cover and current_cover.blob and not _has_thumb_160(current_cover.blob):
+                            missing_cover_thumb = True
+
                     if missing_thumb:
                         galleries_needing_thumbs.append(gid)
+                    if missing_cover_thumb:
+                        galleries_needing_cover_thumbs.append(gid)
 
                     gallery.last_scanned_at = datetime.now(timezone.utc)
 
@@ -298,12 +327,13 @@ async def rescan_library_job(ctx: dict) -> dict:
                 await session.commit()
 
                 # Enqueue thumbnail jobs outside the transaction
-                for gid in galleries_needing_thumbs:
-                    await core.queue.enqueue("thumbnail_job", gallery_id=gid, _timeout=3600)
+                for gid in galleries_needing_cover_thumbs:
+                    await core.queue.enqueue("cover_thumbnail_job", gallery_id=gid, _timeout=300)
                     logger.info(
-                        "[rescan_library] gallery_id=%d: enqueued thumbnail_job (missing thumbs)",
+                        "[rescan_library] gallery_id=%d: enqueued cover_thumbnail_job (missing cover thumb)",
                         gid,
                     )
+                pending_thumbnail_galleries.extend(galleries_needing_thumbs)
 
                 processed += len(chunk_ids)
                 await r.setex(
@@ -311,6 +341,14 @@ async def rescan_library_job(ctx: dict) -> dict:
                     3600,
                     _json.dumps({"processed": processed, "total": total, "status": "running"}),
                 )
+
+            if not cancelled:
+                for gid in pending_thumbnail_galleries:
+                    await core.queue.enqueue("thumbnail_job", gallery_id=gid, _timeout=3600)
+                    logger.info(
+                        "[rescan_library] gallery_id=%d: enqueued thumbnail_job (missing thumbs)",
+                        gid,
+                    )
 
     finally:
         # Always resume the watcher even if the scan fails or is cancelled
@@ -359,13 +397,16 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         from sqlalchemy.orm import selectinload
         images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .order_by(Image.page_num.asc())
             .options(selectinload(Image.blob))
         )).scalars().all()
 
         # --- Step 1: Verify existing records ---
         known_sha256s: set[str] = set()
         missing_thumb = False
+        missing_cover_thumb = False
         removed = 0
+        cover_image = _cover_image_for_gallery(gallery, images)
         for img in images:
             blob = img.blob
             if not blob:
@@ -389,9 +430,11 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 removed += 1
                 continue
             known_sha256s.add(blob.sha256)
-            td = thumb_dir(blob.sha256)
-            if not (td / "thumb_160.webp").exists():
+            has_thumb = _has_thumb_160(blob)
+            if not has_thumb:
                 missing_thumb = True
+                if img is cover_image:
+                    missing_cover_thumb = True
 
         if removed:
             await session.flush()
@@ -402,6 +445,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         gallery_dir: Path | None = None
         surviving_images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .order_by(Image.page_num.asc())
             .options(selectinload(Image.blob))
         )).scalars().all()
 
@@ -469,6 +513,8 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                     )
                 new_files_added += 1
                 missing_thumb = True  # New file needs a thumbnail.
+                if max_page == 1 or get_display_config(gallery.source or "").cover_page == "last":
+                    missing_cover_thumb = True
                 known_sha256s.add(file_hash)
                 logger.info(
                     "[rescan_gallery] gallery_id=%d: added new file %s",
@@ -479,9 +525,14 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         # --- Step 3: Update gallery metadata ---
         final_images = (await session.execute(
             select(Image).where(Image.gallery_id == gallery_id)
+            .order_by(Image.page_num.asc())
             .options(selectinload(Image.blob))
         )).scalars().all()
         gallery.pages = len(final_images)
+        if missing_thumb and not missing_cover_thumb:
+            current_cover = _cover_image_for_gallery(gallery, final_images)
+            if current_cover and current_cover.blob and not _has_thumb_160(current_cover.blob):
+                missing_cover_thumb = True
 
         if gallery.pages == 0 and gallery.import_mode == "link":
             # All source files are gone — clean up blob ref-counts and thumbnail dirs
@@ -507,6 +558,9 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         await session.commit()
 
     if missing_thumb:
+        if missing_cover_thumb:
+            await core.queue.enqueue("cover_thumbnail_job", gallery_id=gallery_id, _timeout=300)
+            logger.info("[rescan_gallery] gallery_id=%d: enqueued cover_thumbnail_job", gallery_id)
         await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id, _timeout=3600)
         logger.info("[rescan_gallery] gallery_id=%d: enqueued thumbnail_job", gallery_id)
 

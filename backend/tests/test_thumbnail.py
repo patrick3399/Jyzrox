@@ -8,9 +8,11 @@ Covers:
 - thumbnail_job: gallery with no images, blob without source, normal processing
 """
 
+import asyncio
 import json
 import subprocess
 from pathlib import Path
+from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -39,6 +41,20 @@ def _make_blob(media_type="image", extension=".jpg", sha256=SHA):
     blob.phash_q3 = None
     blob.thumbhash = None
     return blob
+
+
+def _make_gallery(source="local"):
+    gallery = MagicMock()
+    gallery.source = source
+    return gallery
+
+
+def _make_thumbnail_image(page_num: int, sha256: str):
+    blob = _make_blob(sha256=sha256)
+    img = MagicMock()
+    img.page_num = page_num
+    img.blob = blob
+    return img
 
 
 def _ffprobe_stdout(width=1920, height=1080, duration=120.0):
@@ -108,7 +124,7 @@ def _make_imagehash_mock(phash_hex="aabbccddeeff0011"):
 
 def _make_thumbhash_mock():
     mock_mod = MagicMock()
-    mock_mod.rgba_to_thumbhash.return_value = b"\x01\x02\x03"
+    mock_mod.image_to_thumbhash.return_value = "thumbhash-value"
     return mock_mod
 
 
@@ -202,7 +218,7 @@ class TestGenerateSingleThumbnail:
                 "imagehash": mock_imagehash,
                 "thumbhash": mock_thumbhash,
             }),
-            patch("os.rename"),
+            patch("os.replace"),
         ):
             result = await generate_single_thumbnail(blob, src, session)
 
@@ -210,6 +226,8 @@ class TestGenerateSingleThumbnail:
         assert blob.width == 800
         assert blob.height == 600
         assert blob.phash == "aabbccddeeff0011"
+        assert blob.thumbhash == "thumbhash-value"
+        mock_thumbhash.image_to_thumbhash.assert_called()
 
     async def test_video_blob_calls_ffprobe_and_extract_frame(self, tmp_path):
         """Video blob: _ffprobe_metadata and _extract_video_frame are called."""
@@ -237,7 +255,7 @@ class TestGenerateSingleThumbnail:
                 "imagehash": mock_imagehash,
                 "thumbhash": mock_thumbhash,
             }),
-            patch("os.rename"),
+            patch("os.replace"),
         ):
             result = await generate_single_thumbnail(blob, src, session)
 
@@ -276,12 +294,12 @@ class TestGenerateSingleThumbnail:
                 "imagehash": mock_imagehash,
                 "thumbhash": mock_thumbhash,
             }),
-            patch("os.rename") as mock_rename,
+            patch("os.replace") as mock_replace,
         ):
             result = await generate_single_thumbnail(blob, src, session)
 
         assert result is True
-        mock_rename.assert_not_called()
+        mock_replace.assert_not_called()
 
     async def test_oserror_during_pil_open_returns_false(self, tmp_path):
         """OSError raised when PIL opens the file should cause the function to return False."""
@@ -335,7 +353,7 @@ class TestGenerateSingleThumbnail:
                 "imagehash": mock_imagehash,
                 "thumbhash": mock_thumbhash,
             }),
-            patch("os.rename"),
+            patch("os.replace"),
         ):
             await generate_single_thumbnail(blob, src, session)
 
@@ -348,9 +366,12 @@ class TestGenerateSingleThumbnail:
 # ---------------------------------------------------------------------------
 
 
-def _make_mock_session_ctx(images):
+def _make_mock_session_ctx(images, gallery=None):
     """Return a mock AsyncSessionLocal context manager yielding a session."""
     session = AsyncMock()
+    if gallery is None:
+        gallery = _make_gallery()
+    session.get = AsyncMock(return_value=gallery)
 
     scalars_mock = MagicMock()
     scalars_mock.all.return_value = images
@@ -390,6 +411,7 @@ class TestThumbnailJob:
         blob = _make_blob()
         img = MagicMock()
         img.blob = blob
+        img.page_num = 1
 
         session = _make_mock_session_ctx(images=[img])
         ctx = {}
@@ -400,9 +422,9 @@ class TestThumbnailJob:
             patch("worker.thumbnail.AsyncSessionLocal", return_value=session),
             patch("worker.thumbnail.resolve_blob_path", return_value=fake_src),
             patch(
-                "worker.thumbnail.generate_single_thumbnail",
+                "worker.thumbnail._run_thumbnail_in_thread",
                 new_callable=AsyncMock,
-                return_value=False,
+                return_value=None,
             ),
         ):
             result = await thumbnail_job(ctx, gallery_id=7)
@@ -418,28 +440,144 @@ class TestThumbnailJob:
 
         img1 = MagicMock()
         img1.blob = blob1
+        img1.page_num = 1
         img2 = MagicMock()
         img2.blob = blob2
+        img2.page_num = 2
 
         # img3 has no blob — must be skipped
         img3 = MagicMock()
         img3.blob = None
+        img3.page_num = 3
 
         session = _make_mock_session_ctx(images=[img1, img2, img3])
         ctx = {}
 
         fake_src = MagicMock(spec=Path)
+        from worker.thumbnail import _ThumbnailResult
 
         with (
             patch("worker.thumbnail.AsyncSessionLocal", return_value=session),
             patch("worker.thumbnail.resolve_blob_path", return_value=fake_src),
             patch(
-                "worker.thumbnail.generate_single_thumbnail",
+                "worker.thumbnail._run_thumbnail_in_thread",
                 new_callable=AsyncMock,
-                return_value=True,
+                return_value=_ThumbnailResult(width=1, height=1),
             ),
         ):
             result = await thumbnail_job(ctx, gallery_id=99)
 
         assert result["status"] == "done"
         assert result["processed"] == 2
+
+    async def test_thumbnail_job_processes_cover_image_first(self):
+        """Full thumbnail job should schedule the configured cover image first."""
+        from worker.thumbnail import _ThumbnailResult, thumbnail_job
+
+        img1 = _make_thumbnail_image(1, "a" * 64)
+        img2 = _make_thumbnail_image(2, "b" * 64)
+        img3 = _make_thumbnail_image(3, "c" * 64)
+        session = _make_mock_session_ctx(images=[img1, img2, img3], gallery=_make_gallery("last-cover-source"))
+
+        seen: list[str] = []
+
+        async def _fake_run(sha256, media_type, src):
+            seen.append(sha256)
+            return _ThumbnailResult(width=1, height=1)
+
+        with (
+            patch("worker.thumbnail.AsyncSessionLocal", return_value=session),
+            patch("worker.thumbnail.resolve_blob_path", return_value=MagicMock(spec=Path)),
+            patch(
+                "core.source_display.get_display_config",
+                return_value=SimpleNamespace(cover_page="last"),
+            ),
+            patch("worker.thumbnail._run_thumbnail_in_thread", side_effect=_fake_run),
+        ):
+            result = await thumbnail_job({}, gallery_id=99)
+
+        assert result["processed"] == 3
+        assert seen == ["c" * 64, "a" * 64, "b" * 64]
+
+    async def test_thumbnail_job_commits_in_batches(self):
+        """THUMBNAIL_COMMIT_BATCH should control DB commit cadence."""
+        from worker.thumbnail import _ThumbnailResult, thumbnail_job
+
+        images = [
+            _make_thumbnail_image(1, "a" * 64),
+            _make_thumbnail_image(2, "b" * 64),
+            _make_thumbnail_image(3, "c" * 64),
+        ]
+        session = _make_mock_session_ctx(images=images)
+
+        with (
+            patch.dict("os.environ", {"THUMBNAIL_COMMIT_BATCH": "2"}),
+            patch("worker.thumbnail.AsyncSessionLocal", return_value=session),
+            patch("worker.thumbnail.resolve_blob_path", return_value=MagicMock(spec=Path)),
+            patch(
+                "worker.thumbnail._run_thumbnail_in_thread",
+                new_callable=AsyncMock,
+                return_value=_ThumbnailResult(width=1, height=1),
+            ),
+        ):
+            result = await thumbnail_job({}, gallery_id=99)
+
+        assert result["processed"] == 3
+        assert session.commit.await_count == 2
+
+    async def test_cover_thumbnail_job_only_processes_cover_image(self):
+        """Cover job should process exactly the configured cover image and commit."""
+        from worker.thumbnail import _ThumbnailResult, cover_thumbnail_job
+
+        img1 = _make_thumbnail_image(1, "a" * 64)
+        img2 = _make_thumbnail_image(2, "b" * 64)
+        session = _make_mock_session_ctx(images=[img1, img2], gallery=_make_gallery("last-cover-source"))
+        seen: list[str] = []
+
+        async def _fake_run(sha256, media_type, src):
+            seen.append(sha256)
+            return _ThumbnailResult(width=1, height=1)
+
+        with (
+            patch("worker.thumbnail.AsyncSessionLocal", return_value=session),
+            patch("worker.thumbnail.resolve_blob_path", return_value=MagicMock(spec=Path)),
+            patch(
+                "core.source_display.get_display_config",
+                return_value=SimpleNamespace(cover_page="last"),
+            ),
+            patch("worker.thumbnail._run_thumbnail_in_thread", side_effect=_fake_run),
+        ):
+            result = await cover_thumbnail_job({}, gallery_id=99)
+
+        assert result["processed"] == 1
+        assert seen == ["b" * 64]
+        assert session.commit.await_count == 1
+
+    async def test_thumbnail_workers_limits_to_thread_concurrency(self):
+        """THUMBNAIL_WORKERS should bound concurrent to_thread calls."""
+        from worker.thumbnail import _ThumbnailResult, _run_thumbnail_in_thread
+
+        active = 0
+        max_active = 0
+
+        async def _fake_to_thread(func, *args):
+            nonlocal active, max_active
+            active += 1
+            max_active = max(max_active, active)
+            await asyncio.sleep(0.01)
+            active -= 1
+            return _ThumbnailResult(width=1, height=1)
+
+        with (
+            patch.dict("os.environ", {"THUMBNAIL_WORKERS": "2"}),
+            patch("worker.thumbnail.asyncio.to_thread", new_callable=AsyncMock, side_effect=_fake_to_thread),
+        ):
+            results = await asyncio.gather(
+                *[
+                    _run_thumbnail_in_thread("a" * 64, "image", Path("/tmp/image.jpg"))
+                    for _ in range(5)
+                ]
+            )
+
+        assert len(results) == 5
+        assert max_active == 2

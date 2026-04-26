@@ -562,7 +562,12 @@ class TestImportJob:
 
         assert result["status"] == "done"
         assert result["gallery_id"] == 7
-        mock_enqueue.assert_any_call("thumbnail_job", gallery_id=7)
+        mock_enqueue.assert_any_call("cover_thumbnail_job", gallery_id=7, _timeout=300)
+        mock_enqueue.assert_any_call("thumbnail_job", gallery_id=7, _timeout=3600)
+        assert [c.args[0] for c in mock_enqueue.call_args_list[:2]] == [
+            "cover_thumbnail_job",
+            "thumbnail_job",
+        ]
 
     async def test_source_url_stored_in_gallery(self, tmp_path):
         """source_url parameter should be passed through to the gallery upsert values."""
