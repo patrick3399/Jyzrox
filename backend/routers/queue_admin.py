@@ -152,7 +152,7 @@ async def list_jobs(
 @router.get("/jobs/{job_key}")
 async def job_detail(job_key: str, _: dict = Depends(_admin)):
     """Return full details for a single job (searches across all queues)."""
-    _, job = await _find_job(job_key)
+    _q, job = await _find_job(job_key)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_key}' not found")
     return _serialize_job(job)
@@ -161,7 +161,7 @@ async def job_detail(job_key: str, _: dict = Depends(_admin)):
 @router.post("/jobs/{job_key}/retry")
 async def retry_job(job_key: str, _: dict = Depends(_admin)):
     """Re-enqueue a terminal (completed/failed/aborted) job."""
-    _, job = await _find_job(job_key)
+    _q, job = await _find_job(job_key)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_key}' not found")
 
@@ -182,7 +182,7 @@ async def retry_job(job_key: str, _: dict = Depends(_admin)):
 @router.post("/jobs/{job_key}/abort")
 async def abort_job(job_key: str, _: dict = Depends(_admin)):
     """Abort an active or queued job (searches across all queues)."""
-    _, job = await _find_job(job_key)
+    _q, job = await _find_job(job_key)
     if job is None:
         raise HTTPException(status_code=404, detail=f"Job '{job_key}' not found")
 
