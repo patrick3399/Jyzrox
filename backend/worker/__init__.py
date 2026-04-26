@@ -702,9 +702,9 @@ def build_workers() -> tuple:
     _cq._queues = queues
 
     concurrency = {
-        QUEUE_INTERACTIVE: int(os.environ.get("WORKER_CONCURRENCY_INTERACTIVE", DEFAULT_CONCURRENCY[QUEUE_INTERACTIVE])),
-        QUEUE_INGEST:      int(os.environ.get("WORKER_CONCURRENCY_INGEST",       DEFAULT_CONCURRENCY[QUEUE_INGEST])),
-        QUEUE_RENDER:      int(os.environ.get("WORKER_CONCURRENCY_RENDER",        DEFAULT_CONCURRENCY[QUEUE_RENDER])),
+        QUEUE_INTERACTIVE: int(os.environ.get("WORKER_CONCURRENCY_INTERACTIVE", str(DEFAULT_CONCURRENCY[QUEUE_INTERACTIVE]))),
+        QUEUE_INGEST:      int(os.environ.get("WORKER_CONCURRENCY_INGEST",       str(DEFAULT_CONCURRENCY[QUEUE_INGEST]))),
+        QUEUE_RENDER:      int(os.environ.get("WORKER_CONCURRENCY_RENDER",        str(DEFAULT_CONCURRENCY[QUEUE_RENDER]))),
     }
     logger.info(
         "Worker concurrency — interactive: %d, ingest: %d, render: %d",
