@@ -1,6 +1,6 @@
 fastapi==0.135.3
 uvicorn[standard]==0.44.0
-onnxruntime==1.24.4
-huggingface-hub==1.10.2
-numpy==2.4.3
+onnxruntime==1.25.0
+huggingface-hub==1.12.0
+numpy==2.4.4
 pillow==12.2.0
