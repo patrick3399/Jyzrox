@@ -1,6 +1,7 @@
 """Shared helper functions for the worker package."""
 
 import hashlib
+import os
 import shutil
 import uuid
 from datetime import UTC, datetime
@@ -13,6 +14,14 @@ from core.database import AsyncSessionLocal
 from core.redis_client import publish_job_event
 from db.models import DownloadJob
 from worker.constants import _IMAGE_MAGIC, logger
+
+
+def env_int(name: str, default: int) -> int:
+    """Read an integer from an environment variable, falling back to `default`."""
+    try:
+        return max(1, int(os.environ.get(name, str(default))))
+    except (TypeError, ValueError):
+        return default
 
 
 def _validate_image_magic(file_path: Path) -> bool:

@@ -25,7 +25,7 @@ from worker.ehtag_sync import ehtag_sync_job
 from worker.gallery_dl_venv import ensure_venv
 from worker.gallery_dl_venv import rollback_job as gdl_rollback_job
 from worker.gallery_dl_venv import upgrade_job as gdl_upgrade_job
-from worker.helpers import _sha256, compute_job_key, enqueue_download_job
+from worker.helpers import _sha256, compute_job_key, enqueue_download_job, env_int
 from worker.importer import (
     _build_gallery,
     _extract_tags,
@@ -668,12 +668,14 @@ async def adaptive_persist_job(ctx: dict) -> dict:
     return {"persisted": count}
 
 
-async def _ingest_startup(ctx: dict) -> None:
-    logger.info("SAQ ingest worker started")
+def _make_startup_log(label: str):
+    async def _startup(_ctx: dict) -> None:
+        logger.info("SAQ %s worker started", label)
+    return _startup
 
 
-async def _render_startup(ctx: dict) -> None:
-    logger.info("SAQ render worker started")
+_ingest_startup = _make_startup_log("ingest")
+_render_startup = _make_startup_log("render")
 
 
 # ── SAQ Worker Factory ───────────────────────────────────────────────
@@ -685,8 +687,6 @@ def build_workers() -> tuple:
     Queue objects are pre-registered in core.queue._queues so that enqueue()
     works immediately from startup() onwards without a separate init call.
     """
-    import os
-
     import core.queue as _cq
     from core.queue_config import (
         ALL_QUEUES,
@@ -702,9 +702,9 @@ def build_workers() -> tuple:
     _cq._queues = queues
 
     concurrency = {
-        QUEUE_INTERACTIVE: int(os.environ.get("WORKER_CONCURRENCY_INTERACTIVE", str(DEFAULT_CONCURRENCY[QUEUE_INTERACTIVE]))),
-        QUEUE_INGEST:      int(os.environ.get("WORKER_CONCURRENCY_INGEST",       str(DEFAULT_CONCURRENCY[QUEUE_INGEST]))),
-        QUEUE_RENDER:      int(os.environ.get("WORKER_CONCURRENCY_RENDER",        str(DEFAULT_CONCURRENCY[QUEUE_RENDER]))),
+        QUEUE_INTERACTIVE: env_int("WORKER_CONCURRENCY_INTERACTIVE", DEFAULT_CONCURRENCY[QUEUE_INTERACTIVE]),
+        QUEUE_INGEST:      env_int("WORKER_CONCURRENCY_INGEST",       DEFAULT_CONCURRENCY[QUEUE_INGEST]),
+        QUEUE_RENDER:      env_int("WORKER_CONCURRENCY_RENDER",        DEFAULT_CONCURRENCY[QUEUE_RENDER]),
     }
     logger.info(
         "Worker concurrency — interactive: %d, ingest: %d, render: %d",

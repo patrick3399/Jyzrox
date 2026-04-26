@@ -144,7 +144,8 @@ async def test_overview_with_workers(client):
     }
     q = _make_mock_queue(workers=workers)
     with patch("core.queue.get_queue", return_value=q):
-        resp = await client.get("/api/admin/queue/")
+        with patch("core.queue.get_all_queues", return_value={"interactive": q}):
+            resp = await client.get("/api/admin/queue/")
 
     assert resp.status_code == 200
     data = resp.json()

@@ -1,5 +1,6 @@
 """SAQ queue abstraction layer."""
 
+import asyncio
 import logging
 from typing import Any
 
@@ -17,10 +18,9 @@ async def init_queues(redis_url: str | None = None) -> None:
     """Initialize all SAQ Queue instances (one per logical queue)."""
     global _queues
     url = redis_url or settings.redis_url
-    for name in ALL_QUEUES:
-        q = Queue.from_url(url, name=name)
-        await q.connect()
-        _queues[name] = q
+    new_queues = {name: Queue.from_url(url, name=name) for name in ALL_QUEUES}
+    await asyncio.gather(*[q.connect() for q in new_queues.values()])
+    _queues = new_queues
     logger.info("SAQ queues connected: %s", list(_queues))
 
 
@@ -30,8 +30,7 @@ init_queue = init_queues
 
 async def close_queues() -> None:
     """Disconnect all SAQ Queue instances."""
-    for q in _queues.values():
-        await q.disconnect()
+    await asyncio.gather(*[q.disconnect() for q in _queues.values()])
     _queues.clear()
     logger.info("SAQ queues disconnected")
 

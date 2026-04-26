@@ -1,5 +1,6 @@
 """Queue administration endpoints — SAQ job and worker monitoring."""
 
+import asyncio
 import logging
 import time
 from typing import Any
@@ -62,16 +63,14 @@ async def _find_job(job_key: str) -> tuple[Any, Any]:
 @router.get("/")
 async def queue_overview(_: dict = Depends(_admin)):
     """Return aggregated overview across all queues, plus per-queue breakdown."""
+    queues = core.queue.get_all_queues()
+    infos = await asyncio.gather(*[q.info(jobs=False) for q in queues.values()])
+
     total_queued = total_active = total_scheduled = 0
     per_queue = []
     all_workers: dict = {}
 
-    for name in ALL_QUEUES:
-        try:
-            q = core.queue.get_queue(name)
-        except (RuntimeError, KeyError):
-            continue
-        info = await q.info(jobs=False)
+    for name, info in zip(queues.keys(), infos):
         total_queued    += info.get("queued", 0)
         total_active    += info.get("active", 0)
         total_scheduled += info.get("scheduled", 0)

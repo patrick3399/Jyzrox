@@ -16,6 +16,7 @@ from core.database import AsyncSessionLocal
 from db.models import Gallery, Image
 from services.cas import resolve_blob_path, thumb_dir
 from worker.constants import logger
+from worker.helpers import env_int
 
 THUMBNAIL_SIZES = (160, 360, 720)
 
@@ -37,19 +38,12 @@ class _ThumbnailResult:
     thumbhash: str | None = None
 
 
-def _env_int(name: str, default: int) -> int:
-    try:
-        return max(1, int(os.environ.get(name, str(default))))
-    except (TypeError, ValueError):
-        return default
-
-
 def _thumbnail_workers() -> int:
-    return _env_int("THUMBNAIL_WORKERS", 1)
+    return env_int("THUMBNAIL_WORKERS", 1)
 
 
 def _thumbnail_commit_batch() -> int:
-    return _env_int("THUMBNAIL_COMMIT_BATCH", 25)
+    return env_int("THUMBNAIL_COMMIT_BATCH", 25)
 
 
 def _get_thumbnail_semaphore() -> asyncio.Semaphore:
