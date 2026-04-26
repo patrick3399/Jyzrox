@@ -110,10 +110,11 @@ def _make_mock_queue(jobs=None, workers=None):
 
 @pytest.fixture
 def mock_queue():
-    """Patch core.queue.get_queue to return an empty mock queue."""
+    """Patch both get_queue and get_all_queues to return the same mock queue."""
     q = _make_mock_queue()
     with patch("core.queue.get_queue", return_value=q):
-        yield q
+        with patch("core.queue.get_all_queues", return_value={"interactive": q, "ingest": q, "render": q}):
+            yield q
 
 
 # ---------------------------------------------------------------------------
@@ -126,12 +127,14 @@ async def test_overview_returns_queue_stats(client, mock_queue):
 
     assert resp.status_code == 200
     data = resp.json()
-    assert data["name"] == "default"
-    assert data["queued"] == 3
-    assert data["active"] == 1
-    assert data["scheduled"] == 2
+    assert data["name"] == "all"
+    assert data["queued"] == 9    # 3 queues × 3 each
+    assert data["active"] == 3
+    assert data["scheduled"] == 6
     assert "workers" in data
     assert isinstance(data["workers"], list)
+    assert "queues" in data
+    assert len(data["queues"]) == 3
 
 
 async def test_overview_with_workers(client):
@@ -156,15 +159,14 @@ async def test_overview_with_workers(client):
 
 
 async def test_overview_calls_info_with_jobs_false(client, mock_queue):
-    """queue_overview must call info(jobs=False) to skip expensive job listing."""
+    """queue_overview must call info(jobs=False) for each queue."""
     await client.get("/api/admin/queue/")
 
-    mock_queue.info.assert_called_once()
-    call_kwargs = mock_queue.info.call_args
-    # jobs=False should be passed (either positional or as kwarg)
-    assert call_kwargs.kwargs.get("jobs") is False or (
-        call_kwargs.args and call_kwargs.args[0] is False
-    )
+    assert mock_queue.info.call_count == 3
+    for call in mock_queue.info.call_args_list:
+        assert call.kwargs.get("jobs") is False or (
+            call.args and call.args[0] is False
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -179,7 +181,8 @@ async def test_jobs_list_returns_jobs(client):
     ]
     q = _make_mock_queue(jobs=jobs)
     with patch("core.queue.get_queue", return_value=q):
-        resp = await client.get("/api/admin/queue/jobs")
+        with patch("core.queue.get_all_queues", return_value={"interactive": q}):
+            resp = await client.get("/api/admin/queue/jobs")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -189,10 +192,10 @@ async def test_jobs_list_returns_jobs(client):
 
 
 async def test_jobs_list_pagination(client):
-    """offset and limit parameters are forwarded to q.info()."""
+    """offset and limit parameters are respected when listing jobs for a specific queue."""
     q = _make_mock_queue()
     with patch("core.queue.get_queue", return_value=q):
-        resp = await client.get("/api/admin/queue/jobs?offset=10&limit=5")
+        resp = await client.get("/api/admin/queue/jobs?queue=interactive&offset=10&limit=5")
 
     assert resp.status_code == 200
     q.info.assert_called_once()
@@ -216,7 +219,8 @@ async def test_jobs_filter_by_status(client):
     ]
     q = _make_mock_queue(jobs=jobs)
     with patch("core.queue.get_queue", return_value=q):
-        resp = await client.get("/api/admin/queue/jobs?status=failed")
+        with patch("core.queue.get_all_queues", return_value={"interactive": q}):
+            resp = await client.get("/api/admin/queue/jobs?status=failed")
 
     assert resp.status_code == 200
     data = resp.json()
@@ -234,7 +238,8 @@ async def test_jobs_filter_by_function(client):
     ]
     q = _make_mock_queue(jobs=jobs)
     with patch("core.queue.get_queue", return_value=q):
-        resp = await client.get("/api/admin/queue/jobs?function=download_job")
+        with patch("core.queue.get_all_queues", return_value={"interactive": q}):
+            resp = await client.get("/api/admin/queue/jobs?function=download_job")
 
     assert resp.status_code == 200
     data = resp.json()
