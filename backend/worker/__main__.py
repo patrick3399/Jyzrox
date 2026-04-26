@@ -2,8 +2,13 @@
 
 import asyncio
 
-from worker import build_worker
+from worker import build_workers
+
+
+async def _main() -> None:
+    workers = build_workers()
+    await asyncio.gather(*[w.start() for w in workers])
+
 
 if __name__ == "__main__":
-    worker = build_worker()
-    asyncio.run(worker.start())
+    asyncio.run(_main())
