@@ -2,6 +2,7 @@
 
 import logging
 import time
+from typing import Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from saq.job import TERMINAL_STATUSES, Status
@@ -45,7 +46,7 @@ def _serialize_job(job) -> dict:
     }
 
 
-async def _find_job(job_key: str):
+async def _find_job(job_key: str) -> tuple[Any, Any]:
     """Search all queues for a job by key. Returns (queue, job) or (None, None)."""
     for name in ALL_QUEUES:
         try:
