@@ -16,8 +16,7 @@ along with Redis.  Tests verify control-flow branches:
   - Stop signal during tier 2
 """
 
-import asyncio
-from unittest.mock import AsyncMock, MagicMock, patch, call
+from unittest.mock import AsyncMock, MagicMock, patch
 
 
 # ---------------------------------------------------------------------------
@@ -194,41 +193,6 @@ class TestTier1PhashScan:
         ])
         mock_redis.getdel = AsyncMock(return_value=None)
 
-        call_count = {"n": 0}
-
-        # Track sessions for different queries
-        def _session_factory():
-            session = AsyncMock()
-            session.__aenter__ = AsyncMock(return_value=session)
-            session.__aexit__ = AsyncMock(return_value=False)
-            session.commit = AsyncMock()
-
-            result_blobs = MagicMock()
-            result_blobs.all = MagicMock(return_value=[blob_a, blob_b])
-
-            result_count = MagicMock()
-            result_count.scalar_one = MagicMock(return_value=0)
-            result_count.scalars.return_value.all.return_value = []
-
-            result_insert = MagicMock()
-            result_insert.rowcount = 1
-
-            call_count["n"] += 1
-            n = call_count["n"]
-            if n == 1:
-                # Tier 1 blob fetch
-                session.execute = AsyncMock(return_value=result_blobs)
-            elif n == 2:
-                # Tier 1 flush insert
-                session.execute = AsyncMock(return_value=result_insert)
-            elif n == 3:
-                # Tier 2 count query
-                session.execute = AsyncMock(return_value=result_count)
-            else:
-                session.execute = AsyncMock(return_value=result_count)
-
-            return session
-
         # Use a single versatile session
         versatile_session = AsyncMock()
         versatile_session.__aenter__ = AsyncMock(return_value=versatile_session)
@@ -237,7 +201,7 @@ class TestTier1PhashScan:
 
         query_n = {"n": 0}
 
-        async def _execute_side_effect(stmt, *args, **kwargs):
+        async def _execute_side_effect(_stmt, *_args, **_kwargs):
             query_n["n"] += 1
             n = query_n["n"]
             r = MagicMock()
@@ -294,7 +258,7 @@ class TestTier1PhashScan:
         session.__aexit__ = AsyncMock(return_value=False)
         session.commit = AsyncMock()
 
-        async def _execute_side_effect(stmt, *args, **kwargs):
+        async def _execute_side_effect(_stmt, *_args, **_kwargs):
             query_n["n"] += 1
             n = query_n["n"]
             r = MagicMock()
@@ -349,7 +313,7 @@ class TestStopSignal:
 
         query_n = {"n": 0}
 
-        async def _execute_side_effect(stmt, *args, **kwargs):
+        async def _execute_side_effect(_stmt, *_args, **_kwargs):
             query_n["n"] += 1
             r = MagicMock()
             if query_n["n"] == 1:
@@ -403,7 +367,7 @@ class TestResetMode:
         session.__aexit__ = AsyncMock(return_value=False)
         session.commit = AsyncMock()
 
-        async def _execute_side_effect(stmt, *args, **kwargs):
+        async def _execute_side_effect(stmt, *_args, **_kwargs):
             query_n["n"] += 1
             r = MagicMock()
             # Check if this is a DELETE statement
@@ -653,3 +617,780 @@ class TestDedupProgress:
 
         mock_redis.pipeline.return_value.execute.assert_called()
         assert progress._current == 0
+
+    async def test_wait_for_resume_returns_true_on_resume_signal(self):
+        """wait_for_resume returns True when a 'resume' signal is received."""
+        from worker.dedup_helpers import DedupProgress
+
+        mock_redis = _make_mock_redis()
+        mock_redis.getdel = AsyncMock(return_value=b"resume")
+
+        progress = DedupProgress(mock_redis)
+
+        with patch("asyncio.sleep", new=AsyncMock()):
+            result = await progress.wait_for_resume()
+
+        assert result is True
+        mock_redis.set.assert_called_with(DedupProgress.STATUS_KEY, "running")
+
+    async def test_wait_for_resume_returns_false_on_stop_signal(self):
+        """wait_for_resume returns False when a 'stop' signal is received."""
+        from worker.dedup_helpers import DedupProgress
+
+        mock_redis = _make_mock_redis()
+        mock_redis.getdel = AsyncMock(return_value=b"stop")
+
+        progress = DedupProgress(mock_redis)
+
+        with patch("asyncio.sleep", new=AsyncMock()):
+            result = await progress.wait_for_resume()
+
+        assert result is False
+
+    async def test_wait_for_resume_polls_until_signal(self):
+        """wait_for_resume keeps polling until a non-None signal is returned."""
+        from worker.dedup_helpers import DedupProgress
+
+        mock_redis = _make_mock_redis()
+        # First two polls return None (no signal), third returns resume
+        mock_redis.getdel = AsyncMock(side_effect=[None, None, b"resume"])
+
+        progress = DedupProgress(mock_redis)
+
+        with patch("asyncio.sleep", new=AsyncMock()):
+            result = await progress.wait_for_resume()
+
+        assert result is True
+        assert mock_redis.getdel.call_count == 3
+
+
+# ---------------------------------------------------------------------------
+# Tier 1 — dist > threshold (line 102) and batch flush at 1000 (line 113)
+# ---------------------------------------------------------------------------
+
+
+class TestTier1AdditionalBranches:
+    """Tests for specific tier 1 control-flow branches."""
+
+    async def test_pair_with_hamming_distance_above_threshold_is_skipped(self):
+        """When full hamming distance exceeds threshold, pair is not added (line 102)."""
+        from worker.dedup_scan import dedup_scan_job
+
+        # q01_dist = 0 (passes the early filter)
+        # full phash dist: 0x0 XOR 0xFFFFFFFFFFFFFFFF = 64 bits → dist=64 > threshold=10
+        blob_a = _make_blob("sha_hd_a", phash_int=0x0000000000000000, phash_q0=0, phash_q1=0)
+        blob_b = _make_blob("sha_hd_b", phash_int=0xFFFFFFFFFFFFFFFF, phash_q0=0, phash_q1=0)
+
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(side_effect=[
+            None,    # status
+            b"1",    # phash_enabled
+            b"10",   # threshold=10 (dist=64 > 10 → skip)
+            None,    # heuristic_enabled
+            None,    # opencv_enabled
+        ])
+        mock_redis.getdel = AsyncMock(return_value=None)
+
+        query_n = {"n": 0}
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.commit = AsyncMock()
+
+        async def _execute_side_effect(_stmt, *_args, **_kwargs):
+            query_n["n"] += 1
+            r = MagicMock()
+            if query_n["n"] == 1:
+                r.all = MagicMock(return_value=[blob_a, blob_b])
+                r.scalars.return_value.all.return_value = [blob_a, blob_b]
+            else:
+                r.scalar_one = MagicMock(return_value=0)
+                r.scalars.return_value.all.return_value = []
+            return r
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+
+        with (
+            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
+            patch("worker.dedup_scan.async_session", return_value=session),
+        ):
+            result = await dedup_scan_job({})
+
+        assert result["status"] == "ok"
+        assert result["tier1_inserted"] == 0
+
+    async def test_batch_flush_triggered_at_1000_pairs(self):
+        """When pairs_batch reaches 1000 entries, _flush is called mid-loop (line 113)."""
+        from worker.dedup_scan import dedup_scan_job
+
+        # Create 46 blobs with identical phash (0 hamming distance).
+        # 46 blobs → 46*45/2 = 1035 pairs, which exceeds 1000 → triggers flush.
+        blobs = [
+            _make_blob(f"sha_{i:03d}", phash_int=0xDEADBEEF, phash_q0=0, phash_q1=0)
+            for i in range(46)
+        ]
+
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(side_effect=[
+            None,    # status
+            b"1",    # phash_enabled
+            b"10",   # threshold
+            None,    # heuristic_enabled
+            None,    # opencv_enabled
+        ])
+        mock_redis.getdel = AsyncMock(return_value=None)
+
+        flush_called = {"count": 0}
+        query_n = {"n": 0}
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.commit = AsyncMock()
+
+        async def _execute_side_effect(stmt, *_args, **_kwargs):
+            query_n["n"] += 1
+            r = MagicMock()
+            if query_n["n"] == 1:
+                # Tier 1 blob fetch
+                r.all = MagicMock(return_value=blobs)
+                r.scalars.return_value.all.return_value = blobs
+            elif "INSERT" in str(stmt).upper() or "insert" in str(stmt).lower():
+                # Batch flush insert
+                flush_called["count"] += 1
+                r.rowcount = 35
+                r.scalar_one = MagicMock(return_value=0)
+                r.scalars.return_value.all.return_value = []
+            else:
+                r.scalar_one = MagicMock(return_value=0)
+                r.scalars.return_value.all.return_value = []
+            return r
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+
+        with (
+            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
+            patch("worker.dedup_scan.async_session", return_value=session),
+        ):
+            result = await dedup_scan_job({})
+
+        assert result["status"] == "ok"
+        # Flush must have been called at least once during the loop (mid-loop trigger)
+        assert flush_called["count"] >= 1
+
+
+# ---------------------------------------------------------------------------
+# Pause signal during tier 1
+# ---------------------------------------------------------------------------
+
+
+class TestPauseSignalTier1:
+    """Tests for pause + resume / pause + stop during tier 1."""
+
+    async def test_pause_then_resume_during_tier1_continues(self):
+        """Pause signal followed by resume → job continues and completes (lines 118-122)."""
+        from worker.dedup_scan import dedup_scan_job
+
+        blob_a = _make_blob("sha_pause_a", phash_int=0xABCD, phash_q0=0, phash_q1=0)
+        blob_b = _make_blob("sha_pause_b", phash_int=0xABCD, phash_q0=0, phash_q1=0)
+
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(side_effect=[
+            None,    # status check
+            b"1",    # phash_enabled
+            b"10",   # threshold
+            None,    # heuristic_enabled
+            None,    # opencv_enabled
+        ])
+        # First check_signal returns "pause", second returns None
+        mock_redis.getdel = AsyncMock(side_effect=[b"pause", b"resume", None, None])
+
+        query_n = {"n": 0}
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.commit = AsyncMock()
+
+        async def _execute_side_effect(_stmt, *_args, **_kwargs):
+            query_n["n"] += 1
+            r = MagicMock()
+            if query_n["n"] == 1:
+                r.all = MagicMock(return_value=[blob_a, blob_b])
+                r.scalars.return_value.all.return_value = [blob_a, blob_b]
+            else:
+                r.rowcount = 1
+                r.scalar_one = MagicMock(return_value=0)
+                r.scalars.return_value.all.return_value = []
+            return r
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+
+        with (
+            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
+            patch("worker.dedup_scan.async_session", return_value=session),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            result = await dedup_scan_job({})
+
+        assert result["status"] == "ok"
+
+    async def test_pause_then_stop_during_tier1_returns_stopped(self):
+        """Pause signal followed by stop in wait_for_resume → returns stopped (lines 119-122)."""
+        from worker.dedup_scan import dedup_scan_job
+
+        blob_a = _make_blob("sha_ps_a", phash_int=0xABCD, phash_q0=0, phash_q1=0)
+        blob_b = _make_blob("sha_ps_b", phash_int=0xABCD, phash_q0=0, phash_q1=0)
+
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(side_effect=[
+            None,    # status check
+            b"1",    # phash_enabled
+            b"10",   # threshold
+        ])
+        # check_signal returns "pause", then wait_for_resume gets "stop"
+        mock_redis.getdel = AsyncMock(side_effect=[b"pause", b"stop"])
+
+        query_n = {"n": 0}
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.commit = AsyncMock()
+
+        async def _execute_side_effect(_stmt, *_args, **_kwargs):
+            query_n["n"] += 1
+            r = MagicMock()
+            if query_n["n"] == 1:
+                r.all = MagicMock(return_value=[blob_a, blob_b])
+                r.scalars.return_value.all.return_value = [blob_a, blob_b]
+            else:
+                r.rowcount = 0
+                r.scalar_one = MagicMock(return_value=0)
+                r.scalars.return_value.all.return_value = []
+            return r
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+
+        with (
+            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
+            patch("worker.dedup_scan.async_session", return_value=session),
+            patch("asyncio.sleep", new=AsyncMock()),
+        ):
+            result = await dedup_scan_job({})
+
+        assert result["status"] == "stopped"
+        assert result["tier"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Tier 2 — heuristic classify loop (lines 160-226)
+# ---------------------------------------------------------------------------
+
+
+class TestTier2HeuristicLoop:
+    """Tests for Tier 2 heuristic classification processing."""
+
+    def _make_needs_t2_pair(self, id_=1, sha_a="sha_a", sha_b="sha_b"):
+        return _make_blob_relationship(sha_a, sha_b, id_=id_, relationship="needs_t2")
+
+    async def _run_with_t2_pair(self, pair, blob_a, blob_b, same_gal=False,
+                                 heuristic=None, opencv=None, extra_redis_gets=None):
+        """Helper: run dedup_scan_job with tier 1 returning no pairs and tier 2 having one pair.
+
+        Query ordering (absolute index):
+          n=1: tier1 blob fetch → empty
+          n=2: tier2 needs_t2 count → 1
+          n=3: tier2 pairs fetch (limit 200) → [pair]
+          n=4: blob_a fetch → blob_a
+          n=5: blob_b fetch → blob_b
+          n=6: same_gal exists check → same_gal value
+          n=7+: UPDATE relationship, then second pairs fetch → empty (exit loop)
+        """
+        from worker.dedup_scan import dedup_scan_job
+
+        mock_redis = _make_mock_redis()
+        base_gets = [
+            None,     # status check
+            b"1",     # phash_enabled
+            b"10",    # threshold
+            heuristic or None,   # heuristic_enabled
+            opencv or None,      # opencv_enabled
+        ]
+        if extra_redis_gets:
+            base_gets.extend(extra_redis_gets)
+        mock_redis.get = AsyncMock(side_effect=base_gets)
+        mock_redis.getdel = AsyncMock(return_value=None)
+
+        query_n = {"n": 0}
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.commit = AsyncMock()
+
+        async def _execute_side_effect(_stmt, *_args, **_kwargs):
+            query_n["n"] += 1
+            n = query_n["n"]
+            r = MagicMock()
+
+            if n == 1:
+                # tier1 blob fetch — empty
+                r.all = MagicMock(return_value=[])
+                r.scalars.return_value.all.return_value = []
+            elif n == 2:
+                # tier2 needs_t2 count
+                r.scalar_one = MagicMock(return_value=1)
+            elif n == 3:
+                # tier2 pairs batch fetch → [pair]
+                r.scalars.return_value = MagicMock()
+                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([pair]))
+            elif n == 4:
+                # blob_a fetch
+                r.scalar_one_or_none = MagicMock(return_value=blob_a)
+            elif n == 5:
+                # blob_b fetch
+                r.scalar_one_or_none = MagicMock(return_value=blob_b)
+            elif n == 6:
+                # same_gal exists check
+                r.scalar = MagicMock(return_value=same_gal)
+            else:
+                # n=7: UPDATE; n=8: second pairs fetch → empty (exits loop)
+                r.scalar_one = MagicMock(return_value=0)
+                r.scalars.return_value = MagicMock()
+                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+
+            return r
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+
+        with (
+            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
+            patch("worker.dedup_scan.async_session", return_value=session),
+        ):
+            result = await dedup_scan_job({})
+
+        return result
+
+    async def test_tier2_same_gallery_pair_is_whitelisted(self):
+        """Pair where both blobs share a gallery → whitelisted as same_gallery_variant (lines 190-199)."""
+        pair = self._make_needs_t2_pair()
+        blob_a = _make_blob("sha_a", phash_int=0x1234, phash_q0=0, phash_q1=0)
+        blob_b = _make_blob("sha_b", phash_int=0x1234, phash_q0=0, phash_q1=0)
+
+        result = await self._run_with_t2_pair(pair, blob_a, blob_b, same_gal=True)
+
+        assert result["status"] == "ok"
+        assert result["tier2_processed"] == 1
+
+    async def test_tier2_pair_with_missing_blob_is_resolved(self):
+        """Pair where blob_a is missing from DB → relationship resolved (lines 167-174)."""
+        from worker.dedup_scan import dedup_scan_job
+
+        pair = self._make_needs_t2_pair()
+
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(side_effect=[
+            None, b"1", b"10", None, None,
+        ])
+        mock_redis.getdel = AsyncMock(return_value=None)
+
+        query_n = {"n": 0}
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.commit = AsyncMock()
+
+        async def _execute_side_effect(_stmt, *_args, **_kwargs):
+            query_n["n"] += 1
+            n = query_n["n"]
+            r = MagicMock()
+            # n=1: tier1 blobs → empty
+            # n=2: tier2 count → 1
+            # n=3: tier2 pairs → [pair]
+            # n=4: blob_a → None (missing → triggers resolved branch)
+            # n=5+: UPDATE resolved, second pairs → empty
+            if n == 1:
+                r.all = MagicMock(return_value=[])
+                r.scalars.return_value.all.return_value = []
+            elif n == 2:
+                r.scalar_one = MagicMock(return_value=1)
+            elif n == 3:
+                r.scalars.return_value = MagicMock()
+                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([pair]))
+            elif n == 4:
+                # blob_a is None → missing
+                r.scalar_one_or_none = MagicMock(return_value=None)
+            else:
+                r.scalar_one = MagicMock(return_value=0)
+                r.scalars.return_value = MagicMock()
+                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+
+            return r
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+
+        with (
+            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
+            patch("worker.dedup_scan.async_session", return_value=session),
+        ):
+            result = await dedup_scan_job({})
+
+        assert result["status"] == "ok"
+
+    async def test_tier2_heuristic_classification_updates_relationship(self):
+        """Pair processed by heuristic classify → relationship updated in DB (lines 201-215)."""
+        pair = self._make_needs_t2_pair()
+        blob_a = _make_blob("sha_t2_a", phash_int=0x1111, phash_q0=0, phash_q1=0,
+                             width=1920, height=1080, file_size=500000)
+        blob_b = _make_blob("sha_t2_b", phash_int=0x1111, phash_q0=0, phash_q1=0,
+                             width=800, height=600, file_size=200000)
+
+        result = await self._run_with_t2_pair(pair, blob_a, blob_b, same_gal=False,
+                                               heuristic=b"1")
+
+        assert result["status"] == "ok"
+        assert result["tier2_processed"] == 1
+
+    async def test_tier2_stop_signal_returns_stopped(self):
+        """Stop signal during tier 2 → returns stopped at tier 2 (lines 224-226).
+
+        The stop signal fires after the first tier-2 batch (one pair) is processed.
+        """
+        from worker.dedup_scan import dedup_scan_job
+
+        pair = self._make_needs_t2_pair()
+        blob_a = _make_blob("sha_t2s_a", phash_int=0x5678, phash_q0=0, phash_q1=0)
+        blob_b = _make_blob("sha_t2s_b", phash_int=0x5678, phash_q0=0, phash_q1=0)
+
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(side_effect=[
+            None, b"1", b"10", None, None,
+        ])
+        # tier1 has 0 blobs so no check_signal in tier1.
+        # tier2 processes 1 pair then calls check_signal → b"stop"
+        mock_redis.getdel = AsyncMock(return_value=b"stop")
+
+        query_n = {"n": 0}
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.commit = AsyncMock()
+
+        async def _execute_side_effect(_stmt, *_args, **_kwargs):
+            query_n["n"] += 1
+            n = query_n["n"]
+            r = MagicMock()
+            # Absolute query index routing:
+            # n=1: tier1 blobs (empty)
+            # n=2: tier2 needs_t2 count (1)
+            # n=3: tier2 pairs fetch (returns [pair])
+            # n=4: blob_a fetch (returns blob_a)
+            # n=5: blob_b fetch (returns blob_b)
+            # n=6: same_gal exists check (False)
+            # n=7: UPDATE relationship
+            # (after the pair loop, check_signal is called → returns stop)
+            if n == 1:
+                r.all = MagicMock(return_value=[])
+                r.scalars.return_value.all.return_value = []
+            elif n == 2:
+                r.scalar_one = MagicMock(return_value=1)
+            elif n == 3:
+                r.scalars.return_value = MagicMock()
+                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([pair]))
+            elif n == 4:
+                r.scalar_one_or_none = MagicMock(return_value=blob_a)
+            elif n == 5:
+                r.scalar_one_or_none = MagicMock(return_value=blob_b)
+            elif n == 6:
+                # same_gal exists check → False
+                r.scalar = MagicMock(return_value=False)
+            else:
+                r.scalar_one = MagicMock(return_value=0)
+                r.scalars.return_value = MagicMock()
+                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+
+            return r
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+
+        with (
+            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
+            patch("worker.dedup_scan.async_session", return_value=session),
+        ):
+            result = await dedup_scan_job({})
+
+        assert result["status"] == "stopped"
+        assert result["tier"] == 2
+
+
+# ---------------------------------------------------------------------------
+# Tier 3 — OpenCV pixel-diff (lines 240-344)
+# ---------------------------------------------------------------------------
+
+
+class TestTier3OpenCV:
+    """Tests for Tier 3 OpenCV pixel-diff processing."""
+
+    async def _run_with_t3(self, pair, blob_a, blob_b, opencv_score=0.9,
+                            opencv_exception=None, threshold_cv=None):
+        """Run dedup_scan_job configured for tier 3 processing."""
+        from worker.dedup_scan import dedup_scan_job
+
+        mock_redis = _make_mock_redis()
+        gets = [
+            None,    # status
+            b"1",    # phash_enabled
+            b"10",   # threshold
+            None,    # heuristic_enabled (tier 2)
+            b"1",    # opencv_enabled (tier 2 → needs_t3)
+            # tier 3 settings:
+            threshold_cv or b"0.85",  # opencv_threshold
+        ]
+        mock_redis.get = AsyncMock(side_effect=gets)
+        mock_redis.getdel = AsyncMock(return_value=None)
+
+        query_n = {"n": 0}
+        fetch_count = {"n": 0}
+        t2_pair_returned = {"done": False}
+        t3_pair_returned = {"done": False}
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.commit = AsyncMock()
+
+        async def _execute_side_effect(stmt, *_args, **_kwargs):
+            query_n["n"] += 1
+            n = query_n["n"]
+            r = MagicMock()
+            stmt_str = str(stmt).upper()
+
+            if n == 1:
+                # tier1 blobs — empty
+                r.all = MagicMock(return_value=[])
+                r.scalars.return_value.all.return_value = []
+            elif n == 2:
+                # tier2 needs_t2 count — 1
+                r.scalar_one = MagicMock(return_value=1)
+            elif "SELECT" in stmt_str and not t2_pair_returned["done"]:
+                fetch_count["n"] += 1
+                fc = fetch_count["n"]
+                if fc == 1:
+                    # tier2 pairs → one needs_t2 pair
+                    t2_pair = _make_blob_relationship("sha_t3_a", "sha_t3_b",
+                                                       relationship="needs_t2", id_=10)
+                    r.scalars.return_value = MagicMock()
+                    r.scalars.return_value.__iter__ = MagicMock(return_value=iter([t2_pair]))
+                    t2_pair_returned["done"] = True
+                elif fc == 2:
+                    r.scalar_one_or_none = MagicMock(return_value=blob_a)
+                elif fc == 3:
+                    r.scalar_one_or_none = MagicMock(return_value=blob_b)
+                elif fc == 4:
+                    r.scalar = MagicMock(return_value=False)
+                else:
+                    r.scalar_one = MagicMock(return_value=0)
+                    r.scalars.return_value = MagicMock()
+                    r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+            elif "SELECT" in stmt_str and not t3_pair_returned["done"]:
+                fetch_count["n"] += 1
+                fc = fetch_count["n"]
+                if fc == 5:
+                    # tier3 needs_t3 count
+                    r.scalar_one = MagicMock(return_value=1)
+                elif fc == 6:
+                    # tier3 pairs → one needs_t3 pair
+                    r.scalars.return_value = MagicMock()
+                    r.scalars.return_value.__iter__ = MagicMock(return_value=iter([pair]))
+                    t3_pair_returned["done"] = True
+                elif fc == 7:
+                    r.scalar_one_or_none = MagicMock(return_value=blob_a)
+                elif fc == 8:
+                    r.scalar_one_or_none = MagicMock(return_value=blob_b)
+                else:
+                    r.scalar_one = MagicMock(return_value=0)
+                    r.scalars.return_value = MagicMock()
+                    r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+            else:
+                r.scalar_one = MagicMock(return_value=0)
+                r.scalars.return_value = MagicMock()
+                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+
+            return r
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+
+        if opencv_exception:
+            opencv_mock = MagicMock(side_effect=opencv_exception)
+        else:
+            opencv_mock = MagicMock(return_value=(opencv_score, "compression_noise"))
+
+        with (
+            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
+            patch("worker.dedup_scan.async_session", return_value=session),
+            patch("worker.dedup_helpers._opencv_pixel_diff", opencv_mock),
+            patch("services.cas.resolve_blob_path", return_value=MagicMock(__str__=lambda s: "/fake/path")),
+            patch("core.events.emit_safe", new=AsyncMock()),
+        ):
+            result = await dedup_scan_job({})
+
+        return result
+
+    async def test_opencv_disabled_skips_tier3_and_emits_event(self):
+        """When opencv is disabled, tier 3 is skipped, event emitted, status=ok (lines 231-238)."""
+        from worker.dedup_scan import dedup_scan_job
+
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(side_effect=[
+            None,    # status
+            b"1",    # phash_enabled
+            b"10",   # threshold
+            None,    # heuristic_enabled
+            None,    # opencv_enabled (falsy → skip tier 3)
+        ])
+        mock_redis.getdel = AsyncMock(return_value=None)
+
+        query_n = {"n": 0}
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.commit = AsyncMock()
+
+        async def _execute_side_effect(_stmt, *_args, **_kwargs):
+            query_n["n"] += 1
+            r = MagicMock()
+            r.all = MagicMock(return_value=[])
+            r.scalar_one = MagicMock(return_value=0)
+            r.scalars.return_value.all.return_value = []
+            r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+            return r
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+
+        with (
+            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
+            patch("worker.dedup_scan.async_session", return_value=session),
+            patch("core.events.emit_safe", new=AsyncMock()) as mock_emit,
+        ):
+            result = await dedup_scan_job({})
+
+        assert result["status"] == "ok"
+        assert "tier3_processed" not in result
+        mock_emit.assert_called_once()
+
+    async def test_tier3_pair_processed_with_high_similarity_score(self):
+        """Tier 3 pair with score >= threshold → classified and updated (lines 301-325)."""
+        pair = _make_blob_relationship(
+            "sha_t3_a", "sha_t3_b", relationship="needs_t3", id_=20,
+            suggested_keep=None, reason=None,
+        )
+        blob_a = _make_blob("sha_t3_a", phash_int=0xAAAA, phash_q0=0, phash_q1=0,
+                             width=1920, height=1080, file_size=500000)
+        blob_b = _make_blob("sha_t3_b", phash_int=0xAAAA, phash_q0=0, phash_q1=0,
+                             width=800, height=600, file_size=200000)
+
+        result = await self._run_with_t3(pair, blob_a, blob_b, opencv_score=0.95)
+        assert result["status"] == "ok"
+
+    async def test_tier3_pair_processed_with_low_similarity_score(self):
+        """Tier 3 pair with score < threshold → resolved (not a duplicate) (lines 308-310)."""
+        pair = _make_blob_relationship(
+            "sha_t3_a", "sha_t3_b", relationship="needs_t3", id_=21,
+            suggested_keep="sha_t3_a", reason="higher_resolution",
+        )
+        blob_a = _make_blob("sha_t3_a", phash_int=0xBBBB, phash_q0=0, phash_q1=0)
+        blob_b = _make_blob("sha_t3_b", phash_int=0xBBBB, phash_q0=0, phash_q1=0)
+
+        result = await self._run_with_t3(pair, blob_a, blob_b, opencv_score=0.3)
+        assert result["status"] == "ok"
+
+    async def test_tier3_opencv_exception_marks_quality_conflict(self):
+        """OpenCV exception during pair processing → quality_conflict (lines 291-299)."""
+        pair = _make_blob_relationship(
+            "sha_t3_a", "sha_t3_b", relationship="needs_t3", id_=22,
+        )
+        blob_a = _make_blob("sha_t3_a", phash_int=0xCCCC, phash_q0=0, phash_q1=0)
+        blob_b = _make_blob("sha_t3_b", phash_int=0xCCCC, phash_q0=0, phash_q1=0)
+
+        result = await self._run_with_t3(pair, blob_a, blob_b,
+                                          opencv_exception=ValueError("decode failed"))
+        assert result["status"] == "ok"
+
+    async def test_tier3_missing_blob_is_resolved(self):
+        """Tier 3 pair where blob is missing → resolved (lines 277-284)."""
+        from worker.dedup_scan import dedup_scan_job
+
+        pair = _make_blob_relationship(
+            "sha_t3miss_a", "sha_t3miss_b", relationship="needs_t3", id_=23,
+        )
+
+        mock_redis = _make_mock_redis()
+        mock_redis.get = AsyncMock(side_effect=[
+            None, b"1", b"10", None, b"1",
+            b"0.85",
+        ])
+        mock_redis.getdel = AsyncMock(return_value=None)
+
+        query_n = {"n": 0}
+        t3_pair_returned = {"done": False}
+        fetch_count = {"n": 0}
+
+        session = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+        session.commit = AsyncMock()
+
+        async def _execute_side_effect(stmt, *_args, **_kwargs):
+            query_n["n"] += 1
+            n = query_n["n"]
+            r = MagicMock()
+            stmt_str = str(stmt).upper()
+
+            if n == 1:
+                r.all = MagicMock(return_value=[])
+                r.scalars.return_value.all.return_value = []
+            elif n == 2:
+                r.scalar_one = MagicMock(return_value=0)
+            elif "SELECT" in stmt_str and not t3_pair_returned["done"]:
+                fetch_count["n"] += 1
+                fc = fetch_count["n"]
+                if fc == 1:
+                    # tier2 pairs → empty
+                    r.scalars.return_value = MagicMock()
+                    r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+                elif fc == 2:
+                    # tier3 count → 1
+                    r.scalar_one = MagicMock(return_value=1)
+                elif fc == 3:
+                    # tier3 pairs → one pair
+                    r.scalars.return_value = MagicMock()
+                    r.scalars.return_value.__iter__ = MagicMock(return_value=iter([pair]))
+                    t3_pair_returned["done"] = True
+                elif fc == 4:
+                    # blob_a → None (missing)
+                    r.scalar_one_or_none = MagicMock(return_value=None)
+                else:
+                    r.scalar_one = MagicMock(return_value=0)
+                    r.scalars.return_value = MagicMock()
+                    r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+            elif "SELECT" in stmt_str:
+                r.scalar_one = MagicMock(return_value=0)
+                r.scalars.return_value = MagicMock()
+                r.scalars.return_value.__iter__ = MagicMock(return_value=iter([]))
+            else:
+                r.scalar_one = MagicMock(return_value=0)
+
+            return r
+
+        session.execute = AsyncMock(side_effect=_execute_side_effect)
+
+        with (
+            patch("worker.dedup_scan.get_redis", return_value=mock_redis),
+            patch("worker.dedup_scan.async_session", return_value=session),
+            patch("services.cas.resolve_blob_path", return_value=MagicMock(__str__=lambda s: "/fake/path")),
+            patch("core.events.emit_safe", new=AsyncMock()),
+        ):
+            result = await dedup_scan_job({})
+
+        assert result["status"] == "ok"

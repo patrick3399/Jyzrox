@@ -106,7 +106,7 @@ const { mockUseSWRInfinite } = vi.hoisted(() => ({
     ) => {
       infiniteCalls.push({ getKey, fetcher, options })
       return {
-        data: undefined,
+        data: undefined as unknown[] | undefined,
         error: undefined,
         size: 1,
         setSize: vi.fn(),

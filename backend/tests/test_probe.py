@@ -1,7 +1,7 @@
 """Tests for M2 Probe Engine — core/probe.py + routers/site_config.py probe endpoints."""
 
 import asyncio
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -585,6 +585,344 @@ class TestProbeEndpoint:
 
         assert resp.status_code == 200
         mock_save.assert_not_called()
+
+
+# ── Additional unit tests: probe_url missing branches ─────────────────────────
+
+
+class TestProbeUrlAdditionalBranches:
+    """probe_url() — additional branches not covered by the main test class."""
+
+    async def test_probe_url_returns_failure_when_hostname_missing(self):
+        """A URL with no parseable hostname returns ProbeResult(success=False)."""
+        # urlparse("https:///no-host") has hostname=None after validation passes —
+        # we mock _validate_url to pass so probe_url reaches the hostname check.
+        with patch("core.probe._validate_url"):
+            result = await probe_url("https:///no-host-at-all")
+        assert result.success is False
+        assert result.error is not None
+        assert "hostname" in result.error.lower()
+
+    async def test_probe_url_returns_failure_on_generic_exception_from_dns(self):
+        """A non-ValueError exception from _check_dns is caught as 'DNS resolution failed'."""
+        with (
+            patch("core.probe._validate_url"),
+            patch(
+                "core.probe._check_dns",
+                new=AsyncMock(side_effect=RuntimeError("unexpected network error")),
+            ),
+        ):
+            result = await probe_url("https://example.com/gallery/1")
+        assert result.success is False
+        assert result.error is not None
+        assert "DNS resolution failed" in result.error
+
+    async def test_probe_url_returns_failure_on_value_error_from_dns(self):
+        """A ValueError from _check_dns surfaces directly as the error message."""
+        with (
+            patch("core.probe._validate_url"),
+            patch(
+                "core.probe._check_dns",
+                new=AsyncMock(side_effect=ValueError("Blocked: private IP")),
+            ),
+        ):
+            result = await probe_url("https://example.com/gallery/1")
+        assert result.success is False
+        assert "Blocked: private IP" in (result.error or "")
+
+
+# ── Additional unit tests: _check_dns missing branches ────────────────────────
+
+
+class TestCheckDnsAdditionalBranches:
+    """_check_dns() — empty infos and invalid IP string branches."""
+
+    async def test_check_dns_raises_when_no_infos_returned(self):
+        """Empty list from getaddrinfo raises ValueError about no DNS results."""
+        loop = asyncio.get_running_loop()
+        with patch.object(loop, "getaddrinfo", new=AsyncMock(return_value=[])):
+            with pytest.raises(ValueError, match="No DNS results"):
+                await _check_dns("empty-results.test")
+
+    async def test_check_dns_skips_unparseable_ip_string(self):
+        """An info entry with an unparseable IP string is skipped (continue branch)."""
+        # One invalid IP entry followed by a valid public IP — should NOT raise.
+        fake_infos = [
+            (None, None, None, None, ("not-an-ip-address", 0)),
+            (None, None, None, None, ("93.184.216.34", 0)),
+        ]
+        loop = asyncio.get_running_loop()
+        with patch.object(loop, "getaddrinfo", new=AsyncMock(return_value=fake_infos)):
+            await _check_dns("example.com")  # Should not raise
+
+    async def test_check_dns_rejects_172_16_private_range(self):
+        """172.16.0.1 falls in 172.16.0.0/12 private range."""
+        fake_info = [(None, None, None, None, ("172.16.0.1", 0))]
+        loop = asyncio.get_running_loop()
+        with patch.object(loop, "getaddrinfo", new=AsyncMock(return_value=fake_info)):
+            with pytest.raises(ValueError, match="private/reserved"):
+                await _check_dns("internal.corp")
+
+    async def test_check_dns_rejects_link_local_169_254(self):
+        """169.254.1.1 falls in 169.254.0.0/16 link-local range."""
+        fake_info = [(None, None, None, None, ("169.254.1.1", 0))]
+        loop = asyncio.get_running_loop()
+        with patch.object(loop, "getaddrinfo", new=AsyncMock(return_value=fake_info)):
+            with pytest.raises(ValueError, match="private/reserved"):
+                await _check_dns("link-local.host")
+
+    async def test_check_dns_rejects_multicast_ipv4(self):
+        """224.0.0.1 falls in 224.0.0.0/4 multicast range."""
+        fake_info = [(None, None, None, None, ("224.0.0.1", 0))]
+        loop = asyncio.get_running_loop()
+        with patch.object(loop, "getaddrinfo", new=AsyncMock(return_value=fake_info)):
+            with pytest.raises(ValueError, match="private/reserved"):
+                await _check_dns("multicast.host")
+
+
+# ── Unit tests: _fingerprint_field additional branches ────────────────────────
+
+
+class TestFingerprintFieldAdditionalBranches:
+    """_fingerprint_field() — branches not yet covered."""
+
+    def test_fingerprint_detects_dict_with_non_list_values_as_text(self):
+        """Dict where some values are not lists → 'text' (not namespaced_tags)."""
+        # line 346: the `return "text"` inside the dict branch
+        tags = {"artist": "john_doe", "character": ["reimu"]}
+        assert _fingerprint_field("tags", [tags]) == "text"
+
+    def test_fingerprint_detects_list_with_non_string_elements_as_text(self):
+        """List containing non-string elements → 'text' (not flat_tags)."""
+        # line 351: the `return "text"` inside the list branch
+        assert _fingerprint_field("ids", [[1, 2, 3]]) == "text"
+
+    def test_fingerprint_detects_large_float_as_timestamp(self):
+        """Float > 1_000_000_000 → 'timestamp'."""
+        # line 362-363
+        assert _fingerprint_field("ts", [1700000000.5]) == "timestamp"
+
+    def test_fingerprint_detects_small_float_as_text(self):
+        """Float <= 1_000_000_000 → 'text'."""
+        # line 364
+        assert _fingerprint_field("ratio", [1.5]) == "text"
+
+    def test_fingerprint_returns_text_for_unknown_type(self):
+        """An object of an unrecognized type falls through to 'text'."""
+        # line 375: final return "text" for unknown types
+        class CustomObj:
+            pass
+        assert _fingerprint_field("custom", [CustomObj()]) == "text"
+
+
+# ── Unit tests: _diff_fields — key not present in some items ──────────────────
+
+
+class TestDiffFieldsKeyAbsence:
+    """_diff_fields() — a key present in some but not all items."""
+
+    def test_diff_fields_handles_key_present_in_subset_of_items(self):
+        """A key only in item[0] still gets classified (values list is non-empty)."""
+        items = [
+            {"title": "Gallery", "optional_field": "only_here"},
+            {"title": "Gallery"},
+        ]
+        fields = _diff_fields(items)
+        keys = {f.key for f in fields}
+        # title is present in both → included
+        assert "title" in keys
+        # optional_field is only in item[0] but values list has one entry → included
+        assert "optional_field" in keys
+
+    def test_diff_fields_sample_from_dict_or_list_uses_json_dump(self):
+        """When sample_raw is dict/list, sample_value is a JSON string."""
+        items = [{"meta": {"a": 1, "b": 2}}]
+        fields = _diff_fields(items)
+        meta_field = next(f for f in fields if f.key == "meta")
+        # sample_value should be a valid JSON string
+        import json as _json
+        _json.loads(meta_field.sample_value)
+
+
+# ── Unit tests: _score_mappings — source_id "id" non-numeric branch ──────────
+
+
+class TestScoreMappingsAdditionalBranches:
+    """_score_mappings() — the 'id' hint guard for source_id."""
+
+    def _make_probe_fields(self, field_specs: list[tuple[str, str, str]]) -> list[ProbeField]:
+        return [
+            ProbeField(key=key, field_type=ft, sample_value="sample", level=level)
+            for key, ft, level in field_specs
+        ]
+
+    def test_score_mappings_id_hint_skipped_when_type_is_not_numeric_id(self):
+        """The exact 'id' hint for source_id is skipped when field type is not numeric_id (line 403).
+
+        When gdl_field == 'id' but type is 'text', the exact-match branch is skipped.
+        The field still gets a partial-match score (0.7) because 'id' in 'id' (via
+        the 'gdl_field in hint' path), plus a type-boost of +0.05 since 'text' is in
+        source_id's preferred_types — resulting in 0.75, which is < 0.9.
+        """
+        fields = self._make_probe_fields([("id", "text", "gallery")])
+        mappings = _score_mappings(fields, [])
+        source_id_mapping = next(m for m in mappings if m.jyzrox_field == "source_id")
+        # The 0.9 exact-match is blocked; partial match gives 0.7 + 0.05 type-boost = 0.75
+        assert source_id_mapping.confidence < 0.9
+        assert source_id_mapping.confidence > 0.0
+
+    def test_score_mappings_type_only_boost_when_no_hint_matches(self):
+        """When no key hint matches at all, a preferred-type field scores 0.3 (type-only)."""
+        # 'uploaded_by' has no direct key-hint match for 'uploader' role:
+        #   - 'uploader' is NOT a substring of 'uploaded_by' (they diverge after 'upload')
+        #   - 'uploaded_by' is NOT a substring of 'uploader'
+        # So score stays 0.0 → type-only boost: text ∈ preferred_types → score = 0.3
+        fields = self._make_probe_fields([("uploaded_by", "text", "gallery")])
+        mappings = _score_mappings(fields, [])
+        uploader_mapping = next(m for m in mappings if m.jyzrox_field == "uploader")
+        assert uploader_mapping.gdl_field == "uploaded_by"
+        assert uploader_mapping.confidence == 0.3
+
+
+# ── Unit tests: _detect_source ────────────────────────────────────────────────
+
+
+class TestDetectSource:
+    """_detect_source() — GDL_SITES matching logic."""
+
+    def test_detect_source_returns_none_for_empty_raw(self):
+        """Empty raw list → None."""
+        from core.probe import _detect_source
+        assert _detect_source([]) is None
+
+    def test_detect_source_returns_none_when_no_category(self):
+        """raw[0] with no 'category' key → None."""
+        from core.probe import _detect_source
+        assert _detect_source([{"title": "Test"}]) is None
+
+    def test_detect_source_returns_none_for_unknown_category(self):
+        """Unrecognized category string → None (no site match)."""
+        from core.probe import _detect_source
+        result = _detect_source([{"category": "totally_unknown_extractor_xyz"}])
+        assert result is None
+
+    def test_detect_source_matches_ehentai_by_category(self):
+        """'ehentai' category matches the ehentai site."""
+        from core.probe import _detect_source
+        result = _detect_source([{"category": "ehentai"}])
+        assert result == "ehentai"
+
+    def test_detect_source_matches_case_insensitively(self):
+        """Category matching is case-insensitive."""
+        from core.probe import _detect_source
+        result = _detect_source([{"category": "EHentai"}])
+        assert result == "ehentai"
+
+
+# ── Unit tests: _run_gallery_dl_probe subprocess logic ────────────────────────
+
+
+class TestRunGalleryDlProbe:
+    """_run_gallery_dl_probe() — subprocess invocation and output parsing."""
+
+    async def test_run_gallery_dl_probe_returns_parsed_dicts_from_json_lines(self):
+        """Valid JSON-lines output → list of dicts."""
+        from core.probe import _run_gallery_dl_probe
+
+        json_lines = b'{"title": "test", "id": 1}\n{"title": "page2", "id": 2}\n'
+
+        mock_proc = AsyncMock()
+        mock_proc.stdout = AsyncMock()
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+
+        # Simulate streaming: first call returns data, second call returns b""
+        mock_proc.stdout.read = AsyncMock(side_effect=[json_lines, b""])
+
+        with (
+            patch("worker.gallery_dl_venv.get_gdl_bin", return_value="/usr/bin/gallery-dl"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            result = await _run_gallery_dl_probe("https://example.com/gallery/1")
+
+        assert len(result) == 2
+        assert result[0]["title"] == "test"
+        assert result[1]["id"] == 2
+
+    async def test_run_gallery_dl_probe_returns_empty_list_on_exception(self):
+        """If subprocess creation raises, returns empty list."""
+        from core.probe import _run_gallery_dl_probe
+
+        with (
+            patch("worker.gallery_dl_venv.get_gdl_bin", return_value="/usr/bin/gallery-dl"),
+            patch("asyncio.create_subprocess_exec", side_effect=OSError("no such file")),
+        ):
+            result = await _run_gallery_dl_probe("https://example.com/gallery/1")
+
+        assert result == []
+
+    async def test_run_gallery_dl_probe_handles_timeout(self):
+        """TimeoutError during read → kills process and returns empty list."""
+        from core.probe import _run_gallery_dl_probe
+
+        mock_proc = AsyncMock()
+        mock_proc.stdout = AsyncMock()
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=asyncio.TimeoutError())
+
+        with (
+            patch("worker.gallery_dl_venv.get_gdl_bin", return_value="/usr/bin/gallery-dl"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+            patch("asyncio.wait_for", side_effect=TimeoutError()),
+        ):
+            result = await _run_gallery_dl_probe("https://example.com/gallery/1")
+
+        assert result == []
+
+    async def test_run_gallery_dl_probe_skips_non_dict_json_lines(self):
+        """JSON lines that are not dicts (but are lists) get items extracted."""
+        from core.probe import _run_gallery_dl_probe
+
+        # A list line — dicts inside it should be extracted
+        json_lines = b'[{"id": 1, "title": "a"}, {"id": 2, "title": "b"}]\n'
+
+        mock_proc = AsyncMock()
+        mock_proc.stdout = AsyncMock()
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=[json_lines, b""])
+
+        with (
+            patch("worker.gallery_dl_venv.get_gdl_bin", return_value="/usr/bin/gallery-dl"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            result = await _run_gallery_dl_probe("https://example.com/gallery/1")
+
+        assert len(result) == 2
+        assert result[0]["id"] == 1
+
+    async def test_run_gallery_dl_probe_kills_on_output_cap_exceeded(self):
+        """Output exceeding 2 MB cap → process killed, returns empty list."""
+        from core.probe import _run_gallery_dl_probe
+
+        # 2 MB + 1 byte to exceed the cap
+        big_chunk = b"x" * (2 * 1024 * 1024 + 1)
+
+        mock_proc = AsyncMock()
+        mock_proc.stdout = AsyncMock()
+        mock_proc.kill = MagicMock()
+        mock_proc.wait = AsyncMock()
+        mock_proc.stdout.read = AsyncMock(side_effect=[big_chunk, b""])
+
+        with (
+            patch("worker.gallery_dl_venv.get_gdl_bin", return_value="/usr/bin/gallery-dl"),
+            patch("asyncio.create_subprocess_exec", return_value=mock_proc),
+        ):
+            result = await _run_gallery_dl_probe("https://example.com/gallery/1")
+
+        mock_proc.kill.assert_called_once()
+        assert result == []
 
 
 class TestUpdateFieldMappingEndpoint:
