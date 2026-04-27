@@ -521,6 +521,17 @@ function BrowsePage() {
   )
   const [favScrollLoading, setFavScrollLoading] = useState(false)
   const [favScrollHasMore, setFavScrollHasMore] = useState(restored?.favScrollHasMore ?? true)
+  const [favPaginatedGalleries, setFavPaginatedGalleries] = useState<EhGallery[]>(
+    restored?.favPaginatedGalleries ?? [],
+  )
+  const favPaginatedIsRestored = useRef(true)
+  useEffect(() => {
+    if (favPaginatedIsRestored.current) {
+      favPaginatedIsRestored.current = false
+      return
+    }
+    setFavPaginatedGalleries([])
+  }, [favCursor, favCat, favSearch])
   const favScrollNeedsSeedRef = useRef(
     restored?.favScrollGalleries != null && restored.favScrollGalleries.length > 0 ? false : true,
   )
@@ -730,14 +741,14 @@ function BrowsePage() {
       activeTab === 'search' || activeTab === 'popular'
         ? !!data || scrollGalleries.length > 0
         : activeTab === 'favorites'
-          ? !!favData || favScrollGalleries.length > 0
+          ? !!favData || favScrollGalleries.length > 0 || favPaginatedGalleries.length > 0
           : !!toplistData
     if (!hasData) return
     scrollRestoredRef.current = true
     requestAnimationFrame(() => {
       window.scrollTo(0, restored.scrollY)
     })
-  }, [data, favData, toplistData, scrollGalleries.length, favScrollGalleries.length]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [data, favData, toplistData, scrollGalleries.length, favScrollGalleries.length, favPaginatedGalleries.length]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Infinite scroll: reset when search changes ─────────
   useEffect(() => {
@@ -897,6 +908,9 @@ function BrowsePage() {
         ...(loadMode === 'scroll' && activeTab === 'favorites'
           ? { favScrollGalleries, favScrollNextCursor, favScrollHasMore }
           : {}),
+        ...(loadMode === 'pagination' && activeTab === 'favorites' && favData?.galleries?.length
+          ? { favPaginatedGalleries: favData.galleries }
+          : {}),
       }),
     )
   }, [
@@ -917,6 +931,8 @@ function BrowsePage() {
     favScrollGalleries,
     favScrollNextCursor,
     favScrollHasMore,
+    favData,
+    favPaginatedGalleries,
   ])
 
   const navigateToGallery = useCallback(
@@ -1010,8 +1026,11 @@ function BrowsePage() {
     [loadMode, scrollGalleries, data?.galleries],
   )
   const favDisplayGalleries = useMemo(
-    () => (loadMode === 'scroll' ? favScrollGalleries : (favData?.galleries ?? [])),
-    [loadMode, favScrollGalleries, favData?.galleries],
+    () =>
+      loadMode === 'scroll'
+        ? favScrollGalleries
+        : (favData?.galleries ?? favPaginatedGalleries),
+    [loadMode, favScrollGalleries, favData?.galleries, favPaginatedGalleries],
   )
 
   // ── Keyboard grid navigation ────────────────────────────
