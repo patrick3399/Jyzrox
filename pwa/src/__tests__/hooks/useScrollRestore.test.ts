@@ -163,3 +163,62 @@ describe('useScrollRestore — key isolation', () => {
     expect(mockRemoveItem).toHaveBeenCalledWith('page-b')
   })
 })
+
+describe('useScrollRestore — saveScroll(pages)', () => {
+  it('test_saveScroll_withPages_storesJsonFormat', () => {
+    Object.defineProperty(globalThis.window, 'scrollY', { value: 350, configurable: true })
+    const { result } = renderHook(() => useScrollRestore<{ id: number }>('feed-key', false))
+    act(() => {
+      result.current.saveScroll([{ id: 1 }, { id: 2 }])
+    })
+    expect(mockSetItem).toHaveBeenCalledWith(
+      'feed-key',
+      JSON.stringify({ scrollY: 350, pages: [{ id: 1 }, { id: 2 }] }),
+    )
+  })
+
+  it('test_saveScroll_noArgs_storesLegacyStringFormat_backwardCompat', () => {
+    Object.defineProperty(globalThis.window, 'scrollY', { value: 100, configurable: true })
+    const { result } = renderHook(() => useScrollRestore('feed-key', false))
+    act(() => {
+      result.current.saveScroll()
+    })
+    expect(mockSetItem).toHaveBeenCalledWith('feed-key', '100')
+  })
+})
+
+describe('useScrollRestore — restoredPages', () => {
+  it('test_restoredPages_jsonFormat_returnsPages', () => {
+    mockGetItem.mockReturnValue(JSON.stringify({ scrollY: 200, pages: [{ id: 42 }] }))
+    const { result } = renderHook(() =>
+      useScrollRestore<{ id: number }>('feed-key', true),
+    )
+    expect(result.current.restoredPages).toEqual([{ id: 42 }])
+  })
+
+  it('test_restoredPages_legacyStringFormat_returnsNull', () => {
+    mockGetItem.mockReturnValue('480')
+    const { result } = renderHook(() => useScrollRestore('feed-key', true))
+    expect(result.current.restoredPages).toBeNull()
+    // scroll still restores correctly (backward compat)
+    expect(mockScrollTo).toHaveBeenCalledWith(0, 480)
+  })
+
+  it('test_restoredPages_noSavedValue_returnsNull', () => {
+    mockGetItem.mockReturnValue(null)
+    const { result } = renderHook(() => useScrollRestore('feed-key', true))
+    expect(result.current.restoredPages).toBeNull()
+  })
+
+  it('test_restoredPages_isReadyFalse_stillReadsPages_effectDoesNotRun', () => {
+    // useState initializer reads pages even when isReady=false
+    // but effect does NOT fire (so no scrollTo, no removeItem)
+    mockGetItem.mockReturnValue(JSON.stringify({ scrollY: 100, pages: [{ id: 7 }] }))
+    const { result } = renderHook(() =>
+      useScrollRestore<{ id: number }>('feed-key', false),
+    )
+    expect(result.current.restoredPages).toEqual([{ id: 7 }])
+    expect(mockScrollTo).not.toHaveBeenCalled()
+    expect(mockRemoveItem).not.toHaveBeenCalled()
+  })
+})
