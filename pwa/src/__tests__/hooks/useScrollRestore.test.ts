@@ -210,6 +210,14 @@ describe('useScrollRestore — restoredPages', () => {
     expect(result.current.restoredPages).toBeNull()
   })
 
+  it('test_restoredPages_emptyPagesArray_returnsNull_preventsSWRInitialSizeZero', () => {
+    // Empty pages array must return null so initialSize stays at 1 (not 0)
+    // initialSize:0 would cause SWR to skip all fetches indefinitely
+    mockGetItem.mockReturnValue(JSON.stringify({ scrollY: 100, pages: [] }))
+    const { result } = renderHook(() => useScrollRestore('feed-key', true))
+    expect(result.current.restoredPages).toBeNull()
+  })
+
   it('test_restoredPages_isReadyFalse_stillReadsPages_effectDoesNotRun', () => {
     // useState initializer reads pages even when isReady=false
     // but effect does NOT fire (so no scrollTo, no removeItem)

@@ -18,7 +18,8 @@ export function useScrollRestore<T = unknown>(key: string, isReady: boolean) {
         typeof parsed === 'object' &&
         Array.isArray((parsed as { pages?: unknown }).pages)
       ) {
-        return (parsed as { pages: T[] }).pages
+        const pages = (parsed as { pages: T[] }).pages
+        return pages.length > 0 ? pages : null
       }
     } catch {
       // legacy string format — no pages
