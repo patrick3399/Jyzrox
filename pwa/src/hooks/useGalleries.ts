@@ -368,15 +368,20 @@ export function useEhGalleryImagesPaginated(
 
 // ── Unified Search ────────────────────────────────────────────────────
 
-export function useSearchGalleries(q: string, options?: { sort?: string; limit?: number }) {
+export function useSearchGalleries(
+  q: string,
+  options?: { sort?: string; limit?: number; fallbackData?: SearchGalleriesResponse[] },
+) {
+  const { fallbackData, ...restOptions } = options ?? {}
+
   const getKey = (pageIndex: number, previousPageData: SearchGalleriesResponse | null) => {
     if (!q) return null
-    if (pageIndex === 0) return ['search/galleries', q, options]
+    if (pageIndex === 0) return ['search/galleries', q, restOptions]
     if (previousPageData && !previousPageData.has_next) return null
     if (previousPageData?.next_cursor) {
-      return ['search/galleries', q, { ...options, cursor: previousPageData.next_cursor }]
+      return ['search/galleries', q, { ...restOptions, cursor: previousPageData.next_cursor }]
     }
-    return ['search/galleries', q, { ...options, page: pageIndex + 1 }]
+    return ['search/galleries', q, { ...restOptions, page: pageIndex + 1 }]
   }
 
   const { lastJobUpdate } = useWsJobs()
@@ -417,7 +422,12 @@ export function useSearchGalleries(q: string, options?: { sort?: string; limit?:
       string,
       { cursor?: string; page?: number; sort?: string; limit?: number } | undefined,
     ]) => api.search.galleries(query, opts),
-    { revalidateOnFocus: false },
+    {
+      revalidateOnFocus: false,
+      ...(fallbackData && fallbackData.length > 0
+        ? { fallbackData, initialSize: fallbackData.length }
+        : {}),
+    },
   )
 
   const items = useMemo(() => (data ? data.flatMap((page) => page.items) : []), [data])
@@ -425,10 +435,11 @@ export function useSearchGalleries(q: string, options?: { sort?: string; limit?:
   const lastPage = data?.[data.length - 1]
   const isReachingEnd =
     lastPage?.has_next === false ||
-    (lastPage?.has_next === undefined && (lastPage?.items?.length ?? 0) < (options?.limit ?? 24))
+    (lastPage?.has_next === undefined && (lastPage?.items?.length ?? 0) < (restOptions.limit ?? 24))
 
   return {
     items,
+    data,
     total,
     error,
     isLoading,

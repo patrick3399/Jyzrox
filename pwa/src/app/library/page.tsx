@@ -32,7 +32,7 @@ import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { galleryHref } from '@/lib/galleryRoutes'
 import { useSWRConfig } from 'swr'
-import type { SearchGalleryItem } from '@/lib/api'
+import type { SearchGalleryItem, SearchGalleriesResponse } from '@/lib/api'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -135,8 +135,18 @@ function LibraryContent() {
       : parsed.source
     : ''
 
-  const { items: searchItems, total, isLoading, error, isReachingEnd, loadMore, mutate } =
-    useSearchGalleries(rawQuery || ' ', { sort: sortValue, limit: PAGE_SIZE })
+  // Must be before useSearchGalleries so restoredPages is available as fallbackData
+  const { saveScroll, restoredPages } = useScrollRestore<SearchGalleriesResponse>(
+    'library_scrollY',
+    true,
+  )
+
+  const { items: searchItems, data: searchData, total, isLoading, error, isReachingEnd, loadMore, mutate } =
+    useSearchGalleries(rawQuery || ' ', {
+      sort: sortValue,
+      limit: PAGE_SIZE,
+      fallbackData: restoredPages ?? undefined,
+    })
 
   const displayGalleries = useMemo<Gallery[]>(
     () => (searchItems ? searchItems.map(mapSearchItemToGallery) : []),
@@ -195,9 +205,6 @@ function LibraryContent() {
     [globalMutate],
   )
 
-  // ── Scroll restoration ──────────────────────────────────
-  const { saveScroll } = useScrollRestore('library_scrollY', displayGalleries.length > 0)
-
   // ── Keyboard grid navigation ────────────────────────────
   const { focusedIndex, registerElement } = useGridKeyboard({
     totalItems: displayGalleries.length,
@@ -205,7 +212,7 @@ function LibraryContent() {
     onEnter: (i) => {
       const g = displayGalleries[i]
       if (g) {
-        saveScroll()
+        saveScroll(searchData ?? [])
         router.push(galleryHref(g.source, g.source_id))
       }
     },
@@ -552,7 +559,7 @@ function LibraryContent() {
                 gallery={gallery}
                 thumbUrl={gallery.cover_thumb ?? undefined}
                 onClick={() => {
-                  saveScroll()
+                  saveScroll(searchData ?? [])
                   router.push(galleryHref(gallery.source, gallery.source_id))
                 }}
                 onFavoriteToggle={handleFavoriteToggle}
