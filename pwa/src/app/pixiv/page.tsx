@@ -20,7 +20,7 @@ import type { PixivIllust, PixivSearchResult, PixivUserPreview } from '@/lib/typ
 
 // ── Pixiv illust list-view row ────────────────────────────────────────
 
-function IllustListRow({ illust }: { illust: PixivIllust }) {
+function IllustListRow({ illust, onNavigate }: { illust: PixivIllust; onNavigate?: () => void }) {
   const { downloading, bookmarked, bookmarking, handleDownload, handleBookmark } =
     useIllustActions(illust)
   const thumbUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
@@ -31,6 +31,7 @@ function IllustListRow({ illust }: { illust: PixivIllust }) {
   return (
     <Link
       href={`/pixiv/illust/${illust.id}`}
+      onClick={onNavigate}
       className="group flex gap-3 p-3 bg-vault-card border border-vault-border rounded-lg hover:border-vault-accent transition-colors"
     >
       {/* Thumbnail */}
@@ -111,13 +112,13 @@ function IllustListRow({ illust }: { illust: PixivIllust }) {
 
 // ── Illust card ──────────────────────────────────────────────────────────
 
-function IllustCard({ illust }: { illust: PixivIllust }) {
+function IllustCard({ illust, onNavigate }: { illust: PixivIllust; onNavigate?: () => void }) {
   const { downloading, bookmarked, bookmarking, handleDownload, handleBookmark } =
     useIllustActions(illust)
   const thumbUrl = api.pixiv.imageProxyUrl(illust.image_urls.square_medium)
 
   return (
-    <Link href={`/pixiv/illust/${illust.id}`} className="group block">
+    <Link href={`/pixiv/illust/${illust.id}`} onClick={onNavigate} className="group block">
       <div className="relative aspect-square overflow-hidden rounded-lg bg-vault-input">
         <img
           src={thumbUrl}
@@ -335,12 +336,14 @@ function FeedTab({
   focusedIndex,
   onColCountChange,
   saveScroll,
+  restoredPages,
   viewMode,
 }: {
   credentialsMissing: boolean
   focusedIndex: number | null
   onColCountChange: (count: number) => void
-  saveScroll: () => void
+  saveScroll: (pages: PixivSearchResult[]) => void
+  restoredPages: PixivSearchResult[] | null
   viewMode: 'grid' | 'list'
 }) {
   const router = useRouter()
@@ -354,7 +357,11 @@ function FeedTab({
   const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
     getKey,
     ([, offset]) => api.pixiv.getFollowingFeed(offset as number),
-    { revalidateFirstPage: false },
+    {
+      revalidateFirstPage: false,
+      fallbackData: restoredPages ?? undefined,
+      initialSize: restoredPages ? restoredPages.length : 1,
+    },
   )
 
   const allIllusts = data?.flatMap((page) => page.illusts) ?? []
@@ -367,7 +374,7 @@ function FeedTab({
     totalItems: allIllusts.length,
     colCount,
     onEnter: (i) => {
-      saveScroll()
+      saveScroll(data ?? [])
       router.push(`/pixiv/illust/${allIllusts[i].id}`)
     },
     enabled: allIllusts.length > 0,
@@ -420,9 +427,9 @@ function FeedTab({
         onColCountChange={handleColCountChange}
         renderItem={(illust) =>
           viewMode === 'list' ? (
-            <IllustListRow key={illust.id} illust={illust} />
+            <IllustListRow key={illust.id} illust={illust} onNavigate={() => saveScroll(data ?? [])} />
           ) : (
-            <IllustCard key={illust.id} illust={illust} />
+            <IllustCard key={illust.id} illust={illust} onNavigate={() => saveScroll(data ?? [])} />
           )
         }
         onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
@@ -610,6 +617,7 @@ function BookmarksTab({
   focusedIndex,
   onColCountChange,
   saveScroll,
+  restoredPages,
   viewMode,
 }: {
   credentialsMissing: boolean
@@ -617,7 +625,8 @@ function BookmarksTab({
   onRestrictChange: (v: string) => void
   focusedIndex: number | null
   onColCountChange: (count: number) => void
-  saveScroll: () => void
+  saveScroll: (pages: PixivSearchResult[]) => void
+  restoredPages: PixivSearchResult[] | null
   viewMode: 'grid' | 'list'
 }) {
   const router = useRouter()
@@ -631,7 +640,11 @@ function BookmarksTab({
   const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
     getKey,
     ([, r, offset]) => api.pixiv.getMyBookmarks(r as string, offset as number),
-    { revalidateFirstPage: false },
+    {
+      revalidateFirstPage: false,
+      fallbackData: restoredPages ?? undefined,
+      initialSize: restoredPages ? restoredPages.length : 1,
+    },
   )
 
   const allIllusts = data?.flatMap((page) => page.illusts) ?? []
@@ -644,7 +657,7 @@ function BookmarksTab({
     totalItems: allIllusts.length,
     colCount,
     onEnter: (i) => {
-      saveScroll()
+      saveScroll(data ?? [])
       router.push(`/pixiv/illust/${allIllusts[i].id}`)
     },
     enabled: allIllusts.length > 0,
@@ -704,9 +717,9 @@ function BookmarksTab({
         onColCountChange={handleColCountChange}
         renderItem={(illust) =>
           viewMode === 'list' ? (
-            <IllustListRow key={illust.id} illust={illust} />
+            <IllustListRow key={illust.id} illust={illust} onNavigate={() => saveScroll(data ?? [])} />
           ) : (
-            <IllustCard key={illust.id} illust={illust} />
+            <IllustCard key={illust.id} illust={illust} onNavigate={() => saveScroll(data ?? [])} />
           )
         }
         onLoadMore={hasMore ? () => setSize(size + 1) : undefined}
@@ -718,6 +731,18 @@ function BookmarksTab({
 }
 
 // ── Ranking Tab ───────────────────────────────────────────────────────────
+
+type RankingPage = {
+  contents: Array<Record<string, unknown>>
+  rank_total: number
+  mode: string
+  content: string
+  date: string
+  page: number
+  prev_date: string | null
+  next_date: string | null
+  has_next?: boolean
+}
 
 const RANKING_MODES = [
   { value: 'daily', label: () => t('browse.rankingDaily') },
@@ -744,6 +769,7 @@ function RankingTab({
   focusedIndex,
   onColCountChange,
   saveScroll,
+  restoredPages,
   viewMode,
 }: {
   credentialsMissing: boolean
@@ -755,7 +781,8 @@ function RankingTab({
   onR18Change: (v: boolean) => void
   focusedIndex: number | null
   onColCountChange: (count: number) => void
-  saveScroll: () => void
+  saveScroll: (pages: RankingPage[]) => void
+  restoredPages: RankingPage[] | null
   viewMode: 'grid' | 'list'
 }) {
   const router = useRouter()
@@ -767,18 +794,6 @@ function RankingTab({
       onModeChange('daily')
     }
     onR18Change(next)
-  }
-
-  type RankingPage = {
-    contents: Array<Record<string, unknown>>
-    rank_total: number
-    mode: string
-    content: string
-    date: string
-    page: number
-    prev_date: string | null
-    next_date: string | null
-    has_next?: boolean
   }
 
   const getKey = (pageIndex: number, previous: RankingPage | null) => {
@@ -795,7 +810,11 @@ function RankingTab({
     getKey,
     ([, m, c, p]) =>
       api.pixiv.ranking({ mode: m as string, content: c as string, page: p as number }),
-    { revalidateFirstPage: false },
+    {
+      revalidateFirstPage: false,
+      fallbackData: restoredPages ?? undefined,
+      initialSize: restoredPages ? restoredPages.length : 1,
+    },
   )
 
   const allContents = data?.flatMap((page) => page.contents) ?? []
@@ -813,7 +832,7 @@ function RankingTab({
     totalItems: allContents.length,
     colCount,
     onEnter: (i) => {
-      saveScroll()
+      saveScroll(data ?? [])
       const illustId = allContents[i]?.illust_id as number | undefined
       if (illustId) router.push(`/pixiv/illust/${illustId}`)
     },
@@ -900,7 +919,7 @@ function RankingTab({
           const userName = item.user_name as string
           const thumbUrl = api.pixiv.imageProxyUrl(item.url as string)
           return (
-            <Link key={illustId} href={`/pixiv/illust/${illustId}`} className="group block">
+            <Link key={illustId} href={`/pixiv/illust/${illustId}`} onClick={() => saveScroll(data ?? [])} className="group block">
               <div className="relative aspect-square overflow-hidden rounded-lg bg-vault-input">
                 <img
                   src={thumbUrl}
@@ -1030,18 +1049,12 @@ function PixivPageInner() {
 
   // ── Scroll restoration (per tab) ──
   // isReady is approximated by active tab match; actual data readiness is inside each tab
-  const { saveScroll: saveRankingScroll } = useScrollRestore(
-    'pixiv_ranking_scrollY',
-    activeTab === 'ranking',
-  )
-  const { saveScroll: saveFeedScroll } = useScrollRestore(
-    'pixiv_feed_scrollY',
-    activeTab === 'feed',
-  )
-  const { saveScroll: saveBookmarksScroll } = useScrollRestore(
-    'pixiv_bookmarks_scrollY',
-    activeTab === 'bookmarks',
-  )
+  const { saveScroll: saveRankingScroll, restoredPages: rankingRestoredPages } =
+    useScrollRestore<RankingPage>('pixiv_ranking_scrollY', activeTab === 'ranking')
+  const { saveScroll: saveFeedScroll, restoredPages: feedRestoredPages } =
+    useScrollRestore<PixivSearchResult>('pixiv_feed_scrollY', activeTab === 'feed')
+  const { saveScroll: saveBookmarksScroll, restoredPages: bookmarksRestoredPages } =
+    useScrollRestore<PixivSearchResult>('pixiv_bookmarks_scrollY', activeTab === 'bookmarks')
   const { saveScroll: saveSearchScroll } = useScrollRestore(
     'pixiv_search_scrollY',
     submittedQuery.length > 0,
@@ -1168,6 +1181,7 @@ function PixivPageInner() {
               focusedIndex={null}
               onColCountChange={noop}
               saveScroll={saveRankingScroll}
+              restoredPages={rankingRestoredPages}
               viewMode={viewMode}
             />
           )}
@@ -1177,6 +1191,7 @@ function PixivPageInner() {
               focusedIndex={null}
               onColCountChange={noop}
               saveScroll={saveFeedScroll}
+              restoredPages={feedRestoredPages}
               viewMode={viewMode}
             />
           )}
@@ -1191,6 +1206,7 @@ function PixivPageInner() {
               focusedIndex={null}
               onColCountChange={noop}
               saveScroll={saveBookmarksScroll}
+              restoredPages={bookmarksRestoredPages}
               viewMode={viewMode}
             />
           )}
