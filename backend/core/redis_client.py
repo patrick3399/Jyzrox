@@ -242,6 +242,7 @@ class DownloadSemaphore:
         """Return semaphore usage info for a single source."""
         sem = cls(source)
         r = get_redis()
+        await r.zremrangebyscore(sem._key, "-inf", time.time() - sem._stale_threshold)
         used = await r.zcard(sem._key)
         max_count = await cls.get_limit(source)
         return {"used": used, "max": max_count}
@@ -264,16 +265,18 @@ class DownloadSemaphore:
         # Pipeline: zcard + concurrency limit for each key
         pipe = r.pipeline(transaction=False)
         sources: list[str] = []
+        now = time.time()
         for key_str in all_keys:
             source = key_str.removeprefix("download:sem:")
             sources.append(source)
+            pipe.zremrangebyscore(key_str, "-inf", now - cls(source)._stale_threshold)
             pipe.zcard(key_str)
             pipe.get(f"rate_limit:config:{source}:concurrency")
         raw = await pipe.execute()
         result: dict[str, dict] = {}
         for i, source in enumerate(sources):
-            used = raw[i * 2] or 0
-            limit_raw = raw[i * 2 + 1]
+            used = raw[i * 3 + 1] or 0
+            limit_raw = raw[i * 3 + 2]
             base = source.split(":")[0] if ":" in source else source
             max_count = int(limit_raw) if limit_raw else cls._LIMITS.get(source, cls._LIMITS.get(base, 2))
             result[source] = {"used": used, "max": max_count}

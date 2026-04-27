@@ -666,8 +666,8 @@ class TestPingLoop:
         assert alert_calls[1] == {"type": "alert", "message": "service degraded"}
         assert alert_calls[2]["type"] == "ping"
 
-    async def test_ping_loop_clears_alerts_after_sending(self):
-        """clear_system_alerts is called after sending all alert messages."""
+    async def test_ping_loop_does_not_clear_global_alerts_after_sending(self):
+        """Alerts are not globally consumed by the first connected WebSocket."""
         from routers.ws import _ping_loop
 
         ws = AsyncMock()
@@ -684,7 +684,43 @@ class TestPingLoop:
             with pytest.raises(asyncio.CancelledError):
                 await _ping_loop(ws)
 
-        clear_mock.assert_called_once()
+        clear_mock.assert_not_called()
+
+    async def test_ping_loop_deduplicates_alerts_per_connection(self):
+        """The same connected client should not receive the same retained alert repeatedly."""
+        from routers.ws import _ping_loop
+
+        ws = AsyncMock()
+        calls = 0
+
+        async def _mock_sleep(t):
+            nonlocal calls
+            calls += 1
+            if calls >= 2:
+                raise asyncio.CancelledError
+
+        with (
+            patch("routers.ws.get_system_alerts", new_callable=AsyncMock, return_value=["alert!"]),
+            patch("routers.ws.clear_system_alerts", new_callable=AsyncMock),
+            patch("asyncio.sleep", side_effect=_mock_sleep),
+        ):
+            with pytest.raises(asyncio.CancelledError):
+                await _ping_loop(ws)
+
+        alert_calls = [c.args[0] for c in ws.send_json.call_args_list if c.args[0].get("type") == "alert"]
+        assert alert_calls == [{"type": "alert", "message": "alert!"}]
+
+    async def test_ping_loop_closes_when_session_is_revoked(self):
+        """A long-lived WebSocket should close when its session no longer validates."""
+        from routers.ws import _ping_loop
+
+        ws = AsyncMock()
+
+        with patch("routers.ws._ws_session_still_valid", new_callable=AsyncMock, return_value=False):
+            await _ping_loop(ws, user_id="1", role="admin")
+
+        ws.close.assert_awaited_once_with(code=4001, reason="Unauthorized")
+        ws.send_json.assert_not_called()
 
     async def test_ping_loop_no_alerts_skips_clear(self):
         """When no alerts, clear_system_alerts is not called."""

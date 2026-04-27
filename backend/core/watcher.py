@@ -20,13 +20,15 @@ class _LibraryHandler(FileSystemEventHandler):
         self._enqueue = enqueue_fn
         self._debounce_secs = debounce_secs
         self._pending: dict[str, threading.Timer] = {}
+        self._dirty_while_paused: dict[str, tuple[str, tuple]] = {}
         self._lock = threading.Lock()
         self._paused = False
 
     def _schedule(self, key: str, job_name: str, *args):
-        if self._paused:
-            return
         with self._lock:
+            if self._paused:
+                self._dirty_while_paused[key] = (job_name, args)
+                return
             existing = self._pending.pop(key, None)
             if existing:
                 existing.cancel()
@@ -43,6 +45,30 @@ class _LibraryHandler(FileSystemEventHandler):
         except Exception:
             logger.exception("[watcher] Failed to enqueue %s", job_name)
 
+    def pause(self):
+        with self._lock:
+            self._paused = True
+
+    def resume(self):
+        with self._lock:
+            self._paused = False
+            dirty = list(self._dirty_while_paused.items())
+            self._dirty_while_paused.clear()
+        for key, (job_name, args) in dirty:
+            self._schedule(key, job_name, *args)
+
+    def shutdown(self):
+        with self._lock:
+            for timer in self._pending.values():
+                timer.cancel()
+            self._pending.clear()
+            self._dirty_while_paused.clear()
+            self._paused = False
+
+    @property
+    def is_paused(self) -> bool:
+        return self._paused
+
     def on_created(self, event):
         if event.is_directory:
             self._schedule("discover", "auto_discover_job")
@@ -54,19 +80,22 @@ class _LibraryHandler(FileSystemEventHandler):
 
     def on_deleted(self, event):
         if not event.is_directory:
-            parent = str(Path(event.src_path).parent)
-            self._schedule(f"rescan:{parent}", "rescan_by_path_job", parent)
+            ext = Path(event.src_path).suffix.lower()
+            if ext in _SUPPORTED_EXTS:
+                parent = str(Path(event.src_path).parent)
+                self._schedule(f"rescan:{parent}", "rescan_by_path_job", parent)
 
     def on_moved(self, event):
         if event.is_directory:
             self._schedule("discover", "auto_discover_job")
         else:
-            ext = Path(event.dest_path).suffix.lower()
+            old_ext = Path(event.src_path).suffix.lower()
+            new_ext = Path(event.dest_path).suffix.lower()
             old_parent = str(Path(event.src_path).parent)
             new_parent = str(Path(event.dest_path).parent)
-            # Rescan both old and new parent directories
-            self._schedule(f"rescan:{old_parent}", "rescan_by_path_job", old_parent)
-            if new_parent != old_parent and ext in _SUPPORTED_EXTS:
+            if old_ext in _SUPPORTED_EXTS:
+                self._schedule(f"rescan:{old_parent}", "rescan_by_path_job", old_parent)
+            if new_parent != old_parent and new_ext in _SUPPORTED_EXTS:
                 self._schedule(f"rescan:{new_parent}", "rescan_by_path_job", new_parent)
 
     def on_modified(self, event):
@@ -137,6 +166,8 @@ class LibraryWatcher:
             logger.warning("[watcher] No valid paths to monitor")
 
     def stop(self):
+        if self._handler:
+            self._handler.shutdown()
         if self._observer and self._observer.is_alive():
             self._observer.stop()
             self._observer.join(timeout=5)
@@ -147,18 +178,18 @@ class LibraryWatcher:
     def pause(self):
         """Temporarily pause event handling (e.g., during full rescan)."""
         if self._handler:
-            self._handler._paused = True
+            self._handler.pause()
             logger.info("[watcher] Paused")
 
     def resume(self):
         """Resume event handling after a pause."""
         if self._handler:
-            self._handler._paused = False
+            self._handler.resume()
             logger.info("[watcher] Resumed")
 
     @property
     def is_paused(self) -> bool:
-        return self._handler._paused if self._handler else False
+        return self._handler.is_paused if self._handler else False
 
     @property
     def is_running(self) -> bool:

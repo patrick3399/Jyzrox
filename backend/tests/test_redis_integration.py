@@ -562,7 +562,7 @@ class TestDownloadSemaphoreGetAllActive:
         mock_redis.scan = AsyncMock(return_value=(0, [b"download:sem:ehentai", b"download:sem:pixiv"]))
 
         mock_pipe = MagicMock()
-        mock_pipe.execute = AsyncMock(return_value=[2, None, 1, b"3"])
+        mock_pipe.execute = AsyncMock(return_value=[1, 2, None, 0, 1, b"3"])
         # ehentai: used=2, limit=None (default 2); pixiv: used=1, limit=b"3"
         mock_redis.pipeline = MagicMock(return_value=mock_pipe)
 
@@ -575,6 +575,7 @@ class TestDownloadSemaphoreGetAllActive:
         assert "pixiv" in result
         assert result["pixiv"]["used"] == 1
         assert result["pixiv"]["max"] == 3  # from Redis value b"3"
+        assert mock_pipe.zremrangebyscore.call_count == 2
 
 
 # ---------------------------------------------------------------------------

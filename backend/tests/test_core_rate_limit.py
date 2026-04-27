@@ -269,6 +269,24 @@ class TestRateLimitMiddleware:
         call_next.assert_awaited_once_with(req)
         mock_redis.incr.assert_not_called()
 
+    async def test_readiness_check_bypasses_redis_entirely(self):
+        """Requests to /api/ready should skip rate limiting and not touch Redis."""
+        from starlette.applications import Starlette
+
+        app = Starlette()
+        middleware = mod.RateLimitMiddleware(app)
+        mock_response = MagicMock()
+        call_next = AsyncMock(return_value=mock_response)
+        req = _make_request(host="1.2.3.4", path="/api/ready")
+
+        mock_redis = AsyncMock()
+        with patch("core.rate_limit.settings", _make_settings(rate_limit_enabled=True)):
+            with patch("core.rate_limit.get_redis", return_value=mock_redis):
+                await middleware.dispatch(req, call_next)
+
+        call_next.assert_awaited_once_with(req)
+        mock_redis.incr.assert_not_called()
+
     async def test_private_ip_bypasses_rate_limit(self):
         """LAN/private IP addresses should call_next without hitting Redis."""
         from starlette.applications import Starlette

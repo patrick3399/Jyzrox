@@ -172,7 +172,14 @@ async def _cron_should_run(ctx: dict, task_id: str, default_cron: str, default_e
         next_run = it.get_next(datetime)
         if datetime.now(UTC) < next_run:
             return False
-    return True
+
+    claimed = await r.set(
+        f"cron:{task_id}:claim",
+        datetime.now(UTC).isoformat(),
+        nx=True,
+        ex=60,
+    )
+    return bool(claimed)
 
 
 async def _cron_record(ctx: dict, task_id: str, status: str, error: str | None = None) -> None:
@@ -185,6 +192,7 @@ async def _cron_record(ctx: dict, task_id: str, status: str, error: str | None =
         pipe.set(f"cron:{task_id}:last_error", error)
     else:
         pipe.delete(f"cron:{task_id}:last_error")
+    pipe.delete(f"cron:{task_id}:claim")
     await pipe.execute()
 
 

@@ -42,6 +42,12 @@ async def _validate_ws_session(ws: WebSocket) -> tuple[str, str] | None:
         return None
 
 
+async def _ws_session_still_valid(ws: WebSocket, user_id: str, role: str) -> bool:
+    """Return whether the connected socket still has the same valid user and role."""
+    current = await _validate_ws_session(ws)
+    return current == (user_id, role)
+
+
 def _event_to_ws_message(event_data: dict) -> str:
     """Translate EventBus event format to legacy WebSocket message format.
 
@@ -145,15 +151,24 @@ async def _pubsub_listener(ws: WebSocket, user_id: str, role: str) -> None:
             await pubsub.aclose()
 
 
-async def _ping_loop(ws: WebSocket) -> None:
+async def _ping_loop(ws: WebSocket, user_id: str | None = None, role: str | None = None) -> None:
     """Send alerts and periodic pings to keep the connection alive."""
+    sent_alerts: set[str] = set()
     try:
         while True:
+            if user_id is not None and role is not None:
+                if not await _ws_session_still_valid(ws, user_id, role):
+                    logger.info("WebSocket session revoked or role changed; closing connection")
+                    await ws.close(code=4001, reason="Unauthorized")
+                    return
+
             alerts = await get_system_alerts()
             if alerts:
                 for msg in alerts:
+                    if msg in sent_alerts:
+                        continue
+                    sent_alerts.add(msg)
                     await ws.send_json({"type": "alert", "message": msg})
-                await clear_system_alerts()
 
             await ws.send_json({"type": "ping", "ts": datetime.datetime.now(datetime.UTC).isoformat()})
             await asyncio.sleep(2)
@@ -216,7 +231,7 @@ async def websocket_endpoint(ws: WebSocket):
 
     tasks = [
         asyncio.create_task(_pubsub_listener(ws, user_id, role)),
-        asyncio.create_task(_ping_loop(ws)),
+        asyncio.create_task(_ping_loop(ws, user_id, role)),
         asyncio.create_task(_ws_receiver(ws)),
     ]
     if role == "admin":

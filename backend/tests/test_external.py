@@ -117,6 +117,22 @@ class TestExternalTokenAuth:
         )
         assert resp.status_code == 401
 
+    async def test_status_with_valid_token_is_rate_limited(self, ext_client, db_session, mock_redis):
+        """All external endpoints should use the per-token limiter, not only POST /download."""
+        user_id = await _insert_user(db_session)
+        token_id = await _insert_token(db_session, user_id, _TEST_TOKEN_HASH)
+        mock_redis.incr.return_value = 11
+        mock_redis.ttl.return_value = 60
+
+        resp = await ext_client.get(
+            "/api/external/v1/status",
+            headers={"X-API-Token": _TEST_TOKEN},
+        )
+
+        assert resp.status_code == 429
+        key = mock_redis.incr.await_args.args[0]
+        assert key.startswith(f"ratelimit:ext:{token_id}:")
+
     async def test_download_without_token_returns_422(self, ext_client):
         """POST /download with no token → 422 (missing required header)."""
         resp = await ext_client.post(

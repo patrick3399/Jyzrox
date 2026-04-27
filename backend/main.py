@@ -2,7 +2,7 @@ import logging
 import os
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
+from fastapi import Depends, FastAPI, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
@@ -12,10 +12,11 @@ from core.auth import require_auth
 from core.config import settings
 from core.csrf import CSRFMiddleware
 from core.database import engine
-from core.queue import close_queue, init_queue
+from core.queue import close_queue, get_all_queues, init_queue
 from core.rate_limit import RateLimitMiddleware
-from core.redis_client import close_redis, init_redis
+from core.redis_client import close_redis, get_redis, init_redis
 from core.version import __version__
+from sqlalchemy import text
 from routers import (
     artists,
     auth,
@@ -179,10 +180,60 @@ async def health():
     return {"status": "ok"}
 
 
+@app.get("/api/ready")
+async def ready():
+    """Readiness probe that verifies dependencies required to serve traffic."""
+    checks: dict[str, bool] = {}
+    details: dict[str, str] = {}
+
+    try:
+        async with engine.connect() as conn:
+            await conn.execute(text("SELECT 1"))
+        checks["database"] = True
+    except Exception as exc:
+        checks["database"] = False
+        details["database"] = str(exc)
+
+    try:
+        await get_redis().ping()
+        checks["redis"] = True
+    except Exception as exc:
+        checks["redis"] = False
+        details["redis"] = str(exc)
+
+    try:
+        queues = get_all_queues()
+        checks["queue"] = bool(queues)
+        if not queues:
+            details["queue"] = "no initialized queues"
+    except Exception as exc:
+        checks["queue"] = False
+        details["queue"] = str(exc)
+
+    for name, path in {
+        "data_gallery": settings.data_gallery_path,
+        "data_cas": settings.data_cas_path,
+        "data_thumbs": settings.data_thumbs_path,
+    }.items():
+        exists = os.path.isdir(path)
+        checks[name] = exists
+        if not exists:
+            details[name] = f"{path} is not a directory"
+
+    is_ready = all(checks.values())
+    payload = {"status": "ok" if is_ready else "degraded", "checks": checks}
+    if details:
+        payload["details"] = details
+    return JSONResponse(
+        status_code=status.HTTP_200_OK if is_ready else status.HTTP_503_SERVICE_UNAVAILABLE,
+        content=payload,
+    )
+
+
 class _HealthCheckFilter(logging.Filter):
     def filter(self, record: logging.LogRecord) -> bool:
         msg = record.getMessage()
-        return '"GET /api/health' not in msg
+        return '"GET /api/health' not in msg and '"GET /api/ready' not in msg
 
 
 logging.getLogger("uvicorn.access").addFilter(_HealthCheckFilter())

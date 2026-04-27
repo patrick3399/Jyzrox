@@ -68,6 +68,7 @@ def _make_mock_redis_for_cron(
         return None
 
     mock_redis.get = AsyncMock(side_effect=_get)
+    mock_redis.set = AsyncMock(return_value=True)
     return mock_redis
 
 
@@ -352,6 +353,7 @@ class TestCronShouldRun:
         result = await _cron_should_run(ctx, "my_task", "* * * * *", default_enabled=True)
 
         assert result is True
+        mock_redis.set.assert_awaited_once()
 
     async def test_no_last_run_returns_true(self):
         """No last_run key in Redis means first run — should always return True."""
@@ -363,6 +365,7 @@ class TestCronShouldRun:
         result = await _cron_should_run(ctx, "my_task", "0 */6 * * *")
 
         assert result is True
+        mock_redis.set.assert_awaited_once()
 
     async def test_next_run_in_future_returns_false(self):
         """If the next scheduled run is in the future, should return False."""
@@ -390,6 +393,7 @@ class TestCronShouldRun:
         result = await _cron_should_run(ctx, "my_task", "0 3 * * *")
 
         assert result is True
+        mock_redis.set.assert_awaited_once()
 
     async def test_custom_cron_expr_from_redis(self):
         """A custom cron_expr stored in Redis should override the default."""
@@ -410,12 +414,14 @@ class TestCronShouldRun:
             return None
 
         mock_redis.get = AsyncMock(side_effect=_get)
+        mock_redis.set = AsyncMock(return_value=True)
         ctx = {"redis": mock_redis}
 
         # Default cron would be something unlikely to be due, but custom overrides it.
         result = await _cron_should_run(ctx, "my_task", "0 0 1 1 *")
 
         assert result is True
+        mock_redis.set.assert_awaited_once()
 
     async def test_enabled_byte_one_not_disabled(self):
         """enabled=b'1' should not trigger early-return; proceeds to time check."""
@@ -428,6 +434,18 @@ class TestCronShouldRun:
         result = await _cron_should_run(ctx, "task_x", "*/5 * * * *")
 
         assert result is True
+
+    async def test_due_but_claim_already_exists_returns_false(self):
+        """If another worker already claimed the cron slot, skip this run."""
+        from worker.helpers import _cron_should_run
+
+        mock_redis = _make_mock_redis_for_cron(enabled=b"1", last_run=None)
+        mock_redis.set = AsyncMock(return_value=False)
+        ctx = {"redis": mock_redis}
+
+        result = await _cron_should_run(ctx, "task_x", "*/5 * * * *")
+
+        assert result is False
 
 
 # ---------------------------------------------------------------------------
@@ -493,7 +511,7 @@ class TestCronRecord:
         set_calls = {args[0]: args[1] for args in (c.args for c in pipe.set.call_args_list)}
         assert "cron:my_task:last_error" in set_calls
         assert set_calls["cron:my_task:last_error"] == "something went wrong"
-        pipe.delete.assert_not_called()
+        pipe.delete.assert_called_once_with("cron:my_task:claim")
 
     async def test_without_error_deletes_error_key(self):
         """When error is None, pipe.delete should be called for last_error key."""
@@ -506,7 +524,8 @@ class TestCronRecord:
 
         await _cron_record(ctx, "my_task", "ok", error=None)
 
-        pipe.delete.assert_called_once_with("cron:my_task:last_error")
+        pipe.delete.assert_any_call("cron:my_task:last_error")
+        pipe.delete.assert_any_call("cron:my_task:claim")
         set_calls = [args[0] for args in (c.args for c in pipe.set.call_args_list)]
         assert "cron:my_task:last_error" not in set_calls
 

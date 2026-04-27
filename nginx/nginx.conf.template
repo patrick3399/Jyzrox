@@ -185,6 +185,11 @@ http {
             proxy_set_header Host $host;
         }
 
+        location = /ready {
+            proxy_pass http://api/api/ready;
+            proxy_set_header Host $host;
+        }
+
         # ── Nginx self-health (no upstream dependency) ────────────
         location = /nginx-health {
             access_log off;

@@ -147,10 +147,16 @@ async def run_scheduled_task(
 
     defn = TASK_DEFS[task_id]
     job_name = defn["job"]
+    r = get_redis()
+    claim_key = f"cron:{task_id}:manual_claim"
+    claimed = await r.set(claim_key, "1", nx=True, ex=300)
+    if not claimed:
+        return {"status": "already_queued", "task_id": task_id, "job": job_name}
 
     try:
         await core.queue.enqueue(job_name, _job_id=f"manual:{task_id}:{uuid.uuid4().hex[:8]}")
     except Exception as exc:
+        await r.delete(claim_key)
         logger.error("Failed to enqueue %s: %s", job_name, exc)
         raise HTTPException(status_code=500, detail=str(exc))
 

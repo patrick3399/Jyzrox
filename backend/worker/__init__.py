@@ -669,7 +669,15 @@ async def adaptive_persist_job(ctx: dict) -> dict:
 
 
 def _make_startup_log(label: str):
-    async def _startup(_ctx: dict) -> None:
+    async def _startup(ctx: dict) -> None:
+        from core.redis_client import get_redis, init_redis
+
+        try:
+            r = get_redis()
+        except RuntimeError:
+            await init_redis()
+            r = get_redis()
+        ctx["redis"] = r
         logger.info("SAQ %s worker started", label)
     return _startup
 

@@ -57,6 +57,8 @@ async def verify_api_token(x_api_token: str = Header(...)):
     if not token:
         raise HTTPException(status_code=401, detail="Invalid or expired API token")
 
+    await _check_rate_limit(token.id)
+
     # Update last_used_at
     async with async_session() as session:
         await session.execute(update(ApiToken).where(ApiToken.id == token.id).values(last_used_at=func.now()))
@@ -423,7 +425,6 @@ async def enqueue_download(
     if ROLE_HIERARCHY.get(token_data.get("role", ""), 0) < ROLE_HIERARCHY["member"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions: member role required")
 
-    await _check_rate_limit(token_data["token_id"])
     job_id = _uuid.uuid4()
     source = detect_source(resolved_url)
 

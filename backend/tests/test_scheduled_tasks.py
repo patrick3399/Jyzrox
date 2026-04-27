@@ -145,6 +145,22 @@ async def test_scheduled_tasks_run_enqueues_job(client):
     assert call_args.kwargs["_job_id"].startswith("manual:library_scan:")
 
 
+async def test_scheduled_tasks_run_deduplicates_manual_clicks(client, mock_redis):
+    mock_redis.set = AsyncMock(return_value=False)
+
+    resp = await client.post("/api/scheduled-tasks/library_scan/run")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "already_queued"
+    assert data["task_id"] == "library_scan"
+    assert data["job"] == "scheduled_scan_job"
+
+    from main import app
+
+    app.state.enqueue.assert_not_called()
+
+
 async def test_scheduled_tasks_run_unknown_task_returns_404(client):
     resp = await client.post("/api/scheduled-tasks/nonexistent_task_id/run")
     assert resp.status_code == 404

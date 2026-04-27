@@ -127,8 +127,8 @@ class RateLimitMiddleware(BaseHTTPMiddleware):
 
         path = request.url.path
 
-        # Skip health check — no need to count liveness probes
-        if path == "/api/health":
+        # Skip probes — no need to count liveness/readiness checks
+        if path in ("/api/health", "/api/ready"):
             return await call_next(request)
 
         # Skip paths that have their own rate limiting
