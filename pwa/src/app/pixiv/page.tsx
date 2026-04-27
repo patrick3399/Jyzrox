@@ -329,6 +329,11 @@ function SearchResults({
   )
 }
 
+// Returns SWR fallbackData+initialSize options only when pages is non-empty; empty means "no restore"
+function swrFallback<T>(pages: T[] | null) {
+  return pages ? { fallbackData: pages, initialSize: pages.length } : {}
+}
+
 // ── Feed Tab ─────────────────────────────────────────────────────────────
 
 function FeedTab({
@@ -357,11 +362,7 @@ function FeedTab({
   const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
     getKey,
     ([, offset]) => api.pixiv.getFollowingFeed(offset as number),
-    {
-      revalidateFirstPage: false,
-      fallbackData: restoredPages ?? undefined,
-      initialSize: restoredPages ? restoredPages.length : 1,
-    },
+    { revalidateFirstPage: false, ...swrFallback(restoredPages) },
   )
 
   const allIllusts = data?.flatMap((page) => page.illusts) ?? []
@@ -640,11 +641,7 @@ function BookmarksTab({
   const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
     getKey,
     ([, r, offset]) => api.pixiv.getMyBookmarks(r as string, offset as number),
-    {
-      revalidateFirstPage: false,
-      fallbackData: restoredPages ?? undefined,
-      initialSize: restoredPages ? restoredPages.length : 1,
-    },
+    { revalidateFirstPage: false, ...swrFallback(restoredPages) },
   )
 
   const allIllusts = data?.flatMap((page) => page.illusts) ?? []
@@ -810,11 +807,7 @@ function RankingTab({
     getKey,
     ([, m, c, p]) =>
       api.pixiv.ranking({ mode: m as string, content: c as string, page: p as number }),
-    {
-      revalidateFirstPage: false,
-      fallbackData: restoredPages ?? undefined,
-      initialSize: restoredPages ? restoredPages.length : 1,
-    },
+    { revalidateFirstPage: false, ...swrFallback(restoredPages) },
   )
 
   const allContents = data?.flatMap((page) => page.contents) ?? []

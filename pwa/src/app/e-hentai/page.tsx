@@ -931,7 +931,7 @@ function BrowsePage() {
     favScrollGalleries,
     favScrollNextCursor,
     favScrollHasMore,
-    favData,
+    favData?.galleries,
     favPaginatedGalleries,
   ])
 
