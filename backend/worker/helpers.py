@@ -143,10 +143,12 @@ def compute_job_key(job_id, retry_count: int) -> str:
 async def enqueue_download_job(job, job_key: str) -> None:
     """Enqueue a download job with standard parameters."""
     import core.queue
+    from core.config import settings
 
     await core.queue.enqueue(
         "download_job",
         _job_id=job_key,
+        _timeout=settings.download_job_timeout,
         url=job.url,
         source=job.source or "",
         options=None,

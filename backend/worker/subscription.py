@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 
+from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import DownloadJob, Subscription
 from worker.constants import logger
@@ -121,6 +122,7 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
         await core.queue.enqueue(
             "download_job",
             _job_id=str(job_id),
+            _timeout=settings.download_job_timeout,
             url=sub.url,
             source=sub.source or "gallery_dl",
             options=options,

@@ -433,6 +433,7 @@ async def enqueue_download(
         await core.queue.enqueue(
             "download_job",
             _job_id=str(job_id),
+            _timeout=settings.download_job_timeout,
             url=resolved_url,
             source=source,
             options=None,
