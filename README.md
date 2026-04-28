@@ -27,7 +27,7 @@ A self-hosted gallery management platform built with Docker Compose. Browse, dow
 | Proxy | Nginx |
 | Downloads | Plugin system + gallery-dl fallback |
 
-API documentation is auto-generated from code and always up-to-date: Swagger UI at `/api/docs`, ReDoc at `/api/redoc`.
+API documentation is auto-generated from code and available through the authenticated Swagger UI at `/api/docs` and OpenAPI JSON at `/api/openapi.json`.
 
 ## Quick Start
 

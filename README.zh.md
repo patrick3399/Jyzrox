@@ -27,7 +27,7 @@
 | 反向代理 | Nginx |
 | 下載引擎 | Plugin system + gallery-dl fallback |
 
-API 文件由程式碼自動產生，隨時保持最新：Swagger UI 位於 `/api/docs`，ReDoc 位於 `/api/redoc`。
+API 文件由程式碼自動產生，並可透過需登入的 Swagger UI `/api/docs` 與 OpenAPI JSON `/api/openapi.json` 使用。
 
 ## 快速開始
 
