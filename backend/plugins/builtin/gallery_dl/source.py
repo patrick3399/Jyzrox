@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 import os
+import re
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -35,6 +36,7 @@ _PRINT_SKIP_PREFIX = "JYZROX_SKIP"
 _PROGRESS_EVERY_N = 5
 _PROGRESS_EVERY_S = 10.0
 _MAX_STDERR_LINES = 10000
+_SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
 
 # Fields included in the metadata postprocessor JSON output.
 _METADATA_INCLUDE = (
@@ -92,7 +94,7 @@ def _try_parse_fragment(cred_val: str) -> dict | None:
         parsed = json.loads(cred_val)
         if isinstance(parsed, dict) and (FRAGMENT_KEYS & parsed.keys()):
             return parsed
-    except json.JSONDecodeError, TypeError:
+    except (json.JSONDecodeError, TypeError):
         pass
     return None
 
@@ -213,7 +215,7 @@ async def _build_gallery_dl_config(
                         config["extractor"].setdefault(extra, {})["cookies"] = cookies
                     # N8: cookies-update for legacy format too
                     config["extractor"][ext]["cookies-update"] = True
-                except json.JSONDecodeError, TypeError:
+                except (json.JSONDecodeError, TypeError):
                     logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
 
     # N6: ugoira PP for Pixiv (convert animated illustrations to MP4)
@@ -272,7 +274,7 @@ async def _read_stdout(
         if line.startswith(_PRINT_FILE_PREFIX):
             parts = line[len(_PRINT_FILE_PREFIX) :].split("\t", 1)
             file_path = Path(parts[0])
-            sha256 = parts[1] if len(parts) > 1 and parts[1] else None
+            sha256 = parts[1] if len(parts) > 1 and _SHA256_RE.fullmatch(parts[1]) else None
 
             state.downloaded += 1
             if timing_ctx is not None:
@@ -394,7 +396,7 @@ async def _pause_cancel_watcher(
             logger.info("[gallery_dl] pausing process")
             try:
                 proc.send_signal(signal.SIGSTOP)
-            except ProcessLookupError, OSError:
+            except (ProcessLookupError, OSError):
                 pass
 
             while await pause_check():
@@ -403,7 +405,7 @@ async def _pause_cancel_watcher(
                     try:
                         proc.send_signal(signal.SIGCONT)
                         proc.kill()
-                    except ProcessLookupError, OSError:
+                    except (ProcessLookupError, OSError):
                         pass
                     return "cancelled"
                 await asyncio.sleep(0.5)
@@ -415,7 +417,7 @@ async def _pause_cancel_watcher(
             logger.info("[gallery_dl] resumed after %.1fs", paused_duration)
             try:
                 proc.send_signal(signal.SIGCONT)
-            except ProcessLookupError, OSError:
+            except (ProcessLookupError, OSError):
                 pass
 
 def _validate_download_content(file_path: Path) -> str | None:
