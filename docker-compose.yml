@@ -114,6 +114,7 @@ services:
     depends_on:
       <<: *backend-depends
     networks:
+      - frontend
       - backend
     security_opt: ["no-new-privileges:true"]
     restart: unless-stopped
