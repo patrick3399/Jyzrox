@@ -232,8 +232,18 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     logger.info("[import] gallery_id=%d source=%s/%s", gallery_id, source, source_id)
 
     # Trigger thumbnail generation
-    await core.queue.enqueue("cover_thumbnail_job", gallery_id=gallery_id, _timeout=300)
-    await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id, _timeout=3600)
+    await core.queue.enqueue(
+        "cover_thumbnail_job",
+        gallery_id=gallery_id,
+        _timeout=300,
+        _job_id=f"cover-thumbnail:{gallery_id}",
+    )
+    await core.queue.enqueue(
+        "thumbnail_job",
+        gallery_id=gallery_id,
+        _timeout=3600,
+        _job_id=f"thumbnail:{gallery_id}",
+    )
     if settings.tag_model_enabled:
         await core.queue.enqueue("tag_job", gallery_id=gallery_id)
 
@@ -492,9 +502,21 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
 
     logger.info("[local_import] gallery_id=%d: %d files imported", gallery_id, processed)
 
-    # Trigger thumbnail generation
-    await core.queue.enqueue("cover_thumbnail_job", gallery_id=gallery_id, _timeout=300)
-    await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id, _timeout=3600)
+    # Only new/changed imports need thumbnail work. Replayed local-import jobs for an
+    # already complete gallery should not create duplicate render backlog.
+    if processed > 0:
+        await core.queue.enqueue(
+            "cover_thumbnail_job",
+            gallery_id=gallery_id,
+            _timeout=300,
+            _job_id=f"cover-thumbnail:{gallery_id}",
+        )
+        await core.queue.enqueue(
+            "thumbnail_job",
+            gallery_id=gallery_id,
+            _timeout=3600,
+            _job_id=f"thumbnail:{gallery_id}",
+        )
 
     # Trigger AI tagging if enabled
     if settings.tag_model_enabled:

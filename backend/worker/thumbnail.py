@@ -262,6 +262,19 @@ def _cover_first(images: list[Image], cover_page: str) -> list[Image]:
     return [cover, *(img for idx, img in enumerate(images) if idx != cover_index)]
 
 
+def _blob_needs_thumbnail(blob) -> bool:
+    if blob is None:
+        return False
+    td = thumb_dir(blob.sha256)
+    if any(not (td / f"thumb_{size}.webp").exists() for size in THUMBNAIL_SIZES):
+        return True
+    if blob.width is None or blob.height is None or blob.thumbhash is None:
+        return True
+    if blob.media_type != "video" and blob.phash is None:
+        return True
+    return False
+
+
 async def _load_gallery_images(session, gallery_id: int) -> tuple[Gallery | None, list[Image]]:
     from sqlalchemy.orm import selectinload
 
@@ -301,8 +314,11 @@ async def _process_image_batch(session, images: list[Image]) -> int:
     work = [
         (img, resolve_blob_path(img.blob))
         for img in images
-        if img.blob
+        if _blob_needs_thumbnail(img.blob)
     ]
+    if not work:
+        return 0
+
     results = await asyncio.gather(
         *[
             _run_thumbnail_in_thread(img.blob.sha256, img.blob.media_type, src)

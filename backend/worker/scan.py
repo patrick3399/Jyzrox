@@ -328,7 +328,12 @@ async def rescan_library_job(ctx: dict) -> dict:
 
                 # Enqueue thumbnail jobs outside the transaction
                 for gid in galleries_needing_cover_thumbs:
-                    await core.queue.enqueue("cover_thumbnail_job", gallery_id=gid, _timeout=300)
+                    await core.queue.enqueue(
+                        "cover_thumbnail_job",
+                        gallery_id=gid,
+                        _timeout=300,
+                        _job_id=f"cover-thumbnail:{gid}",
+                    )
                     logger.info(
                         "[rescan_library] gallery_id=%d: enqueued cover_thumbnail_job (missing cover thumb)",
                         gid,
@@ -344,7 +349,12 @@ async def rescan_library_job(ctx: dict) -> dict:
 
             if not cancelled:
                 for gid in pending_thumbnail_galleries:
-                    await core.queue.enqueue("thumbnail_job", gallery_id=gid, _timeout=3600)
+                    await core.queue.enqueue(
+                        "thumbnail_job",
+                        gallery_id=gid,
+                        _timeout=3600,
+                        _job_id=f"thumbnail:{gid}",
+                    )
                     logger.info(
                         "[rescan_library] gallery_id=%d: enqueued thumbnail_job (missing thumbs)",
                         gid,
@@ -559,9 +569,19 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
 
     if missing_thumb:
         if missing_cover_thumb:
-            await core.queue.enqueue("cover_thumbnail_job", gallery_id=gallery_id, _timeout=300)
+            await core.queue.enqueue(
+                "cover_thumbnail_job",
+                gallery_id=gallery_id,
+                _timeout=300,
+                _job_id=f"cover-thumbnail:{gallery_id}",
+            )
             logger.info("[rescan_gallery] gallery_id=%d: enqueued cover_thumbnail_job", gallery_id)
-        await core.queue.enqueue("thumbnail_job", gallery_id=gallery_id, _timeout=3600)
+        await core.queue.enqueue(
+            "thumbnail_job",
+            gallery_id=gallery_id,
+            _timeout=3600,
+            _job_id=f"thumbnail:{gallery_id}",
+        )
         logger.info("[rescan_gallery] gallery_id=%d: enqueued thumbnail_job", gallery_id)
 
     logger.info(
@@ -643,6 +663,7 @@ async def auto_discover_job(ctx: dict) -> dict:
             mode=item.mode,
             gallery_id=item.gallery_id,
             _timeout=3600,
+            _job_id=f"local-import:{item.gallery_id}",
         )
 
     logger.info("[auto_discover] Discovered %d new galleries", discovered)
@@ -692,6 +713,7 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
                             mode=import_request.mode,
                             gallery_id=import_request.gallery_id,
                             _timeout=3600,
+                            _job_id=f"local-import:{import_request.gallery_id}",
                         )
                         return {"status": "discovered", "path": real_dir, "gallery_id": import_request.gallery_id}
 
@@ -780,6 +802,7 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
             mode=item.mode,
             gallery_id=item.gallery_id,
             _timeout=3600,
+            _job_id=f"local-import:{item.gallery_id}",
         )
 
     importing_gallery_ids = {item.gallery_id for item in import_requests}

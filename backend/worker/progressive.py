@@ -12,10 +12,9 @@ from sqlalchemy.sql import select
 from core.database import AsyncSessionLocal
 from db.models import Blob, ExcludedBlob, Gallery, Image
 from plugins.models import GalleryImportData
-from services.cas import cas_path, create_library_symlink, decrement_ref_count, library_dir, store_blob, thumb_dir
+from services.cas import create_library_symlink, decrement_ref_count, library_dir, store_blob, thumb_dir
 from worker.constants import _VIDEO_EXTS, logger
 from worker.helpers import _sha256, _validate_image_magic
-from worker.thumbnail import generate_single_thumbnail
 import core.queue
 
 
@@ -280,7 +279,7 @@ class ProgressiveImporter:
         self._tasks.append(task)
 
     async def _import_single(self, file_path: Path, page_num: int, sha256: str | None = None) -> None:
-        """Import one file: sha256 -> store_blob -> image record -> symlink -> thumbnail."""
+        """Import one file: sha256 -> store_blob -> image record -> symlink."""
         if not file_path.exists():
             return
 
@@ -310,7 +309,7 @@ class ProgressiveImporter:
                     added_at = datetime.fromtimestamp(mtime, tz=UTC)
                     if added_at.year < 2000 or added_at > datetime.now(UTC):
                         added_at = datetime.now(UTC)
-                except OSError, ValueError, OverflowError:
+                except (OSError, ValueError, OverflowError):
                     added_at = datetime.now(UTC)
 
                 img_stmt = (
@@ -336,14 +335,6 @@ class ProgressiveImporter:
 
                 # Create library symlink before closing session (need blob data)
                 await create_library_symlink(self.source, self.source_id, file_path.name, blob)
-
-                # Generate thumbnail within the same session so blob modifications
-                # (width, height, phash, thumbhash) are tracked and committed
-                src = cas_path(blob.sha256, blob.extension)
-                if not src.exists() and blob.storage == "external" and blob.external_path:
-                    src = Path(blob.external_path)
-
-                await generate_single_thumbnail(blob, src, session)
                 await session.commit()
 
             logger.info("[progressive] imported: %s (page %d)", file_path.name, page_num)
@@ -446,10 +437,20 @@ class ProgressiveImporter:
 
         from core.config import settings
 
-        if settings.tag_model_enabled:
-            from core.redis_client import get_redis
+        await core.queue.enqueue(
+            "cover_thumbnail_job",
+            gallery_id=self.gallery_id,
+            _timeout=300,
+            _job_id=f"cover-thumbnail:{self.gallery_id}",
+        )
+        await core.queue.enqueue(
+            "thumbnail_job",
+            gallery_id=self.gallery_id,
+            _timeout=3600,
+            _job_id=f"thumbnail:{self.gallery_id}",
+        )
 
-            r = get_redis()
+        if settings.tag_model_enabled:
             await core.queue.enqueue("tag_job", gallery_id=self.gallery_id)
 
         return self.gallery_id
