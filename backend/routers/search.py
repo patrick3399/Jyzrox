@@ -7,7 +7,7 @@ import json
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, func, or_, select
+from sqlalchemy import and_, asc, desc, func, or_, select
 
 from core.auth import gallery_access_filter, require_auth
 from core.database import async_session
@@ -186,7 +186,7 @@ async def search_galleries(
         filters.append(Gallery.source == source_filter)
 
     if exclude_tags:
-        filters.append(~Gallery.tags_array.overlap(cast(exclude_tags, ARRAY(Text))))
+        filters.append(~Gallery.tags_array.overlap(exclude_tags))
 
     if collection_filter is not None:
         filters.append(
@@ -266,7 +266,7 @@ async def search_galleries(
         ).all()
         if blocked_rows:
             blocked_strings = [f"{r.namespace}:{r.name}" for r in blocked_rows]
-            filters.append(~Gallery.tags_array.overlap(cast(blocked_strings, ARRAY(Text))))
+            filters.append(~Gallery.tags_array.overlap(blocked_strings))
 
         # ── Reading list filter ──
         if rl_filter is not None and rl_filter:
@@ -310,9 +310,9 @@ async def search_galleries(
                         # No matches — fall back to general:name for compat
                         variants = [f"general:{bare_name}"]
                     if len(variants) == 1:
-                        filters.append(Gallery.tags_array.contains(cast(variants, ARRAY(Text))))
+                        filters.append(Gallery.tags_array.contains(variants))
                     else:
-                        filters.append(Gallery.tags_array.overlap(cast(variants, ARRAY(Text))))
+                        filters.append(Gallery.tags_array.overlap(variants))
 
             # Handle namespaced tags through existing alias expansion
             if namespaced_tags:
@@ -402,7 +402,7 @@ async def search_galleries(
                     canonical_id = alias_map.get((ns, name)) or tag_id_map.get((ns, name))
                     if not canonical_id:
                         # No aliases found — exact match only
-                        filters.append(Gallery.tags_array.contains(cast([tag_str], ARRAY(Text))))
+                        filters.append(Gallery.tags_array.contains([tag_str]))
                     else:
                         variants = [tag_str]
                         canon_str = canonical_name_map.get(canonical_id)
@@ -412,9 +412,9 @@ async def search_galleries(
                             if alias_str not in variants:
                                 variants.append(alias_str)
                         if len(variants) == 1:
-                            filters.append(Gallery.tags_array.contains(cast(variants, ARRAY(Text))))
+                            filters.append(Gallery.tags_array.contains(variants))
                         else:
-                            filters.append(Gallery.tags_array.overlap(cast(variants, ARRAY(Text))))
+                            filters.append(Gallery.tags_array.overlap(variants))
 
         if rating_filter is not None:
             filters.append(

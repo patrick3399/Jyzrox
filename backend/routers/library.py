@@ -342,7 +342,7 @@ async def list_galleries(
     user_id = auth["user_id"]
     blocked_tags = await _get_blocked_tag_strings(db, user_id)
     if blocked_tags:
-        stmt = stmt.where(not_(Gallery.tags_array.overlap(cast(blocked_tags, ARRAY(Text)))))
+        stmt = stmt.where(not_(Gallery.tags_array.overlap(blocked_tags)))
 
     sort_col = {"added_at": Gallery.added_at, "rating": Gallery.rating, "pages": Gallery.pages}[sort]
 
