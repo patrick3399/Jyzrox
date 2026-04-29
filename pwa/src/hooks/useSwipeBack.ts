@@ -19,6 +19,12 @@ interface UseSwipeBackOptions {
   enabled?: boolean
 }
 
+function isStandaloneApp(): boolean {
+  if (typeof window === 'undefined') return false
+  const nav = window.navigator as Navigator & { standalone?: boolean }
+  return window.matchMedia('(display-mode: standalone)').matches || nav.standalone === true
+}
+
 export function useSwipeBack({ enabled = true }: UseSwipeBackOptions = {}) {
   const router = useRouter()
   const pathname = usePathname()
@@ -26,7 +32,7 @@ export function useSwipeBack({ enabled = true }: UseSwipeBackOptions = {}) {
   const startYRef = useRef<number>(0)
 
   useEffect(() => {
-    if (!enabled) return
+    if (!enabled || !isStandaloneApp()) return
 
     const handleTouchStart = (e: TouchEvent) => {
       const touch = e.touches[0]

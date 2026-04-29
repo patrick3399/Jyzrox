@@ -58,4 +58,43 @@ describe('structural-nav-audit — E-hentai paginated favorites snapshot', () =>
   it('test_ehentai_saveBrowseState_hasFavPaginatedGalleries', () => {
     expect(src('app/e-hentai/page.tsx')).toContain('favPaginatedGalleries')
   })
+
+  it('test_ehentai_persistsBrowseStateOnPageLifecycle', () => {
+    const page = src('app/e-hentai/page.tsx')
+    expect(page).toContain('BROWSE_STATE_KEY')
+    expect(page).toContain("window.addEventListener('pagehide', saveBrowseState)")
+    expect(page).toContain("document.addEventListener('visibilitychange', handleVisibilityChange)")
+    expect(page).toContain('saveBrowseState()')
+  })
+
+  it('test_ehentai_restoreDoesNotConsumeValidBrowseStateImmediately', () => {
+    const page = src('app/e-hentai/page.tsx')
+    expect(page).not.toContain('sessionStorage.removeItem(BROWSE_STATE_KEY)\n    try')
+  })
+
+  it('test_ehentai_restoreIsScopedToMatchingNonEmptyUrlState', () => {
+    const page = src('app/e-hentai/page.tsx')
+    expect(page).toContain('const urlStateKey = searchParams.toString()')
+    expect(page).toContain('(parsed as { urlStateKey?: unknown }).urlStateKey === urlStateKey')
+    expect(page).toContain("urlStateKey !== ''")
+    expect(page).toContain('sessionStorage.removeItem(BROWSE_STATE_KEY)')
+    expect(page).toContain('urlStateKey,')
+  })
+
+  it('test_ehentai_emptyUrlResetsBrowseStateToHome', () => {
+    const page = src('app/e-hentai/page.tsx')
+    expect(page).toContain('previousUrlStateKeyRef')
+    expect(page).toContain("if (urlStateKey !== '') return")
+    expect(page).toContain("setActiveTab('popular')")
+    expect(page).toContain('sessionStorage.removeItem(BROWSE_STATE_KEY)')
+  })
+})
+
+describe('structural-nav-audit — browser-native back gesture', () => {
+  it('test_useSwipeBack_onlyRunsInStandaloneApp', () => {
+    const hook = src('hooks/useSwipeBack.ts')
+    expect(hook).toContain('isStandaloneApp')
+    expect(hook).toContain("window.matchMedia('(display-mode: standalone)').matches")
+    expect(hook).toContain('!enabled || !isStandaloneApp()')
+  })
 })

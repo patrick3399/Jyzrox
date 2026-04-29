@@ -43,6 +43,7 @@ function LazyImage({ src, alt, className }: { src: string; alt: string; classNam
 
 const HISTORY_KEY = 'eh_search_history'
 const HISTORY_ENABLED_KEY = 'eh_search_history_enabled'
+const BROWSE_STATE_KEY = 'eh_browse_state'
 const MAX_HISTORY = 10
 
 function getSearchHistory(): string[] {
@@ -444,16 +445,27 @@ function BrowsePage() {
     rawTab === 'search' || rawTab === 'favorites' || rawTab === 'toplist' ? rawTab : 'popular'
   const initialFavCat = searchParams.get('favcat') || 'all'
   const initialFavSearch = searchParams.get('favsearch') || ''
+  const urlStateKey = searchParams.toString()
 
-  // Restore saved browse state from back-navigation (consumed once on mount)
+  // Restore saved browse state from browser history/navigation.
   const [restored] = useState(() => {
     if (typeof window === 'undefined') return null
-    const raw = sessionStorage.getItem('eh_browse_state')
+    const raw = sessionStorage.getItem(BROWSE_STATE_KEY)
     if (!raw) return null
-    sessionStorage.removeItem('eh_browse_state')
     try {
-      return JSON.parse(raw)
+      const parsed = JSON.parse(raw)
+      if (
+        parsed !== null &&
+        typeof parsed === 'object' &&
+        (parsed as { urlStateKey?: unknown }).urlStateKey === urlStateKey &&
+        urlStateKey !== ''
+      ) {
+        return parsed
+      }
+      sessionStorage.removeItem(BROWSE_STATE_KEY)
+      return null
     } catch {
+      sessionStorage.removeItem(BROWSE_STATE_KEY)
       return null
     }
   })
@@ -635,6 +647,45 @@ function BrowsePage() {
     }
   }, [urlQ]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  const previousUrlStateKeyRef = useRef(urlStateKey)
+  useEffect(() => {
+    if (previousUrlStateKeyRef.current === urlStateKey) return
+    previousUrlStateKeyRef.current = urlStateKey
+    if (urlStateKey !== '') return
+
+    sessionStorage.removeItem(BROWSE_STATE_KEY)
+    setActiveTab('popular')
+    setInputValue('')
+    setSearchQuery('')
+    setCategory(null)
+    setCurrentCursor(null)
+    setPrevCursors([])
+    setPageIndex(0)
+    setShowAdvanced(false)
+    setSelectedCats(new Set(Object.keys(CATEGORY_META)))
+    setAdvSearch(0)
+    setMinRating(null)
+    setPageFrom('')
+    setPageTo('')
+    setFavCat('all')
+    setFavCursor({})
+    setFavSearch('')
+    setFavPageIndex(0)
+    setScrollGalleries([])
+    setScrollPage(0)
+    setScrollNextGid(null)
+    setScrollHasMore(true)
+    scrollNeedsSeedRef.current = true
+    setFavScrollGalleries([])
+    setFavScrollNextCursor(undefined)
+    setFavScrollHasMore(true)
+    setFavPaginatedGalleries([])
+    favScrollNeedsSeedRef.current = true
+    setToplistTl(11)
+    setToplistPage(0)
+    window.scrollTo(0, 0)
+  }, [urlStateKey])
+
   // Persist browse state in URL so back-navigation restores it
   const isFirstRender = useRef(true)
   useEffect(() => {
@@ -748,7 +799,14 @@ function BrowsePage() {
     requestAnimationFrame(() => {
       window.scrollTo(0, restored.scrollY)
     })
-  }, [data, favData, toplistData, scrollGalleries.length, favScrollGalleries.length, favPaginatedGalleries.length]) // eslint-disable-line react-hooks/exhaustive-deps
+  }, [
+    data,
+    favData,
+    toplistData,
+    scrollGalleries.length,
+    favScrollGalleries.length,
+    favPaginatedGalleries.length,
+  ]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Infinite scroll: reset when search changes ─────────
   useEffect(() => {
@@ -882,39 +940,39 @@ function BrowsePage() {
     [showAdvanced],
   )
 
-  // Save all pagination state to sessionStorage before navigating to a gallery detail page
-  const saveBrowseState = useCallback(() => {
-    sessionStorage.setItem(
-      'eh_browse_state',
-      JSON.stringify({
-        activeTab,
-        scrollY: window.scrollY,
-        // Search pagination
-        pageIndex,
-        currentCursor,
-        prevCursors,
-        // Favorites
-        favCat,
-        favCursor,
-        favSearch,
-        favPageIndex,
-        // Toplist
-        toplistTl,
-        toplistPage,
-        // Scroll mode accumulated data (only save when relevant)
-        ...(loadMode === 'scroll' && activeTab === 'search'
-          ? { scrollGalleries, scrollNextGid, scrollHasMore }
-          : {}),
-        ...(loadMode === 'scroll' && activeTab === 'favorites'
-          ? { favScrollGalleries, favScrollNextCursor, favScrollHasMore }
-          : {}),
-        ...(loadMode === 'pagination' && activeTab === 'favorites' && favData?.galleries?.length
-          ? { favPaginatedGalleries: favData.galleries }
-          : {}),
-      }),
-    )
+  // Persist browse state for all browser history paths, not only card clicks.
+  const browseStateRef = useRef<Record<string, unknown> | null>(null)
+  useEffect(() => {
+    browseStateRef.current = {
+      urlStateKey,
+      activeTab,
+      scrollY: window.scrollY,
+      // Search pagination
+      pageIndex,
+      currentCursor,
+      prevCursors,
+      // Favorites
+      favCat,
+      favCursor,
+      favSearch,
+      favPageIndex,
+      // Toplist
+      toplistTl,
+      toplistPage,
+      // Scroll mode accumulated data (only save when relevant)
+      ...(loadMode === 'scroll' && activeTab === 'search'
+        ? { scrollGalleries, scrollNextGid, scrollHasMore }
+        : {}),
+      ...(loadMode === 'scroll' && activeTab === 'favorites'
+        ? { favScrollGalleries, favScrollNextCursor, favScrollHasMore }
+        : {}),
+      ...(loadMode === 'pagination' && activeTab === 'favorites' && favData?.galleries?.length
+        ? { favPaginatedGalleries: favData.galleries }
+        : {}),
+    }
   }, [
     activeTab,
+    urlStateKey,
     pageIndex,
     currentCursor,
     prevCursors,
@@ -934,6 +992,27 @@ function BrowsePage() {
     favData?.galleries,
     favPaginatedGalleries,
   ])
+
+  const saveBrowseState = useCallback(() => {
+    if (typeof window === 'undefined' || !browseStateRef.current) return
+    sessionStorage.setItem(
+      BROWSE_STATE_KEY,
+      JSON.stringify({ ...browseStateRef.current, scrollY: window.scrollY }),
+    )
+  }, [])
+
+  useEffect(() => {
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') saveBrowseState()
+    }
+    window.addEventListener('pagehide', saveBrowseState)
+    document.addEventListener('visibilitychange', handleVisibilityChange)
+    return () => {
+      saveBrowseState()
+      window.removeEventListener('pagehide', saveBrowseState)
+      document.removeEventListener('visibilitychange', handleVisibilityChange)
+    }
+  }, [saveBrowseState])
 
   const navigateToGallery = useCallback(
     (g: EhGallery) => {
@@ -1027,9 +1106,7 @@ function BrowsePage() {
   )
   const favDisplayGalleries = useMemo(
     () =>
-      loadMode === 'scroll'
-        ? favScrollGalleries
-        : (favData?.galleries ?? favPaginatedGalleries),
+      loadMode === 'scroll' ? favScrollGalleries : (favData?.galleries ?? favPaginatedGalleries),
     [loadMode, favScrollGalleries, favData?.galleries, favPaginatedGalleries],
   )
 
