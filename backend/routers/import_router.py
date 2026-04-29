@@ -426,7 +426,11 @@ async def rescan_gallery(
     return {"status": "enqueued", "gallery_id": gallery_id}
 
 
-# ── Scan Schedule ────────────────────────────────────────────────────
+# ── Legacy scan settings compatibility ───────────────────────────────
+#
+# New UI controls external folder scans through /api/scheduled-tasks and
+# cron:library_scan:* Redis keys. Keep these endpoints for older clients only;
+# do not wire them back into scheduled library_scan behavior.
 
 
 class ScanScheduleRequest(BaseModel):

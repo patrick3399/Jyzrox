@@ -36,16 +36,19 @@ async def _insert_gallery(db_session, **overrides):
         "tags_array": "[]",
         "artist_id": None,
         "uploader": None,
+        "import_mode": None,
+        "library_path": None,
+        "source_path": None,
     }
     defaults.update(overrides)
     await db_session.execute(
         text(
             "INSERT INTO galleries (source, source_id, title, title_jpn, category, "
             "language, pages, rating, favorited, download_status, tags_array, "
-            "artist_id, uploader) "
+            "artist_id, uploader, import_mode, library_path, source_path) "
             "VALUES (:source, :source_id, :title, :title_jpn, :category, "
             ":language, :pages, :rating, :favorited, :download_status, :tags_array, "
-            ":artist_id, :uploader)"
+            ":artist_id, :uploader, :import_mode, :library_path, :source_path)"
         ),
         defaults,
     )
@@ -810,6 +813,57 @@ class TestListFiles:
         assert "directories" in data
         assert isinstance(data["total"], int)
         assert data["page"] == 0
+
+    async def test_list_files_includes_local_source_metadata(self, client, db_session):
+        """Directory items include local import metadata used by Explorer grouping."""
+        await _insert_gallery(
+            db_session,
+            source="local",
+            source_id="local_link_01",
+            title="Linked Gallery",
+            import_mode="link",
+            artist_id="local:alice",
+            uploader="Alice",
+            library_path="/mnt/library/{artist}/{title}",
+            source_path="/mnt/library/Alice/Linked Gallery",
+        )
+
+        resp = await client.get("/api/library/files", params={"source": "local"})
+        assert resp.status_code == 200
+        item = resp.json()["directories"][0]
+        assert item["import_mode"] == "link"
+        assert item["artist_id"] == "local:alice"
+        assert item["uploader"] == "Alice"
+        assert item["library_path"] == "/mnt/library/{artist}/{title}"
+        assert item["source_path"] == "/mnt/library/Alice/Linked Gallery"
+
+    async def test_list_files_import_mode_filter(self, client, db_session):
+        """?import_mode= filters file directory results before pagination."""
+        await _insert_gallery(
+            db_session,
+            source="local",
+            source_id="local_link_filter",
+            title="Linked Gallery",
+            import_mode="link",
+        )
+        await _insert_gallery(
+            db_session,
+            source="local",
+            source_id="local_copy_filter",
+            title="Copied Gallery",
+            import_mode="copy",
+        )
+
+        resp = await client.get(
+            "/api/library/files",
+            params={"source": "local", "import_mode": "link"},
+        )
+
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["directories"][0]["source_id"] == "local_link_filter"
+        assert data["directories"][0]["import_mode"] == "link"
 
 
 # ---------------------------------------------------------------------------

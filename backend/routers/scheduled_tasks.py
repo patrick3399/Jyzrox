@@ -2,7 +2,9 @@
 
 import logging
 import uuid
+from datetime import UTC, datetime
 
+from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
@@ -17,8 +19,8 @@ _admin = require_role("admin")
 
 TASK_DEFS = {
     "library_scan": {
-        "name": "Library Scan",
-        "description": "Scan all library paths for new content and verify existing files",
+        "name": "External Folder Scan",
+        "description": "Scan external folders and update linked local galleries",
         "default_cron": "0 * * * *",
         "default_enabled": True,
         "job": "scheduled_scan_job",
@@ -80,6 +82,22 @@ class PatchTaskRequest(BaseModel):
     cron_expr: str | None = None
 
 
+def _decode_redis(value: bytes | str | None) -> str | None:
+    if value is None:
+        return None
+    return value.decode() if isinstance(value, bytes) else value
+
+
+def _next_run(cron_expr: str, enabled: bool, last_run: str | None) -> str | None:
+    if not enabled:
+        return None
+    try:
+        base = datetime.fromisoformat(last_run) if last_run else datetime.now(UTC)
+        return croniter(cron_expr, base).get_next(datetime).isoformat()
+    except (ValueError, KeyError):
+        return None
+
+
 @router.get("/")
 async def list_scheduled_tasks(
     _: dict = Depends(_admin),
@@ -94,16 +112,21 @@ async def list_scheduled_tasks(
         last_status_raw = await r.get(f"cron:{task_id}:last_status")
         last_error_raw = await r.get(f"cron:{task_id}:last_error")
 
+        enabled = _decode_redis(enabled_raw) != "0" if enabled_raw else defn["default_enabled"]
+        cron_expr = _decode_redis(cron_expr_raw) or defn["default_cron"]
+        last_run = _decode_redis(last_run_raw)
+
         tasks.append({
             "id": task_id,
             "name": defn["name"],
             "description": defn["description"],
-            "enabled": enabled_raw.decode() != "0" if enabled_raw else defn["default_enabled"],
-            "cron_expr": cron_expr_raw.decode() if cron_expr_raw else defn["default_cron"],
+            "enabled": enabled,
+            "cron_expr": cron_expr,
             "default_cron": defn["default_cron"],
-            "last_run": last_run_raw.decode() if last_run_raw else None,
-            "last_status": last_status_raw.decode() if last_status_raw else None,
-            "last_error": last_error_raw.decode() if last_error_raw else None,
+            "next_run": _next_run(cron_expr, enabled, last_run),
+            "last_run": last_run,
+            "last_status": _decode_redis(last_status_raw),
+            "last_error": _decode_redis(last_error_raw),
         })
 
     return {"tasks": tasks}
@@ -125,7 +148,6 @@ async def update_scheduled_task(
         await r.set(f"cron:{task_id}:enabled", "1" if body.enabled else "0")
 
     if body.cron_expr is not None:
-        from croniter import croniter
         try:
             croniter(body.cron_expr)
         except (ValueError, KeyError) as exc:

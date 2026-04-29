@@ -1004,74 +1004,44 @@ async def list_artist_images(
 @router.get("/files")
 async def list_files(
     q: str = Query(default=""),
+    source: str | None = Query(default=None),
+    import_mode: str | None = Query(default=None),
     page: int = Query(default=0, ge=0),
     limit: int = Query(default=50, ge=1, le=200),
     auth: dict = Depends(require_auth),
     db: AsyncSession = Depends(get_db),
 ):
-    """List gallery directories under data_library_path with DB metadata."""
-    import asyncio
-    import os
-
-    base = Path(settings.data_library_path)
-
-    def _scan_dirs() -> list[tuple[str, str, int, int]]:
-        """Return list of (source, source_id, file_count, disk_size) from two-level library tree."""
-        entries = []
-        try:
-            for source_entry in os.scandir(base):
-                if not source_entry.is_dir():
-                    continue
-                source = source_entry.name
-                for sid_entry in os.scandir(source_entry.path):
-                    if not sid_entry.is_dir():
-                        continue
-                    sid = sid_entry.name
-                    file_count = 0
-                    disk_size = 0
-                    try:
-                        for f in os.scandir(sid_entry.path):
-                            if f.is_file(follow_symlinks=True):
-                                file_count += 1
-                                try:
-                                    disk_size += f.stat(follow_symlinks=True).st_size
-                                except OSError:
-                                    pass
-                    except OSError:
-                        pass
-                    entries.append((source, sid, file_count, disk_size))
-        except OSError:
-            pass
-        return entries
-
-    raw_entries = await asyncio.to_thread(_scan_dirs)
-
-    if not raw_entries:
-        return {"directories": [], "total": 0, "page": page}
-
-    fs_keys = [(e[0], e[1]) for e in raw_entries]
-    size_map = {(e[0], e[1]): (e[2], e[3]) for e in raw_entries}
-
-    from sqlalchemy import tuple_
-
-    stmt = select(Gallery).where(tuple_(Gallery.source, Gallery.source_id).in_(fs_keys))
+    """List library galleries with image counts and size from DB metadata."""
+    filters = [gallery_access_filter(auth)]
     if q:
-        stmt = stmt.where(Gallery.title.ilike(f"%{q}%"))
+        filters.append(Gallery.title.ilike(f"%{q}%"))
+    if source:
+        filters.append(Gallery.source == source)
+    if import_mode:
+        filters.append(Gallery.import_mode == import_mode)
 
-    galleries = (await db.execute(stmt)).scalars().all()
-    total = len(galleries)
+    total = (await db.execute(select(func.count()).select_from(Gallery).where(*filters))).scalar_one()
 
-    # Sort by gallery id descending (most recently added first)
-    galleries = sorted(galleries, key=lambda g: g.id, reverse=True)
-    paged = galleries[page * limit : (page + 1) * limit]
+    image_counts = func.count(Image.id).label("file_count")
+    disk_size = func.coalesce(func.sum(Blob.file_size), 0).label("disk_size")
+    stmt = (
+        select(Gallery, image_counts, disk_size)
+        .outerjoin(Image, Image.gallery_id == Gallery.id)
+        .outerjoin(Blob, Blob.sha256 == Image.blob_sha256)
+        .where(*filters)
+        .group_by(Gallery.id)
+        .order_by(Gallery.id.desc())
+        .offset(page * limit)
+        .limit(limit)
+    )
 
-    paged_ids = [g.id for g in paged]
+    rows = (await db.execute(stmt)).all()
+    paged_ids = [g.id for g, _, _ in rows]
     fav_set = await _get_favorite_set(db, auth["user_id"], paged_ids)
     rating_map = await _get_rating_map(db, auth["user_id"], paged_ids)
 
     result = []
-    for g in paged:
-        file_count, disk_size = size_map.get((g.source, g.source_id), (0, 0))
+    for g, file_count, total_size in rows:
         result.append(
             {
                 "gallery_id": g.id,
@@ -1084,7 +1054,12 @@ async def list_files(
                 "is_favorited": g.id in fav_set,
                 "my_rating": rating_map.get(g.id, 0),
                 "source": g.source,
-                "disk_size": disk_size,
+                "import_mode": g.import_mode,
+                "artist_id": g.artist_id,
+                "uploader": g.uploader,
+                "library_path": g.library_path,
+                "source_path": g.source_path,
+                "disk_size": total_size,
             }
         )
 

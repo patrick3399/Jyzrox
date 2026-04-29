@@ -562,8 +562,18 @@ class TestImportJob:
 
         assert result["status"] == "done"
         assert result["gallery_id"] == 7
-        mock_enqueue.assert_any_call("cover_thumbnail_job", gallery_id=7, _timeout=300)
-        mock_enqueue.assert_any_call("thumbnail_job", gallery_id=7, _timeout=3600)
+        mock_enqueue.assert_any_call(
+            "cover_thumbnail_job",
+            gallery_id=7,
+            _timeout=300,
+            _job_id="cover-thumbnail:7",
+        )
+        mock_enqueue.assert_any_call(
+            "thumbnail_job",
+            gallery_id=7,
+            _timeout=3600,
+            _job_id="thumbnail:7",
+        )
         assert [c.args[0] for c in mock_enqueue.call_args_list[:2]] == [
             "cover_thumbnail_job",
             "thumbnail_job",
@@ -1438,6 +1448,22 @@ class TestScanSettings:
         assert resp.status_code == 200
         data = resp.json()
         assert data["interval_hours"] == 24
+
+    async def test_patch_scan_settings_uses_legacy_keys_only(self, client, mock_redis):
+        """Legacy scan settings must not modify scheduled task cron keys."""
+        mock_redis.set = AsyncMock(return_value=True)
+        mock_redis.get = AsyncMock(return_value=None)
+        with patch("routers.import_router.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/import/scan-settings",
+                json={"enabled": False, "interval_hours": 24},
+            )
+
+        assert resp.status_code == 200
+        written_keys = [call_args.args[0] for call_args in mock_redis.set.call_args_list]
+        assert "scan:schedule:enabled" in written_keys
+        assert "scan:schedule:interval_hours" in written_keys
+        assert all(not key.startswith("cron:library_scan:") for key in written_keys)
 
 
 # ---------------------------------------------------------------------------

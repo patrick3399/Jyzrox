@@ -57,6 +57,7 @@ async def test_scheduled_tasks_list_each_task_has_expected_fields(client, mock_r
         assert "cron_expr" in task
         assert "description" in task
         assert "default_cron" in task
+        assert "next_run" in task
 
 
 async def test_scheduled_tasks_list_contains_known_task_ids(client, mock_redis):
@@ -70,6 +71,34 @@ async def test_scheduled_tasks_list_contains_known_task_ids(client, mock_redis):
     assert "library_scan" in task_ids
     assert "reconciliation" in task_ids
     assert "check_subscriptions" in task_ids
+
+
+async def test_scheduled_tasks_library_scan_has_user_facing_name_and_next_run(client, mock_redis):
+    mock_redis.get = AsyncMock(return_value=None)
+
+    resp = await client.get("/api/scheduled-tasks/")
+
+    assert resp.status_code == 200
+    library_scan = next(task for task in resp.json()["tasks"] if task["id"] == "library_scan")
+    assert library_scan["name"] == "External Folder Scan"
+    assert "external folders" in library_scan["description"]
+    assert library_scan["next_run"] is not None
+
+
+async def test_scheduled_tasks_disabled_task_has_null_next_run(client, mock_redis):
+    async def get_value(key):
+        if key == "cron:library_scan:enabled":
+            return b"0"
+        return None
+
+    mock_redis.get = AsyncMock(side_effect=get_value)
+
+    resp = await client.get("/api/scheduled-tasks/")
+
+    assert resp.status_code == 200
+    library_scan = next(task for task in resp.json()["tasks"] if task["id"] == "library_scan")
+    assert library_scan["enabled"] is False
+    assert library_scan["next_run"] is None
 
 
 # ---------------------------------------------------------------------------
