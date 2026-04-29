@@ -403,6 +403,7 @@ const ja: Record<string, string> = {
   'library.statusProxyOnly': 'プロキシのみ',
   'library.statusDownloading': 'ダウンロード中',
   'library.downloadingBanner': 'ダウンロード中 — インポートされた画像から順に表示されます',
+  'library.checkingForUpdates': '更新を確認中...',
   'library.favoriteError': 'お気に入りの更新に失敗しました',
   'library.ratingError': '評価の更新に失敗しました',
   'library.delete.link.button': 'ライブラリから削除',
@@ -462,6 +463,8 @@ const ja: Record<string, string> = {
   'library.metadataFieldsUpdated': '{fields}をソースから更新しました',
   'library.metadataPagesChanged': 'ページ数が変更されました: {old} → {new}',
   'library.statusOutdated': '古い',
+  'library.updateNow': '更新',
+  'library.updateEnqueued': 'ダウンロードをキューに追加しました',
   'library.checkingMetadata': '更新を確認中...',
   'library.editTags': 'タグを編集',
   'library.doneEditingTags': '完了',
@@ -976,7 +979,7 @@ const ja: Record<string, string> = {
   'rss.subscriptionFeed': 'サブスクリプションフィード',
 
   'settings.galleryUpdateCheckDays': 'ギャラリーメタデータ自動確認',
-  'settings.galleryUpdateCheckDaysDesc': '-1=なし、0=常に、N=N日以上古い場合に確認',
+  'settings.galleryUpdateCheckDaysDesc': '-1=なし、0=常に、N=N日以上古い場合に確認（EH・Pixivのみ）',
 
   'settings.subscriptionEnqueue': 'サブスクリプション キュー',
   'settings.subscriptionEnqueueDelay': 'キュー間隔',

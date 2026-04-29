@@ -614,7 +614,7 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "retry_base_delay_minutes": await _get_int_setting("setting:retry_base_delay_minutes", 5),
         "subscription_enqueue_delay_ms": await _get_int_setting("setting:subscription_enqueue_delay_ms", 500),
         "subscription_batch_max": await _get_int_setting("setting:subscription_batch_max", 0),
-        "gallery_update_check_days": await _get_int_setting("setting:gallery_update_check_days", -1),
+        "gallery_update_check_days": await _get_int_setting("setting:gallery_update_check_days", 14),
         "trash_enabled": await _get_toggle("setting:trash_enabled", True),
         "trash_retention_days": await _get_int_setting("setting:trash_retention_days", 30),
     }

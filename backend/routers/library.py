@@ -2315,10 +2315,15 @@ async def check_gallery_update(
     """Auto-check and update gallery metadata from source."""
     g = await _get_or_404_by_source(db, source, source_id, auth)
 
-    if source != "ehentai":
-        return {"status": "skipped", "reason": "unsupported_source"}
+    if source == "ehentai":
+        return await _check_update_ehentai(g, db, auth)
+    if source == "pixiv":
+        return await _check_update_pixiv(g, db, auth)
+    return {"status": "skipped", "reason": "unsupported_source"}
 
-    # Parse gid/token from source_url
+
+async def _check_update_ehentai(g, db: AsyncSession, auth: dict) -> dict:
+    """Fetch fresh EH metadata and update gallery record."""
     if not g.source_url:
         return {"status": "skipped", "reason": "no_source_url"}
 
@@ -2334,17 +2339,14 @@ async def check_gallery_update(
     except ValueError as exc:
         err_msg = str(exc)
         if "expunged" in err_msg.lower():
-            # Gallery was expunged — set timestamp so we don't re-check
             g.metadata_updated_at = func.now()
             await db.commit()
             await db.refresh(g)
             return {"status": "expunged"}
-        # Other errors (auth, 509, etc.) — don't set timestamp, retry next visit
         return {"status": "error", "reason": str(exc)}
     except Exception:
         return {"status": "error", "reason": "fetch_failed"}
 
-    # Snapshot before update
     old = {
         "title": g.title,
         "title_jpn": g.title_jpn,
@@ -2355,7 +2357,6 @@ async def check_gallery_update(
         "tags_array": list(g.tags_array or []),
     }
 
-    # Update source-level fields only (use `is not None` to allow 0/"" from source)
     if meta.get("title") is not None:
         g.title = meta["title"]
     if meta.get("title_jpn") is not None:
@@ -2368,22 +2369,16 @@ async def check_gallery_update(
         g.pages = meta["pages"]
     if meta.get("rating") is not None:
         g.rating = int(round(meta["rating"]))
-
-    # Convert EH tags (format: "namespace:tag") to tags_array
     if meta.get("tags"):
         g.tags_array = meta["tags"]
 
-    # Build changed fields list
     changed_fields = [
         f for f in ("title", "title_jpn", "category", "uploader", "pages", "rating") if getattr(g, f) != old[f]
     ]
     if list(g.tags_array or []) != old["tags_array"]:
         changed_fields.append("tags")
 
-    # Detect page count change
-    pages_diff = None
-    if "pages" in changed_fields:
-        pages_diff = {"old": old["pages"], "new": g.pages}
+    pages_diff = {"old": old["pages"], "new": g.pages} if "pages" in changed_fields else None
 
     g.metadata_updated_at = func.now()
     await db.commit()
@@ -2392,7 +2387,50 @@ async def check_gallery_update(
     if not changed_fields:
         return {"status": "unchanged"}
 
-    # Build response with updated gallery
+    return await _build_updated_response(g, db, auth, changed_fields, pages_diff)
+
+
+async def _check_update_pixiv(g, db: AsyncSession, auth: dict) -> dict:
+    """Fetch fresh Pixiv illust metadata and update gallery record."""
+    from services.credential import get_credential
+    from services.pixiv_client import PixivClient
+
+    refresh_token = await get_credential("pixiv")
+    if not refresh_token:
+        return {"status": "skipped", "reason": "credentials_required"}
+
+    try:
+        illust_id = int(g.source_id)
+    except (ValueError, TypeError):
+        return {"status": "skipped", "reason": "invalid_source_id"}
+
+    try:
+        async with PixivClient(refresh_token=refresh_token) as client:
+            detail = await client.illust_detail(illust_id)
+    except Exception:
+        return {"status": "error", "reason": "fetch_failed"}
+
+    old_pages = g.pages
+    new_pages = detail.get("page_count", 1)
+
+    pages_diff = None
+    changed_fields = []
+    if new_pages != old_pages:
+        g.pages = new_pages
+        changed_fields.append("pages")
+        pages_diff = {"old": old_pages, "new": new_pages}
+
+    g.metadata_updated_at = func.now()
+    await db.commit()
+    await db.refresh(g)
+
+    if not changed_fields:
+        return {"status": "unchanged"}
+
+    return await _build_updated_response(g, db, auth, changed_fields, pages_diff)
+
+
+async def _build_updated_response(g, db: AsyncSession, auth: dict, changed_fields: list, pages_diff: dict | None) -> dict:
     cover_thumb = await _single_cover_thumb(db, g.id, g.source or "")
     is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], g.id)
     return {

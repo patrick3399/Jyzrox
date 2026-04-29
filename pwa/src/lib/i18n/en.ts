@@ -458,6 +458,7 @@ const en: Record<string, string> = {
   'library.statusProxyOnly': 'Proxy Only',
   'library.statusDownloading': 'Downloading',
   'library.downloadingBanner': 'Download in progress — images appear as they are imported',
+  'library.checkingForUpdates': 'Checking for updates...',
   'library.favoriteError': 'Failed to update favorite',
   'library.ratingError': 'Failed to update rating',
   'library.delete.link.button': 'Remove from Library',
@@ -519,6 +520,8 @@ const en: Record<string, string> = {
   'library.metadataFieldsUpdated': '{fields} updated from source',
   'library.metadataPagesChanged': 'Pages changed: {old} → {new}',
   'library.statusOutdated': 'Outdated',
+  'library.updateNow': 'Update',
+  'library.updateEnqueued': 'Download queued for update',
   'library.checkingMetadata': 'Checking for updates...',
   'library.editTags': 'Edit Tags',
   'library.doneEditingTags': 'Done',
@@ -981,7 +984,7 @@ const en: Record<string, string> = {
   'rss.subscriptionFeed': 'Subscription Feed',
 
   'settings.galleryUpdateCheckDays': 'Gallery metadata auto-check',
-  'settings.galleryUpdateCheckDaysDesc': '-1 = never, 0 = always, N = check if older than N days',
+  'settings.galleryUpdateCheckDaysDesc': '-1 = never, 0 = always, N = check if older than N days (EH and Pixiv only)',
 
   'settings.subscriptionEnqueue': 'Subscription Enqueue',
   'settings.subscriptionEnqueueDelay': 'Enqueue Delay',

@@ -3587,3 +3587,71 @@ class TestCursorPagination:
             params={"cursor": "garbage.cursor", "sort": "pages"},
         )
         assert resp.status_code == 400
+
+
+# ---------------------------------------------------------------------------
+# check-update endpoint
+# ---------------------------------------------------------------------------
+
+
+class TestCheckGalleryUpdate:
+    """Tests for POST /api/library/galleries/{source}/{source_id}/check-update."""
+
+    async def test_unsupported_source_returns_skipped(self, client, db_session):
+        """gallery-dl galleries should return skipped (unsupported_source)."""
+        await _insert_gallery(db_session, source="gallery_dl", source_id="gu_001")
+        resp = await client.post("/api/library/galleries/gallery_dl/gu_001/check-update")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "skipped"
+        assert resp.json()["reason"] == "unsupported_source"
+
+    async def test_pixiv_skipped_without_credentials(self, client, db_session):
+        """Pixiv check-update returns skipped when no refresh_token is configured."""
+        await _insert_gallery(db_session, source="pixiv", source_id="111111")
+        with patch("services.credential.get_credential", return_value=None):
+            resp = await client.post("/api/library/galleries/pixiv/111111/check-update")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "skipped"
+        assert data["reason"] == "credentials_required"
+
+    async def test_pixiv_unchanged_when_page_count_same(self, client, db_session):
+        """Pixiv check-update returns unchanged when remote page_count matches local pages."""
+        await _insert_gallery(db_session, source="pixiv", source_id="222222", pages=3)
+        mock_detail = {"page_count": 3, "title": "Test Illust"}
+        with patch("services.credential.get_credential", return_value="fake_token"), patch(
+            "services.pixiv_client.PixivClient"
+        ) as MockClient:
+            instance = MockClient.return_value.__aenter__.return_value
+            instance.illust_detail.return_value = mock_detail
+            resp = await client.post("/api/library/galleries/pixiv/222222/check-update")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "unchanged"
+
+    async def test_pixiv_detects_page_count_increase(self, client, db_session):
+        """Pixiv check-update returns updated with pages_diff when remote has more pages."""
+        await _insert_gallery(db_session, source="pixiv", source_id="333333", pages=3)
+        mock_detail = {"page_count": 5, "title": "Test Illust"}
+        with patch("services.credential.get_credential", return_value="fake_token"), patch(
+            "services.pixiv_client.PixivClient"
+        ) as MockClient:
+            instance = MockClient.return_value.__aenter__.return_value
+            instance.illust_detail.return_value = mock_detail
+            resp = await client.post("/api/library/galleries/pixiv/333333/check-update")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "updated"
+        assert data["pages_diff"] == {"old": 3, "new": 5}
+        assert "pages" in data["changed_fields"]
+
+    async def test_pixiv_fetch_failure_returns_error(self, client, db_session):
+        """Pixiv check-update returns error when the API call raises an exception."""
+        await _insert_gallery(db_session, source="pixiv", source_id="444444", pages=1)
+        with patch("services.credential.get_credential", return_value="fake_token"), patch(
+            "services.pixiv_client.PixivClient"
+        ) as MockClient:
+            instance = MockClient.return_value.__aenter__.return_value
+            instance.illust_detail.side_effect = Exception("network error")
+            resp = await client.post("/api/library/galleries/pixiv/444444/check-update")
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "error"

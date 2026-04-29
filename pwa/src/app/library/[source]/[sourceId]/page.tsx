@@ -110,6 +110,8 @@ export default function GalleryDetailPage() {
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
   const [pagesOutdated, setPagesOutdated] = useState<{ old: number; new: number } | null>(null)
   const updateCheckedRef = useRef<boolean>(false)
+  const [isEnqueueingUpdate, setIsEnqueueingUpdate] = useState(false)
+  const [activeJobId, setActiveJobId] = useState<string | null>(null)
   const [isDeleting, setIsDeleting] = useState(false)
   const [isRetagging, setIsRetagging] = useState(false)
   const [tagData, setTagData] = useState<
@@ -197,8 +199,8 @@ export default function GalleryDetailPage() {
   // Auto-check gallery metadata update (once per page visit)
   useEffect(() => {
     if (!gallery || !featureSettings || updateCheckedRef.current) return
-    // Only EH galleries support metadata check
-    if (gallery.source !== 'ehentai') {
+    // Only EH and Pixiv galleries support metadata check
+    if (!['ehentai', 'pixiv'].includes(gallery.source)) {
       updateCheckedRef.current = true
       return
     }
@@ -253,6 +255,21 @@ export default function GalleryDetailPage() {
         updateCheckedRef.current = true
       })
   }, [gallery, featureSettings, mutateGallery])
+
+  const handleEnqueueUpdate = useCallback(async () => {
+    if (!gallery?.source_url || isEnqueueingUpdate || activeJobId) return
+    setIsEnqueueingUpdate(true)
+    try {
+      const result = await api.download.enqueue(gallery.source_url)
+      toast.success(t('library.updateEnqueued'))
+      setPagesOutdated(null)
+      setActiveJobId(result.job_id)
+    } catch {
+      toast.error(t('library.updateFailed'))
+    } finally {
+      setIsEnqueueingUpdate(false)
+    }
+  }, [gallery?.source_url, isEnqueueingUpdate, activeJobId])
 
   const refetchTagData = useCallback(() => {
     if (!source || !sourceId) return
@@ -314,6 +331,21 @@ export default function GalleryDetailPage() {
     }, 5000)
     return () => clearInterval(interval)
   }, [isDownloading, mutateGallery, mutateImages])
+
+  const { data: activeJob } = useSWR(
+    activeJobId ? ['download/job', activeJobId] : null,
+    ([, id]) => api.download.getJob(id),
+    { refreshInterval: 3000, revalidateOnFocus: false },
+  )
+  useEffect(() => {
+    if (!activeJob) return
+    const terminal = ['done', 'failed', 'cancelled', 'partial']
+    if (terminal.includes(activeJob.status)) {
+      setActiveJobId(null)
+      mutateGallery()
+      mutateImages()
+    }
+  }, [activeJob, mutateGallery, mutateImages])
 
   const getDeleteConfirmKey = () => {
     if (gallery?.import_mode === 'link') return 'library.delete.link.confirm'
@@ -652,9 +684,20 @@ export default function GalleryDetailPage() {
                 </h1>
               )}
               {pagesOutdated && gallery.download_status === 'complete' ? (
-                <span className="shrink-0 px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
-                  {t('library.statusOutdated')}
-                </span>
+                <div className="flex items-center gap-1.5 shrink-0">
+                  <span className="px-2 py-0.5 rounded border text-xs font-medium bg-orange-900/40 border-orange-700/50 text-orange-400">
+                    {t('library.statusOutdated')}
+                  </span>
+                  {gallery.source_url && (
+                    <button
+                      onClick={handleEnqueueUpdate}
+                      disabled={isEnqueueingUpdate || !!activeJobId}
+                      className="px-2 py-0.5 rounded border text-xs font-medium bg-vault-accent/20 border-vault-accent/50 text-vault-accent hover:bg-vault-accent/30 transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
+                    >
+                      {isEnqueueingUpdate ? '...' : t('library.updateNow')}
+                    </button>
+                  )}
+                </div>
               ) : (
                 <span
                   className={`shrink-0 px-2 py-0.5 rounded border text-xs font-medium ${statusInfo.className}`}
@@ -874,6 +917,17 @@ export default function GalleryDetailPage() {
         <p className="text-xs text-vault-text-muted animate-pulse mb-2">
           {t('library.checkingMetadata')}
         </p>
+      )}
+
+      {activeJobId && gallery.download_status !== 'downloading' && (
+        <div className="bg-vault-accent/10 border border-vault-accent/30 rounded-lg p-3 mb-5 flex items-center gap-2 text-vault-accent text-sm">
+          <span className="flex gap-0.5">
+            <span className="w-1.5 h-1.5 rounded-full bg-vault-accent animate-bounce [animation-delay:0ms]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-vault-accent animate-bounce [animation-delay:150ms]" />
+            <span className="w-1.5 h-1.5 rounded-full bg-vault-accent animate-bounce [animation-delay:300ms]" />
+          </span>
+          {t('library.checkingForUpdates')}
+        </div>
       )}
 
       {gallery.download_status === 'downloading' && (
