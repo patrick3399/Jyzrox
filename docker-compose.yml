@@ -99,7 +99,7 @@ services:
         APP_VERSION: ${APP_VERSION:-dev}
     command: python -m worker
     # user: managed by entrypoint.sh via gosu (PUID/PGID, default 1042:1042)
-    stop_grace_period: 120s
+    stop_grace_period: 55s
     environment:
       <<: *backend-env
       WORKER_CONCURRENCY_INTERACTIVE: ${WORKER_CONCURRENCY_INTERACTIVE:-6}
