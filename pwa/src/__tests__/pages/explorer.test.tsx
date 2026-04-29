@@ -9,6 +9,7 @@
 
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
+import { api } from '@/lib/api'
 
 // ── Mock next/navigation ──────────────────────────────────────────────
 
@@ -56,10 +57,11 @@ const mockMutate = vi.fn()
 let swrResponses: Record<string, unknown> = {}
 
 vi.mock('swr', () => ({
-  default: (key: unknown) => {
+  default: (key: unknown, fetcher?: () => unknown) => {
     // The explorer page uses array keys like ['explorer-dirs', ...].
     // Match on the first element of the array.
     const keyStr = Array.isArray(key) ? String(key[0]) : key === null ? '__null__' : String(key)
+    if (key !== null && keyStr === 'explorer-dirs' && fetcher) void fetcher()
     return (
       (swrResponses[keyStr] as object) ?? {
         data: undefined,
@@ -134,5 +136,138 @@ describe('ExplorerPage', () => {
 
     // Clicking retry should call the SWR mutate function to re-fetch.
     expect(mockMutate).toHaveBeenCalledTimes(1)
+  })
+
+  it('test_explorer_displays_local_link_and_copy_source_groups', async () => {
+    swrResponses = {
+      'explorer-dirs': {
+        data: {
+          directories: [
+            {
+              gallery_id: 1,
+              source_id: 'linked',
+              title: 'Linked Gallery',
+              category: null,
+              file_count: 2,
+              rating: 0,
+              favorited: false,
+              is_favorited: false,
+              my_rating: 0,
+              source: 'local',
+              import_mode: 'link',
+              disk_size: 200,
+            },
+            {
+              gallery_id: 2,
+              source_id: 'copied',
+              title: 'Copied Gallery',
+              category: null,
+              file_count: 3,
+              rating: 0,
+              favorited: false,
+              is_favorited: false,
+              my_rating: 0,
+              source: 'local',
+              import_mode: 'copy',
+              disk_size: 300,
+            },
+          ],
+          total: 2,
+          page: 0,
+        },
+        error: undefined,
+        isLoading: false,
+        mutate: mockMutate,
+      },
+    }
+
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    expect(screen.getByText('explorer.externalFolders')).toBeDefined()
+    expect(screen.getByText('explorer.jyzroxImport')).toBeDefined()
+  })
+
+  it('test_explorer_groups_local_galleries_without_artist_under_uncategorized', async () => {
+    swrResponses = {
+      'explorer-dirs': {
+        data: {
+          directories: [
+            {
+              gallery_id: 1,
+              source_id: 'linked',
+              title: 'Linked Gallery',
+              category: null,
+              file_count: 2,
+              rating: 0,
+              favorited: false,
+              is_favorited: false,
+              my_rating: 0,
+              source: 'local',
+              import_mode: 'link',
+              artist_id: null,
+              uploader: null,
+              disk_size: 200,
+            },
+          ],
+          total: 1,
+          page: 0,
+        },
+        error: undefined,
+        isLoading: false,
+        mutate: mockMutate,
+      },
+    }
+
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.doubleClick(screen.getByText('explorer.externalFolders'))
+
+    expect(screen.getByText('explorer.uncategorizedArtist')).toBeDefined()
+    expect(screen.getByText('Linked Gallery')).toBeDefined()
+  })
+
+  it('test_explorer_queries_local_link_with_import_mode_filter', async () => {
+    swrResponses = {
+      'explorer-dirs': {
+        data: {
+          directories: [
+            {
+              gallery_id: 1,
+              source_id: 'linked',
+              title: 'Linked Gallery',
+              category: null,
+              file_count: 2,
+              rating: 0,
+              favorited: false,
+              is_favorited: false,
+              my_rating: 0,
+              source: 'local',
+              import_mode: 'link',
+              disk_size: 200,
+            },
+          ],
+          total: 1,
+          page: 0,
+        },
+        error: undefined,
+        isLoading: false,
+        mutate: mockMutate,
+      },
+    }
+
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.doubleClick(screen.getByText('explorer.externalFolders'))
+
+    expect(api.library.listFiles).toHaveBeenLastCalledWith({
+      q: undefined,
+      source: 'local',
+      import_mode: 'link',
+      page: 0,
+      limit: 50,
+    })
   })
 })

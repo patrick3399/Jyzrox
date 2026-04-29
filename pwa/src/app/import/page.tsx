@@ -28,10 +28,7 @@ import {
   useToggleMonitor,
   useRescanLibraryPath,
   useRecentImports,
-  useScanSettings,
-  useUpdateScanSettings,
 } from '@/hooks/useImport'
-import { useProfile } from '@/hooks/useProfile'
 import { useRouter } from 'next/navigation'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
@@ -241,28 +238,17 @@ function FolderPicker({
   )
 }
 
-// ── Zone A: Monitored Folders ─────────────────────────────────────────
+// ── Zone A: External Folders ──────────────────────────────────────────
 
-function ZoneA({ isAdmin }: { isAdmin: boolean }) {
+function ZoneA() {
   const { data: libraries, mutate: mutateLibraries } = useLibraries()
   const { data: monitorData, mutate: mutateMonitor } = useMonitorStatus()
   const { trigger: addLib } = useAddLibrary()
   const { trigger: removeLib } = useRemoveLibrary()
   const { trigger: toggleMonitor, isMutating: togglingMonitor } = useToggleMonitor()
   const { trigger: rescanPath } = useRescanLibraryPath()
-  const { data: scanSettings } = useScanSettings(isAdmin)
-  const { trigger: updateScan } = useUpdateScanSettings()
   const [rescanningId, setRescanningId] = useState<number | null>(null)
   const [showFolderPicker, setShowFolderPicker] = useState(false)
-  const [scanInterval, setScanInterval] = useState<string>('')
-
-  // Sync scanInterval from server once loaded
-  useEffect(() => {
-    if (scanSettings && scanInterval === '') {
-      setScanInterval(String(scanSettings.interval_hours))
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [scanSettings])
 
   const handleMonitorToggle = async () => {
     if (!monitorData) return
@@ -283,28 +269,6 @@ function ZoneA({ isAdmin }: { isAdmin: boolean }) {
       toast.error(err instanceof Error ? err.message : t('common.failedToLoad'))
     } finally {
       setRescanningId(null)
-    }
-  }
-
-  const handleScanEnabledToggle = async () => {
-    if (!scanSettings) return
-    try {
-      await updateScan({ enabled: !scanSettings.enabled })
-      toast.success(t('import.scan.saved'))
-    } catch {
-      toast.error(t('import.scan.saveFailed'))
-    }
-  }
-
-  const handleIntervalBlur = async () => {
-    const val = parseInt(scanInterval, 10)
-    if (isNaN(val) || val < 6 || val > 168) return
-    if (scanSettings && val === scanSettings.interval_hours) return
-    try {
-      await updateScan({ interval_hours: val })
-      toast.success(t('import.scan.saved'))
-    } catch {
-      toast.error(t('import.scan.saveFailed'))
     }
   }
 
@@ -435,55 +399,6 @@ function ZoneA({ isAdmin }: { isAdmin: boolean }) {
             />
           </button>
         </div>
-
-        {/* Scan settings (admin only) */}
-        {isAdmin && scanSettings && (
-          <div className="pt-2 space-y-3 border-t border-vault-border/50 mt-2">
-            {/* Auto-scan toggle */}
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-vault-text">{t('import.scan.autoEnabled')}</span>
-              <button
-                onClick={handleScanEnabledToggle}
-                className={`relative w-10 h-5 rounded-full transition-colors ${
-                  scanSettings.enabled ? 'bg-vault-accent' : 'bg-vault-border'
-                }`}
-              >
-                <span
-                  className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${
-                    scanSettings.enabled ? 'translate-x-5' : ''
-                  }`}
-                />
-              </button>
-            </div>
-
-            {/* Interval input */}
-            {scanSettings.enabled && (
-              <div className="flex items-center gap-2">
-                <label className="text-sm text-vault-text shrink-0">
-                  {t('import.scan.intervalLabel')}
-                </label>
-                <input
-                  type="number"
-                  min={6}
-                  max={168}
-                  value={scanInterval}
-                  onChange={(e) => setScanInterval(e.target.value)}
-                  onBlur={handleIntervalBlur}
-                  className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1 text-sm text-vault-text focus:outline-none focus:border-vault-accent"
-                />
-              </div>
-            )}
-
-            {/* Last scan time */}
-            <p className="text-xs text-vault-text-muted">
-              {scanSettings.last_run
-                ? t('import.scan.lastScan', {
-                    time: new Date(scanSettings.last_run).toLocaleString(),
-                  })
-                : t('import.scan.neverScanned')}
-            </p>
-          </div>
-        )}
       </div>
     </div>
   )
@@ -506,7 +421,6 @@ function ZoneB() {
   )
   const [selectedDir, setSelectedDir] = useState<string | null>(null)
   const [pattern, setPattern] = useState('{title}')
-  const [mode, setMode] = useState<'copy' | 'link'>('copy')
   const [showPicker, setShowPicker] = useState(false)
   const [matches, setMatches] = useState<BatchMatch[]>([])
   const [unmatched, setUnmatched] = useState<Array<{ rel_path: string; file_count: number }>>([])
@@ -541,7 +455,7 @@ function ZoneB() {
     try {
       const result = await startBatch({
         rootDir: selectedDir!,
-        mode,
+        mode: 'copy',
         galleries: selected.map((m) => ({ path: m.abs_path, artist: m.artist, title: m.title })),
       })
       setBatchId(result.batch_id)
@@ -555,7 +469,6 @@ function ZoneB() {
     setPhase('idle')
     setSelectedDir(null)
     setPattern('{title}')
-    setMode('copy')
     setMatches([])
     setUnmatched([])
     setBatchId(null)
@@ -658,35 +571,6 @@ function ZoneB() {
                   </button>
                 ))}
               </div>
-            </div>
-
-            {/* Mode toggle */}
-            <div>
-              <div className="flex rounded overflow-hidden border border-vault-border w-fit">
-                <button
-                  onClick={() => setMode('copy')}
-                  className={`px-4 py-1.5 text-xs font-medium transition-colors ${
-                    mode === 'copy'
-                      ? 'bg-vault-accent text-white'
-                      : 'bg-vault-input text-vault-text-muted hover:text-vault-text'
-                  }`}
-                >
-                  {t('import.batch.modeCopy')}
-                </button>
-                <button
-                  onClick={() => setMode('link')}
-                  className={`px-4 py-1.5 text-xs font-medium transition-colors ${
-                    mode === 'link'
-                      ? 'bg-vault-accent text-white'
-                      : 'bg-vault-input text-vault-text-muted hover:text-vault-text'
-                  }`}
-                >
-                  {t('import.batch.modeLink')}
-                </button>
-              </div>
-              <p className="text-[11px] text-vault-text-muted mt-1">
-                {mode === 'copy' ? t('import.batch.modeCopyDesc') : t('import.batch.modeLinkDesc')}
-              </p>
             </div>
 
             {/* Scan button */}
@@ -978,8 +862,6 @@ function ZoneC() {
 
 export default function ImportPage() {
   const { data: monitorData } = useMonitorStatus()
-  const { data: profile } = useProfile()
-  const isAdmin = profile?.role === 'admin'
 
   return (
     <div className="max-w-3xl">
@@ -1001,8 +883,8 @@ export default function ImportPage() {
         )}
       </div>
 
-      {/* A Zone: Monitored Folders */}
-      <ZoneA isAdmin={isAdmin} />
+      {/* A Zone: External folders */}
+      <ZoneA />
 
       {/* B Zone: Import into System */}
       <ZoneB />

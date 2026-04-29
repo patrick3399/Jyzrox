@@ -101,8 +101,11 @@ const en: Record<string, string> = {
   'library.inReadingList': 'In Reading List',
   'library.readLater': 'Read Later',
   'library.allSources': 'All',
+  'library.local': 'Local',
   'library.monitored': 'Monitored',
   'library.imported': 'Imported',
+  'library.localLink': 'External Folders',
+  'library.localCopy': 'Jyzrox Import',
   'library.dateAdded': 'Date Added',
   'library.rating': 'Rating',
   'library.pagesSort': 'Pages',
@@ -591,6 +594,9 @@ const en: Record<string, string> = {
   'explorer.totalFiles': '{count} files',
   'explorer.noSources': 'No source folders found',
   'explorer.backToSources': '← Sources',
+  'explorer.externalFolders': 'External Folders',
+  'explorer.jyzroxImport': 'Jyzrox Import',
+  'explorer.uncategorizedArtist': 'Uncategorized Artist',
 
   // ── Queue (extra) ──
   'queue.cancelError': 'Failed to cancel job',
@@ -810,12 +816,12 @@ const en: Record<string, string> = {
   'settings.reconcileOrphanBlobs': 'Orphan blobs cleaned',
 
   // ── Import ──
-  'import.zoneA.title': 'Monitored Folders',
+  'import.zoneA.title': 'External Folders',
   'import.zoneA.desc': 'For NAS/external drives — automatically keeps in sync',
   'import.zoneA.rescan': 'Rescan',
   'import.zoneA.online': 'Online',
   'import.zoneA.offline': 'Offline',
-  'import.zoneB.title': 'Import Galleries',
+  'import.zoneB.title': 'Import to Jyzrox',
   'import.zoneB.desc': 'Scan folders and batch import with pattern matching',
   'import.title': 'Import Center',
   'import.dir.empty': 'No supported files found',
@@ -1314,6 +1320,15 @@ const en: Record<string, string> = {
   'scheduledTasks.resetToDefault': 'Reset to default',
   'scheduledTasks.defaultCron': 'Default: {cron}',
   'scheduledTasks.lastRunAgo': 'Last run {time}',
+  'scheduledTasks.nextRunAgo': 'Next run: {time} ({relative})',
+  'scheduledTasks.nextRunDisabled': 'Next run: disabled',
+  'scheduledTasks.inMinutes': 'in {n} min',
+  'scheduledTasks.inHours': 'in {n} hr',
+  'scheduledTasks.inDays': 'in {n} day(s)',
+  'scheduledTasks.externalFolderScan': 'External Folder Scan',
+  'scheduledTasks.externalFolderScanDesc':
+    'Controls automatic scans for external folders linked into Jyzrox.',
+  'scheduledTasks.otherTasks': 'Other Tasks',
   'scheduledTasks.showError': 'Show error',
   'scheduledTasks.hideError': 'Hide error',
 

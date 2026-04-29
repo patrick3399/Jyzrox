@@ -83,18 +83,49 @@ export function TaskList({ pollWhileRunning = true }: TaskListProps) {
     )
   }
 
+  const libraryScanTask = tasks.find((task) => task.id === 'library_scan')
+  const otherTasks = tasks.filter((task) => task.id !== 'library_scan')
+
   return (
-    <div className="space-y-3">
-      {tasks.map((task) => (
-        <TaskCard
-          key={task.id}
-          task={task}
-          onToggle={handleToggle}
-          onCronUpdate={handleCronUpdate}
-          onReset={handleReset}
-          onRunNow={handleRunNow}
-        />
-      ))}
+    <div className="space-y-6">
+      {libraryScanTask && (
+        <section className="space-y-2">
+          <div>
+            <h2 className="text-base font-semibold text-vault-text">
+              {t('scheduledTasks.externalFolderScan')}
+            </h2>
+            <p className="text-xs text-vault-text-muted">
+              {t('scheduledTasks.externalFolderScanDesc')}
+            </p>
+          </div>
+          <TaskCard
+            task={libraryScanTask}
+            featured
+            onToggle={handleToggle}
+            onCronUpdate={handleCronUpdate}
+            onReset={handleReset}
+            onRunNow={handleRunNow}
+          />
+        </section>
+      )}
+
+      {otherTasks.length > 0 && (
+        <section className="space-y-3">
+          <h2 className="text-base font-semibold text-vault-text">
+            {t('scheduledTasks.otherTasks')}
+          </h2>
+          {otherTasks.map((task) => (
+            <TaskCard
+              key={task.id}
+              task={task}
+              onToggle={handleToggle}
+              onCronUpdate={handleCronUpdate}
+              onReset={handleReset}
+              onRunNow={handleRunNow}
+            />
+          ))}
+        </section>
+      )}
     </div>
   )
 }

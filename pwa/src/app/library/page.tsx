@@ -349,9 +349,9 @@ function LibraryContent() {
                     {(sourcesData ?? []).map((opt) => (
                       <option key={opt.value} value={opt.value}>
                         {opt.value === 'local:link'
-                          ? t('library.monitored')
+                          ? t('explorer.externalFolders')
                           : opt.value === 'local:copy'
-                            ? t('library.imported')
+                            ? t('explorer.jyzroxImport')
                             : opt.label}
                       </option>
                     ))}

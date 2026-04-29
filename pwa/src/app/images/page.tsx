@@ -21,11 +21,11 @@ function sourceDisplayName(value: string): string {
   const STATIC: Record<string, string> = {
     ehentai: 'E-Hentai',
     pixiv: 'Pixiv',
-    local: 'Local',
+    local: t('library.local'),
     gallery_dl: 'gallery-dl',
   }
-  if (value === 'local:link') return t('library.monitored')
-  if (value === 'local:copy') return t('library.imported')
+  if (value === 'local:link') return t('explorer.externalFolders')
+  if (value === 'local:copy') return t('explorer.jyzroxImport')
   return STATIC[value] ?? value
 }
 

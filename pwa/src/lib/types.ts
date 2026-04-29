@@ -553,6 +553,7 @@ export interface ScheduledTask {
   enabled: boolean
   cron_expr: string
   default_cron: string
+  next_run: string | null
   last_run: string | null
   last_status: string | null
   last_error: string | null
@@ -611,6 +612,11 @@ export interface LibraryDirectory {
   is_favorited: boolean // per-user
   my_rating: number | null // per-user
   source: string | null
+  import_mode?: string | null
+  artist_id?: string | null
+  uploader?: string | null
+  library_path?: string | null
+  source_path?: string | null
   disk_size: number
 }
 

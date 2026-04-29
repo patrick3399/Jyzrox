@@ -37,12 +37,38 @@ function StarRating({ rating }: { rating: number }) {
 const SOURCE_DISPLAY: Record<string, string> = {
   ehentai: 'E-Hentai',
   pixiv: 'Pixiv',
-  local: 'Local',
+  local: t('library.local'),
   gallery_dl: 'gallery-dl',
 }
 
 function sourceDisplayName(source: string): string {
+  if (source === 'local:link') return t('explorer.externalFolders')
+  if (source === 'local:copy') return t('explorer.jyzroxImport')
   return SOURCE_DISPLAY[source] ?? source
+}
+
+function sourceGroupKey(dir: Pick<LibraryDirectory, 'source' | 'import_mode'>): string {
+  if (dir.source === 'local' && (dir.import_mode === 'link' || dir.import_mode === 'copy')) {
+    return `local:${dir.import_mode}`
+  }
+  return dir.source ?? 'local'
+}
+
+function sourceApiValue(sourceKey: string | null): string | undefined {
+  if (!sourceKey) return undefined
+  return sourceKey.startsWith('local:') ? 'local' : sourceKey
+}
+
+function sourceImportMode(sourceKey: string | null): string | undefined {
+  if (sourceKey === 'local:link') return 'link'
+  if (sourceKey === 'local:copy') return 'copy'
+  return undefined
+}
+
+function localArtistName(dir: LibraryDirectory): string {
+  if (dir.artist_id) return dir.artist_id.replace(/^local:/, '')
+  if (dir.uploader) return dir.uploader
+  return t('explorer.uncategorizedArtist')
 }
 
 // ── Main Component ────────────────────────────────────────────────────
@@ -92,6 +118,8 @@ export default function ExplorerPage() {
     () =>
       api.library.listFiles({
         q: debouncedQuery || undefined,
+        source: sourceApiValue(currentSource),
+        import_mode: sourceImportMode(currentSource),
         page,
         limit: PAGE_LIMIT,
       }),
@@ -264,7 +292,7 @@ export default function ExplorerPage() {
   // At root level, all directories are used for grouping.
   const filteredDirectories: LibraryDirectory[] =
     currentSource !== null
-      ? allDirectories.filter((d) => d.source === currentSource)
+      ? allDirectories.filter((d) => sourceGroupKey(d) === currentSource)
       : allDirectories
 
   const galleryTitle = currentGallery?.title ?? fileData?.title ?? ''
@@ -279,7 +307,7 @@ export default function ExplorerPage() {
       { galleries: LibraryDirectory[]; totalFiles: number; totalSize: number }
     > = new Map()
     for (const dir of allDirectories) {
-      const src = dir.source ?? 'local'
+      const src = sourceGroupKey(dir)
       if (!groups.has(src)) {
         groups.set(src, { galleries: [], totalFiles: 0, totalSize: 0 })
       }
@@ -448,6 +476,7 @@ export default function ExplorerPage() {
             viewMode={viewMode}
             selectedItems={selectedItems}
             onItemClick={handleItemClick}
+            sourceKey={currentSource}
           />
         ) : (
           <SourceView
@@ -616,9 +645,17 @@ interface RootViewProps {
   viewMode: 'grid' | 'list'
   selectedItems: Set<string | number>
   onItemClick: (id: string | number, e: React.MouseEvent) => void
+  sourceKey: string | null
 }
 
-function RootView({ directories, loading, viewMode, selectedItems, onItemClick }: RootViewProps) {
+function RootView({
+  directories,
+  loading,
+  viewMode,
+  selectedItems,
+  onItemClick,
+  sourceKey,
+}: RootViewProps) {
   if (loading) {
     return <SkeletonGrid count={8} />
   }
@@ -631,81 +668,111 @@ function RootView({ directories, loading, viewMode, selectedItems, onItemClick }
     )
   }
 
+  const groupedByArtist = sourceKey?.startsWith('local:')
+    ? Array.from(
+        directories.reduce((groups, dir) => {
+          const artist = localArtistName(dir)
+          const items = groups.get(artist) ?? []
+          items.push(dir)
+          groups.set(artist, items)
+          return groups
+        }, new Map<string, LibraryDirectory[]>()),
+      )
+    : [[null, directories] as [string | null, LibraryDirectory[]]]
+
   if (viewMode === 'grid') {
     return (
-      <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
-        {directories.map((dir) => {
-          const isSelected = selectedItems.has(dir.gallery_id)
-          return (
-            <div
-              key={dir.gallery_id}
-              onClick={(e) => onItemClick(dir.gallery_id, e)}
-              className={`bg-vault-card rounded-lg p-3 cursor-pointer border transition-all select-none ${
-                isSelected
-                  ? 'border-vault-accent ring-2 ring-vault-accent'
-                  : 'border-vault-border hover:border-vault-accent/50 hover:bg-vault-card-hover'
-              }`}
-            >
-              <div className="flex items-center gap-2 mb-2">
-                <Folder size={20} className="text-vault-accent shrink-0" />
-                <span className="text-sm font-medium text-vault-text truncate">{dir.title}</span>
-              </div>
-              <div className="text-xs text-vault-text-secondary space-y-1">
-                <div className="flex items-center justify-between">
-                  <span>{t('explorer.files', { count: String(dir.file_count) })}</span>
-                  <span>{formatSize(dir.disk_size)}</span>
-                </div>
-                <div className="flex items-center justify-between">
-                  <StarRating rating={dir.my_rating ?? dir.rating} />
-                  {dir.source && (
-                    <span className="bg-vault-input px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide">
-                      {dir.source}
-                    </span>
-                  )}
-                </div>
-              </div>
+      <div className="space-y-5">
+        {groupedByArtist.map(([artist, items]) => (
+          <section key={artist ?? 'all'} className="space-y-2">
+            {artist && <h2 className="text-sm font-semibold text-vault-text">{artist}</h2>}
+            <div className="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3">
+              {items.map((dir) => {
+                const isSelected = selectedItems.has(dir.gallery_id)
+                return (
+                  <div
+                    key={dir.gallery_id}
+                    onClick={(e) => onItemClick(dir.gallery_id, e)}
+                    className={`bg-vault-card rounded-lg p-3 cursor-pointer border transition-all select-none ${
+                      isSelected
+                        ? 'border-vault-accent ring-2 ring-vault-accent'
+                        : 'border-vault-border hover:border-vault-accent/50 hover:bg-vault-card-hover'
+                    }`}
+                  >
+                    <div className="flex items-center gap-2 mb-2">
+                      <Folder size={20} className="text-vault-accent shrink-0" />
+                      <span className="text-sm font-medium text-vault-text truncate">
+                        {dir.title}
+                      </span>
+                    </div>
+                    <div className="text-xs text-vault-text-secondary space-y-1">
+                      <div className="flex items-center justify-between">
+                        <span>{t('explorer.files', { count: String(dir.file_count) })}</span>
+                        <span>{formatSize(dir.disk_size)}</span>
+                      </div>
+                      <div className="flex items-center justify-between">
+                        <StarRating rating={dir.my_rating ?? dir.rating} />
+                        {dir.source && (
+                          <span className="bg-vault-input px-1.5 py-0.5 rounded text-[10px] uppercase tracking-wide">
+                            {sourceDisplayName(sourceGroupKey(dir))}
+                          </span>
+                        )}
+                      </div>
+                    </div>
+                  </div>
+                )
+              })}
             </div>
-          )
-        })}
+          </section>
+        ))}
       </div>
     )
   }
 
   // List mode
   return (
-    <div className="flex flex-col gap-0.5">
-      <div className="grid grid-cols-[1fr_80px_80px_80px_80px] gap-2 px-3 py-1.5 text-xs font-medium text-vault-text-secondary border-b border-vault-border">
-        <span>{t('explorer.fileName')}</span>
-        <span className="text-right">{t('explorer.files', { count: '' }).trim()}</span>
-        <span className="text-right">{t('explorer.diskSize')}</span>
-        <span>{t('library.metaRating').replace(':', '')}</span>
-        <span>{t('library.metaSource')}</span>
-      </div>
-      {directories.map((dir) => {
-        const isSelected = selectedItems.has(dir.gallery_id)
-        return (
-          <div
-            key={dir.gallery_id}
-            onClick={(e) => onItemClick(dir.gallery_id, e)}
-            className={`grid grid-cols-[1fr_80px_80px_80px_80px] gap-2 px-3 min-h-[48px] items-center rounded-lg cursor-pointer select-none transition-colors ${
-              isSelected
-                ? 'bg-vault-accent/10 ring-1 ring-vault-accent'
-                : 'hover:bg-vault-card-hover'
-            }`}
-          >
-            <div className="flex items-center gap-2 min-w-0">
-              <Folder size={16} className="text-vault-accent shrink-0" />
-              <span className="text-sm text-vault-text truncate">{dir.title}</span>
-            </div>
-            <span className="text-xs text-vault-text-secondary text-right">{dir.file_count}</span>
-            <span className="text-xs text-vault-text-secondary text-right">
-              {formatSize(dir.disk_size)}
-            </span>
-            <StarRating rating={dir.my_rating ?? dir.rating} />
-            <span className="text-xs text-vault-text-secondary truncate">{dir.source ?? '—'}</span>
+    <div className="space-y-4">
+      {groupedByArtist.map(([artist, items]) => (
+        <section key={artist ?? 'all'} className="flex flex-col gap-0.5">
+          {artist && <h2 className="px-3 py-1 text-sm font-semibold text-vault-text">{artist}</h2>}
+          <div className="grid grid-cols-[1fr_80px_80px_80px_80px] gap-2 px-3 py-1.5 text-xs font-medium text-vault-text-secondary border-b border-vault-border">
+            <span>{t('explorer.fileName')}</span>
+            <span className="text-right">{t('explorer.files', { count: '' }).trim()}</span>
+            <span className="text-right">{t('explorer.diskSize')}</span>
+            <span>{t('library.metaRating').replace(':', '')}</span>
+            <span>{t('library.metaSource')}</span>
           </div>
-        )
-      })}
+          {items.map((dir) => {
+            const isSelected = selectedItems.has(dir.gallery_id)
+            return (
+              <div
+                key={dir.gallery_id}
+                onClick={(e) => onItemClick(dir.gallery_id, e)}
+                className={`grid grid-cols-[1fr_80px_80px_80px_80px] gap-2 px-3 min-h-[48px] items-center rounded-lg cursor-pointer select-none transition-colors ${
+                  isSelected
+                    ? 'bg-vault-accent/10 ring-1 ring-vault-accent'
+                    : 'hover:bg-vault-card-hover'
+                }`}
+              >
+                <div className="flex items-center gap-2 min-w-0">
+                  <Folder size={16} className="text-vault-accent shrink-0" />
+                  <span className="text-sm text-vault-text truncate">{dir.title}</span>
+                </div>
+                <span className="text-xs text-vault-text-secondary text-right">
+                  {dir.file_count}
+                </span>
+                <span className="text-xs text-vault-text-secondary text-right">
+                  {formatSize(dir.disk_size)}
+                </span>
+                <StarRating rating={dir.my_rating ?? dir.rating} />
+                <span className="text-xs text-vault-text-secondary truncate">
+                  {sourceDisplayName(sourceGroupKey(dir))}
+                </span>
+              </div>
+            )
+          })}
+        </section>
+      ))}
     </div>
   )
 }

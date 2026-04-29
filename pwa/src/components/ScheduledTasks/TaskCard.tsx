@@ -8,6 +8,7 @@ import type { ScheduledTask } from '@/lib/types'
 
 interface TaskCardProps {
   task: ScheduledTask
+  featured?: boolean
   onToggle: (taskId: string, enabled: boolean) => Promise<void>
   onCronUpdate: (taskId: string, cron: string) => Promise<void>
   onReset: (taskId: string) => Promise<void>
@@ -21,7 +22,31 @@ const CRON_PRESETS = [
   { label: () => t('settings.tasks.presetWeeklyMon3am'), value: '0 3 * * 1' },
 ]
 
-export function TaskCard({ task, onToggle, onCronUpdate, onReset, onRunNow }: TaskCardProps) {
+function formatDateTime(value: string | null): string {
+  if (!value) return ''
+  return new Date(value).toLocaleString()
+}
+
+function formatFutureDistance(value: string | null): string {
+  if (!value) return ''
+  const diff = new Date(value).getTime() - Date.now()
+  if (diff <= 0) return t('timeUtils.justNow')
+  const minutes = Math.ceil(diff / 60000)
+  if (minutes < 60) return t('scheduledTasks.inMinutes', { n: String(minutes) })
+  const hours = Math.ceil(minutes / 60)
+  if (hours < 24) return t('scheduledTasks.inHours', { n: String(hours) })
+  const days = Math.ceil(hours / 24)
+  return t('scheduledTasks.inDays', { n: String(days) })
+}
+
+export function TaskCard({
+  task,
+  featured = false,
+  onToggle,
+  onCronUpdate,
+  onReset,
+  onRunNow,
+}: TaskCardProps) {
   const [editingCron, setEditingCron] = useState<string | undefined>(undefined)
   const [showError, setShowError] = useState(false)
 
@@ -44,9 +69,15 @@ export function TaskCard({ task, onToggle, onCronUpdate, onReset, onRunNow }: Ta
   }
 
   const ago = timeAgo(task.last_run)
+  const nextRun = task.enabled ? formatDateTime(task.next_run) : ''
+  const nextRunRelative = task.enabled ? formatFutureDistance(task.next_run) : ''
 
   return (
-    <div className="bg-vault-input border border-vault-border rounded-lg p-3">
+    <div
+      className={`bg-vault-input border rounded-lg p-3 ${
+        featured ? 'border-vault-accent/50' : 'border-vault-border'
+      }`}
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="flex-1 min-w-0">
           {/* Header */}
@@ -102,6 +133,11 @@ export function TaskCard({ task, onToggle, onCronUpdate, onReset, onRunNow }: Ta
               {t('scheduledTasks.lastRunAgo', { time: ago })}
             </p>
           )}
+          <p className="text-[10px] text-vault-text-muted">
+            {nextRun
+              ? t('scheduledTasks.nextRunAgo', { time: nextRun, relative: nextRunRelative })
+              : t('scheduledTasks.nextRunDisabled')}
+          </p>
 
           {/* Error block */}
           {task.last_error && (

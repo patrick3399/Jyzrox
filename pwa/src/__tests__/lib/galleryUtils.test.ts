@@ -45,23 +45,23 @@ describe('getSourceStyle', () => {
     expect(result.className).not.toContain('vault')
   })
 
-  it('test_getSourceStyle_local_link_returns_monitored_i18n_key_and_palette_color', () => {
+  it('test_getSourceStyle_local_link_returns_local_label_and_palette_color', () => {
     const result = getSourceStyle(makeGallery('local', 'link'))
-    expect(result.label).toBe('library.monitored')
+    expect(result.label).toBe('library.local')
     expect(result.className).toMatch(/bg-\w+-900\/50/)
     expect(result.className).not.toContain('vault')
   })
 
-  it('test_getSourceStyle_local_copy_returns_imported_i18n_key_and_palette_color', () => {
+  it('test_getSourceStyle_local_copy_returns_local_label_and_palette_color', () => {
     const result = getSourceStyle(makeGallery('local', 'copy'))
-    expect(result.label).toBe('library.imported')
+    expect(result.label).toBe('library.local')
     expect(result.className).toMatch(/bg-\w+-900\/50/)
     expect(result.className).not.toContain('vault')
   })
 
   it('test_getSourceStyle_local_no_import_mode_returns_local_label_and_palette_color', () => {
     const result = getSourceStyle(makeGallery('local', null))
-    expect(result.label).toBe('Local')
+    expect(result.label).toBe('library.local')
     expect(result.className).toMatch(/bg-\w+-900\/50/)
     expect(result.className).not.toContain('vault')
   })
@@ -87,14 +87,12 @@ describe('getSourceStyle', () => {
     )
   })
 
-  it('test_getSourceStyle_local_variants_get_different_colors_from_each_other', () => {
+  it('test_getSourceStyle_local_variants_share_the_same_source_color', () => {
     const colorNone = getSourceStyle(makeGallery('local', null)).className
     const colorLink = getSourceStyle(makeGallery('local', 'link')).className
     const colorCopy = getSourceStyle(makeGallery('local', 'copy')).className
-    // All three keys ("local", "local:link", "local:copy") must hash to distinct palette entries
-    expect(colorNone).not.toBe(colorLink)
-    expect(colorNone).not.toBe(colorCopy)
-    expect(colorLink).not.toBe(colorCopy)
+    expect(colorNone).toBe(colorLink)
+    expect(colorNone).toBe(colorCopy)
   })
 
   it('test_getSourceStyle_palette_covers_multiple_distinct_sources', () => {

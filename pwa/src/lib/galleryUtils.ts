@@ -49,20 +49,11 @@ export function getSourceStyle(gallery: Pick<Gallery, 'source' | 'import_mode'>)
   let label: string
   if (gallery.source === 'ehentai') label = 'E-Hentai'
   else if (gallery.source === 'pixiv') label = 'Pixiv'
-  else if (gallery.source === 'local' && gallery.import_mode === 'link')
-    label = t('library.monitored')
-  else if (gallery.source === 'local' && gallery.import_mode === 'copy')
-    label = t('library.imported')
-  else if (gallery.source === 'local') label = 'Local'
+  else if (gallery.source === 'local') label = t('library.local')
   else label = gallery.source.charAt(0).toUpperCase() + gallery.source.slice(1)
 
   // Determine color — hash-based for all sources.
-  // local variants use distinct keys so they get different palette entries.
-  const colorKey =
-    gallery.source === 'local' && gallery.import_mode
-      ? `local:${gallery.import_mode}`
-      : gallery.source
-  const className = getSourceColorClass(colorKey)
+  const className = getSourceColorClass(gallery.source)
 
   return { label, className }
 }

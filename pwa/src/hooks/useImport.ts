@@ -117,6 +117,8 @@ export function useRecentImports() {
 }
 
 export function useScanSettings(enabled = true) {
+  // Legacy compatibility for older import screens. New scan scheduling lives
+  // under /scheduled-tasks and cron:library_scan:*.
   return useSWR(enabled ? 'import/scan-settings' : null, () => api.import_.getScanSettings())
 }
 

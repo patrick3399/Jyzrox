@@ -426,7 +426,9 @@ const library = {
       `/api/library/artists/${encodeURIComponent(artistId)}/images${qs(params as Record<string, unknown>)}`,
     ),
 
-  listFiles: (params: { q?: string; page?: number; limit?: number } = {}) =>
+  listFiles: (
+    params: { q?: string; source?: string; import_mode?: string; page?: number; limit?: number } = {},
+  ) =>
     apiFetch<{ directories: LibraryDirectory[]; total: number; page: number }>(
       `/api/library/files${qs(params as Record<string, unknown>)}`,
     ),

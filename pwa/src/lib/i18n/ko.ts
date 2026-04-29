@@ -104,8 +104,11 @@ const ko: Record<string, string> = {
   'library.inReadingList': '읽기 목록에 있음',
   'library.readLater': '나중에 읽기',
   'library.allSources': '전체',
+  'library.local': '로컬',
   'library.monitored': '모니터링 중',
   'library.imported': '가져옴',
+  'library.localLink': '외부 폴더',
+  'library.localCopy': 'Jyzrox 가져오기',
   'library.dateAdded': '추가일',
   'library.rating': '평점',
   'library.pagesSort': '페이지 수',
@@ -690,12 +693,12 @@ const ko: Record<string, string> = {
   'export.kohyaDesc4': 'Kohya_ss, EveryDream2 및 기타 파인튜닝 도구와 호환',
 
   // ── Import ──
-  'import.zoneA.title': '모니터링 폴더',
+  'import.zoneA.title': '외부 폴더',
   'import.zoneA.desc': 'NAS/외장 드라이브용 — 자동으로 동기화 유지',
   'import.zoneA.rescan': '재스캔',
   'import.zoneA.online': '온라인',
   'import.zoneA.offline': '오프라인',
-  'import.zoneB.title': '갤러리 가져오기',
+  'import.zoneB.title': 'Jyzrox로 가져오기',
   'import.zoneB.desc': '폴더를 스캔하고 패턴 매칭으로 일괄 가져오기',
   'import.title': '가져오기 센터',
   'import.dir.empty': '지원 파일 없음',
@@ -1295,6 +1298,9 @@ const ko: Record<string, string> = {
   'explorer.totalFiles': '{count}개 파일',
   'explorer.noSources': '소스 폴더를 찾을 수 없습니다',
   'explorer.backToSources': '← 소스',
+  'explorer.externalFolders': '외부 폴더',
+  'explorer.jyzroxImport': 'Jyzrox 가져오기',
+  'explorer.uncategorizedArtist': '분류되지 않은 아티스트',
 
   // ── Image Browser ──
   'images.title': '이미지 브라우저',
@@ -1316,6 +1322,15 @@ const ko: Record<string, string> = {
   'scheduledTasks.resetToDefault': '기본값으로 초기화',
   'scheduledTasks.defaultCron': '기본값: {cron}',
   'scheduledTasks.lastRunAgo': '{time} 전 마지막 실행',
+  'scheduledTasks.nextRunAgo': '다음 실행: {time}({relative})',
+  'scheduledTasks.nextRunDisabled': '다음 실행: 비활성화됨',
+  'scheduledTasks.inMinutes': '{n}분 후',
+  'scheduledTasks.inHours': '{n}시간 후',
+  'scheduledTasks.inDays': '{n}일 후',
+  'scheduledTasks.externalFolderScan': '외부 폴더 스캔',
+  'scheduledTasks.externalFolderScanDesc':
+    'Jyzrox에 연결된 외부 폴더의 자동 스캔을 제어합니다.',
+  'scheduledTasks.otherTasks': '기타 작업',
   'scheduledTasks.showError': '오류 보기',
   'scheduledTasks.hideError': '오류 숨기기',
 
