@@ -450,6 +450,23 @@ const library = {
       { method: 'POST', body: JSON.stringify({ page_num: pageNum }) },
     ),
 
+  hideImage: (imageId: number) =>
+    apiFetch<{ status: string; remaining_pages: number }>(`/api/library/images/${imageId}/hide`, {
+      method: 'POST',
+    }),
+
+  restoreImage: (imageId: number) =>
+    apiFetch<{ status: string; remaining_pages: number }>(`/api/library/images/${imageId}/restore`, {
+      method: 'POST',
+    }),
+
+  listHidden: (source: string, sourceId: string) =>
+    apiFetch<{
+      gallery_id: number
+      images: GalleryImage[]
+      favorited_image_ids: number[]
+    }>(galleryApiPath(source, sourceId, '/hidden')),
+
   listExcluded: (source: string, sourceId: string) =>
     apiFetch<{
       gallery_id: number

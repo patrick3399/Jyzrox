@@ -106,6 +106,15 @@ class Image(Base):
     blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=False)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
     added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    visibility: Mapped[str] = mapped_column(Text, default="active", server_default="active", nullable=False)
+    source_item_id: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_item_url: Mapped[str | None] = mapped_column(Text, nullable=True)
+    source_position: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    source_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    hidden_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    replaced_by_image_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+    )
 
     gallery: Mapped["Gallery"] = relationship(back_populates="images")
     blob: Mapped["Blob"] = relationship()
@@ -323,6 +332,7 @@ class Subscription(Base):
     auto_download: Mapped[bool] = mapped_column(Boolean, default=True)
     cron_expr: Mapped[str | None] = mapped_column(Text, default="0 */2 * * *")
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_item_id: Mapped[str | None] = mapped_column(Text)
     last_status: Mapped[str] = mapped_column(Text, default="pending")
     last_error: Mapped[str | None] = mapped_column(Text)

@@ -223,8 +223,8 @@ class TestReconciliationJob:
         mock_unlink.assert_any_call(broken_path_str)
         assert result["status"] == "done"
 
-    async def test_empty_gallery_directories_removed_from_db(self, tmp_path):
-        """Gallery dirs with zero valid files should be deleted from the DB."""
+    async def test_empty_download_gallery_directories_are_preserved(self, tmp_path):
+        """Downloaded gallery dirs with zero valid files should not be hard-deleted by reconciliation."""
         from worker.reconciliation import reconciliation_job
 
         lib_base = tmp_path / "library"
@@ -284,10 +284,10 @@ class TestReconciliationJob:
             result = await reconciliation_job(ctx)
 
         assert result["status"] == "done"
-        assert result["removed_galleries"] >= 1
+        assert result["removed_galleries"] == 0
 
-    async def test_orphan_galleries_cleaned_from_db(self, tmp_path):
-        """Galleries present in DB but absent on disk should be deleted."""
+    async def test_orphan_download_galleries_are_preserved(self, tmp_path):
+        """Downloaded galleries present in DB but absent on disk should be preserved for repair/re-download."""
         from worker.reconciliation import reconciliation_job
 
         # Create an empty library dir (no gallery dirs on disk)
@@ -333,7 +333,7 @@ class TestReconciliationJob:
             result = await reconciliation_job(ctx)
 
         assert result["status"] == "done"
-        assert result["removed_galleries"] >= 1
+        assert result["removed_galleries"] == 0
 
     async def test_orphan_blobs_deleted_from_cas_and_db(self, tmp_path):
         """Blobs with ref_count<=0 and actual_refs==0 should have CAS files deleted."""

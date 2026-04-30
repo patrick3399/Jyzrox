@@ -368,7 +368,14 @@ _SQLITE_SCHEMA = [
         filename TEXT,
         blob_sha256 TEXT REFERENCES blobs(sha256),
         tags_array TEXT DEFAULT '[]',
-        added_at TIMESTAMP
+        added_at TIMESTAMP,
+        visibility TEXT DEFAULT 'active',
+        source_item_id TEXT,
+        source_item_url TEXT,
+        source_position INTEGER,
+        source_seen_at TIMESTAMP,
+        hidden_at TIMESTAMP,
+        replaced_by_image_id INTEGER REFERENCES images(id)
     )
     """,
     """
@@ -550,6 +557,7 @@ _SQLITE_SCHEMA = [
         auto_download BOOLEAN DEFAULT 1,
         cron_expr TEXT DEFAULT '0 */2 * * *',
         last_checked_at TIMESTAMP,
+        last_success_at TIMESTAMP,
         last_item_id TEXT,
         last_status TEXT DEFAULT 'pending',
         last_error TEXT,

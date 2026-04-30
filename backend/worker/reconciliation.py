@@ -11,8 +11,8 @@ from sqlalchemy.sql import select
 
 from core.config import settings
 from core.database import AsyncSessionLocal
-from db.models import Gallery, Image
-from services.cas import cas_path, thumb_dir
+from db.models import Blob, Gallery, Image
+from services.cas import cas_path, create_library_symlink, thumb_dir
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run
 
@@ -40,7 +40,7 @@ async def reconciliation_job(ctx: dict) -> dict:
 
     await _cron_record(ctx, "reconciliation", "running")
 
-    stats = {"removed_images": 0, "removed_galleries": 0, "orphan_blobs_cleaned": 0}
+    stats = {"removed_images": 0, "removed_galleries": 0, "orphan_blobs_cleaned": 0, "repaired_links": 0}
 
     lib_base = Path(settings.data_library_path)
     if not lib_base.exists():
@@ -107,20 +107,23 @@ async def reconciliation_job(ctx: dict) -> dict:
             chunk_gallery_ids = [g.id for g in galleries]
 
             # Batch query images for galleries in this chunk
-            rows = (await session.execute(
-                select(Image.id, Image.gallery_id, Image.filename, Image.blob_sha256)
-                .where(Image.gallery_id.in_(chunk_gallery_ids))
-            )).all()
+            rows = (
+                await session.execute(
+                    select(Image.id, Image.gallery_id, Image.filename, Image.blob_sha256, Blob)
+                    .join(Blob, Blob.sha256 == Image.blob_sha256)
+                    .where(Image.gallery_id.in_(chunk_gallery_ids))
+                )
+            ).all()
 
             # Build reverse map: gallery_id -> (source, source_id)
             id_to_key = {g.id: (g.source, g.source_id) for g in galleries}
 
             # Group DB rows by (source, source_id)
-            db_by_gallery: dict[tuple[str, str], dict[str, tuple[int, str]]] = {}
+            db_by_gallery: dict[tuple[str, str], dict[str, tuple[int, str, Blob]]] = {}
             for row in rows:
                 key = id_to_key.get(row.gallery_id)
                 if key:
-                    db_by_gallery.setdefault(key, {})[row.filename] = (row.id, row.blob_sha256)
+                    db_by_gallery.setdefault(key, {})[row.filename] = (row.id, row.blob_sha256, row.Blob)
 
             # Determine which image IDs and blob shas to remove for this chunk
             dead_image_ids: list[int] = []
@@ -128,11 +131,24 @@ async def reconciliation_job(ctx: dict) -> dict:
 
             for key in chunk_keys:
                 disk_files = gallery_map[key]
+                gallery = gallery_by_key.get(key)
                 db_files = db_by_gallery.get(key, {})
-                for filename, (img_id, sha) in db_files.items():
+                for filename, (img_id, sha, blob) in db_files.items():
                     if filename not in disk_files:
-                        dead_image_ids.append(img_id)
-                        dead_blob_shas.append(sha)
+                        if gallery and gallery.import_mode == "link":
+                            dead_image_ids.append(img_id)
+                            dead_blob_shas.append(sha)
+                        elif gallery and filename:
+                            try:
+                                await create_library_symlink(gallery.source, gallery.source_id, filename, blob)
+                                stats["repaired_links"] += 1
+                            except Exception as exc:
+                                logger.warning(
+                                    "[reconcile] failed to repair library link for gallery=%d file=%s: %s",
+                                    gallery.id,
+                                    filename,
+                                    exc,
+                                )
 
             if dead_image_ids:
                 # Batch decrement ref_counts
@@ -153,7 +169,11 @@ async def reconciliation_job(ctx: dict) -> dict:
             # Delete empty gallery dirs and their DB records in this chunk
             empty_in_chunk = [key for key in chunk_keys if key in empty_gallery_dirs]
             if empty_in_chunk:
-                empty_gids = [gallery_by_key[k].id for k in empty_in_chunk if k in gallery_by_key]
+                empty_gids = [
+                    gallery_by_key[k].id
+                    for k in empty_in_chunk
+                    if k in gallery_by_key and gallery_by_key[k].import_mode == "link"
+                ]
                 if empty_gids:
                     await session.execute(
                         text("DELETE FROM galleries WHERE id = ANY(:ids)"),
@@ -191,14 +211,17 @@ async def reconciliation_job(ctx: dict) -> dict:
 
         fs_keys = set(gallery_map.keys())
 
-        db_gallery_rows = (await session.execute(
-            select(Gallery.id, Gallery.source, Gallery.source_id)
-            .where(Gallery.download_status != "proxy_only")
-        )).all()
+        db_gallery_rows = (
+            await session.execute(
+                select(Gallery.id, Gallery.source, Gallery.source_id, Gallery.import_mode, Gallery.deleted_at).where(
+                    Gallery.download_status != "proxy_only"
+                )
+            )
+        ).all()
 
         orphan_gallery_ids = [
             row.id for row in db_gallery_rows
-            if (row.source, row.source_id) not in fs_keys
+            if (row.source, row.source_id) not in fs_keys and row.import_mode == "link" and row.deleted_at is None
         ]
         total_orphans = len(orphan_gallery_ids)
         logger.info("[reconcile] Phase 2: %d orphan galleries found", total_orphans)

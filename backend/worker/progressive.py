@@ -6,6 +6,7 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import update
+from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
@@ -31,11 +32,15 @@ class ProgressiveImporter:
         self._processed: set[str] = set()
         self._page_counter = 0
         self.source_url: str | None = None
-        self._sem = asyncio.Semaphore(2)
+        self._sem = asyncio.Semaphore(2 if page_num_from_filename else 1)
         self._job_started_at = datetime.now(UTC)
         self._tasks: list[asyncio.Task] = []
         self._page_num_from_filename = page_num_from_filename
         self._excluded_set: set[str] = set()
+        self._known_sha256s: set[str] = set()
+        self._known_filenames: set[str] = set()
+        self._known_source_items: set[str] = set()
+        self._source_item_state: dict[str, tuple[int, str, str, int | None]] = {}
 
     async def _load_gallery_state(self) -> None:
         """Load excluded blobs and current max page_num for the gallery."""
@@ -59,10 +64,29 @@ class ProgressiveImporter:
                     "[progressive] loaded %d excluded blob(s) for gallery %d", len(self._excluded_set), self.gallery_id
                 )
 
+            existing_rows = (
+                await session.execute(
+                    select(
+                        Image.id,
+                        Image.page_num,
+                        Image.blob_sha256,
+                        Image.filename,
+                        Image.source_item_id,
+                        Image.visibility,
+                    ).where(Image.gallery_id == self.gallery_id)
+                )
+            ).all()
+            self._known_sha256s = {row.blob_sha256 for row in existing_rows if row.blob_sha256}
+            self._known_filenames = {row.filename for row in existing_rows if row.filename}
+            self._known_source_items = {row.source_item_id for row in existing_rows if row.source_item_id}
+            self._source_item_state = {
+                row.source_item_id: (row.id, row.blob_sha256, row.visibility, row.page_num)
+                for row in existing_rows
+                if row.source_item_id
+            }
+
             # Resume page counter from current max page_num so new images don't collide
-            max_page = (
-                await session.execute(select(func.max(Image.page_num)).where(Image.gallery_id == self.gallery_id))
-            ).scalar_one_or_none()
+            max_page = max((row.page_num for row in existing_rows), default=0)
             if max_page and max_page > self._page_counter:
                 self._page_counter = max_page
                 logger.info("[progressive] resuming page counter at %d for gallery %d", max_page, self.gallery_id)
@@ -256,8 +280,10 @@ class ProgressiveImporter:
             return
         self._processed.add(str_path)
 
-        # Assign page_num: from filename (for parallel downloaders like EH)
-        # or serial counter (for sequential/streaming like gallery-dl)
+        # Assign page_num from filename for parallel downloaders like EH.
+        # Sequential downloaders assign after validation so skipped files do not
+        # leave holes in page numbering.
+        page_num: int | None
         if self._page_num_from_filename:
             try:
                 page_num = int(file_path.stem.lstrip("0") or "0") or 1
@@ -265,8 +291,7 @@ class ProgressiveImporter:
                 self._page_counter += 1
                 page_num = self._page_counter
         else:
-            self._page_counter += 1
-            page_num = self._page_counter
+            page_num = None
 
         # Prune completed tasks to avoid unbounded growth
         self._tasks = [t for t in self._tasks if not t.done()]
@@ -278,7 +303,7 @@ class ProgressiveImporter:
         task = asyncio.create_task(_do_import())
         self._tasks.append(task)
 
-    async def _import_single(self, file_path: Path, page_num: int, sha256: str | None = None) -> None:
+    async def _import_single(self, file_path: Path, page_num: int | None, sha256: str | None = None) -> None:
         """Import one file: sha256 -> store_blob -> image record -> symlink."""
         if not file_path.exists():
             return
@@ -291,6 +316,7 @@ class ProgressiveImporter:
 
         try:
             final_sha256 = sha256 or await asyncio.to_thread(_sha256, file_path)
+            source_item_id = self._derive_source_item_id(file_path, page_num, final_sha256)
 
             # Skip excluded blobs
             if final_sha256 in self._excluded_set:
@@ -298,10 +324,40 @@ class ProgressiveImporter:
                     "[progressive] skipping excluded blob %s for gallery %d", final_sha256[:12], self.gallery_id
                 )
                 return
+            existing_source_item = self._source_item_state.get(source_item_id) if source_item_id else None
+            if final_sha256 in self._known_sha256s:
+                logger.debug("[progressive] skipping existing image: %s", file_path.name)
+                return
+            if existing_source_item and existing_source_item[1] == final_sha256:
+                await self._touch_existing_source_item(existing_source_item[0], existing_source_item[2], page_num)
+                logger.debug("[progressive] skipping unchanged source item: %s", file_path.name)
+                return
+            if not existing_source_item and file_path.name in self._known_filenames:
+                logger.debug("[progressive] skipping existing image: %s", file_path.name)
+                return
 
             async with AsyncSessionLocal() as session:
                 blob = await store_blob(file_path, final_sha256, session)
                 await session.flush()
+
+                replacement_image: Image | None = None
+                if existing_source_item:
+                    replacement_image = await session.get(Image, existing_source_item[0], options=[selectinload(Image.blob)])
+                    if replacement_image:
+                        page_num = replacement_image.page_num
+                        replacement_visibility = (
+                            "user_hidden" if replacement_image.visibility == "user_hidden" else "active"
+                        )
+                        replacement_image.visibility = "replaced"
+                        replacement_image.page_num = -replacement_image.id
+                    else:
+                        replacement_visibility = "active"
+                else:
+                    replacement_visibility = "active"
+
+                if page_num is None:
+                    self._page_counter += 1
+                    page_num = self._page_counter
 
                 # N5: mtime PP sets original upload date
                 try:
@@ -320,6 +376,10 @@ class ProgressiveImporter:
                         filename=file_path.name,
                         blob_sha256=final_sha256,
                         added_at=added_at,
+                        visibility=replacement_visibility,
+                        source_item_id=source_item_id,
+                        source_position=page_num,
+                        source_seen_at=datetime.now(UTC),
                     )
                     .on_conflict_do_nothing()
                     .returning(Image.id)
@@ -332,6 +392,18 @@ class ProgressiveImporter:
                     await session.execute(
                         update(Blob).where(Blob.sha256 == final_sha256).values(ref_count=Blob.ref_count + 1)
                     )
+                    self._known_sha256s.add(final_sha256)
+                    self._known_filenames.add(file_path.name)
+                    if source_item_id:
+                        self._known_source_items.add(source_item_id)
+                        self._source_item_state[source_item_id] = (
+                            inserted,
+                            final_sha256,
+                            replacement_visibility,
+                            page_num,
+                        )
+                    if replacement_image is not None:
+                        replacement_image.replaced_by_image_id = inserted
 
                 # Create library symlink before closing session (need blob data)
                 await create_library_symlink(self.source, self.source_id, file_path.name, blob)
@@ -341,6 +413,42 @@ class ProgressiveImporter:
 
         except Exception as exc:
             logger.warning("[progressive] failed to import %s: %s", file_path.name, exc)
+
+    async def _touch_existing_source_item(self, image_id: int, visibility: str, page_num: int | None) -> None:
+        """Refresh seen metadata for a source item that was already imported."""
+        async with AsyncSessionLocal() as session:
+            img = await session.get(Image, image_id)
+            if not img:
+                return
+            img.source_seen_at = datetime.now(UTC)
+            if page_num is not None:
+                img.source_position = page_num
+            if visibility == "source_missing":
+                img.visibility = "active"
+            await session.commit()
+
+    def _derive_source_item_id(self, file_path: Path, page_num: int | None, sha256: str) -> str:
+        """Best-effort stable identity for source sync and duplicate guards."""
+        source = self.source or "unknown"
+        if source == "pixiv":
+            stem = file_path.stem
+            parent = file_path.parent.name
+            if "_p" in stem:
+                illust_id, _, page_part = stem.rpartition("_p")
+                try:
+                    page_idx = int(page_part.lstrip("0") or "0") or 1
+                    return f"pixiv:{illust_id}:p{page_idx}"
+                except ValueError:
+                    return f"pixiv:{stem}"
+            if parent.isdigit() and page_num is not None:
+                return f"pixiv:{parent}:p{page_num}"
+            if self.source_id and page_num is not None:
+                return f"pixiv:{self.source_id}:p{page_num}"
+        if source == "ehentai" and self.source_id and page_num is not None:
+            return f"ehentai:{self.source_id}:p{page_num}"
+        if page_num is not None:
+            return f"{source}:{self.source_id or 'unknown'}:{file_path.name}:p{page_num}"
+        return f"{source}:{self.source_id or 'unknown'}:{sha256}"
 
     async def _link_archive_entries(self, session) -> None:
         """Link gallery-dl archive entries to this gallery via gallery_id FK.
@@ -417,7 +525,9 @@ class ProgressiveImporter:
             gallery = await session.get(Gallery, self.gallery_id)
             if gallery:
                 count = (
-                    await session.execute(select(func.count()).where(Image.gallery_id == self.gallery_id))
+                    await session.execute(
+                        select(func.count()).where(Image.gallery_id == self.gallery_id, Image.visibility == "active")
+                    )
                 ).scalar_one()
                 gallery.pages = count
                 gallery.download_status = "partial" if partial else "complete"
@@ -472,7 +582,9 @@ class ProgressiveImporter:
             gallery = await session.get(Gallery, self.gallery_id)
             if gallery:
                 count = (
-                    await session.execute(select(func.count()).where(Image.gallery_id == self.gallery_id))
+                    await session.execute(
+                        select(func.count()).where(Image.gallery_id == self.gallery_id, Image.visibility == "active")
+                    )
                 ).scalar_one()
                 gallery.pages = count
                 gallery.download_status = "partial" if count > 0 else "downloading"

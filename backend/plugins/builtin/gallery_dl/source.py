@@ -761,10 +761,11 @@ class GalleryDlPlugin(SourcePlugin):
         if proc.returncode != 0:
             err = stderr_text[:500]
             logger.error("[gallery_dl] non-zero exit:\n%s", stderr_text)
-            if state.downloaded > 0:
+            if state.downloaded > 0 or state.skipped_count > 0:
                 logger.warning(
-                    "[gallery_dl] %d file(s) downloaded before failure — returning partial",
+                    "[gallery_dl] %d file(s) downloaded and %d skipped before failure — returning partial",
                     state.downloaded,
+                    state.skipped_count,
                 )
                 return DownloadResult(
                     status="partial",

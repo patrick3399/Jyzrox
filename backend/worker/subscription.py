@@ -99,9 +99,11 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
         options: dict | None = {
             "job_context": "subscription",
         }
-        # Add last_completed_at from the subscription's last successful job
-        if sub.last_checked_at:
-            options["last_completed_at"] = sub.last_checked_at.isoformat()
+        # Add last_completed_at from the subscription's last successful job.
+        # last_checked_at is only an attempt timestamp and must not advance
+        # gallery-dl incremental cutoffs after failed/partial jobs.
+        if getattr(sub, "last_success_at", None):
+            options["last_completed_at"] = sub.last_success_at.isoformat()
 
         # Create download job
         job_id = uuid.uuid4()
@@ -139,7 +141,7 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
                 .values(
                     last_checked_at=now,
                     last_job_id=job_id,
-                    last_status="ok",
+                    last_status="queued",
                     last_error=None,
                 )
             )

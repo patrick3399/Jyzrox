@@ -544,6 +544,9 @@ const zhTW: Record<string, string> = {
   'library.excludedImages': '排除清單',
   'library.restoreConfirm': '解除排除此圖片？將在今後的重新匯入中包含它。',
   'library.restoreExcluded': '解除排除',
+  'library.restoreHidden': '還原',
+  'library.restoreHiddenConfirm': '還原這張隱藏圖片？',
+  'library.hiddenRestored': '圖片已還原',
   'library.restored': '圖片已解除排除 — 將包含在下次重新匯入中',
   'library.restoreFailed': '解除排除圖片失敗',
 

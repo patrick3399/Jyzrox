@@ -4,7 +4,7 @@ import useSWRMutation from 'swr/mutation'
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import { api } from '@/lib/api'
 import { useWsJobs } from '@/lib/ws'
-import type { GalleryListResponse, GallerySearchParams, EhSearchParams } from '@/lib/types'
+import type { GalleryImage, GalleryListResponse, GallerySearchParams, EhSearchParams } from '@/lib/types'
 import type { SearchGalleriesResponse } from '@/lib/api'
 
 // ── Library ───────────────────────────────────────────────────────────
@@ -119,6 +119,59 @@ export function useGalleryImages(source: string | null, sourceId: string | null)
   return useSWR(source && sourceId ? ['gallery/images', source, sourceId] : null, () =>
     api.library.getImages(source!, sourceId!),
   )
+}
+
+export function useInfiniteGalleryImages(
+  source: string | null,
+  sourceId: string | null,
+  params: { limit?: number } = {},
+) {
+  const limit = params.limit ?? 120
+  const getKey = (pageIndex: number, previousPageData: {
+    images: GalleryImage[]
+    has_next?: boolean
+  } | null) => {
+    if (!source || !sourceId) return null
+    if (previousPageData && previousPageData.has_next === false) return null
+    return ['gallery/images/infinite', source, sourceId, { page: pageIndex + 1, limit }]
+  }
+
+  const { data, error, size, setSize, isLoading, mutate } = useSWRInfinite(
+    getKey,
+    ([, src, sid, opts]: [string, string, string, { page: number; limit: number }]) =>
+      api.library.getImages(src, sid, opts),
+    { revalidateOnFocus: false },
+  )
+
+  const images = useMemo(() => (data ? data.flatMap((page) => page.images) : []), [data])
+  const favoritedImageIds = useMemo(() => {
+    const set = new Set<number>()
+    for (const page of data ?? []) {
+      for (const id of page.favorited_image_ids ?? []) set.add(id)
+    }
+    return [...set]
+  }, [data])
+  const total = data?.[0]?.total
+  const lastPage = data?.[data.length - 1]
+  const isLoadingMore =
+    isLoading || (size > 0 && data !== undefined && typeof data[size - 1] === 'undefined')
+  const isReachingEnd = lastPage?.has_next === false || (total !== undefined && images.length >= total)
+
+  return {
+    data: data?.[0]
+      ? { ...data[0], images, favorited_image_ids: favoritedImageIds, total }
+      : undefined,
+    images,
+    total,
+    error,
+    isLoading,
+    isLoadingMore,
+    isReachingEnd,
+    size,
+    setSize,
+    mutate,
+    loadMore: () => setSize(size + 1),
+  }
 }
 
 export function useGalleryProgress(source: string | null, sourceId: string | null) {

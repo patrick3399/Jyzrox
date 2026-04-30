@@ -72,6 +72,13 @@ CREATE TABLE IF NOT EXISTS images (
     filename        TEXT,
     blob_sha256     TEXT NOT NULL REFERENCES blobs(sha256),
     tags_array      TEXT[] DEFAULT '{}',
+    visibility      TEXT NOT NULL DEFAULT 'active',
+    source_item_id  TEXT,
+    source_item_url TEXT,
+    source_position INT,
+    source_seen_at  TIMESTAMPTZ,
+    hidden_at       TIMESTAMPTZ,
+    replaced_by_image_id BIGINT REFERENCES images(id) ON DELETE SET NULL,
     UNIQUE (gallery_id, page_num)
 );
 
@@ -164,6 +171,8 @@ CREATE INDEX IF NOT EXISTS idx_galleries_source    ON galleries (source, source_
 CREATE INDEX IF NOT EXISTS idx_galleries_added_at  ON galleries (added_at DESC);
 CREATE INDEX IF NOT EXISTS idx_images_gallery      ON images (gallery_id, page_num);
 CREATE INDEX IF NOT EXISTS idx_images_blob         ON images (blob_sha256);
+CREATE INDEX IF NOT EXISTS idx_images_visibility   ON images (visibility);
+CREATE INDEX IF NOT EXISTS idx_images_source_item  ON images (gallery_id, source_item_id);
 
 -- #4: galleries.source (single-column) — used in WHERE source = 'pixiv' filters
 -- Note: idx_galleries_source above covers (source, source_id); this covers source-only lookups.
@@ -314,6 +323,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     auto_download   BOOLEAN DEFAULT TRUE,
     cron_expr       TEXT DEFAULT '0 */2 * * *',
     last_checked_at TIMESTAMPTZ,
+    last_success_at TIMESTAMPTZ,
     last_item_id    TEXT,
     last_status     TEXT DEFAULT 'pending',
     last_error      TEXT,

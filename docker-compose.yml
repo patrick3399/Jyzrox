@@ -251,26 +251,26 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: /mnt/G500/app_data/jyzrox/data
+      device: /mnt/T12-data/jyzrox/data
   postgres_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /mnt/G500/app_data/jyzrox/postgres
+      device: /mnt/T12-data/jyzrox/postgres
   redis_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /mnt/G500/app_data/jyzrox/redis
+      device: /mnt/T12-data/jyzrox/redis
   tagger_models:
   gallery_dl_venv:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /mnt/G500/app_data/jyzrox/gallery-dl-venv
+      device: /mnt/T12-data/jyzrox/venv
 
 networks:
   frontend:

@@ -5,7 +5,7 @@ import { useParams, useRouter } from 'next/navigation'
 import Link from 'next/link'
 import { toast } from 'sonner'
 import useSWR from 'swr'
-import { useLibraryGallery, useGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
+import { useLibraryGallery, useInfiniteGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { api } from '@/lib/api'
 import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
@@ -21,6 +21,7 @@ import { Pencil, Heart, Bookmark, BookmarkCheck } from 'lucide-react'
 import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
 import { SauceNaoModal } from '@/components/SauceNaoModal'
 import { TagSearchPopover } from '@/components/TagSearchPopover'
+import { VirtualGrid } from '@/components/VirtualGrid'
 
 const TAG_NAMESPACE_COLORS: Record<string, string> = {
   character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
@@ -96,8 +97,11 @@ export default function GalleryDetailPage() {
   const {
     data: imagesData,
     isLoading: imagesLoading,
+    isLoadingMore: imagesLoadingMore,
+    isReachingEnd: imagesReachingEnd,
+    loadMore: loadMoreImages,
     mutate: mutateImages,
-  } = useGalleryImages(source, sourceId)
+  } = useInfiniteGalleryImages(source, sourceId, { limit: 120 })
   const { trigger: updateGallery, isMutating: isUpdating } = useUpdateGallery(
     source ?? '',
     sourceId ?? '',
@@ -132,8 +136,10 @@ export default function GalleryDetailPage() {
   const [excludedBlobs, setExcludedBlobs] = useState<
     Array<{ blob_sha256: string; excluded_at: string | null }>
   >([])
+  const [hiddenImages, setHiddenImages] = useState<GalleryImage[]>([])
   const [showExcluded, setShowExcluded] = useState(false)
   const [restoringHash, setRestoringHash] = useState<string | null>(null)
+  const [restoringImageId, setRestoringImageId] = useState<number | null>(null)
 
   // Image context menu state
   const [imageMenu, setImageMenu] = useState<{
@@ -465,12 +471,14 @@ export default function GalleryDetailPage() {
         toast.success(t('library.imagesHidden', { count: hidden }))
         mutateGallery()
         mutateImages()
+        fetchHidden()
       }
     } finally {
       setSelectedPages(new Set())
       setSelectMode(false)
       setIsHiding(false)
       fetchExcluded()
+      fetchHidden()
     }
   }
 
@@ -485,9 +493,20 @@ export default function GalleryDetailPage() {
     }
   }, [source, sourceId])
 
+  const fetchHidden = useCallback(async () => {
+    if (!source || !sourceId) return
+    try {
+      const res = await api.library.listHidden(source, sourceId)
+      setHiddenImages(res.images)
+    } catch {
+      setHiddenImages([])
+    }
+  }, [source, sourceId])
+
   useEffect(() => {
     fetchExcluded()
-  }, [fetchExcluded])
+    fetchHidden()
+  }, [fetchExcluded, fetchHidden])
 
   // Restore excluded blob
   const handleRestore = async (sha256: string) => {
@@ -502,6 +521,22 @@ export default function GalleryDetailPage() {
       toast.error(t('library.restoreFailed'))
     } finally {
       setRestoringHash(null)
+    }
+  }
+
+  const handleRestoreImage = async (imageId: number) => {
+    if (!confirm(t('library.restoreHiddenConfirm'))) return
+    setRestoringImageId(imageId)
+    try {
+      await api.library.restoreImage(imageId)
+      toast.success(t('library.hiddenRestored'))
+      setHiddenImages((prev) => prev.filter((img) => img.id !== imageId))
+      mutateGallery()
+      mutateImages()
+    } catch {
+      toast.error(t('library.restoreFailed'))
+    } finally {
+      setRestoringImageId(null)
     }
   }
 
@@ -546,18 +581,7 @@ export default function GalleryDetailPage() {
         await api.library.favoriteImage(imageId)
       }
       toast.success(wasFavorited ? t('reader.imageUnfavorited') : t('reader.imageFavorited'))
-      mutateImages(
-        (prev) => {
-          if (!prev) return prev
-          return {
-            ...prev,
-            favorited_image_ids: wasFavorited
-              ? (prev.favorited_image_ids ?? []).filter((id: number) => id !== imageId)
-              : [...(prev.favorited_image_ids ?? []), imageId],
-          }
-        },
-        { revalidate: false },
-      )
+      mutateImages()
     } catch {
       // Revert optimistic update
       setLocalFavOverrides((prev) => {
@@ -582,10 +606,11 @@ export default function GalleryDetailPage() {
       mutateGallery()
       mutateImages()
       fetchExcluded()
+      fetchHidden()
     } catch {
       toast.error(t('common.error'))
     }
-  }, [imageMenu, source, sourceId, mutateGallery, mutateImages, fetchExcluded])
+  }, [imageMenu, source, sourceId, mutateGallery, mutateImages, fetchExcluded, fetchHidden])
 
   const manualTagSet = useMemo(
     () =>
@@ -1164,14 +1189,14 @@ export default function GalleryDetailPage() {
                     {t('library.selectImages')}
                   </button>
                 )}
-                {excludedBlobs.length > 0 && (
+                {(hiddenImages.length > 0 || excludedBlobs.length > 0) && (
                   <button
                     onClick={() => setShowExcluded(!showExcluded)}
                     className="px-3 py-1 rounded text-xs font-medium border bg-yellow-900/30 border-yellow-700/50 text-yellow-400 hover:bg-yellow-900/50 transition-colors"
                   >
                     {showExcluded
                       ? t('library.hideExcluded')
-                      : t('library.showExcluded', { count: excludedBlobs.length })}
+                      : t('library.showExcluded', { count: hiddenImages.length + excludedBlobs.length })}
                   </button>
                 )}
               </>
@@ -1186,122 +1211,163 @@ export default function GalleryDetailPage() {
         )}
 
         {!imagesLoading && (
-          <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
-            {images.map((image, idx) => {
-              const isSelected = selectedPages.has(image.page_num)
-              if (selectMode) {
+          <>
+            <VirtualGrid
+              items={images}
+              columns={{ base: 4, sm: 6, md: 8, lg: 10 }}
+              gap={8}
+              estimateHeight={180}
+              overscan={4}
+              onLoadMore={loadMoreImages}
+              hasMore={!imagesReachingEnd}
+              isLoading={imagesLoadingMore}
+              renderItem={(image, idx) => {
+                const isSelected = selectedPages.has(image.page_num)
+                if (selectMode) {
+                  return (
+                    <button
+                      key={image.id}
+                      type="button"
+                      onClick={() => togglePage(image.page_num)}
+                      className={`relative group rounded border-2 transition-colors ${
+                        isSelected
+                          ? 'border-red-500 ring-2 ring-red-500/30'
+                          : 'border-vault-border hover:border-vault-border-hover'
+                      }`}
+                    >
+                      {image.thumb_path ? (
+                        <img
+                          src={image.thumb_path}
+                          alt={`Page ${image.page_num}`}
+                          loading={idx < 20 ? undefined : 'lazy'}
+                          className={`w-full aspect-[3/4] object-cover rounded ${isSelected ? 'opacity-60' : ''}`}
+                        />
+                      ) : (
+                        <div className="w-full aspect-[3/4] bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
+                          {image.page_num}
+                        </div>
+                      )}
+                      {isSelected && (
+                        <div className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
+                          <svg
+                            className="w-3 h-3 text-white"
+                            fill="none"
+                            stroke="currentColor"
+                            viewBox="0 0 24 24"
+                          >
+                            <path
+                              strokeLinecap="round"
+                              strokeLinejoin="round"
+                              strokeWidth={3}
+                              d="M5 13l4 4L19 7"
+                            />
+                          </svg>
+                        </div>
+                      )}
+                    </button>
+                  )
+                }
                 return (
-                  <button
+                  <div
                     key={image.id}
-                    type="button"
-                    onClick={() => togglePage(image.page_num)}
-                    className={`relative group rounded border-2 transition-colors ${
-                      isSelected
-                        ? 'border-red-500 ring-2 ring-red-500/30'
-                        : 'border-vault-border hover:border-vault-border-hover'
-                    }`}
+                    role="button"
+                    tabIndex={0}
+                    onClick={() =>
+                      router.push(readerHref(gallery.source, gallery.source_id, image.page_num))
+                    }
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter')
+                        router.push(readerHref(gallery.source, gallery.source_id, image.page_num))
+                    }}
+                    onTouchStart={(e) => {
+                      activeImageRef.current = image
+                      lpStart(e)
+                    }}
+                    onTouchMove={lpMove}
+                    onTouchEnd={lpEnd}
+                    onContextMenu={(e) => {
+                      activeImageRef.current = image
+                      lpCtx(e)
+                    }}
+                    className="group relative cursor-pointer select-none [-webkit-touch-callout:none]"
                   >
                     {image.thumb_path ? (
                       <img
                         src={image.thumb_path}
                         alt={`Page ${image.page_num}`}
                         loading={idx < 20 ? undefined : 'lazy'}
-                        className={`w-full aspect-[3/4] object-cover rounded ${isSelected ? 'opacity-60' : ''}`}
+                        className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
                       />
                     ) : (
-                      <div className="w-full aspect-[3/4] bg-vault-input rounded flex items-center justify-center text-vault-text-muted text-xs">
+                      <div className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border group-hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors">
                         {image.page_num}
                       </div>
                     )}
-                    {isSelected && (
-                      <div className="absolute top-1 right-1 w-5 h-5 bg-red-500 rounded-full flex items-center justify-center">
-                        <svg
-                          className="w-3 h-3 text-white"
-                          fill="none"
-                          stroke="currentColor"
-                          viewBox="0 0 24 24"
-                        >
-                          <path
-                            strokeLinecap="round"
-                            strokeLinejoin="round"
-                            strokeWidth={3}
-                            d="M5 13l4 4L19 7"
-                          />
-                        </svg>
+                    {isFavorited(image.id) && (
+                      <div className="absolute top-1 right-1">
+                        <Heart className="w-4 h-4 fill-current text-red-400 drop-shadow" />
                       </div>
                     )}
-                  </button>
+                    {imageMenu?.imageId === image.id && (
+                      <div className="absolute inset-0 rounded border-2 border-vault-accent pointer-events-none" />
+                    )}
+                  </div>
                 )
-              }
-              return (
-                <div
-                  key={image.id}
-                  role="button"
-                  tabIndex={0}
-                  onClick={() =>
-                    router.push(readerHref(gallery.source, gallery.source_id, image.page_num))
-                  }
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter')
-                      router.push(readerHref(gallery.source, gallery.source_id, image.page_num))
-                  }}
-                  onTouchStart={(e) => {
-                    activeImageRef.current = image
-                    lpStart(e)
-                  }}
-                  onTouchMove={lpMove}
-                  onTouchEnd={lpEnd}
-                  onContextMenu={(e) => {
-                    activeImageRef.current = image
-                    lpCtx(e)
-                  }}
-                  className="group relative cursor-pointer select-none [-webkit-touch-callout:none]"
-                >
-                  {image.thumb_path ? (
-                    <img
-                      src={image.thumb_path}
-                      alt={`Page ${image.page_num}`}
-                      loading={idx < 20 ? undefined : 'lazy'}
-                      className="w-full aspect-[3/4] object-cover rounded border border-vault-border group-hover:border-vault-border-hover transition-colors"
-                    />
-                  ) : (
-                    <div className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border group-hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors">
-                      {image.page_num}
-                    </div>
-                  )}
-                  {isFavorited(image.id) && (
-                    <div className="absolute top-1 right-1">
-                      <Heart className="w-4 h-4 fill-current text-red-400 drop-shadow" />
-                    </div>
-                  )}
-                  {imageMenu?.imageId === image.id && (
-                    <div className="absolute inset-0 rounded border-2 border-vault-accent pointer-events-none" />
-                  )}
-                </div>
-              )
-            })}
+              }}
+            />
 
-            {/* Placeholder pages if images array is shorter than pages count */}
-            {images.length === 0 &&
-              Array.from({ length: Math.min(gallery.pages, 40) }).map((_, i) => (
-                <Link
-                  key={i}
-                  href={readerHref(gallery.source, gallery.source_id, i + 1)}
-                  className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors"
-                >
-                  {i + 1}
-                </Link>
-              ))}
-          </div>
+            {images.length === 0 && (
+              <div className="grid grid-cols-4 sm:grid-cols-6 md:grid-cols-8 lg:grid-cols-10 gap-2">
+                {Array.from({ length: Math.min(gallery.pages, 40) }).map((_, i) => (
+                  <Link
+                    key={i}
+                    href={readerHref(gallery.source, gallery.source_id, i + 1)}
+                    className="w-full aspect-[3/4] bg-vault-input rounded border border-vault-border hover:border-vault-border-hover flex items-center justify-center text-vault-text-muted text-xs transition-colors"
+                  >
+                    {i + 1}
+                  </Link>
+                ))}
+              </div>
+            )}
+          </>
         )}
 
-        {/* Excluded (hidden) images panel */}
-        {showExcluded && excludedBlobs.length > 0 && (
+        {/* Hidden and excluded images panel */}
+        {showExcluded && (hiddenImages.length > 0 || excludedBlobs.length > 0) && (
           <div className="mt-4 pt-4 border-t border-vault-border">
             <h3 className="text-sm font-semibold text-yellow-400 mb-3">
-              {t('library.excludedImages')} ({excludedBlobs.length})
+              {t('library.excludedImages')} ({hiddenImages.length + excludedBlobs.length})
             </h3>
             <div className="space-y-2">
+              {hiddenImages.map((image) => (
+                <div
+                  key={image.id}
+                  className="flex items-center justify-between bg-vault-input border border-vault-border rounded px-3 py-2"
+                >
+                  <div className="flex items-center gap-3 min-w-0 mr-3">
+                    {image.thumb_path && (
+                      <img src={image.thumb_path} alt="" className="h-12 w-9 object-cover rounded border border-vault-border" />
+                    )}
+                    <div className="flex flex-col min-w-0">
+                      <span className="text-xs text-vault-text-muted truncate">
+                        {image.filename || `Page ${image.source_position ?? image.page_num}`}
+                      </span>
+                      {image.hidden_at && (
+                        <span className="text-[10px] text-vault-text-muted">
+                          {formatDate(image.hidden_at)}
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => handleRestoreImage(image.id)}
+                    disabled={restoringImageId === image.id}
+                    className="px-3 py-1 rounded text-xs font-medium border bg-green-900/30 border-green-700/50 text-green-400 hover:bg-green-900/50 transition-colors disabled:opacity-50 shrink-0"
+                  >
+                    {restoringImageId === image.id ? '...' : t('library.restoreHidden')}
+                  </button>
+                </div>
+              ))}
               {excludedBlobs.map((blob) => (
                 <div
                   key={blob.blob_sha256}

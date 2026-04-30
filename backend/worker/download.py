@@ -52,6 +52,32 @@ async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> Non
             cookie_path.unlink(missing_ok=True)
 
 
+async def _set_subscription_result(db_job_id: str | None, status: str, error: str | None = None) -> None:
+    """Update subscription status after the associated download reaches a terminal state."""
+    if not db_job_id:
+        return
+    try:
+        from sqlalchemy import update
+
+        from core.database import AsyncSessionLocal
+        from db.models import DownloadJob, Subscription
+
+        async with AsyncSessionLocal() as session:
+            job = await session.get(DownloadJob, uuid.UUID(db_job_id))
+            if not job or not job.subscription_id:
+                return
+            values = {
+                "last_status": status,
+                "last_error": error[:500] if error else None,
+            }
+            if status == "done":
+                values["last_success_at"] = datetime.now(UTC)
+            await session.execute(update(Subscription).where(Subscription.id == job.subscription_id).values(**values))
+            await session.commit()
+    except Exception as exc:
+        logger.warning("[download] failed to update subscription result: %s", exc)
+
+
 async def download_job(
     ctx: dict,
     url: str,
@@ -77,6 +103,7 @@ async def download_job(
         err = "No plugin can handle this URL"
         logger.error("[download] %s", err)
         await _set_job_status(db_job_id, "failed", err)
+        await _set_subscription_result(db_job_id, "failed", err)
         return {"status": "failed", "error": err}
 
     source_id = plugin.meta.source_id
@@ -139,6 +166,7 @@ async def download_job(
 
     # ── 6. Progressive Importer (ALL sources) ───────────────────────
     import_user_id = None
+    existing_gallery_id = None
     if db_job_id:
         from sqlalchemy.sql import select as sa_select
 
@@ -146,8 +174,11 @@ async def download_job(
         from db.models import DownloadJob as _DJ
 
         async with AsyncSessionLocal() as _sess:
-            _result = await _sess.execute(sa_select(_DJ.user_id).where(_DJ.id == db_job_id))
-            import_user_id = _result.scalar_one_or_none()
+            _result = await _sess.execute(sa_select(_DJ.user_id, _DJ.gallery_id).where(_DJ.id == db_job_id))
+            _row = _result.one_or_none()
+            if _row:
+                import_user_id = _row.user_id
+                existing_gallery_id = _row.gallery_id
 
     from worker.constants import _MEDIA_EXTS
     from worker.progressive import ProgressiveImporter
@@ -156,6 +187,9 @@ async def download_job(
     page_from_filename = plugin.meta.concurrency > 1
     importer = ProgressiveImporter(db_job_id, import_user_id, page_num_from_filename=page_from_filename)
     importer.source_url = url
+    if isinstance(existing_gallery_id, int):
+        importer.gallery_id = existing_gallery_id
+        await importer._load_gallery_state()
 
     # ── 7. Pre-download metadata (native plugins) ──────────────────
     if hasattr(plugin, "resolve_metadata"):
@@ -339,6 +373,7 @@ async def download_job(
             logger.error("[download] %s", err, exc_info=True)
             await importer.abort()
             await _set_job_status(db_job_id, "failed", err)
+            await _set_subscription_result(db_job_id, "failed", err)
             return {"status": "failed", "error": err}
         finally:
             if pid_key:
@@ -357,6 +392,7 @@ async def download_job(
     if result.status == "cancelled":
         await importer.cleanup()
         await _set_job_status(db_job_id, "cancelled")
+        await _set_subscription_result(db_job_id, "cancelled")
         return {"status": "cancelled"}
 
     if result.status == "failed":
@@ -370,11 +406,13 @@ async def download_job(
             await importer.abort()
             err = result.error or "Download failed"
             await _set_job_status(db_job_id, "failed", err)
+            await _set_subscription_result(db_job_id, "failed", err)
             return {"status": "failed", "error": err}
 
     if await cancel_check():
         await importer.cleanup()
         await _set_job_status(db_job_id, "cancelled")
+        await _set_subscription_result(db_job_id, "cancelled")
         logger.info("[download] cancelled (post-download guard): %s", url)
         return {"status": "cancelled"}
 
@@ -439,6 +477,7 @@ async def download_job(
         else:
             partial_msg = result.error or "Partial download"
         await _set_job_status(db_job_id, "partial", partial_msg)
+        await _set_subscription_result(db_job_id, "partial", partial_msg)
         logger.warning(
             "[download] partial: downloaded=%d failed_pages=%s error=%s",
             result.downloaded,
@@ -453,5 +492,6 @@ async def download_job(
         }
 
     await _set_job_status(db_job_id, "done")
+    await _set_subscription_result(db_job_id, "done")
     logger.info("[download] done: %s (downloaded=%d)", url, result.downloaded)
     return {"status": "done", "downloaded": result.downloaded}

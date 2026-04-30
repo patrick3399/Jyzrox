@@ -54,6 +54,12 @@ export interface GalleryImage {
   media_type: 'image' | 'video' | 'gif'
   duration: number | null
   thumbhash?: string | null
+  visibility?: 'active' | 'user_hidden' | 'source_missing' | 'replaced'
+  source_item_id?: string | null
+  source_item_url?: string | null
+  source_position?: number | null
+  source_seen_at?: string | null
+  hidden_at?: string | null
 }
 
 export interface BrowseImage {

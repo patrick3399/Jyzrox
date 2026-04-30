@@ -98,7 +98,7 @@ async def build_cover_map(
         stmt = (
             select(Image.gallery_id, Blob.sha256)
             .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .where(Image.gallery_id.in_(first_ids), Image.page_num == 1)
+            .where(Image.gallery_id.in_(first_ids), Image.page_num == 1, Image.visibility == "active")
         )
         for r in (await db.execute(stmt)).all():
             thumb_url = _existing_thumb_url(r.sha256)
@@ -109,7 +109,7 @@ async def build_cover_map(
     if last_ids:
         max_page_sub = (
             select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
-            .where(Image.gallery_id.in_(last_ids))
+            .where(Image.gallery_id.in_(last_ids), Image.visibility == "active")
             .group_by(Image.gallery_id)
         ).subquery()
         stmt = (

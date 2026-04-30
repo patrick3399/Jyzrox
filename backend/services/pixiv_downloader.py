@@ -25,6 +25,7 @@ async def download_pixiv_illust(
     cancel_check: Callable[[], Awaitable[bool]] | None = None,
     pause_check: Callable[[], Awaitable[bool]] | None = None,
     on_file: Callable[[Path], Awaitable[None]] | None = None,
+    filename_prefix: str | None = None,
 ) -> dict:
     """
     Download a single Pixiv illustration (including multi-page manga).
@@ -153,7 +154,7 @@ async def download_pixiv_illust(
                 if ext == "jpeg":
                     ext = "jpg"
 
-                filename = f"{i + 1:04d}.{ext}"
+                filename = f"{filename_prefix}_p{i + 1:04d}.{ext}" if filename_prefix else f"{i + 1:04d}.{ext}"
                 (output_dir / filename).write_bytes(image_bytes)
                 if on_file is not None:
                     await on_file(output_dir / filename)
@@ -333,6 +334,7 @@ async def download_pixiv_user_works(
                     cancel_check=cancel_check,
                     pause_check=pause_check,
                     on_file=on_file,
+                    filename_prefix=str(illust_id),
                 )
 
                 if result["status"] == "done":

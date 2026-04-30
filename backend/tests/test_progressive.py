@@ -70,15 +70,24 @@ async def _insert_image(
     page_num: int,
     blob_sha256: str,
     filename: str = "img.jpg",
+    visibility: str = "active",
+    source_item_id: str | None = None,
 ) -> int:
     """Insert an image row and return its id."""
     result = await db_session.execute(
         text(
-            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
-            "VALUES (:gid, :page_num, :filename, :sha) "
+            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, visibility, source_item_id) "
+            "VALUES (:gid, :page_num, :filename, :sha, :visibility, :source_item_id) "
             "RETURNING id"
         ),
-        {"gid": gallery_id, "page_num": page_num, "filename": filename, "sha": blob_sha256},
+        {
+            "gid": gallery_id,
+            "page_num": page_num,
+            "filename": filename,
+            "sha": blob_sha256,
+            "visibility": visibility,
+            "source_item_id": source_item_id,
+        },
     )
     await db_session.commit()
     row = result.fetchone()
@@ -561,8 +570,131 @@ class TestProgressiveImporterImportFile:
         ).scalar()
         assert count == 0, "File with invalid magic bytes must not be imported"
 
-    async def test_import_file_increments_page_counter(self, tmp_path):
-        """Each call to import_file must increment _page_counter by 1."""
+    async def test_same_source_item_new_hash_creates_replacement(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        """A changed source item should preserve the old row as replaced and insert the new blob at the same page."""
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        from db.models import Blob
+        from worker import progressive as progressive_mod
+        from worker.progressive import ProgressiveImporter
+
+        monkeypatch.setattr(progressive_mod, "pg_insert", sqlite_insert)
+        monkeypatch.setattr(progressive_mod.Image.__table__.c.tags_array, "default", None)
+
+        gallery_id = await _insert_gallery(db_session, source="pixiv", source_id="123", pages=1)
+        old_sha = "aa" + "0" * 62
+        new_sha = "bb" + "0" * 62
+        await _insert_blob(db_session, old_sha, ref_count=1)
+        await _insert_blob(db_session, new_sha, ref_count=0)
+        old_id = await _insert_image(
+            db_session,
+            gallery_id,
+            1,
+            old_sha,
+            filename="0001.jpg",
+            source_item_id="pixiv:123:p1",
+        )
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None, page_num_from_filename=True)
+        importer.gallery_id = gallery_id
+        importer.source = "pixiv"
+        importer.source_id = "123"
+
+        fake_file = tmp_path / "0001.jpg"
+        fake_file.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        replacement_blob = Blob(sha256=new_sha, file_size=100, extension=".jpg", storage="cas", ref_count=0)
+
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive.store_blob", new=AsyncMock(return_value=replacement_blob)),
+            patch("worker.progressive.create_library_symlink", new=AsyncMock()),
+        ):
+            await importer._load_gallery_state()
+            await importer.import_file(fake_file, sha256=new_sha)
+            import asyncio
+
+            if importer._tasks:
+                await asyncio.gather(*importer._tasks, return_exceptions=True)
+
+        rows = (
+            await db_session.execute(
+                text(
+                    "SELECT id, page_num, blob_sha256, visibility, replaced_by_image_id "
+                    "FROM images WHERE gallery_id=:gid ORDER BY page_num"
+                ),
+                {"gid": gallery_id},
+            )
+        ).all()
+        assert len(rows) == 2
+        old_row = next(row for row in rows if row.id == old_id)
+        new_row = next(row for row in rows if row.blob_sha256 == new_sha)
+        assert old_row.visibility == "replaced"
+        assert old_row.page_num < 0
+        assert old_row.replaced_by_image_id == new_row.id
+        assert new_row.page_num == 1
+        assert new_row.visibility == "active"
+
+    async def test_replacement_preserves_hidden_state(self, db_session, db_session_factory, tmp_path, monkeypatch):
+        """A hidden source item that changes hash should stay hidden after replacement."""
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        from db.models import Blob
+        from worker import progressive as progressive_mod
+        from worker.progressive import ProgressiveImporter
+
+        monkeypatch.setattr(progressive_mod, "pg_insert", sqlite_insert)
+        monkeypatch.setattr(progressive_mod.Image.__table__.c.tags_array, "default", None)
+
+        gallery_id = await _insert_gallery(db_session, source="pixiv", source_id="456", pages=0)
+        old_sha = "cc" + "0" * 62
+        new_sha = "dd" + "0" * 62
+        await _insert_blob(db_session, old_sha, ref_count=1)
+        await _insert_blob(db_session, new_sha, ref_count=0)
+        await _insert_image(
+            db_session,
+            gallery_id,
+            1,
+            old_sha,
+            filename="0001.jpg",
+            visibility="user_hidden",
+            source_item_id="pixiv:456:p1",
+        )
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None, page_num_from_filename=True)
+        importer.gallery_id = gallery_id
+        importer.source = "pixiv"
+        importer.source_id = "456"
+
+        fake_file = tmp_path / "0001.jpg"
+        fake_file.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        replacement_blob = Blob(sha256=new_sha, file_size=100, extension=".jpg", storage="cas", ref_count=0)
+
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive.store_blob", new=AsyncMock(return_value=replacement_blob)),
+            patch("worker.progressive.create_library_symlink", new=AsyncMock()),
+        ):
+            await importer._load_gallery_state()
+            await importer.import_file(fake_file, sha256=new_sha)
+            import asyncio
+
+            if importer._tasks:
+                await asyncio.gather(*importer._tasks, return_exceptions=True)
+
+        new_visibility = (
+            await db_session.execute(
+                text("SELECT visibility FROM images WHERE gallery_id=:gid AND blob_sha256=:sha"),
+                {"gid": gallery_id, "sha": new_sha},
+            )
+        ).scalar_one()
+        assert new_visibility == "user_hidden"
+
+    async def test_import_file_does_not_reserve_page_before_validation(self, tmp_path):
+        """Sequential imports should not reserve page numbers until the file is validated and stored."""
         from worker.progressive import ProgressiveImporter
 
         importer = ProgressiveImporter(db_job_id=None, user_id=None)
@@ -570,20 +702,19 @@ class TestProgressiveImporterImportFile:
         importer.source = "test"
         importer.source_id = "test_001"
 
-        # Create fake valid files (import_file assigns page_num before spawning task)
+        # Create fake valid files; _import_single is mocked, so no validated insert occurs.
         f1 = tmp_path / "img1.jpg"
         f2 = tmp_path / "img2.jpg"
         f3 = tmp_path / "img3.jpg"
         for f in (f1, f2, f3):
             f.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
 
-        # We only test that the serial counter advances — mock _import_single
         with patch.object(importer, "_import_single", new=AsyncMock()):
             await importer.import_file(f1)
             await importer.import_file(f2)
             await importer.import_file(f3)
 
-        assert importer._page_counter == 3
+        assert importer._page_counter == 0
 
     async def test_import_file_deduplicates_same_path(self, tmp_path):
         """Passing the same file path twice must only increment counter once."""
@@ -601,7 +732,7 @@ class TestProgressiveImporterImportFile:
             await importer.import_file(f)
             await importer.import_file(f)  # duplicate — must be ignored
 
-        assert importer._page_counter == 1
+        assert importer._page_counter == 0
 
 # ---------------------------------------------------------------------------
 # TestProgressiveImporterPageNumbering
@@ -635,7 +766,7 @@ class TestProgressiveImporterPageNumbering:
             if importer._tasks:
                 await asyncio.gather(*importer._tasks, return_exceptions=True)
 
-        assert captured_pages == [1]
+        assert captured_pages == [None]
 
     async def test_sequential_page_numbering_maintained(self, tmp_path):
         """Files imported sequentially must receive consecutive page numbers."""
@@ -666,7 +797,7 @@ class TestProgressiveImporterPageNumbering:
             if importer._tasks:
                 await asyncio.gather(*importer._tasks, return_exceptions=True)
 
-        assert captured_pages == [1, 2, 3, 4, 5]
+        assert captured_pages == [None, None, None, None, None]
 
     async def test_page_counter_resumes_from_loaded_max(self, db_session, db_session_factory, tmp_path):
         """After _load_gallery_state, new pages must continue from existing max page_num."""
@@ -688,3 +819,15 @@ class TestProgressiveImporterPageNumbering:
             await importer._load_gallery_state()
 
         assert importer._page_counter == 5, "Counter must resume from existing max page_num so new pages start at 6"
+
+    def test_pixiv_prefixed_filename_source_item_id_is_normalized(self):
+        """Pixiv user-work filenames should map to the same illust/page identity format as artwork pages."""
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None, page_num_from_filename=True)
+        importer.source = "pixiv"
+        importer.source_id = "user_999"
+
+        source_item_id = importer._derive_source_item_id(Path("123456_p0002.jpg"), 2, "a" * 64)
+
+        assert source_item_id == "pixiv:123456:p2"

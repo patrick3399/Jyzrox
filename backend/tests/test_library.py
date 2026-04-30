@@ -579,26 +579,44 @@ class TestDeleteGalleryImage:
         assert resp.status_code == 404
 
     async def test_delete_image_successful_remaining_pages_correct(self, client, db_session):
-        """Successful deletion returns remaining_pages count and re-numbers pages.
-
-        Uses pg_insert(ExcludedBlob).on_conflict_do_nothing() which is
-        PostgreSQL-specific. We accept 200 (PG) or 500 (SQLite limitation).
-        """
-        gid = await _insert_gallery(db_session, source="local", source_id="del_img_ok", title="Two Pages", pages=2)
+        """Legacy delete-image hides the image without deleting its row."""
+        gid = await _insert_gallery(db_session, source="local", source_id="del_img_ok", title="Three Pages", pages=3)
         await _insert_image(db_session, gid, page_num=1, filename="p1.jpg")
         await _insert_image(db_session, gid, page_num=2, filename="p2.jpg")
+        await _insert_image(db_session, gid, page_num=3, filename="p3.jpg")
 
         resp = await client.post(
             "/api/library/galleries/local/del_img_ok/delete-image",
-            json={"page_num": 1},
+            json={"page_num": 2},
         )
-        if resp.status_code == 200:
-            data = resp.json()
-            assert data["status"] == "ok"
-            assert data["remaining_pages"] == 1
-        else:
-            # SQLite limitation with pg_insert on_conflict_do_nothing
-            assert resp.status_code == 500
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["remaining_pages"] == 2
+
+        hidden = await client.get("/api/library/galleries/local/del_img_ok/hidden")
+        assert hidden.status_code == 200
+        hidden_images = hidden.json()["images"]
+        assert len(hidden_images) == 1
+        assert hidden_images[0]["page_num"] < 0
+        assert hidden_images[0]["source_position"] == 2
+        assert hidden_images[0]["visibility"] == "user_hidden"
+
+        visible = await client.get("/api/library/galleries/local/del_img_ok/images")
+        assert visible.status_code == 200
+        visible_images = visible.json()["images"]
+        assert [img["page_num"] for img in visible_images] == [1, 2]
+        assert [img["filename"] for img in visible_images] == ["p1.jpg", "p3.jpg"]
+
+        restore = await client.post(f"/api/library/images/{hidden_images[0]['id']}/restore")
+        assert restore.status_code == 200
+        assert restore.json()["remaining_pages"] == 3
+
+        visible_after_restore = await client.get("/api/library/galleries/local/del_img_ok/images")
+        assert visible_after_restore.status_code == 200
+        restored_images = visible_after_restore.json()["images"]
+        assert [img["page_num"] for img in restored_images] == [1, 2, 3]
+        assert [img["filename"] for img in restored_images] == ["p1.jpg", "p2.jpg", "p3.jpg"]
 
 
 # ---------------------------------------------------------------------------

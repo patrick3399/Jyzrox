@@ -513,6 +513,7 @@ async def _apply_image_filters(
 ):
     """Apply common image browser filters (tags, source, category, blocked tags, gallery access)."""
     stmt = stmt.where(gallery_access_filter(auth))
+    stmt = stmt.where(Image.visibility == "active")
 
     if gallery_id is not None:
         stmt = stmt.where(Image.gallery_id == gallery_id)
@@ -795,14 +796,14 @@ async def list_artists(
             select(latest_gallery_sub.c.artist_id, latest_gallery_sub.c.source, Blob.sha256)
             .join(Image, Image.gallery_id == latest_gallery_sub.c.id)
             .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .where(Image.page_num == 1)
+            .where(Image.page_num == 1, Image.visibility == "active")
         )
         first_covers = {r.artist_id: (r.source, r.sha256) for r in (await db.execute(first_cover_stmt)).all()}
 
         # Last page covers
         max_page_sub = (
             select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
-            .where(Image.gallery_id.in_(select(latest_gallery_sub.c.id)))
+            .where(Image.gallery_id.in_(select(latest_gallery_sub.c.id)), Image.visibility == "active")
             .group_by(Image.gallery_id)
         ).subquery()
         last_cover_stmt = (
@@ -1662,6 +1663,7 @@ async def get_gallery_images(
     stmt = (
         select(Image)
         .where(Image.gallery_id == gallery_id)
+        .where(Image.visibility == "active")
         .where(~exists(excluded_sq))
         .order_by(page_order)
         .options(selectinload(Image.blob))
@@ -1671,7 +1673,11 @@ async def get_gallery_images(
     if limit is not None:
         p = page or 1
         total_stmt = select(func.count()).select_from(
-            select(Image.id).where(Image.gallery_id == gallery_id).where(~exists(excluded_sq)).subquery()
+            select(Image.id)
+            .where(Image.gallery_id == gallery_id)
+            .where(Image.visibility == "active")
+            .where(~exists(excluded_sq))
+            .subquery()
         )
         total = (await db.execute(total_stmt)).scalar_one()
 
@@ -1692,6 +1698,31 @@ async def get_gallery_images(
     images = (await db.execute(stmt)).scalars().all()
     fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images])
     return {"gallery_id": gallery_id, "images": [_i(img) for img in images], "favorited_image_ids": sorted(fav_ids)}
+
+
+@router.get("/galleries/{source}/{source_id}/hidden")
+async def list_hidden_images(
+    source: str,
+    source_id: str,
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """List user-hidden images for a gallery."""
+    g = await _get_or_404_by_source(db, source, source_id, auth)
+    images = (
+        (
+            await db.execute(
+                select(Image)
+                .where(Image.gallery_id == g.id, Image.visibility == "user_hidden")
+                .order_by(desc(Image.hidden_at), asc(Image.page_num))
+                .options(selectinload(Image.blob))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images])
+    return {"gallery_id": g.id, "images": [_i(img) for img in images], "favorited_image_ids": sorted(fav_ids)}
 
 
 @router.post("/images/{image_id}/favorite")
@@ -1933,6 +1964,95 @@ class DeleteImageBody(BaseModel):
     page_num: int
 
 
+async def _active_image_count(db: AsyncSession, gallery_id: int) -> int:
+    return (
+        await db.execute(
+            select(func.count()).select_from(Image).where(Image.gallery_id == gallery_id, Image.visibility == "active")
+        )
+    ).scalar_one()
+
+
+async def _compact_active_image_pages(db: AsyncSession, gallery_id: int) -> int:
+    images = (
+        (
+            await db.execute(
+                select(Image)
+                .where(Image.gallery_id == gallery_id, Image.visibility == "active")
+                .order_by(asc(Image.page_num), asc(Image.id))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if all(img.page_num == index for index, img in enumerate(images, start=1)):
+        return len(images)
+
+    for img in images:
+        img.page_num = -int(img.id)
+    await db.flush()
+
+    for index, img in enumerate(images, start=1):
+        img.page_num = index
+    await db.flush()
+    return len(images)
+
+
+async def _hide_image_row(db: AsyncSession, gallery: Gallery, img: Image) -> int:
+    if img.visibility != "active":
+        return await _active_image_count(db, gallery.id)
+
+    if img.source_position is None:
+        img.source_position = img.page_num
+    img.visibility = "user_hidden"
+    img.hidden_at = datetime.now(UTC)
+    img.page_num = -int(img.id)
+    await db.flush()
+    active_count = await _compact_active_image_pages(db, gallery.id)
+    gallery.pages = active_count
+    return active_count
+
+
+async def _restore_image_row(db: AsyncSession, gallery: Gallery, img: Image) -> int:
+    if img.visibility != "user_hidden":
+        return await _active_image_count(db, gallery.id)
+
+    active_images = (
+        (
+            await db.execute(
+                select(Image)
+                .where(Image.gallery_id == gallery.id, Image.visibility == "active")
+                .order_by(asc(Image.page_num), asc(Image.id))
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if img.source_position is None:
+        target_page = len(active_images) + 1
+    else:
+        target_page = 1 + sum(
+            1
+            for active in active_images
+            if (active.source_position if active.source_position is not None else active.page_num) < img.source_position
+        )
+
+    moving_images = [(active, active.page_num) for active in active_images if active.page_num >= target_page]
+    for active, _old_page in moving_images:
+        active.page_num = -int(active.id)
+    await db.flush()
+
+    for active, old_page in moving_images:
+        active.page_num = old_page + 1
+    img.page_num = target_page
+    img.visibility = "active"
+    img.hidden_at = None
+    await db.flush()
+
+    active_count = len(active_images) + 1
+    gallery.pages = active_count
+    return active_count
+
+
 @router.post("/galleries/{source}/{source_id}/delete-image")
 async def delete_gallery_image(
     source: str,
@@ -1941,14 +2061,12 @@ async def delete_gallery_image(
     auth: dict = Depends(_member),
     db: AsyncSession = Depends(get_db),
 ):
-    """Delete a single image from a gallery by page number.
+    """Hide a single image from a gallery by page number.
 
-    Removes the library symlink, decrements the blob ref count, deletes the
-    Image record, re-numbers remaining pages sequentially, and cleans up
-    thumbnail directories for any now-unreferenced blobs.
+    This legacy endpoint used to delete the Image row and block the blob from
+    re-import. It now preserves local data and marks the image as user_hidden
+    so accidental hides can be restored immediately.
     """
-    import asyncio
-    import shutil
 
     gallery = await _get_or_404_by_source(db, source, source_id, auth)
     gallery_id = gallery.id
@@ -1956,68 +2074,64 @@ async def delete_gallery_image(
 
     img_stmt = (
         select(Image)
-        .where(Image.gallery_id == gallery_id, Image.page_num == body.page_num)
+        .where(Image.gallery_id == gallery_id, Image.page_num == body.page_num, Image.visibility == "active")
         .options(selectinload(Image.blob))
     )
     img = (await db.execute(img_stmt)).scalar_one_or_none()
     if not img:
         raise HTTPException(status_code=404, detail="Image not found")
 
-    blob_sha256 = img.blob_sha256
-    filename = img.filename
-
-    # Record blob as excluded so re-imports skip it
-    from db.models import ExcludedBlob
-
-    excl_stmt = (
-        pg_insert(ExcludedBlob)
-        .values(
-            gallery_id=gallery_id,
-            blob_sha256=blob_sha256,
-        )
-        .on_conflict_do_nothing()
-    )
-    await db.execute(excl_stmt)
-
-    # Remove the symlink from the library directory (use gallery ORM attributes)
-    symlink_path = library_dir(gallery.source, gallery.source_id) / filename
-    await asyncio.to_thread(symlink_path.unlink, True)
-
-    # Decrement blob ref count and delete image record
-    await decrement_ref_count(blob_sha256, db)
-    await db.delete(img)
-    gallery.pages = max(0, (gallery.pages or 1) - 1)
-
-    # Re-number remaining images sequentially starting at 1.
-    # Two-pass approach to avoid unique constraint violations during renumber:
-    # 1) Set all page_nums to negative temporaries, 2) Set to final positive values.
-    remaining_stmt = select(Image).where(Image.gallery_id == gallery_id).order_by(Image.page_num)
-    remaining = (await db.execute(remaining_stmt)).scalars().all()
-    for i, remaining_img in enumerate(remaining):
-        remaining_img.page_num = -(i + 1)
-    await db.flush()
-    for new_num, remaining_img in enumerate(remaining, start=1):
-        remaining_img.page_num = new_num
-
+    remaining_pages = await _hide_image_row(db, gallery, img)
     await db.commit()
+    return {"status": "ok", "remaining_pages": remaining_pages}
 
-    # Check if the blob is now unreferenced; if so, clean up its thumbnail directory
-    zero_ref_result = await db.execute(select(Blob.sha256).where(Blob.sha256 == blob_sha256, Blob.ref_count <= 0))
-    zero_ref_sha256 = zero_ref_result.scalar_one_or_none()
 
-    if zero_ref_sha256:
-        td = thumb_dir(zero_ref_sha256)
+@router.post("/images/{image_id}/hide")
+async def hide_image(
+    image_id: int,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Hide an image without deleting local data."""
+    img = (
+        await db.execute(
+            select(Image)
+            .join(Gallery, Image.gallery_id == Gallery.id)
+            .where(Image.id == image_id, gallery_access_filter(auth))
+            .options(selectinload(Image.gallery))
+        )
+    ).scalar_one_or_none()
+    if not img:
+        raise HTTPException(status_code=404, detail="Image not found")
+    gallery = img.gallery
+    _check_write_access(auth, gallery)
+    remaining_pages = await _hide_image_row(db, gallery, img)
+    await db.commit()
+    return {"status": "ok", "remaining_pages": remaining_pages}
 
-        def _remove_thumbs() -> None:
-            if td.exists():
-                try:
-                    shutil.rmtree(str(td), ignore_errors=True)
-                except OSError as exc:
-                    logger.warning("[delete_gallery_image] failed to remove thumb dir %s: %s", td, exc)
 
-        await asyncio.to_thread(_remove_thumbs)
-
-    return {"status": "ok", "remaining_pages": gallery.pages}
+@router.post("/images/{image_id}/restore")
+async def restore_hidden_image(
+    image_id: int,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restore a user-hidden image immediately."""
+    img = (
+        await db.execute(
+            select(Image)
+            .join(Gallery, Image.gallery_id == Gallery.id)
+            .where(Image.id == image_id, gallery_access_filter(auth))
+            .options(selectinload(Image.gallery))
+        )
+    ).scalar_one_or_none()
+    if not img:
+        raise HTTPException(status_code=404, detail="Image not found")
+    gallery = img.gallery
+    _check_write_access(auth, gallery)
+    remaining_pages = await _restore_image_row(db, gallery, img)
+    await db.commit()
+    return {"status": "ok", "remaining_pages": remaining_pages}
 
 
 # ── Read progress ────────────────────────────────────────────────────
@@ -2549,4 +2663,10 @@ def _i(img: Image) -> dict:
         "media_type": blob.media_type if blob else "image",
         "duration": blob.duration if blob else None,
         "thumbhash": blob.thumbhash if blob else None,
+        "visibility": img.visibility,
+        "source_item_id": img.source_item_id,
+        "source_item_url": img.source_item_url,
+        "source_position": img.source_position,
+        "source_seen_at": img.source_seen_at.isoformat() if img.source_seen_at else None,
+        "hidden_at": img.hidden_at.isoformat() if img.hidden_at else None,
     }
