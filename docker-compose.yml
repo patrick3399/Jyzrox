@@ -65,7 +65,7 @@ services:
     stop_grace_period: 30s
     environment:
       <<: *backend-env
-    env_file: .env
+    env_file: "${JYZROX_ENV_FILE:-.env}"
     volumes:
       - app_data:/data
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
@@ -105,7 +105,7 @@ services:
       WORKER_CONCURRENCY_INTERACTIVE: ${WORKER_CONCURRENCY_INTERACTIVE:-6}
       WORKER_CONCURRENCY_INGEST: ${WORKER_CONCURRENCY_INGEST:-4}
       WORKER_CONCURRENCY_RENDER: ${WORKER_CONCURRENCY_RENDER:-2}
-    env_file: .env
+    env_file: "${JYZROX_ENV_FILE:-.env}"
     volumes:
       - app_data:/data
       # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
@@ -200,7 +200,7 @@ services:
       -c password_encryption=scram-sha-256
       -c log_connections=on
       -c log_disconnections=on
-    env_file: .env
+    env_file: "${JYZROX_ENV_FILE:-.env}"
     volumes:
       - postgres_data:/var/lib/postgresql
       - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
@@ -251,26 +251,26 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: /mnt/T12-data/jyzrox/data
+      device: ${JYZROX_DATA_ROOT}/data
   postgres_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /mnt/T12-data/jyzrox/postgres
+      device: ${JYZROX_DATA_ROOT}/postgres
   redis_data:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /mnt/T12-data/jyzrox/redis
+      device: ${JYZROX_DATA_ROOT}/redis
   tagger_models:
   gallery_dl_venv:
     driver: local
     driver_opts:
       type: none
       o: bind
-      device: /mnt/T12-data/jyzrox/venv
+      device: ${JYZROX_DATA_ROOT}/gallery-dl-venv
 
 networks:
   frontend:
