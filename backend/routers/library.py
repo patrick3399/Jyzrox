@@ -2257,12 +2257,12 @@ async def find_similar_images(
         stmt = sql_text("""
             SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
                    b.storage, b.external_path, b.phash,
-                   bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
+                   bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
             FROM images i
             JOIN blobs b ON i.blob_sha256 = b.sha256
             WHERE b.phash_int IS NOT NULL
               AND i.id != :image_id
-              AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
+              AND bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int <= :threshold
             ORDER BY distance ASC
             LIMIT :limit
         """)
@@ -2288,12 +2288,12 @@ async def find_similar_images(
             stmt = sql_text("""
                 SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
                        b.storage, b.external_path, b.phash,
-                       bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
+                       bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
                 FROM images i
                 JOIN blobs b ON i.blob_sha256 = b.sha256
                 WHERE b.phash_int IS NOT NULL
                   AND i.id != :image_id
-                  AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
+                  AND bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int <= :threshold
                 ORDER BY distance ASC
                 LIMIT :limit
             """)
@@ -2328,13 +2328,13 @@ async def find_similar_images(
             stmt = sql_text(f"""
                 SELECT i.id, i.gallery_id, i.filename, b.sha256, b.extension,
                        b.storage, b.external_path, b.phash,
-                       bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int AS distance
+                       bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int AS distance
                 FROM images i
                 JOIN blobs b ON i.blob_sha256 = b.sha256
                 WHERE b.phash_int IS NOT NULL
                   AND i.id != :image_id
                   AND ({where_prefilter})
-                  AND bit_count((:phash_int::bigint # b.phash_int)::bit(64))::int <= :threshold
+                  AND bit_count((:phash_int ::bigint # b.phash_int)::bit(64))::int <= :threshold
                 ORDER BY distance ASC
                 LIMIT :limit
             """)

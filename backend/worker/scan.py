@@ -303,8 +303,8 @@ async def rescan_library_job(ctx: dict) -> dict:
                     await session.execute(
                         text("""
                             UPDATE blobs SET ref_count = ref_count - v.n
-                            FROM (SELECT unnest(:shas::text[]) AS sha,
-                                         unnest(:ns::int[])  AS n) v
+                            FROM (SELECT unnest(:shas ::text[]) AS sha,
+                                         unnest(:ns ::int[])  AS n) v
                             WHERE blobs.sha256 = v.sha
                         """),
                         {"shas": unique_shas, "ns": decrements},
@@ -824,9 +824,9 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
     return {"status": "done", "total": total}
 
 
-async def scheduled_scan_job(ctx: dict) -> dict:
+async def scheduled_scan_job(ctx: dict, force: bool = False) -> dict:
     """Scheduled library scan — uses croniter-based gating."""
-    if not await _cron_should_run(ctx, "library_scan", "0 * * * *"):
+    if not force and not await _cron_should_run(ctx, "library_scan", "0 * * * *"):
         return {"status": "skipped"}
 
     try:

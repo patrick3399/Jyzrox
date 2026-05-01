@@ -176,7 +176,7 @@ async def run_scheduled_task(
         return {"status": "already_queued", "task_id": task_id, "job": job_name}
 
     try:
-        await core.queue.enqueue(job_name, _job_id=f"manual:{task_id}:{uuid.uuid4().hex[:8]}")
+        await core.queue.enqueue(job_name, force=True, _job_id=f"manual:{task_id}:{uuid.uuid4().hex[:8]}")
     except Exception as exc:
         await r.delete(claim_key)
         logger.error("Failed to enqueue %s: %s", job_name, exc)
