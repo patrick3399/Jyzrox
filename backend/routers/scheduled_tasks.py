@@ -8,9 +8,9 @@ from croniter import croniter
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
+import core.queue
 from core.auth import require_role
 from core.redis_client import get_redis
-import core.queue
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["scheduled-tasks"])
@@ -94,7 +94,7 @@ def _next_run(cron_expr: str, enabled: bool, last_run: str | None) -> str | None
     try:
         base = datetime.fromisoformat(last_run) if last_run else datetime.now(UTC)
         return croniter(cron_expr, base).get_next(datetime).isoformat()
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         return None
 
 
@@ -116,18 +116,20 @@ async def list_scheduled_tasks(
         cron_expr = _decode_redis(cron_expr_raw) or defn["default_cron"]
         last_run = _decode_redis(last_run_raw)
 
-        tasks.append({
-            "id": task_id,
-            "name": defn["name"],
-            "description": defn["description"],
-            "enabled": enabled,
-            "cron_expr": cron_expr,
-            "default_cron": defn["default_cron"],
-            "next_run": _next_run(cron_expr, enabled, last_run),
-            "last_run": last_run,
-            "last_status": _decode_redis(last_status_raw),
-            "last_error": _decode_redis(last_error_raw),
-        })
+        tasks.append(
+            {
+                "id": task_id,
+                "name": defn["name"],
+                "description": defn["description"],
+                "enabled": enabled,
+                "cron_expr": cron_expr,
+                "default_cron": defn["default_cron"],
+                "next_run": _next_run(cron_expr, enabled, last_run),
+                "last_run": last_run,
+                "last_status": _decode_redis(last_status_raw),
+                "last_error": _decode_redis(last_error_raw),
+            }
+        )
 
     return {"tasks": tasks}
 

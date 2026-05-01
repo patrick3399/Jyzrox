@@ -24,7 +24,6 @@ from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.sql import text as sql_text
 
 from core.auth import gallery_access_filter, require_auth, require_role
-from core.config import settings
 from core.database import get_db
 from core.gallery_helpers import (
     build_cover_map,
@@ -1077,7 +1076,6 @@ async def list_gallery_files(
     """List all files inside a gallery's library directory with DB metadata."""
     import asyncio
     import os
-    from pathlib import Path
 
     g = await _get_or_404_by_source(db, source, source_id, auth)
     gallery_id = g.id
@@ -2515,7 +2513,7 @@ async def _check_update_pixiv(g, db: AsyncSession, auth: dict) -> dict:
 
     try:
         illust_id = int(g.source_id)
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         return {"status": "skipped", "reason": "invalid_source_id"}
 
     try:
@@ -2544,7 +2542,9 @@ async def _check_update_pixiv(g, db: AsyncSession, auth: dict) -> dict:
     return await _build_updated_response(g, db, auth, changed_fields, pages_diff)
 
 
-async def _build_updated_response(g, db: AsyncSession, auth: dict, changed_fields: list, pages_diff: dict | None) -> dict:
+async def _build_updated_response(
+    g, db: AsyncSession, auth: dict, changed_fields: list, pages_diff: dict | None
+) -> dict:
     cover_thumb = await _single_cover_thumb(db, g.id, g.source or "")
     is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], g.id)
     return {

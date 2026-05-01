@@ -11,9 +11,7 @@ inserts are required for these tests.
 
 from unittest.mock import AsyncMock
 
-import pytest
 from sqlalchemy import text
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -171,6 +169,7 @@ async def test_scheduled_tasks_run_enqueues_job(client):
     app.state.enqueue.assert_called_once()
     call_args = app.state.enqueue.call_args
     assert call_args.args[0] == "scheduled_scan_job"
+    assert call_args.kwargs["force"] is True
     assert call_args.kwargs["_job_id"].startswith("manual:library_scan:")
 
 

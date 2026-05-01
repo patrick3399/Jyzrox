@@ -15,8 +15,6 @@ from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 # Ensure backend is on sys.path (conftest does this too, but guard here for safety)
 _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
@@ -393,8 +391,18 @@ class TestImportJob:
             ctx = _make_ctx()
             await import_job(ctx, path=str(gallery_dir))
 
-        mock_enqueue.assert_any_call("cover_thumbnail_job", gallery_id=1, _timeout=300)
-        mock_enqueue.assert_any_call("thumbnail_job", gallery_id=1, _timeout=3600)
+        mock_enqueue.assert_any_call(
+            "cover_thumbnail_job",
+            gallery_id=1,
+            _timeout=300,
+            _job_id="cover-thumbnail:1",
+        )
+        mock_enqueue.assert_any_call(
+            "thumbnail_job",
+            gallery_id=1,
+            _timeout=3600,
+            _job_id="thumbnail:1",
+        )
         assert [c.args[0] for c in mock_enqueue.call_args_list[:2]] == [
             "cover_thumbnail_job",
             "thumbnail_job",

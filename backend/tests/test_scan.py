@@ -7,15 +7,13 @@ Redis is provided via ctx["redis"] as an AsyncMock.
 Filesystem operations are mocked via patch on resolve_blob_path / thumb_dir.
 """
 
-import os
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, call
-
-import pytest
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_redis() -> AsyncMock:
     """Return a fully-wired mock Redis compatible with worker.scan usage."""
@@ -26,6 +24,7 @@ def _make_redis() -> AsyncMock:
     r.delete = AsyncMock(return_value=1)
     return r
 
+
 def _make_blob(sha: str = "abc123", ext: str = ".jpg", storage: str = "cas") -> MagicMock:
     blob = MagicMock()
     blob.sha256 = sha
@@ -33,6 +32,7 @@ def _make_blob(sha: str = "abc123", ext: str = ".jpg", storage: str = "cas") -> 
     blob.storage = storage
     blob.external_path = None
     return blob
+
 
 def _make_image(
     image_id: int = 1,
@@ -48,6 +48,7 @@ def _make_image(
     img.blob_sha256 = blob.sha256 if blob else None
     img.blob = blob
     return img
+
 
 def _make_gallery(
     gallery_id: int = 10,
@@ -68,6 +69,7 @@ def _make_gallery(
     g.library_path = library_path
     g.last_scanned_at = None
     return g
+
 
 def _make_session(
     gallery_ids: list[int] | None = None,
@@ -108,9 +110,11 @@ def _make_session(
     session.__aexit__ = AsyncMock(return_value=False)
     return session
 
+
 # ---------------------------------------------------------------------------
 # TestRescanLibraryJob
 # ---------------------------------------------------------------------------
+
 
 class TestRescanLibraryJob:
     """Tests for rescan_library_job(ctx)."""
@@ -227,8 +231,6 @@ class TestRescanLibraryJob:
         """Cancel signal (b'cancel' in Redis) should stop processing and return 'cancelled'."""
         from worker.scan import rescan_library_job
 
-        gallery = _make_gallery(gallery_id=30)
-
         session = AsyncMock()
         session.flush = AsyncMock()
         session.commit = AsyncMock()
@@ -321,8 +323,18 @@ class TestRescanLibraryJob:
             "cover_thumbnail_job",
             "thumbnail_job",
         ]
-        mock_enqueue.assert_any_call("cover_thumbnail_job", gallery_id=40, _timeout=300)
-        mock_enqueue.assert_any_call("thumbnail_job", gallery_id=40, _timeout=3600)
+        mock_enqueue.assert_any_call(
+            "cover_thumbnail_job",
+            gallery_id=40,
+            _timeout=300,
+            _job_id="cover-thumbnail:40",
+        )
+        mock_enqueue.assert_any_call(
+            "thumbnail_job",
+            gallery_id=40,
+            _timeout=3600,
+            _job_id="thumbnail:40",
+        )
 
     async def test_watcher_paused_and_resumed(self):
         """Watcher should be paused at the start and resumed at the end."""
@@ -399,9 +411,11 @@ class TestRescanLibraryJob:
 
         mock_enqueue.assert_not_awaited()
 
+
 # ---------------------------------------------------------------------------
 # TestRescanGalleryJob
 # ---------------------------------------------------------------------------
+
 
 class TestRescanGalleryJob:
     """Tests for rescan_gallery_job(ctx, gallery_id)."""
@@ -508,7 +522,8 @@ class TestRescanGalleryJob:
         r = _make_redis()
 
         # Create a real temp file to iterate over
-        import tempfile, pathlib
+        import pathlib
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             new_file = pathlib.Path(tmpdir) / "001.jpg"
@@ -560,7 +575,8 @@ class TestRescanGalleryJob:
 
         r = _make_redis()
 
-        import tempfile, pathlib
+        import pathlib
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             excl_file = pathlib.Path(tmpdir) / "excluded.jpg"
@@ -686,13 +702,15 @@ class TestRescanGalleryJob:
             patch("worker.scan.library_dir", return_value=fake_gallery_dir),
             patch("worker.scan.decrement_ref_count", new_callable=AsyncMock),
         ):
-            result = await rescan_gallery_job({"redis": r}, gallery_id=500)
+            await rescan_gallery_job({"redis": r}, gallery_id=500)
 
         assert gallery.download_status == "missing"
+
 
 # ---------------------------------------------------------------------------
 # TestAutoDiscoverJob
 # ---------------------------------------------------------------------------
+
 
 class TestAutoDiscoverJob:
     """Tests for auto_discover_job(ctx)."""
@@ -733,7 +751,8 @@ class TestAutoDiscoverJob:
 
         r = _make_redis()
 
-        import tempfile, pathlib
+        import pathlib
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             hidden_dir = pathlib.Path(tmpdir) / ".hidden_gallery"
@@ -759,7 +778,8 @@ class TestAutoDiscoverJob:
 
         r = _make_redis()
 
-        import tempfile, pathlib
+        import pathlib
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             gallery_dir = pathlib.Path(tmpdir) / "my_gallery"
@@ -793,7 +813,8 @@ class TestAutoDiscoverJob:
 
         r = _make_redis()
 
-        import tempfile, pathlib
+        import pathlib
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             gallery_dir = pathlib.Path(tmpdir) / "new_gallery"
@@ -821,7 +842,6 @@ class TestAutoDiscoverJob:
 
         assert result["discovered"] == 1
         mock_enqueue.assert_awaited_once()
-        enqueue_kwargs = mock_enqueue.call_args.kwargs
         assert mock_enqueue.call_args.args[0] == "local_import_job"
 
     async def test_only_directories_with_supported_extensions_counted(self):
@@ -839,7 +859,8 @@ class TestAutoDiscoverJob:
 
         r = _make_redis()
 
-        import tempfile, pathlib
+        import pathlib
+        import tempfile
 
         with tempfile.TemporaryDirectory() as tmpdir:
             gallery_dir = pathlib.Path(tmpdir) / "text_only"
@@ -855,9 +876,11 @@ class TestAutoDiscoverJob:
 
         assert result["discovered"] == 0
 
+
 # ---------------------------------------------------------------------------
 # TestScheduledScanJob
 # ---------------------------------------------------------------------------
+
 
 class TestScheduledScanJob:
     """Tests for scheduled_scan_job(ctx)."""
@@ -872,6 +895,27 @@ class TestScheduledScanJob:
             result = await scheduled_scan_job({"redis": r})
 
         assert result["status"] == "skipped"
+
+    async def test_force_bypasses_cron_gate(self):
+        """Manual runs pass force=True so the cron gate must not skip the job."""
+        from worker.scan import scheduled_scan_job
+
+        r = _make_redis()
+        auto_discover_mock = AsyncMock(return_value={"discovered": 0})
+        rescan_mock = AsyncMock(return_value={"status": "done", "total": 0})
+
+        with (
+            patch("worker.scan._cron_should_run", new_callable=AsyncMock, return_value=False) as should_run_mock,
+            patch("worker.scan._cron_record", new_callable=AsyncMock),
+            patch("worker.scan.auto_discover_job", auto_discover_mock),
+            patch("worker.scan.rescan_library_job", rescan_mock),
+        ):
+            result = await scheduled_scan_job({"redis": r}, force=True)
+
+        assert result["status"] == "done"
+        should_run_mock.assert_not_awaited()
+        auto_discover_mock.assert_awaited_once()
+        rescan_mock.assert_awaited_once()
 
     async def test_normal_trigger_calls_discover_and_rescan(self):
         """When cron fires, both auto_discover_job and rescan_library_job are called."""
@@ -917,9 +961,11 @@ class TestScheduledScanJob:
         assert "running" in record_statuses
         assert "ok" in record_statuses
 
+
 # ---------------------------------------------------------------------------
 # TestRescanByPathJob
 # ---------------------------------------------------------------------------
+
 
 class TestRescanByPathJob:
     """Tests for rescan_by_path_job(ctx, dir_path)."""

@@ -1,18 +1,15 @@
 """Library scan and rescan jobs for the worker package."""
 
 import asyncio
-import json
 import os
 from dataclasses import dataclass
-from datetime import UTC, datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
-import core.queue
-
 from sqlalchemy import text, update
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
+import core.queue
 from core.config import get_all_library_paths, settings
 from core.database import AsyncSessionLocal
 from core.local_patterns import (
@@ -31,8 +28,8 @@ from services.cas import (
     store_blob,
     thumb_dir,
 )
-from worker.constants import _IMAGE_EXTS, _MEDIA_EXTS, _VIDEO_EXTS, logger
-from worker.helpers import _cron_record, _cron_should_run, _sha256, _validate_image_magic
+from worker.constants import logger
+from worker.helpers import _cron_record, _cron_should_run, _sha256
 
 _SUPPORTED_MEDIA_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
 
@@ -64,11 +61,21 @@ def _has_thumb_160(blob: Blob) -> bool:
 
 
 async def _get_library_specs(session) -> list[_LibrarySpec]:
-    rows = (await session.execute(
-        select(LibraryPath).where(LibraryPath.enabled == True)  # noqa: E712
-    )).scalars().all()
+    rows = (
+        (
+            await session.execute(
+                select(LibraryPath).where(LibraryPath.enabled == True)  # noqa: E712
+            )
+        )
+        .scalars()
+        .all()
+    )
     specs = [
-        _LibrarySpec(path=row.path, pattern=row.pattern or DEFAULT_LIBRARY_PATTERN, import_mode=row.import_mode or DEFAULT_IMPORT_MODE)
+        _LibrarySpec(
+            path=row.path,
+            pattern=row.pattern or DEFAULT_LIBRARY_PATTERN,
+            import_mode=row.import_mode or DEFAULT_IMPORT_MODE,
+        )
         for row in rows
     ]
     seen = {spec.path for spec in specs}
@@ -159,6 +166,7 @@ async def rescan_library_job(ctx: dict) -> dict:
 
     # Pause watcher during full rescan to avoid duplicate triggers
     from core.watcher import watcher_instance as _wi
+
     _watcher_was_running = _wi is not None and _wi.is_running
     if _watcher_was_running:
         _wi.pause()
@@ -168,9 +176,11 @@ async def rescan_library_job(ctx: dict) -> dict:
     try:
         async with AsyncSessionLocal() as session:
             # Fetch only IDs ordered by scan priority (unscanned first)
-            all_gallery_ids = (await session.execute(
-                select(Gallery.id).order_by(Gallery.last_scanned_at.asc().nulls_first())
-            )).scalars().all()
+            all_gallery_ids = (
+                (await session.execute(select(Gallery.id).order_by(Gallery.last_scanned_at.asc().nulls_first())))
+                .scalars()
+                .all()
+            )
             total = len(all_gallery_ids)
             logger.info("[rescan_library] %d galleries to scan", total)
 
@@ -192,15 +202,21 @@ async def rescan_library_job(ctx: dict) -> dict:
                     cancelled = True
                     break
 
-                chunk_ids = all_gallery_ids[chunk_start:chunk_start + CHUNK]
+                chunk_ids = all_gallery_ids[chunk_start : chunk_start + CHUNK]
 
                 # Batch load all images + blobs for this chunk in a single query
-                images_result = (await session.execute(
-                    select(Image)
-                    .where(Image.gallery_id.in_(chunk_ids))
-                    .order_by(Image.gallery_id.asc(), Image.page_num.asc())
-                    .options(selectinload(Image.blob))
-                )).scalars().all()
+                images_result = (
+                    (
+                        await session.execute(
+                            select(Image)
+                            .where(Image.gallery_id.in_(chunk_ids))
+                            .order_by(Image.gallery_id.asc(), Image.page_num.asc())
+                            .options(selectinload(Image.blob))
+                        )
+                    )
+                    .scalars()
+                    .all()
+                )
 
                 # Group images by gallery_id
                 images_by_gallery: dict[int, list] = defaultdict(list)
@@ -208,9 +224,7 @@ async def rescan_library_job(ctx: dict) -> dict:
                     images_by_gallery[img.gallery_id].append(img)
 
                 # Batch load Gallery ORM objects for this chunk
-                galleries = (await session.execute(
-                    select(Gallery).where(Gallery.id.in_(chunk_ids))
-                )).scalars().all()
+                galleries = (await session.execute(select(Gallery).where(Gallery.id.in_(chunk_ids)))).scalars().all()
                 gallery_map = {g.id: g for g in galleries}
 
                 # Accumulate batch operations across the chunk
@@ -290,7 +304,7 @@ async def rescan_library_job(ctx: dict) -> dict:
                     if missing_cover_thumb:
                         galleries_needing_cover_thumbs.append(gid)
 
-                    gallery.last_scanned_at = datetime.now(timezone.utc)
+                    gallery.last_scanned_at = datetime.now(UTC)
 
                 # ── Batch DB operations for this chunk ──────────────────────
 
@@ -374,6 +388,7 @@ async def rescan_library_job(ctx: dict) -> dict:
         logger.info("[rescan_library] completed, %d galleries processed", total)
 
         from core.events import EventType, emit_safe
+
         await emit_safe(EventType.RESCAN_COMPLETED, resource_type="system", total=total)
 
     return {"status": "cancelled" if cancelled else "done", "total": total}
@@ -398,18 +413,29 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             return {"status": "failed", "error": "gallery not found"}
 
         # Load excluded blob hashes for this gallery
-        excluded_rows = (await session.execute(
-            select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)
-        )).scalars().all()
+        excluded_rows = (
+            (await session.execute(select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)))
+            .scalars()
+            .all()
+        )
         excluded_set: set[str] = set(excluded_rows)
 
         import shutil
+
         from sqlalchemy.orm import selectinload
-        images = (await session.execute(
-            select(Image).where(Image.gallery_id == gallery_id)
-            .order_by(Image.page_num.asc())
-            .options(selectinload(Image.blob))
-        )).scalars().all()
+
+        images = (
+            (
+                await session.execute(
+                    select(Image)
+                    .where(Image.gallery_id == gallery_id)
+                    .order_by(Image.page_num.asc())
+                    .options(selectinload(Image.blob))
+                )
+            )
+            .scalars()
+            .all()
+        )
 
         # --- Step 1: Verify existing records ---
         known_sha256s: set[str] = set()
@@ -453,11 +479,18 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         # CAS/copy galleries scan the library symlink directory. Link-mode
         # monitored galleries scan their original external source directory.
         gallery_dir: Path | None = None
-        surviving_images = (await session.execute(
-            select(Image).where(Image.gallery_id == gallery_id)
-            .order_by(Image.page_num.asc())
-            .options(selectinload(Image.blob))
-        )).scalars().all()
+        surviving_images = (
+            (
+                await session.execute(
+                    select(Image)
+                    .where(Image.gallery_id == gallery_id)
+                    .order_by(Image.page_num.asc())
+                    .options(selectinload(Image.blob))
+                )
+            )
+            .scalars()
+            .all()
+        )
 
         if gallery.import_mode == "link" and gallery.source_path:
             source_dir = Path(gallery.source_path)
@@ -489,7 +522,9 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 if file_hash in excluded_set:
                     logger.debug(
                         "[rescan_gallery] gallery_id=%d: skipping excluded blob %s (%s)",
-                        gallery_id, file_hash[:12], fpath.name,
+                        gallery_id,
+                        file_hash[:12],
+                        fpath.name,
                     )
                     continue
                 # New file found on disk that is not in the DB.
@@ -517,9 +552,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 if inserted is not None:
                     # New Image row created — increment blob ref_count.
                     await session.execute(
-                        update(Blob)
-                        .where(Blob.sha256 == file_hash)
-                        .values(ref_count=Blob.ref_count + 1)
+                        update(Blob).where(Blob.sha256 == file_hash).values(ref_count=Blob.ref_count + 1)
                     )
                 new_files_added += 1
                 missing_thumb = True  # New file needs a thumbnail.
@@ -533,11 +566,18 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
                 )
 
         # --- Step 3: Update gallery metadata ---
-        final_images = (await session.execute(
-            select(Image).where(Image.gallery_id == gallery_id)
-            .order_by(Image.page_num.asc())
-            .options(selectinload(Image.blob))
-        )).scalars().all()
+        final_images = (
+            (
+                await session.execute(
+                    select(Image)
+                    .where(Image.gallery_id == gallery_id)
+                    .order_by(Image.page_num.asc())
+                    .options(selectinload(Image.blob))
+                )
+            )
+            .scalars()
+            .all()
+        )
         gallery.pages = len(final_images)
         if missing_thumb and not missing_cover_thumb:
             current_cover = _cover_image_for_gallery(gallery, final_images)
@@ -563,7 +603,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             gallery.download_status = "missing"
         elif gallery.download_status == "missing":
             gallery.download_status = "complete"
-        gallery.last_scanned_at = datetime.now(timezone.utc)
+        gallery.last_scanned_at = datetime.now(UTC)
 
         await session.commit()
 
@@ -643,9 +683,11 @@ async def auto_discover_job(ctx: dict) -> dict:
                 if file_count == 0:
                     continue
 
-                existing = (await session.execute(
-                    select(Gallery.id).where(Gallery.source == "local", Gallery.source_id == rel_path)
-                )).scalar_one_or_none()
+                existing = (
+                    await session.execute(
+                        select(Gallery.id).where(Gallery.source == "local", Gallery.source_id == rel_path)
+                    )
+                ).scalar_one_or_none()
 
                 import_request = await _discover_single_library_dir(session, spec, current)
                 if import_request:
@@ -669,6 +711,7 @@ async def auto_discover_job(ctx: dict) -> dict:
     logger.info("[auto_discover] Discovered %d new galleries", discovered)
 
     from core.events import EventType, emit_safe
+
     await emit_safe(EventType.GALLERY_DISCOVERED, resource_type="gallery", discovered=discovered)
 
     return {"discovered": discovered}
@@ -692,7 +735,8 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
     async with AsyncSessionLocal() as session:
         specs = await _get_library_specs(session)
         matching_specs = [
-            spec for spec in specs
+            spec
+            for spec in specs
             if real_dir == os.path.realpath(spec.path) or real_dir.startswith(os.path.realpath(spec.path) + os.sep)
         ]
         matching_specs.sort(key=lambda spec: len(os.path.realpath(spec.path)), reverse=True)
@@ -729,7 +773,7 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
                     select(Gallery.id).where(Gallery.source == source, Gallery.source_id == source_id)
                 )
                 gallery_id = result.scalar_one_or_none()
-    except (ValueError, IndexError):
+    except ValueError, IndexError:
         pass
 
     if not gallery_id:
@@ -738,10 +782,12 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
             result = await session.execute(
                 select(Image.gallery_id)
                 .join(Blob, Image.blob_sha256 == Blob.sha256)
-                .where(Blob.external_path.like(
-                    dir_path.replace('%', '\\%').replace('_', '\\_') + '%',
-                    escape='\\',
-                ))
+                .where(
+                    Blob.external_path.like(
+                        dir_path.replace("%", "\\%").replace("_", "\\_") + "%",
+                        escape="\\",
+                    )
+                )
                 .limit(1)
             )
             gallery_id = result.scalar_one_or_none()
@@ -788,9 +834,11 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
                                 import_requests.append(import_request)
                     await session.commit()
 
-        relevant = (await session.execute(
-            select(Gallery).where(Gallery.library_path == library_path).order_by(Gallery.id)
-        )).scalars().all()
+        relevant = (
+            (await session.execute(select(Gallery).where(Gallery.library_path == library_path).order_by(Gallery.id)))
+            .scalars()
+            .all()
+        )
 
         total = len(relevant)
         logger.info("[rescan_path] %d galleries under %s", total, library_path)
@@ -811,15 +859,31 @@ async def rescan_library_path_job(ctx: dict, library_path: str) -> dict:
     for idx, gallery in enumerate(relevant):
         if gallery.id in importing_gallery_ids:
             continue
-        await r.setex("rescan:progress", 3600, _json.dumps({
-            "processed": idx, "total": total, "status": "running",
-            "current_gallery": gallery.id,
-        }))
+        await r.setex(
+            "rescan:progress",
+            3600,
+            _json.dumps(
+                {
+                    "processed": idx,
+                    "total": total,
+                    "status": "running",
+                    "current_gallery": gallery.id,
+                }
+            ),
+        )
         await core.queue.enqueue("rescan_gallery_job", gallery_id=gallery.id, _timeout=3600)
 
-    await r.setex("rescan:progress", 30, _json.dumps({
-        "processed": total, "total": total, "status": "done",
-    }))
+    await r.setex(
+        "rescan:progress",
+        30,
+        _json.dumps(
+            {
+                "processed": total,
+                "total": total,
+                "status": "done",
+            }
+        ),
+    )
     logger.info("[rescan_path] completed, %d galleries processed", total)
     return {"status": "done", "total": total}
 
