@@ -155,7 +155,13 @@ async def download_job(
     from core.site_config import site_config_service
 
     sem_key = plugin.meta.semaphore_key or source_id
-    _dl_params = await site_config_service.get_effective_download_params(source_id)
+    if source_id == "gallery_dl":
+        from plugins.builtin.gallery_dl._sites import get_site_by_domain as _get_site_by_domain
+        _url_domain = urlparse(url).netloc.removeprefix("www.")
+        _url_source_id = _get_site_by_domain(_url_domain).source_id
+        _dl_params = await site_config_service.get_effective_download_params(_url_source_id)
+    else:
+        _dl_params = await site_config_service.get_effective_download_params(source_id)
 
     if sem_key == "gallery_dl":
         domain = urlparse(url).netloc.removeprefix("www.")
