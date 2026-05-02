@@ -315,15 +315,26 @@ async def _read_stderr(
     assert proc.stderr is not None
     from core.adaptive import _RE_403, AdaptiveSignal, adaptive_engine
 
-    async for raw_line in proc.stderr:
-        line = raw_line.decode("utf-8", errors="replace").rstrip()
-        if line and len(state.stderr_lines) < _MAX_STDERR_LINES:
-            state.stderr_lines.append(line)
-        if state.source_id and _RE_403.search(line):
-            try:
-                await adaptive_engine.record_signal(state.source_id, AdaptiveSignal.HTTP_403)
-            except Exception:
-                pass
+    # Read by chunks (not lines) so \r-only progress bars also reset last_activity.
+    buf = b""
+    while True:
+        chunk = await proc.stderr.read(4096)
+        if not chunk:
+            break
+        state.last_activity = asyncio.get_running_loop().time()
+        buf += chunk
+        # Process complete lines only (split on \n; keep incomplete tail in buf)
+        parts = buf.split(b"\n")
+        buf = parts[-1]
+        for raw_line in parts[:-1]:
+            line = raw_line.decode("utf-8", errors="replace").rstrip()
+            if line and len(state.stderr_lines) < _MAX_STDERR_LINES:
+                state.stderr_lines.append(line)
+            if state.source_id and _RE_403.search(line):
+                try:
+                    await adaptive_engine.record_signal(state.source_id, AdaptiveSignal.HTTP_403)
+                except Exception:
+                    pass
 
 async def _heartbeat_loop(
     state: _DownloadState,
