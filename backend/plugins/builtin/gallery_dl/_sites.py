@@ -60,6 +60,11 @@ class GdlSiteConfig:
     sleep_request: float | tuple[float, float] | None = None  # seconds between requests
     inactivity_timeout: int = 300  # seconds before killing process on no output
 
+    # ── URL parsing ──
+    # Index of the path segment used as source_id in ensure_gallery_from_url.
+    # E.g. weibo.com/u/USERID has the ID at index 1 (skip the "u" prefix).
+    url_path_id_index: int = 0
+
 GDL_SITES: tuple[GdlSiteConfig, ...] = (
     # ── EH / Pixiv (added before social/booru so _BY_SOURCE gets ehentai from e-hentai.org first) ──
     GdlSiteConfig(
@@ -167,6 +172,21 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         subscribe_id_key="shortcode",
         subscribe_url_tpl="https://www.instagram.com/{}/",
         subscribe_id_pattern=r"^/(@?[^/]+)",
+    ),
+    GdlSiteConfig(
+        domain="weibo.com",
+        source_id="weibo",
+        name="Weibo",
+        category="social",
+        title_fields=("user.screen_name", "user.name"),
+        artist_from="uploader",
+        subscribe_url_tpl="https://weibo.com/u/{}/",
+        subscribe_id_pattern=r"^/(?:u/)?([^/]+)",
+        credential_type="cookies",
+        credential_requirement="recommended",
+        inactivity_timeout=600,
+        sleep_request=(1.0, 3.0),
+        url_path_id_index=1,
     ),
     GdlSiteConfig(
         domain="facebook.com",

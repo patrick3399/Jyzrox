@@ -127,10 +127,12 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fal
     # Source detection: gallery-dl uses "category" for the extractor name
     # (e.g., "exhentai", "pixiv"). Resolve through site config to get the
     # canonical source_id (e.g., "ehentai").
+    # For sites not in GDL_SITES, fall back to the raw gallery-dl category name
+    # (e.g., "artstation", "newgrounds") so galleries aren't all lumped under "gallery_dl".
     raw_source = meta.get("category") or fallback_source or "gallery_dl"
-    from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
+    from plugins.builtin.gallery_dl._sites import _DEFAULT_CONFIG, get_site_config as _get_site_config
     _cfg = _get_site_config(raw_source)
-    source = _cfg.source_id
+    source = raw_source if _cfg is _DEFAULT_CONFIG else _cfg.source_id
     source_id = _resolve_source_id(meta, _cfg, dest_dir.name)
 
     # Tag extraction and normalization

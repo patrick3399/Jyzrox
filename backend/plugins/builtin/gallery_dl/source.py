@@ -250,6 +250,7 @@ class _DownloadState:
     last_progress_update: float = 0.0
     stderr_lines: list[str] = field(default_factory=list)
     html_response_count: int = 0
+    empty_response_count: int = 0
     source_id: str = ""
     last_page_time: float = 0.0
 
@@ -492,6 +493,7 @@ async def _on_file_with_validation(
             pass
         return
     elif result == "empty":
+        state.empty_response_count += 1
         try:
             file_path.unlink(missing_ok=True)
         except OSError:
@@ -773,10 +775,12 @@ class GalleryDlPlugin(SourcePlugin):
             err = stderr_text[:500]
             logger.error("[gallery_dl] non-zero exit:\n%s", stderr_text)
             if state.downloaded > 0 or state.skipped_count > 0:
+                filtered = state.html_response_count + state.empty_response_count
                 logger.warning(
-                    "[gallery_dl] %d file(s) downloaded and %d skipped before failure — returning partial",
+                    "[gallery_dl] %d file(s) downloaded and %d skipped before failure — returning partial%s",
                     state.downloaded,
                     state.skipped_count,
+                    f" (filtered={filtered}: html={state.html_response_count}, empty={state.empty_response_count})" if filtered else "",
                 )
                 return DownloadResult(
                     status="partial",
@@ -795,7 +799,12 @@ class GalleryDlPlugin(SourcePlugin):
                 error_urls=error_urls,
             )
 
-        logger.info("[gallery_dl] done: %s (downloaded=%d, skipped=%d)", url, state.downloaded, state.skipped_count)
+        filtered = state.html_response_count + state.empty_response_count
+        logger.info(
+            "[gallery_dl] done: %s (downloaded=%d, skipped=%d%s)",
+            url, state.downloaded, state.skipped_count,
+            f", filtered={filtered}(html={state.html_response_count},empty={state.empty_response_count})" if filtered else "",
+        )
         return DownloadResult(
             status="done",
             downloaded=state.downloaded,

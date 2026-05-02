@@ -8,7 +8,7 @@ WORKDIR /install
 
 COPY requirements.lock .
 RUN pip install --no-cache-dir --prefix=/install/pkgs -r requirements.lock && \
-    pip install --no-cache-dir --prefix=/install/pkgs gallery-dl && \
+    pip install --no-cache-dir --prefix=/install/pkgs gallery-dl "psycopg[binary]" && \
     pip install --no-cache-dir --no-deps --prefix=/install/pkgs thumbhash-python==1.0.1
 
 # Download swagger-ui-dist static assets for self-hosted docs

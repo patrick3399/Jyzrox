@@ -155,7 +155,7 @@ async def ensure_venv() -> None:
     # Install gallery-dl
     pip_bin = str(v1 / "bin" / "pip")
     logger.info("[gallery-dl venv] Installing gallery-dl into %s", v1)
-    rc, _, stderr = await _run([pip_bin, "install", "gallery-dl", "psycopg[binary]"], timeout=120)
+    rc, _, stderr = await _run([pip_bin, "install", "--upgrade", "gallery-dl", "psycopg[binary]"], timeout=120)
     if rc != 0:
         logger.error("[gallery-dl venv] pip install failed: %s", stderr)
         await asyncio.to_thread(shutil.rmtree, v1, True)

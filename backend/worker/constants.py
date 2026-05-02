@@ -7,7 +7,7 @@ logger = logging.getLogger("worker")
 DISK_LOW_KEY = "system:disk_low"
 
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
-_VIDEO_EXTS = {".mp4", ".webm"}
+_VIDEO_EXTS = {".mp4", ".webm", ".mov"}
 _MEDIA_EXTS = _IMAGE_EXTS | _VIDEO_EXTS
 
 # Magic byte signatures for image file validation

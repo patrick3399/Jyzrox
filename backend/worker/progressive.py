@@ -41,6 +41,9 @@ class ProgressiveImporter:
         self._known_filenames: set[str] = set()
         self._known_source_items: set[str] = set()
         self._source_item_state: dict[str, tuple[int, str, str, int | None]] = {}
+        self._skip_duplicate = 0
+        self._skip_excluded = 0
+        self._skip_invalid = 0
 
     async def _load_gallery_state(self) -> None:
         """Load excluded blobs and current max page_num for the gallery."""
@@ -157,21 +160,22 @@ class ProgressiveImporter:
 
         from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-        from plugins.registry import plugin_registry
+        from plugins.builtin.gallery_dl._sites import get_site_by_domain
 
         parsed = urlparse(url)
         domain = parsed.netloc.removeprefix("www.")
 
-        # Derive source from domain
-        source = "gallery_dl"
-        for site in plugin_registry.get_all_sites():
-            if site.domain == domain:
-                source = site.source_id
-                break
+        from plugins.builtin.gallery_dl._sites import _DEFAULT_CONFIG
+        site_cfg = get_site_by_domain(domain)
+        # For unknown domains use the bare domain as source (e.g. "somebooru.net")
+        # so galleries aren't all lumped under "gallery_dl".
+        source = domain if site_cfg is _DEFAULT_CONFIG else site_cfg.source_id
 
-        # Derive source_id from URL path
+        # Derive source_id from URL path, respecting per-site path segment index.
+        # E.g. weibo.com/u/USERID: url_path_id_index=1 skips the "u" routing prefix.
         path_parts = [p for p in parsed.path.strip("/").split("/") if p]
-        source_id = path_parts[0] if path_parts else dest_dir.name
+        id_idx = min(site_cfg.url_path_id_index, len(path_parts) - 1) if path_parts else 0
+        source_id = path_parts[id_idx] if path_parts else dest_dir.name
         title = source_id
 
         self.title = title
@@ -311,6 +315,7 @@ class ProgressiveImporter:
         # Validate image magic bytes (skip check for videos)
         if file_path.suffix.lower() not in _VIDEO_EXTS:
             if not _validate_image_magic(file_path):
+                self._skip_invalid += 1
                 logger.warning("[progressive] invalid magic bytes, skipping: %s", file_path.name)
                 return
 
@@ -320,20 +325,18 @@ class ProgressiveImporter:
 
             # Skip excluded blobs
             if final_sha256 in self._excluded_set:
-                logger.debug(
-                    "[progressive] skipping excluded blob %s for gallery %d", final_sha256[:12], self.gallery_id
-                )
+                self._skip_excluded += 1
                 return
             existing_source_item = self._source_item_state.get(source_item_id) if source_item_id else None
             if final_sha256 in self._known_sha256s:
-                logger.debug("[progressive] skipping existing image: %s", file_path.name)
+                self._skip_duplicate += 1
                 return
             if existing_source_item and existing_source_item[1] == final_sha256:
                 await self._touch_existing_source_item(existing_source_item[0], existing_source_item[2], page_num)
-                logger.debug("[progressive] skipping unchanged source item: %s", file_path.name)
+                self._skip_duplicate += 1
                 return
             if not existing_source_item and file_path.name in self._known_filenames:
-                logger.debug("[progressive] skipping existing image: %s", file_path.name)
+                self._skip_duplicate += 1
                 return
 
             async with AsyncSessionLocal() as session:
@@ -543,7 +546,15 @@ class ProgressiveImporter:
         except Exception as exc:
             logger.warning("[progressive] failed to remove temp dir %s: %s", dest_dir, exc)
 
-        logger.info("[progressive] finalized: gallery_id=%d pages=%d", self.gallery_id, self._page_counter)
+        skip_parts = []
+        if self._skip_duplicate:
+            skip_parts.append(f"duplicate={self._skip_duplicate}")
+        if self._skip_excluded:
+            skip_parts.append(f"excluded={self._skip_excluded}")
+        if self._skip_invalid:
+            skip_parts.append(f"invalid={self._skip_invalid}")
+        skip_summary = f" skipped({', '.join(skip_parts)})" if skip_parts else ""
+        logger.info("[progressive] finalized: gallery_id=%d pages=%d%s", self.gallery_id, self._page_counter, skip_summary)
 
         from core.config import settings
 
