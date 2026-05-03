@@ -831,3 +831,31 @@ class TestProgressiveImporterPageNumbering:
         source_item_id = importer._derive_source_item_id(Path("123456_p0002.jpg"), 2, "a" * 64)
 
         assert source_item_id == "pixiv:123456:p2"
+
+    async def test_pixiv_prefixed_filenames_use_unique_sequence_page_numbers(self, tmp_path):
+        """Pixiv user-work page filenames must not collide on repeated _p0001 suffixes."""
+        import asyncio
+
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None, page_num_from_filename=True)
+        importer.gallery_id = 1
+        importer.source = "pixiv"
+        importer.source_id = "user_999"
+
+        captured_pages: list[int] = []
+
+        async def _capture(file_path, page_num, sha256=None):
+            captured_pages.append(page_num)
+
+        files = [tmp_path / "123456_p0001.jpg", tmp_path / "654321_p0001.jpg"]
+        for f in files:
+            f.write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+
+        with patch.object(importer, "_import_single", new=_capture):
+            for f in files:
+                await importer.import_file(f)
+            if importer._tasks:
+                await asyncio.gather(*importer._tasks, return_exceptions=True)
+
+        assert captured_pages == [1, 2]

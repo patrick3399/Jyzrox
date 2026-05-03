@@ -5,9 +5,10 @@ import { useParams, useRouter } from 'next/navigation'
 import { Grid, Image as ImageIcon, BookOpen, Users, Heart, Download } from 'lucide-react'
 import { BackButton } from '@/components/BackButton'
 import { useArtistSummary, useArtistImages } from '@/hooks/useArtists'
-import { useLibraryGalleries } from '@/hooks/useGalleries'
+import { useInfiniteLibraryGalleries } from '@/hooks/useGalleries'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { Pagination } from '@/components/Pagination'
+import { VirtualGrid } from '@/components/VirtualGrid'
 import { t } from '@/lib/i18n'
 import { galleryHref } from '@/lib/galleryRoutes'
 import { useLocale } from '@/components/LocaleProvider'
@@ -32,7 +33,7 @@ const SOURCE_COLORS: Record<string, string> = {
   twitter: 'bg-sky-500/20 text-sky-400',
 }
 
-const GALLERY_PAGE_SIZE = 24
+const GALLERY_PAGE_SIZE = 48
 const IMAGE_PAGE_SIZE = 40
 
 export default function ArtistDetailPage() {
@@ -43,7 +44,6 @@ export default function ArtistDetailPage() {
   const artistId = decodeURIComponent(rawArtistId ?? '')
 
   const [activeTab, setActiveTab] = useState<ViewTab>('galleries')
-  const [galleryPage, setGalleryPage] = useState(0)
   const [imagePage, setImagePage] = useState(0)
   const [imageSort, setImageSort] = useState<'newest' | 'oldest'>('newest')
   const [colCount, setColCount] = useState(getGalleryColCount)
@@ -65,16 +65,16 @@ export default function ArtistDetailPage() {
   const isFollowed = !!followEntry
 
   const {
-    data: galleriesData,
+    galleries,
     isLoading: galleriesLoading,
-    isValidating: galleriesValidating,
-  } = useLibraryGalleries({
+    isLoadingMore: galleriesLoadingMore,
+    isReachingEnd: galleriesReachingEnd,
+    loadMore: loadMoreGalleries,
+  } = useInfiniteLibraryGalleries({
     artist: artistId,
-    page: galleryPage,
     limit: GALLERY_PAGE_SIZE,
   })
 
-  const galleries = galleriesData?.galleries ?? []
   const { focusedIndex } = useGridKeyboard({
     totalItems: galleries.length,
     colCount,
@@ -234,55 +234,50 @@ export default function ArtistDetailPage() {
         <div className="space-y-4">
           {galleriesLoading ? (
             <div className="text-center py-12 text-vault-text-secondary">{t('common.loading')}</div>
-          ) : !galleriesData?.galleries?.length ? (
+          ) : !galleries.length ? (
             <div className="flex flex-col items-center py-16 gap-3 text-vault-text-secondary">
               <Users size={48} className="opacity-30" />
               <p>{t('library.noGalleries')}</p>
             </div>
           ) : (
-            <>
-              <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 xl:grid-cols-6 gap-3">
-                {galleriesData.galleries.map((gallery, idx) => (
-                  <button
-                    key={gallery.id}
-                    data-grid-index={idx}
-                    onClick={() => router.push(galleryHref(gallery.source, gallery.source_id))}
-                    className="bg-vault-card border border-vault-border rounded-xl overflow-hidden hover:border-vault-accent/50 hover:shadow-lg transition-all text-left group focus:outline-none focus:ring-2 focus:ring-vault-accent"
-                  >
-                    <div className="aspect-[3/4] bg-vault-bg relative overflow-hidden">
-                      {gallery.cover_thumb ? (
-                        <img
-                          src={gallery.cover_thumb}
-                          alt={gallery.title}
-                          className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
-                          loading="lazy"
-                        />
-                      ) : (
-                        <div className="w-full h-full flex items-center justify-center">
-                          <BookOpen size={32} className="text-vault-text-secondary/30" />
-                        </div>
-                      )}
-                    </div>
-                    <div className="p-2.5 space-y-1">
-                      <p className="font-medium text-xs text-vault-text line-clamp-2 leading-snug">
-                        {gallery.title || gallery.title_jpn}
-                      </p>
-                      <p className="text-xs text-vault-text-secondary">{gallery.pages}p</p>
-                    </div>
-                  </button>
-                ))}
-              </div>
-
-              {galleriesData.total !== undefined && (
-                <Pagination
-                  page={galleryPage}
-                  total={galleriesData.total}
-                  pageSize={GALLERY_PAGE_SIZE}
-                  onChange={(p) => setGalleryPage(p)}
-                  isLoading={galleriesValidating}
-                />
+            <VirtualGrid
+              items={galleries}
+              columns={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
+              gap={12}
+              estimateHeight={310}
+              focusedIndex={focusedIndex}
+              onColCountChange={setColCount}
+              onLoadMore={loadMoreGalleries}
+              hasMore={!galleriesReachingEnd}
+              isLoading={galleriesLoadingMore}
+              renderItem={(gallery) => (
+                <button
+                  onClick={() => router.push(galleryHref(gallery.source, gallery.source_id))}
+                  className="w-full bg-vault-card border border-vault-border rounded-xl overflow-hidden hover:border-vault-accent/50 hover:shadow-lg transition-all text-left group focus:outline-none focus:ring-2 focus:ring-vault-accent"
+                >
+                  <div className="aspect-[3/4] bg-vault-bg relative overflow-hidden">
+                    {gallery.cover_thumb ? (
+                      <img
+                        src={gallery.cover_thumb}
+                        alt={gallery.title}
+                        className="w-full h-full object-cover group-hover:scale-105 transition-transform duration-300"
+                        loading="lazy"
+                      />
+                    ) : (
+                      <div className="w-full h-full flex items-center justify-center">
+                        <BookOpen size={32} className="text-vault-text-secondary/30" />
+                      </div>
+                    )}
+                  </div>
+                  <div className="p-2.5 space-y-1">
+                    <p className="font-medium text-xs text-vault-text line-clamp-2 leading-snug">
+                      {gallery.title || gallery.title_jpn}
+                    </p>
+                    <p className="text-xs text-vault-text-secondary">{gallery.pages}p</p>
+                  </div>
+                </button>
               )}
-            </>
+            />
           )}
         </div>
       )}
@@ -322,7 +317,7 @@ export default function ArtistDetailPage() {
                       key={image.id}
                       onClick={() =>
                         router.push(
-                          `/reader/artist/${encodeURIComponent(artistId)}?start=${globalIndex}`,
+                          `/reader/artist/${encodeURIComponent(artistId)}?start=${globalIndex + 1}`,
                         )
                       }
                       className="aspect-square bg-vault-card border border-vault-border rounded-lg overflow-hidden hover:border-vault-accent/50 hover:shadow-md transition-all group relative"

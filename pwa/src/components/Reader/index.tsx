@@ -1986,9 +1986,16 @@ export default function Reader({
   ])
 
   const handleViewGallery = useCallback(() => {
-    router.push(galleryHref(source, sourceId))
+    const img = imageMenu ? rawImages.find((i) => i.page_num === imageMenu.pageNum) : undefined
+    const crossGalleryImg = img as
+      | (GalleryImage & { gallery_source?: string | null; gallery_source_id?: string | null })
+      | undefined
+    const gallerySource = crossGalleryImg?.gallery_source ?? source
+    const gallerySourceId = crossGalleryImg?.gallery_source_id ?? sourceId
+    if (!gallerySource || !gallerySourceId) return
+    router.push(galleryHref(gallerySource, gallerySourceId))
     setImageMenu(null)
-  }, [source, sourceId, router])
+  }, [imageMenu, rawImages, source, sourceId, router])
 
   const handleToggleFavorite = useCallback(async () => {
     if (!imageMenu) return
@@ -2192,7 +2199,18 @@ export default function Reader({
               : undefined
           }
           onToggleFavorite={canFavoriteContextImg ? handleToggleFavorite : undefined}
-          onViewGallery={handleViewGallery}
+          onViewGallery={
+            source ||
+            sourceId ||
+            (contextMenuImg as
+              | (GalleryImage & {
+                  gallery_source?: string | null
+                  gallery_source_id?: string | null
+                })
+              | undefined)?.gallery_source
+              ? handleViewGallery
+              : undefined
+          }
           onFindSource={
             canFavoriteContextImg && contextMenuImg
               ? () => {

@@ -1,6 +1,7 @@
 """Progressive import: import files and generate thumbnails during download."""
 
 import asyncio
+import re
 import uuid
 from datetime import UTC, datetime
 from pathlib import Path
@@ -17,6 +18,19 @@ from services.cas import create_library_symlink, decrement_ref_count, library_di
 from worker.constants import _VIDEO_EXTS, logger
 from worker.helpers import _sha256, _validate_image_magic
 import core.queue
+
+_FILENAME_NUMBER_RE = re.compile(r"(\d+)")
+_PIXIV_USER_WORK_PAGE_RE = re.compile(r"^\d+_p\d+$")
+
+
+def _page_num_from_name(file_path: Path) -> int | None:
+    """Extract the trailing numeric run from a filename stem for stable page order."""
+    if _PIXIV_USER_WORK_PAGE_RE.match(file_path.stem):
+        return None
+    matches = _FILENAME_NUMBER_RE.findall(file_path.stem)
+    if not matches:
+        return None
+    return int(matches[-1].lstrip("0") or "0") or 1
 
 
 class ProgressiveImporter:
@@ -289,9 +303,8 @@ class ProgressiveImporter:
         # leave holes in page numbering.
         page_num: int | None
         if self._page_num_from_filename:
-            try:
-                page_num = int(file_path.stem.lstrip("0") or "0") or 1
-            except ValueError:
+            page_num = _page_num_from_name(file_path)
+            if page_num is None:
                 self._page_counter += 1
                 page_num = self._page_counter
         else:

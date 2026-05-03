@@ -3,6 +3,7 @@
 import asyncio
 import json
 import os
+import re
 from datetime import UTC, datetime
 from pathlib import Path
 
@@ -26,6 +27,14 @@ from worker.constants import (
 )
 from worker.helpers import _sha256, _validate_image_magic
 from worker.tag_helpers import rebuild_gallery_tags_array, upsert_tag_translations
+
+_NATURAL_SORT_RE = re.compile(r"(\d+)")
+
+
+def _natural_sort_key(path: Path) -> tuple[tuple[int, str | int], ...]:
+    """Sort filenames in human page order: 1, 2, 10 instead of 1, 10, 2."""
+    parts = _NATURAL_SORT_RE.split(path.name)
+    return tuple((1, int(part)) if part.isdigit() else (0, part.casefold()) for part in parts)
 
 
 async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id: int | None = None, source_url: str | None = None) -> dict:
@@ -84,7 +93,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
             media_files.append(f)
         else:
             skipped += 1
-    media_files.sort(key=lambda f: f.name)
+    media_files.sort(key=_natural_sort_key)
     if skipped:
         logger.warning("[import] %s: skipped %d file(s) with invalid magic bytes", gallery_path.name, skipped)
 
@@ -385,7 +394,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             skipped_magic += 1
     if skipped_magic:
         logger.warning("[local_import] gallery_id=%d: skipped %d file(s) with invalid magic bytes", gallery_id, skipped_magic)
-    files = sorted(files_validated)
+    files = sorted(files_validated, key=_natural_sort_key)
 
     if not files:
         return {"status": "failed", "error": "no supported files found"}

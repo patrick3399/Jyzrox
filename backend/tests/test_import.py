@@ -13,6 +13,7 @@ so we patch `core.database.async_session` to redirect DB writes to the test DB.
 
 import json
 import os
+from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, call, patch
 
 # ---------------------------------------------------------------------------
@@ -811,6 +812,23 @@ class TestImportJob:
 # ---------------------------------------------------------------------------
 # TestLocalImportJob — tests for worker.importer.local_import_job
 # ---------------------------------------------------------------------------
+
+
+class TestImportSortHelpers:
+    """Tests for import file ordering helpers."""
+
+    def test_natural_sort_handles_numeric_and_text_filenames(self):
+        """Mixed numeric/text names should sort naturally without TypeError."""
+        from worker.importer import _natural_sort_key
+
+        files = [Path("10.jpg"), Path("cover.jpg"), Path("2.jpg"), Path("001.jpg")]
+
+        assert [p.name for p in sorted(files, key=_natural_sort_key)] == [
+            "001.jpg",
+            "2.jpg",
+            "10.jpg",
+            "cover.jpg",
+        ]
 
 
 class TestLocalImportJob:

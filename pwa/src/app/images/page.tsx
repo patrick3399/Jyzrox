@@ -46,6 +46,7 @@ function ImageBrowserInner() {
 
   const sourceParam = searchParams.get('source') ?? ''
   const categoryParam = searchParams.get('category') ?? ''
+  const favoritedParam = searchParams.get('favorited')
 
   const tags = useMemo(() => (tagsParam ? tagsParam.split(',').filter(Boolean) : []), [tagsParam])
   const excludeTags = useMemo(
@@ -55,7 +56,7 @@ function ImageBrowserInner() {
 
   const [sourceFilter, setSourceFilter] = useState(sourceParam)
   const [categoryFilter, setCategoryFilter] = useState(categoryParam)
-  const [favoritedFilter, setFavoritedFilter] = useState(false)
+  const [favoritedFilter, setFavoritedFilter] = useState(favoritedParam !== 'false')
   const [tagInput, setTagInput] = useState('')
   const [jumpAt, setJumpAt] = useState<string | undefined>(undefined)
   const containerRef = useRef<HTMLDivElement>(null)
@@ -103,17 +104,19 @@ function ImageBrowserInner() {
   const { data: dynamicSources } = useLibrarySources()
   const { data: categoriesData } = useGalleryCategories()
 
-  // Sync source and category filters to URL
+  // Sync source, category, and favorite mode to URL.
   useEffect(() => {
     const params = new URLSearchParams(searchParams.toString())
     if (sourceFilter) params.set('source', sourceFilter)
     else params.delete('source')
     if (categoryFilter) params.set('category', categoryFilter)
     else params.delete('category')
+    if (favoritedFilter) params.delete('favorited')
+    else params.set('favorited', 'false')
     const qs = params.toString()
     const newUrl = qs ? `/images?${qs}` : '/images'
     router.replace(newUrl, { scroll: false })
-  }, [sourceFilter, categoryFilter, searchParams, router])
+  }, [sourceFilter, categoryFilter, favoritedFilter, searchParams, router])
 
   // Reset jumpAt when filters change
   useEffect(() => {
@@ -182,13 +185,18 @@ function ImageBrowserInner() {
 
   const handleImageClick = useCallback(
     (img: BrowseImage) => {
+      if (favoritedFilter) {
+        const idx = images.findIndex((item) => item.id === img.id)
+        router.push(`/reader/favorites?image_id=${img.id}&start=${idx >= 0 ? idx + 1 : 1}`)
+        return
+      }
       if (img.source && img.source_id) {
         router.push(
           `/reader/${encodeURIComponent(img.source)}/${encodeURIComponent(img.source_id)}?page=${img.page_num}`,
         )
       }
     },
-    [router],
+    [favoritedFilter, images, router],
   )
 
   const handleTimelineJump = useCallback((timestamp: string) => {
@@ -400,6 +408,7 @@ function ImageBrowserInner() {
      */
     <div
       ref={scrollRef}
+      data-scroll-root="true"
       className="hide-scrollbar fixed inset-0 lg:left-56 bottom-[calc(4rem+var(--sab))] lg:bottom-0 bg-vault-bg text-vault-text"
     >
       <div className="px-4 lg:px-6 xl:px-8 py-6 pt-[calc(1.5rem+var(--sat)/2)] lg:pt-6">
@@ -444,15 +453,22 @@ function ImageBrowserInner() {
               </select>
             </div>
           )}
-          <label className="flex items-center gap-2 cursor-pointer">
-            <input
-              type="checkbox"
-              checked={favoritedFilter}
-              onChange={(e) => setFavoritedFilter(e.target.checked)}
-              className="w-4 h-4 accent-yellow-500"
+          <button
+            type="button"
+            onClick={() => setFavoritedFilter((value) => !value)}
+            aria-pressed={favoritedFilter}
+            className={`inline-flex items-center gap-2 rounded border px-3 py-1.5 text-sm font-medium transition-colors ${
+              favoritedFilter
+                ? 'border-red-500/60 bg-red-500/15 text-red-300 hover:bg-red-500/20'
+                : 'border-vault-border bg-vault-input text-vault-text-secondary hover:border-vault-accent hover:text-vault-text'
+            }`}
+          >
+            <Heart
+              size={15}
+              className={favoritedFilter ? 'fill-current text-red-400' : 'text-vault-text-muted'}
             />
-            <span className="text-sm text-vault-text-secondary">{t('images.favoritesOnly')}</span>
-          </label>
+            {favoritedFilter ? t('images.favoritesOnly') : t('common.all')}
+          </button>
           <div className="flex items-center gap-2">
             <input
               type="text"
