@@ -1033,6 +1033,80 @@ class TestLocalImportJob:
         assert result["processed"] == 0
         mock_store.assert_not_called()
 
+    async def test_existing_file_missing_thumbnail_enqueues_thumbnail_jobs(self, tmp_path):
+        """Replayed local imports should repair missing thumbnails for existing files."""
+        from worker.importer import local_import_job
+
+        src = tmp_path / "existing_src"
+        src.mkdir()
+        img = src / "page1.jpg"
+        img.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+
+        mock_gallery = MagicMock()
+        mock_gallery.source = "local"
+        mock_gallery.source_id = "existing_src"
+        mock_gallery.import_mode = "link"
+        mock_gallery.source_path = str(src)
+
+        fixed_hash = "feedface" * 8
+
+        mock_sess1 = _make_mock_session()
+        mock_sess1.get = AsyncMock(return_value=mock_gallery)
+
+        mock_sess2 = _make_mock_session()
+        excl_result = MagicMock()
+        excl_result.scalars.return_value.all.return_value = []
+        mock_sess2.execute = AsyncMock(return_value=excl_result)
+
+        existing_row = MagicMock()
+        existing_row.page_num = 1
+        existing_row.blob_sha256 = fixed_hash
+        existing_result = MagicMock()
+        existing_result.all.return_value = [existing_row]
+        count_result = MagicMock()
+        count_result.scalar_one.return_value = 1
+
+        mock_sess3 = _make_mock_session()
+        mock_sess3.execute = AsyncMock(side_effect=[existing_result, count_result])
+        mock_sess3.get = AsyncMock(return_value=mock_gallery)
+
+        sessions = iter([mock_sess1, mock_sess2, mock_sess3])
+
+        def _factory():
+            return next(sessions)
+
+        missing_thumb_dir = tmp_path / "missing_thumbs"
+        ctx = _make_ctx()
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", side_effect=_factory),
+            patch("worker.importer.store_blob", AsyncMock()) as mock_store,
+            patch("worker.importer.create_library_symlink", AsyncMock()),
+            patch("worker.importer.thumb_dir", return_value=missing_thumb_dir),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
+            patch("worker.importer.settings") as mock_settings,
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            mock_settings.tag_model_enabled = False
+            result = await local_import_job(ctx, str(src), "link", gallery_id=1)
+
+        assert result["status"] == "done"
+        assert result["processed"] == 0
+        mock_store.assert_not_called()
+        mock_enqueue.assert_any_call(
+            "cover_thumbnail_job",
+            gallery_id=1,
+            _timeout=300,
+            _job_id="cover-thumbnail:1",
+        )
+        mock_enqueue.assert_any_call(
+            "thumbnail_job",
+            gallery_id=1,
+            _timeout=3600,
+            _job_id="thumbnail:1",
+        )
+
     async def test_progress_written_to_redis(self, tmp_path):
         """Progress setex calls should be made to Redis during and after import."""
         from worker.importer import local_import_job

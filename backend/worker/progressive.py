@@ -598,7 +598,7 @@ class ProgressiveImporter:
                     )
                 ).scalar_one()
                 gallery.pages = count
-                gallery.download_status = "partial" if count > 0 else "downloading"
+                gallery.download_status = "partial" if count > 0 else "failed"
                 await session.commit()
 
     async def cleanup(self) -> None:

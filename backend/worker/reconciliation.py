@@ -17,7 +17,7 @@ from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run
 
 
-async def reconciliation_job(ctx: dict) -> dict:
+async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
     """
     Reconcile /data/library/ symlink tree with database records.
 
@@ -34,7 +34,7 @@ async def reconciliation_job(ctx: dict) -> dict:
     logger.info("[reconcile] Starting reconciliation")
     r = ctx["redis"]
 
-    if not await _cron_should_run(ctx, "reconciliation", "0 3 * * 1"):
+    if not force and not await _cron_should_run(ctx, "reconciliation", "0 3 * * 1"):
         logger.info("[reconcile] Skipping — cron gate not reached")
         return {"status": "skipped", "reason": "interval_not_reached"}
 

@@ -99,6 +99,24 @@ async def test_scheduled_tasks_disabled_task_has_null_next_run(client, mock_redi
     assert library_scan["next_run"] is None
 
 
+async def test_scheduled_tasks_stale_running_status_is_reported(client, mock_redis):
+    async def get_value(key):
+        if key == "cron:library_scan:last_status":
+            return b"running"
+        if key == "cron:library_scan:last_run":
+            return b"2026-05-01T04:57:08.564396+00:00"
+        return None
+
+    mock_redis.get = AsyncMock(side_effect=get_value)
+    mock_redis.exists = AsyncMock(return_value=0)
+
+    resp = await client.get("/api/scheduled-tasks/")
+
+    assert resp.status_code == 200
+    library_scan = next(task for task in resp.json()["tasks"] if task["id"] == "library_scan")
+    assert library_scan["last_status"] == "stale"
+
+
 # ---------------------------------------------------------------------------
 # Tests — update task
 # ---------------------------------------------------------------------------
@@ -170,7 +188,27 @@ async def test_scheduled_tasks_run_enqueues_job(client):
     call_args = app.state.enqueue.call_args
     assert call_args.args[0] == "scheduled_scan_job"
     assert call_args.kwargs["force"] is True
+    assert call_args.kwargs["_timeout"] == 7200
     assert call_args.kwargs["_job_id"].startswith("manual:library_scan:")
+
+
+async def test_scheduled_tasks_run_reconciliation_enqueues_force(client):
+    resp = await client.post("/api/scheduled-tasks/reconciliation/run")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "queued"
+    assert data["task_id"] == "reconciliation"
+    assert data["job"] == "reconciliation_job"
+
+    from main import app
+
+    app.state.enqueue.assert_called_once()
+    call_args = app.state.enqueue.call_args
+    assert call_args.args[0] == "reconciliation_job"
+    assert call_args.kwargs["force"] is True
+    assert call_args.kwargs["_timeout"] == 3600
+    assert call_args.kwargs["_job_id"].startswith("manual:reconciliation:")
 
 
 async def test_scheduled_tasks_run_deduplicates_manual_clicks(client, mock_redis):

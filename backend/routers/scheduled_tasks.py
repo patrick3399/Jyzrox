@@ -24,6 +24,8 @@ TASK_DEFS = {
         "default_cron": "0 * * * *",
         "default_enabled": True,
         "job": "scheduled_scan_job",
+        "manual_kwargs": {"force": True},
+        "manual_timeout": 7200,
     },
     "reconciliation": {
         "name": "Reconciliation",
@@ -31,6 +33,8 @@ TASK_DEFS = {
         "default_cron": "0 3 * * 1",
         "default_enabled": True,
         "job": "reconciliation_job",
+        "manual_kwargs": {"force": True},
+        "manual_timeout": 3600,
     },
     "check_subscriptions": {
         "name": "Check Subscriptions",
@@ -115,6 +119,12 @@ async def list_scheduled_tasks(
         enabled = _decode_redis(enabled_raw) != "0" if enabled_raw else defn["default_enabled"]
         cron_expr = _decode_redis(cron_expr_raw) or defn["default_cron"]
         last_run = _decode_redis(last_run_raw)
+        last_status = _decode_redis(last_status_raw)
+        if last_status == "running":
+            claim_exists = await r.exists(f"cron:{task_id}:claim", f"cron:{task_id}:manual_claim")
+            progress_exists = await r.exists("rescan:progress" if task_id == "library_scan" else "reconcile:progress")
+            if not claim_exists and not progress_exists:
+                last_status = "stale"
 
         tasks.append(
             {
@@ -126,7 +136,7 @@ async def list_scheduled_tasks(
                 "default_cron": defn["default_cron"],
                 "next_run": _next_run(cron_expr, enabled, last_run),
                 "last_run": last_run,
-                "last_status": _decode_redis(last_status_raw),
+                "last_status": last_status,
                 "last_error": _decode_redis(last_error_raw),
             }
         )
@@ -178,7 +188,12 @@ async def run_scheduled_task(
         return {"status": "already_queued", "task_id": task_id, "job": job_name}
 
     try:
-        await core.queue.enqueue(job_name, force=True, _job_id=f"manual:{task_id}:{uuid.uuid4().hex[:8]}")
+        await core.queue.enqueue(
+            job_name,
+            **defn.get("manual_kwargs", {}),
+            _timeout=defn.get("manual_timeout"),
+            _job_id=f"manual:{task_id}:{uuid.uuid4().hex[:8]}",
+        )
     except Exception as exc:
         await r.delete(claim_key)
         logger.error("Failed to enqueue %s: %s", job_name, exc)

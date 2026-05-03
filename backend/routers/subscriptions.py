@@ -323,7 +323,7 @@ async def delete_subscription(
                 await session.execute(
                     select(DownloadJob).where(
                         DownloadJob.subscription_id == sub_id,
-                        DownloadJob.status.in_(["queued", "running"]),
+                        DownloadJob.status.in_(["queued", "running", "paused"]),
                     )
                 )
             )

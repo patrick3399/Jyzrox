@@ -17,7 +17,7 @@ from sqlalchemy.sql import select
 from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, Tag
-from services.cas import create_library_symlink, store_blob
+from services.cas import create_library_symlink, store_blob, thumb_dir
 from worker.constants import (
     _IMAGE_EXTS,
     _MEDIA_EXTS,
@@ -417,7 +417,9 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             select(Image.page_num, Image.blob_sha256).where(Image.gallery_id == gallery_id)
         )).all()
         known_sha256s = {row.blob_sha256 for row in existing_rows}
+        existing_page_by_sha = {row.blob_sha256: row.page_num for row in existing_rows}
         max_page = max((row.page_num for row in existing_rows), default=0)
+        existing_missing_thumb = False
 
         for idx, f in enumerate(files):
             sha256 = await asyncio.to_thread(_sha256, f)
@@ -426,6 +428,14 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                 logger.debug("[local_import] gallery_id=%d: skipping excluded blob %s", gallery_id, sha256[:12])
                 continue
             if sha256 in known_sha256s:
+                td = thumb_dir(sha256)
+                if any(not (td / f"thumb_{size}.webp").exists() for size in (160, 360, 720)):
+                    existing_missing_thumb = True
+                    logger.debug(
+                        "[local_import] gallery_id=%d: existing page %s missing thumbnail(s)",
+                        gallery_id,
+                        existing_page_by_sha.get(sha256),
+                    )
                 attempted += 1
                 continue
 
@@ -504,7 +514,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
 
     # Only new/changed imports need thumbnail work. Replayed local-import jobs for an
     # already complete gallery should not create duplicate render backlog.
-    if processed > 0:
+    if processed > 0 or existing_missing_thumb:
         await core.queue.enqueue(
             "cover_thumbnail_job",
             gallery_id=gallery_id,

@@ -1,6 +1,7 @@
 """Content-Addressable Storage (CAS) service layer."""
 
 import os
+import shutil
 from pathlib import Path
 
 from sqlalchemy import update
@@ -95,7 +96,7 @@ async def store_blob(
                 os.link(str(file_path), str(dest))
             except OSError:
                 # Cross-device link: fallback to copy
-                file_path.copy(dest)
+                shutil.copy2(str(file_path), str(dest))
 
     # Upsert blob record.
     # ref_count starts at 0 here; callers must increment it only when a new

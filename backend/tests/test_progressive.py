@@ -279,8 +279,8 @@ class TestProgressiveImporterAbort:
         assert row[0] == "partial", "Gallery download_status should be 'partial' after abort with images"
         assert row[1] == 2, "Gallery pages count should reflect actual image count"
 
-    async def test_abort_no_images_sets_downloading(self, db_session, db_session_factory):
-        """abort() must keep download_status='downloading' when no images exist."""
+    async def test_abort_no_images_sets_failed(self, db_session, db_session_factory):
+        """abort() must set download_status='failed' (not 'downloading') when no images exist (edge case #16)."""
         from worker.progressive import ProgressiveImporter
 
         gallery_id = await _insert_gallery(db_session, pages=0, download_status="downloading")
@@ -303,7 +303,7 @@ class TestProgressiveImporterAbort:
         ).fetchone()
 
         assert row is not None
-        assert row[0] == "downloading", "Gallery download_status should remain 'downloading' when no images"
+        assert row[0] == "failed", "Zero-image abort must use terminal status 'failed', not stale 'downloading'"
         assert row[1] == 0, "Gallery pages should be 0 when no images"
 
 # ---------------------------------------------------------------------------
