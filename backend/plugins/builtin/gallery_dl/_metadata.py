@@ -51,10 +51,17 @@ def _resolve_source_id(meta: dict, cfg, dest_dir_name: str) -> str:
 
     # If source has explicit (non-default) source_id_fields, prioritize them
     # to avoid auto-detection returning wrong fields (e.g. Facebook's {title})
+    # Supports dot notation for nested fields (e.g. "user.idstr").
     if cfg.source_id_fields != _DEFAULT_SID_FIELDS:
         for f in cfg.source_id_fields:
-            val = meta.get(f)
-            if val:
+            val: object = meta
+            for part in f.split("."):
+                if isinstance(val, dict):
+                    val = val.get(part)
+                else:
+                    val = None
+                    break
+            if val and isinstance(val, (str, int)):
                 return str(val)
 
     category = meta.get("category", "")

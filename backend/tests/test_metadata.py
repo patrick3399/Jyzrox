@@ -210,8 +210,8 @@ class TestParseTwitterImport:
         result = parse_gallery_dl_import(tmp_path, meta)
         assert result.title == "artsy_person"
 
-    def test_parse_twitter_import_x_category_unknown_falls_back_to_gallery_dl(self, tmp_path: Path):
-        """'x' is not a registered alias, so source falls back to 'gallery_dl'."""
+    def test_parse_twitter_import_x_category_unknown_uses_raw_category(self, tmp_path: Path):
+        """'x' is not a registered alias, so source uses the raw category name (not 'gallery_dl')."""
         from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
 
         meta = {
@@ -220,8 +220,8 @@ class TestParseTwitterImport:
             "author": {"name": "x_user"},
         }
         result = parse_gallery_dl_import(tmp_path, meta)
-        # 'x' has no entry in _ALIASES or _BY_SOURCE -> _DEFAULT_CONFIG -> source_id="gallery_dl"
-        assert result.source == "gallery_dl"
+        # 'x' has no entry in _ALIASES or _BY_SOURCE -> _DEFAULT_CONFIG -> raw category used
+        assert result.source == "x"
 
     def test_parse_twitter_import_missing_tweet_id_uses_dir_name(self, tmp_path: Path):
         """When tweet_id is absent, source_id falls back to dest_dir.name."""
@@ -556,3 +556,77 @@ class TestExtractTagsCJKHashtags:
         metadata = {"content": "#おえかき"}
         tags = _extract_tags(Path("/tmp/test"), metadata, source="twitter")
         assert "general:おえかき" in tags
+
+
+# ---------------------------------------------------------------------------
+# _resolve_source_id — dot-notation source_id_fields
+# ---------------------------------------------------------------------------
+
+
+class TestResolveSourceIdDotNotation:
+    """source_id_fields with dot notation resolves nested metadata fields."""
+
+    def test_weibo_source_id_uses_user_idstr(self, tmp_path: Path):
+        """Weibo metadata: source_id_fields=('user.idstr',) returns numeric user ID."""
+        from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
+
+        meta = {
+            "category": "weibo",
+            "user": {"idstr": "3802725779", "screen_name": "SomeUser"},
+        }
+        data = parse_gallery_dl_import(tmp_path, meta)
+        assert data.source == "weibo"
+        assert data.source_id == "3802725779"
+
+    def test_weibo_source_id_matches_url_based_extraction(self, tmp_path: Path):
+        """Metadata path and URL path both yield the numeric ID — no mismatch."""
+        from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
+
+        meta = {
+            "category": "weibo",
+            "user": {"idstr": "3802725779", "screen_name": "SomeUser"},
+        }
+        data = parse_gallery_dl_import(tmp_path, meta)
+        # url_path_id_index=1 on weibo.com/u/3802725779 also yields "3802725779"
+        assert data.source_id == "3802725779"
+
+    def test_weibo_title_uses_screen_name(self, tmp_path: Path):
+        """Weibo title comes from user.screen_name, not the numeric ID."""
+        from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
+
+        meta = {
+            "category": "weibo",
+            "user": {"idstr": "3802725779", "screen_name": "SomeUser"},
+        }
+        data = parse_gallery_dl_import(tmp_path, meta)
+        assert data.title == "SomeUser"
+
+    def test_dot_notation_missing_nested_key_falls_through_to_identity_field(self, tmp_path: Path):
+        """When the nested key is absent, falls through to _get_identity_field."""
+        from unittest.mock import patch
+
+        from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
+
+        meta = {
+            "category": "weibo",
+            "user": {"screen_name": "SomeUser"},  # no idstr
+        }
+        # _get_identity_field requires gallery-dl (not in test venv); mock it
+        with patch(
+            "plugins.builtin.gallery_dl._metadata._get_identity_field",
+            return_value=("user", "screen_name"),
+        ):
+            data = parse_gallery_dl_import(tmp_path, meta)
+        assert data.source_id == "SomeUser"
+
+    def test_dot_notation_non_dict_intermediate_falls_through(self, tmp_path: Path):
+        """When intermediate key is not a dict, falls through gracefully."""
+        from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
+
+        meta = {
+            "category": "weibo",
+            "user": "not_a_dict",
+        }
+        data = parse_gallery_dl_import(tmp_path, meta)
+        # Falls through to dest_dir name
+        assert data.source_id == tmp_path.name

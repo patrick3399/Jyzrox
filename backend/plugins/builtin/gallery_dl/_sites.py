@@ -187,6 +187,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         inactivity_timeout=600,
         sleep_request=(1.0, 3.0),
         url_path_id_index=1,
+        source_id_fields=("user.idstr",),
     ),
     GdlSiteConfig(
         domain="facebook.com",
