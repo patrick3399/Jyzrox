@@ -1,10 +1,11 @@
 """Shared gallery enrichment helpers used by library and search routers."""
 
-from sqlalchemy import and_, func, select
+from sqlalchemy import asc, desc, exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import selectinload
 
 from core.source_display import get_display_config
-from db.models import Blob, Image, UserFavorite, UserRating, UserReadingList
+from db.models import Blob, ExcludedBlob, Image, UserFavorite, UserRating, UserReadingList
 from services.cas import thumb_dir, thumb_url as cas_thumb_url
 
 
@@ -77,55 +78,101 @@ async def build_cover_map(
         gallery_ids: Gallery IDs to fetch covers for.
         source_map: Optional {gallery_id: source} mapping. If None, all use page_num=1.
     """
+    cover_sha_map = await build_cover_sha_map(db, gallery_ids, source_map)
+    cover_map: dict[int, str] = {}
+    for gallery_id, sha256 in cover_sha_map.items():
+        thumb_url = _existing_thumb_url(sha256)
+        if thumb_url:
+            cover_map[gallery_id] = thumb_url
+    return cover_map
+
+
+def image_not_excluded_clause():
+    """SQL clause selecting images whose blob is not excluded for its gallery."""
+    excluded_sq = (
+        select(ExcludedBlob.blob_sha256)
+        .where(ExcludedBlob.gallery_id == Image.gallery_id)
+        .where(ExcludedBlob.blob_sha256 == Image.blob_sha256)
+        .correlate(Image)
+    )
+    return ~exists(excluded_sq)
+
+
+async def select_cover_images(
+    db: AsyncSession,
+    gallery_ids: list[int],
+    source_map: dict[int, str] | None = None,
+) -> dict[int, Image]:
+    """Return gallery_id -> configured active cover image, excluding blocked blobs."""
     if not gallery_ids:
         return {}
 
-    # Split galleries by cover strategy
     first_ids: list[int] = []
     last_ids: list[int] = []
     for gid in gallery_ids:
-        source = (source_map or {}).get(gid, "")
-        cfg = get_display_config(source)
+        cfg = get_display_config((source_map or {}).get(gid, ""))
         if cfg.cover_page == "last":
             last_ids.append(gid)
         else:
             first_ids.append(gid)
 
-    cover_map: dict[int, str] = {}
+    cover_images: dict[int, Image] = {}
 
-    # Batch query: first page covers
-    if first_ids:
-        stmt = (
-            select(Image.gallery_id, Blob.sha256)
-            .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .where(Image.gallery_id.in_(first_ids), Image.page_num == 1, Image.visibility == "active")
-        )
-        for r in (await db.execute(stmt)).all():
-            thumb_url = _existing_thumb_url(r.sha256)
-            if thumb_url:
-                cover_map[r.gallery_id] = thumb_url
-
-    # Batch query: last page covers
-    if last_ids:
-        max_page_sub = (
-            select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
-            .where(Image.gallery_id.in_(last_ids), Image.visibility == "active")
-            .group_by(Image.gallery_id)
-        ).subquery()
-        stmt = (
-            select(Image.gallery_id, Blob.sha256)
-            .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .join(
-                max_page_sub,
-                and_(
-                    Image.gallery_id == max_page_sub.c.gallery_id,
-                    Image.page_num == max_page_sub.c.max_page,
-                ),
+    async def _load(ids: list[int], newest: bool) -> None:
+        if not ids:
+            return
+        order = (desc(Image.page_num), desc(Image.id)) if newest else (asc(Image.page_num), asc(Image.id))
+        rank_sub = (
+            select(
+                Image.id.label("image_id"),
+                Image.gallery_id.label("gallery_id"),
+                func.row_number().over(partition_by=Image.gallery_id, order_by=order).label("rn"),
             )
+            .where(
+                Image.gallery_id.in_(ids),
+                Image.visibility == "active",
+                image_not_excluded_clause(),
+            )
+            .subquery()
         )
-        for r in (await db.execute(stmt)).all():
-            thumb_url = _existing_thumb_url(r.sha256)
-            if thumb_url:
-                cover_map[r.gallery_id] = thumb_url
+        rows = (
+            (
+                await db.execute(
+                    select(Image)
+                    .join(rank_sub, Image.id == rank_sub.c.image_id)
+                    .where(rank_sub.c.rn == 1)
+                    .options(selectinload(Image.blob))
+                )
+            )
+            .scalars()
+            .all()
+        )
+        for img in rows:
+            cover_images[img.gallery_id] = img
 
-    return cover_map
+    await _load(first_ids, newest=False)
+    await _load(last_ids, newest=True)
+    return cover_images
+
+
+async def select_cover_image(
+    db: AsyncSession,
+    gallery_id: int,
+    source: str,
+) -> Image | None:
+    """Return the configured active cover image for one gallery."""
+    return (await select_cover_images(db, [gallery_id], {gallery_id: source})).get(gallery_id)
+
+
+async def build_cover_sha_map(
+    db: AsyncSession,
+    gallery_ids: list[int],
+    source_map: dict[int, str] | None = None,
+) -> dict[int, str]:
+    """Build gallery_id -> cover blob sha256 map using shared cover rules."""
+    images = await select_cover_images(db, gallery_ids, source_map)
+    return {
+        gallery_id: img.blob_sha256
+        for gallery_id, img in images.items()
+        if img.blob_sha256
+    }

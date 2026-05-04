@@ -5,15 +5,15 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import and_, func, select, delete
+from sqlalchemy import func, select, delete
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.auth import require_auth
 from core.database import get_db
-from db.models import Collection, CollectionGallery, Gallery, Image, Blob
+from core.gallery_helpers import build_cover_sha_map
+from db.models import Collection, CollectionGallery, Gallery
 from services.cas import thumb_url as cas_thumb_url
-from core.source_display import get_display_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["collections"])
@@ -71,24 +71,14 @@ async def list_collections(
                 cover_gid = first_cg
 
         if cover_gid:
-            # Per-source cover page selection
             cover_gallery = await db.get(Gallery, cover_gid)
-            cfg = get_display_config((cover_gallery.source if cover_gallery else "") or "")
-            if cfg.cover_page == "last":
-                page_sub = (
-                    select(func.max(Image.page_num))
-                    .where(Image.gallery_id == cover_gid)
-                    .scalar_subquery()
-                )
-            else:
-                page_sub = 1
-            cover_row = (
-                await db.execute(
-                    select(Blob.sha256)
-                    .join(Image, Image.blob_sha256 == Blob.sha256)
-                    .where(Image.gallery_id == cover_gid, Image.page_num == page_sub)
-                )
-            ).scalar_one_or_none()
+            cover_row = None
+            if cover_gallery:
+                cover_row = (await build_cover_sha_map(
+                    db,
+                    [cover_gid],
+                    {cover_gid: cover_gallery.source or ""},
+                )).get(cover_gid)
             if cover_row:
                 cover_thumb = cas_thumb_url(cover_row)
 
@@ -156,33 +146,11 @@ async def get_collection(
     cg_rows = (await db.execute(cg_stmt)).scalars().all()
 
     gallery_ids = [cg.gallery_id for cg in cg_rows]
-    # Per-source cover map
     source_map_col = {cg.gallery_id: (cg.gallery.source or "") for cg in cg_rows if cg.gallery}
-    first_ids = [gid for gid in gallery_ids if get_display_config(source_map_col.get(gid, "")).cover_page == "first"]
-    last_ids = [gid for gid in gallery_ids if get_display_config(source_map_col.get(gid, "")).cover_page == "last"]
-
-    cover_map: dict[int, str] = {}
-    if first_ids:
-        first_stmt = (
-            select(Image.gallery_id, Blob.sha256)
-            .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .where(Image.gallery_id.in_(first_ids), Image.page_num == 1)
-        )
-        for r in (await db.execute(first_stmt)).all():
-            cover_map[r.gallery_id] = cas_thumb_url(r.sha256)
-    if last_ids:
-        max_page_sub = (
-            select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
-            .where(Image.gallery_id.in_(last_ids))
-            .group_by(Image.gallery_id)
-        ).subquery()
-        last_stmt = (
-            select(Image.gallery_id, Blob.sha256)
-            .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .join(max_page_sub, and_(Image.gallery_id == max_page_sub.c.gallery_id, Image.page_num == max_page_sub.c.max_page))
-        )
-        for r in (await db.execute(last_stmt)).all():
-            cover_map[r.gallery_id] = cas_thumb_url(r.sha256)
+    cover_map = {
+        gallery_id: cas_thumb_url(sha256)
+        for gallery_id, sha256 in (await build_cover_sha_map(db, gallery_ids, source_map_col)).items()
+    }
 
     galleries = []
     for cg in cg_rows:

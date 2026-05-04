@@ -12,6 +12,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
 from core.database import AsyncSessionLocal
+from core.social_order import reorder_social_gallery_images
 from db.models import Blob, ExcludedBlob, Gallery, Image
 from plugins.models import GalleryImportData
 from services.cas import create_library_symlink, decrement_ref_count, library_dir, store_blob, thumb_dir
@@ -540,6 +541,7 @@ class ProgressiveImporter:
 
             gallery = await session.get(Gallery, self.gallery_id)
             if gallery:
+                await reorder_social_gallery_images(session, self.gallery_id, gallery.source)
                 count = (
                     await session.execute(
                         select(func.count()).where(Image.gallery_id == self.gallery_id, Image.visibility == "active")

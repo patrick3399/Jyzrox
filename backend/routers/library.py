@@ -27,6 +27,7 @@ from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import get_db
 from core.gallery_helpers import (
     build_cover_map,
+    build_cover_sha_map,
     get_blocked_tag_strings,
     get_favorite_set,
     get_rating_map,
@@ -147,6 +148,7 @@ async def _get_image_favorite_set(db: AsyncSession, user_id: int, image_ids: lis
 _get_rating_map = get_rating_map
 _get_blocked_tag_strings = get_blocked_tag_strings
 _build_cover_map = build_cover_map
+_build_cover_sha_map = build_cover_sha_map
 
 
 async def _single_cover_thumb(db: AsyncSession, gallery_id: int, source: str) -> str | None:
@@ -790,43 +792,19 @@ async def list_artists(
             .distinct(Gallery.artist_id)
         ).subquery()
 
-        # First page covers
-        first_cover_stmt = (
-            select(latest_gallery_sub.c.artist_id, latest_gallery_sub.c.source, Blob.sha256)
-            .join(Image, Image.gallery_id == latest_gallery_sub.c.id)
-            .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .where(Image.page_num == 1, Image.visibility == "active")
-        )
-        first_covers = {r.artist_id: (r.source, r.sha256) for r in (await db.execute(first_cover_stmt)).all()}
-
-        # Last page covers
-        max_page_sub = (
-            select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
-            .where(Image.gallery_id.in_(select(latest_gallery_sub.c.id)), Image.visibility == "active")
-            .group_by(Image.gallery_id)
-        ).subquery()
-        last_cover_stmt = (
-            select(latest_gallery_sub.c.artist_id, latest_gallery_sub.c.source, Blob.sha256)
-            .join(Image, Image.gallery_id == latest_gallery_sub.c.id)
-            .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .join(
-                max_page_sub,
-                and_(
-                    Image.gallery_id == max_page_sub.c.gallery_id,
-                    Image.page_num == max_page_sub.c.max_page,
-                ),
+        latest_rows = (
+            await db.execute(
+                select(latest_gallery_sub.c.id, latest_gallery_sub.c.artist_id, latest_gallery_sub.c.source)
             )
-        )
-        last_covers = {r.artist_id: (r.source, r.sha256) for r in (await db.execute(last_cover_stmt)).all()}
-
-        cover_map = {}
-        for artist_id_val in first_covers.keys() | last_covers.keys():
-            source_val = (first_covers.get(artist_id_val) or last_covers.get(artist_id_val, ("", "")))[0]
-            cfg = get_display_config(source_val or "")
-            if cfg.cover_page == "last" and artist_id_val in last_covers:
-                cover_map[artist_id_val] = cas_thumb_url(last_covers[artist_id_val][1])
-            elif artist_id_val in first_covers:
-                cover_map[artist_id_val] = cas_thumb_url(first_covers[artist_id_val][1])
+        ).all()
+        latest_by_id = {row.id: row.artist_id for row in latest_rows}
+        source_map = {row.id: row.source or "" for row in latest_rows}
+        sha_map = await _build_cover_sha_map(db, list(latest_by_id.keys()), source_map)
+        cover_map = {
+            latest_by_id[gallery_id]: cas_thumb_url(sha256)
+            for gallery_id, sha256 in sha_map.items()
+            if gallery_id in latest_by_id
+        }
 
     result = []
     for r in rows:
@@ -887,26 +865,7 @@ async def get_artist_summary(
     if latest_gallery_row:
         latest_gid = latest_gallery_row.id
         latest_source = latest_gallery_row.source or ""
-        display_cfg = get_display_config(latest_source)
-        if display_cfg.cover_page == "last":
-            cover_page_sub = select(func.max(Image.page_num)).where(Image.gallery_id == latest_gid).scalar_subquery()
-            cover_sha256 = (
-                await db.execute(
-                    select(Blob.sha256)
-                    .join(Image, Image.blob_sha256 == Blob.sha256)
-                    .where(Image.gallery_id == latest_gid, Image.page_num == cover_page_sub)
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
-        else:
-            cover_sha256 = (
-                await db.execute(
-                    select(Blob.sha256)
-                    .join(Image, Image.blob_sha256 == Blob.sha256)
-                    .where(Image.gallery_id == latest_gid, Image.page_num == 1)
-                    .limit(1)
-                )
-            ).scalar_one_or_none()
+        cover_sha256 = (await _build_cover_sha_map(db, [latest_gid], {latest_gid: latest_source})).get(latest_gid)
         cover_thumb = cas_thumb_url(cover_sha256) if cover_sha256 else None
 
     source = artist_id.split(":", 1)[0] if ":" in artist_id else ""

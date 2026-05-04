@@ -17,6 +17,7 @@ from sqlalchemy.sql import select
 
 from core.config import settings
 from core.database import AsyncSessionLocal
+from core.social_order import reorder_social_gallery_images
 from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, Tag
 from services.cas import create_library_symlink, store_blob, thumb_dir
 from worker.constants import (
@@ -193,6 +194,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
             {
                 "gallery_id": gallery_id,
                 "page_num": page_num,
+                "source_position": page_num,
                 "filename": img_file.name,
                 "blob_sha256": sha256,
                 "added_at": now,
@@ -221,6 +223,8 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
 
         # Upsert tags + gallery_tags
         await _upsert_tags(session, gallery_id, tags)
+
+        await reorder_social_gallery_images(session, gallery_id, source)
 
         # Upsert tag translations if present in metadata
         tag_translations = metadata.get("tag_translations")

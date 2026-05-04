@@ -5,16 +5,17 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import Response
-from sqlalchemy import and_, func, select
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
 from core.auth import gallery_access_filter, require_opds_auth
 from core.config import settings as app_settings
 from core.database import async_session
+from core.gallery_helpers import build_cover_sha_map, image_not_excluded_clause
 from core.redis_client import get_redis
+from core.source_display import get_display_config
 from db.models import Gallery, Image, UserFavorite
 from services.cas import cas_url, thumb_url as cas_thumb_url
-from core.source_display import get_display_config
 
 
 async def _require_opds_enabled():
@@ -224,43 +225,13 @@ async def _build_acquisition_feed(
     cover_thumbs: dict[int, str] = {}
 
     if gallery_ids:
-        # Per-source cover selection
         source_map = {g.id: g.source or "" for g in galleries}
-        first_ids = [gid for gid in gallery_ids if get_display_config(source_map.get(gid, "")).cover_page == "first"]
-        last_ids = [gid for gid in gallery_ids if get_display_config(source_map.get(gid, "")).cover_page == "last"]
 
         async with async_session() as session:
-            if first_ids:
-                first_rows = (
-                    await session.execute(
-                        select(Image)
-                        .where(Image.gallery_id.in_(first_ids), Image.page_num == 1)
-                        .options(selectinload(Image.blob))
-                    )
-                ).scalars().all()
-                for img in first_rows:
-                    if img.blob and img.blob.sha256:
-                        cover_thumbs[img.gallery_id] = cas_thumb_url(img.blob.sha256)
-
-            if last_ids:
-                max_page_sub = (
-                    select(Image.gallery_id, func.max(Image.page_num).label("max_page"))
-                    .where(Image.gallery_id.in_(last_ids))
-                    .group_by(Image.gallery_id)
-                ).subquery()
-                last_rows = (
-                    await session.execute(
-                        select(Image)
-                        .join(max_page_sub, and_(
-                            Image.gallery_id == max_page_sub.c.gallery_id,
-                            Image.page_num == max_page_sub.c.max_page,
-                        ))
-                        .options(selectinload(Image.blob))
-                    )
-                ).scalars().all()
-                for img in last_rows:
-                    if img.blob and img.blob.sha256:
-                        cover_thumbs[img.gallery_id] = cas_thumb_url(img.blob.sha256)
+            cover_thumbs = {
+                gallery_id: cas_thumb_url(sha256)
+                for gallery_id, sha256 in (await build_cover_sha_map(session, gallery_ids, source_map)).items()
+            }
 
     # Pagination links
     if page > 0:
@@ -478,7 +449,7 @@ async def opds_gallery(
         images = (
             await session.execute(
                 select(Image)
-                .where(Image.gallery_id == gallery.id)
+                .where(Image.gallery_id == gallery.id, Image.visibility == "active", image_not_excluded_clause())
                 .order_by(Image.page_num.desc() if get_display_config(gallery.source or "").image_order == "desc" else Image.page_num.asc())
                 .options(selectinload(Image.blob))
             )

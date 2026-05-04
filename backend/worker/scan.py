@@ -48,10 +48,15 @@ class _ImportRequest:
     mode: str
 
 
-def _cover_image_for_gallery(gallery: Gallery, images: list[Image]) -> Image | None:
-    if not images:
+def _cover_image_for_gallery(gallery: Gallery, images: list[Image], excluded_set: set[str] | None = None) -> Image | None:
+    eligible = [
+        img
+        for img in images
+        if img.visibility == "active" and img.blob_sha256 not in (excluded_set or set())
+    ]
+    if not eligible:
         return None
-    ordered = sorted(images, key=lambda img: img.page_num)
+    ordered = sorted(eligible, key=lambda img: img.page_num)
     cfg = get_display_config(gallery.source or "")
     return ordered[-1] if cfg.cover_page == "last" else ordered[0]
 
@@ -442,7 +447,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         missing_thumb = False
         missing_cover_thumb = False
         removed = 0
-        cover_image = _cover_image_for_gallery(gallery, images)
+        cover_image = _cover_image_for_gallery(gallery, images, excluded_set)
         for img in images:
             blob = img.blob
             if not blob:
@@ -580,7 +585,7 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
         )
         gallery.pages = len(final_images)
         if missing_thumb and not missing_cover_thumb:
-            current_cover = _cover_image_for_gallery(gallery, final_images)
+            current_cover = _cover_image_for_gallery(gallery, final_images, excluded_set)
             if current_cover and current_cover.blob and not _has_thumb_160(current_cover.blob):
                 missing_cover_thumb = True
 

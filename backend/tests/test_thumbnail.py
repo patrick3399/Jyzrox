@@ -540,11 +540,8 @@ class TestThumbnailJob:
 
         with (
             patch("worker.thumbnail.AsyncSessionLocal", return_value=session),
+            patch("worker.thumbnail.select_cover_image", new_callable=AsyncMock, return_value=img2),
             patch("worker.thumbnail.resolve_blob_path", return_value=MagicMock(spec=Path)),
-            patch(
-                "core.source_display.get_display_config",
-                return_value=SimpleNamespace(cover_page="last"),
-            ),
             patch("worker.thumbnail._run_thumbnail_in_thread", side_effect=_fake_run),
         ):
             result = await cover_thumbnail_job({}, gallery_id=99)

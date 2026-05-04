@@ -13,6 +13,7 @@ from pathlib import Path
 from sqlalchemy.sql import select
 
 from core.database import AsyncSessionLocal
+from core.gallery_helpers import select_cover_image
 from db.models import Gallery, Image
 from services.cas import resolve_blob_path, thumb_dir
 from worker.constants import logger
@@ -365,17 +366,15 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
 
 async def cover_thumbnail_job(ctx: dict, gallery_id: int) -> dict:
     """Generate thumbnails only for the configured cover image of a gallery."""
-    from core.source_display import get_display_config
-
     logger.info("[thumbnail_cover] gallery_id=%d", gallery_id)
     processed = 0
 
     async with AsyncSessionLocal() as session:
-        gallery, images = await _load_gallery_images(session, gallery_id)
-        if gallery and images:
-            display_cfg = get_display_config(gallery.source or "")
-            cover = _cover_first(images, display_cfg.cover_page)[0]
-            processed = await _process_images(session, [cover], commit_batch=1)
+        gallery = await session.get(Gallery, gallery_id)
+        if gallery:
+            cover = await select_cover_image(session, gallery_id, gallery.source or "")
+            if cover:
+                processed = await _process_images(session, [cover], commit_batch=1)
 
     logger.info("[thumbnail_cover] gallery_id=%d: %d done", gallery_id, processed)
     return {"status": "done", "processed": processed}
