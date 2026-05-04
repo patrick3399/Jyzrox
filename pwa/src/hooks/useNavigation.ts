@@ -6,7 +6,11 @@ import { useProfile } from '@/hooks/useProfile'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { PAGE_REGISTRY, hasRole, type PageDef } from '@/lib/pageRegistry'
-import { loadSidebarConfig, SIDEBAR_CONFIG_KEY } from '@/components/SidebarConfig'
+import {
+  getDefaultSidebarConfig,
+  loadSidebarConfig,
+  SIDEBAR_CONFIG_KEY,
+} from '@/components/SidebarConfig'
 
 const THEME_CYCLE = ['light', 'dark', 'amoled', 'system'] as const
 
@@ -29,9 +33,16 @@ export function useNavigation() {
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()
   const { data: profile } = useProfile()
+  const [mounted, setMounted] = useState(false)
 
   // Sidebar config with cross-tab sync
-  const [sidebarConfig, setSidebarConfig] = useState(() => loadSidebarConfig())
+  const [sidebarConfig, setSidebarConfig] = useState(() => getDefaultSidebarConfig())
+
+  useEffect(() => {
+    setMounted(true)
+    setSidebarConfig(loadSidebarConfig())
+  }, [])
+
   useEffect(() => {
     const handler = (e: StorageEvent) => {
       if (e.key === SIDEBAR_CONFIG_KEY) setSidebarConfig(loadSidebarConfig())
@@ -72,7 +83,7 @@ export function useNavigation() {
     setTheme(THEME_CYCLE[(idx + 1) % THEME_CYCLE.length])
   }, [theme, setTheme])
 
-  const themeKey = (theme as keyof typeof THEME_ICON) || 'system'
+  const themeKey = mounted ? (theme as keyof typeof THEME_ICON) || 'system' : 'system'
   const ThemeIcon = THEME_ICON[themeKey] ?? Monitor
   const themeLabel = THEME_LABEL[themeKey]?.() ?? t('common.theme')
 

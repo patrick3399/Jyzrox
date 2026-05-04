@@ -37,7 +37,7 @@ export function loadTabConfig(): TabDefinition[] {
   }
 }
 
-function getDefaultTabs(): TabDefinition[] {
+export function getDefaultTabs(): TabDefinition[] {
   return DEFAULT_TAB_HREFS.map((href) => ALL_TABS.find((t) => t.href === href)!)
 }
 
@@ -49,7 +49,11 @@ interface BottomTabBarProps {
 export function BottomTabBar({ onMoreClick, downloadStats: stats }: BottomTabBarProps) {
   useLocale()
   const pathname = usePathname()
-  const [tabs, setTabs] = useState<TabDefinition[]>(loadTabConfig)
+  const [tabs, setTabs] = useState<TabDefinition[]>(getDefaultTabs)
+
+  useEffect(() => {
+    setTabs(loadTabConfig())
+  }, [])
 
   useEffect(() => {
     function onStorage(e: StorageEvent) {

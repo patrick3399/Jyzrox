@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, useEffect } from 'react'
 import { Check, GripVertical } from 'lucide-react'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
@@ -9,12 +9,17 @@ import {
   BOTTOM_TAB_CONFIG_KEY,
   TAB_COUNT,
   DEFAULT_TAB_HREFS,
+  getDefaultTabs,
   loadTabConfig,
 } from '@/components/BottomTabBar'
 import { useDragReorder } from '@/hooks/useDragReorder'
 
 function loadSelectedHrefs(): string[] {
   return loadTabConfig().map((tab) => tab.href)
+}
+
+function getDefaultSelectedHrefs(): string[] {
+  return getDefaultTabs().map((tab) => tab.href)
 }
 
 function saveSelectedHrefs(hrefs: string[]) {
@@ -27,7 +32,11 @@ function saveSelectedHrefs(hrefs: string[]) {
 
 export function BottomTabConfig() {
   useLocale()
-  const [selected, setSelected] = useState<string[]>(() => loadSelectedHrefs())
+  const [selected, setSelected] = useState<string[]>(() => getDefaultSelectedHrefs())
+
+  useEffect(() => {
+    setSelected(loadSelectedHrefs())
+  }, [])
 
   const handleReorder = useCallback((newItems: string[]) => {
     setSelected(newItems)

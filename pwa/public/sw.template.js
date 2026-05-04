@@ -178,6 +178,9 @@ self.addEventListener('fetch', (event) => {
 
   if (event.request.method !== 'GET') return;
 
+  const requestUrl = new URL(event.request.url);
+  if (requestUrl.origin !== self.location.origin) return;
+
   // Cache-first for images/media if possible, otherwise network-first
   if (event.request.url.includes('/media/') || event.request.url.includes('/thumbs/')) {
     event.respondWith(

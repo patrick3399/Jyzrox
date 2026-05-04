@@ -1513,9 +1513,9 @@ const dedup = {
 // ── Users ─────────────────────────────────────────────────────────────
 
 const users = {
-  list: () => apiFetch<{ users: UserInfo[] }>('/api/users'),
+  list: () => apiFetch<{ users: UserInfo[] }>('/api/users/'),
   create: (data: { username: string; password: string; role: string; email?: string }) =>
-    apiFetch<{ id: number; username: string; role: string; email: string | null }>('/api/users', {
+    apiFetch<{ id: number; username: string; role: string; email: string | null }>('/api/users/', {
       method: 'POST',
       body: JSON.stringify(data),
     }),

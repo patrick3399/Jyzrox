@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useMemo, useEffect } from 'react'
 import { Check, GripVertical } from 'lucide-react'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
@@ -9,7 +9,7 @@ import { useDragReorder } from '@/hooks/useDragReorder'
 
 export const SIDEBAR_CONFIG_KEY = 'sidebar_nav_order'
 
-interface SidebarNavConfig {
+export interface SidebarNavConfig {
   order: string[]
   hidden: string[]
 }
@@ -18,13 +18,17 @@ function getDefaultOrder(): string[] {
   return PAGE_REGISTRY.filter((p) => p.sidebar).map((p) => p.href)
 }
 
+export function getDefaultSidebarConfig(): SidebarNavConfig {
+  return { order: getDefaultOrder(), hidden: [] }
+}
+
 export function loadSidebarConfig(): SidebarNavConfig {
   if (typeof window === 'undefined') {
-    return { order: getDefaultOrder(), hidden: [] }
+    return getDefaultSidebarConfig()
   }
   try {
     const raw = localStorage.getItem(SIDEBAR_CONFIG_KEY)
-    if (!raw) return { order: getDefaultOrder(), hidden: [] }
+    if (!raw) return getDefaultSidebarConfig()
     const parsed: unknown = JSON.parse(raw)
     if (
       typeof parsed !== 'object' ||
@@ -32,7 +36,7 @@ export function loadSidebarConfig(): SidebarNavConfig {
       !Array.isArray((parsed as SidebarNavConfig).order) ||
       !Array.isArray((parsed as SidebarNavConfig).hidden)
     ) {
-      return { order: getDefaultOrder(), hidden: [] }
+      return getDefaultSidebarConfig()
     }
     const config = parsed as SidebarNavConfig
     // Validate — filter out hrefs no longer in registry
@@ -47,11 +51,11 @@ export function loadSidebarConfig(): SidebarNavConfig {
       }
     }
     if (validOrder.length === 0 && validHidden.length === 0) {
-      return { order: getDefaultOrder(), hidden: [] }
+      return getDefaultSidebarConfig()
     }
     return { order: validOrder, hidden: validHidden }
   } catch {
-    return { order: getDefaultOrder(), hidden: [] }
+    return getDefaultSidebarConfig()
   }
 }
 
@@ -67,7 +71,11 @@ interface SidebarConfigProps {
 
 export function SidebarConfig({ userRole }: SidebarConfigProps) {
   useLocale()
-  const [config, setConfig] = useState<SidebarNavConfig>(() => loadSidebarConfig())
+  const [config, setConfig] = useState<SidebarNavConfig>(() => getDefaultSidebarConfig())
+
+  useEffect(() => {
+    setConfig(loadSidebarConfig())
+  }, [])
 
   const handleReorder = useCallback((newOrder: string[]) => {
     setConfig((prev) => {
