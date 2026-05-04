@@ -18,8 +18,9 @@ import { toast } from 'sonner'
 function getGalleryColCount() {
   if (typeof window === 'undefined') return 2
   const w = window.innerWidth
-  if (w >= 1280) return 6
-  if (w >= 1024) return 5
+  if (w >= 1536) return 10
+  if (w >= 1280) return 8
+  if (w >= 1024) return 6
   if (w >= 768) return 4
   if (w >= 640) return 3
   return 2
@@ -242,9 +243,9 @@ export default function ArtistDetailPage() {
           ) : (
             <VirtualGrid
               items={galleries}
-              columns={{ base: 2, sm: 3, md: 4, lg: 5, xl: 6 }}
+              columns={{ base: 2, sm: 3, md: 4, lg: 6, xl: 8, xxl: 10 }}
               gap={12}
-              estimateHeight={310}
+              estimateHeight={260}
               focusedIndex={focusedIndex}
               onColCountChange={setColCount}
               onLoadMore={loadMoreGalleries}
