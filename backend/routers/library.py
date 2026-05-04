@@ -2414,7 +2414,7 @@ async def _check_update_ehentai(g, db: AsyncSession, auth: dict) -> dict:
             await db.commit()
             await db.refresh(g)
             return {"status": "expunged"}
-        return {"status": "error", "reason": str(exc)}
+        return {"status": "error", "reason": "invalid_metadata"}
     except Exception:
         return {"status": "error", "reason": "fetch_failed"}
 

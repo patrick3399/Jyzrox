@@ -3673,3 +3673,35 @@ class TestCheckGalleryUpdate:
             resp = await client.post("/api/library/galleries/pixiv/444444/check-update")
         assert resp.status_code == 200
         assert resp.json()["status"] == "error"
+
+    async def test_ehentai_value_error_does_not_expose_exception_text(self, client, db_session):
+        """EH check-update should not return raw exception details."""
+        await _insert_gallery(
+            db_session,
+            source="ehentai",
+            source_id="555555",
+        )
+        await db_session.execute(
+            text("UPDATE galleries SET source_url = :url WHERE source = 'ehentai' AND source_id = '555555'"),
+            {"url": "https://e-hentai.org/g/555555/abcdef/"},
+        )
+        await db_session.commit()
+
+        class _Client:
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return None
+
+            async def get_gallery_metadata(self, gid, token):
+                raise ValueError("traceback: internal token leaked")
+
+        async def _make_client():
+            return _Client()
+
+        with patch("routers.library._make_eh_client", _make_client):
+            resp = await client.post("/api/library/galleries/ehentai/555555/check-update")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "error", "reason": "invalid_metadata"}

@@ -3,14 +3,13 @@
 from __future__ import annotations
 
 import os
-import re
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Literal
 
 
 DEFAULT_LIBRARY_PATTERN = "{title}"
 DEFAULT_IMPORT_MODE = "link"
-_PLACEHOLDER_RE = re.compile(r"\{([^}]+)\}")
 
 
 @dataclass(frozen=True)
@@ -22,6 +21,57 @@ class ParsedLibraryPattern:
 
 class PatternError(ValueError):
     pass
+
+
+class LibraryPatternMatch:
+    def __init__(self, groups: dict[str, str]) -> None:
+        self._groups = groups
+
+    def groupdict(self) -> dict[str, str]:
+        return dict(self._groups)
+
+
+class LibraryPatternRegex:
+    """Regex-like matcher for validated library path patterns."""
+
+    def __init__(self, tokens: list[tuple[str, str]], pattern: str) -> None:
+        self._tokens = tokens
+        self.pattern = pattern
+
+    def match(self, value: str) -> LibraryPatternMatch | None:
+        normalized = normalize_relative_path(value)
+        groups = self._match_from(0, 0, normalized, {})
+        return LibraryPatternMatch(groups) if groups is not None else None
+
+    def _match_from(
+        self,
+        token_index: int,
+        value_index: int,
+        value: str,
+        groups: dict[str, str],
+    ) -> dict[str, str] | None:
+        if token_index == len(self._tokens):
+            return groups if value_index == len(value) else None
+
+        kind, token_value = self._tokens[token_index]
+        if kind == "literal":
+            if not value.startswith(token_value, value_index):
+                return None
+            return self._match_from(token_index + 1, value_index + len(token_value), value, groups)
+
+        segment_end = value.find("/", value_index)
+        max_end = len(value) if segment_end == -1 else segment_end
+        if value_index >= max_end:
+            return None
+
+        for end in range(value_index + 1, max_end + 1):
+            next_groups = dict(groups)
+            if token_value != "_":
+                next_groups[token_value] = value[value_index:end]
+            matched = self._match_from(token_index + 1, end, value, next_groups)
+            if matched is not None:
+                return matched
+        return None
 
 
 def normalize_relative_path(path: str) -> str:
@@ -65,34 +115,84 @@ def validate_library_pattern(pattern: str) -> None:
         raise PatternError("Pattern must include {title}")
 
     seen: set[str] = set()
-    for match in _PLACEHOLDER_RE.finditer(pattern):
-        name = match.group(1)
-        if name != "_" and not re.fullmatch(r"[a-zA-Z_]\w*", name):
+    has_title = False
+    for kind, value in _iter_pattern_tokens(pattern):
+        if kind != "placeholder":
+            continue
+        name = value
+        if name == "title":
+            has_title = True
+        if name != "_" and not _is_valid_placeholder_name(name):
             raise PatternError(f"Invalid placeholder name: {{{name}}}")
         if name != "_":
             if name in seen:
                 raise PatternError(f"Duplicate placeholder name: {{{name}}}")
             seen.add(name)
 
-    rebuilt = "".join(_PLACEHOLDER_RE.split(pattern)[::2])
-    if "{" in rebuilt or "}" in rebuilt:
-        raise PatternError("Invalid placeholder syntax")
+    if not has_title:
+        raise PatternError("Pattern must include {title}")
 
 
-def build_library_pattern_regex(pattern: str) -> re.Pattern[str]:
+def build_library_pattern_regex(pattern: str) -> LibraryPatternRegex:
     validate_library_pattern(pattern)
-    parts = re.split(r"(\{[^}]+\})", normalize_relative_path(pattern))
-    regex_parts: list[str] = []
-    for part in parts:
-        if part.startswith("{") and part.endswith("}"):
-            name = part[1:-1]
+    tokens = _iter_pattern_tokens(normalize_relative_path(pattern))
+    pattern_parts: list[str] = []
+    for kind, value in tokens:
+        if kind == "placeholder":
+            name = value
             if name == "_":
-                regex_parts.append(r"(?:[^/]+)")
+                pattern_parts.append(r"(?:[^/]+)")
             else:
-                regex_parts.append(rf"(?P<{name}>[^/]+)")
+                pattern_parts.append(rf"(?P<{name}>[^/]+)")
         else:
-            regex_parts.append(re.escape(part))
-    return re.compile("^" + "".join(regex_parts) + "$")
+            pattern_parts.append(_regex_display_escape(value))
+    return LibraryPatternRegex(tokens, "^" + "".join(pattern_parts) + "$")
+
+
+def _is_valid_placeholder_name(name: str) -> bool:
+    if not name:
+        return False
+    first = name[0]
+    if not (first == "_" or "A" <= first <= "Z" or "a" <= first <= "z"):
+        return False
+    return all(ch == "_" or "A" <= ch <= "Z" or "a" <= ch <= "z" or "0" <= ch <= "9" for ch in name[1:])
+
+
+def _regex_display_escape(value: str) -> str:
+    special = frozenset(r"\.^$*+?{}[]|()")
+    return "".join(f"\\{ch}" if ch in special else ch for ch in value)
+
+
+def _iter_pattern_tokens(pattern: str) -> list[tuple[Literal["literal", "placeholder"], str]]:
+    """Tokenize a library pattern with linear brace parsing."""
+    tokens: list[tuple[Literal["literal", "placeholder"], str]] = []
+    literal_start = 0
+    index = 0
+    length = len(pattern)
+
+    while index < length:
+        char = pattern[index]
+        if char == "}":
+            raise PatternError("Invalid placeholder syntax")
+        if char != "{":
+            index += 1
+            continue
+
+        if literal_start < index:
+            tokens.append(("literal", pattern[literal_start:index]))
+        close_index = pattern.find("}", index + 1)
+        if close_index == -1:
+            raise PatternError("Invalid placeholder syntax")
+        name = pattern[index + 1 : close_index]
+        if "{" in name or "}" in name:
+            raise PatternError("Invalid placeholder syntax")
+        tokens.append(("placeholder", name))
+        index = close_index + 1
+        literal_start = index
+
+    if literal_start < length:
+        tokens.append(("literal", pattern[literal_start:]))
+    return tokens
 
 
 def pattern_match(pattern: str, root: Path, candidate: Path) -> dict[str, str] | None:

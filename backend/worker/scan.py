@@ -49,11 +49,17 @@ class _ImportRequest:
 
 
 def _cover_image_for_gallery(gallery: Gallery, images: list[Image], excluded_set: set[str] | None = None) -> Image | None:
-    eligible = [
-        img
-        for img in images
-        if img.visibility == "active" and img.blob_sha256 not in (excluded_set or set())
-    ]
+    excluded = excluded_set or set()
+    eligible = []
+    for img in images:
+        visibility = getattr(img, "visibility", "active")
+        if not isinstance(visibility, str):
+            visibility = "active"
+        if visibility != "active":
+            continue
+        if getattr(img, "blob_sha256", None) in excluded:
+            continue
+        eligible.append(img)
     if not eligible:
         return None
     ordered = sorted(eligible, key=lambda img: img.page_num)
