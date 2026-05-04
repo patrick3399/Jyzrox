@@ -40,6 +40,10 @@ pyrightconfig.json
 .editorconfig
 Makefile
 
+# Local dev gates (not needed for runtime / deploy)
+scripts/local-ci.sh
+scripts/pre-commit-checks.sh
+
 # Claude Code
 .claude/
 CLAUDE.md
