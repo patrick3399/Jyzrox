@@ -64,6 +64,12 @@ export function useCheckSubscription() {
   )
 }
 
+export function useBackfillSubscription() {
+  return useSWRMutation('subscriptions', (_key: string, { arg }: { arg: number }) =>
+    api.subscriptions.backfill(arg),
+  )
+}
+
 export function useSubscriptionJobs(subId: number | null) {
   return useSWR(subId ? ['subscription-jobs', subId] : null, () => api.subscriptions.jobs(subId!), {
     refreshInterval: 5000,

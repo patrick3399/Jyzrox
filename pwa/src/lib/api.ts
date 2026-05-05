@@ -1416,6 +1416,12 @@ const subscriptions = {
       method: 'POST',
     }),
 
+  backfill: (id: number) =>
+    apiFetch<{ status: string; mode?: string }>(
+      `/api/subscriptions/${id}/backfill`,
+      { method: 'POST' },
+    ),
+
   jobs: (id: number, limit = 10) =>
     apiFetch<{ jobs: DownloadJob[] }>(`/api/subscriptions/${id}/jobs${qs({ limit })}`),
 }

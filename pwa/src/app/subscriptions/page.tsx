@@ -6,6 +6,7 @@ import {
   Plus,
   X,
   RefreshCw,
+  RotateCcw,
   Trash2,
   ExternalLink,
   Download,
@@ -32,6 +33,7 @@ import {
   useUpdateSubscription,
   useDeleteSubscription,
   useCheckSubscription,
+  useBackfillSubscription,
 } from '@/hooks/useSubscriptions'
 import {
   useSubscriptionGroups,
@@ -201,6 +203,7 @@ function SubscriptionCard({
   groups,
   onToggle,
   onCheck,
+  onBackfill,
   onDelete,
   onAutoDownloadToggle,
   onMoveToGroup,
@@ -211,6 +214,7 @@ function SubscriptionCard({
   groups: SubscriptionGroup[]
   onToggle: (sub: Subscription) => void
   onCheck: (sub: Subscription) => void
+  onBackfill: (sub: Subscription) => void
   onDelete: (sub: Subscription) => void
   onAutoDownloadToggle: (sub: Subscription) => void
   onMoveToGroup: (sub: Subscription, groupId: number | null) => void
@@ -301,6 +305,15 @@ function SubscriptionCard({
           title={t('subscriptions.downloadNow')}
         >
           <RefreshCw size={14} className={checkingId === sub.id ? 'animate-spin' : ''} />
+        </button>
+        <button
+          onClick={() => onBackfill(sub)}
+          disabled={checkingId === sub.id}
+          className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
+          title={t('subscriptions.backfill')}
+          aria-label={t('subscriptions.backfillTitle')}
+        >
+          <RotateCcw size={14} />
         </button>
         <a
           href={sub.url}
@@ -536,6 +549,7 @@ function GroupCard({
   onDelete,
   onToggleSub,
   onCheckSub,
+  onBackfillSub,
   onDeleteSub,
   onAutoDownloadToggle,
   onMoveToGroup,
@@ -552,6 +566,7 @@ function GroupCard({
   onDelete: (group: SubscriptionGroup) => void
   onToggleSub: (sub: Subscription) => void
   onCheckSub: (sub: Subscription) => void
+  onBackfillSub: (sub: Subscription) => void
   onDeleteSub: (sub: Subscription) => void
   onAutoDownloadToggle: (sub: Subscription) => void
   onMoveToGroup: (sub: Subscription, groupId: number | null) => void
@@ -673,6 +688,7 @@ function GroupCard({
                 groups={groups}
                 onToggle={onToggleSub}
                 onCheck={onCheckSub}
+                onBackfill={onBackfillSub}
                 onDelete={onDeleteSub}
                 onAutoDownloadToggle={onAutoDownloadToggle}
                 onMoveToGroup={onMoveToGroup}
@@ -697,6 +713,7 @@ export default function SubscriptionsPage() {
   const { trigger: updateSub } = useUpdateSubscription()
   const { trigger: deleteSub } = useDeleteSubscription()
   const { trigger: checkSub } = useCheckSubscription()
+  const { trigger: backfillSub } = useBackfillSubscription()
 
   // Groups data
   const { data: groupsData, mutate: mutateGroups } = useSubscriptionGroups()
@@ -961,6 +978,20 @@ export default function SubscriptionsPage() {
       mutate()
     } catch {
       toast.error(t('subscriptions.checkFailed'))
+    } finally {
+      setCheckingId(null)
+    }
+  }
+
+  const handleBackfill = async (sub: Subscription) => {
+    if (!confirm(t('subscriptions.backfillConfirm', { name: sub.name || sub.url }))) return
+    setCheckingId(sub.id)
+    try {
+      await backfillSub(sub.id)
+      toast.success(t('subscriptions.backfillQueued', { name: sub.name || sub.url }))
+      mutate()
+    } catch {
+      toast.error(t('subscriptions.backfillFailed'))
     } finally {
       setCheckingId(null)
     }
@@ -1377,6 +1408,7 @@ export default function SubscriptionsPage() {
               onDelete={handleGroupDelete}
               onToggleSub={handleToggle}
               onCheckSub={handleCheck}
+              onBackfillSub={handleBackfill}
               onDeleteSub={handleDelete}
               onAutoDownloadToggle={handleAutoDownloadToggle}
               onMoveToGroup={handleMoveToGroup}
@@ -1398,6 +1430,7 @@ export default function SubscriptionsPage() {
               onDelete={handleGroupDelete}
               onToggleSub={handleToggle}
               onCheckSub={handleCheck}
+              onBackfillSub={handleBackfill}
               onDeleteSub={handleDelete}
               onAutoDownloadToggle={handleAutoDownloadToggle}
               onMoveToGroup={handleMoveToGroup}

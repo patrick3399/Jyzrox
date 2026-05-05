@@ -16,12 +16,13 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
 
 // ── Hoisted mock helpers ──────────────────────────────────────────────
 
-const { mockList, mockCreate, mockUpdate, mockDelete, mockCheck, mockJobs } = vi.hoisted(() => ({
+const { mockList, mockCreate, mockUpdate, mockDelete, mockCheck, mockBackfill, mockJobs } = vi.hoisted(() => ({
   mockList: vi.fn(),
   mockCreate: vi.fn(),
   mockUpdate: vi.fn(),
   mockDelete: vi.fn(),
   mockCheck: vi.fn(),
+  mockBackfill: vi.fn(),
   mockJobs: vi.fn(),
 }))
 
@@ -35,6 +36,7 @@ vi.mock('@/lib/api', () => ({
       update: mockUpdate,
       delete: mockDelete,
       check: mockCheck,
+      backfill: mockBackfill,
       jobs: mockJobs,
     },
   },
@@ -82,6 +84,7 @@ import {
   useUpdateSubscription,
   useDeleteSubscription,
   useCheckSubscription,
+  useBackfillSubscription,
   useSubscriptionJobs,
 } from '@/hooks/useSubscriptions'
 
@@ -95,6 +98,7 @@ beforeEach(() => {
   mockUpdate.mockResolvedValue({ id: 1 })
   mockDelete.mockResolvedValue({})
   mockCheck.mockResolvedValue({ status: 'ok' })
+  mockBackfill.mockResolvedValue({ status: 'queued', mode: 'backfill' })
   mockJobs.mockResolvedValue({ jobs: [] })
 })
 
@@ -179,6 +183,14 @@ describe('useCheckSubscription', () => {
     const { trigger } = useCheckSubscription()
     await trigger(99)
     expect(mockCheck).toHaveBeenCalledWith(99)
+  })
+})
+
+describe('useBackfillSubscription', () => {
+  it('test_useBackfillSubscription_trigger_callsApiSubscriptionsBackfillWithId', async () => {
+    const { trigger } = useBackfillSubscription()
+    await trigger(7)
+    expect(mockBackfill).toHaveBeenCalledWith(7)
   })
 })
 

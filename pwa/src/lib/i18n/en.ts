@@ -925,6 +925,12 @@ const en: Record<string, string> = {
   'subscriptions.updated': 'Subscription updated',
   'subscriptions.updateFailed': 'Failed to update subscription',
   'subscriptions.checkFailed': 'Failed to check subscription',
+  'subscriptions.backfill': 'Force re-scan',
+  'subscriptions.backfillTitle': 'Re-scan all posts (backfill)',
+  'subscriptions.backfillConfirm':
+    'Re-scan the entire timeline for "{name}"? This walks deeper than a normal Renew and may take a while. Already-downloaded items (including ones you deleted locally) are NOT re-fetched.',
+  'subscriptions.backfillQueued': 'Backfill queued for "{name}"',
+  'subscriptions.backfillFailed': 'Failed to queue backfill',
   'subscriptions.noSubscriptions': 'No subscriptions yet.',
   'subscriptions.noSubscriptionsHint':
     'Add a Pixiv user or Twitter account URL to monitor for new works.',
