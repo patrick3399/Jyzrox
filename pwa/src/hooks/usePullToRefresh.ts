@@ -29,7 +29,10 @@ export function usePullToRefresh({
   const isRefreshingRef = useRef(false)
   const pullDistanceRef = useRef(0)
   const onRefreshRef = useRef(onRefresh)
-  onRefreshRef.current = onRefresh
+
+  useEffect(() => {
+    onRefreshRef.current = onRefresh
+  }, [onRefresh])
 
   const getScrollTop = useCallback((): number => {
     if (scrollContainerRef?.current) {

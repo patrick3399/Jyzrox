@@ -1176,6 +1176,12 @@ const ko: Record<string, string> = {
   'subscriptions.downloadComplete': '다운로드 완료',
   'subscriptions.downloadFailed': '다운로드 실패',
   'subscriptions.downloadNow': '지금 다운로드',
+  'subscriptions.backfill': '강제 재스캔',
+  'subscriptions.backfillTitle': '모든 게시물 강제 재스캔',
+  'subscriptions.backfillConfirm':
+    '"{name}"의 전체 타임라인을 다시 스캔하시겠습니까? 다운로드 아카이브를 우회하므로 시간이 걸릴 수 있습니다. 기존 로컬 항목은 원격에서 삭제된 게시물을 포함해 순서 안에 유지됩니다.',
+  'subscriptions.backfillQueued': '"{name}" 강제 재스캔이 대기열에 추가됨',
+  'subscriptions.backfillFailed': '강제 재스캔을 대기열에 추가하지 못했습니다',
   'subscriptions.downloadQueued': '다운로드 대기열에 추가됨',
   'subscriptions.viewGallery': '갤러리 보기',
   'subscriptions.queued': '대기 중',

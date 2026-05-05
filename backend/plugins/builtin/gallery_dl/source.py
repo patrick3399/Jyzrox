@@ -141,9 +141,11 @@ async def _build_gallery_dl_config(
         config_id: Per-job config isolation key.
         job_context: "manual" or "subscription" — controls archive-mode and skip behavior.
         last_completed_at: For subscription context, enables date-after optimization.
-        force_full_scan: Subscription backfill mode. Disables date-after and uses
-            ``skip=abort:100``. Mutually exclusive with ``last_completed_at`` —
-            caller (worker.subscription) drops last_completed_at when this is True.
+        force_full_scan: Subscription force re-scan mode. Disables both
+            date-after and gallery-dl's archive so remote items are fetched
+            again and the importer can repair missing DB/library rows.
+            Mutually exclusive with ``last_completed_at`` — caller
+            (worker.subscription) drops last_completed_at when this is True.
 
     Returns:
         Path to the config file written.
@@ -181,15 +183,19 @@ async def _build_gallery_dl_config(
 
     # N2: subscription optimization
     if job_context == "subscription":
-        # N10a: archive-mode memory for batch writes (subscription)
-        config["extractor"]["archive-mode"] = "memory"
         if force_full_scan:
-            # Backfill mode: tolerate gaps (artist may have deleted posts, or our
-            # first run was interrupted). 100 consecutive archive hits ≈ caught up.
-            # No date-after — that's the whole point of backfill. Archive still
-            # gates re-downloads, so locally-deleted images are NOT re-fetched.
-            config["extractor"]["skip"] = "abort:100"
-        elif last_completed_at:
+            # Force re-scan is a repair path for archive/import mismatches:
+            # gallery-dl must fetch every currently visible remote item even if
+            # it was already archived. The ProgressiveImporter keeps existing
+            # local images and reorders the combined set, so remote-deleted
+            # local-only images remain in the gallery sequence.
+            config["extractor"].pop("archive", None)
+            config["extractor"].pop("archive-table", None)
+        else:
+            # N10a: archive-mode memory for batch writes (subscription)
+            config["extractor"]["archive-mode"] = "memory"
+
+        if not force_full_scan and last_completed_at:
             # Incremental mode: a full download was confirmed before.
             # abort:10 is safe here — 10 consecutive archive hits means we've caught up.
             # For initial downloads (no last_completed_at), abort:10 would prematurely stop

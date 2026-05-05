@@ -69,14 +69,21 @@ def _make_fake_process(
 
     proc.stdout = _async_iter_lines()
 
-    # stderr: async iterator over lines (split from bytes)
-    stderr_lines = [l + b"\n" for l in stderr.split(b"\n") if l] if stderr else []
+    class _FakeStderr:
+        def __init__(self, data: bytes):
+            self._data = data
+            self._offset = 0
 
-    async def _async_iter_stderr():
-        for line in stderr_lines:
-            yield line
+        async def read(self, n: int = -1) -> bytes:
+            if self._offset >= len(self._data):
+                return b""
+            if n is None or n < 0:
+                n = len(self._data) - self._offset
+            chunk = self._data[self._offset : self._offset + n]
+            self._offset += len(chunk)
+            return chunk
 
-    proc.stderr = _async_iter_stderr()
+    proc.stderr = _FakeStderr(stderr)
 
     if block_wait:
         _kill_event = asyncio.Event()
@@ -491,8 +498,8 @@ class TestGalleryDlParseMetadata:
 class TestConfigGeneration:
     """Tests for _build_gallery_dl_config — config file generation logic."""
 
-    async def test_subscription_mode_sets_skip_and_archive_mode(self, tmp_path):
-        """subscription job_context should set skip=abort:10 and archive-mode=memory in extractor."""
+    async def test_subscription_mode_sets_archive_mode_without_initial_skip(self, tmp_path):
+        """Initial subscription downloads use archive-mode but no abort skip before a success cutoff exists."""
         from unittest.mock import MagicMock, patch
 
         from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
@@ -507,7 +514,7 @@ class TestConfigGeneration:
             path = await _build_gallery_dl_config({}, job_context="subscription")
 
         config = json.loads(path.read_text())
-        assert config["extractor"].get("skip") == "abort:10"
+        assert "skip" not in config["extractor"]
         assert config["extractor"].get("archive-mode") == "memory"
 
     async def test_manual_mode_does_not_set_skip(self, tmp_path):

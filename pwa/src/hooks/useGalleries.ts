@@ -284,6 +284,7 @@ export function useEhGalleryImagesPaginated(
   // Map of page (string key) -> preview URL or sprite string "url|ox|w|h"
   const [previewMap, setPreviewMap] = useState<Record<string, string>>({})
   const [isLoading, setIsLoading] = useState(false)
+  const [isDone, setIsDone] = useState(false)
   const [error, setError] = useState<Error | null>(null)
 
   // startPage for next batch to fetch (0-indexed as the API expects)
@@ -310,6 +311,7 @@ export function useEhGalleryImagesPaginated(
     setTokenMap({})
     setPreviewMap({})
     setError(null)
+    setIsDone(false)
     nextStartRef.current = 0
     doneRef.current = false
     fetchingRef.current = false
@@ -343,6 +345,7 @@ export function useEhGalleryImagesPaginated(
       nextStartRef.current += result.images.length
       if (!result.has_more || nextStartRef.current >= totalPages) {
         doneRef.current = true
+        setIsDone(true)
       }
     } catch (err) {
       if (mountedRef.current) setError(err instanceof Error ? err : new Error(String(err)))
@@ -415,7 +418,7 @@ export function useEhGalleryImagesPaginated(
     error,
     onPageChange,
     fetchUpTo,
-    isDone: doneRef.current,
+    isDone,
   }
 }
 

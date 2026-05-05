@@ -148,6 +148,40 @@ async def test_reorder_social_gallery_images_hidden_gets_restore_position(db_ses
     assert hidden.source_position == 2
 
 
+async def test_reorder_social_gallery_images_keeps_local_only_posts_in_sequence(db_session):
+    """Force re-scan adds current remote posts without dropping local-only older posts."""
+    await db_session.execute(
+        text("INSERT INTO galleries (source, source_id, title, pages, tags_array) VALUES ('twitter', 'r', 'R', 3, '[]')")
+    )
+    gallery_id = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar_one()
+
+    # Existing local row whose remote post no longer appears in the force re-scan.
+    await _insert_blob_image(db_session, gallery_id, 1, "101_1.jpg")
+    # Items imported during the archive-bypassing force re-scan.
+    await _insert_blob_image(db_session, gallery_id, 2, "103_1.jpg")
+    await _insert_blob_image(db_session, gallery_id, 3, "100_1.jpg")
+
+    await reorder_social_gallery_images(db_session, gallery_id, "twitter")
+    await db_session.commit()
+
+    rows = (
+        (
+            await db_session.execute(
+                select(Image.filename, Image.page_num, Image.source_position)
+                .where(Image.gallery_id == gallery_id, Image.visibility == "active")
+                .order_by(Image.page_num.asc())
+            )
+        )
+        .all()
+    )
+
+    assert [(r.filename, r.page_num, r.source_position) for r in rows] == [
+        ("103_1.jpg", 1, 1),
+        ("101_1.jpg", 2, 2),
+        ("100_1.jpg", 3, 3),
+    ]
+
+
 async def test_reorder_social_gallery_images_ignores_non_social(db_session):
     await db_session.execute(
         text("INSERT INTO galleries (source, source_id, title, pages, tags_array) VALUES ('pixiv', 'p', 'P', 2, '[]')")

@@ -5,11 +5,10 @@ import {
   Rss,
   Plus,
   X,
-  RefreshCw,
-  RotateCcw,
   Trash2,
   ExternalLink,
   Download,
+  ScanSearch,
   CheckCircle,
   AlertCircle,
   List,
@@ -56,6 +55,7 @@ const SOURCE_COLORS: Record<string, string> = {
   pixiv: 'bg-blue-500/20 text-blue-400',
   twitter: 'bg-sky-500/20 text-sky-400',
   ehentai: 'bg-purple-500/20 text-purple-400',
+  weibo: 'bg-red-500/20 text-red-300',
 }
 
 const CRON_PRESETS = [
@@ -77,7 +77,9 @@ function sourceBadge(source: string | null) {
         ? 'Twitter'
         : source === 'ehentai'
           ? 'E-Hentai'
-          : source
+          : source === 'weibo'
+            ? 'Weibo'
+            : source
     : t('subscriptions.sourceOther')
   return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${cls}`}>{label}</span>
 }
@@ -119,19 +121,17 @@ function groupStatusBadge(status: string) {
 
 // ── Sub-components ───────────────────────────────────────────────────
 
-function JobStatusBadge({ job }: { job: DownloadJob }) {
+function JobStatusBadge({ job, galleryHref }: { job: DownloadJob; galleryHref: string | null }) {
   if (job.status === 'running') {
     const downloaded = job.progress?.downloaded ?? 0
     const total = job.progress?.total
     const pct = total ? Math.min(100, Math.round((downloaded / total) * 100)) : 0
-    const gallerySource = job.gallery_source
-    const gallerySourceId = job.gallery_source_id
     const title = job.progress?.title
     return (
       <div className="mt-2">
-        {title && gallerySource && gallerySourceId && (
+        {title && galleryHref && (
           <Link
-            href={`/library/${encodeURIComponent(gallerySource)}/${encodeURIComponent(gallerySourceId)}`}
+            href={galleryHref}
             className="text-[10px] text-vault-accent hover:underline truncate block mb-1"
           >
             {title}
@@ -159,15 +159,13 @@ function JobStatusBadge({ job }: { job: DownloadJob }) {
     )
   }
   if (job.status === 'done') {
-    const gallerySource = job.gallery_source
-    const gallerySourceId = job.gallery_source_id
     return (
       <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
         <CheckCircle size={12} className="text-green-400" />
         <span className="text-green-400">{t('subscriptions.downloadComplete')}</span>
-        {gallerySource && gallerySourceId && (
+        {galleryHref && (
           <Link
-            href={`/library/${encodeURIComponent(gallerySource)}/${encodeURIComponent(gallerySourceId)}`}
+            href={galleryHref}
             className="text-vault-accent hover:underline ml-1"
           >
             {t('subscriptions.viewGallery')}
@@ -197,6 +195,13 @@ function JobStatusBadge({ job }: { job: DownloadJob }) {
   return null
 }
 
+function subscriptionGalleryHref(sub: Subscription, latestJob: DownloadJob | null): string | null {
+  const source = latestJob?.gallery_source ?? sub.gallery_source
+  const sourceId = latestJob?.gallery_source_id ?? sub.gallery_source_id
+  if (!source || !sourceId) return null
+  return `/library/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`
+}
+
 function SubscriptionCard({
   sub,
   latestJob,
@@ -222,6 +227,7 @@ function SubscriptionCard({
 }) {
   const [showMoveMenu, setShowMoveMenu] = useState(false)
   const moveMenuRef = useRef<HTMLDivElement | null>(null)
+  const galleryHref = subscriptionGalleryHref(sub, latestJob)
 
   useEffect(() => {
     if (!showMoveMenu) return
@@ -294,26 +300,35 @@ function SubscriptionCard({
           {sub.last_error}
         </p>
       )}
-      {latestJob && <JobStatusBadge job={latestJob} />}
+      {latestJob && <JobStatusBadge job={latestJob} galleryHref={galleryHref} />}
+      {galleryHref && (!latestJob || !['running', 'done'].includes(latestJob.status)) && (
+        <Link
+          href={galleryHref}
+          className="mt-1.5 inline-block text-[10px] text-vault-accent hover:underline"
+        >
+          {t('subscriptions.viewGallery')}
+        </Link>
+      )}
 
       {/* Bottom action row */}
       <div className="flex items-center gap-0.5 mt-2 pt-2 border-t border-vault-border/50">
         <button
           onClick={() => onCheck(sub)}
           disabled={checkingId === sub.id}
-          className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
+          className="p-1.5 rounded text-vault-text-muted hover:text-emerald-400 transition-colors disabled:opacity-60"
           title={t('subscriptions.downloadNow')}
+          aria-label={t('subscriptions.downloadNow')}
         >
-          <RefreshCw size={14} className={checkingId === sub.id ? 'animate-spin' : ''} />
+          <Download size={14} className={checkingId === sub.id ? 'animate-pulse' : ''} />
         </button>
         <button
           onClick={() => onBackfill(sub)}
           disabled={checkingId === sub.id}
-          className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
+          className="p-1.5 rounded text-vault-text-muted hover:text-amber-400 transition-colors disabled:opacity-60"
           title={t('subscriptions.backfill')}
           aria-label={t('subscriptions.backfillTitle')}
         >
-          <RotateCcw size={14} />
+          <ScanSearch size={14} />
         </button>
         <a
           href={sub.url}

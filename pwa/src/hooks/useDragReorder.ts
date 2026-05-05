@@ -1,4 +1,4 @@
-import { useState, useCallback, useRef } from 'react'
+import { useState, useCallback, useEffect, useRef } from 'react'
 
 interface UseDragReorderOptions {
   items: string[]
@@ -30,13 +30,16 @@ export function useDragReorder({ items, onReorder }: UseDragReorderOptions): Use
   const [dragIdx, setDragIdx] = useState<number | null>(null)
   const [dragOver, setDragOver] = useState<number | null>(null)
 
-  // Refs to keep callbacks stable — avoids cascade recreation
+  // Refs keep callbacks stable and are synced after render for React Compiler.
   const itemsRef = useRef(items)
-  itemsRef.current = items
   const onReorderRef = useRef(onReorder)
-  onReorderRef.current = onReorder
   const dragIdxRef = useRef<number | null>(null)
   const dragOverRef = useRef<number | null>(null)
+
+  useEffect(() => {
+    itemsRef.current = items
+    onReorderRef.current = onReorder
+  }, [items, onReorder])
 
   // Touch-specific refs
   const touchStartIdx = useRef<number | undefined>(undefined)

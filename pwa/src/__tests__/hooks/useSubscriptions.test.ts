@@ -98,7 +98,7 @@ beforeEach(() => {
   mockUpdate.mockResolvedValue({ id: 1 })
   mockDelete.mockResolvedValue({})
   mockCheck.mockResolvedValue({ status: 'ok' })
-  mockBackfill.mockResolvedValue({ status: 'queued', mode: 'backfill' })
+  mockBackfill.mockResolvedValue({ status: 'queued', mode: 'force_rescan' })
   mockJobs.mockResolvedValue({ jobs: [] })
 })
 

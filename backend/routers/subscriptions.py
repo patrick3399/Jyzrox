@@ -10,10 +10,10 @@ from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 import core.queue
-from core.auth import require_auth, require_role
+from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source, normalize_subscription_url, validate_cron
-from db.models import Subscription
+from db.models import DownloadJob, Gallery, Subscription
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["subscriptions"])
@@ -42,8 +42,8 @@ class BulkMoveRequest(BaseModel):
     group_id: int | None
 
 
-def _serialize_subscription(s) -> dict:
-    return {
+def _serialize_subscription(s, gallery: Gallery | None = None) -> dict:
+    data = {
         "id": s.id,
         "name": s.name,
         "url": s.url,
@@ -62,6 +62,11 @@ def _serialize_subscription(s) -> dict:
         "next_check_at": s.next_check_at.isoformat() if s.next_check_at else None,
         "created_at": s.created_at.isoformat() if s.created_at else None,
     }
+    if gallery:
+        data["gallery_id"] = gallery.id
+        data["gallery_source"] = gallery.source
+        data["gallery_source_id"] = gallery.source_id
+    return data
 
 
 @router.get("/")
@@ -88,6 +93,44 @@ async def list_subscriptions(
         result = await session.execute(query)
         subs = result.scalars().all()
 
+        gallery_by_sub_id: dict[int, Gallery] = {}
+        if subs:
+            sub_ids = [s.id for s in subs]
+            job_gallery_rows = (
+                await session.execute(
+                    select(DownloadJob.subscription_id, Gallery)
+                    .join(Gallery, Gallery.id == DownloadJob.gallery_id)
+                    .where(
+                        DownloadJob.subscription_id.in_(sub_ids),
+                        DownloadJob.gallery_id.is_not(None),
+                        gallery_access_filter(auth),
+                    )
+                    .order_by(DownloadJob.subscription_id.asc(), DownloadJob.created_at.desc())
+                )
+            ).all()
+            for sub_id, gallery in job_gallery_rows:
+                gallery_by_sub_id.setdefault(sub_id, gallery)
+
+            # Keep the link stable even if old download jobs are cleaned up.
+            urls_missing_job_gallery = [s.url for s in subs if s.id not in gallery_by_sub_id]
+            if urls_missing_job_gallery:
+                source_url_rows = (
+                    await session.execute(
+                        select(Gallery)
+                        .where(Gallery.source_url.in_(urls_missing_job_gallery), gallery_access_filter(auth))
+                        .order_by(Gallery.source_url.asc(), Gallery.added_at.desc())
+                    )
+                ).scalars().all()
+                gallery_by_source_url: dict[str, Gallery] = {}
+                for gallery in source_url_rows:
+                    if gallery.source_url:
+                        gallery_by_source_url.setdefault(gallery.source_url, gallery)
+                for sub in subs:
+                    if sub.id not in gallery_by_sub_id:
+                        gallery = gallery_by_source_url.get(sub.url)
+                        if gallery:
+                            gallery_by_sub_id[sub.id] = gallery
+
         count_q = select(sa_func.count(Subscription.id)).where(Subscription.user_id == user_id)
         if source:
             count_q = count_q.where(Subscription.source == source)
@@ -98,7 +141,7 @@ async def list_subscriptions(
         total = (await session.execute(count_q)).scalar() or 0
 
     return {
-        "subscriptions": [_serialize_subscription(s) for s in subs],
+        "subscriptions": [_serialize_subscription(s, gallery_by_sub_id.get(s.id)) for s in subs],
         "total": total,
     }
 
@@ -394,12 +437,12 @@ async def backfill_subscription(
     request: Request,
     auth: dict = Depends(_member),
 ):
-    """Trigger a force full-scan for a subscription.
+    """Trigger a force re-scan for a subscription.
 
-    Bypasses the incremental ``date-after`` filter so older posts missed by an
-    interrupted first download can be backfilled. gallery-dl's archive still
-    skips already-seen entries, so this does NOT re-download content the user
-    has deleted locally — only entries that were never recorded in the archive.
+    Bypasses both the incremental ``date-after`` filter and gallery-dl's
+    archive so the current remote timeline is downloaded again. Importer-side
+    de-duplication keeps existing local rows and social ordering preserves
+    already-downloaded items even if their remote posts have disappeared.
     """
     user_id = auth["user_id"]
     async with async_session() as session:
@@ -415,7 +458,7 @@ async def backfill_subscription(
     try:
         await core.queue.enqueue("check_single_subscription", sub_id=sub_id, force_full_scan=True)
     except Exception as exc:
-        logger.error("Failed to enqueue backfill for sub %d: %s", sub_id, exc)
+        logger.error("Failed to enqueue force re-scan for sub %d: %s", sub_id, exc)
         raise HTTPException(status_code=500, detail=str(exc))
 
-    return {"status": "queued", "subscription_id": sub_id, "mode": "backfill"}
+    return {"status": "queued", "subscription_id": sub_id, "mode": "force_rescan"}

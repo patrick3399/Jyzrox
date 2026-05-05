@@ -17,10 +17,11 @@ from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release
 async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = False) -> dict:
     """Create a download job for a subscription and enqueue it.
 
-    force_full_scan=True suppresses date-after / abort:10 in source.py and uses
-    abort:100 instead. Used by manual ``Backfill`` action when an interrupted
-    first run left gaps in archive coverage. gallery-dl's archive table still
-    skips already-seen entries, so locally-deleted images are not re-fetched.
+    force_full_scan=True suppresses both date-after and gallery-dl's archive.
+    Used by manual ``Force re-scan`` when an interrupted or inconsistent run
+    left archive entries without matching image/library rows. Existing local
+    images are retained by the importer and social reordering keeps them in the
+    gallery sequence even if the remote post disappeared.
     """
     from core.redis_client import get_redis, publish_job_event
 
@@ -104,8 +105,8 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
             "job_context": "subscription",
         }
         if force_full_scan:
-            # Backfill: bypass date-after, walk deeper. archive still gates re-downloads
-            # so locally-deleted images are not re-fetched.
+            # Force re-scan: bypass date-after and archive so gallery-dl emits
+            # every currently visible item; importer-side dedupe preserves local rows.
             options["force_full_scan"] = True
         elif getattr(sub, "last_success_at", None):
             # Incremental: must be JSON-serializable for SAQ; download.py parses
@@ -174,7 +175,7 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
 async def check_single_subscription(ctx: dict, sub_id: int, force_full_scan: bool = False) -> dict:
     """Check a single subscription — enqueue a download job for it.
 
-    force_full_scan: if True, run as backfill (no date-after, abort:100).
+    force_full_scan: if True, run as Force re-scan (no date-after, no archive).
     """
     from core.redis_client import publish_job_event
 

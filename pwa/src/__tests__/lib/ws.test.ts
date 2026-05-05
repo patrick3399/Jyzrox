@@ -40,6 +40,7 @@ class FakeWebSocket {
   })
 
   constructor(_url: string) {
+    // eslint-disable-next-line @typescript-eslint/no-this-alias
     mockWsInstance = this
   }
 }

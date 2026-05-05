@@ -910,6 +910,12 @@ const ja: Record<string, string> = {
   'subscriptions.downloadComplete': 'ダウンロード完了',
   'subscriptions.downloadFailed': 'ダウンロード失敗',
   'subscriptions.downloadNow': '今すぐダウンロード',
+  'subscriptions.backfill': '強制再スキャン',
+  'subscriptions.backfillTitle': 'すべての投稿を強制再スキャン',
+  'subscriptions.backfillConfirm':
+    '「{name}」のタイムライン全体を再スキャンしますか？ダウンロードアーカイブをバイパスするため、時間がかかる場合があります。既存のローカル項目は、リモートで削除済みの投稿も含めて順序内に保持されます。',
+  'subscriptions.backfillQueued': '「{name}」の強制再スキャンをキューに追加しました',
+  'subscriptions.backfillFailed': '強制再スキャンをキューに追加できませんでした',
   'subscriptions.downloadQueued': 'ダウンロードをキューに追加しました',
   'subscriptions.viewGallery': 'ギャラリーを見る',
   'subscriptions.queued': 'キュー済み',

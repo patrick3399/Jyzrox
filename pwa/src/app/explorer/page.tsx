@@ -180,7 +180,7 @@ export default function ExplorerPage() {
   }
 
   function handleItemClick(id: string | number, e: React.MouseEvent) {
-    const now = Date.now()
+    const now = e.timeStamp
     const last = lastClickRef.current
     if (last && last.id === id && now - last.time < 400) {
       handleDoubleClick(id)
@@ -552,8 +552,8 @@ interface SourceViewProps {
 function SourceView({ sourceGroups, loading, viewMode, onSourceDoubleClick }: SourceViewProps) {
   const lastClickRef = useRef<{ id: string; time: number } | null>(null)
 
-  function handleClick(source: string) {
-    const now = Date.now()
+  function handleClick(source: string, e: React.MouseEvent) {
+    const now = e.timeStamp
     const last = lastClickRef.current
     if (last && last.id === source && now - last.time < 400) {
       onSourceDoubleClick(source)
@@ -583,7 +583,7 @@ function SourceView({ sourceGroups, loading, viewMode, onSourceDoubleClick }: So
         {entries.map(([source, info]) => (
           <div
             key={source}
-            onClick={() => handleClick(source)}
+            onClick={(e) => handleClick(source, e)}
             onDoubleClick={() => onSourceDoubleClick(source)}
             className="bg-vault-card rounded-lg p-4 cursor-pointer border border-vault-border hover:border-vault-accent/50 hover:bg-vault-card-hover transition-all select-none"
           >
@@ -616,7 +616,7 @@ function SourceView({ sourceGroups, loading, viewMode, onSourceDoubleClick }: So
       {entries.map(([source, info]) => (
         <div
           key={source}
-          onClick={() => handleClick(source)}
+          onClick={(e) => handleClick(source, e)}
           onDoubleClick={() => onSourceDoubleClick(source)}
           className="grid grid-cols-[1fr_100px_80px_100px] gap-2 px-3 min-h-[48px] items-center rounded-lg cursor-pointer select-none transition-colors hover:bg-vault-card-hover"
         >

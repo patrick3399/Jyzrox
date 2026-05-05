@@ -1,12 +1,12 @@
-"""Regression: backfill flow must (1) enqueue with force_full_scan=True and
-without last_completed_at; (2) configure gallery-dl with abort:100 and no
+"""Regression: force re-scan flow must (1) enqueue with force_full_scan=True
+and without last_completed_at; (2) configure gallery-dl without archive and no
 date-after.
 
 User scenario: sub 7's first download was interrupted (Twitter rate-limit),
 only 51/N images saved. Incremental Renew (date-after) can never reach the
-older missing posts. Backfill bypasses date-after but keeps archive check —
-items already in the PG ``twitter`` table (deleted-locally-by-user) are still
-skipped, so this is safe.
+older missing posts. Force re-scan must also bypass gallery-dl's archive because
+archive entries can exist without matching ``images`` / library rows. Existing
+local-only images are preserved by importer-side dedupe and social ordering.
 """
 
 import json
@@ -145,10 +145,10 @@ def mock_config_path(tmp_path):
 
 
 @pytest.mark.asyncio
-async def test_build_config_force_full_scan_uses_abort_100_and_no_date_after(
+async def test_build_config_force_full_scan_disables_archive_and_no_date_after(
     mock_site_config_service, mock_config_path
 ):
-    """Force mode in source.py: skip=abort:100, no date-after key."""
+    """Force mode in source.py: no archive, no archive skip, no date-after key."""
     from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
 
     await _build_gallery_dl_config(
@@ -161,10 +161,12 @@ async def test_build_config_force_full_scan_uses_abort_100_and_no_date_after(
 
     cfg = json.loads(mock_config_path.read_text())
 
-    assert cfg["extractor"]["archive-mode"] == "memory"
-    assert cfg["extractor"]["skip"] == "abort:100"
+    assert "archive" not in cfg["extractor"]
+    assert "archive-table" not in cfg["extractor"]
+    assert "archive-mode" not in cfg["extractor"]
+    assert "skip" not in cfg["extractor"]
     assert "date-after" not in cfg["extractor"], (
-        "force_full_scan must NOT set date-after — that's the whole point of backfill"
+        "force_full_scan must NOT set date-after — that's the whole point of Force re-scan"
     )
 
 

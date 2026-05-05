@@ -162,7 +162,7 @@ export default function ReaderPage() {
       : gallery.pages
 
   // URL ?page= takes priority over saved progress
-  let initialPage =
+  const initialPage =
     urlPage > 0
       ? pageCeiling > 0
         ? Math.min(urlPage, pageCeiling)

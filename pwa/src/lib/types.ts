@@ -618,6 +618,9 @@ export interface Subscription {
   created_at: string | null
   last_job_id: string | null
   group_id: number | null
+  gallery_id?: number | null
+  gallery_source?: string | null
+  gallery_source_id?: string | null
 }
 
 // ── File Explorer ────────────────────────────────────────────────────
