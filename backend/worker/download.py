@@ -52,8 +52,20 @@ async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> Non
             cookie_path.unlink(missing_ok=True)
 
 
-async def _set_subscription_result(db_job_id: str | None, status: str, error: str | None = None) -> None:
-    """Update subscription status after the associated download reaches a terminal state."""
+async def _set_subscription_result(
+    db_job_id: str | None,
+    status: str,
+    error: str | None = None,
+    *,
+    advance_success: bool = True,
+) -> None:
+    """Update subscription status after the associated download reaches a terminal state.
+
+    advance_success=False suppresses the last_success_at update even when status="done".
+    Use this when gallery-dl returned 0 downloaded + 0 skipped: the run produced no
+    evidence the source was actually checked (date-after may have filtered everything),
+    so advancing the cutoff would self-poison the next incremental check.
+    """
     if not db_job_id:
         return
     try:
@@ -70,7 +82,7 @@ async def _set_subscription_result(db_job_id: str | None, status: str, error: st
                 "last_status": status,
                 "last_error": error[:500] if error else None,
             }
-            if status == "done":
+            if status == "done" and advance_success:
                 values["last_success_at"] = datetime.now(UTC)
             await session.execute(update(Subscription).where(Subscription.id == job.subscription_id).values(**values))
             await session.commit()
@@ -586,8 +598,15 @@ async def download_job(
                 "error": result.error,
             }
 
+        zero_run = result.downloaded == 0 and skipped_total == 0
         await _set_job_status(db_job_id, "done")
-        await _set_subscription_result(db_job_id, "done")
+        await _set_subscription_result(db_job_id, "done", advance_success=not zero_run)
+        if zero_run:
+            logger.info(
+                "[download] 0/0 run not advancing last_success_at: %s "
+                "(date-after may have filtered all items, or extractor returned empty)",
+                url,
+            )
         logger.info("[download] done: %s (downloaded=%d)", url, result.downloaded)
         return {"status": "done", "downloaded": result.downloaded}
 
