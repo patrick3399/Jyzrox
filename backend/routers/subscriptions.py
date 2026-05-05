@@ -9,10 +9,10 @@ from sqlalchemy import delete, select, update
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
+import core.queue
 from core.auth import require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source, normalize_subscription_url, validate_cron
-import core.queue
 from db.models import Subscription
 
 logger = logging.getLogger(__name__)
@@ -386,3 +386,36 @@ async def check_subscription(
         raise HTTPException(status_code=500, detail=str(exc))
 
     return {"status": "queued", "subscription_id": sub_id}
+
+
+@router.post("/{sub_id}/backfill")
+async def backfill_subscription(
+    sub_id: int,
+    request: Request,
+    auth: dict = Depends(_member),
+):
+    """Trigger a force full-scan for a subscription.
+
+    Bypasses the incremental ``date-after`` filter so older posts missed by an
+    interrupted first download can be backfilled. gallery-dl's archive still
+    skips already-seen entries, so this does NOT re-download content the user
+    has deleted locally — only entries that were never recorded in the archive.
+    """
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        sub = (
+            await session.execute(
+                select(Subscription).where(Subscription.id == sub_id, Subscription.user_id == user_id)
+            )
+        ).scalar_one_or_none()
+
+    if not sub:
+        raise HTTPException(status_code=404, detail="Subscription not found")
+
+    try:
+        await core.queue.enqueue("check_single_subscription", sub_id=sub_id, force_full_scan=True)
+    except Exception as exc:
+        logger.error("Failed to enqueue backfill for sub %d: %s", sub_id, exc)
+        raise HTTPException(status_code=500, detail=str(exc))
+
+    return {"status": "queued", "subscription_id": sub_id, "mode": "backfill"}

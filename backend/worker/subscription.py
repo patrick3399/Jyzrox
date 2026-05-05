@@ -14,8 +14,14 @@ from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
 
 
-async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
-    """Create a download job for a subscription and enqueue it."""
+async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = False) -> dict:
+    """Create a download job for a subscription and enqueue it.
+
+    force_full_scan=True suppresses date-after / abort:10 in source.py and uses
+    abort:100 instead. Used by manual ``Backfill`` action when an interrupted
+    first run left gaps in archive coverage. gallery-dl's archive table still
+    skips already-seen entries, so locally-deleted images are not re-fetched.
+    """
     from core.redis_client import get_redis, publish_job_event
 
     pool = ctx.get("redis")
@@ -97,11 +103,14 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
         options: dict | None = {
             "job_context": "subscription",
         }
-        # Add last_completed_at from the subscription's last successful job.
-        # last_checked_at is only an attempt timestamp and must not advance
-        # gallery-dl incremental cutoffs after failed/partial jobs.
-        if getattr(sub, "last_success_at", None):
-            # Must be JSON-serializable for SAQ; download.py parses back to datetime.
+        if force_full_scan:
+            # Backfill: bypass date-after, walk deeper. archive still gates re-downloads
+            # so locally-deleted images are not re-fetched.
+            options["force_full_scan"] = True
+        elif getattr(sub, "last_success_at", None):
+            # Incremental: must be JSON-serializable for SAQ; download.py parses
+            # back to datetime. last_checked_at is only an attempt timestamp and
+            # must not advance gallery-dl incremental cutoffs after failed jobs.
             options["last_completed_at"] = sub.last_success_at.isoformat()
 
         # Create download job
@@ -162,8 +171,11 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
         await release_lock(redis, lock_key, lock_value)
 
 
-async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
-    """Check a single subscription — enqueue a download job for it."""
+async def check_single_subscription(ctx: dict, sub_id: int, force_full_scan: bool = False) -> dict:
+    """Check a single subscription — enqueue a download job for it.
+
+    force_full_scan: if True, run as backfill (no date-after, abort:100).
+    """
     from core.redis_client import publish_job_event
 
     async with AsyncSessionLocal() as session:
@@ -181,7 +193,7 @@ async def check_single_subscription(ctx: dict, sub_id: int) -> dict:
             return {"status": "failed", "error": "subscription not found"}
 
     try:
-        return await _enqueue_for_subscription(ctx, sub)
+        return await _enqueue_for_subscription(ctx, sub, force_full_scan=force_full_scan)
     except Exception as exc:
         logger.error("[subscription] error processing sub %d: %s", sub_id, exc)
         async with AsyncSessionLocal() as session:

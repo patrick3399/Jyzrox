@@ -132,6 +132,7 @@ async def _build_gallery_dl_config(
     config_id: str | None = None,
     job_context: str = "manual",
     last_completed_at: datetime | None = None,
+    force_full_scan: bool = False,
 ) -> Path:
     """Write gallery-dl config with v3.0 features: PG archive, native rate-limiting, postprocessors.
 
@@ -140,6 +141,9 @@ async def _build_gallery_dl_config(
         config_id: Per-job config isolation key.
         job_context: "manual" or "subscription" — controls archive-mode and skip behavior.
         last_completed_at: For subscription context, enables date-after optimization.
+        force_full_scan: Subscription backfill mode. Disables date-after and uses
+            ``skip=abort:100``. Mutually exclusive with ``last_completed_at`` —
+            caller (worker.subscription) drops last_completed_at when this is True.
 
     Returns:
         Path to the config file written.
@@ -179,7 +183,13 @@ async def _build_gallery_dl_config(
     if job_context == "subscription":
         # N10a: archive-mode memory for batch writes (subscription)
         config["extractor"]["archive-mode"] = "memory"
-        if last_completed_at:
+        if force_full_scan:
+            # Backfill mode: tolerate gaps (artist may have deleted posts, or our
+            # first run was interrupted). 100 consecutive archive hits ≈ caught up.
+            # No date-after — that's the whole point of backfill. Archive still
+            # gates re-downloads, so locally-deleted images are NOT re-fetched.
+            config["extractor"]["skip"] = "abort:100"
+        elif last_completed_at:
             # Incremental mode: a full download was confirmed before.
             # abort:10 is safe here — 10 consecutive archive hits means we've caught up.
             # For initial downloads (no last_completed_at), abort:10 would prematurely stop
@@ -704,6 +714,7 @@ class GalleryDlPlugin(SourcePlugin):
             config_id=options.get("config_id") if options else None,
             job_context=options.get("job_context", "manual") if options else "manual",
             last_completed_at=options.get("last_completed_at") if options else None,
+            force_full_scan=bool(options.get("force_full_scan", False)) if options else False,
         )
 
         from worker.gallery_dl_venv import get_gdl_bin
