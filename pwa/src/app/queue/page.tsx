@@ -69,7 +69,27 @@ function formatDuration(seconds: number): string {
   return `${h}h ${m}m`
 }
 
+const GDL_STATE_KEY: Record<string, string> = {
+  starting: 'queue.gdlStateStarting',
+  downloading: 'queue.gdlStateDownloading',
+  sleeping: 'queue.gdlStateSleeping',
+  rate_limited: 'queue.gdlStateRateLimited',
+  retrying: 'queue.gdlStateRetrying',
+  paused: 'queue.gdlStatePaused',
+  cancelled: 'queue.gdlStateCancelled',
+  done: 'queue.gdlStateDone',
+}
+
 function JobDetailPanel({ job }: { job: DownloadJob }) {
+  const p = job.progress ?? {}
+  const gdlState = typeof p.gdl_state === 'string' ? p.gdl_state : undefined
+  const stateLabel = gdlState ? t(GDL_STATE_KEY[gdlState] ?? 'queue.gdlStateDownloading') : null
+  const currentFile = typeof p.current_file === 'string' ? p.current_file : null
+  const currentPage = typeof p.current_file_page === 'number' ? p.current_file_page : null
+  const skipped = typeof p.skipped === 'number' ? p.skipped : 0
+  const importSkipped = p.import_skipped
+  const recentLog = Array.isArray(p.recent_log) ? p.recent_log : null
+
   return (
     <div className="px-4 py-3 bg-vault-bg border-t border-vault-border space-y-2 text-sm">
       {job.error && (
@@ -77,18 +97,72 @@ function JobDetailPanel({ job }: { job: DownloadJob }) {
           <span className="font-medium">{t('queue.jobError')}:</span> {job.error}
         </div>
       )}
-      {typeof job.progress?.percent === 'number' && (
+      {typeof p.percent === 'number' && (
         <div className="text-vault-text-muted">
-          <span className="font-medium">{t('queue.jobProgress')}:</span> {job.progress.percent}%
+          <span className="font-medium">{t('queue.jobProgress')}:</span> {p.percent}%
         </div>
       )}
-      {job.progress && Object.keys(job.progress).length > 0 && (
+      {stateLabel && (
         <div className="text-vault-text-muted">
-          <span className="font-medium">{t('queue.jobMeta')}:</span>
-          <pre className="mt-1 text-xs bg-vault-card rounded p-2 overflow-auto max-h-40">
-            {JSON.stringify(job.progress, null, 2)}
+          <span className="font-medium">{t('queue.jobGdlState')}:</span>{' '}
+          <span
+            className={
+              gdlState === 'rate_limited' || gdlState === 'sleeping'
+                ? 'text-yellow-400'
+                : gdlState === 'retrying' || gdlState === 'cancelled'
+                  ? 'text-red-400'
+                  : 'text-vault-text'
+            }
+          >
+            {stateLabel}
+            {typeof p.gdl_state_seconds === 'number' && p.gdl_state_seconds > 0 && (
+              <> · {Math.round(p.gdl_state_seconds)}s</>
+            )}
+          </span>
+        </div>
+      )}
+      {currentFile && (
+        <div className="text-vault-text-muted">
+          <span className="font-medium">{t('queue.jobCurrentFile')}:</span>{' '}
+          <span className="font-mono text-xs">
+            {currentPage !== null && <>#{currentPage} </>}
+            {currentFile}
+          </span>
+        </div>
+      )}
+      {skipped > 0 && (
+        <div className="text-vault-text-muted">
+          <span className="font-medium">{t('queue.jobSkipped')}:</span> {skipped}
+        </div>
+      )}
+      {importSkipped &&
+        typeof importSkipped === 'object' &&
+        (importSkipped.duplicate > 0 ||
+          importSkipped.excluded > 0 ||
+          importSkipped.invalid > 0) && (
+          <div className="text-vault-text-muted">
+            <span className="font-medium">{t('queue.jobImportSkipped')}:</span>{' '}
+            <span className="font-mono text-xs">
+              dup={importSkipped.duplicate} excl={importSkipped.excluded} inv=
+              {importSkipped.invalid}
+            </span>
+          </div>
+        )}
+      {recentLog && recentLog.length > 0 && (
+        <div className="text-vault-text-muted">
+          <span className="font-medium">{t('queue.jobRecentLog')}:</span>
+          <pre className="mt-1 text-xs bg-vault-card rounded p-2 overflow-auto max-h-32 whitespace-pre-wrap break-all">
+            {recentLog.join('\n')}
           </pre>
         </div>
+      )}
+      {Object.keys(p).length > 0 && (
+        <details className="text-vault-text-muted">
+          <summary className="cursor-pointer font-medium">{t('queue.jobMeta')}</summary>
+          <pre className="mt-1 text-xs bg-vault-card rounded p-2 overflow-auto max-h-40">
+            {JSON.stringify(p, null, 2)}
+          </pre>
+        </details>
       )}
     </div>
   )

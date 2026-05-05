@@ -566,6 +566,14 @@ CREATE TABLE IF NOT EXISTS rule34 (
     created_at  TIMESTAMPTZ DEFAULT now()
 );
 
+CREATE TABLE IF NOT EXISTS weibo (
+    entry       TEXT PRIMARY KEY,
+    gallery_id  BIGINT REFERENCES galleries(id) ON DELETE CASCADE,
+    job_id      UUID,
+    created_at  TIMESTAMPTZ DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS idx_weibo_unlinked ON weibo (job_id) WHERE gallery_id IS NULL;
+
 -- ── Performance indexes (benchmark-driven) ─────────────────────────────
 
 -- Image composite: serves browse_images ORDER BY added_at DESC when filtered by gallery_id

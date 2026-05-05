@@ -6,12 +6,12 @@ from datetime import UTC, datetime
 
 from sqlalchemy import select, update
 
+import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import DownloadJob, Subscription
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
-import core.queue
 
 
 async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
@@ -33,11 +33,9 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
     try:
         # Source-enabled check
         source = sub.source or "gallery_dl"
-        try:
-            from routers.download import _check_source_enabled
+        from services.source_health import is_source_enabled
 
-            await _check_source_enabled(source)
-        except Exception:
+        if not await is_source_enabled(source):
             logger.warning("[subscription] sub=%d source '%s' disabled, skipping", sub.id, source)
             async with AsyncSessionLocal() as session:
                 await session.execute(
@@ -103,6 +101,7 @@ async def _enqueue_for_subscription(ctx: dict, sub) -> dict:
         # last_checked_at is only an attempt timestamp and must not advance
         # gallery-dl incremental cutoffs after failed/partial jobs.
         if getattr(sub, "last_success_at", None):
+            # Must be JSON-serializable for SAQ; download.py parses back to datetime.
             options["last_completed_at"] = sub.last_success_at.isoformat()
 
         # Create download job

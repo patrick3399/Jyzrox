@@ -7,10 +7,11 @@ from datetime import UTC, datetime
 from pathlib import Path
 
 from sqlalchemy import update
-from sqlalchemy.orm import selectinload
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import select
 
+import core.queue
 from core.database import AsyncSessionLocal
 from core.social_order import reorder_social_gallery_images
 from db.models import Blob, ExcludedBlob, Gallery, Image
@@ -18,7 +19,6 @@ from plugins.models import GalleryImportData
 from services.cas import create_library_symlink, decrement_ref_count, library_dir, store_blob, thumb_dir
 from worker.constants import _VIDEO_EXTS, logger
 from worker.helpers import _sha256, _validate_image_magic
-import core.queue
 
 _FILENAME_NUMBER_RE = re.compile(r"(\d+)")
 _PIXIV_USER_WORK_PAGE_RE = re.compile(r"^\d+_p\d+$")
@@ -61,11 +61,25 @@ class ProgressiveImporter:
         self._skip_invalid = 0
 
     async def _load_gallery_state(self) -> None:
-        """Load excluded blobs and current max page_num for the gallery."""
+        """Load excluded blobs and current max page_num for the gallery.
+
+        Also restores self.source / self.source_id from the gallery row when
+        the importer was attached to a pre-existing gallery (e.g. subscription
+        renew). Without this, import_file crashes in create_library_symlink
+        with `Path / None` because the symlink layout is
+        /data/library/{source}/{source_id}/.
+        """
         if not self.gallery_id:
             return
         async with AsyncSessionLocal() as session:
-            from sqlalchemy import func
+            gallery = await session.get(Gallery, self.gallery_id)
+            if gallery:
+                if not self.source:
+                    self.source = gallery.source
+                if not self.source_id:
+                    self.source_id = gallery.source_id
+                if not self.title:
+                    self.title = gallery.title
 
             rows = (
                 (
@@ -181,6 +195,7 @@ class ProgressiveImporter:
         domain = parsed.netloc.removeprefix("www.")
 
         from plugins.builtin.gallery_dl._sites import _DEFAULT_CONFIG
+
         site_cfg = get_site_by_domain(domain)
         # For unknown domains use the bare domain as source (e.g. "somebooru.net")
         # so galleries aren't all lumped under "gallery_dl".
@@ -359,7 +374,9 @@ class ProgressiveImporter:
 
                 replacement_image: Image | None = None
                 if existing_source_item:
-                    replacement_image = await session.get(Image, existing_source_item[0], options=[selectinload(Image.blob)])
+                    replacement_image = await session.get(
+                        Image, existing_source_item[0], options=[selectinload(Image.blob)]
+                    )
                     if replacement_image:
                         page_num = replacement_image.page_num
                         replacement_visibility = (
@@ -382,7 +399,7 @@ class ProgressiveImporter:
                     added_at = datetime.fromtimestamp(mtime, tz=UTC)
                     if added_at.year < 2000 or added_at > datetime.now(UTC):
                         added_at = datetime.now(UTC)
-                except (OSError, ValueError, OverflowError):
+                except OSError, ValueError, OverflowError:
                     added_at = datetime.now(UTC)
 
                 img_stmt = (
@@ -483,43 +500,44 @@ class ProgressiveImporter:
         table = cfg.extractor or cfg.source_id
 
         try:
-            exists = (
-                await session.execute(
-                    text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = :t)"),
-                    {"t": table},
-                )
-            ).scalar()
-            if not exists:
-                return
-
-            # Strategy 1: LIKE match by source_id prefix
-            if self.source_id:
-                prefix = f"{self.source_id}%"
-                result = await session.execute(
-                    text(f'UPDATE "{table}" SET gallery_id = :gid WHERE gallery_id IS NULL AND entry LIKE :prefix'),
-                    {"gid": self.gallery_id, "prefix": prefix},
-                )
-                if result.rowcount:
-                    logger.info("[progressive] linked %d archive entries (prefix)", result.rowcount)
+            async with session.begin_nested():  # SAVEPOINT: failure rolls back only this block
+                exists = (
+                    await session.execute(
+                        text("SELECT EXISTS (SELECT FROM information_schema.tables WHERE table_name = :t)"),
+                        {"t": table},
+                    )
+                ).scalar()
+                if not exists:
                     return
 
-            # Strategy 2: time window + job_id exclusion
-            if self.db_job_id:
-                result = await session.execute(
-                    text(
-                        f'UPDATE "{table}" SET gallery_id = :gid, job_id = :jid '
-                        f"WHERE gallery_id IS NULL AND job_id IS NULL "
-                        f"AND created_at BETWEEN :start AND :end"
-                    ),
-                    {
-                        "gid": self.gallery_id,
-                        "jid": self.db_job_id,
-                        "start": self._job_started_at,
-                        "end": datetime.now(UTC),
-                    },
-                )
-                if result.rowcount:
-                    logger.info("[progressive] linked %d archive entries (job_id)", result.rowcount)
+                # Strategy 1: LIKE match by source_id prefix
+                if self.source_id:
+                    prefix = f"{self.source_id}%"
+                    result = await session.execute(
+                        text(f'UPDATE "{table}" SET gallery_id = :gid WHERE gallery_id IS NULL AND entry LIKE :prefix'),
+                        {"gid": self.gallery_id, "prefix": prefix},
+                    )
+                    if result.rowcount:
+                        logger.info("[progressive] linked %d archive entries (prefix)", result.rowcount)
+                        return
+
+                # Strategy 2: time window + job_id exclusion
+                if self.db_job_id:
+                    result = await session.execute(
+                        text(
+                            f'UPDATE "{table}" SET gallery_id = :gid, job_id = :jid '
+                            f"WHERE gallery_id IS NULL AND job_id IS NULL "
+                            f"AND created_at BETWEEN :start AND :end"
+                        ),
+                        {
+                            "gid": self.gallery_id,
+                            "jid": self.db_job_id,
+                            "start": self._job_started_at,
+                            "end": datetime.now(UTC),
+                        },
+                    )
+                    if result.rowcount:
+                        logger.info("[progressive] linked %d archive entries (job_id)", result.rowcount)
 
         except Exception as exc:
             logger.warning("[progressive] failed to link archive entries: %s", exc)
@@ -569,7 +587,9 @@ class ProgressiveImporter:
         if self._skip_invalid:
             skip_parts.append(f"invalid={self._skip_invalid}")
         skip_summary = f" skipped({', '.join(skip_parts)})" if skip_parts else ""
-        logger.info("[progressive] finalized: gallery_id=%d pages=%d%s", self.gallery_id, self._page_counter, skip_summary)
+        logger.info(
+            "[progressive] finalized: gallery_id=%d pages=%d%s", self.gallery_id, self._page_counter, skip_summary
+        )
 
         from core.config import settings
 

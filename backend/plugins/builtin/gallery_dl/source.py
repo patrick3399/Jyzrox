@@ -33,10 +33,29 @@ logger = logging.getLogger(__name__)
 
 _PRINT_FILE_PREFIX = "JYZROX_FILE\t"
 _PRINT_SKIP_PREFIX = "JYZROX_SKIP"
+_PRINT_PREPARE_PREFIX = "JYZROX_PREPARE\t"
 _PROGRESS_EVERY_N = 5
 _PROGRESS_EVERY_S = 10.0
+_PROGRESS_PULSE_S = 5.0
 _MAX_STDERR_LINES = 10000
+_RECENT_LOG_SIZE = 5
+_SLEEP_VISIBLE_THRESHOLD = 2.0
 _SHA256_RE = re.compile(r"^[0-9a-fA-F]{64}$")
+
+# Diagnostic state strings — surfaced to UI via progress dict
+GDL_STATE_STARTING = "starting"
+GDL_STATE_DOWNLOADING = "downloading"
+GDL_STATE_SLEEPING = "sleeping"
+GDL_STATE_RATE_LIMITED = "rate_limited"
+GDL_STATE_RETRYING = "retrying"
+GDL_STATE_PAUSED = "paused"
+GDL_STATE_CANCELLED = "cancelled"
+
+# Stderr inference patterns. gallery-dl uses Python logging with
+# "[extractor][level] message" format, but underlying URL libs may emit
+# different formats. Patterns kept lenient.
+_RE_SLEEP = re.compile(r"[Ss]leeping\s+(\d+\.?\d*)\s+seconds?")
+_RE_HTTP_STATUS = re.compile(r"\b(?:HttpError|HTTPError|HTTP\s*Error|status\s*code|HTTP/[\d.]+)[\D]{0,30}?(\d{3})\b")
 
 # Fields included in the metadata postprocessor JSON output.
 _METADATA_INCLUDE = (
@@ -61,6 +80,7 @@ _METADATA_INCLUDE = (
     "language",
 )
 
+
 def _build_supported_sites() -> list[SiteInfo]:
     """Generate SiteInfo list from unified site registry."""
     from plugins.builtin.gallery_dl._sites import GDL_SITES
@@ -76,6 +96,7 @@ def _build_supported_sites() -> list[SiteInfo]:
         for s in GDL_SITES
     ]
 
+
 def _source_to_extractor(source: str) -> str:
     """Map our source name to gallery-dl extractor name."""
     from plugins.builtin.gallery_dl._sites import get_site_config
@@ -83,7 +104,9 @@ def _source_to_extractor(source: str) -> str:
     cfg = get_site_config(source)
     return cfg.extractor or cfg.source_id
 
+
 FRAGMENT_KEYS = {"cookies", "username", "password", "refresh-token", "api-key"}
+
 
 def _try_parse_fragment(cred_val: str) -> dict | None:
     """Try to parse a credential value as a gallery-dl config fragment (new format).
@@ -94,13 +117,15 @@ def _try_parse_fragment(cred_val: str) -> dict | None:
         parsed = json.loads(cred_val)
         if isinstance(parsed, dict) and (FRAGMENT_KEYS & parsed.keys()):
             return parsed
-    except (json.JSONDecodeError, TypeError):
+    except json.JSONDecodeError, TypeError:
         pass
     return None
+
 
 def _is_fragment(cred_val: str) -> bool:
     """Check if a credential value is a gallery-dl config fragment (new format)."""
     return _try_parse_fragment(cred_val) is not None
+
 
 async def _build_gallery_dl_config(
     credentials: dict,
@@ -152,10 +177,14 @@ async def _build_gallery_dl_config(
 
     # N2: subscription optimization
     if job_context == "subscription":
-        config["extractor"]["skip"] = "abort:10"
         # N10a: archive-mode memory for batch writes (subscription)
         config["extractor"]["archive-mode"] = "memory"
         if last_completed_at:
+            # Incremental mode: a full download was confirmed before.
+            # abort:10 is safe here — 10 consecutive archive hits means we've caught up.
+            # For initial downloads (no last_completed_at), abort:10 would prematurely stop
+            # before all images are fetched, so we skip it.
+            config["extractor"]["skip"] = "abort:10"
             from datetime import timedelta
 
             cutoff = last_completed_at - timedelta(days=1)
@@ -215,7 +244,7 @@ async def _build_gallery_dl_config(
                         config["extractor"].setdefault(extra, {})["cookies"] = cookies
                     # N8: cookies-update for legacy format too
                     config["extractor"][ext]["cookies-update"] = True
-                except (json.JSONDecodeError, TypeError):
+                except json.JSONDecodeError, TypeError:
                     logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
 
     # N6: ugoira PP for Pixiv (convert animated illustrations to MP4)
@@ -238,6 +267,7 @@ async def _build_gallery_dl_config(
     os.rename(tmp_path, config_path)
     return config_path
 
+
 @dataclass
 class _DownloadState:
     """Shared mutable state for the download task group."""
@@ -253,6 +283,41 @@ class _DownloadState:
     empty_response_count: int = 0
     source_id: str = ""
     last_page_time: float = 0.0
+    # Diagnostic visibility — surfaced to UI via diagnostic_ctx
+    current_file: str | None = None
+    current_file_page: int | None = None
+    gdl_state: str = GDL_STATE_STARTING
+    gdl_state_seconds: float | None = None
+    gdl_state_started_at: float = 0.0
+    recent_log: list[str] = field(default_factory=list)
+
+    def push_log(self, line: str) -> None:
+        self.recent_log.append(line)
+        if len(self.recent_log) > _RECENT_LOG_SIZE:
+            self.recent_log.pop(0)
+
+
+def _sync_diagnostic(state: _DownloadState, diagnostic_ctx: dict | None) -> None:
+    """Mirror state diagnostic fields into the shared ctx dict.
+
+    Called from stdout/stderr/pause readers whenever state mutates so the
+    on_progress closure (in worker.download) sees a consistent snapshot.
+    """
+    if diagnostic_ctx is None:
+        return
+    diagnostic_ctx["gdl_state"] = state.gdl_state
+    diagnostic_ctx["current_file"] = state.current_file
+    diagnostic_ctx["current_file_page"] = state.current_file_page
+    diagnostic_ctx["downloaded"] = state.downloaded
+    diagnostic_ctx["skipped"] = state.skipped_count
+    diagnostic_ctx["filtered_html"] = state.html_response_count
+    diagnostic_ctx["filtered_empty"] = state.empty_response_count
+    if state.gdl_state_seconds is not None:
+        diagnostic_ctx["gdl_state_seconds"] = state.gdl_state_seconds
+    else:
+        diagnostic_ctx.pop("gdl_state_seconds", None)
+    diagnostic_ctx["recent_log"] = list(state.recent_log)
+
 
 async def _read_stdout(
     proc: asyncio.subprocess.Process,
@@ -260,6 +325,7 @@ async def _read_stdout(
     on_file: Callable[[Path, str | None], Awaitable[None]] | None,
     on_progress: Callable[[int, int], Awaitable[None]] | None,
     timing_ctx: dict | None = None,
+    diagnostic_ctx: dict | None = None,
 ) -> None:
     """Parse structured --Print output from gallery-dl. No regex needed."""
     assert proc.stdout is not None
@@ -278,10 +344,16 @@ async def _read_stdout(
             sha256 = parts[1] if len(parts) > 1 and _SHA256_RE.fullmatch(parts[1]) else None
 
             state.downloaded += 1
+            # File done — clear "currently downloading" marker so UI doesn't show stale name
+            state.current_file = None
+            state.current_file_page = None
+            state.gdl_state = GDL_STATE_DOWNLOADING
+            state.gdl_state_seconds = None
             if timing_ctx is not None:
                 if state.last_page_time > 0:
                     timing_ctx["last_page_ms"] = round((now - state.last_page_time) * 1000)
                 state.last_page_time = now
+            _sync_diagnostic(state, diagnostic_ctx)
 
             if on_file:
                 try:
@@ -289,8 +361,27 @@ async def _read_stdout(
                 except Exception as exc:
                     logger.warning("[gallery_dl] progressive import error: %s", exc)
 
+        elif line.startswith(_PRINT_PREPARE_PREFIX):
+            # Fired right before gallery-dl downloads a file. Format is
+            # "JYZROX_PREPARE\t{num}\t{filename}". Either field may be empty
+            # for extractors that don't populate {num} or {filename}.
+            parts = line[len(_PRINT_PREPARE_PREFIX) :].split("\t", 2)
+            page_str = parts[0] if parts else ""
+            filename = parts[1] if len(parts) > 1 else ""
+            try:
+                state.current_file_page = int(page_str) if page_str.isdigit() else None
+            except ValueError:
+                state.current_file_page = None
+            state.current_file = filename or None
+            # Don't downgrade rate_limited/sleeping into downloading — the
+            # next prepare arriving means gallery-dl resumed on its own.
+            state.gdl_state = GDL_STATE_DOWNLOADING
+            state.gdl_state_seconds = None
+            _sync_diagnostic(state, diagnostic_ctx)
+
         elif line.startswith(_PRINT_SKIP_PREFIX):
             state.skipped_count += 1
+            _sync_diagnostic(state, diagnostic_ctx)
 
         total_seen = state.downloaded + state.skipped_count
         if total_seen > 0 and (
@@ -303,15 +394,19 @@ async def _read_stdout(
                 except Exception:
                     pass
 
+
 async def _read_stderr(
     proc: asyncio.subprocess.Process,
     state: _DownloadState,
+    diagnostic_ctx: dict | None = None,
 ) -> None:
-    """Accumulate stderr for error reporting. Detect 403 for credential warnings only.
+    """Accumulate stderr for error reporting. Infer high-level state for UI.
 
     v3.0: rate-limit signals (429/503/timeout) offloaded to gallery-dl's
-    native sleep-429 and sleep-retries config. Only credential-related
-    signals (403) are still tracked by the adaptive engine.
+    native sleep-429 and sleep-retries config. The adaptive engine still
+    tracks 403 (credential warning); additionally we infer transient state
+    (sleeping / rate_limited / retrying) for UI visibility, but DO NOT act
+    on it — gallery-dl handles the actual recovery.
     """
     assert proc.stderr is not None
     from core.adaptive import _RE_403, AdaptiveSignal, adaptive_engine
@@ -329,13 +424,46 @@ async def _read_stderr(
         buf = parts[-1]
         for raw_line in parts[:-1]:
             line = raw_line.decode("utf-8", errors="replace").rstrip()
-            if line and len(state.stderr_lines) < _MAX_STDERR_LINES:
+            if not line:
+                continue
+            if len(state.stderr_lines) < _MAX_STDERR_LINES:
                 state.stderr_lines.append(line)
+            state.push_log(line)
+
             if state.source_id and _RE_403.search(line):
                 try:
                     await adaptive_engine.record_signal(state.source_id, AdaptiveSignal.HTTP_403)
                 except Exception:
                     pass
+
+            # State inference — order matters: explicit status codes outrank
+            # generic "sleeping" since 429 sleeps include the word "sleep".
+            m_status = _RE_HTTP_STATUS.search(line)
+            m_sleep = _RE_SLEEP.search(line)
+            if m_status:
+                try:
+                    code = int(m_status.group(1))
+                except ValueError, IndexError:
+                    code = 0
+                if code == 429:
+                    state.gdl_state = GDL_STATE_RATE_LIMITED
+                    if m_sleep:
+                        state.gdl_state_seconds = float(m_sleep.group(1))
+                    state.gdl_state_started_at = asyncio.get_running_loop().time()
+                elif code in (502, 503, 504):
+                    state.gdl_state = GDL_STATE_RETRYING
+                    state.gdl_state_started_at = asyncio.get_running_loop().time()
+            elif m_sleep:
+                seconds = float(m_sleep.group(1))
+                # Sub-2s sleeps are normal per-request throttling — don't
+                # surface them or the UI would flicker constantly.
+                if seconds >= _SLEEP_VISIBLE_THRESHOLD:
+                    state.gdl_state = GDL_STATE_SLEEPING
+                    state.gdl_state_seconds = seconds
+                    state.gdl_state_started_at = asyncio.get_running_loop().time()
+
+            _sync_diagnostic(state, diagnostic_ctx)
+
 
 async def _heartbeat_loop(
     state: _DownloadState,
@@ -361,6 +489,7 @@ async def _heartbeat_loop(
         except Exception as exc:
             logger.warning("[gallery_dl] heartbeat callback error: %s", exc)
 
+
 async def _inactivity_watchdog(
     state: _DownloadState,
     timeout: int,
@@ -380,11 +509,13 @@ async def _inactivity_watchdog(
                 pass
             return "inactivity_timeout"
 
+
 async def _pause_cancel_watcher(
     state: _DownloadState,
     proc: asyncio.subprocess.Process,
     cancel_check: Callable[[], Awaitable[bool]] | None,
     pause_check: Callable[[], Awaitable[bool]] | None,
+    diagnostic_ctx: dict | None = None,
 ) -> str:
     """Poll for cancel/pause signals at high frequency."""
     while True:
@@ -393,6 +524,8 @@ async def _pause_cancel_watcher(
         # Cancel check
         if cancel_check is not None and await cancel_check():
             state.cancelled = True
+            state.gdl_state = GDL_STATE_CANCELLED
+            _sync_diagnostic(state, diagnostic_ctx)
             logger.info("[gallery_dl] cancel detected, killing process")
             try:
                 proc.kill()
@@ -405,32 +538,40 @@ async def _pause_cancel_watcher(
             import signal
 
             pause_start = asyncio.get_running_loop().time()
+            prev_state = state.gdl_state
+            state.gdl_state = GDL_STATE_PAUSED
+            _sync_diagnostic(state, diagnostic_ctx)
             logger.info("[gallery_dl] pausing process")
             try:
                 proc.send_signal(signal.SIGSTOP)
-            except (ProcessLookupError, OSError):
+            except ProcessLookupError, OSError:
                 pass
 
             while await pause_check():
                 if cancel_check is not None and await cancel_check():
                     state.cancelled = True
+                    state.gdl_state = GDL_STATE_CANCELLED
+                    _sync_diagnostic(state, diagnostic_ctx)
                     try:
                         proc.send_signal(signal.SIGCONT)
                         proc.kill()
-                    except (ProcessLookupError, OSError):
+                    except ProcessLookupError, OSError:
                         pass
                     return "cancelled"
                 await asyncio.sleep(0.5)
 
-            # Resume
+            # Resume — restore prior state (or downloading if it was paused-from-paused)
             paused_duration = asyncio.get_running_loop().time() - pause_start
             state.total_paused += paused_duration
-            state.last_activity = asyncio.get_running_loop().time()  # reset inactivity after resume
+            state.last_activity = asyncio.get_running_loop().time()
+            state.gdl_state = prev_state if prev_state != GDL_STATE_PAUSED else GDL_STATE_DOWNLOADING
+            _sync_diagnostic(state, diagnostic_ctx)
             logger.info("[gallery_dl] resumed after %.1fs", paused_duration)
             try:
                 proc.send_signal(signal.SIGCONT)
-            except (ProcessLookupError, OSError):
+            except ProcessLookupError, OSError:
                 pass
+
 
 def _validate_download_content(file_path: Path) -> str | None:
     """Check downloaded file content. Returns 'html', 'empty', or None (ok)."""
@@ -449,6 +590,7 @@ def _validate_download_content(file_path: Path) -> str | None:
         except OSError:
             pass
     return None
+
 
 async def _on_file_with_validation(
     file_path: Path,
@@ -502,6 +644,7 @@ async def _on_file_with_validation(
     if inner_on_file:
         await inner_on_file(file_path, sha256)
 
+
 def _read_url_file(path: Path) -> list[str]:
     """Read and delete a URL file (--write-unsupported / --error-file output)."""
     try:
@@ -510,6 +653,7 @@ def _read_url_file(path: Path) -> list[str]:
         return []
     finally:
         path.unlink(missing_ok=True)
+
 
 class GalleryDlPlugin(SourcePlugin):
     """Fallback SourcePlugin that delegates to gallery-dl subprocess."""
@@ -577,6 +721,10 @@ class GalleryDlPlugin(SourcePlugin):
             "after:JYZROX_FILE\t{_path}\t{sha256}",
             "--Print",
             "skip:JYZROX_SKIP",
+            # prepare event fires before each download — gives UI the file
+            # name and page number while bytes are streaming in.
+            "--Print",
+            "prepare:JYZROX_PREPARE\t{num!s}\t{filename}",
         ]
 
         if config_id:
@@ -618,6 +766,7 @@ class GalleryDlPlugin(SourcePlugin):
                 *cmd,
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
+                env={**os.environ, "PYTHONUNBUFFERED": "1"},
             )
         except OSError as exc:
             err = f"Failed to start gallery-dl: {exc}"
@@ -639,9 +788,28 @@ class GalleryDlPlugin(SourcePlugin):
 
         # Background reader tasks (these finish when the process's pipes close)
         timing_ctx = options.get("timing_ctx") if options else None
-        stdout_task = asyncio.create_task(_read_stdout(proc, state, on_file, on_progress, timing_ctx))
-        stderr_task = asyncio.create_task(_read_stderr(proc, state))
+        diagnostic_ctx = options.get("diagnostic_ctx") if options else None
+        if diagnostic_ctx is not None:
+            # Seed initial state so the UI has something before first event arrives
+            _sync_diagnostic(state, diagnostic_ctx)
+        stdout_task = asyncio.create_task(_read_stdout(proc, state, on_file, on_progress, timing_ctx, diagnostic_ctx))
+        stderr_task = asyncio.create_task(_read_stderr(proc, state, diagnostic_ctx))
         bg_tasks: list[asyncio.Task] = [stdout_task, stderr_task]
+
+        # Periodic pulse so UI keeps refreshing during long sleeps / silent waits
+        async def _pulse_loop() -> None:
+            while True:
+                await asyncio.sleep(_PROGRESS_PULSE_S)
+                if state.cancelled or on_progress is None:
+                    continue
+                try:
+                    total_seen = state.downloaded + state.skipped_count
+                    await on_progress(total_seen, 0)
+                except Exception:
+                    pass
+
+        pulse_task = asyncio.create_task(_pulse_loop())
+        bg_tasks.append(pulse_task)
 
         # Sentinel tasks — any of these finishing first triggers cleanup
         proc_wait_task = asyncio.create_task(proc.wait())
@@ -655,7 +823,9 @@ class GalleryDlPlugin(SourcePlugin):
             sentinel_tasks.append(heartbeat_task)
 
         if cancel_check or pause_check:
-            sentinel_tasks.append(asyncio.create_task(_pause_cancel_watcher(state, proc, cancel_check, pause_check)))
+            sentinel_tasks.append(
+                asyncio.create_task(_pause_cancel_watcher(state, proc, cancel_check, pause_check, diagnostic_ctx))
+            )
 
         all_tasks = bg_tasks + sentinel_tasks
         try:
@@ -780,7 +950,9 @@ class GalleryDlPlugin(SourcePlugin):
                     "[gallery_dl] %d file(s) downloaded and %d skipped before failure — returning partial%s",
                     state.downloaded,
                     state.skipped_count,
-                    f" (filtered={filtered}: html={state.html_response_count}, empty={state.empty_response_count})" if filtered else "",
+                    f" (filtered={filtered}: html={state.html_response_count}, empty={state.empty_response_count})"
+                    if filtered
+                    else "",
                 )
                 return DownloadResult(
                     status="partial",
@@ -802,8 +974,12 @@ class GalleryDlPlugin(SourcePlugin):
         filtered = state.html_response_count + state.empty_response_count
         logger.info(
             "[gallery_dl] done: %s (downloaded=%d, skipped=%d%s)",
-            url, state.downloaded, state.skipped_count,
-            f", filtered={filtered}(html={state.html_response_count},empty={state.empty_response_count})" if filtered else "",
+            url,
+            state.downloaded,
+            state.skipped_count,
+            f", filtered={filtered}(html={state.html_response_count},empty={state.empty_response_count})"
+            if filtered
+            else "",
         )
         return DownloadResult(
             status="done",

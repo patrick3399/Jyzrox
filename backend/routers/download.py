@@ -134,18 +134,14 @@ async def _credential_warning(source: str) -> str | None:
 
 
 async def _check_source_enabled(source: str) -> None:
-    """Raise 400 if the download source is disabled."""
-    from plugins.builtin.gallery_dl._sites import get_site_config
+    """Raise HTTP 400 if the download source is disabled.
 
-    cfg = get_site_config(source)
-    if cfg.feature_toggle_key and cfg.feature_toggle_attr:
-        default = getattr(app_settings, cfg.feature_toggle_attr, True)
-        val = await get_redis().get(cfg.feature_toggle_key)
-        enabled = val == b"1" if val is not None else default
-    else:
-        val = await get_redis().get("setting:download_gallery_dl_enabled")
-        enabled = val == b"1" if val is not None else app_settings.download_gallery_dl_enabled
-    if not enabled:
+    Thin HTTP wrapper around services.source_health.is_source_enabled — that
+    function is the boundary-respecting form usable from worker/.
+    """
+    from services.source_health import is_source_enabled
+
+    if not await is_source_enabled(source):
         raise HTTPException(status_code=400, detail=f"Download source '{source}' is disabled")
 
 

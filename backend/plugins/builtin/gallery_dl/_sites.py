@@ -7,6 +7,7 @@ Replaces scattered config in source.py, _subscribe.py, _metadata.py, and importe
 from dataclasses import dataclass
 from typing import Literal
 
+
 @dataclass(frozen=True, slots=True)
 class GdlSiteConfig:
     """Complete configuration for a gallery-dl supported site."""
@@ -64,6 +65,7 @@ class GdlSiteConfig:
     # Index of the path segment used as source_id in ensure_gallery_from_url.
     # E.g. weibo.com/u/USERID has the ID at index 1 (skip the "u" prefix).
     url_path_id_index: int = 0
+
 
 GDL_SITES: tuple[GdlSiteConfig, ...] = (
     # ── EH / Pixiv (added before social/booru so _BY_SOURCE gets ehentai from e-hentai.org first) ──
@@ -144,7 +146,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         source_id_fields=("tweet_id",),
         subscribe_id_pattern=r"^/([^/]+)",
         artist_url_tpl="https://x.com/{}",
-        inactivity_timeout=180,
+        inactivity_timeout=600,
     ),
     GdlSiteConfig(
         domain="x.com",
@@ -161,7 +163,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         source_id_fields=("tweet_id",),
         subscribe_id_pattern=r"^/([^/]+)",
         artist_url_tpl="https://x.com/{}",
-        inactivity_timeout=180,
+        inactivity_timeout=600,
     ),
     GdlSiteConfig(
         domain="instagram.com",
@@ -443,10 +445,12 @@ _DEFAULT_CONFIG = GdlSiteConfig(
 
 _ALIASES: dict[str, str] = {"exhentai": "ehentai"}
 
+
 def get_site_config(source: str) -> GdlSiteConfig:
     """Look up site config by source_id. Unknown sites → _DEFAULT_CONFIG."""
     resolved = _ALIASES.get(source, source)
     return _BY_SOURCE.get(resolved, _DEFAULT_CONFIG)
+
 
 def get_site_by_domain(domain: str) -> GdlSiteConfig:
     """Look up site config by domain. Unknown domains → _DEFAULT_CONFIG."""

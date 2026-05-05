@@ -179,6 +179,7 @@ export interface DownloadJob {
     percent?: number
     downloaded?: number
     total?: number
+    skipped?: number
     status_text?: string
     speed?: number
     started_at?: string
@@ -187,6 +188,20 @@ export interface DownloadJob {
     permanently_failed?: boolean
     gallery_id?: number
     title?: string
+    current_file?: string
+    current_file_page?: number
+    gdl_state?:
+      | 'starting'
+      | 'downloading'
+      | 'sleeping'
+      | 'rate_limited'
+      | 'retrying'
+      | 'paused'
+      | 'cancelled'
+      | 'done'
+    gdl_state_seconds?: number
+    recent_log?: string[]
+    import_skipped?: { duplicate: number; excluded: number; invalid: number }
     [key: string]: unknown
   }
   error: string | null

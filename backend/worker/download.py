@@ -7,13 +7,13 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
+import core.queue
 from core.config import settings
 from core.events import EventType, emit_safe
 from core.redis_client import DownloadSemaphore
 from services.credential import get_credential
-from worker.constants import DISK_LOW_KEY, logger
-from worker.helpers import _set_job_progress, _set_job_status, check_disk_space
-import core.queue
+from worker.constants import _IMAGE_EXTS, DISK_LOW_KEY, logger
+from worker.helpers import _set_job_progress, _set_job_status, _validate_image_magic, check_disk_space
 
 
 async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> None:
@@ -157,6 +157,7 @@ async def download_job(
     sem_key = plugin.meta.semaphore_key or source_id
     if source_id == "gallery_dl":
         from plugins.builtin.gallery_dl._sites import get_site_by_domain as _get_site_by_domain
+
         _url_domain = urlparse(url).netloc.removeprefix("www.")
         _url_source_id = _get_site_by_domain(_url_domain).source_id
         _dl_params = await site_config_service.get_effective_download_params(_url_source_id)
@@ -218,20 +219,77 @@ async def download_job(
     # ── 8. Progress callback ────────────────────────────────────────
     # Mutable container so the closure can observe updates made after acquire.
     timing_ctx: dict = {"semaphore_wait_ms": 0}
+    diagnostic_ctx: dict = {}
+
+    def _build_status_text(
+        downloaded: int,
+        total_pages: int,
+        gdl_state: str,
+        current_file: str | None,
+        skipped: int,
+        gdl_state_seconds: float | None,
+    ) -> str:
+        if gdl_state == "sleeping" and gdl_state_seconds:
+            return f"Rate-limit cooldown: {gdl_state_seconds:.0f}s"
+        if gdl_state == "rate_limited":
+            cd = f" ({gdl_state_seconds:.0f}s)" if gdl_state_seconds else ""
+            return f"Hit rate limit (429), waiting{cd}..."
+        if gdl_state == "retrying":
+            return "Server error — gallery-dl retrying..."
+        if gdl_state == "paused":
+            return "Paused"
+        if gdl_state == "cancelled":
+            return "Cancelling..."
+        if current_file:
+            tail = f" ({downloaded}/{total_pages})" if total_pages > 0 else f" ({downloaded})"
+            return f"Downloading {current_file}{tail}"
+        if skipped > 0 and downloaded == 0:
+            # Re-download / subscription-up-to-date case: gallery-dl is hitting the archive.
+            # Old images deleted by the user but archive entry still present also lands here.
+            return f"Checking archive ({skipped} already saved)"
+        if total_pages > 0:
+            return f"Downloading... ({downloaded}/{total_pages})"
+        return "Downloading..."
 
     async def on_progress(downloaded: int, total_pages: int) -> None:
         elapsed = (datetime.now(UTC) - started_at).total_seconds()
         speed = round(downloaded / elapsed, 3) if elapsed > 0 else 0
-        status_text = f"Downloading... ({downloaded}/{total_pages})" if total_pages > 0 else "Downloading..."
+        gdl_state = diagnostic_ctx.get("gdl_state", "downloading")
+        current_file = diagnostic_ctx.get("current_file")
+        current_file_page = diagnostic_ctx.get("current_file_page")
+        skipped = diagnostic_ctx.get("skipped", 0)
+        gdl_state_seconds = diagnostic_ctx.get("gdl_state_seconds")
+        recent_log = diagnostic_ctx.get("recent_log") or []
         progress: dict = {
             **_base_progress,
             **({"total": total_pages} if total_pages > 0 else {}),
             "downloaded": downloaded,
+            "skipped": skipped,
             "started_at": started_at.isoformat(),
             "last_update_at": datetime.now(UTC).isoformat(),
             "speed": speed,
-            "status_text": status_text,
+            "status_text": _build_status_text(
+                downloaded, total_pages, gdl_state, current_file, skipped, gdl_state_seconds
+            ),
+            "gdl_state": gdl_state,
         }
+        if current_file:
+            progress["current_file"] = current_file
+        if current_file_page is not None:
+            progress["current_file_page"] = current_file_page
+        if gdl_state_seconds is not None:
+            progress["gdl_state_seconds"] = gdl_state_seconds
+        if recent_log:
+            progress["recent_log"] = list(recent_log)
+        # Progressive importer skip counters (different from gallery-dl's
+        # archive skips — these fire post-download for excluded/duplicate/invalid).
+        importer_skip = {
+            "duplicate": importer._skip_duplicate,
+            "excluded": importer._skip_excluded,
+            "invalid": importer._skip_invalid,
+        }
+        if any(importer_skip.values()):
+            progress["import_skipped"] = importer_skip
         if importer.title:
             progress["title"] = importer.title
         if importer.gallery_id:
@@ -353,8 +411,19 @@ async def download_job(
         opts["sem_heartbeat"] = _sem_heartbeat
         opts["inactivity_timeout"] = _dl_params.inactivity_timeout
         opts["timing_ctx"] = timing_ctx
+        opts["diagnostic_ctx"] = diagnostic_ctx
         opts["job_context"] = (options or {}).get("job_context", "manual")
-        opts["last_completed_at"] = (options or {}).get("last_completed_at")
+        # last_completed_at travels through SAQ as ISO string (JSON-safe);
+        # source.py expects a datetime, so reify here.
+        _lca_raw = (options or {}).get("last_completed_at")
+        if isinstance(_lca_raw, str):
+            try:
+                opts["last_completed_at"] = datetime.fromisoformat(_lca_raw)
+            except ValueError:
+                logger.warning("[download] invalid last_completed_at isoformat: %r", _lca_raw)
+                opts["last_completed_at"] = None
+        else:
+            opts["last_completed_at"] = _lca_raw
 
         try:
             result = await plugin.download(
@@ -422,82 +491,113 @@ async def download_job(
         logger.info("[download] cancelled (post-download guard): %s", url)
         return {"status": "cancelled"}
 
-    # ── 13. Image validation ────────────────────────────────────────
-    from worker.constants import _IMAGE_EXTS
-    from worker.helpers import _validate_image_magic
+    try:
+        # ── 13. Image validation ────────────────────────────────────────
+        corrupt_pages: list[int] = []
+        if target_dir.exists():
+            for f in sorted(target_dir.rglob("*")):
+                if f.suffix.lower() in _IMAGE_EXTS and f.is_file():
+                    if not _validate_image_magic(f):
+                        try:
+                            page_num = int(f.stem.lstrip("0") or "0")
+                        except ValueError:
+                            page_num = 0
+                        corrupt_pages.append(page_num)
+                        logger.warning("[download] corrupt image removed: %s", f.name)
+                        f.unlink(missing_ok=True)
 
-    corrupt_pages: list[int] = []
-    if target_dir.exists():
-        for f in sorted(target_dir.rglob("*")):
-            if f.suffix.lower() in _IMAGE_EXTS and f.is_file():
-                if not _validate_image_magic(f):
-                    try:
-                        page_num = int(f.stem.lstrip("0") or "0")
-                    except ValueError:
-                        page_num = 0
-                    corrupt_pages.append(page_num)
-                    logger.warning("[download] corrupt image removed: %s", f.name)
-                    f.unlink(missing_ok=True)
+        all_failed = sorted(set(getattr(result, "failed_pages", []) + corrupt_pages))
 
-    all_failed = sorted(set(getattr(result, "failed_pages", []) + corrupt_pages))
-
-    # ── 14. Final progress update ───────────────────────────────────
-    elapsed = (datetime.now(UTC) - started_at).total_seconds()
-    speed = round(result.downloaded / elapsed, 3) if elapsed > 0 else 0
-    final_progress = {
-        **_base_progress,
-        "total": result.total or result.downloaded,
-        "downloaded": result.downloaded,
-        "started_at": started_at.isoformat(),
-        "last_update_at": datetime.now(UTC).isoformat(),
-        "speed": speed,
-        "status_text": "Complete" if not all_failed else f"Partial — {len(all_failed)} pages failed",
-    }
-    if importer.title:
-        final_progress["title"] = importer.title
-    if importer.gallery_id:
-        final_progress["gallery_id"] = importer.gallery_id
-    if all_failed:
-        final_progress["failed_pages"] = all_failed
-    await _set_job_progress(db_job_id, final_progress)
-
-    # ── 15. Finalize ────────────────────────────────────────────────
-    if target_dir.exists() and result.downloaded > 0:
-        if importer.gallery_id:
-            gallery_id = await importer.finalize(
-                target_dir, partial=bool(all_failed) or result.status in ("failed", "partial")
-            )
-            logger.info("[download] progressive import finalized: gallery_id=%s", gallery_id)
-        else:
-            # Safety fallback: no progressive import occurred (should be rare)
-            await core.queue.enqueue("import_job", path=str(target_dir), db_job_id=db_job_id, user_id=import_user_id, source_url=url)
-    elif result.downloaded == 0:
-        logger.info("[download] no new files downloaded (all skipped by archive), skipping import: %s", url)
-
-    is_partial = bool(all_failed) or result.status in ("failed", "partial")
-    if is_partial:
+        # ── 14. Final progress update ───────────────────────────────────
+        elapsed = (datetime.now(UTC) - started_at).total_seconds()
+        speed = round(result.downloaded / elapsed, 3) if elapsed > 0 else 0
+        skipped_total = diagnostic_ctx.get("skipped", 0)
         if all_failed:
-            partial_msg = f"Partial — {len(all_failed)} pages failed"
-            if result.error:
-                partial_msg = f"{partial_msg}; {result.error}"
+            final_status_text = f"Partial — {len(all_failed)} pages failed"
+        elif result.downloaded == 0 and skipped_total > 0:
+            # Subscription up-to-date / re-download where everything was already in archive
+            final_status_text = f"Up to date — {skipped_total} already saved"
+        elif skipped_total > 0:
+            # Mixed run: subscription found new items + skipped existing ones
+            final_status_text = f"Complete — {result.downloaded} new, {skipped_total} already saved"
         else:
-            partial_msg = result.error or "Partial download"
-        await _set_job_status(db_job_id, "partial", partial_msg)
-        await _set_subscription_result(db_job_id, "partial", partial_msg)
-        logger.warning(
-            "[download] partial: downloaded=%d failed_pages=%s error=%s",
-            result.downloaded,
-            all_failed or [],
-            result.error,
-        )
-        return {
-            "status": "partial",
+            final_status_text = "Complete"
+        final_progress = {
+            **_base_progress,
+            "total": result.total or result.downloaded,
             "downloaded": result.downloaded,
-            "failed_pages": all_failed,
-            "error": result.error,
+            "skipped": skipped_total,
+            "started_at": started_at.isoformat(),
+            "last_update_at": datetime.now(UTC).isoformat(),
+            "speed": speed,
+            "status_text": final_status_text,
+            "gdl_state": "done",
         }
+        importer_skip = {
+            "duplicate": importer._skip_duplicate,
+            "excluded": importer._skip_excluded,
+            "invalid": importer._skip_invalid,
+        }
+        if any(importer_skip.values()):
+            final_progress["import_skipped"] = importer_skip
+        if importer.title:
+            final_progress["title"] = importer.title
+        if importer.gallery_id:
+            final_progress["gallery_id"] = importer.gallery_id
+        if all_failed:
+            final_progress["failed_pages"] = all_failed
+        await _set_job_progress(db_job_id, final_progress)
 
-    await _set_job_status(db_job_id, "done")
-    await _set_subscription_result(db_job_id, "done")
-    logger.info("[download] done: %s (downloaded=%d)", url, result.downloaded)
-    return {"status": "done", "downloaded": result.downloaded}
+        # ── 15. Finalize ────────────────────────────────────────────────
+        if target_dir.exists() and result.downloaded > 0:
+            if importer.gallery_id:
+                gallery_id = await importer.finalize(
+                    target_dir, partial=bool(all_failed) or result.status in ("failed", "partial")
+                )
+                logger.info("[download] progressive import finalized: gallery_id=%s", gallery_id)
+            else:
+                # Safety fallback: no progressive import occurred (should be rare)
+                await core.queue.enqueue(
+                    "import_job", path=str(target_dir), db_job_id=db_job_id, user_id=import_user_id, source_url=url
+                )
+        elif result.downloaded == 0:
+            logger.info("[download] no new files downloaded (all skipped by archive), skipping import: %s", url)
+
+        is_partial = bool(all_failed) or result.status in ("failed", "partial")
+        if is_partial:
+            if all_failed:
+                partial_msg = f"Partial — {len(all_failed)} pages failed"
+                if result.error:
+                    partial_msg = f"{partial_msg}; {result.error}"
+            else:
+                partial_msg = result.error or "Partial download"
+            await _set_job_status(db_job_id, "partial", partial_msg)
+            await _set_subscription_result(db_job_id, "partial", partial_msg)
+            logger.warning(
+                "[download] partial: downloaded=%d failed_pages=%s error=%s",
+                result.downloaded,
+                all_failed or [],
+                result.error,
+            )
+            return {
+                "status": "partial",
+                "downloaded": result.downloaded,
+                "failed_pages": all_failed,
+                "error": result.error,
+            }
+
+        await _set_job_status(db_job_id, "done")
+        await _set_subscription_result(db_job_id, "done")
+        logger.info("[download] done: %s (downloaded=%d)", url, result.downloaded)
+        return {"status": "done", "downloaded": result.downloaded}
+
+    except Exception as exc:
+        # Guard: post-download steps (validation, finalize, status update) must never leave
+        # a job stuck in 'running'. Files already downloaded are not lost — treat as done
+        # if any were downloaded, otherwise failed.
+        logger.error("[download] post-download steps failed: %s", exc, exc_info=True)
+        fin_status = "done" if result.downloaded > 0 else "failed"
+        fin_err = f"Post-download error: {exc}" if fin_status == "failed" else None
+        await _set_job_status(db_job_id, fin_status, fin_err)
+        await _set_subscription_result(db_job_id, fin_status, fin_err)
+        return {"status": fin_status, "downloaded": result.downloaded, "error": str(exc)}

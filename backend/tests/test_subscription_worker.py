@@ -105,7 +105,7 @@ class TestEnqueueForSubscription:
 
         with (
             patch("core.redis_client.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock, side_effect=Exception("disabled")),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=False),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
         ):
             result = await _enqueue_for_subscription(_make_ctx(), sub)
@@ -131,7 +131,7 @@ class TestEnqueueForSubscription:
 
         with (
             patch("core.redis_client.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
             patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
@@ -180,7 +180,7 @@ class TestEnqueueForSubscription:
 
         with (
             patch("core.redis_client.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
         ):
@@ -207,7 +207,7 @@ class TestEnqueueForSubscription:
 
         with (
             patch("core.redis_client.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
@@ -273,7 +273,7 @@ class TestCheckSingleSubscription:
         with (
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
             patch("core.redis_client.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
             patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
         ):
@@ -518,7 +518,7 @@ class TestDuplicateGuardIncludesPaused:
 
         with (
             patch("core.redis_client.get_redis", return_value=mock_redis),
-            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
             patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
             patch("worker.subscription.AsyncSessionLocal", return_value=session),
         ):
