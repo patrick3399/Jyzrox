@@ -227,10 +227,10 @@ function SearchResults({
 
   const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
     getKey,
-    (key) => {
+    (key, { signal }: { signal?: AbortSignal } = {}) => {
       if (key[0] === '/pixiv/search-public') {
         const [, word, order, page] = key as [string, string, string, number]
-        return api.pixiv.searchPublic({ word, order, page })
+        return api.pixiv.searchPublic({ word, order, page }, { signal })
       }
       const [, word, s, d, offset] = key as [string, string, string, string, number]
       return api.pixiv.search({
@@ -238,7 +238,7 @@ function SearchResults({
         sort: s,
         duration: d || undefined,
         offset,
-      })
+      }, { signal })
     },
     { revalidateFirstPage: false },
   )
@@ -361,7 +361,8 @@ function FeedTab({
 
   const { data, size, setSize, isValidating, error } = useSWRInfinite<PixivSearchResult>(
     getKey,
-    ([, offset]) => api.pixiv.getFollowingFeed(offset as number),
+    ([, offset], { signal }: { signal?: AbortSignal } = {}) =>
+      api.pixiv.getFollowingFeed(offset as number, { signal }),
     { revalidateFirstPage: false, ...swrFallback(restoredPages) },
   )
 

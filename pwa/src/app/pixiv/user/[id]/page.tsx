@@ -77,7 +77,10 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
     data: userResult,
     error,
     isLoading,
-  } = useSWR(validId ? `/api/pixiv/user/${userId}` : null, () => api.pixiv.getUser(userId))
+  } = useSWR(
+    validId ? `/api/pixiv/user/${userId}` : null,
+    (_, { signal }: { signal?: AbortSignal } = {}) => api.pixiv.getUser(userId, { signal }),
+  )
 
   const [isFollowing, setIsFollowing] = useState(false)
   const [followLoading, setFollowLoading] = useState(false)
@@ -87,7 +90,8 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
 
   const { data: bookmarksData, isLoading: bookmarksLoading } = useSWR(
     activeTab === 'bookmarks' && validId ? ['pixiv-user-bookmarks', userId, bookmarkOffset] : null,
-    () => api.pixiv.getUserBookmarks(userId, bookmarkOffset),
+    ([, uid, offset], { signal }: { signal?: AbortSignal } = {}) =>
+      api.pixiv.getUserBookmarks(uid as number, offset as number, { signal }),
   )
 
   useEffect(() => {
@@ -129,7 +133,8 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
     isValidating: worksLoading,
   } = useSWRInfinite<PixivSearchResult>(
     getKey,
-    ([, offset]) => api.pixiv.getUserIllusts(userId, offset as number),
+    ([, offset], { signal }: { signal?: AbortSignal } = {}) =>
+      api.pixiv.getUserIllusts(userId, offset as number, { signal }),
     { revalidateFirstPage: false },
   )
 

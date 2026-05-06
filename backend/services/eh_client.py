@@ -9,7 +9,6 @@ References:
 import dataclasses
 import logging
 import re
-from collections import defaultdict
 from typing import Any
 from urllib.parse import urlencode
 
@@ -19,6 +18,65 @@ from bs4 import BeautifulSoup
 from core.config import settings
 
 logger = logging.getLogger(__name__)
+
+# ---------------------------------------------------------------------------
+# Module-level shared HTTP clients (singleton, lazy-created)
+# ---------------------------------------------------------------------------
+# EhClient cookies are per-user, so they must be passed on every request
+# rather than baked into the client.  The shared client carries only fixed
+# headers and connection-pool settings.
+
+_shared_http: httpx.AsyncClient | None = None
+_shared_img_http: httpx.AsyncClient | None = None
+
+
+def _get_shared_http() -> httpx.AsyncClient:
+    global _shared_http
+    if _shared_http is None or _shared_http.is_closed:
+        _shared_http = httpx.AsyncClient(
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
+                "Accept-Language": "en-US,en;q=0.9",
+            },
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            timeout=settings.eh_request_timeout,
+            follow_redirects=True,
+        )
+    return _shared_http
+
+
+def _get_shared_img_http() -> httpx.AsyncClient:
+    global _shared_img_http
+    if _shared_img_http is None or _shared_img_http.is_closed:
+        _shared_img_http = httpx.AsyncClient(
+            headers={
+                "User-Agent": (
+                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+                    "AppleWebKit/537.36 (KHTML, like Gecko) "
+                    "Chrome/124.0.0.0 Safari/537.36"
+                ),
+                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
+            },
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            timeout=20,
+            follow_redirects=True,
+        )
+    return _shared_img_http
+
+
+async def shutdown_shared_clients() -> None:
+    """Close shared httpx clients. Called from FastAPI lifespan shutdown."""
+    global _shared_http, _shared_img_http
+    if _shared_http and not _shared_http.is_closed:
+        await _shared_http.aclose()
+    if _shared_img_http and not _shared_img_http.is_closed:
+        await _shared_img_http.aclose()
+
 
 EH_API_URL = "https://api.e-hentai.org/api.php"
 EH_BASE_URL = "https://e-hentai.org"
@@ -74,13 +132,14 @@ _NEW_PREVIEW_RE = re.compile(
     r'<a[^>]+href="[^"]+/s/[0-9a-f]{10}/\d+-(\d+)"[^>]*>'
     r'<div[^>]+style="[^"]*'
     r'width:\s*(\d+)px[^"]*height:\s*(\d+)px[^"]*'
-    r'url\(([^)]+)\)\s*(-?\d+)px',
+    r"url\(([^)]+)\)\s*(-?\d+)px",
     re.DOTALL,
 )
 
 
 class Image509Error(Exception):
     """E-Hentai 509 error: image viewing limit reached for this IP."""
+
     pass
 
 
@@ -140,54 +199,69 @@ class EhClient:
         self.base_url = EX_BASE_URL if use_ex else EH_BASE_URL
         self._http: httpx.AsyncClient | None = None
         self._img_http: httpx.AsyncClient | None = None
+        self._cookies: dict = {}  # populated by __aenter__ with nw=1 injected
 
     @property
     def _is_ex(self) -> bool:
         return self.base_url == EX_BASE_URL
 
-    async def __aenter__(self) -> "EhClient":
-        # Inject nw=1 cookie to skip Content Warning page
-        cookies = {**self.cookies, "nw": "1"}
-        self._http = httpx.AsyncClient(
-            cookies=cookies,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-                "Accept": "text/html,application/xhtml+xml,*/*;q=0.8",
-                "Accept-Language": "en-US,en;q=0.9",
-            },
-            timeout=settings.eh_request_timeout,
-            follow_redirects=True,
-        )
-        self._img_http = httpx.AsyncClient(
-            cookies=cookies,
-            headers={
-                "User-Agent": (
-                    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
-                    "AppleWebKit/537.36 (KHTML, like Gecko) "
-                    "Chrome/124.0.0.0 Safari/537.36"
-                ),
-                "Accept": "image/webp,image/apng,image/*,*/*;q=0.8",
-            },
-            timeout=20,
-            follow_redirects=True,
-        )
+    async def __aenter__(self) -> EhClient:
+        # Inject nw=1 cookie to skip Content Warning page.
+        # Cookies are stored per-instance and passed on every request so that
+        # the shared client pool is not contaminated with user-specific state.
+        self._cookies = {**self.cookies, "nw": "1"}
+        self._http = _get_shared_http()
+        self._img_http = _get_shared_img_http()
         return self
 
     async def __aexit__(self, *_) -> None:
-        if self._img_http:
-            await self._img_http.aclose()
-        if self._http:
-            await self._http.aclose()
+        # Shared clients must not be closed here; shutdown_shared_clients()
+        # handles teardown during FastAPI lifespan shutdown.
+        pass
 
     # ── Internal ─────────────────────────────────────────────────────
 
+    def _cookie_header(self) -> str:
+        return "; ".join(f"{name}={value}" for name, value in self._cookies.items() if value is not None)
+
+    def _with_cookie_header(self, headers: dict | None = None) -> dict:
+        merged = dict(headers or {})
+        if not any(name.lower() == "cookie" for name in merged):
+            cookie_header = self._cookie_header()
+            if cookie_header:
+                merged["Cookie"] = cookie_header
+        return merged
+
+    @staticmethod
+    def _clear_client_cookie_jar(client: httpx.AsyncClient) -> None:
+        # Response Set-Cookie headers must not persist in shared clients.
+        if isinstance(client.cookies, httpx.Cookies):
+            client.cookies.clear()
+
+    async def _http_get(self, url: str, **kwargs) -> httpx.Response:
+        kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
+        try:
+            return await self._http.get(url, **kwargs)
+        finally:
+            self._clear_client_cookie_jar(self._http)
+
+    async def _http_post(self, url: str, **kwargs) -> httpx.Response:
+        kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
+        try:
+            return await self._http.post(url, **kwargs)
+        finally:
+            self._clear_client_cookie_jar(self._http)
+
+    async def _img_get(self, url: str, **kwargs) -> httpx.Response:
+        kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
+        try:
+            return await self._img_http.get(url, **kwargs)
+        finally:
+            self._clear_client_cookie_jar(self._img_http)
+
     async def _api(self, payload: dict) -> dict:
         api_url = f"{self.base_url}/api.php" if self.base_url == EX_BASE_URL else EH_API_URL
-        resp = await self._http.post(api_url, json=payload)
+        resp = await self._http_post(api_url, json=payload)
         resp.raise_for_status()
         data = resp.json()
         if data.get("error"):
@@ -214,7 +288,7 @@ class EhClient:
         query: str = "",
         page: int = 0,
         next_gid: int | None = None,  # cursor for next page
-        prev: bool = False,           # go to previous page
+        prev: bool = False,  # go to previous page
         category: str | None = None,
         f_cats: int | None = None,
         advance: bool = False,
@@ -277,7 +351,7 @@ class EhClient:
             params["f_sp"] = "on"
             params["f_spt"] = page_to
 
-        resp = await self._http.get(f"{self.base_url}/?{urlencode(params)}")
+        resp = await self._http_get(f"{self.base_url}/?{urlencode(params)}")
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
@@ -387,7 +461,7 @@ class EhClient:
         Used for the gallery detail/info page before the user reads.
         """
         url = f"{self.base_url}/g/{gid}/{token}/?p=0"
-        resp = await self._http.get(url)
+        resp = await self._http_get(url)
         try:
             resp.raise_for_status()
         except httpx.HTTPStatusError as exc:
@@ -424,7 +498,7 @@ class EhClient:
                 await asyncio.sleep(0.3)
 
             url = f"{self.base_url}/g/{gid}/{token}/?p={dp}"
-            resp = await self._http.get(url)
+            resp = await self._http_get(url)
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as exc:
@@ -498,7 +572,7 @@ class EhClient:
                 await asyncio.sleep(0.3)  # polite delay between requests
 
             url = f"{self.base_url}/g/{gid}/{token}/?p={dp}"
-            resp = await self._http.get(url)
+            resp = await self._http_get(url)
             try:
                 resp.raise_for_status()
             except httpx.HTTPStatusError as exc:
@@ -540,7 +614,7 @@ class EhClient:
         Page URL: /s/{image_page_token}/{gid}-{page}
         """
         url = f"{self.base_url}/s/{image_page_token}/{gid}-{page}"
-        resp = await self._http.get(url)
+        resp = await self._http_get(url)
         resp.raise_for_status()
 
         soup = BeautifulSoup(resp.text, "lxml")
@@ -555,7 +629,7 @@ class EhClient:
         Returns (showkey, nl_param_or_None)
         """
         url = f"{self.base_url}/s/{image_page_token}/{gid}-{page}"
-        resp = await self._http.get(url)
+        resp = await self._http_get(url)
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
@@ -569,7 +643,9 @@ class EhClient:
 
         return showkey, nl_param
 
-    async def get_image_url_via_api(self, showkey: str, gid: int, page: int, imgkey: str, nl: str = "") -> ShowpageResult:
+    async def get_image_url_via_api(
+        self, showkey: str, gid: int, page: int, imgkey: str, nl: str = ""
+    ) -> ShowpageResult:
         """Use showpage JSON API for fast image URL resolution.
         POST to api.php with method=showpage.
         Response JSON has:
@@ -589,7 +665,7 @@ class EhClient:
             payload["nl"] = nl
 
         api_url = f"{self.base_url}/api.php" if self.base_url == EX_BASE_URL else EH_API_URL
-        resp = await self._http.post(api_url, json=payload)
+        resp = await self._http_post(api_url, json=payload)
         resp.raise_for_status()
         data = resp.json()
 
@@ -629,7 +705,7 @@ class EhClient:
 
     async def _download_image_bytes(self, url: str, gid: int, page: int, imgkey: str) -> tuple[bytes, str, str]:
         """Download image from URL, validate, return (bytes, media_type, ext)."""
-        resp = await self._img_http.get(url)
+        resp = await self._img_get(url)
         resp.raise_for_status()
         image_data = resp.content
         if len(image_data) < 100:
@@ -639,7 +715,9 @@ class EhClient:
         ext = ext_map.get(media_type, "jpg")
         return image_data, media_type, ext
 
-    async def download_image_with_retry(self, showkey: str, gid: int, page: int, imgkey: str, max_retries: int = 3) -> tuple[bytes, str, str]:
+    async def download_image_with_retry(
+        self, showkey: str, gid: int, page: int, imgkey: str, max_retries: int = 3
+    ) -> tuple[bytes, str, str]:
         """Resolve URL via showpage API + download with nl retry on stall/error.
 
         Phase 1: Try primary image URL up to max_retries times, switching H@H
@@ -663,7 +741,7 @@ class EhClient:
                 last_result = result
 
                 # Check for 509 bandwidth limit — raise immediately, do not retry
-                if result.image_url.endswith(('/509.gif', '/509s.gif')):
+                if result.image_url.endswith(("/509.gif", "/509s.gif")):
                     raise Image509Error(f"509 limit reached on page {page}")
 
                 data = await self._download_image_bytes(result.image_url, gid, page, imgkey)
@@ -700,7 +778,7 @@ class EhClient:
 
     async def fetch_image_bytes(self, image_url: str) -> tuple[bytes, str]:
         """Fetch image bytes. Returns (bytes, media_type)."""
-        resp = await self._http.get(image_url)
+        resp = await self._http_get(image_url)
         resp.raise_for_status()
         data = resp.content
         return data, _detect_media_type(data)
@@ -731,7 +809,7 @@ class EhClient:
         elif prev_cursor:
             params["prev"] = prev_cursor
 
-        resp = await self._http.get(f"{self.base_url}/favorites.php?{urlencode(params)}")
+        resp = await self._http_get(f"{self.base_url}/favorites.php?{urlencode(params)}")
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
@@ -843,7 +921,7 @@ class EhClient:
             "submit": "Apply Changes",
             "update": "1",
         }
-        resp = await self._http.post(
+        resp = await self._http_post(
             url,
             data=data,
             headers={
@@ -863,7 +941,7 @@ class EhClient:
             "submit": "Apply Changes",
             "update": "1",
         }
-        resp = await self._http.post(
+        resp = await self._http_post(
             url,
             data=data,
             headers={
@@ -879,7 +957,7 @@ class EhClient:
         Scrape E-H popular page and return galleries.
         GET {base_url}/popular
         """
-        resp = await self._http.get(f"{self.base_url}/popular")
+        resp = await self._http_get(f"{self.base_url}/popular")
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
@@ -898,7 +976,7 @@ class EhClient:
         tl: 11=All-Time, 12=Past Year, 13=Past Month, 15=Yesterday
         """
         # Toplist only exists on e-hentai.org; exhentai.org returns 404 for this page.
-        resp = await self._http.get(f"{EH_BASE_URL}/toplist.php?tl={tl}&p={page}")
+        resp = await self._http_get(f"{EH_BASE_URL}/toplist.php?tl={tl}&p={page}")
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
@@ -919,7 +997,7 @@ class EhClient:
         Returns list of {poster, posted_at, text, score}.
         """
         url = f"{self.base_url}/g/{gid}/{token}/?p=0"
-        resp = await self._http.get(url)
+        resp = await self._http_get(url)
         resp.raise_for_status()
         self._check_auth(resp.text, resp)
 
@@ -951,19 +1029,21 @@ class EhClient:
                 if score_match:
                     score = int(score_match.group(1))
 
-            comments.append({
-                "poster": poster,
-                "posted_at": posted_at,
-                "text": text,
-                "score": score,
-            })
+            comments.append(
+                {
+                    "poster": poster,
+                    "posted_at": posted_at,
+                    "text": text,
+                    "score": score,
+                }
+            )
 
         return comments
 
     async def check_cookies(self) -> bool:
         """Verify that the current cookies give authenticated access."""
         try:
-            resp = await self._http.get(f"{self.base_url}/home.php")
+            resp = await self._http_get(f"{self.base_url}/home.php")
             return "Credits" in resp.text or "Hath" in resp.text
         except (httpx.HTTPError, httpx.TimeoutException) as exc:
             logger.warning("check_cookies request failed: %s", exc)
@@ -972,7 +1052,7 @@ class EhClient:
     async def get_account_info(self) -> dict:
         """Parse GP credits and Hath status from home.php."""
         try:
-            resp = await self._http.get(f"{self.base_url}/home.php")
+            resp = await self._http_get(f"{self.base_url}/home.php")
             info: dict[str, Any] = {}
             m = re.search(r"([\d,]+)\s+Credits", resp.text)
             if m:

@@ -12,6 +12,38 @@ from core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
 
+# ---------------------------------------------------------------------------
+# Module-level shared HTTP client (singleton, lazy-created)
+# ---------------------------------------------------------------------------
+# Pixiv image downloads require Referer + User-Agent headers.
+# The shared client is reused across PixivClient instances to avoid
+# creating a new connection pool per request.
+
+_shared_img_http: httpx.AsyncClient | None = None
+
+
+def _get_shared_img_http() -> httpx.AsyncClient:
+    global _shared_img_http
+    if _shared_img_http is None or _shared_img_http.is_closed:
+        _shared_img_http = httpx.AsyncClient(
+            headers={
+                "Referer": "https://www.pixiv.net/",
+                "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
+            },
+            limits=httpx.Limits(max_connections=20, max_keepalive_connections=10),
+            timeout=settings.pixiv_request_timeout,
+            follow_redirects=True,
+        )
+    return _shared_img_http
+
+
+async def shutdown_shared_pixiv_clients() -> None:
+    """Close shared httpx clients. Called from FastAPI lifespan shutdown."""
+    global _shared_img_http
+    if _shared_img_http and not _shared_img_http.is_closed:
+        await _shared_img_http.aclose()
+
+
 _TOKEN_KEY = "pixiv:access_token"
 _LOCK_KEY = "pixiv:token_lock"
 _TOKEN_TTL = 3500  # seconds — Pixiv tokens last 3600s; refresh before expiry
@@ -35,23 +67,15 @@ class PixivClient:
         self._api: AppPixivAPI | None = None
         self._img_http: httpx.AsyncClient | None = None
 
-    async def __aenter__(self) -> "PixivClient":
+    async def __aenter__(self) -> PixivClient:
         self._api = AppPixivAPI()
         self._api.additional_headers = {"Accept-Language": "en"}
         await self._ensure_token()
-        self._img_http = httpx.AsyncClient(
-            headers={
-                "Referer": "https://www.pixiv.net/",
-                "User-Agent": "PixivAndroidApp/5.0.234 (Android 11; Pixel 5)",
-            },
-            timeout=settings.pixiv_request_timeout,
-            follow_redirects=True,
-        )
+        self._img_http = _get_shared_img_http()
         return self
 
     async def __aexit__(self, *_) -> None:
-        if self._img_http:
-            await self._img_http.aclose()
+        pass  # shared client managed externally
 
     # ── Token management ─────────────────────────────────────────────
 
@@ -86,9 +110,7 @@ class PixivClient:
         """Call pixivpy3 auth and cache the resulting access token."""
         r = get_redis()
         try:
-            token_response = await asyncio.to_thread(
-                self._api.auth, refresh_token=self.refresh_token
-            )
+            token_response = await asyncio.to_thread(self._api.auth, refresh_token=self.refresh_token)
         except Exception as exc:
             raise PermissionError(f"Pixiv token invalid or expired: {exc}") from exc
 
@@ -129,7 +151,7 @@ class PixivClient:
     def _image_urls(illust: dict) -> dict:
         """Extract all relevant image URLs from an illust dict."""
         urls = illust.get("image_urls") or {}
-        meta = (illust.get("meta_single_page") or {})
+        meta = illust.get("meta_single_page") or {}
         # For multi-page illusts, original is in meta_pages[0]
         meta_pages = illust.get("meta_pages") or []
         if meta_pages:
@@ -164,10 +186,12 @@ class PixivClient:
         for t in tags_raw:
             if not isinstance(t, dict) and hasattr(t, "__dict__"):
                 t = t.__dict__
-            tags.append({
-                "name": t.get("name", ""),
-                "translated_name": t.get("translated_name"),
-            })
+            tags.append(
+                {
+                    "name": t.get("name", ""),
+                    "translated_name": t.get("translated_name"),
+                }
+            )
 
         image_urls_raw = illust.get("image_urls") or {}
         if not isinstance(image_urls_raw, dict) and hasattr(image_urls_raw, "__dict__"):
@@ -340,9 +364,7 @@ class PixivClient:
         kwargs = {"restrict": restrict}
         if offset > 0:
             kwargs["max_bookmark_id"] = offset
-        result = await self._call(
-            self._api.user_bookmarks_illust, user_id, **kwargs
-        )
+        result = await self._call(self._api.user_bookmarks_illust, user_id, **kwargs)
         return self._normalize_illust_list(result)
 
     async def illust_follow(
@@ -361,9 +383,7 @@ class PixivClient:
         offset: int = 0,
     ) -> dict:
         """Get user following list. Returns {user_previews, next_offset}."""
-        result = await self._call(
-            self._api.user_following, user_id, restrict=restrict, offset=offset
-        )
+        result = await self._call(self._api.user_following, user_id, restrict=restrict, offset=offset)
         if not isinstance(result, dict) and hasattr(result, "__dict__"):
             result = result.__dict__
 
@@ -379,15 +399,17 @@ class PixivClient:
             if not isinstance(profile_image_urls, dict) and hasattr(profile_image_urls, "__dict__"):
                 profile_image_urls = profile_image_urls.__dict__
             illusts_raw = up.get("illusts") or []
-            user_previews.append({
-                "user": {
-                    "id": user.get("id"),
-                    "name": user.get("name", ""),
-                    "account": user.get("account", ""),
-                    "profile_image": profile_image_urls.get("medium", ""),
-                },
-                "illusts": [self._normalize_illust(i) for i in illusts_raw],
-            })
+            user_previews.append(
+                {
+                    "user": {
+                        "id": user.get("id"),
+                        "name": user.get("name", ""),
+                        "account": user.get("account", ""),
+                        "profile_image": profile_image_urls.get("medium", ""),
+                    },
+                    "illusts": [self._normalize_illust(i) for i in illusts_raw],
+                }
+            )
 
         return {
             "user_previews": user_previews,

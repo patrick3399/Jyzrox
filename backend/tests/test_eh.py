@@ -432,6 +432,7 @@ def _build_eh_client(cookies: dict | None = None, use_ex: bool = False):
     from services.eh_client import EhClient
 
     client = EhClient(cookies or {}, use_ex=use_ex)
+    client._cookies = {**(cookies or {}), "nw": "1"}
     client._http = AsyncMock()
     client._img_http = AsyncMock()
     return client
@@ -709,32 +710,32 @@ class TestCookieHandling:
     """Unit tests for EhClient cookie initialisation and check_cookies."""
 
     async def test_cookies_injected_with_nw_1(self):
-        """__aenter__ should merge user cookies with nw=1."""
-        import httpx
-
+        """__aenter__ should populate self._cookies with user cookies + nw=1."""
         from services.eh_client import EhClient
 
         user_cookies = {"ipb_member_id": "123456", "ipb_pass_hash": "abcdef"}
         client = EhClient(user_cookies)
 
-        with patch.object(httpx, "AsyncClient") as mock_ac:
-            mock_instance = AsyncMock()
-            mock_ac.return_value = mock_instance
-            await client.__aenter__()
-
-        # httpx.AsyncClient should have been called with cookies that include nw=1
-        call_kwargs = mock_ac.call_args_list[0].kwargs
-        assert call_kwargs["cookies"].get("nw") == "1"
-        assert call_kwargs["cookies"].get("ipb_member_id") == "123456"
+        await client.__aenter__()
+        try:
+            assert client._cookies.get("nw") == "1"
+            assert client._cookies.get("ipb_member_id") == "123456"
+            assert client._cookies.get("ipb_pass_hash") == "abcdef"
+        finally:
+            await client.__aexit__(None, None, None)
 
     async def test_check_cookies_returns_true_when_credits_present(self):
         """check_cookies should return True if 'Credits' appears in home.php."""
-        client = _build_eh_client()
+        client = _build_eh_client({"ipb_member_id": "123456", "ipb_pass_hash": "abcdef"}, use_ex=True)
         client._http.get = AsyncMock(return_value=_make_http_response(200, text="<html>1,234 Credits available</html>"))
 
         result = await client.check_cookies()
 
         assert result is True
+        headers = client._http.get.call_args.kwargs["headers"]
+        assert "ipb_member_id=123456" in headers["Cookie"]
+        assert "ipb_pass_hash=abcdef" in headers["Cookie"]
+        assert "nw=1" in headers["Cookie"]
 
     async def test_check_cookies_returns_false_on_network_error(self):
         """check_cookies should return False when the HTTP request raises."""
@@ -746,6 +747,35 @@ class TestCookieHandling:
         result = await client.check_cookies()
 
         assert result is False
+
+    async def test_shared_client_cookie_jar_is_cleared_after_response_set_cookie(self):
+        """Set-Cookie from ExHentai must not persist in the shared client jar."""
+        import httpx
+
+        from services.eh_client import EhClient
+
+        seen_cookie_headers: list[str | None] = []
+
+        async def handler(request: httpx.Request) -> httpx.Response:
+            seen_cookie_headers.append(request.headers.get("cookie"))
+            return httpx.Response(
+                200,
+                headers={"set-cookie": "igneous=server-value; Path=/"},
+                text="<html>1,234 Credits</html>",
+            )
+
+        client = EhClient({"ipb_member_id": "123456", "ipb_pass_hash": "abcdef"}, use_ex=True)
+        client._cookies = {**client.cookies, "nw": "1"}
+        client._http = httpx.AsyncClient(transport=httpx.MockTransport(handler), follow_redirects=True)
+
+        try:
+            resp = await client._http_get("https://exhentai.org/home.php")
+        finally:
+            await client._http.aclose()
+
+        assert resp.status_code == 200
+        assert seen_cookie_headers == ["ipb_member_id=123456; ipb_pass_hash=abcdef; nw=1"]
+        assert dict(client._http.cookies) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -825,6 +855,27 @@ class TestArchiveDownload:
         assert image_data == png_bytes
         assert media_type == "image/png"
         assert ext == "png"
+
+    async def test_download_image_bytes_sends_cookie_header(self):
+        """Image downloads should keep ExHentai cookies after shared client refactor."""
+        client = _build_eh_client({"ipb_member_id": "123456", "ipb_pass_hash": "abcdef"}, use_ex=True)
+        jpg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 200
+        client._img_http.get = AsyncMock(return_value=_make_http_response(200, content=jpg_bytes))
+
+        image_data, media_type, ext = await client._download_image_bytes(
+            "https://exhentai.org/fullimg/example.jpg",
+            gid=12345,
+            page=1,
+            imgkey="abcdef1234",
+        )
+
+        assert image_data == jpg_bytes
+        assert media_type == "image/jpeg"
+        assert ext == "jpg"
+        headers = client._img_http.get.call_args.kwargs["headers"]
+        assert "ipb_member_id=123456" in headers["Cookie"]
+        assert "ipb_pass_hash=abcdef" in headers["Cookie"]
+        assert "nw=1" in headers["Cookie"]
 
     async def test_download_image_with_retry_raises_image509_error(self):
         """download_image_with_retry should raise Image509Error immediately for 509 URLs."""

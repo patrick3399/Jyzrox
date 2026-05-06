@@ -220,9 +220,11 @@ describe('useLibraryGalleries', () => {
   it('test_useLibraryGalleries_fetcher_callsApiLibraryGetGalleriesWithParams', async () => {
     const params = { q: 'touhou', page: 1 }
     useLibraryGalleries(params)
-    await lastSwrCall().fetcher!()
+    // SWR passes (key, { signal }) as the two fetcher args; the hook ignores key
+    // and forwards { signal } to the api call.
+    await lastSwrCall().fetcher!(null, {})
     expect(mockGetGalleries).toHaveBeenCalledOnce()
-    expect(mockGetGalleries).toHaveBeenCalledWith(params)
+    expect(mockGetGalleries).toHaveBeenCalledWith(params, { signal: undefined })
   })
 
   it('test_useLibraryGalleries_returnsSwrResult', () => {
@@ -252,9 +254,10 @@ describe('useLibraryGallery', () => {
 
   it('test_useLibraryGallery_withId_fetcher_callsApiLibraryGetGalleryWithId', async () => {
     useLibraryGallery('ehentai', '42')
-    await lastSwrCall().fetcher!()
+    // Hook fetcher destructures key array; pass the same array SWR would provide.
+    await lastSwrCall().fetcher!(['library/gallery', 'ehentai', '42'], {})
     expect(mockGetGallery).toHaveBeenCalledOnce()
-    expect(mockGetGallery).toHaveBeenCalledWith('ehentai', '42')
+    expect(mockGetGallery).toHaveBeenCalledWith('ehentai', '42', { signal: undefined })
   })
 
   it('test_useLibraryGallery_withNullId_fetcher_notCalledByDefault', async () => {
@@ -286,9 +289,10 @@ describe('useGalleryImages', () => {
 
   it('test_useGalleryImages_withId_fetcher_callsApiLibraryGetImagesWithSourceAndId', async () => {
     useGalleryImages('ehentai', '7')
-    await lastSwrCall().fetcher!()
+    // Hook fetcher destructures key array; pass the same array SWR would provide.
+    await lastSwrCall().fetcher!(['gallery/images', 'ehentai', '7'], {})
     expect(mockGetImages).toHaveBeenCalledOnce()
-    expect(mockGetImages).toHaveBeenCalledWith('ehentai', '7')
+    expect(mockGetImages).toHaveBeenCalledWith('ehentai', '7', undefined, { signal: undefined })
   })
 })
 
@@ -306,8 +310,9 @@ describe('useGalleryProgress', () => {
 
   it('test_useGalleryProgress_withId_fetcher_callsApiLibraryGetProgressWithSourceAndId', async () => {
     useGalleryProgress('ehentai', '5')
-    await lastSwrCall().fetcher!()
-    expect(mockGetProgress).toHaveBeenCalledWith('ehentai', '5')
+    // Hook fetcher destructures key array; pass the same array SWR would provide.
+    await lastSwrCall().fetcher!(['gallery/progress', 'ehentai', '5'], {})
+    expect(mockGetProgress).toHaveBeenCalledWith('ehentai', '5', { signal: undefined })
   })
 })
 
@@ -480,6 +485,35 @@ describe('useSearchGalleries — stale data cleared when search query changes', 
 
     const lastPage = { items: [], total: 5, has_next: false, next_cursor: null }
     expect(getKey(1, lastPage)).toBeNull()
+  })
+})
+
+// ── Abort signal propagation ──────────────────────────────────────────
+
+describe('useEhSearch — abort signal forwarded to api', () => {
+  /**
+   * Regression guard: the SWR fetcher second argument carries an AbortSignal.
+   * Verifies that the signal object received by the fetcher is forwarded
+   * verbatim to the api call — the direct contractual guarantee that
+   * in-flight requests are cancellable when SWR invalidates a key.
+   */
+  it('test_abort_signal_is_forwarded_from_fetcher_arg_to_api_call', async () => {
+    const params = { q: 'abort-test' }
+    useEhSearch(params)
+    const { fetcher } = lastSwrCall()
+    const controller = new AbortController()
+    await fetcher!(null, { signal: controller.signal })
+    expect(mockEhSearch).toHaveBeenCalledWith(params, { signal: controller.signal })
+  })
+})
+
+describe('useEhPopular — abort signal forwarded to api', () => {
+  it('test_abort_signal_is_forwarded_from_fetcher_arg_to_api_call', async () => {
+    useEhPopular()
+    const { fetcher } = lastSwrCall()
+    const controller = new AbortController()
+    await fetcher!(null, { signal: controller.signal })
+    expect(mockEhGetPopular).toHaveBeenCalledWith({ signal: controller.signal })
   })
 })
 

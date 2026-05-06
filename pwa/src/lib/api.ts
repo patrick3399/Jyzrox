@@ -293,33 +293,33 @@ const eh = {
   getToplist: (params: { tl?: number; page?: number } = {}, init?: RequestInit) =>
     apiFetch<EhSearchResult>(`/api/eh/toplists${qs(params as Record<string, unknown>)}`, init),
 
-  getComments: (gid: number, token: string) =>
-    apiFetch<{ comments: EhComment[] }>(`/api/eh/gallery/${gid}/${token}/comments`),
+  getComments: (gid: number, token: string, init?: RequestInit) =>
+    apiFetch<{ comments: EhComment[] }>(`/api/eh/gallery/${gid}/${token}/comments`, init),
 
   /** Paginated image token fetch — avoids loading all tokens upfront for large galleries */
-  getImagesPaginated: (gid: number, token: string, startPage: number = 0, count: number = 20) =>
+  getImagesPaginated: (gid: number, token: string, startPage: number = 0, count: number = 20, init?: RequestInit) =>
     apiFetch<{
       images: Array<{ page: number; token: string }>
       previews: Record<string, string>
       has_more: boolean
       total: number
-    }>(`/api/eh/gallery/${gid}/${token}/images-paginated?start_page=${startPage}&count=${count}`),
+    }>(`/api/eh/gallery/${gid}/${token}/images-paginated?start_page=${startPage}&count=${count}`, init),
 }
 
 // ── Library ───────────────────────────────────────────────────────────
 
 const library = {
-  getSources: () => apiFetch<{ value: string; label: string }[]>('/api/library/galleries/sources'),
+  getSources: (init?: RequestInit) => apiFetch<{ value: string; label: string }[]>('/api/library/galleries/sources', init),
 
-  getCategories: () => apiFetch<{ categories: string[] }>('/api/library/galleries/categories'),
+  getCategories: (init?: RequestInit) => apiFetch<{ categories: string[] }>('/api/library/galleries/categories', init),
 
-  getGalleries: (params: GallerySearchParams = {}) =>
-    apiFetch<GalleryListResponse>(`/api/library/galleries${qs(params as Record<string, unknown>)}`),
+  getGalleries: (params: GallerySearchParams = {}, init?: RequestInit) =>
+    apiFetch<GalleryListResponse>(`/api/library/galleries${qs(params as Record<string, unknown>)}`, init),
 
-  getGallery: (source: string, sourceId: string) =>
-    apiFetch<Gallery>(galleryApiPath(source, sourceId)),
+  getGallery: (source: string, sourceId: string, init?: RequestInit) =>
+    apiFetch<Gallery>(galleryApiPath(source, sourceId), init),
 
-  getImages: (source: string, sourceId: string, opts?: { page?: number; limit?: number }) => {
+  getImages: (source: string, sourceId: string, opts?: { page?: number; limit?: number }, init?: RequestInit) => {
     const params = new URLSearchParams()
     if (opts?.page) params.set('page', String(opts.page))
     if (opts?.limit) params.set('limit', String(opts.limit))
@@ -333,6 +333,7 @@ const library = {
       favorited_image_ids?: number[]
     }>(
       `${galleryApiPath(source, sourceId, '/images')}${qs ? `?${qs}` : ''}`,
+      init,
     )
   },
 
@@ -347,51 +348,59 @@ const library = {
       category?: string
       in_reading_list?: boolean
     },
+    init?: RequestInit,
   ) =>
     apiFetch<Gallery>(galleryApiPath(source, sourceId), {
       method: 'PATCH',
       body: JSON.stringify(patch),
+      ...init,
     }),
 
-  batchGalleries: (body: {
-    action:
-      | 'delete'
-      | 'favorite'
-      | 'unfavorite'
-      | 'rate'
-      | 'add_to_collection'
-      | 'add_tags'
-      | 'remove_tags'
-      | 'add_to_reading_list'
-      | 'remove_from_reading_list'
-    gallery_ids: number[]
-    rating?: number
-    collection_id?: number
-    tags?: string[]
-  }) =>
+  batchGalleries: (
+    body: {
+      action:
+        | 'delete'
+        | 'favorite'
+        | 'unfavorite'
+        | 'rate'
+        | 'add_to_collection'
+        | 'add_tags'
+        | 'remove_tags'
+        | 'add_to_reading_list'
+        | 'remove_from_reading_list'
+      gallery_ids: number[]
+      rating?: number
+      collection_id?: number
+      tags?: string[]
+    },
+    init?: RequestInit,
+  ) =>
     apiFetch<{ status: string; affected: number; deleted_dirs?: number }>(
       '/api/library/galleries/batch',
       {
         method: 'POST',
         body: JSON.stringify(body),
+        ...init,
       },
     ),
 
-  deleteGallery: (source: string, sourceId: string) =>
+  deleteGallery: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{ status: string; deleted_files: number }>(galleryApiPath(source, sourceId), {
       method: 'DELETE',
+      ...init,
     }),
 
-  getProgress: (source: string, sourceId: string) =>
-    apiFetch<ReadProgress>(galleryApiPath(source, sourceId, '/progress')),
+  getProgress: (source: string, sourceId: string, init?: RequestInit) =>
+    apiFetch<ReadProgress>(galleryApiPath(source, sourceId, '/progress'), init),
 
-  saveProgress: (source: string, sourceId: string, last_page: number) =>
+  saveProgress: (source: string, sourceId: string, last_page: number, init?: RequestInit) =>
     apiFetch<{ status: string }>(galleryApiPath(source, sourceId, '/progress'), {
       method: 'POST',
       body: JSON.stringify({ last_page }),
+      ...init,
     }),
 
-  getGalleryTags: (source: string, sourceId: string) =>
+  getGalleryTags: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{
       gallery_id: number
       tags: Array<{
@@ -400,21 +409,24 @@ const library = {
         confidence: number
         source: string
       }>
-    }>(galleryApiPath(source, sourceId, '/tags')),
+    }>(galleryApiPath(source, sourceId, '/tags'), init),
 
   getArtists: (
     params: { q?: string; source?: string; sort?: string; page?: number; limit?: number } = {},
+    init?: RequestInit,
   ) =>
     apiFetch<{ artists: ArtistSummary[]; total: number }>(
       `/api/library/artists${qs(params as Record<string, unknown>)}`,
+      init,
     ),
 
-  getArtistSummary: (artistId: string) =>
-    apiFetch<ArtistDetail>(`/api/library/artists/${encodeURIComponent(artistId)}/summary`),
+  getArtistSummary: (artistId: string, init?: RequestInit) =>
+    apiFetch<ArtistDetail>(`/api/library/artists/${encodeURIComponent(artistId)}/summary`, init),
 
   getArtistImages: (
     artistId: string,
     params: { page?: number; limit?: number; sort?: 'newest' | 'oldest' } = {},
+    init?: RequestInit,
   ) =>
     apiFetch<{
       artist_id: string
@@ -424,16 +436,19 @@ const library = {
       has_next: boolean
     }>(
       `/api/library/artists/${encodeURIComponent(artistId)}/images${qs(params as Record<string, unknown>)}`,
+      init,
     ),
 
   listFiles: (
     params: { q?: string; source?: string; import_mode?: string; page?: number; limit?: number } = {},
+    init?: RequestInit,
   ) =>
     apiFetch<{ directories: LibraryDirectory[]; total: number; page: number }>(
       `/api/library/files${qs(params as Record<string, unknown>)}`,
+      init,
     ),
 
-  listGalleryFiles: (source: string, sourceId: string) =>
+  listGalleryFiles: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{
       gallery_id: number
       source: string
@@ -442,48 +457,50 @@ const library = {
       category: string | null
       files: LibraryFile[]
       total_files: number
-    }>(`/api/library/files/${encodeURIComponent(source)}/${encodeOpaquePathId(sourceId)}`),
+    }>(`/api/library/files/${encodeURIComponent(source)}/${encodeOpaquePathId(sourceId)}`, init),
 
-  deleteImage: (source: string, sourceId: string, pageNum: number) =>
+  deleteImage: (source: string, sourceId: string, pageNum: number, init?: RequestInit) =>
     apiFetch<{ status: string; remaining_pages: number }>(
       galleryApiPath(source, sourceId, '/delete-image'),
-      { method: 'POST', body: JSON.stringify({ page_num: pageNum }) },
+      { method: 'POST', body: JSON.stringify({ page_num: pageNum }), ...init },
     ),
 
-  hideImage: (imageId: number) =>
+  hideImage: (imageId: number, init?: RequestInit) =>
     apiFetch<{ status: string; remaining_pages: number }>(`/api/library/images/${imageId}/hide`, {
       method: 'POST',
+      ...init,
     }),
 
-  restoreImage: (imageId: number) =>
+  restoreImage: (imageId: number, init?: RequestInit) =>
     apiFetch<{ status: string; remaining_pages: number }>(`/api/library/images/${imageId}/restore`, {
       method: 'POST',
+      ...init,
     }),
 
-  listHidden: (source: string, sourceId: string) =>
+  listHidden: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{
       gallery_id: number
       images: GalleryImage[]
       favorited_image_ids: number[]
-    }>(galleryApiPath(source, sourceId, '/hidden')),
+    }>(galleryApiPath(source, sourceId, '/hidden'), init),
 
-  listExcluded: (source: string, sourceId: string) =>
+  listExcluded: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{
       gallery_id: number
       excluded: Array<{ blob_sha256: string; excluded_at: string | null }>
-    }>(galleryApiPath(source, sourceId, '/excluded')),
+    }>(galleryApiPath(source, sourceId, '/excluded'), init),
 
-  restoreExcluded: (source: string, sourceId: string, sha256: string) =>
+  restoreExcluded: (source: string, sourceId: string, sha256: string, init?: RequestInit) =>
     apiFetch<{ status: string }>(
       `${galleryApiPath(source, sourceId, '/excluded')}/${encodeURIComponent(sha256)}`,
-      { method: 'DELETE' },
+      { method: 'DELETE', ...init },
     ),
 
-  favoriteImage: (imageId: number) =>
-    apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, { method: 'POST' }),
+  favoriteImage: (imageId: number, init?: RequestInit) =>
+    apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, { method: 'POST', ...init }),
 
-  unfavoriteImage: (imageId: number) =>
-    apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, { method: 'DELETE' }),
+  unfavoriteImage: (imageId: number, init?: RequestInit) =>
+    apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, { method: 'DELETE', ...init }),
 
   browseImages: (
     params: {
@@ -498,9 +515,11 @@ const library = {
       jump_at?: string
       favorited?: boolean
     } = {},
+    init?: RequestInit,
   ) =>
     apiFetch<import('./types').ImageBrowserResponse>(
       `/api/library/images${qs(params as Record<string, unknown>)}`,
+      init,
     ),
 
   imageTimeRange: (
@@ -512,9 +531,11 @@ const library = {
       gallery_id?: number
       favorited?: boolean
     } = {},
+    init?: RequestInit,
   ) =>
     apiFetch<import('./types').ImageTimeRangeResponse>(
       `/api/library/images/time_range${qs(params as Record<string, unknown>)}`,
+      init,
     ),
 
   imageTimelinePercentiles: (
@@ -527,49 +548,56 @@ const library = {
       buckets?: number
       favorited?: boolean
     } = {},
+    init?: RequestInit,
   ) =>
     apiFetch<import('./types').TimelinePercentilesResponse>(
       `/api/library/images/timeline_percentiles${qs(params as Record<string, unknown>)}`,
+      init,
     ),
 
-  trashList: (params: { limit?: number; offset?: number } = {}) =>
+  trashList: (params: { limit?: number; offset?: number } = {}, init?: RequestInit) =>
     apiFetch<{ total: number; galleries: Gallery[] }>(
       `/api/library/trash${qs(params as Record<string, unknown>)}`,
+      init,
     ),
 
-  trashCount: () => apiFetch<{ count: number }>('/api/library/trash/count'),
+  trashCount: (init?: RequestInit) => apiFetch<{ count: number }>('/api/library/trash/count', init),
 
-  restore: (source: string, sourceId: string) =>
+  restore: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{ status: string }>(galleryApiPath(source, sourceId, '/restore'), {
       method: 'POST',
+      ...init,
     }),
 
-  permanentDelete: (source: string, sourceId: string) =>
+  permanentDelete: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{ status: string; affected: number; deleted_dirs: number }>(
       galleryApiPath(source, sourceId, '/permanent-delete'),
       {
         method: 'POST',
+        ...init,
       },
     ),
 
-  emptyTrash: () =>
+  emptyTrash: (init?: RequestInit) =>
     apiFetch<{ status: string; affected: number }>('/api/library/trash/empty', {
       method: 'POST',
+      ...init,
     }),
 
-  checkUpdate: (source: string, sourceId: string) =>
+  checkUpdate: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{
       status: string
       reason?: string
       gallery?: Gallery
       changed_fields?: string[]
       pages_diff?: { old: number; new: number } | null
-    }>(galleryApiPath(source, sourceId, '/check-update'), { method: 'POST' }),
+    }>(galleryApiPath(source, sourceId, '/check-update'), { method: 'POST', ...init }),
 
   findSimilar: (
     imageId: number,
     threshold = 10,
     limit = 20,
+    init?: RequestInit,
   ): Promise<{
     image_id: number
     phash: string
@@ -582,7 +610,7 @@ const library = {
       phash: string
       distance: number
     }>
-  }> => apiFetch(`/api/library/images/${imageId}/similar?threshold=${threshold}&limit=${limit}`),
+  }> => apiFetch(`/api/library/images/${imageId}/similar?threshold=${threshold}&limit=${limit}`, init),
 }
 
 // ── Download ──────────────────────────────────────────────────────────
@@ -1164,6 +1192,7 @@ const pixiv = {
       duration?: string
       offset?: number
     } = {},
+    init?: RequestInit,
   ) => {
     const p = new URLSearchParams()
     if (params.word) p.set('word', params.word)
@@ -1171,7 +1200,7 @@ const pixiv = {
     if (params.search_target) p.set('search_target', params.search_target)
     if (params.duration) p.set('duration', params.duration)
     if (params.offset) p.set('offset', String(params.offset))
-    return apiFetch<PixivSearchResult>(`/api/pixiv/search?${p}`)
+    return apiFetch<PixivSearchResult>(`/api/pixiv/search?${p}`, init)
   },
 
   searchPublic: (
@@ -1183,6 +1212,7 @@ const pixiv = {
       s_mode?: string
       type?: string
     } = {},
+    init?: RequestInit,
   ) => {
     const p = new URLSearchParams()
     if (params.word) p.set('word', params.word)
@@ -1193,55 +1223,59 @@ const pixiv = {
     if (params.type) p.set('type', params.type)
     return apiFetch<PixivSearchResult & { popular?: PixivIllust[]; related_tags?: string[] }>(
       `/api/pixiv/search-public?${p}`,
+      init,
     )
   },
 
-  getIllust: (id: number) => apiFetch<PixivIllust>(`/api/pixiv/illust/${id}`),
+  getIllust: (id: number, init?: RequestInit) => apiFetch<PixivIllust>(`/api/pixiv/illust/${id}`, init),
 
-  getIllustPages: (id: number) =>
+  getIllustPages: (id: number, init?: RequestInit) =>
     apiFetch<{ pages: Array<{ page_num: number; url: string }>; page_count: number }>(
       `/api/pixiv/illust/${id}/pages`,
+      init,
     ),
 
-  getUser: (id: number) => apiFetch<PixivUserResult>(`/api/pixiv/user/${id}`),
+  getUser: (id: number, init?: RequestInit) => apiFetch<PixivUserResult>(`/api/pixiv/user/${id}`, init),
 
-  getUserIllusts: (id: number, offset = 0) =>
-    apiFetch<PixivSearchResult>(`/api/pixiv/user/${id}/illusts?offset=${offset}`),
+  getUserIllusts: (id: number, offset = 0, init?: RequestInit) =>
+    apiFetch<PixivSearchResult>(`/api/pixiv/user/${id}/illusts?offset=${offset}`, init),
 
-  getUserBookmarks: (id: number, offset = 0) =>
-    apiFetch<PixivSearchResult>(`/api/pixiv/user/${id}/bookmarks?offset=${offset}`),
+  getUserBookmarks: (id: number, offset = 0, init?: RequestInit) =>
+    apiFetch<PixivSearchResult>(`/api/pixiv/user/${id}/bookmarks?offset=${offset}`, init),
 
-  getMyBookmarks: (restrict = 'public', offset = 0) =>
-    apiFetch<PixivSearchResult>(`/api/pixiv/bookmarks?restrict=${restrict}&offset=${offset}`),
+  getMyBookmarks: (restrict = 'public', offset = 0, init?: RequestInit) =>
+    apiFetch<PixivSearchResult>(`/api/pixiv/bookmarks?restrict=${restrict}&offset=${offset}`, init),
 
-  getFollowingFeed: (offset = 0) =>
-    apiFetch<PixivSearchResult>(`/api/pixiv/following/feed?offset=${offset}`),
+  getFollowingFeed: (offset = 0, init?: RequestInit) =>
+    apiFetch<PixivSearchResult>(`/api/pixiv/following/feed?offset=${offset}`, init),
 
-  getFollowing: (restrict = 'public', offset = 0) =>
+  getFollowing: (restrict = 'public', offset = 0, init?: RequestInit) =>
     apiFetch<{ user_previews: PixivUserPreview[]; next_offset: number | null }>(
       `/api/pixiv/following?restrict=${restrict}&offset=${offset}`,
+      init,
     ),
 
   imageProxyUrl: (url: string) => `/api/pixiv/image-proxy?url=${encodeURIComponent(url)}`,
 
-  addBookmark: (id: number, restrict: 'public' | 'private' = 'public') =>
+  addBookmark: (id: number, restrict: 'public' | 'private' = 'public', init?: RequestInit) =>
     apiFetch<{ ok: boolean }>(`/api/pixiv/illust/${id}/bookmark?restrict=${restrict}`, {
       method: 'POST',
+      ...init,
     }),
 
-  deleteBookmark: (id: number) =>
-    apiFetch<{ ok: boolean }>(`/api/pixiv/illust/${id}/bookmark`, { method: 'DELETE' }),
+  deleteBookmark: (id: number, init?: RequestInit) =>
+    apiFetch<{ ok: boolean }>(`/api/pixiv/illust/${id}/bookmark`, { method: 'DELETE', ...init }),
 
-  getBookmarkStatus: (id: number) =>
-    apiFetch<{ is_bookmarked: boolean }>(`/api/pixiv/illust/${id}/bookmark`),
+  getBookmarkStatus: (id: number, init?: RequestInit) =>
+    apiFetch<{ is_bookmarked: boolean }>(`/api/pixiv/illust/${id}/bookmark`, init),
 
-  followUser: (id: number) =>
-    apiFetch<{ ok: boolean }>(`/api/pixiv/user/${id}/follow`, { method: 'POST' }),
+  followUser: (id: number, init?: RequestInit) =>
+    apiFetch<{ ok: boolean }>(`/api/pixiv/user/${id}/follow`, { method: 'POST', ...init }),
 
-  unfollowUser: (id: number) =>
-    apiFetch<{ ok: boolean }>(`/api/pixiv/user/${id}/follow`, { method: 'DELETE' }),
+  unfollowUser: (id: number, init?: RequestInit) =>
+    apiFetch<{ ok: boolean }>(`/api/pixiv/user/${id}/follow`, { method: 'DELETE', ...init }),
 
-  ranking: (params: { mode?: string; content?: string; date?: string; page?: number } = {}) => {
+  ranking: (params: { mode?: string; content?: string; date?: string; page?: number } = {}, init?: RequestInit) => {
     const p = new URLSearchParams()
     if (params.mode) p.set('mode', params.mode)
     if (params.content) p.set('content', params.content)
@@ -1256,7 +1290,7 @@ const pixiv = {
       prev_date: string | null
       next_date: string | null
       rank_total: number
-    }>(`/api/pixiv/ranking?${p}`)
+    }>(`/api/pixiv/ranking?${p}`, init)
   },
 }
 

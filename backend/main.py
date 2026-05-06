@@ -95,6 +95,17 @@ async def lifespan(app: FastAPI):
     logger.info("Shutting down...")
     await site_config_service.stop_listener()
     await close_queue()
+    from services.eh_client import shutdown_shared_clients as _shutdown_eh_clients
+    from services.pixiv_client import shutdown_shared_pixiv_clients as _shutdown_pixiv_clients
+
+    try:
+        await _shutdown_eh_clients()
+    except Exception:
+        logger.exception("Error shutting down EH shared clients")
+    try:
+        await _shutdown_pixiv_clients()
+    except Exception:
+        logger.exception("Error shutting down Pixiv shared clients")
     await close_redis()
     await engine.dispose()
     logger.info("Shutdown complete")

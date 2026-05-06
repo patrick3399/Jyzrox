@@ -1,6 +1,8 @@
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 
+type SwrOpts = { signal?: AbortSignal }
+
 export interface NavCounts {
   '/library': number
   '/subscriptions': number
@@ -18,7 +20,7 @@ const SWR_CONFIG = {
 function useLibraryCount(enabled: boolean): number {
   const { data } = useSWR(
     enabled ? 'nav-counts/library' : null,
-    () => api.library.getGalleries({ limit: 1 }),
+    (_: unknown, { signal }: SwrOpts = {}) => api.library.getGalleries({ limit: 1 }, { signal }),
     SWR_CONFIG,
   )
   return data?.total ?? 0
@@ -45,7 +47,7 @@ function useCollectionsCount(enabled: boolean): number {
 function useTrashCount(enabled: boolean): number {
   const { data } = useSWR(
     enabled ? 'nav-counts/trash' : null,
-    () => api.library.trashCount(),
+    (_: unknown, { signal }: SwrOpts = {}) => api.library.trashCount({ signal }),
     SWR_CONFIG,
   )
   return data?.count ?? 0

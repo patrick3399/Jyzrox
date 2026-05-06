@@ -26,8 +26,9 @@ export function useGalleryCategories() {
 export function useLibraryGalleries(params: GallerySearchParams = {}) {
   // Include cursor in the SWR key so each cursor page gets its own cache slot.
   // When cursor is absent the key degrades to the same shape as before.
-  return useSWR(['library/galleries', params.cursor ?? params.page ?? 0, params], () =>
-    api.library.getGalleries(params),
+  return useSWR(
+    ['library/galleries', params.cursor ?? params.page ?? 0, params],
+    (_: unknown, { signal }: SwrOpts = {}) => api.library.getGalleries(params, { signal }),
   )
 }
 
@@ -82,7 +83,8 @@ export function useInfiniteLibraryGalleries(
   const { data, error, size, setSize, isValidating, isLoading, mutate } =
     useSWRInfinite<GalleryListResponse>(
       getKey,
-      ([, fetchParams]: [string, GallerySearchParams]) => api.library.getGalleries(fetchParams),
+      ([, fetchParams]: [string, GallerySearchParams], { signal }: SwrOpts = {}) =>
+        api.library.getGalleries(fetchParams, { signal }),
       { revalidateOnFocus: false },
     )
 
@@ -110,14 +112,18 @@ export function useInfiniteLibraryGalleries(
 }
 
 export function useLibraryGallery(source: string | null, sourceId: string | null) {
-  return useSWR(source && sourceId ? ['library/gallery', source, sourceId] : null, () =>
-    api.library.getGallery(source!, sourceId!),
+  return useSWR(
+    source && sourceId ? ['library/gallery', source, sourceId] : null,
+    ([, src, sid]: [string, string, string], { signal }: SwrOpts = {}) =>
+      api.library.getGallery(src, sid, { signal }),
   )
 }
 
 export function useGalleryImages(source: string | null, sourceId: string | null) {
-  return useSWR(source && sourceId ? ['gallery/images', source, sourceId] : null, () =>
-    api.library.getImages(source!, sourceId!),
+  return useSWR(
+    source && sourceId ? ['gallery/images', source, sourceId] : null,
+    ([, src, sid]: [string, string, string], { signal }: SwrOpts = {}) =>
+      api.library.getImages(src, sid, undefined, { signal }),
   )
 }
 
@@ -138,8 +144,8 @@ export function useInfiniteGalleryImages(
 
   const { data, error, size, setSize, isLoading, mutate } = useSWRInfinite(
     getKey,
-    ([, src, sid, opts]: [string, string, string, { page: number; limit: number }]) =>
-      api.library.getImages(src, sid, opts),
+    ([, src, sid, opts]: [string, string, string, { page: number; limit: number }], { signal }: SwrOpts = {}) =>
+      api.library.getImages(src, sid, opts, { signal }),
     { revalidateOnFocus: false },
   )
 
@@ -175,8 +181,10 @@ export function useInfiniteGalleryImages(
 }
 
 export function useGalleryProgress(source: string | null, sourceId: string | null) {
-  return useSWR(source && sourceId ? ['gallery/progress', source, sourceId] : null, () =>
-    api.library.getProgress(source!, sourceId!),
+  return useSWR(
+    source && sourceId ? ['gallery/progress', source, sourceId] : null,
+    ([, src, sid]: [string, string, string], { signal }: SwrOpts = {}) =>
+      api.library.getProgress(src, sid, { signal }),
   )
 }
 
@@ -258,7 +266,7 @@ export function useEhGalleryPreviews(gid: number | null, token: string | null) {
 export function useEhGalleryComments(gid: number | null, token: string | null, enabled = false) {
   return useSWR(
     enabled && gid && token ? ['eh/comments', gid, token] : null,
-    ([, g, t]: [string, number, string]) => api.eh.getComments(g, t),
+    ([, g, t]: [string, number, string], { signal }: SwrOpts = {}) => api.eh.getComments(g, t, { signal }),
     { revalidateOnFocus: false },
   )
 }

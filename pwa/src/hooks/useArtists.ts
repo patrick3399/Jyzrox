@@ -3,6 +3,8 @@
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 
+type SwrOpts = { signal?: AbortSignal }
+
 export function useArtists(
   params: {
     q?: string
@@ -13,12 +15,13 @@ export function useArtists(
   } = {},
 ) {
   const key = ['artists', JSON.stringify(params)]
-  return useSWR(key, () => api.library.getArtists(params))
+  return useSWR(key, (_: unknown, { signal }: SwrOpts = {}) => api.library.getArtists(params, { signal }))
 }
 
 export function useArtistSummary(artistId: string) {
-  return useSWR(artistId ? ['artist-summary', artistId] : null, () =>
-    api.library.getArtistSummary(artistId),
+  return useSWR(
+    artistId ? ['artist-summary', artistId] : null,
+    ([, id]: [string, string], { signal }: SwrOpts = {}) => api.library.getArtistSummary(id, { signal }),
   )
 }
 
@@ -30,7 +33,9 @@ export function useArtistImages(
     sort?: 'newest' | 'oldest'
   } = {},
 ) {
-  return useSWR(artistId ? ['artist-images', artistId, JSON.stringify(params)] : null, () =>
-    api.library.getArtistImages(artistId, params),
+  return useSWR(
+    artistId ? ['artist-images', artistId, JSON.stringify(params)] : null,
+    ([, id]: [string, string, string], { signal }: SwrOpts = {}) =>
+      api.library.getArtistImages(id, params, { signal }),
   )
 }

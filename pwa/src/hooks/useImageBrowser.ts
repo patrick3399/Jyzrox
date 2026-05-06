@@ -3,6 +3,8 @@ import { useMemo } from 'react'
 import { api } from '@/lib/api'
 import type { ImageBrowserResponse } from '@/lib/types'
 
+type SwrOpts = { signal?: AbortSignal }
+
 interface UseImageBrowserParams {
   tags?: string[]
   exclude_tags?: string[]
@@ -31,8 +33,10 @@ export function useImageBrowser(params: UseImageBrowserParams = {}) {
 
   const { data, error, size, setSize, isLoading, mutate } = useSWRInfinite<ImageBrowserResponse>(
     getKey,
-    ([, fetchParams]: [string, UseImageBrowserParams & { cursor?: string; jump_at?: string }]) =>
-      api.library.browseImages(fetchParams),
+    (
+      [, fetchParams]: [string, UseImageBrowserParams & { cursor?: string; jump_at?: string }],
+      { signal }: SwrOpts = {},
+    ) => api.library.browseImages(fetchParams, { signal }),
     { revalidateOnFocus: false },
   )
 
