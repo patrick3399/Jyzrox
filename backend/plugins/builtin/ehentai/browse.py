@@ -17,12 +17,12 @@ from fastapi.responses import JSONResponse
 from sqlalchemy import select
 
 from core.auth import require_auth
-from core.version import __version__
 from core.config import settings as app_settings
-from core.errors import api_error, parse_accept_language
 from core.database import async_session
-from core.rate_limit import check_rate_limit, get_client_ip, _is_private
+from core.errors import api_error, parse_accept_language
+from core.rate_limit import _is_private, check_rate_limit, get_client_ip
 from core.redis_client import eh_semaphore, get_redis
+from core.version import __version__
 from db.models import BlockedTag
 from plugins.base import BrowsePlugin
 from plugins.models import (
@@ -652,7 +652,7 @@ async def get_gallery_images_paginated(
                         await asyncio.sleep(0.3)
 
                     url_html = f"{client.base_url}/g/{gid}/{token}/?p={dp}"
-                    resp = await client._http.get(url_html)
+                    resp = await client._http_get(url_html)
                     resp.raise_for_status()
                     client._check_auth(resp.text, resp)
 

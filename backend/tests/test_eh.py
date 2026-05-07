@@ -1034,6 +1034,43 @@ class TestEhGalleryImagesPaginated:
         assert data["has_more"] is False
         assert data["total"] == 30
 
+    async def test_gallery_images_paginated_uses_cookie_aware_http_helper(self, client):
+        """Reader token fetches must use EhClient._http_get so EH cookies are sent."""
+        gallery_cache = _FAKE_GALLERY_META.copy()
+        eh_mock = _make_eh_client_mock()
+        eh_mock.base_url = "https://exhentai.org"
+        eh_mock._http = MagicMock()
+        eh_mock._http.get = AsyncMock(side_effect=AssertionError("raw shared client must not be used"))
+        eh_mock._http_get = AsyncMock(return_value=_make_http_response(200, text="<html>detail page</html>"))
+        eh_mock._check_auth = MagicMock(return_value=None)
+        eh_mock._parse_detail_html = MagicMock(
+            return_value=(
+                {1: "tok001", 2: "tok002"},
+                {1: "https://ehgt.org/p/001.jpg", 2: "https://ehgt.org/p/002.jpg"},
+            )
+        )
+
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=gallery_cache),
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_json", new_callable=AsyncMock),
+            patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value={}),
+            patch("services.cache.set_imagelist_cache", new_callable=AsyncMock),
+            patch("services.cache.get_preview_cache", new_callable=AsyncMock, return_value={}),
+            patch("services.cache.set_preview_cache", new_callable=AsyncMock),
+        ):
+            resp = await client.get(
+                "/api/eh/gallery/12345/abcdef/images-paginated",
+                params={"start_page": 0, "count": 2},
+            )
+
+        assert resp.status_code == 200
+        eh_mock._http.get.assert_not_awaited()
+        eh_mock._http_get.assert_awaited_once_with("https://exhentai.org/g/12345/abcdef/?p=0")
+        data = resp.json()
+        assert data["images"] == [{"page": 1, "token": "tok001"}, {"page": 2, "token": "tok002"}]
+
 
 # ---------------------------------------------------------------------------
 # TestEhImageProxy
