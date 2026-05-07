@@ -79,6 +79,40 @@ class TestGetAlerts:
         assert resp.status_code == 401
 
 
+class TestDismissAlerts:
+    """POST /api/settings/alerts/dismiss — removes queued system alerts."""
+
+    async def test_dismiss_alert_removes_matching_messages(self, client, mock_redis):
+        """Dismiss should remove all queued copies of one alert message."""
+        mock_redis.lrem = AsyncMock(return_value=3)
+        with patch("services.cache.get_redis", return_value=mock_redis):
+            resp = await client.post(
+                "/api/settings/alerts/dismiss",
+                json={"message": "ExHentai access denied (Sad Panda)"},
+            )
+
+        assert resp.status_code == 200
+        assert resp.json() == {"status": "ok", "dismissed": 3}
+        mock_redis.lrem.assert_awaited_once_with(
+            "system:alerts",
+            0,
+            "ExHentai access denied (Sad Panda)",
+        )
+
+    async def test_dismiss_alert_rejects_empty_message(self, client):
+        """Empty dismiss messages are rejected."""
+        resp = await client.post("/api/settings/alerts/dismiss", json={"message": ""})
+        assert resp.status_code == 400
+
+    async def test_dismiss_alert_requires_auth(self, unauthed_client):
+        """Unauthenticated request should return 401."""
+        resp = await unauthed_client.post(
+            "/api/settings/alerts/dismiss",
+            json={"message": "Cookie expired"},
+        )
+        assert resp.status_code == 401
+
+
 # ---------------------------------------------------------------------------
 # Rate limit
 # ---------------------------------------------------------------------------

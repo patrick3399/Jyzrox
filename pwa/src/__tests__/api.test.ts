@@ -170,6 +170,23 @@ describe('apiFetch', () => {
     const [url] = vi.mocked(fetch).mock.calls[0]
     expect(url).toBe('/api/library/galleries/local/42')
   })
+
+  it('should post dashboard alert dismiss requests with the alert message', async () => {
+    const { api } = await import('../lib/api')
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({ jsonBody: { status: 'ok', dismissed: 2 } }),
+    )
+
+    await api.settings.dismissAlert('ExHentai access denied (Sad Panda)')
+
+    const [url, init] = vi.mocked(fetch).mock.calls[0]
+    expect(url).toBe('/api/settings/alerts/dismiss')
+    expect((init as RequestInit).method).toBe('POST')
+    expect((init as RequestInit).body).toBe(
+      JSON.stringify({ message: 'ExHentai access denied (Sad Panda)' }),
+    )
+  })
 })
 
 // ── qs() behaviour (tested via observable fetch URL) ─────────────────

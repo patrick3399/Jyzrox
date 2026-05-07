@@ -781,6 +781,12 @@ const settings = {
 
   getAlerts: () => apiFetch<{ alerts: string[] }>('/api/settings/alerts'),
 
+  dismissAlert: (message: string) =>
+    apiFetch<{ status: string; dismissed: number }>('/api/settings/alerts/dismiss', {
+      method: 'POST',
+      body: JSON.stringify({ message }),
+    }),
+
   getFeatures: () =>
     apiFetch<{
       csrf_enabled: boolean

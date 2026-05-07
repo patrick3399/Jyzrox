@@ -47,7 +47,13 @@ function alertStyles(severity: 'error' | 'warning' | 'info') {
   }
 }
 
-function SystemAlerts({ alerts }: { alerts: string[] }) {
+function SystemAlerts({
+  alerts,
+  onDismiss,
+}: {
+  alerts: string[]
+  onDismiss: (message: string) => void
+}) {
   const [dismissed, setDismissed] = useState<Set<string>>(new Set())
 
   useEffect(() => {
@@ -70,9 +76,10 @@ function SystemAlerts({ alerts }: { alerts: string[] }) {
       }
       return next
     })
+    onDismiss(msg)
   }
 
-  const visible = alerts.filter((a) => !dismissed.has(a))
+  const visible = [...new Set(alerts)].filter((a) => !dismissed.has(a))
   if (visible.length === 0) return null
 
   return (
@@ -136,12 +143,29 @@ export default function Dashboard() {
     focusThrottleInterval: 10000,
   })
 
-  const { data: alertsData } = useSWR('dashboard/alerts', () => api.settings.getAlerts(), {
-    revalidateOnFocus: false,
-    dedupingInterval: 60000,
-  })
+  const { data: alertsData, mutate: mutateAlerts } = useSWR(
+    'dashboard/alerts',
+    () => api.settings.getAlerts(),
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 60000,
+    },
+  )
 
   const alerts = alertsData?.alerts ?? []
+
+  const dismissAlert = useCallback(
+    (message: string) => {
+      void mutateAlerts(
+        (current) => ({ alerts: (current?.alerts ?? []).filter((alert) => alert !== message) }),
+        { revalidate: false },
+      )
+      void api.settings.dismissAlert(message).catch(() => {
+        void mutateAlerts()
+      })
+    },
+    [mutateAlerts],
+  )
 
   const activeJobs = (jobsData?.jobs ?? []).filter(
     (j: DownloadJob) => j.status === 'queued' || j.status === 'running',
@@ -196,7 +220,7 @@ export default function Dashboard() {
       </div>
 
       {/* System Alerts */}
-      {alerts.length > 0 && <SystemAlerts alerts={alerts} />}
+      {alerts.length > 0 && <SystemAlerts alerts={alerts} onDismiss={dismissAlert} />}
 
       {/* Quick Links */}
       <div>

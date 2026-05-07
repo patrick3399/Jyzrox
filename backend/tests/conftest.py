@@ -723,6 +723,7 @@ def mock_redis():
     redis.zremrangebyscore = AsyncMock(return_value=0)
     redis.lpush = AsyncMock(return_value=1)
     redis.lrange = AsyncMock(return_value=[])
+    redis.lrem = AsyncMock(return_value=1)
     redis.ltrim = AsyncMock(return_value=True)
     redis.scan = AsyncMock(return_value=(0, []))
     return redis

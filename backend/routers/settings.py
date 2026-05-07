@@ -19,7 +19,7 @@ from core.config import settings as app_settings
 from core.database import async_session
 from core.redis_client import get_redis
 from db.models import Credential
-from services.cache import get_system_alerts, push_system_alert
+from services.cache import dismiss_system_alert, get_system_alerts, push_system_alert
 from services.credential import get_credential, list_credentials, set_credential
 from services.eh_client import EhClient
 
@@ -56,6 +56,10 @@ class PixivCookieRequest(BaseModel):
 class PixivOAuthCallbackRequest(BaseModel):
     code: str
     code_verifier: str
+
+
+class DismissAlertRequest(BaseModel):
+    message: str
 
 
 class FeatureTogglePatch(BaseModel):
@@ -767,6 +771,14 @@ async def set_eh_site_preference(
 async def get_alerts(_: dict = Depends(require_auth)):
     """Return queued system alerts (cookie expiry, etc.)."""
     return {"alerts": await get_system_alerts()}
+
+
+@router.post("/alerts/dismiss")
+async def dismiss_alert(req: DismissAlertRequest, _: dict = Depends(require_auth)):
+    """Dismiss one queued system alert message across all duplicates."""
+    if not req.message:
+        raise HTTPException(status_code=400, detail="message is required")
+    return {"status": "ok", "dismissed": await dismiss_system_alert(req.message)}
 
 
 # ── API Tokens ────────────────────────────────────────────────────────

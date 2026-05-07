@@ -28,6 +28,7 @@ def _make_redis(**overrides) -> AsyncMock:
     r.lpush = AsyncMock(return_value=1)
     r.ltrim = AsyncMock(return_value=True)
     r.lrange = AsyncMock(return_value=[])
+    r.lrem = AsyncMock(return_value=1)
     for attr, value in overrides.items():
         setattr(r, attr, value)
     return r
@@ -169,13 +170,27 @@ async def test_push_system_alert_calls_lpush_and_ltrim():
 
         await push_system_alert("disk usage above 90%")
 
+    redis.lrange.assert_awaited_once_with("system:alerts", 0, 49)
     redis.lpush.assert_awaited_once_with("system:alerts", "disk usage above 90%")
     redis.ltrim.assert_awaited_once_with("system:alerts", 0, 49)
 
 
+async def test_push_system_alert_skips_duplicate_message():
+    """push_system_alert must not append a duplicate alert message."""
+    redis = _make_redis(lrange=AsyncMock(return_value=[b"disk usage above 90%"]))
+
+    with patch("services.cache.get_redis", return_value=redis):
+        from services.cache import push_system_alert
+
+        await push_system_alert("disk usage above 90%")
+
+    redis.lpush.assert_not_awaited()
+    redis.ltrim.assert_not_awaited()
+
+
 async def test_get_system_alerts_returns_decoded_list():
     """get_system_alerts should decode byte entries and return plain strings."""
-    raw_alerts = [b"alert one", b"alert two", "already a string"]
+    raw_alerts = [b"alert one", b"alert two", "already a string", b"alert one"]
     redis = _make_redis(lrange=AsyncMock(return_value=raw_alerts))
 
     with patch("services.cache.get_redis", return_value=redis):
@@ -209,6 +224,19 @@ async def test_clear_system_alerts_calls_delete():
         await clear_system_alerts()
 
     redis.delete.assert_awaited_once_with("system:alerts")
+
+
+async def test_dismiss_system_alert_removes_all_matching_messages():
+    """dismiss_system_alert removes all copies of the given alert message."""
+    redis = _make_redis(lrem=AsyncMock(return_value=3))
+
+    with patch("services.cache.get_redis", return_value=redis):
+        from services.cache import dismiss_system_alert
+
+        result = await dismiss_system_alert("alert one")
+
+    assert result == 3
+    redis.lrem.assert_awaited_once_with("system:alerts", 0, "alert one")
 
 
 # ---------------------------------------------------------------------------

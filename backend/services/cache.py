@@ -121,6 +121,10 @@ async def set_pixiv_image_cache(url_hash: str, data: bytes) -> None:
 
 async def push_system_alert(message: str) -> None:
     r = get_redis()
+    raw = await r.lrange("system:alerts", 0, 49)
+    existing = {v.decode() if isinstance(v, bytes) else v for v in raw}
+    if message in existing:
+        return
     await r.lpush("system:alerts", message)
     await r.ltrim("system:alerts", 0, 49)  # Keep last 50
 
@@ -128,7 +132,21 @@ async def push_system_alert(message: str) -> None:
 async def get_system_alerts() -> list[str]:
     r = get_redis()
     raw = await r.lrange("system:alerts", 0, 49)
-    return [v.decode() if isinstance(v, bytes) else v for v in raw]
+    alerts: list[str] = []
+    seen: set[str] = set()
+    for value in raw:
+        msg = value.decode() if isinstance(value, bytes) else value
+        if msg in seen:
+            continue
+        seen.add(msg)
+        alerts.append(msg)
+    return alerts
+
+
+async def dismiss_system_alert(message: str) -> int:
+    r = get_redis()
+    removed = await r.lrem("system:alerts", 0, message)
+    return int(removed or 0)
 
 
 async def clear_system_alerts() -> None:
