@@ -297,7 +297,7 @@ export default function ExplorerPage() {
 
   const galleryTitle = currentGallery?.title ?? fileData?.title ?? ''
   const files: LibraryFile[] = fileData?.files ?? []
-  const totalDirs = currentSource !== null ? filteredDirectories.length : (dirData?.total ?? 0)
+  const _totalDirs = currentSource !== null ? filteredDirectories.length : (dirData?.total ?? 0)
   const totalPages = Math.ceil((dirData?.total ?? 0) / PAGE_LIMIT)
 
   // Group all directories by source for the root view

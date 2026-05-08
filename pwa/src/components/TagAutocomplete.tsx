@@ -27,7 +27,7 @@ export function TagAutocomplete({
   placeholder,
   className,
   clearOnSelect = true,
-  multiple = false,
+  multiple: _multiple = false,
   value,
   onChange,
 }: TagAutocompleteProps) {

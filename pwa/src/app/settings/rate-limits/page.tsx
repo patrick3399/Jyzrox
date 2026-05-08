@@ -106,7 +106,6 @@ export default function RateLimitsSettingsPage() {
         .catch(() => toast.error(t('common.failedToLoad')))
         .finally(() => setLoading(false))
       api.settings
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .getFeatures()
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
         .then((f: any) => {

@@ -1000,7 +1000,7 @@ function ThumbnailStrip({
   onPageSelect,
   previews,
   onScrollToPage,
-  isVisible,
+  isVisible: _isVisible,
   readingDirection,
 }: ThumbnailStripProps) {
   const activeRef = useRef<HTMLButtonElement | null>(null)
@@ -1208,7 +1208,7 @@ function ThumbnailStrip({
                 const spriteUrl = parts[0]
                 const ox = Number(parts[1])
                 const cellW = Number(parts[2]) || 200
-                const cellH = Number(parts[3]) || 300
+                const _cellH = Number(parts[3]) || 300
                 const proxyUrl = `/api/eh/thumb-proxy?url=${encodeURIComponent(spriteUrl)}`
                 const naturalSize = spriteNaturalSizes[proxyUrl]
                 // cellH from EH HTML is the DISPLAY div height, not the sprite
@@ -1597,23 +1597,6 @@ export default function Reader({
     setScaleMode,
     setReadingDirection,
   } = useReaderState(initialPage, totalPages, source, sourceId)
-
-  // Reading direction aware next/prev
-  const nextPage = useCallback(() => {
-    if (state.readingDirection === 'rtl') {
-      rawPrevPage()
-    } else {
-      rawNextPage()
-    }
-  }, [state.readingDirection, rawNextPage, rawPrevPage])
-
-  const prevPage = useCallback(() => {
-    if (state.readingDirection === 'rtl') {
-      rawNextPage()
-    } else {
-      rawPrevPage()
-    }
-  }, [state.readingDirection, rawNextPage, rawPrevPage])
 
   // Reader settings (status bar, auto advance)
   const [readerSettings, setReaderSettings] = useState<ReaderSettings>(DEFAULT_READER_SETTINGS)

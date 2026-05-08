@@ -1,17 +1,3 @@
-// Known filter prefixes that map to structured fields
-const KNOWN_FILTER_KEYS = new Set([
-  'title',
-  'source',
-  'rating',
-  'favorited',
-  'sort',
-  'collection',
-  'artist_id',
-  'category',
-  'import',
-  'rl',
-])
-
 export interface ParsedFilters {
   tags: string[] // "namespace:name" tokens (with colon, not a known filter prefix)
   nameOnlyTags: string[] // bare name tokens (without colon, not a known filter prefix)

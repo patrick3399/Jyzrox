@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useCallback, useEffect, useRef, Suspense } from 'react'
+import { useState, useEffect, useRef, Suspense } from 'react'
 import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
@@ -195,7 +195,7 @@ function SearchResults({
   onDurationChange,
   focusedIndex,
   onColCountChange,
-  saveScroll,
+  saveScroll: _saveScroll,
   viewMode,
 }: {
   query: string
@@ -768,7 +768,7 @@ function RankingTab({
   onColCountChange,
   saveScroll,
   restoredPages,
-  viewMode,
+  viewMode: _viewMode,
 }: {
   credentialsMissing: boolean
   mode: string

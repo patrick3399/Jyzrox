@@ -52,7 +52,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
       }
       if (e.key === 'ArrowUp' || e.key === 'Escape') {
         e.preventDefault()
-        history.length > 1 ? router.back() : router.push('/pixiv')
+        if (history.length > 1) { router.back() } else { router.push('/pixiv') }
       }
     }
     window.addEventListener('keydown', handler)

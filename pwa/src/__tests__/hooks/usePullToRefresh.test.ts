@@ -27,14 +27,10 @@ vi.mock('@/lib/i18n', () => ({
 // Import after mocks
 import { usePullToRefresh } from '@/hooks/usePullToRefresh'
 
-// ── Constants mirrored from implementation ────────────────────────────
-
-const THRESHOLD = 60
-const MAX_PULL = 100
-
 // ── Touch event simulation helpers ────────────────────────────────────
 
 function simulateTouch(type: string, clientY: number) {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const event = new Event(type, { bubbles: true }) as any
   if (type !== 'touchend') {
     event.touches = [{ clientY, clientX: 0 }]
@@ -102,7 +98,7 @@ describe('usePullToRefresh — pulling state transitions', () => {
 describe('usePullToRefresh — touch end handling', () => {
   it('test_pullToRefresh_touchEnd_withSufficientPull_triggersRefresh', async () => {
     const onRefresh = vi.fn().mockResolvedValue(undefined)
-    const { result } = renderHook(() => usePullToRefresh({ onRefresh }))
+    const { result: _result } = renderHook(() => usePullToRefresh({ onRefresh }))
 
     // Pull far enough to exceed clamped THRESHOLD
     await act(async () => {

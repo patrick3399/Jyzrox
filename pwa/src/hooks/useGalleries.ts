@@ -80,7 +80,7 @@ export function useInfiniteLibraryGalleries(
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [lastJobUpdate])
 
-  const { data, error, size, setSize, isValidating, isLoading, mutate } =
+  const { data, error, size, setSize, isValidating: _isValidating, isLoading, mutate } =
     useSWRInfinite<GalleryListResponse>(
       getKey,
       ([, fetchParams]: [string, GallerySearchParams], { signal }: SwrOpts = {}) =>

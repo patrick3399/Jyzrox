@@ -126,7 +126,7 @@ describe('useSequentialPrefetch', () => {
     it('should continue the chain (not stall) when an image errors', async () => {
       const images = makeImages(5)
 
-      const { result } = renderHook(() => useSequentialPrefetch(images, 1, true))
+      const { result: _result } = renderHook(() => useSequentialPrefetch(images, 1, true))
 
       // Error page 2
       await act(async () => {

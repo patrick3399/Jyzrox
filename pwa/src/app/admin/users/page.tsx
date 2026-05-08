@@ -20,12 +20,6 @@ function formatDate(dateStr: string | null): string {
   })
 }
 
-function roleLabel(role: UserRole): string {
-  if (role === 'admin') return t('admin.users.roleAdmin')
-  if (role === 'member') return t('admin.users.roleMember')
-  return t('admin.users.roleViewer')
-}
-
 export default function AdminUsersPage() {
   useLocale()
   const router = useRouter()

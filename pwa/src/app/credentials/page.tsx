@@ -228,7 +228,7 @@ function EhFieldsFlow({ onSaved }: { onSaved: (account: EhAccount) => void }) {
 // ── PixivOAuthFlow ────────────────────────────────────────────────────────
 
 function PixivOAuthFlow({ onSaved }: { onSaved: (username: string) => void }) {
-  const [oauthUrl, setOauthUrl] = useState('')
+  const [_oauthUrl, setOauthUrl] = useState('')
   const [codeVerifier, setCodeVerifier] = useState('')
   const [callbackUrl, setCallbackUrl] = useState('')
   const [saving, setSaving] = useState(false)

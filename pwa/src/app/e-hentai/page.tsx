@@ -1,7 +1,6 @@
 'use client'
 
 import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react'
-import Link from 'next/link'
 import { useRouter, useSearchParams } from 'next/navigation'
 import { useEhSearch, useEhFavorites, useEhPopular, useEhToplist } from '@/hooks/useGalleries'
 import { useCreateSubscription } from '@/hooks/useSubscriptions'
@@ -517,7 +516,7 @@ function BrowsePage() {
   const [scrollGalleries, setScrollGalleries] = useState<EhGallery[]>(
     restored?.scrollGalleries ?? [],
   )
-  const [scrollPage, setScrollPage] = useState(0)
+  const [_scrollPage, setScrollPage] = useState(0)
   const [scrollNextGid, setScrollNextGid] = useState<number | null>(restored?.scrollNextGid ?? null)
   const scrollNeedsSeedRef = useRef(
     restored?.scrollGalleries != null && restored.scrollGalleries.length > 0 ? false : true,
@@ -721,7 +720,8 @@ function BrowsePage() {
     advSearch,
     pageFrom,
     pageTo,
-  ]) // eslint-disable-line react-hooks/exhaustive-deps
+    router,
+  ])
 
   // Compute f_cats bitmask from selected categories (multi-select)
   const computedFCats = (() => {
@@ -799,6 +799,7 @@ function BrowsePage() {
     requestAnimationFrame(() => {
       window.scrollTo(0, restored.scrollY)
     })
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- activeTab intentionally excluded to avoid re-triggering restore on tab change
   }, [
     data,
     favData,
@@ -806,7 +807,8 @@ function BrowsePage() {
     scrollGalleries.length,
     favScrollGalleries.length,
     favPaginatedGalleries.length,
-  ]) // eslint-disable-line react-hooks/exhaustive-deps
+    restored?.scrollY,
+  ])
 
   // ── Infinite scroll: reset when search changes ─────────
   useEffect(() => {
@@ -2084,7 +2086,7 @@ function BrowsePage() {
             {Array.from({ length: 10 }, (_, i) => {
               const catData = favData?.categories?.find((c) => c.index === i)
               const name = catData?.name || `Favorites ${i}`
-              const count = catData?.count
+              const _count = catData?.count
               const color = FAV_COLORS[i]
               const isActive = favCat === String(i)
               return (

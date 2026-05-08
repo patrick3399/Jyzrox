@@ -100,6 +100,7 @@ export function JustifiedGrid<T>({
   }, [items, containerWidth, targetRowHeight, boxSpacing, getAspectRatio])
 
   // Element-scroll virtualizer — used when a custom scrollElement is provided.
+  // eslint-disable-next-line react-hooks/incompatible-library -- TanStack Virtual returns non-memoizable functions; React Compiler skips this component safely
   const elementVirtualizer = useVirtualizer({
     count: rows.length,
     estimateSize: (i) => rows[i]?.height + boxSpacing || targetRowHeight,

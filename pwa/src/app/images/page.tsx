@@ -313,7 +313,7 @@ function ImageBrowserInner() {
   }, [imageMenu, mutate])
 
   const renderItem = useCallback(
-    (img: BrowseImage, geometry: { width: number; height: number }) => {
+    (img: BrowseImage, _geometry: { width: number; height: number }) => {
       const thumbhashUrl = thumbhashUrls.get(img.thumbhash || '') || null
       const favorited = isFavorited(img.id)
       const isSelected = imageMenu?.imageId === img.id

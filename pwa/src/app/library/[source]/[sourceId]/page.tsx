@@ -321,7 +321,7 @@ export default function GalleryDetailPage() {
       }
       if (e.key === 'ArrowUp' || e.key === 'Escape') {
         e.preventDefault()
-        history.length > 1 ? router.back() : router.push('/library')
+        if (history.length > 1) { router.back() } else { router.push('/library') }
       }
     }
     window.addEventListener('keydown', handler)

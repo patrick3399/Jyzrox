@@ -9,7 +9,7 @@
  *   timeAgo — returns 'daysAgo' key with correct count
  */
 
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest'
+import { describe, it, expect, vi } from 'vitest'
 
 // ── i18n mock — return a readable value so we can inspect the key and params ─
 

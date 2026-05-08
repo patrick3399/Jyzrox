@@ -345,8 +345,10 @@ export function useKeyboardNav(
           e.preventDefault()
           if (isWebtoon) {
             onNext()
+          } else if (isRtl) {
+            onPrev()
           } else {
-            isRtl ? onPrev() : onNext()
+            onNext()
           }
           break
         case 'ArrowLeft':
@@ -354,8 +356,10 @@ export function useKeyboardNav(
           e.preventDefault()
           if (isWebtoon) {
             onPrev()
+          } else if (isRtl) {
+            onNext()
           } else {
-            isRtl ? onNext() : onPrev()
+            onPrev()
           }
           break
         case 'ArrowDown':
@@ -408,7 +412,7 @@ export function useProgressSave(
       clearTimeout(timerRef.current)
       clearTimeout(retryRef.current)
     }
-  }, [source, sourceId, currentPage])
+  }, [source, sourceId, currentPage, enabled])
 }
 
 // ── useAutoAdvance ────────────────────────────────────────────────────

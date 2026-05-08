@@ -240,7 +240,6 @@ export function LibraryGalleryCard({
           ]
         : []),
     ]
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [menuOpen, gallery, onFavoriteToggle, onReadingListToggle, onDownload, onDelete, router])
 
   return (

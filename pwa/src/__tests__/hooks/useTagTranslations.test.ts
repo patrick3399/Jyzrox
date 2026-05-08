@@ -176,11 +176,11 @@ describe('useTagTranslations — return value', () => {
     // useTagTranslations calls useSWR twice: first for 'settings/features', then for translations.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockUseSWR.mockReturnValueOnce(MOCK_SWR_RETURN as any)
-    // eslint-disable-next-line @typescript-eslint/no-explicit-any
     mockUseSWR.mockReturnValueOnce({
       data: translations,
       isLoading: false,
       error: undefined,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
     } as any)
 
     const result = useTagTranslations(['artist:bob', 'parody:foo'])
