@@ -1000,7 +1000,7 @@ class TestCheckSourceEnabled:
         from routers.download import _check_source_enabled
 
         mock_redis.get = AsyncMock(return_value=b"1")
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.source_health.get_redis", return_value=mock_redis):
             # Should not raise when Redis returns b"1" (enabled)
             await _check_source_enabled("ehentai")
 
@@ -1010,7 +1010,7 @@ class TestCheckSourceEnabled:
         from routers.download import _check_source_enabled
 
         mock_redis.get = AsyncMock(return_value=b"0")
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.source_health.get_redis", return_value=mock_redis):
             with pytest.raises(HTTPException) as exc_info:
                 await _check_source_enabled("ehentai")
         assert exc_info.value.status_code == 400
@@ -1021,7 +1021,7 @@ class TestCheckSourceEnabled:
         from routers.download import _check_source_enabled
 
         mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.source_health.get_redis", return_value=mock_redis):
             # Default download_eh_enabled is True; should not raise
             await _check_source_enabled("ehentai")
 
@@ -1030,7 +1030,7 @@ class TestCheckSourceEnabled:
         from routers.download import _check_source_enabled
 
         mock_redis.get = AsyncMock(return_value=b"1")
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.source_health.get_redis", return_value=mock_redis):
             # "danbooru" has no feature_toggle_key — falls back to gallery_dl key
             await _check_source_enabled("danbooru")
         mock_redis.get.assert_called_with("setting:download_gallery_dl_enabled")
@@ -1041,7 +1041,7 @@ class TestCheckSourceEnabled:
         from routers.download import _check_source_enabled
 
         mock_redis.get = AsyncMock(return_value=b"0")
-        with patch("routers.download.get_redis", return_value=mock_redis):
+        with patch("services.source_health.get_redis", return_value=mock_redis):
             with pytest.raises(HTTPException) as exc_info:
                 await _check_source_enabled("danbooru")
         assert exc_info.value.status_code == 400
