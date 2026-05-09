@@ -44,6 +44,23 @@ const SORT_OPTIONS = [
 
 const PAGE_SIZE = 24
 
+function estimateLibraryGridRowHeight({
+  colCount,
+  containerWidth,
+  gap,
+}: {
+  colCount: number
+  containerWidth: number
+  gap: number
+}) {
+  const safeWidth = Math.max(containerWidth, 320)
+  const safeColCount = Math.max(colCount, 1)
+  const cardWidth = (safeWidth - gap * (safeColCount - 1)) / safeColCount
+  const coverHeight = cardWidth * (4 / 3)
+
+  return Math.ceil(Math.max(188, Math.min(280, coverHeight + 72)))
+}
+
 function mapSearchItemToGallery(item: SearchGalleryItem): Gallery {
   return {
     id: item.id,
@@ -527,7 +544,9 @@ function LibraryContent() {
             viewMode === 'list' ? { base: 1 } : { base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }
           }
           gap={viewMode === 'list' ? 8 : 12}
-          estimateHeight={viewMode === 'list' ? 134 : 300}
+          estimateHeight={viewMode === 'list' ? 150 : estimateLibraryGridRowHeight}
+          measureRows={false}
+          overscan={viewMode === 'list' ? 8 : 6}
           focusedIndex={focusedIndex}
           onColCountChange={setColCount}
           onRegisterElement={registerElement}

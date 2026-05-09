@@ -18,13 +18,16 @@ export interface VirtualGridProps<T> {
   items: T[]
   columns: ColumnConfig
   gap?: number // gap in px (default 16 = gap-4)
-  estimateHeight?: number // estimated row height in px (default 280)
+  estimateHeight?:
+    | number
+    | ((context: { colCount: number; containerWidth: number; gap: number }) => number)
   renderItem: (item: T, index: number) => React.ReactNode
   onLoadMore?: () => void
   hasMore?: boolean
   isLoading?: boolean
   loadingElement?: React.ReactNode
   overscan?: number // extra rows to render (default 3)
+  measureRows?: boolean // dynamically measure rendered rows (default true)
   className?: string
   focusedIndex?: number | null
   onScrollToIndex?: (index: number) => void
@@ -52,6 +55,7 @@ export function VirtualGrid<T>({
   isLoading = false,
   loadingElement,
   overscan = 5,
+  measureRows = true,
   className,
   focusedIndex,
   onColCountChange,
@@ -63,6 +67,10 @@ export function VirtualGrid<T>({
   const [colCount, setColCount] = useState<number>(() => {
     if (typeof window === 'undefined') return columns.base
     return getColumnCount(window.innerWidth, columns)
+  })
+  const [containerWidth, setContainerWidth] = useState<number>(() => {
+    if (typeof window === 'undefined') return 0
+    return window.innerWidth
   })
 
   // Stable key for the columns config (avoids effect re-run on every render when columns is an inline object)
@@ -85,11 +93,13 @@ export function VirtualGrid<T>({
       prevScrollMarginRef.current = initialMargin
       setScrollMargin(initialMargin)
     }
+    setContainerWidth(el.getBoundingClientRect().width)
 
     const ro = new ResizeObserver((entries) => {
       const entry = entries[0]
       if (!entry) return
       const width = entry.contentRect.width
+      setContainerWidth(width)
       const next = getColumnCount(width, columns)
       setColCount((prev) => {
         if (prev !== next) {
@@ -122,10 +132,16 @@ export function VirtualGrid<T>({
   }, [items, colCount])
 
   const rowCount = rows.length
+  const rowHeight = useMemo(() => {
+    if (typeof estimateHeight === 'function') {
+      return estimateHeight({ colCount, containerWidth, gap })
+    }
+    return estimateHeight
+  }, [colCount, containerWidth, estimateHeight, gap])
 
   const virtualizer = useWindowVirtualizer({
     count: rowCount,
-    estimateSize: () => estimateHeight + gap,
+    estimateSize: () => rowHeight + gap,
     overscan,
     scrollMargin,
   })
@@ -198,12 +214,13 @@ export function VirtualGrid<T>({
             <div
               key={virtualRow.key}
               data-index={virtualRow.index}
-              ref={virtualizer.measureElement}
+              ref={measureRows ? virtualizer.measureElement : undefined}
               style={{
                 position: 'absolute',
                 top: 0,
                 left: 0,
                 right: 0,
+                height: measureRows ? undefined : rowHeight + gap,
                 transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                 paddingBottom: gap,
                 contain: 'layout style paint',
@@ -216,6 +233,7 @@ export function VirtualGrid<T>({
                   display: 'grid',
                   gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))`,
                   gap: gap,
+                  height: measureRows ? undefined : rowHeight,
                 }}
               >
                 {rowItems.map((item, colIdx) => {
