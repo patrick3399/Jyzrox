@@ -559,6 +559,7 @@ export interface FollowedArtist {
   artist_id: string
   artist_name: string | null
   artist_avatar: string | null
+  cover_thumb: string | null
   last_checked_at: string | null
   last_illust_id: string | null
   auto_download: boolean

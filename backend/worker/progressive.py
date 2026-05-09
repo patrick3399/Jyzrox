@@ -24,6 +24,14 @@ _FILENAME_NUMBER_RE = re.compile(r"(\d+)")
 _PIXIV_USER_WORK_PAGE_RE = re.compile(r"^\d+_p\d+$")
 
 
+def _subscription_artist_id(data: GalleryImportData, source_url: str | None) -> str | None:
+    if data.artist_id:
+        return data.artist_id
+    if source_url and data.source and data.source_id:
+        return f"{data.source}:{data.source_id}"
+    return None
+
+
 def _page_num_from_name(file_path: Path) -> int | None:
     """Extract the trailing numeric run from a filename stem for stable page order."""
     if _PIXIV_USER_WORK_PAGE_RE.match(file_path.stem):
@@ -151,7 +159,7 @@ class ProgressiveImporter:
                     uploader=import_data.uploader,
                     download_status="downloading",
                     tags_array=import_data.tags,
-                    artist_id=import_data.artist_id,
+                    artist_id=_subscription_artist_id(import_data, self.source_url),
                     created_by_user_id=self.user_id,
                     source_url=self.source_url,
                 )
@@ -221,6 +229,7 @@ class ProgressiveImporter:
                     title=title,
                     pages=0,
                     download_status="downloading",
+                    artist_id=f"{source}:{source_id}" if self.source_url and source and source_id else None,
                     created_by_user_id=self.user_id,
                     source_url=self.source_url,
                 )
@@ -228,6 +237,7 @@ class ProgressiveImporter:
                     index_elements=["source", "source_id"],
                     set_={
                         "download_status": "downloading",
+                        "artist_id": pg_insert(Gallery).excluded.artist_id,
                         "source_url": pg_insert(Gallery).excluded.source_url,
                     },
                 )
@@ -272,7 +282,7 @@ class ProgressiveImporter:
                     uploader=data.uploader,
                     download_status="downloading",
                     tags_array=data.tags,
-                    artist_id=data.artist_id,
+                    artist_id=_subscription_artist_id(data, self.source_url),
                     created_by_user_id=self.user_id,
                     source_url=self.source_url,
                 )

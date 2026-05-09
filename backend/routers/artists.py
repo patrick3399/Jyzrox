@@ -4,16 +4,17 @@ import logging
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
-from sqlalchemy import delete, select, update
+from sqlalchemy import and_, delete, desc, or_, select, update
 from sqlalchemy import func as sa_func
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
-from core.auth import require_auth
 import core.queue
+from core.auth import gallery_access_filter, require_auth
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
+from core.gallery_helpers import build_cover_map
 from core.utils import normalize_subscription_url
-from db.models import Subscription
+from db.models import DownloadJob, Gallery, Subscription
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["artists"])
@@ -44,6 +45,39 @@ class PatchFollowRequest(BaseModel):
     artist_avatar: str | None = None
 
 
+def _artist_key_from_gallery(gallery: Gallery | None) -> str:
+    """Return the library artist key for a gallery-backed subscription."""
+    if not gallery:
+        return ""
+    if gallery.artist_id:
+        return gallery.artist_id
+    if gallery.source and gallery.source_id:
+        return f"{gallery.source}:{gallery.source_id}"
+    return ""
+
+
+def _subscription_artist_clause(user_id: int, source: str, artist_id: str):
+    raw_artist_id = artist_id.split(":", 1)[1] if artist_id.startswith(f"{source}:") else artist_id
+    linked_urls = select(Gallery.source_url).where(
+        Gallery.source_url.is_not(None),
+        or_(
+            Gallery.artist_id == artist_id,
+            and_(
+                Gallery.source == source,
+                Gallery.source_id == raw_artist_id,
+            ),
+        ),
+    )
+    return and_(
+        Subscription.user_id == user_id,
+        Subscription.source == source,
+        or_(
+            Subscription.source_id.in_([artist_id, raw_artist_id]),
+            Subscription.url.in_(linked_urls),
+        ),
+    )
+
+
 @router.get("/followed")
 async def list_followed(
     source: str | None = Query(default=None),
@@ -62,28 +96,76 @@ async def list_followed(
         result = await session.execute(query)
         subs = result.scalars().all()
 
+        gallery_by_sub_id: dict[int, Gallery] = {}
+        if subs:
+            sub_ids = [s.id for s in subs]
+            job_gallery_rows = (
+                await session.execute(
+                    select(DownloadJob.subscription_id, Gallery)
+                    .join(Gallery, Gallery.id == DownloadJob.gallery_id)
+                    .where(
+                        DownloadJob.subscription_id.in_(sub_ids),
+                        DownloadJob.gallery_id.is_not(None),
+                        gallery_access_filter(auth),
+                    )
+                    .order_by(DownloadJob.subscription_id.asc(), desc(DownloadJob.created_at))
+                )
+            ).all()
+            for sub_id, gallery in job_gallery_rows:
+                gallery_by_sub_id.setdefault(sub_id, gallery)
+
+            urls_missing_job_gallery = [s.url for s in subs if s.id not in gallery_by_sub_id]
+            if urls_missing_job_gallery:
+                source_url_rows = (
+                    await session.execute(
+                        select(Gallery)
+                        .where(Gallery.source_url.in_(urls_missing_job_gallery), gallery_access_filter(auth))
+                        .order_by(Gallery.source_url.asc(), desc(Gallery.added_at))
+                    )
+                ).scalars().all()
+                gallery_by_source_url: dict[str, Gallery] = {}
+                for gallery in source_url_rows:
+                    if gallery.source_url:
+                        gallery_by_source_url.setdefault(gallery.source_url, gallery)
+                for sub in subs:
+                    if sub.id not in gallery_by_sub_id:
+                        gallery = gallery_by_source_url.get(sub.url)
+                        if gallery:
+                            gallery_by_sub_id[sub.id] = gallery
+
+        cover_map: dict[int, str] = {}
+        if gallery_by_sub_id:
+            galleries = list(gallery_by_sub_id.values())
+            cover_map = await build_cover_map(
+                session,
+                [g.id for g in galleries],
+                {g.id: g.source or "" for g in galleries},
+            )
+
         count_q = select(sa_func.count(Subscription.id)).where(Subscription.user_id == user_id)
         if source:
             count_q = count_q.where(Subscription.source == source)
         total = (await session.execute(count_q)).scalar() or 0
 
-    return {
-        "artists": [
+    artists = []
+    for sub in subs:
+        gallery = gallery_by_sub_id.get(sub.id)
+        artists.append(
             {
-                "id": s.id,
-                "source": s.source,
-                "artist_id": s.source_id,
-                "artist_name": s.name,
-                "artist_avatar": s.avatar_url,
-                "last_checked_at": s.last_checked_at.isoformat() if s.last_checked_at else None,
-                "last_illust_id": s.last_item_id,
-                "auto_download": s.auto_download,
-                "added_at": s.created_at.isoformat() if s.created_at else None,
+                "id": sub.id,
+                "source": sub.source or (gallery.source if gallery else ""),
+                "artist_id": sub.source_id or _artist_key_from_gallery(gallery),
+                "artist_name": sub.name or (gallery.uploader if gallery else None),
+                "artist_avatar": sub.avatar_url,
+                "cover_thumb": cover_map.get(gallery.id) if gallery else None,
+                "last_checked_at": sub.last_checked_at.isoformat() if sub.last_checked_at else None,
+                "last_illust_id": sub.last_item_id,
+                "auto_download": sub.auto_download,
+                "added_at": sub.created_at.isoformat() if sub.created_at else None,
             }
-            for s in subs
-        ],
-        "total": total,
-    }
+        )
+
+    return {"artists": artists, "total": total}
 
 
 @router.post("/follow")
@@ -135,11 +217,7 @@ async def unfollow_artist(
 
     async with async_session() as session:
         result = await session.execute(
-            delete(Subscription).where(
-                Subscription.user_id == user_id,
-                Subscription.source == source,
-                Subscription.source_id == artist_id,
-            ).returning(Subscription.id)
+            delete(Subscription).where(_subscription_artist_clause(user_id, source, artist_id)).returning(Subscription.id)
         )
         deleted = result.fetchone()
         await session.commit()
@@ -174,11 +252,7 @@ async def patch_follow(
 
     async with async_session() as session:
         result = await session.execute(
-            update(Subscription).where(
-                Subscription.user_id == user_id,
-                Subscription.source == source,
-                Subscription.source_id == artist_id,
-            ).values(**updates).returning(Subscription.id)
+            update(Subscription).where(_subscription_artist_clause(user_id, source, artist_id)).values(**updates).returning(Subscription.id)
         )
         updated = result.fetchone()
         await session.commit()

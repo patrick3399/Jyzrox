@@ -10,9 +10,7 @@ Covers:
 - Unauthenticated requests → 401
 """
 
-import pytest
 from sqlalchemy import text
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -95,7 +93,36 @@ class TestListFollowed:
         assert "source" in artist
         assert "artist_id" in artist
         assert "artist_name" in artist
+        assert "cover_thumb" in artist
         assert "auto_download" in artist
+
+    async def test_list_followed_falls_back_to_gallery_artist_key(self, client, db_session):
+        """URL subscriptions without source_id should still link to their library artist page."""
+        url = "https://x.com/example_artist/media"
+        await _insert_subscription(
+            db_session,
+            source="twitter",
+            source_id="",
+            name="Example Artist",
+            url=url,
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, download_status, tags_array, source_url) "
+                "VALUES ('twitter', 'example_artist', 'example_artist', 'complete', '[]', :url)"
+            ),
+            {"url": url},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/artists/followed")
+
+        assert resp.status_code == 200
+        artist = resp.json()["artists"][0]
+        assert artist["artist_id"] == "twitter:example_artist"
+        assert artist["source"] == "twitter"
+        assert "cover_thumb" in artist
 
     async def test_list_followed_filter_by_source(self, client, db_session):
         """?source= query param should filter results to that source only."""
@@ -232,6 +259,23 @@ class TestUnfollowArtist:
         resp = await client.delete("/api/artists/follow/default_src")
         assert resp.status_code == 200
 
+    async def test_unfollow_matches_gallery_backed_subscription_without_source_id(self, client, db_session):
+        """Unfollow should work for URL subscriptions whose artist key comes from a linked gallery."""
+        url = "https://x.com/remove_me/media"
+        await _insert_subscription(db_session, source="twitter", source_id="", name="Remove Me", url=url)
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, download_status, tags_array, source_url) "
+                "VALUES ('twitter', 'remove_me', 'remove_me', 'complete', '[]', :url)"
+            ),
+            {"url": url},
+        )
+        await db_session.commit()
+
+        resp = await client.delete("/api/artists/follow/twitter%3Aremove_me?source=twitter")
+        assert resp.status_code == 200
+
     async def test_unfollow_other_users_subscription_returns_404(self, client, db_session):
         """Attempting to unfollow another user's subscription should return 404."""
         await _insert_subscription(db_session, user_id=2, source="pixiv",
@@ -286,6 +330,26 @@ class TestPatchFollow:
         resp = await client.patch(
             "/api/artists/follow/avatar_me?source=pixiv",
             json={"artist_avatar": "https://example.com/new_avatar.jpg"},
+        )
+        assert resp.status_code == 200
+
+    async def test_patch_matches_gallery_backed_subscription_without_source_id(self, client, db_session):
+        """Patch should work for URL subscriptions whose artist key comes from a linked gallery."""
+        url = "https://x.com/toggle_me/media"
+        await _insert_subscription(db_session, source="twitter", source_id="", name="Toggle Me", url=url)
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, download_status, tags_array, source_url) "
+                "VALUES ('twitter', 'toggle_me', 'toggle_me', 'complete', '[]', :url)"
+            ),
+            {"url": url},
+        )
+        await db_session.commit()
+
+        resp = await client.patch(
+            "/api/artists/follow/twitter%3Atoggle_me?source=twitter",
+            json={"auto_download": True},
         )
         assert resp.status_code == 200
 

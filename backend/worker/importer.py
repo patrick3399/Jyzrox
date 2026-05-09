@@ -4,24 +4,21 @@ import asyncio
 import json
 import os
 import re
+from collections import Counter
 from datetime import UTC, datetime
 from pathlib import Path
-
-import core.queue
-
-from collections import Counter
 
 from sqlalchemy import func, text, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.sql import select
 
+import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.social_order import reorder_social_gallery_images
 from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, Tag
 from services.cas import create_library_symlink, store_blob, thumb_dir
 from worker.constants import (
-    _IMAGE_EXTS,
     _MEDIA_EXTS,
     _VIDEO_EXTS,
     logger,
@@ -30,6 +27,14 @@ from worker.helpers import _sha256, _validate_image_magic
 from worker.tag_helpers import rebuild_gallery_tags_array, upsert_tag_translations
 
 _NATURAL_SORT_RE = re.compile(r"(\d+)")
+
+
+def _subscription_artist_id(source: str, source_id: str, artist_id: str | None, source_url: str | None) -> str | None:
+    if artist_id:
+        return artist_id
+    if source_url and source and source_id:
+        return f"{source}:{source_id}"
+    return None
 
 
 def _natural_sort_key(path: Path) -> tuple[tuple[int, str | int], ...]:
@@ -88,9 +93,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     media_files = []
     skipped = 0
     for f in media_files_raw:
-        if f.suffix.lower() in _VIDEO_EXTS:
-            media_files.append(f)
-        elif _validate_image_magic(f):
+        if f.suffix.lower() in _VIDEO_EXTS or _validate_image_magic(f):
             media_files.append(f)
         else:
             skipped += 1
@@ -123,7 +126,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
                 "download_status": "complete",
                 "metadata_updated_at": func.now(),
                 "tags_array": import_data.tags,
-                "artist_id": import_data.artist_id,
+                "artist_id": _subscription_artist_id(import_data.source, import_data.source_id, import_data.artist_id, source_url),
                 "created_by_user_id": user_id,
                 "source_url": source_url,
             }
@@ -133,6 +136,12 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
             gallery_values = _build_gallery(source, source_id, metadata, tags, len(media_files))
             gallery_values["created_by_user_id"] = user_id
             gallery_values["source_url"] = source_url
+            gallery_values["artist_id"] = _subscription_artist_id(
+                gallery_values["source"],
+                gallery_values["source_id"],
+                gallery_values["artist_id"],
+                source_url,
+            )
         stmt = (
             pg_insert(Gallery)
             .values(**gallery_values)
@@ -390,9 +399,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     files_validated = []
     skipped_magic = 0
     for f in files_raw:
-        if f.suffix.lower() in _VIDEO_EXTS:
-            files_validated.append(f)
-        elif _validate_image_magic(f):
+        if f.suffix.lower() in _VIDEO_EXTS or _validate_image_magic(f):
             files_validated.append(f)
         else:
             skipped_magic += 1
@@ -434,7 +441,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         max_page = max((row.page_num for row in existing_rows), default=0)
         existing_missing_thumb = False
 
-        for idx, f in enumerate(files):
+        for f in files:
             sha256 = await asyncio.to_thread(_sha256, f)
 
             if sha256 in excluded_set:

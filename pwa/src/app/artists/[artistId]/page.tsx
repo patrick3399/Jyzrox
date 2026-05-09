@@ -16,14 +16,14 @@ import { useFollowedArtists, useFollowArtist, useUnfollowArtist, usePatchFollow 
 import { toast } from 'sonner'
 
 function getGalleryColCount() {
-  if (typeof window === 'undefined') return 2
+  if (typeof window === 'undefined') return 4
   const w = window.innerWidth
-  if (w >= 1536) return 10
-  if (w >= 1280) return 8
-  if (w >= 1024) return 6
-  if (w >= 768) return 4
-  if (w >= 640) return 3
-  return 2
+  if (w >= 1536) return 12
+  if (w >= 1280) return 10
+  if (w >= 1024) return 8
+  if (w >= 768) return 6
+  if (w >= 640) return 5
+  return 4
 }
 
 type ViewTab = 'galleries' | 'images'
@@ -243,9 +243,9 @@ export default function ArtistDetailPage() {
           ) : (
             <VirtualGrid
               items={galleries}
-              columns={{ base: 2, sm: 3, md: 4, lg: 6, xl: 8, xxl: 10 }}
-              gap={12}
-              estimateHeight={260}
+              columns={{ base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }}
+              gap={6}
+              estimateHeight={180}
               focusedIndex={focusedIndex}
               onColCountChange={setColCount}
               onLoadMore={loadMoreGalleries}
@@ -254,7 +254,7 @@ export default function ArtistDetailPage() {
               renderItem={(gallery) => (
                 <button
                   onClick={() => router.push(galleryHref(gallery.source, gallery.source_id))}
-                  className="w-full bg-vault-card border border-vault-border rounded-xl overflow-hidden hover:border-vault-accent/50 hover:shadow-lg transition-all text-left group focus:outline-none focus:ring-2 focus:ring-vault-accent"
+                  className="w-full bg-vault-card border border-vault-border rounded-lg overflow-hidden hover:border-vault-accent/50 hover:shadow-lg transition-all text-left group focus:outline-none focus:ring-2 focus:ring-vault-accent"
                 >
                   <div className="aspect-[3/4] bg-vault-bg relative overflow-hidden">
                     {gallery.cover_thumb ? (
@@ -266,15 +266,15 @@ export default function ArtistDetailPage() {
                       />
                     ) : (
                       <div className="w-full h-full flex items-center justify-center">
-                        <BookOpen size={32} className="text-vault-text-secondary/30" />
+                        <BookOpen size={24} className="text-vault-text-secondary/30 sm:size-8" />
                       </div>
                     )}
                   </div>
-                  <div className="p-2.5 space-y-1">
-                    <p className="font-medium text-xs text-vault-text line-clamp-2 leading-snug">
+                  <div className="p-2 sm:p-2.5 space-y-0.5 sm:space-y-1">
+                    <p className="font-medium text-[11px] sm:text-xs text-vault-text line-clamp-2 leading-snug">
                       {gallery.title || gallery.title_jpn}
                     </p>
-                    <p className="text-xs text-vault-text-secondary">{gallery.pages}p</p>
+                    <p className="text-[10px] sm:text-xs text-vault-text-secondary">{gallery.pages}p</p>
                   </div>
                 </button>
               )}
