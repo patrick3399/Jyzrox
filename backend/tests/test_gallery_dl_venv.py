@@ -125,3 +125,64 @@ async def test_get_current_version_parses_version_line_only(tmp_path):
         version = await venv_mod.get_current_version()
 
     assert version == "1.29.3"
+
+
+@pytest.mark.asyncio
+async def test_ensure_venv_creates_isolated_venv(tmp_path):
+    """Initial venv creation must not inherit system gallery-dl packages."""
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    fake_active = fake_base / "active"
+    calls: list[list[str]] = []
+
+    async def fake_run(cmd, timeout=300):
+        calls.append(cmd)
+        if cmd[:3] == [str(fake_base / "v1" / "bin" / "pip"), "install", "--upgrade"]:
+            return (0, "", "")
+        if cmd == [str(fake_base / "v1" / "bin" / "gallery-dl"), "--version"]:
+            return (0, "1.32.1\n", "")
+        return (0, "", "")
+
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_run", side_effect=fake_run),
+    ):
+        await venv_mod.ensure_venv()
+
+    assert calls[0] == [venv_mod.sys.executable, "-m", "venv", str(fake_base / "v1")]
+    assert "--system-site-packages" not in calls[0]
+    assert fake_active.is_symlink()
+    assert fake_active.readlink() == Path("v1")
+
+
+@pytest.mark.asyncio
+async def test_ensure_venv_recreates_active_without_gallery_dl_binary(tmp_path):
+    """A venv that only sees system gallery-dl is treated as corrupt."""
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    v1 = fake_base / "v1"
+    v1.mkdir(parents=True)
+    fake_active = fake_base / "active"
+    fake_active.symlink_to("v1")
+    calls: list[list[str]] = []
+
+    async def fake_run(cmd, timeout=300):
+        calls.append(cmd)
+        if cmd[:3] == [str(v1 / "bin" / "pip"), "install", "--upgrade"]:
+            return (0, "", "")
+        if cmd == [str(v1 / "bin" / "gallery-dl"), "--version"]:
+            return (0, "1.32.1\n", "")
+        return (0, "", "")
+
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_run", side_effect=fake_run),
+    ):
+        await venv_mod.ensure_venv()
+
+    assert calls[0] == [venv_mod.sys.executable, "-m", "venv", str(v1)]
+    assert "--system-site-packages" not in calls[0]

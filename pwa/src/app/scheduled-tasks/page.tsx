@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import { t } from '@/lib/i18n'
 import { useProfile } from '@/hooks/useProfile'
 import { TaskList } from '@/components/ScheduledTasks/TaskList'
+import { BackupList } from '@/components/Backups/BackupList'
 
 export default function ScheduledTasksPage() {
   const router = useRouter()
@@ -33,6 +34,7 @@ export default function ScheduledTasksPage() {
         <p className="text-sm text-vault-text-muted mt-1">{t('scheduledTasks.subtitle')}</p>
       </div>
       <TaskList pollWhileRunning={true} />
+      <BackupList />
     </main>
   )
 }

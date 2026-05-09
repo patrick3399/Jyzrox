@@ -29,6 +29,12 @@ _VERSION_DIR_RE = re.compile(r"^v\d+$")
 
 _gdl_bin_cache: str | None = None
 
+
+def _venv_create_cmd(target: Path) -> list[str]:
+    """Create an isolated venv that owns its gallery-dl entry point."""
+    return [sys.executable, "-m", "venv", str(target)]
+
+
 def get_gdl_bin() -> str:
     """Return gallery-dl binary path — venv if available, else system PATH fallback."""
     global _gdl_bin_cache
@@ -134,8 +140,12 @@ async def ensure_venv() -> None:
         target = VENV_ACTIVE.resolve()
         if target.exists() and (target / "bin" / "gallery-dl").exists():
             ver = await _get_version(str(target / "bin" / "gallery-dl"))
-            logger.info("[gallery-dl venv] Active venv OK: %s → %s (v%s)", VENV_ACTIVE, target.name, ver)
-            return
+            if ver:
+                logger.info("[gallery-dl venv] Active venv OK: %s → %s (v%s)", VENV_ACTIVE, target.name, ver)
+                return
+            logger.warning("[gallery-dl venv] Active venv has gallery-dl binary but version check failed; recreating")
+        else:
+            logger.warning("[gallery-dl venv] Active venv is missing gallery-dl binary; recreating")
 
     # Need to create initial venv
     VENV_BASE.mkdir(parents=True, exist_ok=True)
@@ -145,7 +155,7 @@ async def ensure_venv() -> None:
 
     logger.info("[gallery-dl venv] Creating initial venv at %s", v1)
     rc, _, stderr = await _run(
-        [sys.executable, "-m", "venv", str(v1), "--system-site-packages"],
+        _venv_create_cmd(v1),
         timeout=30,
     )
     if rc != 0:
@@ -244,10 +254,7 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
         if current_dir:
             await asyncio.to_thread(shutil.copytree, current_dir, new_dir, symlinks=True)
         else:
-            rc, _, stderr = await _run(
-                [sys.executable, "-m", "venv", str(new_dir), "--system-site-packages"],
-                timeout=30,
-            )
+            rc, _, stderr = await _run(_venv_create_cmd(new_dir), timeout=30)
             if rc != 0:
                 await _cleanup_new_dir(new_dir)
                 return {"status": "failed", "error": f"venv creation failed: {stderr}"}

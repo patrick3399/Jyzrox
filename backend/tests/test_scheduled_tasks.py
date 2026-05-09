@@ -69,6 +69,7 @@ async def test_scheduled_tasks_list_contains_known_task_ids(client, mock_redis):
     assert "library_scan" in task_ids
     assert "reconciliation" in task_ids
     assert "check_subscriptions" in task_ids
+    assert "database_backup" in task_ids
 
 
 async def test_scheduled_tasks_library_scan_has_user_facing_name_and_next_run(client, mock_redis):
@@ -209,6 +210,25 @@ async def test_scheduled_tasks_run_reconciliation_enqueues_force(client):
     assert call_args.kwargs["force"] is True
     assert call_args.kwargs["_timeout"] == 3600
     assert call_args.kwargs["_job_id"].startswith("manual:reconciliation:")
+
+
+async def test_scheduled_tasks_run_database_backup_enqueues_force(client):
+    resp = await client.post("/api/scheduled-tasks/database_backup/run")
+
+    assert resp.status_code == 200
+    data = resp.json()
+    assert data["status"] == "queued"
+    assert data["task_id"] == "database_backup"
+    assert data["job"] == "database_backup_job"
+
+    from main import app
+
+    app.state.enqueue.assert_called_once()
+    call_args = app.state.enqueue.call_args
+    assert call_args.args[0] == "database_backup_job"
+    assert call_args.kwargs["force"] is True
+    assert call_args.kwargs["_timeout"] == 3600
+    assert call_args.kwargs["_job_id"].startswith("manual:database_backup:")
 
 
 async def test_scheduled_tasks_run_deduplicates_manual_clicks(client, mock_redis):

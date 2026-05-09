@@ -45,8 +45,8 @@ readable, self-hosted library.
 - Review duplicates with SHA-256 exact matching, pHash scanning, heuristic
   classification, optional OpenCV verification, and a review queue.
 - Administer users, credentials, logs, scheduled tasks, site settings,
-  gallery-dl runtime, external API tokens, and optional AI tagging; use scripts
-  for backup and restore.
+  gallery-dl runtime, database backups, external API tokens, and optional AI
+  tagging.
 
 ## Tech Stack
 
@@ -69,6 +69,43 @@ Open `http://localhost:35689`. The first visit starts the setup flow.
 
 API documentation is available after login at `/api/docs` and
 `/api/openapi.json`.
+
+## Operations
+
+### Database backups
+
+Jyzrox includes an admin database backup task. The worker runs
+`database_backup_job` daily at `02:00` by default, and admins can trigger it
+manually from Scheduled Tasks or `POST /api/admin/backups/run`.
+
+Backups are compressed PostgreSQL dumps stored under `/data/backups` inside the
+container, which maps to `${JYZROX_DATA_ROOT}/data/backups` in Docker Compose.
+Each dump has a JSON manifest, and the built-in retention keeps the latest 14
+successful backups by default. The admin API can list and delete backup files;
+restore remains an operator action using `scripts/restore.sh`.
+
+The legacy `scripts/backup.sh` script is still available for manual operator
+backups that also copy Redis RDB files and optionally encrypt the output.
+
+### gallery-dl runtime
+
+The Docker image ships a `gallery-dl` bootstrap/fallback copy, but normal
+`docker compose build` is not the intended update path for the download engine.
+Runtime `gallery-dl` lives in the isolated `/opt/gallery-dl` volume, mounted
+from `${JYZROX_DATA_ROOT}/venv`, and is managed by the admin gallery-dl upgrade
+and rollback actions.
+
+The worker creates or repairs the isolated venv on startup. The active venv must
+own its own `bin/gallery-dl`; if that entry point is missing, the worker rebuilds
+the venv instead of silently falling back to system packages.
+
+**Upgrading from an earlier release:** the host path changed from
+`${JYZROX_DATA_ROOT}/gallery-dl-venv` to `${JYZROX_DATA_ROOT}/venv`. Rename the
+directory before restarting containers:
+
+```bash
+mv "${JYZROX_DATA_ROOT}/gallery-dl-venv" "${JYZROX_DATA_ROOT}/venv"
+```
 
 ## License
 

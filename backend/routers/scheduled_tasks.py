@@ -10,6 +10,7 @@ from pydantic import BaseModel
 
 import core.queue
 from core.auth import require_role
+from core.config import settings
 from core.redis_client import get_redis
 
 logger = logging.getLogger(__name__)
@@ -35,6 +36,15 @@ TASK_DEFS = {
         "job": "reconciliation_job",
         "manual_kwargs": {"force": True},
         "manual_timeout": 3600,
+    },
+    "database_backup": {
+        "name": "Database Backup",
+        "description": "Create a compressed PostgreSQL dump for disaster recovery",
+        "default_cron": "0 2 * * *",
+        "default_enabled": True,
+        "job": "database_backup_job",
+        "manual_kwargs": {"force": True},
+        "manual_timeout": settings.backup_pg_dump_timeout,
     },
     "check_subscriptions": {
         "name": "Check Subscriptions",
@@ -122,7 +132,12 @@ async def list_scheduled_tasks(
         last_status = _decode_redis(last_status_raw)
         if last_status == "running":
             claim_exists = await r.exists(f"cron:{task_id}:claim", f"cron:{task_id}:manual_claim")
-            progress_exists = await r.exists("rescan:progress" if task_id == "library_scan" else "reconcile:progress")
+            progress_key = {
+                "library_scan": "rescan:progress",
+                "reconciliation": "reconcile:progress",
+                "database_backup": "backup:database:claim",
+            }.get(task_id)
+            progress_exists = await r.exists(progress_key) if progress_key else 0
             if not claim_exists and not progress_exists:
                 last_status = "stale"
 

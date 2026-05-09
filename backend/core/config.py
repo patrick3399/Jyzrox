@@ -53,6 +53,9 @@ class Settings(BaseSettings):
     data_avatars_path: str = "/data/avatars"
     data_cas_path: str = "/data/cas"
     data_library_path: str = "/data/library"
+    data_backups_path: str = "/data/backups"
+    backup_retention_count: int = 14
+    backup_pg_dump_timeout: int = 3600
     # Disk space
     disk_min_free_gb: float = 2.0
 

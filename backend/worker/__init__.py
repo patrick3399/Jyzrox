@@ -8,7 +8,6 @@ import asyncio
 import json
 import logging
 import os
-
 from datetime import UTC
 
 from saq import CronJob
@@ -16,6 +15,7 @@ from saq import CronJob
 from core.config import get_all_library_paths, settings
 from core.redis_client import close_redis
 from core.watcher import LibraryWatcher
+from worker.backup import database_backup_job
 from worker.dedup_scan import dedup_scan_job
 from worker.dedup_tier1 import dedup_tier1_job
 from worker.dedup_tier2 import dedup_tier2_job
@@ -695,15 +695,16 @@ def build_workers() -> tuple:
     Queue objects are pre-registered in core.queue._queues so that enqueue()
     works immediately from startup() onwards without a separate init call.
     """
+    from saq import Queue, Worker
+
     import core.queue as _cq
     from core.queue_config import (
         ALL_QUEUES,
         DEFAULT_CONCURRENCY,
-        QUEUE_INTERACTIVE,
         QUEUE_INGEST,
+        QUEUE_INTERACTIVE,
         QUEUE_RENDER,
     )
-    from saq import Queue, Worker
 
     # Build queue objects and pre-register for enqueue() routing
     queues = {name: Queue.from_url(settings.redis_url, name=name) for name in ALL_QUEUES}
@@ -745,6 +746,7 @@ def build_workers() -> tuple:
             trash_gc_job,
             ehtag_sync_job,
             log_cleanup_job,
+            database_backup_job,
             ("gdl_upgrade_job", gdl_upgrade_job),
             ("gdl_rollback_job", gdl_rollback_job),
             disk_monitor_job,
@@ -759,6 +761,12 @@ def build_workers() -> tuple:
             CronJob(trash_gc_job,                cron="0 4 * * *",    unique=True, timeout=3600),
             CronJob(ehtag_sync_job,              cron="30 4 * * *",   unique=True, timeout=300),
             CronJob(log_cleanup_job,             cron="30 3 * * *",   unique=True, timeout=300),
+            CronJob(
+                database_backup_job,
+                cron="0 2 * * *",
+                unique=True,
+                timeout=settings.backup_pg_dump_timeout,
+            ),
             CronJob(disk_monitor_job,            cron="*/5 * * * *",  unique=True, timeout=30),
             CronJob(adaptive_persist_job,        cron="*/5 * * * *",  unique=True, timeout=60),
         ],
@@ -825,6 +833,7 @@ __all__ = [
     "trash_gc_job",
     "ehtag_sync_job",
     "log_cleanup_job",
+    "database_backup_job",
     "gdl_upgrade_job",
     "gdl_rollback_job",
     "disk_monitor_job",

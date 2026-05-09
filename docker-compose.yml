@@ -270,7 +270,7 @@ volumes:
     driver_opts:
       type: none
       o: bind
-      device: ${JYZROX_DATA_ROOT}/gallery-dl-venv
+      device: ${JYZROX_DATA_ROOT}/venv
 
 networks:
   frontend:

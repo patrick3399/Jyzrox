@@ -581,6 +581,20 @@ export interface ScheduledTask {
   last_error: string | null
 }
 
+export interface DatabaseBackup {
+  id: string
+  status: string
+  created_at: string | null
+  filename: string | null
+  manifest: string
+  size_bytes: number | null
+  sha256: string | null
+  app_version: string | null
+  database: string | null
+  exists: boolean
+  error: string | null
+}
+
 // ── Subscription Groups ─────────────────────────────────────────────
 
 export interface SubscriptionGroup {

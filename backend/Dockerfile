@@ -25,9 +25,16 @@ ENV APP_VERSION=$APP_VERSION
 
 # gosu: privilege-drop in entrypoint; wget: healthcheck
 RUN apt-get update && apt-get install -y --no-install-recommends \
+        ca-certificates \
         gosu \
         wget \
         ffmpeg \
+    && install -d /usr/share/postgresql-common/pgdg \
+    && wget -qO /usr/share/postgresql-common/pgdg/apt.postgresql.org.asc https://www.postgresql.org/media/keys/ACCC4CF8.asc \
+    && . /etc/os-release \
+    && echo "deb [signed-by=/usr/share/postgresql-common/pgdg/apt.postgresql.org.asc] https://apt.postgresql.org/pub/repos/apt ${VERSION_CODENAME}-pgdg main" > /etc/apt/sources.list.d/pgdg.list \
+    && apt-get update \
+    && apt-get install -y --no-install-recommends postgresql-client-18 \
     && rm -rf /var/lib/apt/lists/*
 
 # Create service account matching ZFS dataset owner (UID/GID 1042)

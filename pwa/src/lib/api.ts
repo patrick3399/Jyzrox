@@ -58,6 +58,7 @@ import type {
   DashboardResponse,
   SaqJob,
   QueueOverview,
+  DatabaseBackup,
 } from './types'
 
 // ── Local types ───────────────────────────────────────────────────────
@@ -1389,7 +1390,7 @@ const collections = {
     }),
 }
 
-// ── Scheduled Tasks ──────────────────────────────────────────────────
+// ── Scheduled Tasks / Backups ────────────────────────────────────────
 
 const scheduledTasks = {
   list: () => apiFetch<{ tasks: ScheduledTask[] }>('/api/scheduled-tasks/'),
@@ -1403,6 +1404,20 @@ const scheduledTasks = {
   run: (taskId: string) =>
     apiFetch<{ status: string }>(`/api/scheduled-tasks/${taskId}/run`, {
       method: 'POST',
+    }),
+}
+
+const backups = {
+  list: () => apiFetch<{ backups: DatabaseBackup[]; path: string }>('/api/admin/backups/'),
+
+  run: () =>
+    apiFetch<{ status: string; job: string }>('/api/admin/backups/run', {
+      method: 'POST',
+    }),
+
+  delete: (backupId: string) =>
+    apiFetch<{ status: string; deleted: string[] }>(`/api/admin/backups/${encodeURIComponent(backupId)}`, {
+      method: 'DELETE',
     }),
 }
 
@@ -1762,6 +1777,7 @@ export const api = {
   artists,
   collections,
   scheduledTasks,
+  backups,
   subscriptions,
   subscriptionGroups,
   dedup,

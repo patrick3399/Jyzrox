@@ -7,6 +7,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from fastapi.openapi.docs import get_swagger_ui_html
 from fastapi.responses import HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
+from sqlalchemy import text
 
 from core.auth import require_auth
 from core.config import settings
@@ -16,10 +17,10 @@ from core.queue import close_queue, get_all_queues, init_queue
 from core.rate_limit import RateLimitMiddleware
 from core.redis_client import close_redis, get_redis, init_redis
 from core.version import __version__
-from sqlalchemy import text
 from routers import (
     artists,
     auth,
+    backups,
     collections,
     download,
     export,
@@ -179,6 +180,7 @@ app.include_router(dedup_router.router, prefix="/api/dedup")
 app.include_router(users_router.router, prefix="/api/users")
 app.include_router(rss.router, prefix="/api/rss")
 app.include_router(logs_router.router, prefix="/api/logs")
+app.include_router(backups.router, prefix="/api/admin/backups")
 app.include_router(gallery_dl_admin.router, prefix="/api/admin/gallery-dl")
 app.include_router(site_config_router.router, prefix="/api/admin/sites")
 app.include_router(queue_admin.router, prefix="/api/admin/queue")

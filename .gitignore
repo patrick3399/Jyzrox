@@ -31,6 +31,8 @@ Thumbs.db
 # Local Data & Dev
 data/
 mnt/
+backups/
+backend/.python-version
 .playwright-mcp/
 docker-compose.override.yml
 
