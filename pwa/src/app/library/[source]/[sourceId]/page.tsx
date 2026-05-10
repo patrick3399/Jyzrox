@@ -46,6 +46,23 @@ function getSourceLink(sourceUrl: string, source: string): { href: string; exter
   return { href: sourceUrl, external: true }
 }
 
+function getArtistDisplayName(gallery: { artist_id?: string | null; artist_name?: string | null }): string {
+  if (gallery.artist_name?.trim()) return gallery.artist_name.trim()
+  const artistId = gallery.artist_id?.trim()
+  if (!artistId) return ''
+  const separatorIndex = artistId.indexOf(':')
+  return separatorIndex >= 0 ? artistId.slice(separatorIndex + 1) : artistId
+}
+
+function formatSearchFilterValue(value: string): string {
+  const escaped = value.replace(/"/g, '\\"')
+  return /\s/.test(escaped) ? `"${escaped}"` : escaped
+}
+
+function artistSearchHref(artistId: string): string {
+  return `/library?q=${encodeURIComponent(`artist_id:${formatSearchFilterValue(artistId)}`)}`
+}
+
 function getTagColor(tag: string): string {
   const ns = tag.split(':')[0]
   return TAG_NAMESPACE_COLORS[ns] ?? TAG_NAMESPACE_COLORS.general
@@ -654,6 +671,7 @@ export default function GalleryDetailPage() {
   const images = imagesData?.images ?? []
   const statusInfo =
     DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
+  const artistDisplayName = getArtistDisplayName(gallery)
 
   return (
     <div>
@@ -806,19 +824,23 @@ export default function GalleryDetailPage() {
                   ))}
                 </select>
               </div>
-              {/* Uploader — clickable when artist_id is available */}
+              {/* Artist and uploader have distinct meanings on E-Hentai. */}
               <div>
-                <span className="text-vault-text-muted">{t('library.metaUploader')}: </span>
-                {gallery.artist_id ? (
+                <span className="text-vault-text-muted">{t('library.artistFilter')}: </span>
+                {gallery.artist_id && artistDisplayName ? (
                   <Link
-                    href={`/library?q=${encodeURIComponent(`artist_id:${gallery.artist_id}`)}`}
+                    href={artistSearchHref(gallery.artist_id)}
                     className="text-vault-text hover:text-vault-accent hover:underline transition-colors"
                   >
-                    {gallery.uploader || 'N/A'}
+                    {artistDisplayName}
                   </Link>
                 ) : (
-                  <span className="text-vault-text">{gallery.uploader || 'N/A'}</span>
+                  <span className="text-vault-text">N/A</span>
                 )}
+              </div>
+              <div>
+                <span className="text-vault-text-muted">{t('library.metaUploader')}: </span>
+                <span className="text-vault-text">{gallery.uploader || 'N/A'}</span>
               </div>
             </div>
 
@@ -845,7 +867,7 @@ export default function GalleryDetailPage() {
               </Link>
               {gallery.artist_id && (
                 <Link
-                  href={`/library?q=${encodeURIComponent(`artist_id:${gallery.artist_id}`)}`}
+                  href={artistSearchHref(gallery.artist_id)}
                   className="px-4 py-2 rounded text-sm font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
                 >
                   {t('library.viewAllByArtist')}

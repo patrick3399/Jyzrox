@@ -64,6 +64,11 @@ function extractValue(token: string, prefixLen: number): string {
   return raw
 }
 
+function formatValue(value: string): string {
+  const escaped = value.replace(/"/g, '\\"')
+  return /\s/.test(escaped) ? `"${escaped}"` : escaped
+}
+
 export function parseQuery(q: string): ParsedFilters {
   const result: ParsedFilters = {
     tags: [],
@@ -175,11 +180,10 @@ export function buildQuery(filters: Partial<ParsedFilters>): string {
 
   // Filter tokens
   if (filters.title) {
-    const needsQuote = filters.title.includes(' ')
-    parts.push(`title:${needsQuote ? `"${filters.title}"` : filters.title}`)
+    parts.push(`title:${formatValue(filters.title)}`)
   }
   if (filters.source) {
-    parts.push(`source:${filters.source}`)
+    parts.push(`source:${formatValue(filters.source)}`)
   }
   if (filters.rating !== null && filters.rating !== undefined) {
     parts.push(`rating:>=${filters.rating}`)
@@ -194,13 +198,13 @@ export function buildQuery(filters: Partial<ParsedFilters>): string {
     parts.push(`collection:${filters.collection}`)
   }
   if (filters.artistId) {
-    parts.push(`artist_id:${filters.artistId}`)
+    parts.push(`artist_id:${formatValue(filters.artistId)}`)
   }
   if (filters.category) {
-    parts.push(`category:${filters.category}`)
+    parts.push(`category:${formatValue(filters.category)}`)
   }
   if (filters.importMode) {
-    parts.push(`import:${filters.importMode}`)
+    parts.push(`import:${formatValue(filters.importMode)}`)
   }
   if (filters.sort) {
     parts.push(`sort:${filters.sort}`)

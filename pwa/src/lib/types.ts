@@ -29,6 +29,7 @@ export interface Gallery {
   in_reading_list: boolean
   uploader: string
   artist_id: string | null
+  artist_name?: string | null
   download_status: 'proxy_only' | 'partial' | 'complete' | 'downloading'
   import_mode: string | null
   tags_array: string[]

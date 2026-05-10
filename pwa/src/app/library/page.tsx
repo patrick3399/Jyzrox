@@ -78,6 +78,7 @@ function mapSearchItemToGallery(item: SearchGalleryItem): Gallery {
     in_reading_list: item.in_reading_list,
     uploader: item.uploader ?? '',
     artist_id: item.artist_id,
+    artist_name: item.artist_name,
     download_status: item.download_status as Gallery['download_status'],
     added_at: item.added_at ?? '',
     posted_at: item.posted_at,

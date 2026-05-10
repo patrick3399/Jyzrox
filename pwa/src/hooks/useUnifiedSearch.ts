@@ -8,6 +8,7 @@ export function useUnifiedSearch() {
   const searchParams = useSearchParams()
   const router = useRouter()
   const debounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const inputDebounceRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const [rawQuery, setRawQuery] = useState(searchParams.get('q') ?? '')
   const [inputValue, setInputValue] = useState(rawQuery)
@@ -40,12 +41,24 @@ export function useUnifiedSearch() {
 
   // Commit search from input (e.g. on Enter)
   const commitSearch = useCallback((value: string) => {
+    if (inputDebounceRef.current) clearTimeout(inputDebounceRef.current)
     setRawQuery(value)
   }, [])
 
-  // Input change handler (doesn't commit until Enter)
+  // Input change handler. Debounced commit keeps clearing/searching responsive
+  // without requiring Enter after every edit.
   const handleInputChange = useCallback((value: string) => {
     setInputValue(value)
+    if (inputDebounceRef.current) clearTimeout(inputDebounceRef.current)
+    inputDebounceRef.current = setTimeout(() => {
+      setRawQuery(value)
+    }, 300)
+  }, [])
+
+  useEffect(() => {
+    return () => {
+      if (inputDebounceRef.current) clearTimeout(inputDebounceRef.current)
+    }
   }, [])
 
   // Select mode state (not stored in query)

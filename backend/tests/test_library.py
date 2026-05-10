@@ -454,6 +454,40 @@ class TestListArtists:
         assert data["total"] == 1
         assert data["artists"][0]["artist_id"] == "pixiv:unique_artist"
 
+    async def test_list_artists_uses_ehentai_artist_tag_as_display_name(self, client, db_session):
+        """E-Hentai artists display the artist tag name, not the uploader."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, "
+                "artist_id, uploader) VALUES "
+                "('ehentai', 'eh_artist_1', 'Work', 'completed', '[]', 'ehentai:fukuro daizi', 'Pokom')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/artists", params={"source": "ehentai"})
+        assert resp.status_code == 200
+        artist = resp.json()["artists"][0]
+        assert artist["artist_id"] == "ehentai:fukuro daizi"
+        assert artist["artist_name"] == "fukuro daizi"
+
+    async def test_list_artists_search_matches_ehentai_artist_id_name(self, client, db_session):
+        """E-Hentai artist search matches the displayed artist tag name."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, "
+                "artist_id, uploader) VALUES "
+                "('ehentai', 'eh_artist_2', 'Work', 'completed', '[]', 'ehentai:kabu usagi', 'backgrounded490')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/artists", params={"source": "ehentai", "q": "kabu"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["artists"][0]["artist_name"] == "kabu usagi"
+
 
 # ---------------------------------------------------------------------------
 # Batch gallery operations
@@ -1037,6 +1071,23 @@ class TestArtistSummary:
         assert data["total_pages"] == 21
         assert data["artist_name"] == "SummaryArtist"
         assert "total_images" in data
+
+    async def test_ehentai_artist_summary_uses_artist_tag_display_name(self, client, db_session):
+        """E-Hentai summary title should not use uploader as the artist name."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, download_status, tags_array, "
+                "artist_id, uploader, pages) "
+                "VALUES ('ehentai', 'eh_summary', 'Work', 'completed', '[]', "
+                "'ehentai:fukuro daizi', 'Pokom', 12)"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/artists/ehentai:fukuro daizi/summary")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["artist_name"] == "fukuro daizi"
 
 
 # ---------------------------------------------------------------------------

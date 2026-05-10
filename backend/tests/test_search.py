@@ -115,6 +115,82 @@ class TestSearchGalleries:
         assert data["total"] == 1
         assert data["items"][0]["title"] == "Naruto Doujin"
 
+    async def test_bare_search_matches_uploader(self, client, db_session):
+        """Bare words should match gallery metadata, not only tag names."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, uploader) "
+                "VALUES ('ehentai', 'uploader_1', 'Uploaded Work', 'Image Set', "
+                "'english', 10, 0, 0, 'completed', '[]', 'Pokom')"
+            )
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, uploader) "
+                "VALUES ('ehentai', 'uploader_2', 'Other Work', 'Image Set', "
+                "'english', 10, 0, 0, 'completed', '[]', 'OtherUploader')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/search/", params={"q": "Pokom"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["source_id"] == "uploader_1"
+
+    async def test_bare_search_matches_artist_id_display_name(self, client, db_session):
+        """Bare words should find E-Hentai artist_id display names such as Fukuro."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, artist_id, uploader) "
+                "VALUES ('ehentai', 'artist_text_1', 'Patreon Pack', 'Image Set', "
+                "'english', 10, 0, 0, 'completed', '[]', 'ehentai:fukuro daizi', 'Pokom')"
+            )
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, artist_id, uploader) "
+                "VALUES ('ehentai', 'artist_text_2', 'Different Pack', 'Image Set', "
+                "'english', 10, 0, 0, 'completed', '[]', 'ehentai:kacyu', 'Someone')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/search/", params={"q": "Fukuro"})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["source_id"] == "artist_text_1"
+        assert data["items"][0]["artist_name"] == "fukuro daizi"
+
+    async def test_quoted_artist_id_filter_keeps_spaces(self, client, db_session):
+        """artist_id filters with spaces must stay one token."""
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(source, source_id, title, category, language, pages, rating, "
+                "favorited, download_status, tags_array, artist_id, uploader) "
+                "VALUES ('ehentai', 'artist_space_1', 'Spaced Artist', 'Image Set', "
+                "'english', 10, 0, 0, 'completed', '[]', 'ehentai:fukuro daizi', 'Pokom')"
+            )
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/search/", params={"q": 'artist_id:"ehentai:fukuro daizi"'})
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["total"] == 1
+        assert data["items"][0]["source_id"] == "artist_space_1"
+
     async def test_search_source_filter(self, client, db_session):
         """source:<value> token should filter by source column."""
         await _insert_gallery(db_session, source="pixiv", source_id="p1", title="Pixiv Art")

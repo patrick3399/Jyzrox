@@ -32,6 +32,48 @@ from db.models import (
 router = APIRouter(tags=["search"])
 
 
+def _tokenize_query(q: str) -> list[str]:
+    """Split a search query while preserving quoted filter values."""
+    tokens: list[str] = []
+    current: list[str] = []
+    in_quote = False
+
+    for ch in q.strip():
+        if ch == '"':
+            in_quote = not in_quote
+            current.append(ch)
+        elif ch.isspace() and not in_quote:
+            if current:
+                tokens.append("".join(current))
+                current = []
+        else:
+            current.append(ch)
+
+    if current:
+        tokens.append("".join(current))
+    return tokens
+
+
+def _token_value(token: str, prefix: str) -> str:
+    value = token[len(prefix):]
+    if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
+        return value[1:-1]
+    return value
+
+
+def _artist_display_name(artist_id: str | None, uploader: str | None) -> str:
+    clean_uploader = (uploader or "").strip()
+    if not artist_id:
+        return clean_uploader
+
+    source, _, raw_name = artist_id.partition(":")
+    if source == "ehentai" and raw_name:
+        return raw_name
+    if clean_uploader:
+        return clean_uploader
+    return raw_name or artist_id
+
+
 # ── Cursor helpers ────────────────────────────────────────────────────
 
 
@@ -129,7 +171,7 @@ async def search_galleries(
     Supports cursor-based pagination (cursor=) for deep pages without COUNT(*)/OFFSET cost.
     When cursor is absent, falls back to OFFSET-based pagination (page-based, max page 500).
     """
-    tokens = q.split()[:20]
+    tokens = _tokenize_query(q)[:20]
     include_tags: list[str] = []
     exclude_tags: list[str] = []
     text_queries: list[str] = []
@@ -144,32 +186,32 @@ async def search_galleries(
 
     for t in tokens:
         if t.startswith("title:"):
-            text_queries.append(t[6:].strip('"'))
+            text_queries.append(_token_value(t, "title:"))
         elif t.startswith("source:"):
-            source_filter = t[7:]
+            source_filter = _token_value(t, "source:")
         elif t.startswith("rating:"):
-            val = t[7:].lstrip(">=<")
+            val = _token_value(t, "rating:").lstrip(">=<")
             try:
                 rating_filter = int(val)
             except ValueError:
                 pass
         elif t.startswith("favorited:"):
-            favorited_filter = t[10:].lower() == "true"
+            favorited_filter = _token_value(t, "favorited:").lower() == "true"
         elif t.startswith("sort:"):
-            sort = t[5:]
+            sort = _token_value(t, "sort:")
         elif t.startswith("collection:"):
             try:
-                collection_filter = int(t[11:])
+                collection_filter = int(_token_value(t, "collection:"))
             except ValueError:
                 pass
         elif t.startswith("artist_id:"):
-            artist_id_filter = t[10:]
+            artist_id_filter = _token_value(t, "artist_id:")
         elif t.startswith("category:"):
-            category_filter = t[9:]
+            category_filter = _token_value(t, "category:")
         elif t.startswith("import:"):
-            import_filter = t[7:]
+            import_filter = _token_value(t, "import:")
         elif t.startswith("rl:"):
-            rl_filter = t[3:].lower() == "true"
+            rl_filter = _token_value(t, "rl:").lower() == "true"
         elif t.startswith("-"):
             exclude_tags.append(t[1:])
         else:
@@ -237,6 +279,7 @@ async def search_galleries(
             "source_id": r.source_id,
             "source_url": r.source_url,
             "artist_id": r.artist_id,
+            "artist_name": _artist_display_name(r.artist_id, r.uploader),
             "import_mode": r.import_mode,
             "category": r.category,
             "language": r.language,
@@ -289,12 +332,13 @@ async def search_galleries(
                 else:
                     name_only_tags.append(tag_str)
 
-            # Handle name-only tags: lookup across all namespaces
+            # Handle bare terms: match text metadata, while preserving tag-name search.
             if name_only_tags:
+                lower_name_terms = [name.lower() for name in name_only_tags]
                 name_rows = (
                     await session.execute(
                         select(Tag.namespace, Tag.name).where(
-                            Tag.name.in_(name_only_tags)
+                            func.lower(Tag.name).in_(lower_name_terms)
                         )
                     )
                 ).all()
@@ -302,17 +346,24 @@ async def search_galleries(
                 name_to_variants: dict[str, list[str]] = {}
                 for row in name_rows:
                     tag_str = f"{row.namespace}:{row.name}"
-                    name_to_variants.setdefault(row.name, []).append(tag_str)
+                    name_to_variants.setdefault(row.name.lower(), []).append(tag_str)
 
                 for bare_name in name_only_tags:
-                    variants = name_to_variants.get(bare_name)
+                    variants = name_to_variants.get(bare_name.lower())
+                    text_pattern = f"%{bare_name}%"
+                    text_filter = or_(
+                        Gallery.title.ilike(text_pattern),
+                        Gallery.title_jpn.ilike(text_pattern),
+                        Gallery.uploader.ilike(text_pattern),
+                        Gallery.artist_id.ilike(text_pattern),
+                        Gallery.source_id.ilike(text_pattern),
+                    )
                     if not variants:
-                        # No matches — fall back to general:name for compat
-                        variants = [f"general:{bare_name}"]
-                    if len(variants) == 1:
-                        filters.append(Gallery.tags_array.contains(variants))
+                        filters.append(text_filter)
+                    elif len(variants) == 1:
+                        filters.append(or_(text_filter, Gallery.tags_array.contains(variants)))
                     else:
-                        filters.append(Gallery.tags_array.overlap(variants))
+                        filters.append(or_(text_filter, Gallery.tags_array.overlap(variants)))
 
             # Handle namespaced tags through existing alias expansion
             if namespaced_tags:

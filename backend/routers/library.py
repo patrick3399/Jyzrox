@@ -65,6 +65,20 @@ router = APIRouter(tags=["library"])
 _member = require_role("member")
 
 
+def _artist_display_name(artist_id: str | None, uploader: str | None) -> str:
+    """Return the user-facing artist name without conflating EH uploader data."""
+    clean_uploader = (uploader or "").strip()
+    if not artist_id:
+        return clean_uploader
+
+    source, _, raw_name = artist_id.partition(":")
+    if source == "ehentai" and raw_name:
+        return raw_name
+    if clean_uploader:
+        return clean_uploader
+    return raw_name or artist_id
+
+
 def _trash_filter(auth: dict):
     """Return WHERE clause for trash visibility: soft-deleted galleries the user can see."""
     filters = [Gallery.deleted_at.is_not(None)]
@@ -762,7 +776,12 @@ async def list_artists(
     )
 
     if q:
-        base = base.having(func.max(Gallery.uploader).ilike(f"%{q}%"))
+        base = base.having(
+            or_(
+                func.max(Gallery.uploader).ilike(f"%{q}%"),
+                Gallery.artist_id.ilike(f"%{q}%"),
+            )
+        )
     if source:
         base = base.where(Gallery.artist_id.startswith(f"{source}:"))
 
@@ -813,7 +832,7 @@ async def list_artists(
         result.append(
             {
                 "artist_id": aid,
-                "artist_name": r.artist_name or "",
+                "artist_name": _artist_display_name(aid, r.artist_name),
                 "source": src,
                 "gallery_count": r.gallery_count,
                 "total_pages": r.total_pages,
@@ -872,7 +891,7 @@ async def get_artist_summary(
 
     return {
         "artist_id": artist_id,
-        "artist_name": agg_row.artist_name or "",
+        "artist_name": _artist_display_name(artist_id, agg_row.artist_name),
         "source": source,
         "gallery_count": agg_row.gallery_count,
         "total_pages": agg_row.total_pages,
@@ -2595,6 +2614,7 @@ def _g(
         "in_reading_list": in_reading_list,
         "uploader": g.uploader,
         "artist_id": g.artist_id,
+        "artist_name": _artist_display_name(g.artist_id, g.uploader),
         "download_status": g.download_status,
         "import_mode": g.import_mode,
         "tags_array": g.tags_array or [],

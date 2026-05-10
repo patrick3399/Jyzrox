@@ -1703,6 +1703,7 @@ export type SearchGalleryItem = {
   my_rating: number | null
   in_reading_list: boolean
   artist_id: string | null
+  artist_name?: string | null
   import_mode: string | null
   source_url: string | null
   tags_array: string[]
