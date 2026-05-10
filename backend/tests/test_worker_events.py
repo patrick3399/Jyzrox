@@ -63,6 +63,7 @@ class TestTrashGcJobEmitsEvent:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("routers.settings.get_redis", return_value=redis),
+            patch("services.settings_store.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
             patch("routers.library._hard_delete_galleries", new_callable=AsyncMock, return_value=delete_result),
             patch("core.events.emit", mock_emit),
@@ -86,6 +87,7 @@ class TestTrashGcJobEmitsEvent:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("routers.settings.get_redis", return_value=redis),
+            patch("services.settings_store.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
             patch("core.events.emit", mock_emit),
         ):
@@ -107,6 +109,7 @@ class TestTrashGcJobEmitsEvent:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("routers.settings.get_redis", return_value=redis),
+            patch("services.settings_store.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
             patch("routers.library._hard_delete_galleries", new_callable=AsyncMock, return_value=delete_result),
             patch("core.events.emit", side_effect=RuntimeError("Redis down")),

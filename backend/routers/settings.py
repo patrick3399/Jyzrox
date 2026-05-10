@@ -22,6 +22,18 @@ from db.models import Credential
 from services.cache import dismiss_system_alert, get_system_alerts, push_system_alert
 from services.credential import get_credential, list_credentials, set_credential
 from services.eh_client import EhClient
+from services.settings_store import (
+    get_float_setting as _get_float_setting,
+)
+from services.settings_store import (
+    get_int_setting as _get_int_setting,
+)
+from services.settings_store import (
+    get_toggle as _get_toggle,
+)
+from services.settings_store import (
+    set_toggle as _set_toggle,
+)
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["settings"])
@@ -547,45 +559,6 @@ async def eh_account_info(_: dict = Depends(_admin)):
         info = await client.get_account_info()
 
     return {"valid": True, **info}
-
-
-# ── Feature Toggle Helpers ───────────────────────────────────────────
-
-
-async def _get_toggle(redis_key: str, default: bool) -> bool:
-    """Read a boolean toggle from Redis, falling back to config default."""
-    val = await get_redis().get(redis_key)
-    if val is not None:
-        return val == b"1"
-    return default
-
-
-async def _set_toggle(redis_key: str, enabled: bool) -> bool:
-    """Set a boolean toggle in Redis."""
-    await get_redis().set(redis_key, "1" if enabled else "0")
-    return enabled
-
-
-async def _get_int_setting(redis_key: str, default: int) -> int:
-    """Read an integer setting from Redis, falling back to default."""
-    val = await get_redis().get(redis_key)
-    if val is not None:
-        try:
-            return int(val)
-        except ValueError, TypeError:
-            pass
-    return default
-
-
-async def _get_float_setting(redis_key: str, default: float) -> float:
-    """Read a float setting from Redis, falling back to default."""
-    val = await get_redis().get(redis_key)
-    if val is not None:
-        try:
-            return float(val)
-        except ValueError, TypeError:
-            pass
-    return default
 
 
 # ── Feature Toggles ──────────────────────────────────────────────────
