@@ -567,3 +567,128 @@ class TestImportJob:
             result = await import_job(ctx, path=str(gallery_dir))
 
         assert result["status"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# TestLocalImportJob  (STAB-005 regression)
+# ---------------------------------------------------------------------------
+
+
+def _make_local_import_sessions(test_sha: str):
+    """Returns (s1, s2, s3) where:
+    s1 — gallery lookup session
+    s2 — excluded-blobs session (empty result)
+    s3 — main session: image-rows query + count query + gallery get
+    """
+    mock_gallery = MagicMock()
+    mock_gallery.source = "local"
+    mock_gallery.source_id = "g1"
+    mock_gallery.source_path = None
+
+    s1 = AsyncMock()
+    s1.get = AsyncMock(return_value=mock_gallery)
+
+    s2 = AsyncMock()
+    excl_result = MagicMock()
+    excl_result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    s2.execute = AsyncMock(return_value=excl_result)
+
+    s3 = AsyncMock()
+    s3.get = AsyncMock(return_value=mock_gallery)
+
+    img_row = MagicMock()
+    img_row.blob_sha256 = test_sha
+    img_row.page_num = 1
+    img_result = MagicMock()
+    img_result.all = MagicMock(return_value=[img_row])
+
+    count_result = MagicMock()
+    count_result.scalar_one = MagicMock(return_value=1)
+
+    s3.execute = AsyncMock(side_effect=[img_result, count_result])
+    return s1, s2, s3
+
+
+def _session_rotator(sessions):
+    """Return an async context manager factory that yields sessions in order."""
+    it = iter(sessions)
+
+    @asynccontextmanager
+    async def _next():
+        yield next(it)
+
+    return _next
+
+
+class TestLocalImportJob:
+    """Regression tests for local_import_job no-op guard (STAB-005).
+
+    Verifies that thumbnail jobs are only enqueued when there is actual work
+    to do, preventing duplicate render backlog on replayed local-import jobs.
+    """
+
+    async def test_no_thumbnail_enqueue_when_all_files_already_imported_and_thumbs_complete(self, tmp_path):
+        """When all files are already imported and all thumbs are complete, no enqueue occurs."""
+        from worker.importer import local_import_job
+
+        gallery_dir = _create_test_gallery(tmp_path)
+        test_sha = "aa" * 32
+
+        td = tmp_path / "thumbs"
+        td.mkdir()
+        for size in (160, 360, 720):
+            (td / f"thumb_{size}.webp").write_bytes(b"x")
+
+        s1, s2, s3 = _make_local_import_sessions(test_sha)
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", side_effect=_session_rotator([s1, s2, s3])),
+            patch("worker.importer._sha256", return_value=test_sha),
+            patch("worker.importer.thumb_dir", return_value=td),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            result = await local_import_job(_make_ctx(), source_dir=str(gallery_dir), mode="copy", gallery_id=1)
+
+        assert result["status"] == "done"
+        mock_enqueue.assert_not_called()
+
+    async def test_thumbnail_enqueued_when_existing_blobs_have_missing_thumbs(self, tmp_path):
+        """When files are already imported but thumbs are incomplete, enqueue still fires."""
+        from worker.importer import local_import_job
+
+        gallery_dir = _create_test_gallery(tmp_path)
+        test_sha = "bb" * 32
+
+        # No thumb files created → existing_missing_thumb becomes True
+        td = tmp_path / "thumbs"
+        td.mkdir()
+
+        s1, s2, s3 = _make_local_import_sessions(test_sha)
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", side_effect=_session_rotator([s1, s2, s3])),
+            patch("worker.importer._sha256", return_value=test_sha),
+            patch("worker.importer.thumb_dir", return_value=td),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            result = await local_import_job(_make_ctx(), source_dir=str(gallery_dir), mode="copy", gallery_id=1)
+
+        assert result["status"] == "done"
+        mock_enqueue.assert_any_call(
+            "cover_thumbnail_job",
+            gallery_id=1,
+            _timeout=300,
+            _job_id="cover-thumbnail:1",
+        )
+        mock_enqueue.assert_any_call(
+            "thumbnail_job",
+            gallery_id=1,
+            _timeout=3600,
+            _job_id="thumbnail:1",
+        )

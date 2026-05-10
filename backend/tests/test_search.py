@@ -20,7 +20,6 @@ import json
 
 from sqlalchemy import text
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -29,10 +28,7 @@ from sqlalchemy import text
 async def _insert_user(db_session, user_id=1):
     """Ensure a user row exists for FK constraints."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash) "
-            "VALUES (:id, 'searchuser', 'x')"
-        ),
+        text("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (:id, 'searchuser', 'x')"),
         {"id": user_id},
     )
     await db_session.commit()
@@ -73,10 +69,7 @@ async def _insert_saved_search(db_session, user_id=1, name="My Search", query="t
     """Insert a saved_searches row and return its rowid."""
     params_json = json.dumps(params or {})
     await db_session.execute(
-        text(
-            "INSERT INTO saved_searches (user_id, name, query, params) "
-            "VALUES (:uid, :name, :query, :params)"
-        ),
+        text("INSERT INTO saved_searches (user_id, name, query, params) VALUES (:uid, :name, :query, :params)"),
         {"uid": user_id, "name": name, "query": query, "params": params_json},
     )
     await db_session.commit()
@@ -333,10 +326,7 @@ class TestSavedSearches:
         """Users should only be able to delete their own saved searches."""
         # Insert a saved search owned by user_id=99 (not the authed user_id=1)
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO users (id, username, password_hash) "
-                "VALUES (99, 'otheruser', 'x')"
-            )
+            text("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (99, 'otheruser', 'x')")
         )
         await db_session.commit()
         ss_id = await _insert_saved_search(db_session, user_id=99, name="Other User Search")
@@ -373,10 +363,7 @@ class TestSearchBlockedTags:
         await _insert_user(db_session, user_id=1)
         # Insert a blocked tag
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO blocked_tags (user_id, namespace, name) "
-                "VALUES (1, 'general', 'blocked_thing')"
-            )
+            text("INSERT OR IGNORE INTO blocked_tags (user_id, namespace, name) VALUES (1, 'general', 'blocked_thing')")
         )
         await db_session.commit()
 
@@ -398,9 +385,9 @@ class TestSearchAliasExpansion:
             text("INSERT OR IGNORE INTO tags (namespace, name, count) VALUES ('character', 'rem', 5)")
         )
         await db_session.commit()
-        tag_id = (await db_session.execute(
-            text("SELECT id FROM tags WHERE namespace='character' AND name='rem'")
-        )).scalar()
+        tag_id = (
+            await db_session.execute(text("SELECT id FROM tags WHERE namespace='character' AND name='rem'"))
+        ).scalar()
 
         await db_session.execute(
             text(
@@ -582,13 +569,14 @@ class TestCursorPagination:
         """
         for rating, sid in [(5, "cr5"), (3, "cr3"), (1, "cr1")]:
             await _insert_gallery(
-                db_session, source_id=sid, title=f"Rated {rating}", rating=rating,
+                db_session,
+                source_id=sid,
+                title=f"Rated {rating}",
+                rating=rating,
                 source="cursor_rating_src",
             )
 
-        start_cursor = _make_cursor(
-            gallery_id=999999999, sort_value="999", sort_key="rating"
-        )
+        start_cursor = _make_cursor(gallery_id=999999999, sort_value="999", sort_key="rating")
         resp1 = await client.get(
             "/api/search/",
             params={"q": "sort:rating source:cursor_rating_src", "limit": 1, "cursor": start_cursor},
@@ -617,13 +605,14 @@ class TestCursorPagination:
         """
         for pages, sid in [(100, "cp100"), (50, "cp50"), (10, "cp10")]:
             await _insert_gallery(
-                db_session, source_id=sid, title=f"{pages} Pages", pages=pages,
+                db_session,
+                source_id=sid,
+                title=f"{pages} Pages",
+                pages=pages,
                 source="cursor_pages_src",
             )
 
-        start_cursor = _make_cursor(
-            gallery_id=999999999, sort_value="999999", sort_key="pages"
-        )
+        start_cursor = _make_cursor(gallery_id=999999999, sort_value="999999", sort_key="pages")
         resp1 = await client.get(
             "/api/search/",
             params={"q": "sort:pages source:cursor_pages_src", "limit": 1, "cursor": start_cursor},
@@ -678,9 +667,7 @@ class TestCursorPagination:
     async def test_cursor_pagination_sort_by_posted_at(self, client, db_session):
         """Cursor pagination with sort:posted_at returns items newest-first."""
         # ISO format with T separator to match isoformat() output for SQLite string comparison.
-        for i, ts in enumerate(
-            ["2024-03-01T00:00:00", "2024-02-01T00:00:00", "2024-01-01T00:00:00"]
-        ):
+        for i, ts in enumerate(["2024-03-01T00:00:00", "2024-02-01T00:00:00", "2024-01-01T00:00:00"]):
             await db_session.execute(
                 text(
                     "INSERT INTO galleries "
@@ -724,11 +711,15 @@ class TestCursorPagination:
 
         resp = await client.get(
             "/api/search/",
-            params={"q": "source:last_page_src", "limit": 10, "cursor": _make_cursor(
-                gallery_id=9999999,
-                sort_value="2099-01-01T00:00:00",
-                sort_key="added_at",
-            )},
+            params={
+                "q": "source:last_page_src",
+                "limit": 10,
+                "cursor": _make_cursor(
+                    gallery_id=9999999,
+                    sort_value="2099-01-01T00:00:00",
+                    sort_key="added_at",
+                ),
+            },
         )
         assert resp.status_code == 200
         data = resp.json()
@@ -841,22 +832,13 @@ class TestSearchCollectionFilter:
         gid_out = await _insert_gallery(db_session, source_id="col_out", title="Not In Collection")
 
         # Create a collection owned by user 1
-        await db_session.execute(
-            text(
-                "INSERT INTO collections (user_id, name) VALUES (1, 'Test Collection')"
-            )
-        )
+        await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'Test Collection')"))
         await db_session.commit()
-        col_id = (
-            await db_session.execute(text("SELECT last_insert_rowid()"))
-        ).scalar()
+        col_id = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
 
         # Add only the first gallery to the collection
         await db_session.execute(
-            text(
-                "INSERT INTO collection_galleries (collection_id, gallery_id) "
-                "VALUES (:cid, :gid)"
-            ),
+            text("INSERT INTO collection_galleries (collection_id, gallery_id) VALUES (:cid, :gid)"),
             {"cid": col_id, "gid": gid_in},
         )
         await db_session.commit()
@@ -874,13 +856,9 @@ class TestSearchCollectionFilter:
         await _insert_gallery(db_session, source_id="col_none", title="Random Gallery")
 
         # Collection with no galleries
-        await db_session.execute(
-            text("INSERT INTO collections (user_id, name) VALUES (1, 'Empty Collection')")
-        )
+        await db_session.execute(text("INSERT INTO collections (user_id, name) VALUES (1, 'Empty Collection')"))
         await db_session.commit()
-        empty_col_id = (
-            await db_session.execute(text("SELECT last_insert_rowid()"))
-        ).scalar()
+        empty_col_id = (await db_session.execute(text("SELECT last_insert_rowid()"))).scalar()
 
         resp = await client.get("/api/search/", params={"q": f"collection:{empty_col_id}"})
         assert resp.status_code == 200
@@ -907,9 +885,7 @@ class TestSearchArtistIdFilter:
                 ),
                 {"sid": sid, "title": title, "artist": artist},
             )
-        await _insert_gallery(
-            db_session, source="artist_test", source_id="art3", title="No Artist Gallery"
-        )
+        await _insert_gallery(db_session, source="artist_test", source_id="art3", title="No Artist Gallery")
         await db_session.commit()
 
         resp = await client.get("/api/search/", params={"q": "artist_id:pixiv_111 source:artist_test"})
@@ -932,9 +908,7 @@ class TestSearchArtistIdFilter:
         )
         await db_session.commit()
 
-        resp = await client.get(
-            "/api/search/", params={"q": "artist_id:nonexistent source:artist_nomatch"}
-        )
+        resp = await client.get("/api/search/", params={"q": "artist_id:nonexistent source:artist_nomatch"})
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
 
@@ -959,9 +933,7 @@ class TestSearchCategoryFilter:
             category="manga",
         )
 
-        resp = await client.get(
-            "/api/search/", params={"q": "category:doujinshi source:cat_test"}
-        )
+        resp = await client.get("/api/search/", params={"q": "category:doujinshi source:cat_test"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 1
@@ -987,9 +959,7 @@ class TestSearchCategoryFilter:
         )
         await db_session.commit()
 
-        resp = await client.get(
-            "/api/search/", params={"q": "category:__uncategorized__ source:cat_null_test"}
-        )
+        resp = await client.get("/api/search/", params={"q": "category:__uncategorized__ source:cat_null_test"})
         assert resp.status_code == 200
         data = resp.json()
         assert data["total"] == 1
@@ -1005,9 +975,7 @@ class TestSearchCategoryFilter:
             category="doujinshi",
         )
 
-        resp = await client.get(
-            "/api/search/", params={"q": "category:__uncategorized__ source:cat_excl_test"}
-        )
+        resp = await client.get("/api/search/", params={"q": "category:__uncategorized__ source:cat_excl_test"})
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
 
@@ -1066,9 +1034,7 @@ class TestSearchImportModeFilter:
         )
         await db_session.commit()
 
-        resp = await client.get(
-            "/api/search/", params={"q": "import:download source:import_excl"}
-        )
+        resp = await client.get("/api/search/", params={"q": "import:download source:import_excl"})
         assert resp.status_code == 200
         assert resp.json()["total"] == 0
 
@@ -1083,9 +1049,7 @@ class TestSearchReadingListFilter:
         await _insert_gallery(db_session, source_id="rl_out", title="Not In Reading List")
 
         await db_session.execute(
-            text(
-                "INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"
-            ),
+            text("INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"),
             {"gid": rl_gid},
         )
         await db_session.commit()
@@ -1130,11 +1094,7 @@ class TestSearchEnrichedResponse:
         )
         await db_session.commit()
 
-        gid = (
-            await db_session.execute(
-                text("SELECT id FROM galleries WHERE source_id='enr1'")
-            )
-        ).scalar()
+        gid = (await db_session.execute(text("SELECT id FROM galleries WHERE source_id='enr1'"))).scalar()
 
         # Add to favorites
         await db_session.execute(
@@ -1143,16 +1103,12 @@ class TestSearchEnrichedResponse:
         )
         # Add per-user rating
         await db_session.execute(
-            text(
-                "INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 4)"
-            ),
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (1, :gid, 4)"),
             {"gid": gid},
         )
         # Add to reading list
         await db_session.execute(
-            text(
-                "INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"
-            ),
+            text("INSERT INTO user_reading_list (user_id, gallery_id) VALUES (1, :gid)"),
             {"gid": gid},
         )
         await db_session.commit()
@@ -1180,9 +1136,7 @@ class TestSearchEnrichedResponse:
         """Gallery not favorited / rated / in RL must have is_favorited=False,
         my_rating=None, in_reading_list=False."""
         await _insert_user(db_session, user_id=1)
-        await _insert_gallery(
-            db_session, source="plain_enrich", source_id="pe1", title="Plain Gallery"
-        )
+        await _insert_gallery(db_session, source="plain_enrich", source_id="pe1", title="Plain Gallery")
 
         resp = await client.get("/api/search/", params={"q": "source:plain_enrich"})
         assert resp.status_code == 200
@@ -1321,3 +1275,39 @@ class TestSearchSignedCursor:
         )
         assert resp_tampered.status_code == 400
         assert "cursor" in resp_tampered.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Regression: postgresql.ARRAY type for Gallery.tags_array (commit 2371ae8)
+# ---------------------------------------------------------------------------
+
+
+class TestSQLAlchemyArrayTypeRegression:
+    """Regression: Gallery.tags_array must use sqlalchemy.dialects.postgresql.ARRAY.
+
+    Commit 2371ae8 — using the generic sqlalchemy.ARRAY on tags_array caused
+    NotImplementedError when the ORM called .contains() or .overlap() on the
+    column, crashing every /api/search/ request that included tag filters,
+    blocked-tag exclusions, or alias expansion with a 500 error.
+    """
+
+    def test_gallery_tags_array_column_uses_postgresql_array_not_generic_array(self):
+        """Gallery.tags_array must be sqlalchemy.dialects.postgresql.ARRAY.
+
+        The generic sqlalchemy.ARRAY type does not implement the .contains() or
+        .overlap() methods needed for @> and && PostgreSQL operators.  Calling
+        them raises NotImplementedError, which propagates as a 500 error on any
+        search query with include/exclude tags or blocked tags.
+        """
+        from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
+
+        from db.models import Gallery
+
+        col_type = Gallery.__table__.c.tags_array.type
+        assert isinstance(col_type, PG_ARRAY), (
+            f"Gallery.tags_array column type must be "
+            f"sqlalchemy.dialects.postgresql.ARRAY but got "
+            f"{type(col_type).__module__}.{type(col_type).__name__}. "
+            "The generic sqlalchemy.ARRAY lacks .contains()/.overlap(), "
+            "causing NotImplementedError on all tag-filtered search queries."
+        )

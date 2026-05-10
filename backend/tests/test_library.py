@@ -806,6 +806,88 @@ class TestFindSimilarImages:
 
 
 # ---------------------------------------------------------------------------
+# Regression: SQLAlchemy text() bind-param truncation with :: cast (commit a425a08)
+# ---------------------------------------------------------------------------
+
+
+class TestSQLAlchemyTextParamWithPostgresCastRegression:
+    """Regression: :param::type in SQLAlchemy text() truncates the param name.
+
+    Commit a425a08 — SQLAlchemy's text() regex uses a negative lookahead (?!:)
+    so a parameter immediately followed by '::' backtracks and matches a shorter
+    name.  E.g. ':phash_int::bigint' matches 'phash_in' instead of 'phash_int',
+    causing a wrong or missing bind at runtime.  The fix adds a space before '::':
+    ':phash_int ::bigint'.
+
+    Affected: find_similar_images phash-distance queries (library.py),
+              rescan_library_job unnest queries (worker/scan.py).
+    """
+
+    def test_sqlalchemy_text_param_followed_by_double_colon_is_truncated_not_full_name(self):
+        """:param::type causes the regex to backtrack and match a shorter name.
+
+        Demonstrates the root cause: the (?!:) lookahead fails at the last char
+        before '::' and the engine backtracks to the second-to-last char, yielding
+        a truncated name ('phash_in' instead of 'phash_int').
+        """
+        import re
+
+        _re = re.compile(r"(?<![:\w\x5c]):([\w]+)(?!:)", re.UNICODE)
+
+        bad_sql = "bit_count((:phash_int::bigint # b.phash_int)::bit(64))"
+        bad_match = _re.findall(bad_sql)
+        assert "phash_int" not in bad_match, (
+            ":phash_int::bigint must NOT match full name 'phash_int' (the bug: negative lookahead prevents full match)"
+        )
+        assert "phash_in" in bad_match, (
+            ":phash_int::bigint must match truncated 'phash_in' "
+            "(demonstrating the exact mis-bind that broke runtime execution)"
+        )
+
+    def test_sqlalchemy_text_param_with_space_before_double_colon_matches_full_name(self):
+        """:param ::type (space before ::) allows the regex to match the full name.
+
+        This is the fixed pattern used in find_similar_images phash queries after
+        commit a425a08.
+        """
+        import re
+
+        _re = re.compile(r"(?<![:\w\x5c]):([\w]+)(?!:)", re.UNICODE)
+
+        good_sql = "bit_count((:phash_int ::bigint # b.phash_int)::bit(64))"
+        good_match = _re.findall(good_sql)
+        assert "phash_int" in good_match, ":phash_int ::bigint (space before ::) must correctly match 'phash_int'"
+
+    def test_unnest_param_without_space_is_truncated(self):
+        """:shas::text[] in unnest() is truncated to 'sha' (missing final 's').
+
+        Demonstrates the bug in rescan_library_job before the fix.
+        """
+        import re
+
+        _re = re.compile(r"(?<![:\w\x5c]):([\w]+)(?!:)", re.UNICODE)
+
+        bad_sql = "SELECT unnest(:shas::text[]) AS sha, unnest(:ns::int[]) AS n"
+        bad_match = _re.findall(bad_sql)
+        assert "shas" not in bad_match, ":shas::text[] must NOT match full 'shas'"
+        assert "sha" in bad_match, ":shas::text[] must match truncated 'sha'"
+
+    def test_unnest_param_with_space_before_cast_matches_correctly(self):
+        """:shas ::text[] (space before ::) correctly matches 'shas' and 'ns'.
+
+        This is the fixed pattern used in rescan_library_job after commit a425a08.
+        """
+        import re
+
+        _re = re.compile(r"(?<![:\w\x5c]):([\w]+)(?!:)", re.UNICODE)
+
+        good_sql = "SELECT unnest(:shas ::text[]) AS sha, unnest(:ns ::int[]) AS n"
+        good_match = _re.findall(good_sql)
+        assert "shas" in good_match, ":shas ::text[] must correctly match 'shas'"
+        assert "ns" in good_match, ":ns ::int[] must correctly match 'ns'"
+
+
+# ---------------------------------------------------------------------------
 # List files
 # ---------------------------------------------------------------------------
 
@@ -3637,9 +3719,10 @@ class TestCheckGalleryUpdate:
         """Pixiv check-update returns unchanged when remote page_count matches local pages."""
         await _insert_gallery(db_session, source="pixiv", source_id="222222", pages=3)
         mock_detail = {"page_count": 3, "title": "Test Illust"}
-        with patch("services.credential.get_credential", return_value="fake_token"), patch(
-            "services.pixiv_client.PixivClient"
-        ) as MockClient:
+        with (
+            patch("services.credential.get_credential", return_value="fake_token"),
+            patch("services.pixiv_client.PixivClient") as MockClient,
+        ):
             instance = MockClient.return_value.__aenter__.return_value
             instance.illust_detail.return_value = mock_detail
             resp = await client.post("/api/library/galleries/pixiv/222222/check-update")
@@ -3650,9 +3733,10 @@ class TestCheckGalleryUpdate:
         """Pixiv check-update returns updated with pages_diff when remote has more pages."""
         await _insert_gallery(db_session, source="pixiv", source_id="333333", pages=3)
         mock_detail = {"page_count": 5, "title": "Test Illust"}
-        with patch("services.credential.get_credential", return_value="fake_token"), patch(
-            "services.pixiv_client.PixivClient"
-        ) as MockClient:
+        with (
+            patch("services.credential.get_credential", return_value="fake_token"),
+            patch("services.pixiv_client.PixivClient") as MockClient,
+        ):
             instance = MockClient.return_value.__aenter__.return_value
             instance.illust_detail.return_value = mock_detail
             resp = await client.post("/api/library/galleries/pixiv/333333/check-update")
@@ -3665,9 +3749,10 @@ class TestCheckGalleryUpdate:
     async def test_pixiv_fetch_failure_returns_error(self, client, db_session):
         """Pixiv check-update returns error when the API call raises an exception."""
         await _insert_gallery(db_session, source="pixiv", source_id="444444", pages=1)
-        with patch("services.credential.get_credential", return_value="fake_token"), patch(
-            "services.pixiv_client.PixivClient"
-        ) as MockClient:
+        with (
+            patch("services.credential.get_credential", return_value="fake_token"),
+            patch("services.pixiv_client.PixivClient") as MockClient,
+        ):
             instance = MockClient.return_value.__aenter__.return_value
             instance.illust_detail.side_effect = Exception("network error")
             resp = await client.post("/api/library/galleries/pixiv/444444/check-update")

@@ -10,13 +10,11 @@ Covers:
 
 import asyncio
 import json
-import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -60,9 +58,7 @@ def _make_thumbnail_image(page_num: int, sha256: str):
 def _ffprobe_stdout(width=1920, height=1080, duration=120.0):
     """Return JSON string that mimics ffprobe -print_format json output."""
     data = {
-        "streams": [
-            {"codec_type": "video", "width": width, "height": height}
-        ],
+        "streams": [{"codec_type": "video", "width": width, "height": height}],
         "format": {"duration": str(duration)},
     }
     return json.dumps(data)
@@ -95,13 +91,9 @@ def _make_pil_mocks(width=100, height=100):
 
     mock_rgba = MagicMock()
     mock_rgba.size = (min(width, 100), min(height, 100))
-    mock_rgba.tobytes.return_value = b"\x00" * (
-        mock_rgba.size[0] * mock_rgba.size[1] * 4
-    )
+    mock_rgba.tobytes.return_value = b"\x00" * (mock_rgba.size[0] * mock_rgba.size[1] * 4)
 
-    mock_pil_img.convert = MagicMock(
-        side_effect=lambda m: mock_rgb if m == "RGB" else mock_rgba
-    )
+    mock_pil_img.convert = MagicMock(side_effect=lambda m: mock_rgb if m == "RGB" else mock_rgba)
 
     mock_image_cls = MagicMock()
     mock_image_cls.open.return_value = mock_pil_img
@@ -212,12 +204,15 @@ class TestGenerateSingleThumbnail:
 
         with (
             patch("worker.thumbnail.thumb_dir", return_value=td),
-            patch.dict("sys.modules", {
-                "PIL": mock_pil_module,
-                "PIL.Image": mock_pil_module.Image,
-                "imagehash": mock_imagehash,
-                "thumbhash": mock_thumbhash,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "PIL": mock_pil_module,
+                    "PIL.Image": mock_pil_module.Image,
+                    "imagehash": mock_imagehash,
+                    "thumbhash": mock_thumbhash,
+                },
+            ),
             patch("os.replace"),
         ):
             result = await generate_single_thumbnail(blob, src, session)
@@ -249,12 +244,15 @@ class TestGenerateSingleThumbnail:
             patch("worker.thumbnail.thumb_dir", return_value=td),
             patch("worker.thumbnail._ffprobe_metadata", return_value=meta) as mock_ffprobe,
             patch("worker.thumbnail._extract_video_frame") as mock_extract,
-            patch.dict("sys.modules", {
-                "PIL": mock_pil_module,
-                "PIL.Image": mock_pil_module.Image,
-                "imagehash": mock_imagehash,
-                "thumbhash": mock_thumbhash,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "PIL": mock_pil_module,
+                    "PIL.Image": mock_pil_module.Image,
+                    "imagehash": mock_imagehash,
+                    "thumbhash": mock_thumbhash,
+                },
+            ),
             patch("os.replace"),
         ):
             result = await generate_single_thumbnail(blob, src, session)
@@ -288,12 +286,15 @@ class TestGenerateSingleThumbnail:
 
         with (
             patch("worker.thumbnail.thumb_dir", return_value=td),
-            patch.dict("sys.modules", {
-                "PIL": mock_pil_module,
-                "PIL.Image": mock_pil_module.Image,
-                "imagehash": mock_imagehash,
-                "thumbhash": mock_thumbhash,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "PIL": mock_pil_module,
+                    "PIL.Image": mock_pil_module.Image,
+                    "imagehash": mock_imagehash,
+                    "thumbhash": mock_thumbhash,
+                },
+            ),
             patch("os.replace") as mock_replace,
         ):
             result = await generate_single_thumbnail(blob, src, session)
@@ -320,11 +321,14 @@ class TestGenerateSingleThumbnail:
 
         with (
             patch("worker.thumbnail.thumb_dir", return_value=td),
-            patch.dict("sys.modules", {
-                "PIL": mock_pil_module,
-                "PIL.Image": mock_pil_module.Image,
-                "imagehash": mock_imagehash,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "PIL": mock_pil_module,
+                    "PIL.Image": mock_pil_module.Image,
+                    "imagehash": mock_imagehash,
+                },
+            ),
         ):
             result = await generate_single_thumbnail(blob, src, session)
 
@@ -347,12 +351,15 @@ class TestGenerateSingleThumbnail:
 
         with (
             patch("worker.thumbnail.thumb_dir", return_value=td),
-            patch.dict("sys.modules", {
-                "PIL": mock_pil_module,
-                "PIL.Image": mock_pil_module.Image,
-                "imagehash": mock_imagehash,
-                "thumbhash": mock_thumbhash,
-            }),
+            patch.dict(
+                "sys.modules",
+                {
+                    "PIL": mock_pil_module,
+                    "PIL.Image": mock_pil_module.Image,
+                    "imagehash": mock_imagehash,
+                    "thumbhash": mock_thumbhash,
+                },
+            ),
             patch("os.replace"),
         ):
             await generate_single_thumbnail(blob, src, session)
@@ -552,7 +559,7 @@ class TestThumbnailJob:
 
     async def test_thumbnail_workers_limits_to_thread_concurrency(self):
         """THUMBNAIL_WORKERS should bound concurrent to_thread calls."""
-        from worker.thumbnail import _ThumbnailResult, _run_thumbnail_in_thread
+        from worker.thumbnail import _run_thumbnail_in_thread, _ThumbnailResult
 
         active = 0
         max_active = 0
@@ -570,11 +577,159 @@ class TestThumbnailJob:
             patch("worker.thumbnail.asyncio.to_thread", new_callable=AsyncMock, side_effect=_fake_to_thread),
         ):
             results = await asyncio.gather(
-                *[
-                    _run_thumbnail_in_thread("a" * 64, "image", Path("/tmp/image.jpg"))
-                    for _ in range(5)
-                ]
+                *[_run_thumbnail_in_thread("a" * 64, "image", Path("/tmp/image.jpg")) for _ in range(5)]
             )
 
         assert len(results) == 5
         assert max_active == 2
+
+
+# ---------------------------------------------------------------------------
+# TestBlobNeedsThumbnail  (STAB-005 regression)
+# ---------------------------------------------------------------------------
+
+
+class TestBlobNeedsThumbnail:
+    """Regression tests for _blob_needs_thumbnail() skip guard (STAB-005).
+
+    Verifies that completed blobs are correctly identified so thumbnail_job
+    does not re-process them, preventing duplicate render work.
+    """
+
+    def _all_thumbs_dir(self, tmp_path):
+        """Create and return a thumb dir with all three sizes present."""
+        td = tmp_path / SHA[:2] / SHA[2:4] / SHA
+        td.mkdir(parents=True)
+        for size in (160, 360, 720):
+            (td / f"thumb_{size}.webp").write_bytes(b"x")
+        return td
+
+    def test_none_blob_returns_false(self):
+        """None blob must return False without raising."""
+        from worker.thumbnail import _blob_needs_thumbnail
+
+        assert _blob_needs_thumbnail(None) is False
+
+    def test_missing_thumb_file_returns_true(self, tmp_path):
+        """Returns True when any thumb_{size}.webp is absent from disk."""
+        from worker.thumbnail import _blob_needs_thumbnail
+
+        blob = _make_blob()
+        blob.width = 100
+        blob.height = 100
+        blob.thumbhash = "h"
+        blob.phash = "0" * 16
+
+        td = tmp_path / SHA[:2] / SHA[2:4] / SHA
+        td.mkdir(parents=True)
+        for size in (160, 360):  # 720 deliberately missing
+            (td / f"thumb_{size}.webp").write_bytes(b"x")
+
+        with patch("worker.thumbnail.thumb_dir", return_value=td):
+            assert _blob_needs_thumbnail(blob) is True
+
+    def test_missing_width_metadata_returns_true(self, tmp_path):
+        """Returns True when all thumbs exist but blob.width is None."""
+        from worker.thumbnail import _blob_needs_thumbnail
+
+        blob = _make_blob()
+        blob.width = None
+        blob.height = 100
+        blob.thumbhash = "h"
+        blob.phash = "0" * 16
+
+        with patch("worker.thumbnail.thumb_dir", return_value=self._all_thumbs_dir(tmp_path)):
+            assert _blob_needs_thumbnail(blob) is True
+
+    def test_image_blob_missing_phash_returns_true(self, tmp_path):
+        """Returns True for non-video blob with all thumbs present but phash=None."""
+        from worker.thumbnail import _blob_needs_thumbnail
+
+        blob = _make_blob(media_type="image")
+        blob.width = 100
+        blob.height = 100
+        blob.thumbhash = "h"
+        blob.phash = None  # non-video blobs require phash
+
+        with patch("worker.thumbnail.thumb_dir", return_value=self._all_thumbs_dir(tmp_path)):
+            assert _blob_needs_thumbnail(blob) is True
+
+    def test_complete_image_blob_returns_false(self, tmp_path):
+        """Returns False when all thumbs exist and all metadata is present."""
+        from worker.thumbnail import _blob_needs_thumbnail
+
+        blob = _make_blob(media_type="image")
+        blob.width = 100
+        blob.height = 100
+        blob.thumbhash = "h"
+        blob.phash = "aabbccddeeff0011"
+
+        with patch("worker.thumbnail.thumb_dir", return_value=self._all_thumbs_dir(tmp_path)):
+            assert _blob_needs_thumbnail(blob) is False
+
+    def test_complete_video_blob_without_phash_returns_false(self, tmp_path):
+        """Returns False for video blob with complete thumbs/metadata but no phash (videos skip phash)."""
+        from worker.thumbnail import _blob_needs_thumbnail
+
+        blob = _make_blob(media_type="video")
+        blob.width = 1920
+        blob.height = 1080
+        blob.thumbhash = "h"
+        blob.phash = None  # videos are exempt from phash check
+
+        with patch("worker.thumbnail.thumb_dir", return_value=self._all_thumbs_dir(tmp_path)):
+            assert _blob_needs_thumbnail(blob) is False
+
+
+# ---------------------------------------------------------------------------
+# TestProcessImageBatch  (STAB-005 regression)
+# ---------------------------------------------------------------------------
+
+
+class TestProcessImageBatch:
+    """Regression tests for _process_image_batch() complete-blob skip (STAB-005).
+
+    Verifies that blobs returning False from _blob_needs_thumbnail() are
+    excluded from the work list so _run_thumbnail_in_thread is never called.
+    """
+
+    async def test_complete_blobs_are_not_reprocessed(self):
+        """_process_image_batch must skip images whose blobs need no work."""
+        from worker.thumbnail import _process_image_batch
+
+        img = MagicMock()
+        img.blob = _make_blob()
+
+        with (
+            patch("worker.thumbnail._blob_needs_thumbnail", return_value=False),
+            patch(
+                "worker.thumbnail._run_thumbnail_in_thread",
+                new_callable=AsyncMock,
+            ) as mock_run,
+        ):
+            result = await _process_image_batch(AsyncMock(), [img])
+
+        assert result == 0
+        mock_run.assert_not_called()
+
+    async def test_incomplete_blobs_are_processed(self):
+        """_process_image_batch must process images whose blobs need thumbnails."""
+        from worker.thumbnail import _process_image_batch, _ThumbnailResult
+
+        img = MagicMock()
+        img.blob = _make_blob()
+
+        with (
+            patch("worker.thumbnail._blob_needs_thumbnail", return_value=True),
+            patch("worker.thumbnail.resolve_blob_path", return_value=MagicMock(spec=Path)),
+            patch(
+                "worker.thumbnail._run_thumbnail_in_thread",
+                new_callable=AsyncMock,
+                return_value=_ThumbnailResult(width=100, height=100),
+            ) as mock_run,
+            patch("worker.thumbnail._apply_thumbnail_result"),
+        ):
+            result = await _process_image_batch(AsyncMock(), [img])
+
+        assert result == 1
+        mock_run.assert_called_once()
