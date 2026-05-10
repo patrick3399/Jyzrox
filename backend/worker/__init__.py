@@ -14,6 +14,7 @@ from saq import CronJob
 
 from core.config import get_all_library_paths, settings
 from core.redis_client import close_redis
+from core.scheduled_task_catalog import CATALOG
 from core.watcher import LibraryWatcher
 from worker.backup import database_backup_job
 from worker.dedup_scan import dedup_scan_job
@@ -689,6 +690,34 @@ _render_startup = _make_startup_log("render")
 # ── SAQ Worker Factory ───────────────────────────────────────────────
 
 
+def _build_cron_jobs() -> list[CronJob]:
+    """Build CronJob list from the scheduled task catalog."""
+    func_map = {
+        "scheduled_scan_job":         scheduled_scan_job,
+        "reconciliation_job":         reconciliation_job,
+        "database_backup_job":        database_backup_job,
+        "check_followed_artists":     check_followed_artists,
+        "dedup_tier1_job":            dedup_tier1_job,
+        "dedup_tier2_job":            dedup_tier2_job,
+        "dedup_tier3_job":            dedup_tier3_job,
+        "retry_failed_downloads_job": retry_failed_downloads_job,
+        "ehtag_sync_job":             ehtag_sync_job,
+        "subscription_scheduler":     subscription_scheduler,
+        "rate_limit_schedule_job":    rate_limit_schedule_job,
+        "trash_gc_job":               trash_gc_job,
+        "log_cleanup_job":            log_cleanup_job,
+        "disk_monitor_job":           disk_monitor_job,
+        "adaptive_persist_job":       adaptive_persist_job,
+    }
+    jobs = []
+    for t in CATALOG:
+        func = func_map.get(t.job_name)
+        if func is None:
+            raise RuntimeError(f"Catalog entry {t.task_id!r} references unknown job {t.job_name!r}")
+        jobs.append(CronJob(func, cron=t.default_cron, unique=t.saq_unique, timeout=t.saq_timeout))
+    return jobs
+
+
 def build_workers() -> tuple:
     """Build and return all three SAQ Worker instances.
 
@@ -752,24 +781,7 @@ def build_workers() -> tuple:
             disk_monitor_job,
             adaptive_persist_job,
         ],
-        cron_jobs=[
-            CronJob(scheduled_scan_job,         cron="0 * * * *",    unique=True, timeout=7200),
-            CronJob(reconciliation_job,          cron="0 3 * * 1",    unique=True, timeout=3600),
-            CronJob(subscription_scheduler,      cron="* * * * *",    unique=True, timeout=120),
-            CronJob(rate_limit_schedule_job,     cron="*/10 * * * *", unique=True, timeout=60),
-            CronJob(retry_failed_downloads_job,  cron="*/15 * * * *", unique=True, timeout=300),
-            CronJob(trash_gc_job,                cron="0 4 * * *",    unique=True, timeout=3600),
-            CronJob(ehtag_sync_job,              cron="30 4 * * *",   unique=True, timeout=300),
-            CronJob(log_cleanup_job,             cron="30 3 * * *",   unique=True, timeout=300),
-            CronJob(
-                database_backup_job,
-                cron="0 2 * * *",
-                unique=True,
-                timeout=settings.backup_pg_dump_timeout,
-            ),
-            CronJob(disk_monitor_job,            cron="*/5 * * * *",  unique=True, timeout=30),
-            CronJob(adaptive_persist_job,        cron="*/5 * * * *",  unique=True, timeout=60),
-        ],
+        cron_jobs=_build_cron_jobs(),
         concurrency=concurrency[QUEUE_INTERACTIVE],
         startup=startup,
         shutdown=shutdown,

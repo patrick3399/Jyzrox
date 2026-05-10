@@ -5,90 +5,18 @@ import uuid
 from datetime import UTC, datetime
 
 from croniter import croniter
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel
 
 import core.queue
 from core.auth import require_role
-from core.config import settings
 from core.redis_client import get_redis
+from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["scheduled-tasks"])
 
 _admin = require_role("admin")
-
-TASK_DEFS = {
-    "library_scan": {
-        "name": "External Folder Scan",
-        "description": "Scan external folders and update linked local galleries",
-        "default_cron": "0 * * * *",
-        "default_enabled": True,
-        "job": "scheduled_scan_job",
-        "manual_kwargs": {"force": True},
-        "manual_timeout": 7200,
-    },
-    "reconciliation": {
-        "name": "Reconciliation",
-        "description": "Verify database/filesystem consistency and clean orphaned blobs",
-        "default_cron": "0 3 * * 1",
-        "default_enabled": True,
-        "job": "reconciliation_job",
-        "manual_kwargs": {"force": True},
-        "manual_timeout": 3600,
-    },
-    "database_backup": {
-        "name": "Database Backup",
-        "description": "Create a compressed PostgreSQL dump for disaster recovery",
-        "default_cron": "0 2 * * *",
-        "default_enabled": True,
-        "job": "database_backup_job",
-        "manual_kwargs": {"force": True},
-        "manual_timeout": settings.backup_pg_dump_timeout,
-    },
-    "check_subscriptions": {
-        "name": "Check Subscriptions",
-        "description": "Check followed artists and subscriptions for new works",
-        "default_cron": "30 */2 * * *",
-        "default_enabled": True,
-        "job": "check_followed_artists",
-    },
-    "dedup_tier1": {
-        "name": "Dedup — pHash Scan",
-        "description": "Scan all images for similar pairs using perceptual hashing",
-        "default_cron": "0 8 * * *",
-        "default_enabled": False,
-        "job": "dedup_tier1_job",
-    },
-    "dedup_tier2": {
-        "name": "Dedup — Heuristic Classify",
-        "description": "Classify similar pairs by resolution and file size",
-        "default_cron": "0 9 * * *",
-        "default_enabled": False,
-        "job": "dedup_tier2_job",
-    },
-    "dedup_tier3": {
-        "name": "Dedup — OpenCV Verify",
-        "description": "Pixel-level validation of similar pairs (CPU intensive, runs nightly)",
-        "default_cron": "0 2 * * *",
-        "default_enabled": False,
-        "job": "dedup_tier3_job",
-    },
-    "retry_downloads": {
-        "name": "Retry Failed Downloads",
-        "description": "Auto-retry failed and partial downloads with exponential backoff",
-        "default_cron": "*/15 * * * *",
-        "default_enabled": True,
-        "job": "retry_failed_downloads_job",
-    },
-    "ehtag_sync": {
-        "name": "EhTag Translation Sync",
-        "description": "Sync tag translations from EhTagTranslation database (CDN)",
-        "default_cron": "0 4 * * 0",
-        "default_enabled": True,
-        "job": "ehtag_sync_job",
-    },
-}
 
 
 class PatchTaskRequest(BaseModel):
@@ -108,7 +36,7 @@ def _next_run(cron_expr: str, enabled: bool, last_run: str | None) -> str | None
     try:
         base = datetime.fromisoformat(last_run) if last_run else datetime.now(UTC)
         return croniter(cron_expr, base).get_next(datetime).isoformat()
-    except ValueError, KeyError:
+    except (ValueError, KeyError):
         return None
 
 
@@ -119,36 +47,31 @@ async def list_scheduled_tasks(
     """List all scheduled tasks with their config and status."""
     r = get_redis()
     tasks = []
-    for task_id, defn in TASK_DEFS.items():
+    for task_id, defn in CONFIGURABLE_TASK_DEFS.items():
         enabled_raw = await r.get(f"cron:{task_id}:enabled")
         cron_expr_raw = await r.get(f"cron:{task_id}:cron_expr")
         last_run_raw = await r.get(f"cron:{task_id}:last_run")
         last_status_raw = await r.get(f"cron:{task_id}:last_status")
         last_error_raw = await r.get(f"cron:{task_id}:last_error")
 
-        enabled = _decode_redis(enabled_raw) != "0" if enabled_raw else defn["default_enabled"]
-        cron_expr = _decode_redis(cron_expr_raw) or defn["default_cron"]
+        enabled = _decode_redis(enabled_raw) != "0" if enabled_raw else defn.default_enabled
+        cron_expr = _decode_redis(cron_expr_raw) or defn.default_cron
         last_run = _decode_redis(last_run_raw)
         last_status = _decode_redis(last_status_raw)
         if last_status == "running":
             claim_exists = await r.exists(f"cron:{task_id}:claim", f"cron:{task_id}:manual_claim")
-            progress_key = {
-                "library_scan": "rescan:progress",
-                "reconciliation": "reconcile:progress",
-                "database_backup": "backup:database:claim",
-            }.get(task_id)
-            progress_exists = await r.exists(progress_key) if progress_key else 0
+            progress_exists = await r.exists(defn.progress_key) if defn.progress_key else 0
             if not claim_exists and not progress_exists:
                 last_status = "stale"
 
         tasks.append(
             {
                 "id": task_id,
-                "name": defn["name"],
-                "description": defn["description"],
+                "name": defn.name,
+                "description": defn.description,
                 "enabled": enabled,
                 "cron_expr": cron_expr,
-                "default_cron": defn["default_cron"],
+                "default_cron": defn.default_cron,
                 "next_run": _next_run(cron_expr, enabled, last_run),
                 "last_run": last_run,
                 "last_status": last_status,
@@ -166,7 +89,7 @@ async def update_scheduled_task(
     _: dict = Depends(_admin),
 ):
     """Update a scheduled task's config (enabled, cron_expr)."""
-    if task_id not in TASK_DEFS:
+    if task_id not in CONFIGURABLE_TASK_DEFS:
         raise HTTPException(status_code=404, detail="Task not found")
 
     r = get_redis()
@@ -187,15 +110,14 @@ async def update_scheduled_task(
 @router.post("/{task_id}/run")
 async def run_scheduled_task(
     task_id: str,
-    request: Request,
     _: dict = Depends(_admin),
 ):
     """Manually trigger a scheduled task."""
-    if task_id not in TASK_DEFS:
+    if task_id not in CONFIGURABLE_TASK_DEFS:
         raise HTTPException(status_code=404, detail="Task not found")
 
-    defn = TASK_DEFS[task_id]
-    job_name = defn["job"]
+    defn = CONFIGURABLE_TASK_DEFS[task_id]
+    job_name = defn.job_name
     r = get_redis()
     claim_key = f"cron:{task_id}:manual_claim"
     claimed = await r.set(claim_key, "1", nx=True, ex=300)
@@ -205,8 +127,8 @@ async def run_scheduled_task(
     try:
         await core.queue.enqueue(
             job_name,
-            **defn.get("manual_kwargs", {}),
-            _timeout=defn.get("manual_timeout"),
+            **defn.manual_kwargs,
+            _timeout=defn.manual_timeout,
             _job_id=f"manual:{task_id}:{uuid.uuid4().hex[:8]}",
         )
     except Exception as exc:

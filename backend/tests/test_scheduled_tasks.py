@@ -250,3 +250,72 @@ async def test_scheduled_tasks_run_deduplicates_manual_clicks(client, mock_redis
 async def test_scheduled_tasks_run_unknown_task_returns_404(client):
     resp = await client.post("/api/scheduled-tasks/nonexistent_task_id/run")
     assert resp.status_code == 404
+
+
+# ---------------------------------------------------------------------------
+# Regression — catalog consistency (edge-case audit #24–#27)
+# ---------------------------------------------------------------------------
+
+
+def test_catalog_configurable_task_ids_match_router_task_defs():
+    """CONFIGURABLE_TASK_DEFS must equal the set the router exposes — no silent
+    divergence between the catalog and what the UI can reach."""
+    from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
+    from routers.scheduled_tasks import CONFIGURABLE_TASK_DEFS as router_defs
+
+    assert set(CONFIGURABLE_TASK_DEFS.keys()) == set(router_defs.keys())
+
+
+def test_catalog_check_subscriptions_job_name_matches_cron_should_run_task_id():
+    """check_followed_artists calls _cron_should_run('check_subscriptions', ...).
+    The catalog must map task_id='check_subscriptions' → job_name='check_followed_artists'
+    so that the Redis gate key and the UI task ID stay in sync. (#24)"""
+    from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
+
+    defn = CONFIGURABLE_TASK_DEFS["check_subscriptions"]
+    assert defn.job_name == "check_followed_artists"
+
+
+def test_catalog_required_jobs_are_registered_as_cron_jobs():
+    """All catalog entries with CronJob requirements must appear in the list
+    built by _build_cron_jobs(). Covers: #24 (check_followed_artists added),
+    #25 (dedup tiers added), #27 (background-only jobs present)."""
+    from worker import _build_cron_jobs
+
+    cron_jobs = {job.function.__name__: job for job in _build_cron_jobs()}
+    required = {
+        # #24 — subscription schedule was missing
+        "check_followed_artists",
+        # #25 — dedup had no CronJob entries
+        "dedup_tier1_job", "dedup_tier2_job", "dedup_tier3_job",
+        # #27 — background jobs not previously catalogued
+        "trash_gc_job", "log_cleanup_job", "disk_monitor_job",
+        "adaptive_persist_job", "rate_limit_schedule_job",
+    }
+    missing = required - cron_jobs.keys()
+    assert not missing, f"Missing from CronJob list: {missing}"
+
+
+def test_catalog_ehtag_sync_cron_is_consistent_between_catalog_and_cron_job():
+    """ehtag_sync default_cron in catalog must match the CronJob schedule so
+    the gate interval and SAQ wake-up are aligned. (#26)"""
+    from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
+    from worker import _build_cron_jobs
+
+    expected_cron = CONFIGURABLE_TASK_DEFS["ehtag_sync"].default_cron
+    cron_jobs = {job.function.__name__: job for job in _build_cron_jobs()}
+    assert "ehtag_sync_job" in cron_jobs
+    assert cron_jobs["ehtag_sync_job"].cron == expected_cron
+
+
+def test_catalog_all_configurable_tasks_have_valid_default_cron():
+    """All configurable tasks must have valid cron expressions so the UI
+    next_run calculation never raises."""
+    from croniter import croniter
+
+    from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
+
+    for task_id, defn in CONFIGURABLE_TASK_DEFS.items():
+        assert croniter.is_valid(defn.default_cron), (
+            f"{task_id} has invalid default_cron: {defn.default_cron!r}"
+        )
