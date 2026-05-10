@@ -69,7 +69,7 @@ class TestTrashGcJob:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
-            patch("routers.settings._get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("worker.trash.get_toggle", new_callable=AsyncMock, return_value=True),
             patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             result = await trash_gc_job({})
@@ -90,7 +90,7 @@ class TestTrashGcJob:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
-            patch("routers.settings._get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("worker.trash.get_toggle", new_callable=AsyncMock, return_value=True),
             patch("core.events.emit_safe", new_callable=AsyncMock),
         ):
             result = await trash_gc_job({})
@@ -108,10 +108,10 @@ class TestTrashGcJob:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
-            patch("routers.settings._get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("worker.trash.get_toggle", new_callable=AsyncMock, return_value=True),
             patch("core.events.emit_safe", new_callable=AsyncMock),
             patch(
-                "routers.library._hard_delete_galleries",
+                "worker.trash.hard_delete_galleries",
                 new_callable=AsyncMock,
             ) as mock_delete,
         ):
@@ -119,7 +119,7 @@ class TestTrashGcJob:
 
         assert result["status"] == "ok"
         assert result["deleted"] == 0
-        # _hard_delete_galleries should NOT be called when no galleries are found
+        # hard_delete_galleries should NOT be called when no galleries are found
         mock_delete.assert_not_awaited()
 
     async def test_expired_galleries_are_hard_deleted(self):
@@ -134,10 +134,10 @@ class TestTrashGcJob:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
-            patch("routers.settings._get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("worker.trash.get_toggle", new_callable=AsyncMock, return_value=True),
             patch("core.events.emit_safe", new_callable=AsyncMock),
             patch(
-                "routers.library._hard_delete_galleries",
+                "worker.trash.hard_delete_galleries",
                 new_callable=AsyncMock,
                 return_value=delete_result,
             ) as mock_delete,
@@ -161,13 +161,34 @@ class TestTrashGcJob:
         with (
             patch("worker.trash.get_redis", return_value=redis),
             patch("worker.trash.AsyncSessionLocal", return_value=session),
-            patch("routers.settings._get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("worker.trash.get_toggle", new_callable=AsyncMock, return_value=True),
             patch("core.events.emit_safe", new_callable=AsyncMock),
             patch(
-                "routers.library._hard_delete_galleries",
+                "worker.trash.hard_delete_galleries",
                 new_callable=AsyncMock,
                 side_effect=RuntimeError("DB connection lost"),
             ),
         ):
             with pytest.raises(RuntimeError, match="DB connection lost"):
                 await trash_gc_job({})
+
+
+class TestTrashWorkerImportBoundary:
+    """Regression: worker/trash.py must not import from any router module (STAB-004)."""
+
+    def test_trash_worker_does_not_import_routers(self):
+        import ast
+        import pathlib
+
+        source = pathlib.Path(__file__).parent.parent / "worker" / "trash.py"
+        tree = ast.parse(source.read_text())
+
+        router_imports = []
+        for node in ast.walk(tree):
+            if isinstance(node, ast.ImportFrom):
+                if node.module and node.module.startswith("routers"):
+                    router_imports.append(node.module)
+
+        assert router_imports == [], (
+            f"worker/trash.py imports from routers (STAB-004 violation): {router_imports}"
+        )
