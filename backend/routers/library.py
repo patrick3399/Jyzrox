@@ -53,11 +53,17 @@ from plugins.builtin.ehentai.browse import _make_client as _make_eh_client
 from plugins.builtin.gallery_dl._sites import get_site_config as _get_gdl_site_config
 from services.cas import (
     cas_url,
-    decrement_ref_count,
     library_dir,
     thumb_dir,
 )
 from services.cas import thumb_url as cas_thumb_url
+from services.gallery_lifecycle import (
+    hard_delete_galleries as _hard_delete_galleries,
+)
+from services.gallery_lifecycle import (
+    invalidate_sources_cache as _invalidate_sources_cache,
+)
+from services.settings_store import get_toggle as _get_toggle
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["library"])
@@ -200,14 +206,6 @@ async def _user_gallery_state(db: AsyncSession, user_id: int, gallery_id: int) -
 
 _SOURCES_CACHE_KEY = "library:sources"
 _SOURCES_CACHE_TTL = 300  # 5 minutes
-
-
-async def _invalidate_sources_cache() -> None:
-    """Delete the cached sources list so next request re-queries."""
-    try:
-        await get_redis().delete(_SOURCES_CACHE_KEY)
-    except Exception:
-        pass
 
 
 @router.get("/galleries/sources")
@@ -1428,66 +1426,6 @@ async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth
     return {"status": "ok", "affected": len(galleries), "deleted_dirs": 0}
 
 
-async def _hard_delete_galleries(db: AsyncSession, galleries: list) -> dict:
-    """Permanently delete galleries: decrement blob refs, remove DB records, cleanup filesystem."""
-    import asyncio
-    import shutil
-
-    if not galleries:
-        return {"affected": 0, "deleted_dirs": 0}
-
-    # Load all images with blobs
-    img_stmt = select(Image).where(Image.gallery_id.in_([g.id for g in galleries])).options(selectinload(Image.blob))
-    images = (await db.execute(img_stmt)).scalars().all()
-
-    blob_sha256s = [img.blob_sha256 for img in images]
-
-    for sha256 in blob_sha256s:
-        await decrement_ref_count(sha256, db)
-
-    for g in galleries:
-        await db.delete(g)
-    await db.commit()
-
-    await _invalidate_sources_cache()
-
-    zero_ref_sha256s: set[str] = set()
-    if blob_sha256s:
-        zero_ref_result = await db.execute(
-            select(Blob.sha256).where(Blob.sha256.in_(blob_sha256s), Blob.ref_count <= 0)
-        )
-        zero_ref_sha256s = set(zero_ref_result.scalars().all())
-
-    def _delete_filesystem() -> int:
-        deleted = 0
-        for g in galleries:
-            lib_dir = library_dir(g.source, g.source_id)
-            if lib_dir.exists():
-                try:
-                    shutil.rmtree(str(lib_dir), ignore_errors=True)
-                    deleted += 1
-                except OSError as exc:
-                    logger.warning("[hard_delete] failed to remove library dir %s: %s", lib_dir, exc)
-        # Thumbnail cleanup — once, not per gallery
-        for sha256 in zero_ref_sha256s:
-            td = thumb_dir(sha256)
-            if td.exists():
-                try:
-                    shutil.rmtree(str(td), ignore_errors=True)
-                    deleted += 1
-                except OSError as exc:
-                    logger.warning("[hard_delete] failed to remove thumb dir %s: %s", td, exc)
-        return deleted
-
-    try:
-        deleted_count = await asyncio.to_thread(_delete_filesystem)
-    except Exception as exc:
-        logger.warning("[hard_delete] cleanup failed: %s", exc)
-        deleted_count = 0
-
-    return {"affected": len(galleries), "deleted_dirs": deleted_count}
-
-
 # ── Trash endpoints ───────────────────────────────────────────────────
 
 
@@ -1917,8 +1855,6 @@ async def delete_gallery(
         )
 
     # Check if trash is enabled
-    from routers.settings import _get_toggle
-
     trash_enabled = await _get_toggle("setting:trash_enabled", True)
 
     if not trash_enabled:
