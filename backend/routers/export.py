@@ -1,6 +1,7 @@
 """Training Data Export (Kohya format)."""
 
 import os
+import re
 import zipfile
 from io import BytesIO
 
@@ -71,8 +72,10 @@ async def export_kohya(gallery_id: int, auth: dict = Depends(_member)):
             if not file_path:
                 continue
 
-            # Use img.filename if available, otherwise fall back to a page-based name
-            arcname = img.filename if img.filename else f"image_{i}"
+            # Use img.filename if available, otherwise fall back to a page-based name.
+            # Strip directory components and sanitize to prevent path traversal — edge case #129.
+            raw_name = img.filename if img.filename else f"image_{i}"
+            arcname = re.sub(r"[^\w.\-]", "_", os.path.basename(raw_name)) or f"image_{i}"
 
             # Add image file to zip
             zip_file.write(str(file_path), arcname=arcname)

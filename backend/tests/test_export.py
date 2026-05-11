@@ -221,3 +221,57 @@ class TestExportKohya:
 
         assert resp.status_code == 413
         assert "too large" in resp.json()["detail"].lower()
+
+
+# ---------------------------------------------------------------------------
+# Regression: edge case #129 — export ZIP arcname path traversal
+# ---------------------------------------------------------------------------
+
+
+class TestExportArcnameSanitization:
+    """Export ZIP arcnames must not contain path components — edge case #129."""
+
+    async def test_export_filename_with_path_traversal_is_sanitized(self, client, db_session, db_session_factory):
+        """Image filename containing '../' must be sanitized in the ZIP arcname — edge case #129.
+
+        Before the fix, img.filename was used as-is in zipfile.write(), allowing
+        a crafted filename like '../../etc/passwd' to write outside the intended dir.
+        """
+        import re
+
+        gid = await _insert_gallery(db_session, title="Traversal Test")
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+            tmp_path = f.name
+
+        try:
+            dangerous_filename = "../../etc/passwd.jpg"
+            await db_session.execute(
+                text(
+                    "INSERT INTO blobs (sha256, file_size, extension, storage, external_path)"
+                    " VALUES ('sha_traversal', 100, '.jpg', 'external', :fp)"
+                ),
+                {"fp": tmp_path},
+            )
+            await db_session.execute(
+                text(
+                    "INSERT INTO images (gallery_id, page_num, filename, blob_sha256)"
+                    " VALUES (:gid, 1, :fn, 'sha_traversal')"
+                ),
+                {"gid": gid, "fn": dangerous_filename},
+            )
+            await db_session.commit()
+
+            with patch("routers.export.async_session", db_session_factory):
+                resp = await client.get(f"/api/export/kohya/{gid}")
+
+            assert resp.status_code == 200
+            buf = io.BytesIO(resp.content)
+            with zipfile.ZipFile(buf) as zf:
+                for name in zf.namelist():
+                    assert ".." not in name, f"arcname '{name}' contains path traversal"
+                    assert "/" not in name, f"arcname '{name}' contains directory separator"
+                    assert re.match(r"^[\w.\-]+$", name), f"arcname '{name}' contains unsafe chars"
+        finally:
+            os.unlink(tmp_path)

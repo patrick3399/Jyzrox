@@ -168,12 +168,16 @@ async def create_alias(req: AliasRequest, _: dict = Depends(_admin)):
         if not tag:
             raise HTTPException(status_code=404, detail="Canonical tag not found")
 
+        # Normalize to lowercase so aliases are case-insensitive — edge case #127.
+        ns = req.alias_namespace.lower()
+        name = req.alias_name.lower()
+
         # Upsert alias
         existing = (
             await session.execute(
                 select(TagAlias).where(
-                    TagAlias.alias_namespace == req.alias_namespace,
-                    TagAlias.alias_name == req.alias_name,
+                    TagAlias.alias_namespace == ns,
+                    TagAlias.alias_name == name,
                 )
             )
         ).scalar_one_or_none()
@@ -183,8 +187,8 @@ async def create_alias(req: AliasRequest, _: dict = Depends(_admin)):
         else:
             session.add(
                 TagAlias(
-                    alias_namespace=req.alias_namespace,
-                    alias_name=req.alias_name,
+                    alias_namespace=ns,
+                    alias_name=name,
                     canonical_id=req.canonical_id,
                 )
             )
@@ -202,8 +206,8 @@ async def delete_alias(
         alias = (
             await session.execute(
                 select(TagAlias).where(
-                    TagAlias.alias_namespace == alias_namespace,
-                    TagAlias.alias_name == alias_name,
+                    TagAlias.alias_namespace == alias_namespace.lower(),
+                    TagAlias.alias_name == alias_name.lower(),
                 )
             )
         ).scalar_one_or_none()

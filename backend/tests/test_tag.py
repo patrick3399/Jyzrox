@@ -1443,3 +1443,51 @@ class TestManualTagRemoveEdgeCases:
         data = resp.json()
         assert data["status"] == "ok"
         assert data["affected"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Regression: edge case #127 — tag aliases must be case-insensitive
+# ---------------------------------------------------------------------------
+
+
+class TestAliasNormalization:
+    """Tag alias namespace/name must be normalized to lowercase at write time — edge case #127."""
+
+    async def test_alias_created_with_mixed_case_is_stored_lowercase(self, client, db_session):
+        """Creating an alias with 'Character:Rem' must store 'character:rem' — edge case #127.
+
+        Before the fix, the alias PK was case-sensitive, so 'Character:Rem' and
+        'character:rem' were treated as distinct rows; lookups by lowercased input
+        silently missed title-cased aliases.
+        """
+        canonical_id = await _insert_tag(db_session, "character", "rem", count=10)
+
+        resp = await client.post(
+            "/api/tags/aliases",
+            json={"alias_namespace": "Character", "alias_name": "Rem", "canonical_id": canonical_id},
+        )
+        assert resp.status_code == 200
+
+        list_resp = await client.get("/api/tags/aliases", params={"tag_id": canonical_id})
+        assert list_resp.status_code == 200
+        stored = [(a["alias_namespace"], a["alias_name"]) for a in list_resp.json()]
+        assert ("character", "rem") in stored, "Alias must be stored in lowercase"
+        assert ("Character", "Rem") not in stored, "Mixed-case form must not be stored"
+
+    async def test_alias_delete_with_mixed_case_resolves_to_lowercase_row(self, client, db_session):
+        """DELETE /aliases with mixed-case params must find the lowercase row — edge case #127."""
+        canonical_id = await _insert_tag(db_session, "character", "aqua", count=5)
+
+        await client.post(
+            "/api/tags/aliases",
+            json={"alias_namespace": "character", "alias_name": "aqua_alias", "canonical_id": canonical_id},
+        )
+
+        del_resp = await client.delete(
+            "/api/tags/aliases",
+            params={"alias_namespace": "Character", "alias_name": "Aqua_Alias"},
+        )
+        assert del_resp.status_code == 200
+
+        list_resp = await client.get("/api/tags/aliases", params={"tag_id": canonical_id})
+        assert not any(a["alias_name"] == "aqua_alias" for a in list_resp.json())

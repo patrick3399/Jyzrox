@@ -343,7 +343,10 @@ async def list_galleries(
         else:
             stmt = stmt.where(Gallery.category == category)
     if q:
-        stmt = stmt.where(Gallery.title.ilike(f"%{q}%"))
+        # Edge case #101: escape LIKE special characters so user input cannot
+        # act as wildcards or cause pathological backtracking.
+        escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        stmt = stmt.where(Gallery.title.ilike(f"%{escaped_q}%", escape="\\"))
     if collection is not None:
         from db.models import CollectionGallery
 

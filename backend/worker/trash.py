@@ -30,6 +30,10 @@ async def trash_gc_job(ctx: dict) -> dict:
         return {"status": "ok", "trash_disabled": True, **result}
 
     retention_days = await get_int_setting("setting:trash_retention_days", 30)
+    if retention_days < 1:
+        # Edge case #93: zero/negative retention would delete all trashed galleries immediately.
+        logger.warning("[trash_gc] retention_days=%d invalid (must be >= 1), defaulting to 30", retention_days)
+        retention_days = 30
 
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
 

@@ -3841,3 +3841,39 @@ class TestCheckGalleryUpdate:
 
         assert resp.status_code == 200
         assert resp.json() == {"status": "error", "reason": "invalid_metadata"}
+
+
+# ---------------------------------------------------------------------------
+# Regression: edge case #101 — search ILIKE must escape % and _ wildcards
+# ---------------------------------------------------------------------------
+
+
+class TestSearchIlikeEscape:
+    """Title search must escape LIKE wildcards in user input — edge case #101."""
+
+    async def test_percent_in_query_does_not_match_all_galleries(self, client, db_session):
+        """A query containing only '%' must not return every gallery — edge case #101.
+
+        Before the fix, Gallery.title.ilike('%%') matched all rows because '%' is
+        a wildcard. After the fix it is escaped to '\\%' and matches literally.
+        """
+        await _insert_gallery(db_session, source_id="pct1", title="Exact Match")
+        await _insert_gallery(db_session, source_id="pct2", title="Unrelated Gallery")
+
+        resp = await client.get("/api/library/galleries", params={"q": "%"})
+        assert resp.status_code == 200
+        data = resp.json()
+        # A literal '%' should match no titles (neither title contains '%')
+        assert data["total"] == 0, "Unescaped '%' must not wildcard-match all galleries"
+
+    async def test_underscore_in_query_matches_literally(self, client, db_session):
+        """A query containing '_' must match it as a literal character — edge case #101."""
+        await _insert_gallery(db_session, source_id="usc1", title="Gallery_Title")
+        await _insert_gallery(db_session, source_id="usc2", title="Other Gallery")
+
+        resp = await client.get("/api/library/galleries", params={"q": "_"})
+        assert resp.status_code == 200
+        data = resp.json()
+        # Only "Gallery_Title" contains a literal underscore
+        assert data["total"] == 1
+        assert data["galleries"][0]["title"] == "Gallery_Title"

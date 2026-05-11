@@ -163,6 +163,61 @@ class TestTrashGcJob:
                 await trash_gc_job({})
 
 
+# ---------------------------------------------------------------------------
+# Regression: edge case #93 — zero/negative retention must not delete all galleries
+# ---------------------------------------------------------------------------
+
+
+class TestTrashGcJobRetentionGuard:
+    """retention_days <= 0 must fall back to 30, not compute cutoff=now() — edge case #93."""
+
+    async def test_zero_retention_days_logs_warning_and_succeeds(self, caplog):
+        """get_int_setting returning 0 must trigger a warning and use the 30-day default.
+
+        Before the fix, retention_days=0 produced cutoff=datetime.now(), which
+        matched every trashed gallery (deleted_at < now()) and deleted them all.
+        """
+        import logging
+
+        from worker.trash import trash_gc_job
+
+        session = _make_mock_session(galleries=[])
+
+        with (
+            patch("worker.trash.get_int_setting", new_callable=AsyncMock, return_value=0),
+            patch("worker.trash.AsyncSessionLocal", return_value=session),
+            patch("worker.trash.get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            with caplog.at_level(logging.WARNING, logger="worker.trash"):
+                result = await trash_gc_job({})
+
+        assert result["status"] == "ok"
+        assert any("retention_days=0 invalid" in r.message for r in caplog.records), (
+            "Expected a warning log when retention_days=0"
+        )
+
+    async def test_negative_retention_days_logs_warning_and_succeeds(self, caplog):
+        """get_int_setting returning a negative value must also fall back to 30 — edge case #93."""
+        import logging
+
+        from worker.trash import trash_gc_job
+
+        session = _make_mock_session(galleries=[])
+
+        with (
+            patch("worker.trash.get_int_setting", new_callable=AsyncMock, return_value=-5),
+            patch("worker.trash.AsyncSessionLocal", return_value=session),
+            patch("worker.trash.get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            with caplog.at_level(logging.WARNING, logger="worker.trash"):
+                result = await trash_gc_job({})
+
+        assert result["status"] == "ok"
+        assert any("invalid" in r.message for r in caplog.records)
+
+
 class TestTrashWorkerImportBoundary:
     """Regression: worker/trash.py must not import from any router module (STAB-004)."""
 

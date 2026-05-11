@@ -733,3 +733,37 @@ class TestProcessImageBatch:
 
         assert result == 1
         mock_run.assert_called_once()
+
+
+# ---------------------------------------------------------------------------
+# Regression: edge case #110 — PIL decompression bomb limit must be set
+# ---------------------------------------------------------------------------
+
+
+class TestThumbnailDecompressionBombLimit:
+    """_generate_single_thumbnail_sync must cap PIL.MAX_IMAGE_PIXELS — edge case #110."""
+
+    def test_max_image_pixels_set_before_open(self):
+        """After calling _generate_single_thumbnail_sync, PIL.MAX_IMAGE_PIXELS must be <= 50M.
+
+        Before the fix there was no cap, so a crafted image with billions of pixels
+        could exhaust process memory (decompression bomb).
+        """
+        from pathlib import Path
+        from unittest.mock import MagicMock, patch
+
+        src = MagicMock(spec=Path)
+        src.exists.return_value = False  # early-return path — no actual PIL open needed
+
+        with patch.dict("sys.modules", {"imagehash": MagicMock()}):
+            from worker.thumbnail import _generate_single_thumbnail_sync
+
+            _generate_single_thumbnail_sync("abc123", "image", src)
+
+        # Import PIL as the production code does to read the current cap
+        from PIL import Image as PILImage  # type: ignore[import]
+
+        assert PILImage.MAX_IMAGE_PIXELS is not None
+        assert PILImage.MAX_IMAGE_PIXELS <= 50_000_000, (
+            f"PIL.MAX_IMAGE_PIXELS must be <= 50M, got {PILImage.MAX_IMAGE_PIXELS}"
+        )

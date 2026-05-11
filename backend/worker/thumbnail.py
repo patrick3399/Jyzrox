@@ -171,6 +171,9 @@ def _generate_single_thumbnail_sync(
     """Generate thumbnails + hashes for one blob without touching the DB session."""
     from PIL import Image as PILImage
 
+    # Edge case #110: cap pixel budget to prevent decompression bomb DoS.
+    PILImage.MAX_IMAGE_PIXELS = 50_000_000
+
     if not src.exists():
         return None
 
