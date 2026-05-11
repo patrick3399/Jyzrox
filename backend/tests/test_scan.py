@@ -1046,3 +1046,35 @@ class TestRescanByPathJob:
 
         rescan_gallery_mock.assert_awaited_once_with({"redis": r}, 88)
         assert result["status"] == "done"
+
+
+# ---------------------------------------------------------------------------
+# Regression: edge case #95 — rescan must exclude trashed galleries
+# ---------------------------------------------------------------------------
+
+
+class TestRescanLibraryJobDeletedAtFilter:
+    """rescan_library_job must not enqueue or process soft-deleted galleries — edge case #95."""
+
+    async def test_rescan_library_job_gallery_id_query_excludes_deleted_at(self):
+        """The initial gallery-ID SELECT must carry a deleted_at IS NULL clause — edge case #95.
+
+        Before the fix, rescan_library_job fetched ALL gallery IDs with no
+        deleted_at filter, causing trashed galleries to be included in the rescan.
+        """
+        from worker.scan import rescan_library_job
+
+        session = _make_session(gallery_ids=[], galleries=[], images=[])
+        r = _make_redis()
+
+        with (
+            patch("worker.scan.AsyncSessionLocal", return_value=session),
+            patch("core.watcher.watcher_instance", None),
+        ):
+            await rescan_library_job({"redis": r})
+
+        # The very first execute() call fetches gallery IDs.
+        # Its argument must reference deleted_at so trashed rows are excluded.
+        first_call = session.execute.call_args_list[0]
+        stmt_str = str(first_call.args[0]).lower()
+        assert "deleted_at" in stmt_str, "rescan_library_job must filter trashed galleries via deleted_at IS NULL"

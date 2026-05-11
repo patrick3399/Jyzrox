@@ -593,6 +593,21 @@ CREATE INDEX IF NOT EXISTS idx_galleries_owner_added_at_id
   ON galleries (created_by_user_id, added_at DESC, id DESC)
   WHERE deleted_at IS NULL AND created_by_user_id IS NOT NULL;
 
+-- ── read_progress indexes (#144) ─────────────────────────────────────
+-- read_progress PK is (user_id, gallery_id) — but "recent reads by user"
+-- and "recent reads of a gallery" queries filter on a single column, which
+-- the composite PK index cannot satisfy without a full scan.
+CREATE INDEX IF NOT EXISTS idx_read_progress_user
+  ON read_progress (user_id, last_read_at DESC);
+CREATE INDEX IF NOT EXISTS idx_read_progress_gallery
+  ON read_progress (gallery_id, last_read_at DESC);
+
+-- ── users.role constraint (#190) ──────────────────────────────────────
+-- Prevent arbitrary strings from being written into users.role.
+-- Valid values mirror ROLE_HIERARCHY in core/auth.py.
+ALTER TABLE users ADD CONSTRAINT IF NOT EXISTS chk_users_role
+  CHECK (role IN ('admin', 'member', 'viewer'));
+
 -- ── PostgreSQL 18 features ─────────────────────────────────────────────
 
 -- UUIDv7: timestamp-ordered UUIDs for better B-tree index write performance

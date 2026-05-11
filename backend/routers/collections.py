@@ -9,7 +9,7 @@ from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
-from core.auth import require_auth
+from core.auth import gallery_access_filter, require_auth
 from core.database import get_db
 from core.gallery_helpers import build_cover_sha_map
 from db.models import Collection, CollectionGallery, Gallery
@@ -140,14 +140,21 @@ async def get_collection(
     if not collection or collection.user_id != auth["user_id"]:
         raise HTTPException(status_code=404, detail="Collection not found")
 
-    # Count galleries
-    count_stmt = select(func.count()).where(CollectionGallery.collection_id == collection_id)
+    # Count galleries — apply access filter so trashed/inaccessible galleries
+    # are excluded from pagination totals (edge case #100)
+    count_stmt = (
+        select(func.count())
+        .select_from(CollectionGallery)
+        .join(Gallery, CollectionGallery.gallery_id == Gallery.id)
+        .where(CollectionGallery.collection_id == collection_id, gallery_access_filter(auth))
+    )
     total = (await db.execute(count_stmt)).scalar_one()
 
-    # Get galleries with covers
+    # Get galleries with covers — same access filter applied
     cg_stmt = (
         select(CollectionGallery)
-        .where(CollectionGallery.collection_id == collection_id)
+        .join(Gallery, CollectionGallery.gallery_id == Gallery.id)
+        .where(CollectionGallery.collection_id == collection_id, gallery_access_filter(auth))
         .order_by(CollectionGallery.position, CollectionGallery.added_at)
         .offset(page * limit)
         .limit(limit)

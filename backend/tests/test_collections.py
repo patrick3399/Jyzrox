@@ -1002,3 +1002,69 @@ class TestRemoveGalleryUpdatedAt:
         detail = await client.get(f"/api/collections/{col['id']}")
         assert detail.json()["gallery_count"] == 0
         assert detail.json()["galleries"] == []
+
+
+# ---------------------------------------------------------------------------
+# Regression: edge case #100 — trashed galleries must not appear in collections
+# ---------------------------------------------------------------------------
+
+
+class TestGetCollectionExcludesTrashedGalleries:
+    """gallery_access_filter must exclude soft-deleted galleries from collection detail — edge case #100."""
+
+    async def test_get_collection_excludes_soft_deleted_gallery(self, client, db_session):
+        """A gallery soft-deleted after being added must not appear in collection detail — edge case #100.
+
+        Before the fix, get_collection loaded galleries via selectinload without
+        applying gallery_access_filter, so trashed galleries leaked into responses.
+        """
+        await _ensure_user(db_session)
+        col = await _create_collection(client, "Trash Filter Test")
+        col_id = col["id"]
+
+        gid = await _insert_gallery(db_session, source_id="trash_regression_g1")
+        resp = await client.post(
+            f"/api/collections/{col_id}/galleries",
+            json={"gallery_ids": [gid]},
+        )
+        assert resp.json()["added"] == 1
+
+        # Soft-delete the gallery (simulate trash)
+        await db_session.execute(
+            text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id"),
+            {"id": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.get(f"/api/collections/{col_id}")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["gallery_count"] == 0, "Trashed gallery must not be counted"
+        returned_ids = [g["id"] for g in data["galleries"]]
+        assert gid not in returned_ids, "Trashed gallery must not appear in gallery list"
+
+    async def test_get_collection_keeps_live_gallery_after_other_is_trashed(self, client, db_session):
+        """Trashing one gallery must not affect other live galleries in the same collection — edge case #100."""
+        await _ensure_user(db_session)
+        col = await _create_collection(client, "Mixed Trash Test")
+        col_id = col["id"]
+
+        gid_live = await _insert_gallery(db_session, source_id="live_g1")
+        gid_trash = await _insert_gallery(db_session, source_id="trash_g1")
+        await client.post(
+            f"/api/collections/{col_id}/galleries",
+            json={"gallery_ids": [gid_live, gid_trash]},
+        )
+
+        await db_session.execute(
+            text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :id"),
+            {"id": gid_trash},
+        )
+        await db_session.commit()
+
+        resp = await client.get(f"/api/collections/{col_id}")
+        data = resp.json()
+        assert data["gallery_count"] == 1
+        returned_ids = [g["id"] for g in data["galleries"]]
+        assert gid_live in returned_ids
+        assert gid_trash not in returned_ids

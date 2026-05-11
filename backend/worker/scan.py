@@ -189,8 +189,15 @@ async def rescan_library_job(ctx: dict) -> dict:
     try:
         async with AsyncSessionLocal() as session:
             # Fetch only IDs ordered by scan priority (unscanned first)
+            # Exclude soft-deleted (trashed) galleries — edge case #95
             all_gallery_ids = (
-                (await session.execute(select(Gallery.id).order_by(Gallery.last_scanned_at.asc().nulls_first())))
+                (
+                    await session.execute(
+                        select(Gallery.id)
+                        .where(Gallery.deleted_at.is_(None))
+                        .order_by(Gallery.last_scanned_at.asc().nulls_first())
+                    )
+                )
                 .scalars()
                 .all()
             )
