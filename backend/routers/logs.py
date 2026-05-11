@@ -11,6 +11,7 @@ from core.auth import require_role
 from core.events import EventType, emit_safe
 from core.log_handler import read_log_level, set_log_level
 from core.redis_client import get_redis
+from services.settings_store import get_int_setting as _get_int_setting
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["logs"])
@@ -28,19 +29,6 @@ class LogLevelPatch(BaseModel):
 
 class LogRetentionPatch(BaseModel):
     max_entries: int = Field(ge=500, le=20000)
-
-
-# ── Helpers ───────────────────────────────────────────────────────────
-
-
-async def _get_int_setting(redis_key: str, default: int) -> int:
-    val = await get_redis().get(redis_key)
-    if val is not None:
-        try:
-            return int(val)
-        except ValueError, TypeError:
-            pass
-    return default
 
 
 # ── Endpoints ─────────────────────────────────────────────────────────

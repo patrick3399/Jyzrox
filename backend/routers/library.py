@@ -59,8 +59,6 @@ from services.cas import (
 from services.cas import thumb_url as cas_thumb_url
 from services.gallery_lifecycle import (
     hard_delete_galleries as _hard_delete_galleries,
-)
-from services.gallery_lifecycle import (
     invalidate_sources_cache as _invalidate_sources_cache,
 )
 from services.settings_store import get_toggle as _get_toggle

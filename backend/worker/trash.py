@@ -7,18 +7,15 @@ from sqlalchemy import select
 
 from core.database import AsyncSessionLocal
 from core.events import EventType, emit_safe
-from core.redis_client import get_redis
 from db.models import Gallery
 from services.gallery_lifecycle import hard_delete_galleries
-from services.settings_store import get_toggle
+from services.settings_store import get_int_setting, get_toggle
 
 logger = logging.getLogger(__name__)
 
 
 async def trash_gc_job(ctx: dict) -> dict:
     """Delete galleries that have been in trash longer than retention period."""
-    r = get_redis()
-
     trash_enabled = await get_toggle("setting:trash_enabled", True)
 
     if not trash_enabled:
@@ -32,8 +29,7 @@ async def trash_gc_job(ctx: dict) -> dict:
         logger.info("[trash_gc] Trash disabled — purged %d galleries", result.get("affected", 0))
         return {"status": "ok", "trash_disabled": True, **result}
 
-    retention_raw = await r.get("setting:trash_retention_days")
-    retention_days = int(retention_raw) if retention_raw else 30
+    retention_days = await get_int_setting("setting:trash_retention_days", 30)
 
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
 
