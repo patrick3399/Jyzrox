@@ -17,6 +17,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 import core.queue
 from core.auth import require_auth, require_role
 from core.database import async_session, get_db
+from core.utils import escape_like
 from db.models import BlockedTag, Gallery, GalleryTag, Tag, TagAlias, TagImplication, TagTranslation
 
 _s2twp = OpenCC("s2twp")
@@ -359,9 +360,6 @@ async def autocomplete_tags(
     if not q:
         return []
 
-    def _escape_like(s: str) -> str:
-        return s.replace("%", "\\%").replace("_", "\\_")
-
     async with async_session() as session:
         base = select(
             Tag.id,
@@ -378,26 +376,26 @@ async def autocomplete_tags(
 
         if ":" in q:
             ns, name_prefix = q.split(":", 1)
-            safe_ns = _escape_like(ns)
-            safe_name = _escape_like(name_prefix)
+            safe_ns = escape_like(ns)
+            safe_name = escape_like(name_prefix)
             query = (
                 base.where(
-                    Tag.namespace.ilike(f"{safe_ns}%"),
+                    Tag.namespace.ilike(f"{safe_ns}%", escape="\\"),
                     or_(
-                        Tag.name.ilike(f"{safe_name}%"),
-                        TagTranslation.translation.ilike(f"%{safe_name}%"),
+                        Tag.name.ilike(f"{safe_name}%", escape="\\"),
+                        TagTranslation.translation.ilike(f"%{safe_name}%", escape="\\"),
                     ),
                 )
                 .order_by(desc(Tag.count), desc(Tag.id))
                 .limit(limit)
             )
         else:
-            safe_q = _escape_like(q)
+            safe_q = escape_like(q)
             query = (
                 base.where(
                     or_(
-                        Tag.name.ilike(f"{safe_q}%"),
-                        TagTranslation.translation.ilike(f"%{safe_q}%"),
+                        Tag.name.ilike(f"{safe_q}%", escape="\\"),
+                        TagTranslation.translation.ilike(f"%{safe_q}%", escape="\\"),
                     )
                 )
                 .order_by(desc(Tag.count), desc(Tag.id))

@@ -35,6 +35,7 @@ from core.gallery_helpers import (
 )
 from core.redis_client import get_redis
 from core.source_display import get_display_config
+from core.utils import escape_like
 from db.models import (
     Blob,
     BlockedTag,
@@ -343,10 +344,7 @@ async def list_galleries(
         else:
             stmt = stmt.where(Gallery.category == category)
     if q:
-        # Edge case #101: escape LIKE special characters so user input cannot
-        # act as wildcards or cause pathological backtracking.
-        escaped_q = q.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
-        stmt = stmt.where(Gallery.title.ilike(f"%{escaped_q}%", escape="\\"))
+        stmt = stmt.where(Gallery.title.ilike(f"%{escape_like(q)}%", escape="\\"))
     if collection is not None:
         from db.models import CollectionGallery
 
@@ -779,8 +777,8 @@ async def list_artists(
     if q:
         base = base.having(
             or_(
-                func.max(Gallery.uploader).ilike(f"%{q}%"),
-                Gallery.artist_id.ilike(f"%{q}%"),
+                func.max(Gallery.uploader).ilike(f"%{escape_like(q)}%", escape="\\"),
+                Gallery.artist_id.ilike(f"%{escape_like(q)}%", escape="\\"),
             )
         )
     if source:
@@ -993,7 +991,7 @@ async def list_files(
     """List library galleries with image counts and size from DB metadata."""
     filters = [gallery_access_filter(auth)]
     if q:
-        filters.append(Gallery.title.ilike(f"%{q}%"))
+        filters.append(Gallery.title.ilike(f"%{escape_like(q)}%", escape="\\"))
     if source:
         filters.append(Gallery.source == source)
     if import_mode:

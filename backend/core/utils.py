@@ -13,6 +13,11 @@ def validate_cron(expr: str) -> None:
         raise HTTPException(status_code=400, detail=f"Invalid cron expression: {exc}")
 
 
+def escape_like(s: str) -> str:
+    """Escape backslash, %, and _ for use in SQLAlchemy .ilike(..., escape='\\')."""
+    return s.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+
+
 def normalize_subscription_url(url: str) -> str:
     """Strip whitespace and trailing slashes for consistent duplicate detection."""
     return url.strip().rstrip("/")

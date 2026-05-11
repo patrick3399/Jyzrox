@@ -215,7 +215,7 @@ class TestTrashGcJobRetentionGuard:
                 result = await trash_gc_job({})
 
         assert result["status"] == "ok"
-        assert any("invalid" in r.message for r in caplog.records)
+        assert any("retention_days=-5 invalid" in r.message for r in caplog.records)
 
 
 class TestTrashWorkerImportBoundary:

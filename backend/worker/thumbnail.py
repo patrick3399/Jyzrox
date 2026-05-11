@@ -19,6 +19,13 @@ from services.cas import resolve_blob_path, thumb_dir
 from worker.constants import logger
 from worker.helpers import env_int
 
+try:
+    from PIL import Image as _PILImage
+
+    _PILImage.MAX_IMAGE_PIXELS = 50_000_000  # edge case #110: decompression bomb cap
+except ImportError:
+    pass
+
 THUMBNAIL_SIZES = (160, 360, 720)
 
 _thumbnail_semaphore: asyncio.Semaphore | None = None
@@ -170,9 +177,6 @@ def _generate_single_thumbnail_sync(
 ) -> _ThumbnailResult | None:
     """Generate thumbnails + hashes for one blob without touching the DB session."""
     from PIL import Image as PILImage
-
-    # Edge case #110: cap pixel budget to prevent decompression bomb DoS.
-    PILImage.MAX_IMAGE_PIXELS = 50_000_000
 
     if not src.exists():
         return None
