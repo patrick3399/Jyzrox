@@ -9,8 +9,6 @@ uses an AsyncMock session and verifies `session.execute` is called.
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 # Consistent 64-character hex sha256 used throughout
 SHA = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
 

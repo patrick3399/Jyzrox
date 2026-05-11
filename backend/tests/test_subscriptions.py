@@ -28,10 +28,7 @@ from core.utils import normalize_subscription_url
 async def _ensure_user(db_session, user_id: int = 1) -> None:
     """Insert the user row if not already present."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-            "VALUES (:id, :u, 'x', 'admin')"
-        ),
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, 'x', 'admin')"),
         {"id": user_id, "u": f"sub_user_{user_id}"},
     )
     await db_session.commit()
@@ -236,10 +233,7 @@ class TestGetSubscription:
         """Subscription owned by a different user is not visible → 404."""
         await _ensure_user(db_session, user_id=1)
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO users (id, username, password_hash) "
-                "VALUES (2, 'other_sub_user', 'x')"
-            )
+            text("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (2, 'other_sub_user', 'x')")
         )
         await db_session.commit()
         sub_id = await _insert_subscription(db_session, user_id=2, name="Other User Sub")
@@ -336,9 +330,7 @@ class TestUpdateSubscription:
         await _ensure_user(db_session)
         sub_id = await _insert_subscription(db_session, name="Cron Patch")
 
-        resp = await client.patch(
-            f"/api/subscriptions/{sub_id}", json={"cron_expr": "not-a-cron"}
-        )
+        resp = await client.patch(f"/api/subscriptions/{sub_id}", json={"cron_expr": "not-a-cron"})
         assert resp.status_code == 400
 
     async def test_update_subscription_valid_cron_returns_ok(self, client, db_session):
@@ -346,9 +338,7 @@ class TestUpdateSubscription:
         await _ensure_user(db_session)
         sub_id = await _insert_subscription(db_session, name="Cron OK Patch")
 
-        resp = await client.patch(
-            f"/api/subscriptions/{sub_id}", json={"cron_expr": "0 6 * * 1"}
-        )
+        resp = await client.patch(f"/api/subscriptions/{sub_id}", json={"cron_expr": "0 6 * * 1"})
         assert resp.status_code == 200
 
     async def test_update_subscription_no_fields_returns_400(self, client, db_session):
@@ -500,9 +490,7 @@ class TestCreateSubscriptionDuplicateAndNormalization:
     gated behind a skip when the SQLite limitation kicks in.
     """
 
-    async def test_create_subscription_response_contains_duplicate_field(
-        self, client, db_session
-    ):
+    async def test_create_subscription_response_contains_duplicate_field(self, client, db_session):
         """Successful POST response must include a 'duplicate' field."""
         await _ensure_user(db_session)
 
@@ -520,9 +508,7 @@ class TestCreateSubscriptionDuplicateAndNormalization:
         # First creation is never a duplicate
         assert not data["duplicate"]
 
-    async def test_create_subscription_with_trailing_slash_url_stores_normalized_url(
-        self, client, db_session
-    ):
+    async def test_create_subscription_with_trailing_slash_url_stores_normalized_url(self, client, db_session):
         """URL submitted with a trailing slash must be stored without the slash.
 
         After POST, a GET on the returned id must reflect the normalised URL.
@@ -549,9 +535,7 @@ class TestCreateSubscriptionDuplicateAndNormalization:
             f"Expected stored URL '{expected_url}' but got '{get_resp.json()['url']}'"
         )
 
-    async def test_create_subscription_with_whitespace_url_stores_normalized_url(
-        self, client, db_session
-    ):
+    async def test_create_subscription_with_whitespace_url_stores_normalized_url(self, client, db_session):
         """URL submitted with surrounding whitespace must be stored stripped.
 
         Guards against whitespace-padded URLs being stored verbatim and then

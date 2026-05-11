@@ -23,6 +23,7 @@ import pytest
 
 from tests.helpers import make_mock_site_config_svc
 
+
 @pytest.fixture(autouse=True)
 def mock_redis_global():
     """Prevent any code path from calling get_redis() on an uninitialised client."""
@@ -34,9 +35,11 @@ def mock_redis_global():
     with patch("core.redis_client.get_redis", return_value=mock_redis):
         yield mock_redis
 
+
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_async_iter(lines: list[bytes], delay: float = 0):
     """Return an async iterable that yields the given byte lines."""
@@ -48,6 +51,7 @@ def _make_async_iter(lines: list[bytes], delay: float = 0):
             yield line
 
     return _gen()
+
 
 def _make_mock_proc(
     stdout_lines: list[bytes],
@@ -91,6 +95,7 @@ def _make_mock_proc(
 
     return proc
 
+
 def _source_patches():
     """Common patches for GalleryDlPlugin.download() tests."""
     return [
@@ -111,9 +116,11 @@ def _source_patches():
         patch("core.site_config.site_config_service", make_mock_site_config_svc()),
     ]
 
+
 # ---------------------------------------------------------------------------
 # TestGalleryDlCancel
 # ---------------------------------------------------------------------------
+
 
 class TestGalleryDlCancel:
     """Tests for cancel detection inside GalleryDlPlugin.download()."""
@@ -200,9 +207,11 @@ class TestGalleryDlCancel:
         # The key invariant: result.status is "cancelled" and process was killed.
         mock_proc.kill.assert_called()
 
+
 # ---------------------------------------------------------------------------
 # TestGalleryDlPartial
 # ---------------------------------------------------------------------------
+
 
 class TestGalleryDlPartial:
     """Tests for partial vs failed status based on subprocess exit code + downloads."""
@@ -265,9 +274,11 @@ class TestGalleryDlPartial:
         assert result.status == "failed"
         assert result.downloaded == 0
 
+
 # ---------------------------------------------------------------------------
 # Shared helpers for download_job() tests
 # ---------------------------------------------------------------------------
+
 
 def _make_plugin_result(status="done", downloaded=3, total=3, error=None, failed_pages=None):
     """Build a minimal plugin DownloadResult-like object."""
@@ -279,6 +290,7 @@ def _make_plugin_result(status="done", downloaded=3, total=3, error=None, failed
     result.failed_pages = failed_pages or []
     return result
 
+
 def _make_mock_session():
     """Return a mock async context manager session."""
     session = AsyncMock()
@@ -289,6 +301,7 @@ def _make_mock_session():
     session.__aexit__ = AsyncMock(return_value=False)
     return session
 
+
 def _make_ctx():
     """Build a minimal worker ctx with a mocked redis pool."""
     redis = AsyncMock()
@@ -297,6 +310,7 @@ def _make_ctx():
     redis.delete = AsyncMock(return_value=1)
     redis.enqueue_job = AsyncMock()
     return {"redis": redis}
+
 
 def _make_mock_sem(*, timeout: bool = False) -> MagicMock:
     """Build a DownloadSemaphore mock using the explicit acquire/release API.
@@ -313,11 +327,13 @@ def _make_mock_sem(*, timeout: bool = False) -> MagicMock:
     mock_sem.get_limit = AsyncMock(return_value=2)
     return mock_sem
 
+
 def _make_default_site_cfg():
     """Return a minimal site config mock with default inactivity_timeout."""
     cfg = MagicMock()
     cfg.inactivity_timeout = 300
     return cfg
+
 
 def _patch_download_job_dependencies(
     plugin=None,
@@ -372,9 +388,11 @@ def _patch_download_job_dependencies(
         patch("core.site_config.site_config_service", make_mock_site_config_svc()),
     ]
 
+
 # ---------------------------------------------------------------------------
 # TestDownloadJobPluginErrors
 # ---------------------------------------------------------------------------
+
 
 class TestDownloadJobPluginErrors:
     """Tests for plugin-resolution and credential-gate failures in download_job()."""
@@ -595,9 +613,11 @@ class TestDownloadJobPluginErrors:
 
         assert result["status"] == "failed"
 
+
 # ---------------------------------------------------------------------------
 # TestDownloadJobSemaphore
 # ---------------------------------------------------------------------------
+
 
 class TestDownloadJobSemaphore:
     """Tests for semaphore acquisition behaviour in download_job()."""
@@ -750,9 +770,11 @@ class TestDownloadJobSemaphore:
         assert len(captured_keys) == 1
         assert captured_keys[0].startswith("gallery_dl:danbooru.donmai.us")
 
+
 # ---------------------------------------------------------------------------
 # TestDownloadJobSignals
 # ---------------------------------------------------------------------------
+
 
 class TestDownloadJobSignals:
     """Tests for cancel and pause signal handling inside download_job()."""
@@ -1025,9 +1047,11 @@ class TestDownloadJobSignals:
         # pause_check should have returned True (pause key was set)
         assert received_pause_check == [True]
 
+
 # ---------------------------------------------------------------------------
 # TestDownloadJobValidation
 # ---------------------------------------------------------------------------
+
 
 class TestDownloadJobValidation:
     """Tests for image validation, progress, PID, and partial-download logic."""
@@ -1331,9 +1355,11 @@ class TestDownloadJobValidation:
         assert result["downloaded"] == 7
         mock_status.assert_any_call("job-val-05", "done")
 
+
 # ---------------------------------------------------------------------------
 # TestCheckDiskSpace
 # ---------------------------------------------------------------------------
+
 
 class TestCheckDiskSpace:
     """Unit tests for the check_disk_space() helper in worker.helpers."""
@@ -1376,9 +1402,11 @@ class TestCheckDiskSpace:
         assert ok is True
         assert free_gb == -1.0
 
+
 # ---------------------------------------------------------------------------
 # TestDownloadJobDiskSpace
 # ---------------------------------------------------------------------------
+
 
 class TestDownloadJobDiskSpace:
     """Tests for the disk space pre-flight check inside download_job()."""
@@ -1523,9 +1551,11 @@ class TestDownloadJobDiskSpace:
         # It should have proceeded past the disk check and reached the semaphore.
         mock_sem.acquire.assert_awaited_once()
 
+
 # ---------------------------------------------------------------------------
 # TestDiskMonitorJob
 # ---------------------------------------------------------------------------
+
 
 class TestDiskMonitorJob:
     """Tests for disk_monitor_job() in worker.__init__."""
@@ -1565,9 +1595,11 @@ class TestDiskMonitorJob:
         assert result["free_gb"] == 50.0
         redis.delete.assert_awaited_once_with("system:disk_low")
 
+
 # ---------------------------------------------------------------------------
 # TestRetryJobDiskLow
 # ---------------------------------------------------------------------------
+
 
 class TestRetryJobDiskLow:
     """Tests for disk-low guard inside retry_failed_downloads_job()."""
@@ -1610,9 +1642,11 @@ class TestRetryJobDiskLow:
 
         assert result["status"] == "skipped_disk_low"
 
+
 # ---------------------------------------------------------------------------
 # TestOnFileConcurrency
 # ---------------------------------------------------------------------------
+
 
 class TestOnFileConcurrency:
     """Tests for the on_file callback's double-checked locking and media-ext filtering."""
@@ -1787,9 +1821,11 @@ class TestOnFileConcurrency:
 
         importer.import_file.assert_not_awaited()
 
+
 # ---------------------------------------------------------------------------
 # TestDownloadJobCancellation
 # ---------------------------------------------------------------------------
+
 
 class TestDownloadJobCancellation:
     """State machine tests for job cancellation paths in download_job()."""
@@ -2029,6 +2065,7 @@ class TestDownloadJobCancellation:
 # TestDownloadJobPause
 # ---------------------------------------------------------------------------
 
+
 class TestDownloadJobPause:
     """State machine tests for job pause paths in download_job()."""
 
@@ -2149,8 +2186,11 @@ class TestDownloadJobPause:
             patch(
                 "worker.progressive.ProgressiveImporter",
                 return_value=MagicMock(
-                    gallery_id=None, title=None, source_url=None,
-                    abort=AsyncMock(), cleanup=AsyncMock(),
+                    gallery_id=None,
+                    title=None,
+                    source_url=None,
+                    abort=AsyncMock(),
+                    cleanup=AsyncMock(),
                 ),
             ),
             patch("worker.download.DownloadSemaphore", mock_sem_cls),
@@ -2227,7 +2267,7 @@ class TestDownloadJobPause:
                 pause_gate_call_count[0] += 1
                 if pause_gate_call_count[0] == 1:
                     return None  # gate: not paused, proceed
-                return b"1"     # mid-download: pause flag is now set
+                return b"1"  # mid-download: pause flag is now set
             return None
 
         ctx["redis"].get = _selective_pause_get
@@ -2245,7 +2285,7 @@ class TestDownloadJobPause:
             patch("pathlib.Path.exists", return_value=False),
             patch("core.site_config.site_config_service", make_mock_site_config_svc()),
         ):
-            result = await download_job(ctx, "https://example.com/gallery/6", db_job_id="job-pausecheck")
+            await download_job(ctx, "https://example.com/gallery/6", db_job_id="job-pausecheck")
 
         assert observed_pause_results == [True], (
             f"pause_check() must return True when pause key is set in Redis, got: {observed_pause_results}"

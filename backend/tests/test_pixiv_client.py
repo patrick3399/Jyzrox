@@ -6,11 +6,9 @@ and error handling.  pixivpy3 calls and Redis are fully mocked — no external
 network traffic.
 """
 
-import asyncio
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -74,9 +72,7 @@ class TestTokenManagement:
         with patch("services.pixiv_client.get_redis", return_value=mock_redis):
             await client._ensure_token()
 
-        client._api.set_auth.assert_called_once_with(
-            "cached_access_token", "my_refresh_token"
-        )
+        client._api.set_auth.assert_called_once_with("cached_access_token", "my_refresh_token")
 
     async def test_ensure_token_refreshes_when_no_cache(self):
         """_ensure_token should call auth() and cache result when no token in Redis."""
@@ -518,8 +514,8 @@ class TestCallErrorHandling:
                 new_callable=AsyncMock,
                 side_effect=[
                     Exception("403 Forbidden"),  # first _call attempt
-                    token_resp,                  # _refresh_token
-                    {"result": "ok"},            # retry
+                    token_resp,  # _refresh_token
+                    {"result": "ok"},  # retry
                 ],
             ),
         ):
@@ -538,8 +534,8 @@ class TestCallErrorHandling:
                 "asyncio.to_thread",
                 new_callable=AsyncMock,
                 side_effect=[
-                    Exception("invalid_grant"),   # first call fails
-                    Exception("still invalid"),   # refresh also fails
+                    Exception("invalid_grant"),  # first call fails
+                    Exception("still invalid"),  # refresh also fails
                 ],
             ),
         ):

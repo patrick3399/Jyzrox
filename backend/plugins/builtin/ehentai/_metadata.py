@@ -9,6 +9,7 @@ from plugins.models import GalleryImportData
 
 logger = logging.getLogger(__name__)
 
+
 def parse_eh_import(dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
     """Parse an EH gallery directory into GalleryImportData."""
     meta = raw_meta or {}
@@ -53,6 +54,7 @@ def parse_eh_import(dest_dir: Path, raw_meta: dict | None = None) -> GalleryImpo
         uploader=meta.get("uploader") or "",
         extra={"token": meta.get("token") or ""},
     )
+
 
 def _extract_tags(gallery_path: Path, metadata: dict) -> list[str]:
     """Extract tags in 'namespace:name' format from metadata or tags.txt."""

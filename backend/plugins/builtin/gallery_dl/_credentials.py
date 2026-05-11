@@ -4,6 +4,7 @@ import json
 
 from plugins.models import CredentialFlow, CredentialStatus, FieldDef
 
+
 def parse_cookie_input(raw: str) -> dict[str, str]:
     """Parse cookie input in multiple formats: JSON, per-line key=val, browser semicolon format, or single key=val."""
     raw = raw.strip()
@@ -27,7 +28,7 @@ def parse_cookie_input(raw: str) -> dict[str, str]:
                 continue
             eq = part.find("=")
             if eq > 0:
-                result[part[:eq].strip()] = part[eq + 1:].strip()
+                result[part[:eq].strip()] = part[eq + 1 :].strip()
         return result
 
     # Per-line format (has newlines)
@@ -41,9 +42,10 @@ def parse_cookie_input(raw: str) -> dict[str, str]:
     # Single key=value
     eq = raw.find("=")
     if eq > 0:
-        return {raw[:eq].strip(): raw[eq + 1:].strip()}
+        return {raw[:eq].strip(): raw[eq + 1 :].strip()}
 
     return {}
+
 
 def gallery_dl_credential_flows() -> list[CredentialFlow]:
     """Return the generic cookie credential flow.
@@ -73,6 +75,7 @@ def gallery_dl_credential_flows() -> list[CredentialFlow]:
             verify_endpoint=None,
         ),
     ]
+
 
 async def verify_gallery_dl_credential(credentials: dict) -> CredentialStatus:
     """Generic credentials cannot be verified — accept as-is."""

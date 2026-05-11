@@ -6,8 +6,8 @@ import logging
 from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel
 
-from core.auth import require_role
 import core.queue
+from core.auth import require_role
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["gallery-dl admin"])

@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
-from core.auth import _checkpw_async, _hashpw_async, _sign_session, _verify_session, require_role
+from core.auth import _hashpw_async, _sign_session, _verify_session, require_role
 from core.database import get_db
 from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
@@ -40,21 +40,21 @@ async def list_users(
     auth: dict = Depends(_admin),
     db: AsyncSession = Depends(get_db),
 ):
-    result = await db.execute(
-        select(User).order_by(User.id)
-    )
+    result = await db.execute(select(User).order_by(User.id))
     users = result.scalars().all()
-    return {"users": [
-        {
-            "id": u.id,
-            "username": u.username,
-            "email": u.email,
-            "role": u.role,
-            "created_at": u.created_at.isoformat() if u.created_at else None,
-            "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
-        }
-        for u in users
-    ]}
+    return {
+        "users": [
+            {
+                "id": u.id,
+                "username": u.username,
+                "email": u.email,
+                "role": u.role,
+                "created_at": u.created_at.isoformat() if u.created_at else None,
+                "last_login_at": u.last_login_at.isoformat() if u.last_login_at else None,
+            }
+            for u in users
+        ]
+    }
 
 
 @router.post("/", status_code=201)
@@ -116,9 +116,7 @@ async def update_user(
             raise api_error(status.HTTP_400_BAD_REQUEST, "invalid_request", locale)
         # Prevent demoting the last admin
         if user.role == "admin" and req.role != "admin":
-            result = await db.execute(
-                select(func.count()).select_from(User).where(User.role == "admin")
-            )
+            result = await db.execute(select(func.count()).select_from(User).where(User.role == "admin"))
             if result.scalar() <= 1:
                 raise api_error(status.HTTP_400_BAD_REQUEST, "cannot_delete_last_admin", locale)
         user.role = req.role
@@ -129,9 +127,9 @@ async def update_user(
     if req.password is not None:
         if len(req.password) < 8:
             raise api_error(status.HTTP_400_BAD_REQUEST, "invalid_request", locale)
-        user.password_hash = (await _hashpw_async(
-            req.password.encode("utf-8"), bcrypt.gensalt(rounds=12)
-        )).decode("utf-8")
+        user.password_hash = (await _hashpw_async(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12))).decode(
+            "utf-8"
+        )
 
     await db.commit()
 
@@ -168,8 +166,7 @@ async def update_user(
                     break
         except Exception as exc:
             logger.warning(
-                "Redis unavailable when updating role for user %d (%s); "
-                "deleting all sessions to force re-login",
+                "Redis unavailable when updating role for user %d (%s); deleting all sessions to force re-login",
                 user_id,
                 exc,
             )
@@ -210,9 +207,7 @@ async def delete_user(
 
     # Check if this is the last admin
     if user.role == "admin":
-        result = await db.execute(
-            select(func.count()).select_from(User).where(User.role == "admin")
-        )
+        result = await db.execute(select(func.count()).select_from(User).where(User.role == "admin"))
         admin_count = result.scalar()
         if admin_count <= 1:
             raise api_error(status.HTTP_400_BAD_REQUEST, "cannot_delete_last_admin", locale)

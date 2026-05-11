@@ -1,9 +1,9 @@
 """Tests for the application log viewer endpoints."""
 
 import json
-import pytest
 from unittest.mock import AsyncMock, MagicMock, patch
 
+import pytest
 
 # ── Log Levels ──────────────────────────────────────────────────────
 
@@ -311,8 +311,9 @@ async def test_log_retention_patch_partial(client, mock_redis):
 @pytest.mark.asyncio
 async def test_redis_log_handler_emit(mock_redis):
     """Unit test: RedisLogHandler writes to Redis via pipeline."""
-    from core.log_handler import RedisLogHandler
     import logging
+
+    from core.log_handler import RedisLogHandler
 
     handler = RedisLogHandler(source="api")
     handler.setFormatter(logging.Formatter("%(message)s"))
@@ -344,9 +345,10 @@ async def test_redis_log_handler_emit(mock_redis):
 @pytest.mark.asyncio
 async def test_redis_log_handler_emit_trimming(mock_redis):
     """RedisLogHandler issues ltrim every _TRIM_INTERVAL emits."""
-    import core.log_handler as lh
-    from core.log_handler import RedisLogHandler, _TRIM_INTERVAL
     import logging
+
+    import core.log_handler as lh
+    from core.log_handler import _TRIM_INTERVAL, RedisLogHandler
 
     # Reset counter to force trim on next emit
     lh._trim_counter = _TRIM_INTERVAL - 1
@@ -383,7 +385,8 @@ async def test_redis_log_handler_emit_trimming(mock_redis):
 def test_install_log_handler_attaches_to_extra_loggers():
     """install_log_handler attaches RedisLogHandler to each name in extra_loggers."""
     import logging
-    from core.log_handler import install_log_handler, RedisLogHandler
+
+    from core.log_handler import RedisLogHandler, install_log_handler
 
     root_logger = logging.getLogger()
     extra1 = logging.getLogger("fake.extra1")
@@ -419,14 +422,14 @@ def test_install_log_handler_attaches_to_extra_loggers():
 def test_non_propagating_logger_reaches_handler():
     """install_log_handler directly attaches to a non-propagating logger so it still receives records."""
     import logging
-    from core.log_handler import install_log_handler, RedisLogHandler
+
+    from core.log_handler import RedisLogHandler, install_log_handler
 
     noprop = logging.getLogger("fake.noprop")
     noprop.propagate = False
     noprop_before = len(noprop.handlers)
 
     root_logger = logging.getLogger()
-    root_before = len(root_logger.handlers)
 
     try:
         install_log_handler("test", extra_loggers=["fake.noprop"])

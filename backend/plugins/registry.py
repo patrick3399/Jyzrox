@@ -18,6 +18,7 @@ from plugins.models import PluginMeta, SiteInfo
 
 logger = logging.getLogger(__name__)
 
+
 class PluginRegistry:
     def __init__(self) -> None:
         # Legacy ABC dicts (preserved for backward compatibility)
@@ -109,6 +110,7 @@ class PluginRegistry:
     def detect_source(self, url: str) -> str | None:
         """Detect source_id from URL using site index, with gallery-dl fallback."""
         import urllib.parse
+
         try:
             netloc = urllib.parse.urlparse(url).netloc.lower()
         except Exception:
@@ -124,7 +126,9 @@ class PluginRegistry:
         # Fallback: use gallery-dl extractor to detect category
         try:
             from gallery_dl import extractor as gdl_extractor
+
             from plugins.builtin.gallery_dl._sites import get_site_config
+
             ex = gdl_extractor.find(url)
             if ex and ex.category:
                 cfg = get_site_config(ex.category)
@@ -140,6 +144,7 @@ class PluginRegistry:
     def detect_source_info(self, url: str) -> SiteInfo | None:
         """Return SiteInfo for the given URL, with gallery-dl fallback."""
         import urllib.parse
+
         try:
             netloc = urllib.parse.urlparse(url).netloc.lower()
         except Exception:
@@ -155,7 +160,9 @@ class PluginRegistry:
         # Fallback: use gallery-dl extractor to detect category
         try:
             from gallery_dl import extractor as gdl_extractor
+
             from plugins.builtin.gallery_dl._sites import get_site_config
+
             ex = gdl_extractor.find(url)
             if ex and ex.category:
                 cfg = get_site_config(ex.category)
@@ -219,5 +226,6 @@ class PluginRegistry:
 
     def get_downloader(self, source_id: str) -> Any:
         return self._downloadable.get(source_id)
+
 
 plugin_registry = PluginRegistry()

@@ -8,7 +8,7 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.version import __version__
@@ -28,6 +28,7 @@ from plugins.models import (
 logger = logging.getLogger(__name__)
 
 _EH_URL_RE = re.compile(r"https?://(?:e-hentai|exhentai)\.org/g/(\d+)/([a-f0-9]+)")
+
 
 class EhSourcePlugin(SourcePlugin):
     """SourcePlugin for E-Hentai and ExHentai galleries."""
@@ -189,6 +190,7 @@ class EhSourcePlugin(SourcePlugin):
         # Determine use_ex: Redis setting → config → igneous cookie → URL domain.
         # Anonymous downloads must use e-hentai.org, not exhentai.
         from core.redis_client import get_redis
+
         redis = get_redis()
         pref = await redis.get("setting:eh_use_ex")
         if pref is not None:
@@ -205,6 +207,7 @@ class EhSourcePlugin(SourcePlugin):
                 await on_progress(downloaded, total_pages)
 
         from core.redis_client import get_image_concurrency
+
         image_concurrency = await get_image_concurrency("ehentai", settings.eh_download_concurrency)
 
         try:
@@ -260,7 +263,7 @@ class EhSourcePlugin(SourcePlugin):
         posted_raw = raw.get("posted")
         if posted_raw:
             try:
-                posted_at = datetime.fromtimestamp(int(posted_raw), tz=timezone.utc)
+                posted_at = datetime.fromtimestamp(int(posted_raw), tz=UTC)
             except ValueError, TypeError, OSError:
                 pass
 
@@ -301,6 +304,7 @@ class EhSourcePlugin(SourcePlugin):
     def parse_import(self, dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
         """Parse a downloaded EH gallery directory into GalleryImportData."""
         from plugins.builtin.ehentai._metadata import parse_eh_import
+
         return parse_eh_import(dest_dir, raw_meta)
 
     # ------------------------------------------------------------------
@@ -310,11 +314,13 @@ class EhSourcePlugin(SourcePlugin):
     def credential_flows(self) -> list[CredentialFlow]:
         """Declare EH credential flows: cookie fields + login."""
         from plugins.builtin.ehentai._credentials import eh_credential_flows
+
         return eh_credential_flows()
 
     async def verify_credential(self, credentials: dict) -> CredentialStatus:
         """Verify EH cookies by testing access against the EhClient."""
         from plugins.builtin.ehentai._credentials import verify_eh_credential
+
         return await verify_eh_credential(credentials)
 
     # ------------------------------------------------------------------
@@ -322,7 +328,11 @@ class EhSourcePlugin(SourcePlugin):
     # ------------------------------------------------------------------
 
     async def check_new_works(
-        self, artist_id: str, last_known: str | None, credentials: dict | None,
+        self,
+        artist_id: str,
+        last_known: str | None,
+        credentials: dict | None,
     ) -> list[NewWork]:
         from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
         return await check_eh_new_works(artist_id, last_known, credentials)

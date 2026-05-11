@@ -8,9 +8,8 @@ imported directly from the worker module and tested in isolation.
 import hashlib
 import os
 import tempfile
+from datetime import UTC
 from pathlib import Path
-
-import pytest
 
 # ---------------------------------------------------------------------------
 # _detect_source
@@ -432,7 +431,7 @@ class TestRateLimitScheduleJob:
 
     async def test_disabled_returns_disabled(self):
         """When schedule is not enabled, job must return status='disabled'."""
-        from unittest.mock import AsyncMock, patch
+        from unittest.mock import AsyncMock
 
         mock_redis = AsyncMock()
         mock_redis.get = AsyncMock(return_value=b"0")
@@ -446,8 +445,8 @@ class TestRateLimitScheduleJob:
 
     async def test_active_window_returns_active(self):
         """When current hour falls inside the rate-limit window, status must be 'active'."""
+        from datetime import datetime
         from unittest.mock import AsyncMock, MagicMock, patch
-        from datetime import datetime, timezone
 
         mock_redis = AsyncMock()
         mock_redis.set = AsyncMock(return_value=True)
@@ -464,7 +463,7 @@ class TestRateLimitScheduleJob:
         mock_redis.get = AsyncMock(side_effect=_get_side)
 
         # Force current_hour=12, which is inside 0..23
-        fixed_dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        fixed_dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
         from worker import rate_limit_schedule_job
 
@@ -478,8 +477,8 @@ class TestRateLimitScheduleJob:
 
     async def test_outside_window_returns_inactive(self):
         """When current hour is outside the window, status must be 'inactive'."""
+        from datetime import datetime
         from unittest.mock import AsyncMock, MagicMock, patch
-        from datetime import datetime, timezone
 
         mock_redis = AsyncMock()
         mock_redis.set = AsyncMock(return_value=True)
@@ -496,7 +495,7 @@ class TestRateLimitScheduleJob:
         mock_redis.get = AsyncMock(side_effect=_get_side)
 
         # Force current_hour=12 which is outside 1..3
-        fixed_dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=timezone.utc)
+        fixed_dt = datetime(2026, 1, 1, 12, 0, 0, tzinfo=UTC)
 
         from worker import rate_limit_schedule_job
 
@@ -508,8 +507,8 @@ class TestRateLimitScheduleJob:
 
     async def test_midnight_wrap_window_correctly_detected(self):
         """Wrap-midnight window (e.g. 22-06) must correctly detect in-window hours."""
+        from datetime import datetime
         from unittest.mock import AsyncMock, MagicMock, patch
-        from datetime import datetime, timezone
 
         mock_redis = AsyncMock()
         mock_redis.set = AsyncMock(return_value=True)
@@ -526,7 +525,7 @@ class TestRateLimitScheduleJob:
         mock_redis.get = AsyncMock(side_effect=_get_side)
 
         # Hour=23 is inside the wrap-midnight window 22..6
-        fixed_dt = datetime(2026, 1, 1, 23, 0, 0, tzinfo=timezone.utc)
+        fixed_dt = datetime(2026, 1, 1, 23, 0, 0, tzinfo=UTC)
 
         from worker import rate_limit_schedule_job
 

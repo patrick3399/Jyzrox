@@ -11,10 +11,7 @@ Strategy:
 
 import json
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
+from unittest.mock import AsyncMock, patch
 
 # ---------------------------------------------------------------------------
 # Shared test data
@@ -444,7 +441,7 @@ class TestPixivDownloaderErrorHandling:
             nonlocal call_count
             call_count += 1
             if call_count == 2:
-                raise IOError("Server returned 404 for page 2")
+                raise OSError("Server returned 404 for page 2")
             return (_FAKE_IMAGE_BYTES, "image/png")
 
         mock_client.download_image = _fail_second_page

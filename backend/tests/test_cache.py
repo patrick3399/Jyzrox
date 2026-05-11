@@ -8,10 +8,7 @@ Strategy:
 """
 
 import json
-from unittest.mock import AsyncMock, call, patch
-
-import pytest
-
+from unittest.mock import AsyncMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers

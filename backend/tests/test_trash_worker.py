@@ -21,6 +21,7 @@ if os.path.abspath(_backend_dir) not in sys.path:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_mock_session(galleries: list | None = None):
     """Return a mock async context-manager session."""
     if galleries is None:
@@ -39,6 +40,7 @@ def _make_mock_session(galleries: list | None = None):
     session.__aexit__ = AsyncMock(return_value=False)
     return session
 
+
 def _make_gallery(gallery_id: int = 1):
     """Return a MagicMock representing a Gallery row."""
     g = MagicMock()
@@ -46,9 +48,11 @@ def _make_gallery(gallery_id: int = 1):
     g.title = f"Gallery {gallery_id}"
     return g
 
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestTrashGcJob:
     """Unit tests for trash_gc_job()."""
@@ -175,6 +179,4 @@ class TestTrashWorkerImportBoundary:
                 if node.module and node.module.startswith("routers"):
                     router_imports.append(node.module)
 
-        assert router_imports == [], (
-            f"worker/trash.py imports from routers (STAB-004 violation): {router_imports}"
-        )
+        assert router_imports == [], f"worker/trash.py imports from routers (STAB-004 violation): {router_imports}"

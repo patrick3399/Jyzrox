@@ -22,7 +22,7 @@ def _backup_dir() -> Path:
 def _load_manifest(path: Path) -> dict[str, Any] | None:
     try:
         data = json.loads(path.read_text())
-    except (OSError, json.JSONDecodeError):
+    except OSError, json.JSONDecodeError:
         return None
     if not isinstance(data, dict):
         return None

@@ -349,16 +349,22 @@ class TestParseImportFallbackSource:
     def test_parse_import_empty_meta_reads_json_from_dir(self, tmp_path: Path):
         """With no raw_meta provided, parse_gallery_dl_import reads JSON files from dest_dir."""
         import json
+
         from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
 
         gallery_dir = tmp_path / "gallery_123"
         gallery_dir.mkdir()
         meta_file = gallery_dir / "info.json"
-        meta_file.write_text(json.dumps({
-            "category": "twitter",
-            "tweet_id": 5555555555,
-            "author": {"name": "json_file_artist"},
-        }), encoding="utf-8")
+        meta_file.write_text(
+            json.dumps(
+                {
+                    "category": "twitter",
+                    "tweet_id": 5555555555,
+                    "author": {"name": "json_file_artist"},
+                }
+            ),
+            encoding="utf-8",
+        )
 
         result = parse_gallery_dl_import(gallery_dir)
         assert result.source == "twitter"

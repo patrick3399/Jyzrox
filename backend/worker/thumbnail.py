@@ -99,7 +99,7 @@ def _encode_thumbhash(pil) -> str | None:
 def _phash_parts(phash: str) -> dict[str, int]:
     phash_int_val = int(phash, 16)
     if phash_int_val >= (1 << 63):
-        phash_int_val -= (1 << 64)
+        phash_int_val -= 1 << 64
 
     def _to_signed16(v: int) -> int:
         return v - 0x10000 if v >= 0x8000 else v
@@ -116,9 +116,13 @@ def _phash_parts(phash: str) -> dict[str, int]:
 def _ffprobe_metadata(src: Path) -> dict:
     """Extract width, height, duration from video using ffprobe."""
     cmd = [
-        "ffprobe", "-v", "quiet",
-        "-print_format", "json",
-        "-show_streams", "-show_format",
+        "ffprobe",
+        "-v",
+        "quiet",
+        "-print_format",
+        "json",
+        "-show_streams",
+        "-show_format",
         str(src),
     ]
     result = subprocess.run(cmd, capture_output=True, text=True, timeout=30)
@@ -144,11 +148,16 @@ def _ffprobe_metadata(src: Path) -> dict:
 def _extract_video_frame(src: Path, output: Path, seek: float) -> None:
     """Extract a single frame from video at `seek` seconds as JPEG."""
     cmd = [
-        "ffmpeg", "-y",
-        "-ss", str(seek),
-        "-i", str(src),
-        "-frames:v", "1",
-        "-q:v", "2",
+        "ffmpeg",
+        "-y",
+        "-ss",
+        str(seek),
+        "-i",
+        str(src),
+        "-frames:v",
+        "1",
+        "-q:v",
+        "2",
         str(output),
     ]
     subprocess.run(cmd, capture_output=True, timeout=30, check=True)
@@ -271,9 +280,7 @@ def _blob_needs_thumbnail(blob) -> bool:
         return True
     if blob.width is None or blob.height is None or blob.thumbhash is None:
         return True
-    if blob.media_type != "video" and blob.phash is None:
-        return True
-    return False
+    return blob.media_type != "video" and blob.phash is None
 
 
 async def _load_gallery_images(session, gallery_id: int) -> tuple[Gallery | None, list[Image]]:
@@ -284,13 +291,17 @@ async def _load_gallery_images(session, gallery_id: int) -> tuple[Gallery | None
         return None, []
 
     images = (
-        await session.execute(
-            select(Image)
-            .where(Image.gallery_id == gallery_id)
-            .order_by(Image.page_num.asc())
-            .options(selectinload(Image.blob))
+        (
+            await session.execute(
+                select(Image)
+                .where(Image.gallery_id == gallery_id)
+                .order_by(Image.page_num.asc())
+                .options(selectinload(Image.blob))
+            )
         )
-    ).scalars().all()
+        .scalars()
+        .all()
+    )
     return gallery, list(images)
 
 
@@ -312,19 +323,12 @@ async def _process_images(session, images: list[Image], *, commit_batch: int) ->
 
 
 async def _process_image_batch(session, images: list[Image]) -> int:
-    work = [
-        (img, resolve_blob_path(img.blob))
-        for img in images
-        if _blob_needs_thumbnail(img.blob)
-    ]
+    work = [(img, resolve_blob_path(img.blob)) for img in images if _blob_needs_thumbnail(img.blob)]
     if not work:
         return 0
 
     results = await asyncio.gather(
-        *[
-            _run_thumbnail_in_thread(img.blob.sha256, img.blob.media_type, src)
-            for img, src in work
-        ],
+        *[_run_thumbnail_in_thread(img.blob.sha256, img.blob.media_type, src) for img, src in work],
         return_exceptions=True,
     )
 
@@ -359,6 +363,7 @@ async def thumbnail_job(ctx: dict, gallery_id: int) -> dict:
     logger.info("[thumbnail] gallery_id=%d: %d done", gallery_id, processed)
 
     from core.events import EventType, emit_safe
+
     await emit_safe(EventType.THUMBNAILS_GENERATED, resource_type="gallery", resource_id=gallery_id, count=processed)
 
     return {"status": "done", "processed": processed}

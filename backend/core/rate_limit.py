@@ -93,11 +93,13 @@ _WRITE_RATE_LIMIT = 120
 _WRITE_RATE_WINDOW = 60  # seconds
 
 # Paths that carry their own stricter per-endpoint limits — skip global check
-_SKIP_GLOBAL: frozenset[str] = frozenset({
-    "/api/auth/login",
-    "/api/auth/setup",
-    "/api/auth/check",
-})
+_SKIP_GLOBAL: frozenset[str] = frozenset(
+    {
+        "/api/auth/login",
+        "/api/auth/setup",
+        "/api/auth/check",
+    }
+)
 _SKIP_GLOBAL_PREFIXES: tuple[str, ...] = (
     "/api/external/v1/",  # has its own per-token limiter
 )
@@ -105,7 +107,7 @@ _SKIP_GLOBAL_PREFIXES: tuple[str, ...] = (
 
 _PRIVATE_NETWORKS: tuple[ipaddress.IPv4Network | ipaddress.IPv6Network, ...] = (
     ipaddress.ip_network("10.0.0.0/8"),
-    ipaddress.ip_network("172.16.0.0/12"),   # covers 172.16–172.31
+    ipaddress.ip_network("172.16.0.0/12"),  # covers 172.16–172.31
     ipaddress.ip_network("192.168.0.0/16"),
     ipaddress.ip_network("127.0.0.0/8"),
     ipaddress.ip_network("::1/128"),

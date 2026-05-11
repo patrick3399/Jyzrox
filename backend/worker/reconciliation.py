@@ -97,11 +97,15 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             chunk_keys = all_fs_keys[chunk_start : chunk_start + _CHUNK]
 
             # Query Gallery records for this chunk using tuple IN
-            galleries = (await session.execute(
-                select(Gallery).where(
-                    tuple_(Gallery.source, Gallery.source_id).in_(chunk_keys)
+            galleries = (
+                (
+                    await session.execute(
+                        select(Gallery).where(tuple_(Gallery.source, Gallery.source_id).in_(chunk_keys))
+                    )
                 )
-            )).scalars().all()
+                .scalars()
+                .all()
+            )
 
             gallery_by_key = {(g.source, g.source_id): g for g in galleries}
             chunk_gallery_ids = [g.id for g in galleries]
@@ -153,10 +157,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             if dead_image_ids:
                 # Batch decrement ref_counts
                 await session.execute(
-                    text(
-                        "UPDATE blobs SET ref_count = ref_count - 1 "
-                        "WHERE sha256 = ANY(:shas)"
-                    ),
+                    text("UPDATE blobs SET ref_count = ref_count - 1 WHERE sha256 = ANY(:shas)"),
                     {"shas": dead_blob_shas},
                 )
                 # Batch delete images
@@ -200,8 +201,11 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                 json.dumps({"phase": 1, "processed": processed_p1, "total": total_fs}),
             )
 
-        logger.info("[reconcile] Phase 1 done: removed %d images, %d galleries",
-                    stats["removed_images"], stats["removed_galleries"])
+        logger.info(
+            "[reconcile] Phase 1 done: removed %d images, %d galleries",
+            stats["removed_images"],
+            stats["removed_galleries"],
+        )
 
         # ── Phase 2: Orphan galleries — in DB but missing from filesystem ──
         # Query gallery rows and filter those whose (source, source_id) key is
@@ -220,7 +224,8 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
         ).all()
 
         orphan_gallery_ids = [
-            row.id for row in db_gallery_rows
+            row.id
+            for row in db_gallery_rows
             if (row.source, row.source_id) not in fs_keys and row.import_mode == "link" and row.deleted_at is None
         ]
         total_orphans = len(orphan_gallery_ids)
@@ -231,19 +236,15 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             chunk_ids = orphan_gallery_ids[chunk_start : chunk_start + _CHUNK]
 
             # Batch-fetch blob shas for images in these galleries
-            orphan_rows = (await session.execute(
-                select(Image.id, Image.blob_sha256)
-                .where(Image.gallery_id.in_(chunk_ids))
-            )).all()
+            orphan_rows = (
+                await session.execute(select(Image.id, Image.blob_sha256).where(Image.gallery_id.in_(chunk_ids)))
+            ).all()
 
             if orphan_rows:
                 orphan_img_ids = [r.id for r in orphan_rows]
                 orphan_shas = [r.blob_sha256 for r in orphan_rows]
                 await session.execute(
-                    text(
-                        "UPDATE blobs SET ref_count = ref_count - 1 "
-                        "WHERE sha256 = ANY(:shas)"
-                    ),
+                    text("UPDATE blobs SET ref_count = ref_count - 1 WHERE sha256 = ANY(:shas)"),
                     {"shas": orphan_shas},
                 )
                 await session.execute(
@@ -278,8 +279,9 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
         # Single query: join blobs with actual image ref count.
         # Scan ALL blobs (not just ref_count <= 0) so that inflated ref_counts
         # caused by the former store_blob() bug are also detected and corrected.
-        gc_rows = (await session.execute(
-            text("""
+        gc_rows = (
+            await session.execute(
+                text("""
                 SELECT b.sha256, b.extension, b.storage, b.external_path,
                        b.ref_count,
                        COUNT(i.id) AS actual_refs
@@ -288,7 +290,8 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                 GROUP BY b.sha256, b.extension, b.storage, b.external_path, b.ref_count
                 HAVING b.ref_count != COUNT(i.id)
             """)
-        )).all()
+            )
+        ).all()
 
         total_gc = len(gc_rows)
         logger.info("[reconcile] Phase 3: %d candidate blobs to GC", total_gc)
@@ -304,7 +307,8 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             for row in chunk:
                 logger.warning(
                     "[reconcile] ref_count drift for %s: corrected to %d",
-                    row.sha256[:12], row.actual_refs,
+                    row.sha256[:12],
+                    row.actual_refs,
                 )
                 await session.execute(
                     text("UPDATE blobs SET ref_count = :rc WHERE sha256 = :sha"),
@@ -346,20 +350,30 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                 json.dumps({"phase": 3, "processed": processed_p3, "total": total_gc}),
             )
 
-        logger.info("[reconcile] Phase 3 done: cleaned %d orphan blobs (%d ref_count corrections)",
-                    stats["orphan_blobs_cleaned"], len(drifted))
+        logger.info(
+            "[reconcile] Phase 3 done: cleaned %d orphan blobs (%d ref_count corrections)",
+            stats["orphan_blobs_cleaned"],
+            len(drifted),
+        )
 
     await _cron_record(ctx, "reconciliation", "ok")
 
     # Store result in Redis for API query (30-day TTL)
-    await r.setex("reconcile:last_result", 86400 * 30, json.dumps({
-        "completed_at": datetime.now(UTC).isoformat(),
-        **stats,
-    }))
+    await r.setex(
+        "reconcile:last_result",
+        86400 * 30,
+        json.dumps(
+            {
+                "completed_at": datetime.now(UTC).isoformat(),
+                **stats,
+            }
+        ),
+    )
 
     logger.info("[reconcile] done: %s", stats)
 
     from core.events import EventType, emit_safe
+
     await emit_safe(EventType.RECONCILIATION_COMPLETED, resource_type="system", **stats)
 
     return {"status": "done", **stats}

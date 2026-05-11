@@ -71,8 +71,7 @@ async def get_dedup_stats(_: dict = Depends(_admin)):
     """Return counts by relationship state."""
     async with async_session() as session:
         result = await session.execute(
-            select(BlobRelationship.relationship, func.count().label("cnt"))
-            .group_by(BlobRelationship.relationship)
+            select(BlobRelationship.relationship, func.count().label("cnt")).group_by(BlobRelationship.relationship)
         )
         rows = result.all()
 
@@ -133,17 +132,19 @@ async def get_dedup_review(
 
     items = []
     for pair in pairs:
-        items.append({
-            "id": pair.id,
-            "relationship": pair.relationship,
-            "hamming_dist": pair.hamming_dist,
-            "suggested_keep": pair.suggested_keep,
-            "reason": pair.reason,
-            "diff_score": pair.diff_score,
-            "diff_type": pair.diff_type,
-            "blob_a": _blob_detail(pair.blob_a),
-            "blob_b": _blob_detail(pair.blob_b),
-        })
+        items.append(
+            {
+                "id": pair.id,
+                "relationship": pair.relationship,
+                "hamming_dist": pair.hamming_dist,
+                "suggested_keep": pair.suggested_keep,
+                "reason": pair.reason,
+                "diff_score": pair.diff_score,
+                "diff_type": pair.diff_type,
+                "blob_a": _blob_detail(pair.blob_a),
+                "blob_b": _blob_detail(pair.blob_b),
+            }
+        )
 
     return {"items": items, "next_cursor": next_cursor}
 
@@ -154,6 +155,7 @@ class KeepRequest(BaseModel):
 
 class ScanStartRequest(BaseModel):
     mode: str  # "reset" or "pending"
+
 
 class ScanSignalRequest(BaseModel):
     signal: str  # "pause", "resume", or "stop"
@@ -184,9 +186,7 @@ async def keep_blob(
 
         # Re-point images from discard_sha to keep_sha
         remap_result = await session.execute(
-            update(Image)
-            .where(Image.blob_sha256 == discard_sha)
-            .values(blob_sha256=keep_sha)
+            update(Image).where(Image.blob_sha256 == discard_sha).values(blob_sha256=keep_sha)
         )
         remapped = remap_result.rowcount or 0
 
@@ -200,13 +200,12 @@ async def keep_blob(
             )
 
         await session.execute(
-            update(BlobRelationship)
-            .where(BlobRelationship.id == pair_id)
-            .values(relationship="resolved")
+            update(BlobRelationship).where(BlobRelationship.id == pair_id).values(relationship="resolved")
         )
         await session.commit()
 
     from core.events import EventType, emit_safe
+
     await emit_safe(EventType.DEDUP_PAIR_RESOLVED, actor_user_id=_["user_id"], resource_type="dedup")
     return {"status": "ok"}
 
@@ -218,17 +217,13 @@ async def whitelist_pair(
 ):
     """Mark a pair as whitelisted (not a duplicate)."""
     async with async_session() as session:
-        result = await session.execute(
-            select(BlobRelationship).where(BlobRelationship.id == pair_id)
-        )
+        result = await session.execute(select(BlobRelationship).where(BlobRelationship.id == pair_id))
         pair = result.scalar_one_or_none()
         if not pair:
             raise HTTPException(status_code=404, detail="Pair not found")
 
         await session.execute(
-            update(BlobRelationship)
-            .where(BlobRelationship.id == pair_id)
-            .values(relationship="whitelisted")
+            update(BlobRelationship).where(BlobRelationship.id == pair_id).values(relationship="whitelisted")
         )
         await session.commit()
 
@@ -239,6 +234,7 @@ async def whitelist_pair(
 async def get_scan_progress(_: dict = Depends(_admin)):
     """Return current dedup scan progress."""
     from core.redis_client import get_redis
+
     r = get_redis()
 
     status_raw = await r.get("dedup:progress:status")
@@ -276,6 +272,7 @@ async def start_scan(
 ):
     """Enqueue a dedup scan job. 409 if already running/paused."""
     from core.redis_client import get_redis
+
     r = get_redis()
 
     status_raw = await r.get("dedup:progress:status")
@@ -287,6 +284,7 @@ async def start_scan(
 
     await core.queue.enqueue("dedup_scan_job", _job_id="dedup_scan:singleton", mode=req.mode)
     from core.events import EventType, emit_safe
+
     await emit_safe(EventType.DEDUP_SCAN_STARTED, actor_user_id=_["user_id"], resource_type="system")
     return {"status": "queued"}
 
@@ -298,6 +296,7 @@ async def send_scan_signal(
 ):
     """Send a pause/resume/stop signal to the running scan. 409 if idle."""
     from core.redis_client import get_redis
+
     r = get_redis()
 
     status_raw = await r.get("dedup:progress:status")
@@ -318,17 +317,13 @@ async def dismiss_pair(
 ):
     """Dismiss a pair (mark as resolved)."""
     async with async_session() as session:
-        result = await session.execute(
-            select(BlobRelationship).where(BlobRelationship.id == pair_id)
-        )
+        result = await session.execute(select(BlobRelationship).where(BlobRelationship.id == pair_id))
         pair = result.scalar_one_or_none()
         if not pair:
             raise HTTPException(status_code=404, detail="Pair not found")
 
         await session.execute(
-            update(BlobRelationship)
-            .where(BlobRelationship.id == pair_id)
-            .values(relationship="resolved")
+            update(BlobRelationship).where(BlobRelationship.id == pair_id).values(relationship="resolved")
         )
         await session.commit()
 

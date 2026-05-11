@@ -68,9 +68,9 @@ class Gallery(Base):
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     metadata_updated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
-    images: Mapped[list["Image"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
-    gallery_tags: Mapped[list["GalleryTag"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
-    read_progress: Mapped[list["ReadProgress"]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
+    images: Mapped[list[Image]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
+    gallery_tags: Mapped[list[GalleryTag]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
+    read_progress: Mapped[list[ReadProgress]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
 
 
 class Blob(Base):
@@ -116,9 +116,9 @@ class Image(Base):
         BigInteger, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
     )
 
-    gallery: Mapped["Gallery"] = relationship(back_populates="images")
-    blob: Mapped["Blob"] = relationship()
-    image_tags: Mapped[list["ImageTag"]] = relationship(back_populates="image", cascade="all, delete-orphan")
+    gallery: Mapped[Gallery] = relationship(back_populates="images")
+    blob: Mapped[Blob] = relationship()
+    image_tags: Mapped[list[ImageTag]] = relationship(back_populates="image", cascade="all, delete-orphan")
 
 
 class Tag(Base):
@@ -137,7 +137,7 @@ class TagAlias(Base):
     alias_name: Mapped[str] = mapped_column(Text, primary_key=True)
     canonical_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), nullable=False)
 
-    canonical: Mapped["Tag"] = relationship()
+    canonical: Mapped[Tag] = relationship()
 
 
 class TagImplication(Base):
@@ -146,8 +146,8 @@ class TagImplication(Base):
     antecedent_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True)
     consequent_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tags.id", ondelete="CASCADE"), primary_key=True)
 
-    antecedent: Mapped["Tag"] = relationship(foreign_keys=[antecedent_id])
-    consequent: Mapped["Tag"] = relationship(foreign_keys=[consequent_id])
+    antecedent: Mapped[Tag] = relationship(foreign_keys=[antecedent_id])
+    consequent: Mapped[Tag] = relationship(foreign_keys=[consequent_id])
 
 
 class GalleryTag(Base):
@@ -160,8 +160,8 @@ class GalleryTag(Base):
     confidence: Mapped[float] = mapped_column(Float, default=1.0)
     source: Mapped[str] = mapped_column(Text, default="metadata")
 
-    gallery: Mapped["Gallery"] = relationship(back_populates="gallery_tags")
-    tag: Mapped["Tag"] = relationship()
+    gallery: Mapped[Gallery] = relationship(back_populates="gallery_tags")
+    tag: Mapped[Tag] = relationship()
 
 
 class ImageTag(Base):
@@ -171,8 +171,8 @@ class ImageTag(Base):
     tag_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("tags.id"), primary_key=True)
     confidence: Mapped[float | None] = mapped_column(Float)
 
-    image: Mapped["Image"] = relationship(back_populates="image_tags")
-    tag: Mapped["Tag"] = relationship()
+    image: Mapped[Image] = relationship(back_populates="image_tags")
+    tag: Mapped[Tag] = relationship()
 
 
 class DownloadJob(Base):
@@ -208,7 +208,7 @@ class ReadProgress(Base):
     last_page: Mapped[int] = mapped_column(Integer, default=0)
     last_read_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    gallery: Mapped["Gallery"] = relationship(back_populates="read_progress")
+    gallery: Mapped[Gallery] = relationship(back_populates="read_progress")
 
 
 class Credential(Base):
@@ -361,8 +361,8 @@ class Collection(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    cover_gallery: Mapped["Gallery | None"] = relationship()
-    collection_galleries: Mapped[list["CollectionGallery"]] = relationship(
+    cover_gallery: Mapped[Gallery | None] = relationship()
+    collection_galleries: Mapped[list[CollectionGallery]] = relationship(
         back_populates="collection", cascade="all, delete-orphan"
     )
 
@@ -379,8 +379,8 @@ class CollectionGallery(Base):
     position: Mapped[int] = mapped_column(Integer, default=0)
     added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    collection: Mapped["Collection"] = relationship(back_populates="collection_galleries")
-    gallery: Mapped["Gallery"] = relationship()
+    collection: Mapped[Collection] = relationship(back_populates="collection_galleries")
+    gallery: Mapped[Gallery] = relationship()
 
 
 class ExcludedBlob(Base):
@@ -410,8 +410,8 @@ class BlobRelationship(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
-    blob_a: Mapped["Blob"] = _rel(foreign_keys="[BlobRelationship.sha_a]")
-    blob_b: Mapped["Blob"] = _rel(foreign_keys="[BlobRelationship.sha_b]")
+    blob_a: Mapped[Blob] = _rel(foreign_keys="[BlobRelationship.sha_a]")
+    blob_b: Mapped[Blob] = _rel(foreign_keys="[BlobRelationship.sha_b]")
 
 
 class UserFavorite(Base):

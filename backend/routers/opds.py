@@ -15,7 +15,8 @@ from core.gallery_helpers import build_cover_sha_map, image_not_excluded_clause
 from core.redis_client import get_redis
 from core.source_display import get_display_config
 from db.models import Gallery, Image, UserFavorite
-from services.cas import cas_url, thumb_url as cas_thumb_url
+from services.cas import cas_url
+from services.cas import thumb_url as cas_thumb_url
 
 
 async def _require_opds_enabled():
@@ -270,14 +271,18 @@ async def opds_all(
     """OPDS acquisition feed: all galleries, paginated."""
     async with async_session() as session:
         rows = (
-            await session.execute(
-                select(Gallery)
-                .where(gallery_access_filter(auth))
-                .order_by(Gallery.added_at.desc())
-                .limit(limit + 1)
-                .offset(page * limit)
+            (
+                await session.execute(
+                    select(Gallery)
+                    .where(gallery_access_filter(auth))
+                    .order_by(Gallery.added_at.desc())
+                    .limit(limit + 1)
+                    .offset(page * limit)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     has_more = len(rows) > limit
     galleries = rows[:limit]
@@ -304,13 +309,14 @@ async def opds_recent(
     """OPDS acquisition feed: last 50 galleries."""
     async with async_session() as session:
         galleries = (
-            await session.execute(
-                select(Gallery)
-                .where(gallery_access_filter(auth))
-                .order_by(Gallery.added_at.desc())
-                .limit(50)
+            (
+                await session.execute(
+                    select(Gallery).where(gallery_access_filter(auth)).order_by(Gallery.added_at.desc()).limit(50)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     return await _build_acquisition_feed(
         title="Recent Galleries",
@@ -336,18 +342,22 @@ async def opds_favorites(
     """OPDS acquisition feed: favorited galleries (per-user favorites)."""
     async with async_session() as session:
         rows = (
-            await session.execute(
-                select(Gallery)
-                .join(UserFavorite, Gallery.id == UserFavorite.gallery_id)
-                .where(
-                    UserFavorite.user_id == auth["user_id"],
-                    gallery_access_filter(auth),
+            (
+                await session.execute(
+                    select(Gallery)
+                    .join(UserFavorite, Gallery.id == UserFavorite.gallery_id)
+                    .where(
+                        UserFavorite.user_id == auth["user_id"],
+                        gallery_access_filter(auth),
+                    )
+                    .order_by(Gallery.added_at.desc())
+                    .limit(limit + 1)
+                    .offset(page * limit)
                 )
-                .order_by(Gallery.added_at.desc())
-                .limit(limit + 1)
-                .offset(page * limit)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     has_more = len(rows) > limit
     galleries = rows[:limit]
@@ -380,11 +390,7 @@ async def opds_search(
         query = query.where(Gallery.title.ilike(f"%{q}%"))
 
     async with async_session() as session:
-        rows = (
-            await session.execute(
-                query.limit(limit + 1).offset(page * limit)
-            )
-        ).scalars().all()
+        rows = (await session.execute(query.limit(limit + 1).offset(page * limit))).scalars().all()
 
     has_more = len(rows) > limit
     galleries = rows[:limit]
@@ -447,13 +453,21 @@ async def opds_gallery(
             raise HTTPException(status_code=404, detail="Gallery not found")
 
         images = (
-            await session.execute(
-                select(Image)
-                .where(Image.gallery_id == gallery.id, Image.visibility == "active", image_not_excluded_clause())
-                .order_by(Image.page_num.desc() if get_display_config(gallery.source or "").image_order == "desc" else Image.page_num.asc())
-                .options(selectinload(Image.blob))
+            (
+                await session.execute(
+                    select(Image)
+                    .where(Image.gallery_id == gallery.id, Image.visibility == "active", image_not_excluded_clause())
+                    .order_by(
+                        Image.page_num.desc()
+                        if get_display_config(gallery.source or "").image_order == "desc"
+                        else Image.page_num.asc()
+                    )
+                    .options(selectinload(Image.blob))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     base = _base_url(request)
     title = gallery.title or gallery.title_jpn or f"Gallery {source}/{source_id}"

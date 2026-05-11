@@ -15,10 +15,7 @@ from sqlalchemy import text
 async def _ensure_admin(db_session, user_id: int = 1) -> None:
     """Insert the admin user if not already present."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-            "VALUES (:id, :u, :p, 'admin')"
-        ),
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, :p, 'admin')"),
         {"id": user_id, "u": f"admin_{user_id}", "p": "x"},
     )
     await db_session.commit()
@@ -34,17 +31,13 @@ async def _insert_user(
     if user_id is not None:
         result = await db_session.execute(
             text(
-                "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-                "VALUES (:id, :u, 'x', :r) RETURNING id"
+                "INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, 'x', :r) RETURNING id"
             ),
             {"id": user_id, "u": username, "r": role},
         )
     else:
         result = await db_session.execute(
-            text(
-                "INSERT INTO users (username, password_hash, role) "
-                "VALUES (:u, 'x', :r) RETURNING id"
-            ),
+            text("INSERT INTO users (username, password_hash, role) VALUES (:u, 'x', :r) RETURNING id"),
             {"u": username, "r": role},
         )
     await db_session.commit()
@@ -305,13 +298,9 @@ class TestDeleteUser:
         """Deleting the only admin (not self) → 400 (cannot_delete_last_admin)."""
         await _ensure_admin(db_session)
         # Insert a second admin, make that the lone admin by id, and attempt deletion
-        other_admin_id = await _insert_user(
-            db_session, username="only_other_admin", role="admin"
-        )
+        other_admin_id = await _insert_user(db_session, username="only_other_admin", role="admin")
         # Demote user_id=1 to member so other_admin_id is the last admin
-        await db_session.execute(
-            text("UPDATE users SET role = 'member' WHERE id = 1")
-        )
+        await db_session.execute(text("UPDATE users SET role = 'member' WHERE id = 1"))
         await db_session.commit()
 
         resp = await client.delete(f"/api/users/{other_admin_id}")
@@ -375,9 +364,7 @@ class TestUsersRoleAccess:
 class TestUpdateUserRedisSessionPropagation:
     """PATCH /api/users/{user_id} with role change — Redis session-update paths."""
 
-    async def test_update_role_propagates_to_redis_sessions(
-        self, client, db_session, mock_redis
-    ):
+    async def test_update_role_propagates_to_redis_sessions(self, client, db_session, mock_redis):
         """
         When a role change is saved, the router must scan Redis for existing
         sessions and re-sign them with the new role.
@@ -402,12 +389,8 @@ class TestUpdateUserRedisSessionPropagation:
         mock_redis.scan = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(
             side_effect=[(1, [session_key.encode()]), (0, [])]
         )
-        mock_redis.get = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(
-            return_value=signed.encode()
-        )
-        mock_redis.ttl = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(
-            return_value=86400
-        )
+        mock_redis.get = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(return_value=signed.encode())
+        mock_redis.ttl = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(return_value=86400)
 
         resp = await client.patch(f"/api/users/{uid}", json={"role": "viewer"})
         assert resp.status_code == 200
@@ -415,9 +398,7 @@ class TestUpdateUserRedisSessionPropagation:
         # setex must have been called to re-write the session
         mock_redis.setex.assert_called()
 
-    async def test_update_role_skips_expired_session_ttl(
-        self, client, db_session, mock_redis
-    ):
+    async def test_update_role_skips_expired_session_ttl(self, client, db_session, mock_redis):
         """
         Sessions with TTL < 1 must be skipped (not re-signed).
         setex should NOT be called in this case.
@@ -436,21 +417,15 @@ class TestUpdateUserRedisSessionPropagation:
         mock_redis.scan = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(
             side_effect=[(0, [session_key.encode()])]
         )
-        mock_redis.get = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(
-            return_value=signed.encode()
-        )
+        mock_redis.get = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(return_value=signed.encode())
         # TTL == 0 → should be skipped
-        mock_redis.ttl = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(
-            return_value=0
-        )
+        mock_redis.ttl = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(return_value=0)
 
         resp = await client.patch(f"/api/users/{uid}", json={"role": "admin"})
         assert resp.status_code == 200
         mock_redis.setex.assert_not_called()
 
-    async def test_update_role_deletes_tampered_session(
-        self, client, db_session, mock_redis
-    ):
+    async def test_update_role_deletes_tampered_session(self, client, db_session, mock_redis):
         """
         A session that fails HMAC verification must be deleted from Redis,
         not re-signed.
@@ -467,17 +442,13 @@ class TestUpdateUserRedisSessionPropagation:
         mock_redis.get = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(
             return_value=b'{"user_id":999}:' + b"a" * 64
         )
-        mock_redis.ttl = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(
-            return_value=3600
-        )
+        mock_redis.ttl = __import__("unittest.mock", fromlist=["AsyncMock"]).AsyncMock(return_value=3600)
 
         resp = await client.patch(f"/api/users/{uid}", json={"role": "viewer"})
         assert resp.status_code == 200
         mock_redis.delete.assert_called()
 
-    async def test_update_role_redis_unavailable_falls_back_to_delete(
-        self, client, db_session, mock_redis
-    ):
+    async def test_update_role_redis_unavailable_falls_back_to_delete(self, client, db_session, mock_redis):
         """
         If Redis raises during the scan/update phase, the router must fall back
         to deleting all sessions for the user to prevent stale-role access.
@@ -489,11 +460,6 @@ class TestUpdateUserRedisSessionPropagation:
         uid = await _insert_user(db_session, username="roleupdate_redisfail", role="member")
 
         session_key = f"session:{uid}:tok1"
-        # First scan call raises (Redis down); the except-block's scan returns a key
-        fallback_scan = AsyncMock(
-            side_effect=[(0, [session_key.encode()])]
-        )
-
         call_count = 0
 
         async def _scan_side_effect(*args, **kwargs):
@@ -513,9 +479,7 @@ class TestUpdateUserRedisSessionPropagation:
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
-    async def test_update_role_no_sessions_scan_empty(
-        self, client, db_session, mock_redis
-    ):
+    async def test_update_role_no_sessions_scan_empty(self, client, db_session, mock_redis):
         """
         When scan returns no keys the loop must terminate without calling setex.
         This exercises the cursor==0 exit path cleanly.
@@ -528,9 +492,7 @@ class TestUpdateUserRedisSessionPropagation:
         assert resp.status_code == 200
         mock_redis.setex.assert_not_called()
 
-    async def test_update_role_skips_key_with_null_value(
-        self, client, db_session, mock_redis
-    ):
+    async def test_update_role_skips_key_with_null_value(self, client, db_session, mock_redis):
         """
         When a session key exists in Redis but its value is None (already expired),
         the router must skip that key (line 152 — the `if not raw: continue` branch).
@@ -549,9 +511,7 @@ class TestUpdateUserRedisSessionPropagation:
         assert resp.status_code == 200
         mock_redis.setex.assert_not_called()
 
-    async def test_update_role_handles_invalid_json_in_session(
-        self, client, db_session, mock_redis
-    ):
+    async def test_update_role_handles_invalid_json_in_session(self, client, db_session, mock_redis):
         """
         When the verified session payload is not valid JSON, the router must
         silently swallow the JSONDecodeError and continue (lines 165-166).
@@ -575,9 +535,7 @@ class TestUpdateUserRedisSessionPropagation:
         assert resp.status_code == 200
         assert resp.json()["status"] == "ok"
 
-    async def test_update_role_redis_fallback_delete_also_fails(
-        self, client, db_session, mock_redis
-    ):
+    async def test_update_role_redis_fallback_delete_also_fails(self, client, db_session, mock_redis):
         """
         If even the fallback delete-loop scan raises, the router must log the
         error and still return ok (lines 185-186).
@@ -610,9 +568,7 @@ class TestUpdateUserRedisSessionPropagation:
 class TestDeleteUserRedisCleanup:
     """DELETE /api/users/{user_id} — Redis session deletion for target user."""
 
-    async def test_delete_user_cleans_up_redis_sessions(
-        self, client, db_session, mock_redis
-    ):
+    async def test_delete_user_cleans_up_redis_sessions(self, client, db_session, mock_redis):
         """
         When deleting a user who has active Redis sessions, the router must
         scan and delete each key.  Validates line 227 (per-key delete call).
@@ -626,9 +582,7 @@ class TestDeleteUserRedisCleanup:
 
         session_key = f"session:{uid}:tok999"
         # scan: first call returns one key, cursor=0 means done
-        mock_redis.scan = AsyncMock(
-            side_effect=[(0, [session_key.encode()])]
-        )
+        mock_redis.scan = AsyncMock(side_effect=[(0, [session_key.encode()])])
 
         resp = await client.delete(f"/api/users/{uid}")
         assert resp.status_code in (200, 500)

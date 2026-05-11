@@ -20,7 +20,6 @@ import xml.etree.ElementTree as ET
 from unittest.mock import AsyncMock
 
 import bcrypt
-import pytest
 from sqlalchemy import text
 
 # ── XML namespace helpers ──────────────────────────────────────────────────────
@@ -43,10 +42,7 @@ def _entries(root: ET.Element) -> list[ET.Element]:
 
 def _link_rels(element: ET.Element) -> dict[str, str]:
     """Map rel → href for all <link> children of element."""
-    return {
-        link.get("rel"): link.get("href")
-        for link in element.findall(f"{ATOM}link")
-    }
+    return {link.get("rel"): link.get("href") for link in element.findall(f"{ATOM}link")}
 
 
 # ── Helpers for inserting test data ───────────────────────────────────────────
@@ -92,10 +88,7 @@ async def _insert_image(
 ) -> int:
     """Insert one image (no blob); return its auto-generated id."""
     await db_session.execute(
-        text(
-            "INSERT INTO images (gallery_id, page_num, filename) "
-            "VALUES (:gid, :pnum, :fn)"
-        ),
+        text("INSERT INTO images (gallery_id, page_num, filename) VALUES (:gid, :pnum, :fn)"),
         {"gid": gallery_id, "pnum": page_num, "fn": filename},
     )
     await db_session.commit()
@@ -107,9 +100,7 @@ async def _insert_user(db_session, username: str = "testuser", password: str = "
     """Insert a user with bcrypt-hashed password; return its id."""
     pw_hash = bcrypt.hashpw(password.encode("utf-8"), bcrypt.gensalt()).decode("utf-8")
     await db_session.execute(
-        text(
-            "INSERT INTO users (username, password_hash) VALUES (:uname, :phash)"
-        ),
+        text("INSERT INTO users (username, password_hash) VALUES (:uname, :phash)"),
         {"uname": username, "phash": pw_hash},
     )
     await db_session.commit()
@@ -126,10 +117,7 @@ async def _insert_blob(
 ) -> str:
     """Insert a blob record; return its sha256."""
     await db_session.execute(
-        text(
-            "INSERT INTO blobs (sha256, extension, media_type, file_size) "
-            "VALUES (:sha, :ext, :mt, :fs)"
-        ),
+        text("INSERT INTO blobs (sha256, extension, media_type, file_size) VALUES (:sha, :ext, :mt, :fs)"),
         {"sha": sha256, "ext": extension, "mt": media_type, "fs": file_size},
     )
     await db_session.commit()
@@ -148,10 +136,7 @@ async def _insert_image_with_blob(
     """Insert a blob + image linked to that blob; return image id."""
     await _insert_blob(db_session, sha256=sha256, extension=extension, media_type=media_type)
     await db_session.execute(
-        text(
-            "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
-            "VALUES (:gid, :pnum, :fn, :sha)"
-        ),
+        text("INSERT INTO images (gallery_id, page_num, filename, blob_sha256) VALUES (:gid, :pnum, :fn, :sha)"),
         {"gid": gallery_id, "pnum": page_num, "fn": filename, "sha": sha256},
     )
     await db_session.commit()
@@ -605,10 +590,7 @@ class TestOPDSGalleryDetail:
     async def test_gallery_detail_fallback_title_when_no_title(self, opds_client, db_session):
         """When gallery title is null, feed title should fall back to 'Gallery {source}/{source_id}'."""
         await db_session.execute(
-            text(
-                "INSERT INTO galleries (source, source_id, pages, favorited) "
-                "VALUES ('test', 'no-title-1', 5, 0)"
-            )
+            text("INSERT INTO galleries (source, source_id, pages, favorited) VALUES ('test', 'no-title-1', 5, 0)")
         )
         await db_session.commit()
 
@@ -834,8 +816,13 @@ class TestOPDSGalleryDetailImageLinks:
         gid = await _insert_gallery(db_session, source="test", source_id="il4")
         sha = "d" * 64
         await _insert_image_with_blob(
-            db_session, gid, page_num=1, filename="video.mp4",
-            sha256=sha, extension=".mp4", media_type="video",
+            db_session,
+            gid,
+            page_num=1,
+            filename="video.mp4",
+            sha256=sha,
+            extension=".mp4",
+            media_type="video",
         )
 
         resp = await opds_client.get("/opds/gallery/test/il4")

@@ -6,19 +6,20 @@ from collections import deque
 from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from opencc import OpenCC
 from pydantic import BaseModel
-from sqlalchemy import case as sql_case, delete, desc, func, literal as sql_literal, or_, select
+from sqlalchemy import case as sql_case
+from sqlalchemy import delete, desc, func, or_, select
+from sqlalchemy import literal as sql_literal
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from opencc import OpenCC
-
+import core.queue
 from core.auth import require_auth, require_role
 from core.database import async_session, get_db
-import core.queue
 from db.models import BlockedTag, Gallery, GalleryTag, Tag, TagAlias, TagImplication, TagTranslation
 
-_s2twp = OpenCC('s2twp')
+_s2twp = OpenCC("s2twp")
 
 router = APIRouter(tags=["tags"])
 
@@ -61,7 +62,7 @@ async def list_tags(
     """
     filters = []
     if prefix:
-        safe_prefix = prefix.replace('%', '\\%').replace('_', '\\_')
+        safe_prefix = prefix.replace("%", "\\%").replace("_", "\\_")
         filters.append(Tag.name.like(f"{safe_prefix}%"))
     if namespace:
         filters.append(Tag.namespace == namespace)
@@ -281,10 +282,10 @@ async def _has_cycle(session, from_id: int, target_id: int, max_depth: int = 50)
         if current == target_id:
             return True
         rows = (
-            await session.execute(
-                select(TagImplication.consequent_id).where(TagImplication.antecedent_id == current)
-            )
-        ).scalars().all()
+            (await session.execute(select(TagImplication.consequent_id).where(TagImplication.antecedent_id == current)))
+            .scalars()
+            .all()
+        )
         queue.extend(r for r in rows if r not in visited)
     # If we hit the limit, conservatively assume a cycle exists
     return len(visited) >= max_depth
@@ -355,23 +356,20 @@ async def autocomplete_tags(
         return []
 
     def _escape_like(s: str) -> str:
-        return s.replace('%', '\\%').replace('_', '\\_')
+        return s.replace("%", "\\%").replace("_", "\\_")
 
     async with async_session() as session:
-        base = (
-            select(
-                Tag.id,
-                Tag.namespace,
-                Tag.name,
-                Tag.count,
-                TagTranslation.translation,
-            )
-            .outerjoin(
-                TagTranslation,
-                (TagTranslation.namespace == Tag.namespace)
-                & (TagTranslation.name == Tag.name)
-                & (TagTranslation.language == language),
-            )
+        base = select(
+            Tag.id,
+            Tag.namespace,
+            Tag.name,
+            Tag.count,
+            TagTranslation.translation,
+        ).outerjoin(
+            TagTranslation,
+            (TagTranslation.namespace == Tag.namespace)
+            & (TagTranslation.name == Tag.name)
+            & (TagTranslation.language == language),
         )
 
         if ":" in q:
@@ -456,13 +454,17 @@ async def get_translations(
         from sqlalchemy import tuple_
 
         rows = (
-            await session.execute(
-                select(TagTranslation).where(
-                    TagTranslation.language == db_language,
-                    tuple_(TagTranslation.namespace, TagTranslation.name).in_(tag_pairs),
+            (
+                await session.execute(
+                    select(TagTranslation).where(
+                        TagTranslation.language == db_language,
+                        tuple_(TagTranslation.namespace, TagTranslation.name).in_(tag_pairs),
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     result = {}
     for r in rows:
@@ -550,11 +552,7 @@ async def list_blocked_tags(
     """List blocked tags for the current user."""
     user_id = auth["user_id"]
     async with async_session() as session:
-        rows = (
-            await session.execute(
-                select(BlockedTag).where(BlockedTag.user_id == user_id)
-            )
-        ).scalars().all()
+        rows = (await session.execute(select(BlockedTag).where(BlockedTag.user_id == user_id))).scalars().all()
     return [{"id": r.id, "namespace": r.namespace, "name": r.name} for r in rows]
 
 
@@ -626,6 +624,7 @@ async def manual_tag_gallery(
 
     if body.action == "add":
         from worker.tag_helpers import parse_tag_strings
+
         parsed = parse_tag_strings(body.tags)
 
         if not parsed:
@@ -647,8 +646,7 @@ async def manual_tag_gallery(
         # Upsert gallery_tags with source='manual'
         # ON CONFLICT: overwrite 'ai' source but not 'metadata'
         gt_values = [
-            {"gallery_id": gallery_id, "tag_id": tid, "confidence": 1.0, "source": "manual"}
-            for tid in tag_ids
+            {"gallery_id": gallery_id, "tag_id": tid, "confidence": 1.0, "source": "manual"} for tid in tag_ids
         ]
         if gt_values:
             gt_stmt = (
@@ -673,11 +671,15 @@ async def manual_tag_gallery(
         await rebuild_gallery_tags_array(session, gallery_id)
         await session.commit()
         from core.events import EventType, emit_safe
-        await emit_safe(EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
+
+        await emit_safe(
+            EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id
+        )
         return {"status": "ok", "affected": len(tag_ids)}
 
     else:  # remove
         from worker.tag_helpers import parse_tag_strings
+
         parsed = parse_tag_strings(body.tags)
 
         if not parsed:
@@ -686,15 +688,8 @@ async def manual_tag_gallery(
             return {"status": "ok", "affected": 0}
 
         # Query 1: resolve all (namespace, name) pairs to tag IDs in one round-trip
-        ns_name_filter = or_(
-            *[
-                (Tag.namespace == ns) & (Tag.name == name)
-                for ns, name in parsed
-            ]
-        )
-        tag_ids = (
-            await session.execute(select(Tag.id).where(ns_name_filter))
-        ).scalars().all()
+        ns_name_filter = or_(*[(Tag.namespace == ns) & (Tag.name == name) for ns, name in parsed])
+        tag_ids = (await session.execute(select(Tag.id).where(ns_name_filter))).scalars().all()
 
         if not tag_ids:
             await rebuild_gallery_tags_array(session, gallery_id)
@@ -703,14 +698,18 @@ async def manual_tag_gallery(
 
         # Query 2: find which tag_ids actually have manual source rows for this gallery
         manual_tag_ids = (
-            await session.execute(
-                select(GalleryTag.tag_id).where(
-                    GalleryTag.gallery_id == gallery_id,
-                    GalleryTag.tag_id.in_(tag_ids),
-                    GalleryTag.source == "manual",
+            (
+                await session.execute(
+                    select(GalleryTag.tag_id).where(
+                        GalleryTag.gallery_id == gallery_id,
+                        GalleryTag.tag_id.in_(tag_ids),
+                        GalleryTag.source == "manual",
+                    )
                 )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         if not manual_tag_ids:
             await rebuild_gallery_tags_array(session, gallery_id)
@@ -732,16 +731,21 @@ async def manual_tag_gallery(
             await session.execute(
                 Tag.__table__.update()
                 .where(Tag.id.in_(manual_tag_ids))
-                .values(count=sql_case(
-                    (Tag.count > 0, Tag.count - 1),
-                    else_=0,
-                ))
+                .values(
+                    count=sql_case(
+                        (Tag.count > 0, Tag.count - 1),
+                        else_=0,
+                    )
+                )
             )
 
         await rebuild_gallery_tags_array(session, gallery_id)
         await session.commit()
         from core.events import EventType, emit_safe
-        await emit_safe(EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id)
+
+        await emit_safe(
+            EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id
+        )
         return {"status": "ok", "affected": removed}
 
 
@@ -789,9 +793,7 @@ async def retag_all_galleries(
     offset = 0
 
     while True:
-        chunk = (await db.execute(
-            select(Gallery.id).order_by(Gallery.id).offset(offset).limit(CHUNK)
-        )).scalars().all()
+        chunk = (await db.execute(select(Gallery.id).order_by(Gallery.id).offset(offset).limit(CHUNK))).scalars().all()
 
         if not chunk:
             break

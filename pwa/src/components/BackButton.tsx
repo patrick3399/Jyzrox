@@ -1,7 +1,7 @@
 'use client'
 
 import { useEffect } from 'react'
-import { useRouter } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
@@ -11,6 +11,7 @@ interface BackButtonProps {
 
 export function BackButton({ fallback }: BackButtonProps) {
   const router = useRouter()
+  const pathname = usePathname()
 
   useEffect(() => {
     document.documentElement.style.setProperty('--fab-offset', '4.5rem')
@@ -20,6 +21,10 @@ export function BackButton({ fallback }: BackButtonProps) {
   }, [])
 
   const handleClick = () => {
+    if (fallback === '/settings' && pathname?.startsWith('/settings/')) {
+      router.push(fallback)
+      return
+    }
     if (window.history.length > 1) {
       router.back()
     } else {

@@ -22,21 +22,24 @@ export default function AppearanceSettingsPage() {
       <div className="space-y-3">
         {/* Bottom Tab */}
         <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-          <div className="px-5 py-4">
+          <div className="px-5 pt-4">
+            <h2 className="font-medium text-vault-text text-sm">{t('settings.bottomTab')}</h2>
             <BottomTabConfig />
           </div>
         </div>
 
         {/* Sidebar Order */}
         <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-          <div className="px-5 py-4">
+          <div className="px-5 pt-4">
+            <h2 className="font-medium text-vault-text text-sm">{t('settings.sidebarOrder')}</h2>
             <SidebarConfig userRole={profile?.role} />
           </div>
         </div>
 
         {/* Dashboard Links */}
         <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-          <div className="px-5 py-4">
+          <div className="px-5 pt-4">
+            <h2 className="font-medium text-vault-text text-sm">{t('settings.dashboardLinks')}</h2>
             <DashboardLinksConfig />
           </div>
         </div>

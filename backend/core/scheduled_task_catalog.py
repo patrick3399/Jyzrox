@@ -201,6 +201,4 @@ CATALOG: list[ScheduledTaskDef] = [
 ]
 
 # ── Lookup helpers ─────────────────────────────────────────────────────────
-CONFIGURABLE_TASK_DEFS: dict[str, ScheduledTaskDef] = {
-    t.task_id: t for t in CATALOG if t.configurable
-}
+CONFIGURABLE_TASK_DEFS: dict[str, ScheduledTaskDef] = {t.task_id: t for t in CATALOG if t.configurable}

@@ -7,6 +7,7 @@ core.queue. Download jobs are stored in SQLite test DB.
 
 import sys
 import uuid
+from datetime import UTC
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -36,9 +37,15 @@ async def _insert_job(
             "VALUES (:id, :url, :source, :status, :progress, :user_id, :gallery_id, :retry_count, :max_retries, :next_retry_at)"
         ),
         {
-            "id": job_id, "url": url, "source": source, "status": status,
-            "progress": "{}", "user_id": user_id, "gallery_id": gallery_id,
-            "retry_count": retry_count, "max_retries": max_retries,
+            "id": job_id,
+            "url": url,
+            "source": source,
+            "status": status,
+            "progress": "{}",
+            "user_id": user_id,
+            "gallery_id": gallery_id,
+            "retry_count": retry_count,
+            "max_retries": max_retries,
             "next_retry_at": next_retry_at,
         },
     )
@@ -186,6 +193,7 @@ class TestCredentialWarning:
         """Pixiv source with no credential should raise HTTPException(400)."""
         import pytest
         from fastapi import HTTPException
+
         from routers.download import _credential_warning
 
         with patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None):
@@ -756,7 +764,7 @@ class TestSupportedSites:
         assert "categories" in data
         categories = data["categories"]
         assert isinstance(categories, dict)
-        for category, sites in categories.items():
+        for _category, sites in categories.items():
             assert isinstance(sites, list)
 
     async def test_supported_sites_requires_auth(self, unauthed_client):
@@ -851,9 +859,7 @@ class TestEnqueueDuplicateGuard:
 
     async def test_enqueue_duplicate_url_returns_existing_job(self, member_client, db_session):
         """Enqueueing a URL already in queued/running state should return the existing job_id."""
-        job_id = await _insert_job(
-            db_session, url="https://e-hentai.org/g/555/dupe/", status="queued", user_id=1
-        )
+        await _insert_job(db_session, url="https://e-hentai.org/g/555/dupe/", status="queued", user_id=1)
         with (
             patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
@@ -1007,6 +1013,7 @@ class TestCheckSourceEnabled:
     async def test_source_with_feature_toggle_disabled_via_redis(self, mock_redis):
         """Source with feature_toggle_key raises 400 when Redis returns b'0'."""
         from fastapi import HTTPException
+
         from routers.download import _check_source_enabled
 
         mock_redis.get = AsyncMock(return_value=b"0")
@@ -1038,6 +1045,7 @@ class TestCheckSourceEnabled:
     async def test_source_without_feature_toggle_disabled_raises_400(self, mock_redis):
         """Generic gallery_dl source disabled in Redis raises 400."""
         from fastapi import HTTPException
+
         from routers.download import _check_source_enabled
 
         mock_redis.get = AsyncMock(return_value=b"0")
@@ -1058,6 +1066,7 @@ class TestEnqueueFailurePaths:
     async def test_enqueue_failure_marks_job_failed(self, db_session, mock_redis):
         """When enqueue raises, the DB job record is marked failed and 503 is raised."""
         from fastapi import HTTPException
+
         from routers.download import _enqueue
 
         with (
@@ -1375,8 +1384,10 @@ class TestPauseResumeJobBranches:
         mock_saq_job.status = "active"  # SAQ Status.ACTIVE — job still alive
         mock_queue = MagicMock()
         mock_queue.job = AsyncMock(return_value=mock_saq_job)
-        with patch("routers.download.get_redis", return_value=mock_redis), \
-             patch("core.queue.get_queue", return_value=mock_queue):
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("core.queue.get_queue", return_value=mock_queue),
+        ):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "resume"},
@@ -1385,18 +1396,18 @@ class TestPauseResumeJobBranches:
         if resp.status_code == 200:
             assert resp.json()["status"] == "running"
 
-    async def test_resume_paused_job_with_dead_coroutine_re_enqueues(
-        self, member_client, db_session, mock_redis
-    ):
+    async def test_resume_paused_job_with_dead_coroutine_re_enqueues(self, member_client, db_session, mock_redis):
         """Resume with dead SAQ job (queue.job returns None) should re-enqueue the job."""
         job_id = await _insert_job(db_session, status="paused", user_id=1, retry_count=0)
 
         mock_queue = MagicMock()
         mock_queue.job = AsyncMock(return_value=None)  # None = job cleared from SAQ/Redis
 
-        with patch("routers.download.get_redis", return_value=mock_redis), \
-             patch("core.queue.get_queue", return_value=mock_queue), \
-             patch("routers.download.enqueue_download_job", new_callable=AsyncMock):
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("core.queue.get_queue", return_value=mock_queue),
+            patch("routers.download.enqueue_download_job", new_callable=AsyncMock),
+        ):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "resume"},
@@ -1416,9 +1427,11 @@ class TestPauseResumeJobBranches:
         mock_queue = MagicMock()
         mock_queue.job = AsyncMock(return_value=None)  # None = job cleared from SAQ/Redis
 
-        with patch("routers.download.get_redis", return_value=mock_redis), \
-             patch("core.queue.get_queue", return_value=mock_queue), \
-             patch("routers.download.enqueue_download_job", new_callable=AsyncMock):
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("core.queue.get_queue", return_value=mock_queue),
+            patch("routers.download.enqueue_download_job", new_callable=AsyncMock),
+        ):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "resume"},
@@ -1439,8 +1452,10 @@ class TestPauseResumeJobBranches:
         mock_queue = MagicMock()
         mock_queue.job = AsyncMock(return_value=mock_saq_job)
 
-        with patch("routers.download.get_redis", return_value=mock_redis), \
-             patch("core.queue.get_queue", return_value=mock_queue):
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch("core.queue.get_queue", return_value=mock_queue),
+        ):
             resp = await member_client.patch(
                 f"/api/download/jobs/{job_id}",
                 json={"action": "resume"},
@@ -1597,8 +1612,9 @@ class TestJobSerializerGalleryFields:
 
     def test_j_with_gallery_includes_gallery_source_fields(self):
         """_j should include gallery_source and gallery_source_id when gallery is provided."""
+        from datetime import datetime
         from unittest.mock import MagicMock
-        from datetime import datetime, timezone
+
         from routers.download import _j
 
         job = MagicMock()
@@ -1608,7 +1624,7 @@ class TestJobSerializerGalleryFields:
         job.status = "done"
         job.progress = {}
         job.error = None
-        job.created_at = datetime.now(timezone.utc)
+        job.created_at = datetime.now(UTC)
         job.finished_at = None
         job.retry_count = 0
         job.max_retries = 3
@@ -1629,8 +1645,9 @@ class TestJobSerializerGalleryFields:
 
     def test_j_without_gallery_omits_gallery_source_fields(self):
         """_j should NOT include gallery_source fields when gallery is None."""
+        from datetime import datetime
         from unittest.mock import MagicMock
-        from datetime import datetime, timezone
+
         from routers.download import _j
 
         job = MagicMock()
@@ -1640,7 +1657,7 @@ class TestJobSerializerGalleryFields:
         job.status = "queued"
         job.progress = {}
         job.error = None
-        job.created_at = datetime.now(timezone.utc)
+        job.created_at = datetime.now(UTC)
         job.finished_at = None
         job.retry_count = 0
         job.max_retries = 3

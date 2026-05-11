@@ -5,8 +5,9 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
 from core.source_display import get_display_config
-from db.models import Blob, ExcludedBlob, Image, UserFavorite, UserRating, UserReadingList
-from services.cas import thumb_dir, thumb_url as cas_thumb_url
+from db.models import ExcludedBlob, Image, UserFavorite, UserRating, UserReadingList
+from services.cas import thumb_dir
+from services.cas import thumb_url as cas_thumb_url
 
 
 def _existing_thumb_url(sha256: str) -> str | None:
@@ -58,11 +59,7 @@ async def get_blocked_tag_strings(db: AsyncSession, user_id: int) -> list[str]:
     """Return list of 'namespace:name' blocked tag strings for the user."""
     from db.models import BlockedTag
 
-    rows = (
-        await db.execute(
-            select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == user_id)
-        )
-    ).all()
+    rows = (await db.execute(select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == user_id))).all()
     return [f"{r.namespace}:{r.name}" for r in rows]
 
 
@@ -171,8 +168,4 @@ async def build_cover_sha_map(
 ) -> dict[int, str]:
     """Build gallery_id -> cover blob sha256 map using shared cover rules."""
     images = await select_cover_images(db, gallery_ids, source_map)
-    return {
-        gallery_id: img.blob_sha256
-        for gallery_id, img in images.items()
-        if img.blob_sha256
-    }
+    return {gallery_id: img.blob_sha256 for gallery_id, img in images.items() if img.blob_sha256}

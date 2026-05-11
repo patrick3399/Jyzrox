@@ -1,7 +1,5 @@
 """Tests for EhTagTranslation CDN importer parsing logic."""
 
-import pytest
-
 from services.ehtag_importer import parse_ehtag_payload
 
 
@@ -120,16 +118,20 @@ class TestParseEhtagPayload:
     def test_all_valid_namespaces_accepted(self):
         """All 12 valid namespaces are accepted."""
         valid = [
-            "artist", "character", "parody", "group", "language",
-            "misc", "other", "reclass", "cosplayer",
-            "female", "male", "mixed",
+            "artist",
+            "character",
+            "parody",
+            "group",
+            "language",
+            "misc",
+            "other",
+            "reclass",
+            "cosplayer",
+            "female",
+            "male",
+            "mixed",
         ]
-        payload = {
-            "data": [
-                {"namespace": ns, "data": {"tag": {"name": f"翻譯_{ns}"}}}
-                for ns in valid
-            ]
-        }
+        payload = {"data": [{"namespace": ns, "data": {"tag": {"name": f"翻譯_{ns}"}}} for ns in valid]}
         rows = parse_ehtag_payload(payload)
         assert len(rows) == 12
 

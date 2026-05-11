@@ -6,10 +6,10 @@ from datetime import UTC, datetime
 from croniter import croniter as _croniter_cls
 from sqlalchemy import select, update
 
+import core.queue
 from core.database import AsyncSessionLocal
 from db.models import Subscription, SubscriptionGroup
 from worker.constants import logger
-import core.queue
 
 GROUP_MAX_DURATION = 1800  # 30 minutes
 

@@ -7,13 +7,16 @@ from plugins.models import CredentialFlow, CredentialStatus, FieldDef
 
 logger = logging.getLogger(__name__)
 
+
 def eh_credential_flows() -> list[CredentialFlow]:
     """Return the supported credential flows for E-Hentai."""
     return [
         CredentialFlow(
             flow_type="fields",
             fields=[
-                FieldDef(name="ipb_member_id", field_type="text", label="ipb_member_id", required=True, placeholder="12345"),
+                FieldDef(
+                    name="ipb_member_id", field_type="text", label="ipb_member_id", required=True, placeholder="12345"
+                ),
                 FieldDef(name="ipb_pass_hash", field_type="password", label="ipb_pass_hash", required=True),
                 FieldDef(name="sk", field_type="password", label="sk", required=False),
                 FieldDef(name="igneous", field_type="password", label="igneous (ExHentai)", required=False),
@@ -26,6 +29,7 @@ def eh_credential_flows() -> list[CredentialFlow]:
             verify_endpoint="/api/settings/credentials/ehentai/cookies-check",
         ),
     ]
+
 
 async def verify_eh_credential(credentials: dict) -> CredentialStatus:
     """Verify E-Hentai cookies by testing access against EhClient."""

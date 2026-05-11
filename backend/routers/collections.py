@@ -5,7 +5,7 @@ from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import func, select, delete
+from sqlalchemy import delete, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 
@@ -74,24 +74,28 @@ async def list_collections(
             cover_gallery = await db.get(Gallery, cover_gid)
             cover_row = None
             if cover_gallery:
-                cover_row = (await build_cover_sha_map(
-                    db,
-                    [cover_gid],
-                    {cover_gid: cover_gallery.source or ""},
-                )).get(cover_gid)
+                cover_row = (
+                    await build_cover_sha_map(
+                        db,
+                        [cover_gid],
+                        {cover_gid: cover_gallery.source or ""},
+                    )
+                ).get(cover_gid)
             if cover_row:
                 cover_thumb = cas_thumb_url(cover_row)
 
-        result.append({
-            "id": collection.id,
-            "name": collection.name,
-            "description": collection.description,
-            "cover_gallery_id": collection.cover_gallery_id,
-            "gallery_count": gallery_count,
-            "cover_thumb": cover_thumb,
-            "created_at": collection.created_at.isoformat() if collection.created_at else None,
-            "updated_at": collection.updated_at.isoformat() if collection.updated_at else None,
-        })
+        result.append(
+            {
+                "id": collection.id,
+                "name": collection.name,
+                "description": collection.description,
+                "cover_gallery_id": collection.cover_gallery_id,
+                "gallery_count": gallery_count,
+                "cover_thumb": cover_thumb,
+                "created_at": collection.created_at.isoformat() if collection.created_at else None,
+                "updated_at": collection.updated_at.isoformat() if collection.updated_at else None,
+            }
+        )
 
     return {"collections": result}
 
@@ -108,7 +112,13 @@ async def create_collection(
     await db.commit()
     await db.refresh(collection)
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.COLLECTION_UPDATED, actor_user_id=auth["user_id"], resource_type="collection", resource_id=collection.id)
+
+    await emit_safe(
+        EventType.COLLECTION_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="collection",
+        resource_id=collection.id,
+    )
     return {
         "id": collection.id,
         "name": collection.name,
@@ -157,20 +167,22 @@ async def get_collection(
         g = cg.gallery
         if not g:
             continue
-        galleries.append({
-            "id": g.id,
-            "source": g.source,
-            "title": g.title,
-            "title_jpn": g.title_jpn,
-            "category": g.category,
-            "pages": g.pages,
-            "rating": g.rating,
-            "favorited": g.favorited,
-            "added_at": g.added_at.isoformat() if g.added_at else None,
-            "cover_thumb": cover_map.get(g.id),
-            "position": cg.position,
-            "added_to_collection_at": cg.added_at.isoformat() if cg.added_at else None,
-        })
+        galleries.append(
+            {
+                "id": g.id,
+                "source": g.source,
+                "title": g.title,
+                "title_jpn": g.title_jpn,
+                "category": g.category,
+                "pages": g.pages,
+                "rating": g.rating,
+                "favorited": g.favorited,
+                "added_at": g.added_at.isoformat() if g.added_at else None,
+                "cover_thumb": cover_map.get(g.id),
+                "position": cg.position,
+                "added_to_collection_at": cg.added_at.isoformat() if cg.added_at else None,
+            }
+        )
 
     return {
         "id": collection.id,
@@ -208,7 +220,13 @@ async def update_collection(
     collection.updated_at = datetime.now(UTC)
     await db.commit()
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.COLLECTION_UPDATED, actor_user_id=auth["user_id"], resource_type="collection", resource_id=collection_id)
+
+    await emit_safe(
+        EventType.COLLECTION_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="collection",
+        resource_id=collection_id,
+    )
     return {"status": "ok"}
 
 
@@ -225,7 +243,13 @@ async def delete_collection(
     await db.delete(collection)
     await db.commit()
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.COLLECTION_UPDATED, actor_user_id=auth["user_id"], resource_type="collection", resource_id=collection_id)
+
+    await emit_safe(
+        EventType.COLLECTION_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="collection",
+        resource_id=collection_id,
+    )
     return {"status": "ok"}
 
 
@@ -244,8 +268,9 @@ async def add_galleries_to_collection(
     # Get current max position
     max_pos_result = (
         await db.execute(
-            select(func.coalesce(func.max(CollectionGallery.position), -1))
-            .where(CollectionGallery.collection_id == collection_id)
+            select(func.coalesce(func.max(CollectionGallery.position), -1)).where(
+                CollectionGallery.collection_id == collection_id
+            )
         )
     ).scalar_one()
 
@@ -256,8 +281,7 @@ async def add_galleries_to_collection(
         # Check if already in collection
         existing = (
             await db.execute(
-                select(CollectionGallery)
-                .where(
+                select(CollectionGallery).where(
                     CollectionGallery.collection_id == collection_id,
                     CollectionGallery.gallery_id == gid,
                 )
@@ -271,9 +295,11 @@ async def add_galleries_to_collection(
             denied.append(gid)
             continue
         if auth.get("role") != "admin":
-            if (gallery.created_by_user_id is not None
-                    and gallery.created_by_user_id != auth["user_id"]
-                    and gallery.visibility != "public"):
+            if (
+                gallery.created_by_user_id is not None
+                and gallery.created_by_user_id != auth["user_id"]
+                and gallery.visibility != "public"
+            ):
                 denied.append(gid)
                 continue
         cg = CollectionGallery(
@@ -288,7 +314,13 @@ async def add_galleries_to_collection(
     collection.updated_at = datetime.now(UTC)
     await db.commit()
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.COLLECTION_UPDATED, actor_user_id=auth["user_id"], resource_type="collection", resource_id=collection_id)
+
+    await emit_safe(
+        EventType.COLLECTION_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="collection",
+        resource_id=collection_id,
+    )
     return {"status": "ok", "added": added, "denied": denied}
 
 

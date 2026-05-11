@@ -55,7 +55,7 @@ def _tokenize_query(q: str) -> list[str]:
 
 
 def _token_value(token: str, prefix: str) -> str:
-    value = token[len(prefix):]
+    value = token[len(prefix) :]
     if len(value) >= 2 and value.startswith('"') and value.endswith('"'):
         return value[1:-1]
     return value
@@ -140,7 +140,7 @@ async def search_galleries(
         "",
         description=(
             "Search query: tags (character:rem), exclude (-general:sketch), "
-            "title (title:\"re zero\"), source (source:ehentai), rating (rating:>=4), "
+            'title (title:"re zero"), source (source:ehentai), rating (rating:>=4), '
             "favorited (favorited:true), sort (sort:rating), "
             "collection (collection:N), artist_id (artist_id:X), "
             "category (category:doujinshi), import (import:manual), "
@@ -233,9 +233,7 @@ async def search_galleries(
     if collection_filter is not None:
         filters.append(
             Gallery.id.in_(
-                select(CollectionGallery.gallery_id).where(
-                    CollectionGallery.collection_id == collection_filter
-                )
+                select(CollectionGallery.gallery_id).where(CollectionGallery.collection_id == collection_filter)
             )
         )
 
@@ -244,9 +242,7 @@ async def search_galleries(
 
     if category_filter is not None:
         if category_filter == "__uncategorized__":
-            filters.append(
-                or_(Gallery.category.is_(None), Gallery.category == "")
-            )
+            filters.append(or_(Gallery.category.is_(None), Gallery.category == ""))
         else:
             filters.append(Gallery.category == category_filter)
 
@@ -302,9 +298,7 @@ async def search_galleries(
         # ── Blocked tags — query user's blocked tags ──
         blocked_rows = (
             await session.execute(
-                select(BlockedTag.namespace, BlockedTag.name).where(
-                    BlockedTag.user_id == auth["user_id"]
-                )
+                select(BlockedTag.namespace, BlockedTag.name).where(BlockedTag.user_id == auth["user_id"])
             )
         ).all()
         if blocked_rows:
@@ -314,11 +308,7 @@ async def search_galleries(
         # ── Reading list filter ──
         if rl_filter is not None and rl_filter:
             filters.append(
-                Gallery.id.in_(
-                    select(UserReadingList.gallery_id).where(
-                        UserReadingList.user_id == auth["user_id"]
-                    )
-                )
+                Gallery.id.in_(select(UserReadingList.gallery_id).where(UserReadingList.user_id == auth["user_id"]))
             )
 
         # ── Alias expansion — batch resolve all include tags ──
@@ -337,9 +327,7 @@ async def search_galleries(
                 lower_name_terms = [name.lower() for name in name_only_tags]
                 name_rows = (
                     await session.execute(
-                        select(Tag.namespace, Tag.name).where(
-                            func.lower(Tag.name).in_(lower_name_terms)
-                        )
+                        select(Tag.namespace, Tag.name).where(func.lower(Tag.name).in_(lower_name_terms))
                     )
                 ).all()
                 # Group matches by bare name
@@ -394,21 +382,13 @@ async def search_galleries(
                     alias_map[(row.alias_namespace, row.alias_name)] = row.canonical_id
 
                 # Batch 2: For non-alias tags, check if they are canonical tags
-                non_alias_pairs = [
-                    (ns, name) for ns, name in parsed_includes
-                    if (ns, name) not in alias_map
-                ]
+                non_alias_pairs = [(ns, name) for ns, name in parsed_includes if (ns, name) not in alias_map]
                 tag_id_map: dict[tuple[str, str], int] = {}
                 if non_alias_pairs:
                     tag_rows = (
                         await session.execute(
                             select(Tag.id, Tag.namespace, Tag.name).where(
-                                or_(
-                                    *[
-                                        (Tag.namespace == ns) & (Tag.name == name)
-                                        for ns, name in non_alias_pairs
-                                    ]
-                                )
+                                or_(*[(Tag.namespace == ns) & (Tag.name == name) for ns, name in non_alias_pairs])
                             )
                         )
                     ).all()
@@ -425,9 +405,7 @@ async def search_galleries(
                 if all_canonical_ids:
                     canon_rows = (
                         await session.execute(
-                            select(Tag.id, Tag.namespace, Tag.name).where(
-                                Tag.id.in_(all_canonical_ids)
-                            )
+                            select(Tag.id, Tag.namespace, Tag.name).where(Tag.id.in_(all_canonical_ids))
                         )
                     ).all()
                     for row in canon_rows:
@@ -480,9 +458,7 @@ async def search_galleries(
         if favorited_filter is not None:
             if favorited_filter:
                 filters.append(
-                    Gallery.id.in_(
-                        select(UserFavorite.gallery_id).where(UserFavorite.user_id == auth["user_id"])
-                    )
+                    Gallery.id.in_(select(UserFavorite.gallery_id).where(UserFavorite.user_id == auth["user_id"]))
                 )
 
         if cursor is not None:
@@ -643,13 +619,17 @@ async def list_saved_searches(
     user_id = auth["user_id"]
     async with async_session() as session:
         rows = (
-            await session.execute(
-                select(SavedSearch)
-                .where(SavedSearch.user_id == user_id)
-                .order_by(desc(SavedSearch.created_at))
-                .limit(200)
+            (
+                await session.execute(
+                    select(SavedSearch)
+                    .where(SavedSearch.user_id == user_id)
+                    .order_by(desc(SavedSearch.created_at))
+                    .limit(200)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return {"searches": [_ss(r) for r in rows]}
 
 

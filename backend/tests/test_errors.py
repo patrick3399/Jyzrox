@@ -9,8 +9,6 @@ Covers:
 - Fallback to English for missing locale
 """
 
-import pytest
-
 
 # ---------------------------------------------------------------------------
 # Import helpers
@@ -20,21 +18,25 @@ import pytest
 def _get_translations():
     """Return the internal _TRANSLATIONS dict from core.errors."""
     from core.errors import _TRANSLATIONS
+
     return _TRANSLATIONS
 
 
 def _get_error_message(code: str, locale: str = "en", **kwargs) -> str:
     from core.errors import get_error_message
+
     return get_error_message(code, locale, **kwargs)
 
 
 def _api_error(status_code: int, code: str, locale: str = "en", **kwargs):
     from core.errors import api_error
+
     return api_error(status_code, code, locale, **kwargs)
 
 
 def _parse_accept_language(header: str | None) -> str:
     from core.errors import parse_accept_language
+
     return parse_accept_language(header)
 
 
@@ -71,6 +73,7 @@ class TestNewWarningCodesExist:
     def test_eh_credentials_recommended_has_all_locales(self):
         """'eh_credentials_recommended' should have translations for all supported locales."""
         from core.errors import SUPPORTED_LOCALES
+
         translations = _get_translations()
         code_translations = translations["eh_credentials_recommended"]
         for locale in SUPPORTED_LOCALES:
@@ -79,6 +82,7 @@ class TestNewWarningCodesExist:
     def test_pixiv_credentials_required_has_all_locales(self):
         """'pixiv_credentials_required' should have translations for all supported locales."""
         from core.errors import SUPPORTED_LOCALES
+
         translations = _get_translations()
         code_translations = translations["pixiv_credentials_required"]
         for locale in SUPPORTED_LOCALES:

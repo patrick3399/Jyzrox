@@ -19,6 +19,7 @@ import pytest
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _create_dist_info(site_packages: Path, version: str) -> None:
     """Create a minimal gallery_dl-{version}.dist-info/METADATA file."""
     dist_info = site_packages / f"gallery_dl-{version}.dist-info"
@@ -30,9 +31,11 @@ def _create_dist_info(site_packages: Path, version: str) -> None:
         f"Summary: Command-line program to download image-galleries\n"
     )
 
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 @pytest.mark.asyncio
 async def test_get_current_version_reads_from_dist_info(tmp_path):
@@ -50,6 +53,7 @@ async def test_get_current_version_reads_from_dist_info(tmp_path):
         version = await venv_mod.get_current_version()
 
     assert version == "1.31.10"
+
 
 @pytest.mark.asyncio
 async def test_get_current_version_fallback_when_venv_missing():
@@ -70,6 +74,7 @@ async def test_get_current_version_fallback_when_venv_missing():
 
     assert version == "1.28.0"
 
+
 @pytest.mark.asyncio
 async def test_get_current_version_fallback_when_no_dist_info(tmp_path):
     """When dist-info is missing, fall back to system gallery-dl binary."""
@@ -88,6 +93,7 @@ async def test_get_current_version_fallback_when_no_dist_info(tmp_path):
         version = await venv_mod.get_current_version()
 
     assert version == "1.28.0"
+
 
 @pytest.mark.asyncio
 async def test_get_current_version_fallback_when_metadata_unreadable(tmp_path):
@@ -111,6 +117,7 @@ async def test_get_current_version_fallback_when_metadata_unreadable(tmp_path):
         version = await venv_mod.get_current_version()
 
     assert version == "1.28.0"
+
 
 @pytest.mark.asyncio
 async def test_get_current_version_parses_version_line_only(tmp_path):

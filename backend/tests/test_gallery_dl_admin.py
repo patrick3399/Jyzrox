@@ -11,7 +11,6 @@ Covers previously uncovered lines: 25-28, 38-40, 49-54.
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # GET /api/admin/gallery-dl/version (lines 25-28)
 # ---------------------------------------------------------------------------

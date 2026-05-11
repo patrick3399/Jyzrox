@@ -7,10 +7,7 @@ Mocks:
 - asyncio.to_thread (avoids PIL/thumbhash deps)
 """
 
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch, call
-import pytest
-
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers

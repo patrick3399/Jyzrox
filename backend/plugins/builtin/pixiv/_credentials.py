@@ -6,6 +6,7 @@ from plugins.models import CredentialFlow, CredentialStatus, FieldDef, OAuthConf
 
 logger = logging.getLogger(__name__)
 
+
 def pixiv_credential_flows() -> list[CredentialFlow]:
     """Return the supported credential flows for Pixiv."""
     return [
@@ -43,6 +44,7 @@ def pixiv_credential_flows() -> list[CredentialFlow]:
             ],
         ),
     ]
+
 
 async def verify_pixiv_credential(credentials: dict) -> CredentialStatus:
     """Verify a Pixiv refresh token."""

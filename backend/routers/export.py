@@ -6,10 +6,10 @@ from io import BytesIO
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.orm import selectinload
 
-from core.auth import gallery_access_filter, require_auth, require_role
+from core.auth import gallery_access_filter, require_role
 from core.database import async_session
 from db.models import Gallery, Image
 from services.cas import resolve_blob_path
@@ -25,9 +25,9 @@ async def export_kohya(gallery_id: int, auth: dict = Depends(_member)):
 
     async with async_session() as session:
         # Get Gallery with access control
-        gallery = (await session.execute(
-            select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(auth))
-        )).scalar_one_or_none()
+        gallery = (
+            await session.execute(select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(auth)))
+        ).scalar_one_or_none()
         if not gallery:
             raise HTTPException(status_code=404, detail="Gallery not found")
 
@@ -35,13 +35,17 @@ async def export_kohya(gallery_id: int, auth: dict = Depends(_member)):
 
         # Get Images with blobs eagerly loaded
         images = (
-            await session.execute(
-                select(Image)
-                .where(Image.gallery_id == gallery_id)
-                .order_by(Image.page_num.desc())
-                .options(selectinload(Image.blob))
+            (
+                await session.execute(
+                    select(Image)
+                    .where(Image.gallery_id == gallery_id)
+                    .order_by(Image.page_num.desc())
+                    .options(selectinload(Image.blob))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     if not images:
         raise HTTPException(status_code=404, detail="No images found in gallery")
@@ -55,9 +59,7 @@ async def export_kohya(gallery_id: int, auth: dict = Depends(_member)):
 
     # Check total size before creating ZIP (limit: 2 GB)
     _MAX_ZIP_SIZE = 2 * 1024 * 1024 * 1024
-    total_size = sum(
-        img.blob.file_size for img in images if img.blob and img.blob.file_size
-    )
+    total_size = sum(img.blob.file_size for img in images if img.blob and img.blob.file_size)
     if total_size > _MAX_ZIP_SIZE:
         raise HTTPException(status_code=413, detail="Gallery too large to export (max 2 GB)")
 

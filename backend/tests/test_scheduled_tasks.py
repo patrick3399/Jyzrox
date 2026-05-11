@@ -287,10 +287,15 @@ def test_catalog_required_jobs_are_registered_as_cron_jobs():
         # #24 — subscription schedule was missing
         "check_followed_artists",
         # #25 — dedup had no CronJob entries
-        "dedup_tier1_job", "dedup_tier2_job", "dedup_tier3_job",
+        "dedup_tier1_job",
+        "dedup_tier2_job",
+        "dedup_tier3_job",
         # #27 — background jobs not previously catalogued
-        "trash_gc_job", "log_cleanup_job", "disk_monitor_job",
-        "adaptive_persist_job", "rate_limit_schedule_job",
+        "trash_gc_job",
+        "log_cleanup_job",
+        "disk_monitor_job",
+        "adaptive_persist_job",
+        "rate_limit_schedule_job",
     }
     missing = required - cron_jobs.keys()
     assert not missing, f"Missing from CronJob list: {missing}"
@@ -316,6 +321,4 @@ def test_catalog_all_configurable_tasks_have_valid_default_cron():
     from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
 
     for task_id, defn in CONFIGURABLE_TASK_DEFS.items():
-        assert croniter.is_valid(defn.default_cron), (
-            f"{task_id} has invalid default_cron: {defn.default_cron!r}"
-        )
+        assert croniter.is_valid(defn.default_cron), f"{task_id} has invalid default_cron: {defn.default_cron!r}"

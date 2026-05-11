@@ -81,7 +81,7 @@ def _successful_manifests(backup_dir: Path) -> list[tuple[Path, dict]]:
     for path in backup_dir.glob("jyzrox_db_*.json"):
         try:
             data = json.loads(path.read_text())
-        except (OSError, json.JSONDecodeError):
+        except OSError, json.JSONDecodeError:
             continue
         if data.get("status") == "ok":
             manifests.append((path, data))

@@ -9,6 +9,7 @@ from plugins.models import GalleryImportData
 
 logger = logging.getLogger(__name__)
 
+
 def parse_pixiv_import(dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
     """Parse a Pixiv gallery directory into GalleryImportData."""
     meta = raw_meta or {}

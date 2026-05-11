@@ -5,7 +5,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { inputClass, btnPrimary } from '@/components/settings/SettingsShared'
-import { t } from '@/lib/i18n'
+import { formatDate, t } from '@/lib/i18n'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { Copy } from 'lucide-react'
@@ -190,20 +190,32 @@ export default function ApiTokensSettingsPage() {
                         )}
                         <div className="flex flex-wrap items-center gap-3 mt-1 text-xs text-vault-text-muted">
                           {tk.created_at && (
-                            <span>Created {new Date(tk.created_at).toLocaleDateString()}</span>
+                            <span>
+                              {t('settings.tokenCreatedAt', {
+                                date: formatDate(tk.created_at),
+                              })}
+                            </span>
                           )}
                           {tk.last_used_at ? (
-                            <span>Last used {new Date(tk.last_used_at).toLocaleDateString()}</span>
+                            <span>
+                              {t('settings.tokenLastUsedAt', {
+                                date: formatDate(tk.last_used_at),
+                              })}
+                            </span>
                           ) : (
-                            <span>Never used</span>
+                            <span>{t('settings.tokenNeverUsed')}</span>
                           )}
                           {tk.expires_at && (
                             <span>
-                              {isExpired ? 'Expired' : 'Expires'}{' '}
-                              {new Date(tk.expires_at).toLocaleDateString()}
+                              {t(
+                                isExpired ? 'settings.tokenExpiredAt' : 'settings.tokenExpiresAt',
+                                {
+                                  date: formatDate(tk.expires_at),
+                                },
+                              )}
                             </span>
                           )}
-                          {!tk.expires_at && <span>No expiration</span>}
+                          {!tk.expires_at && <span>{t('settings.tokenNoExpiration')}</span>}
                         </div>
                       </div>
                       <button
@@ -211,7 +223,7 @@ export default function ApiTokensSettingsPage() {
                         disabled={deletingTokenId === tk.id}
                         className="text-xs text-red-400/70 hover:text-red-400 transition-colors shrink-0 px-2 py-1"
                       >
-                        {deletingTokenId === tk.id ? '...' : 'Revoke'}
+                        {deletingTokenId === tk.id ? '...' : t('settings.revoke')}
                       </button>
                     </div>
                   </div>
@@ -248,16 +260,18 @@ export default function ApiTokensSettingsPage() {
 
         {/* API usage info */}
         <div className="bg-vault-card border border-vault-border rounded-xl px-5 py-5">
-          <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">Usage</p>
+          <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+            {t('settings.usage')}
+          </p>
           <div className="bg-vault-input border border-vault-border rounded-lg p-3">
             <p className="text-xs text-vault-text-secondary mb-2">
-              Use the{' '}
+              {t('settings.apiTokenUsagePrefix')}{' '}
               <code className="bg-black/30 px-1 py-0.5 rounded text-vault-text-muted">
                 X-API-Token
               </code>{' '}
-              header to authenticate external API requests.
+              {t('settings.apiTokenUsageSuffix')}
             </p>
-            <p className="text-xs text-vault-text-muted mb-1">Available endpoints:</p>
+            <p className="text-xs text-vault-text-muted mb-1">{t('settings.availableEndpoints')}</p>
             <div className="space-y-0.5 font-mono text-[11px] text-vault-text-muted">
               <p>
                 <span className="text-green-400">GET</span> /api/external/v1/status

@@ -36,14 +36,16 @@ class RedisLogHandler(logging.Handler):
                 tb = traceback.format_exception(*record.exc_info)
                 tb = "".join(tb)
 
-            payload = json.dumps({
-                "level": record.levelname,
-                "source": self.source,
-                "logger": record.name,
-                "message": self.format(record),
-                "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
-                **({"traceback": tb} if tb else {}),
-            })
+            payload = json.dumps(
+                {
+                    "level": record.levelname,
+                    "source": self.source,
+                    "logger": record.name,
+                    "message": self.format(record),
+                    "timestamp": datetime.fromtimestamp(record.created, tz=UTC).isoformat(),
+                    **({"traceback": tb} if tb else {}),
+                }
+            )
 
             try:
                 loop = asyncio.get_running_loop()
@@ -60,6 +62,7 @@ class RedisLogHandler(logging.Handler):
         global _trim_counter
         try:
             from core.redis_client import get_redis
+
             r = get_redis()
             pipe = r.pipeline(transaction=False)
             pipe.lpush(self.LIST_KEY, payload)
@@ -78,7 +81,7 @@ def install_log_handler(source: str, extra_loggers: list[str] | None = None) -> 
     handler = RedisLogHandler(source=source)
     handler.setFormatter(logging.Formatter("%(message)s"))
     logging.getLogger().addHandler(handler)
-    for name in (extra_loggers or []):
+    for name in extra_loggers or []:
         logging.getLogger(name).addHandler(handler)
 
 
@@ -89,6 +92,7 @@ async def read_log_level(source: str) -> str:
     """
     try:
         from core.redis_client import get_redis
+
         r = get_redis()
         key = LOG_LEVEL_KEYS.get(source, f"log_level:{source}")
         raw = await r.get(key)
@@ -112,6 +116,7 @@ async def apply_log_level_from_redis(source: str) -> str:
 async def set_log_level(source: str, level: str) -> None:
     """Persist log level to Redis and publish a change notification."""
     from core.redis_client import get_redis
+
     r = get_redis()
     key = LOG_LEVEL_KEYS.get(source, f"log_level:{source}")
     await r.set(key, level)

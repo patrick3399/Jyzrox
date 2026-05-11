@@ -8,8 +8,8 @@ from typing import Any
 from fastapi import APIRouter, Depends, HTTPException, Query
 from saq.job import TERMINAL_STATUSES, Status
 
-from core.auth import require_role
 import core.queue
+from core.auth import require_role
 from core.queue_config import ALL_QUEUES
 
 logger = logging.getLogger(__name__)
@@ -52,7 +52,7 @@ async def _find_job(job_key: str) -> tuple[Any, Any]:
     for name in ALL_QUEUES:
         try:
             q = core.queue.get_queue(name)
-        except (RuntimeError, KeyError):
+        except RuntimeError, KeyError:
             continue
         job = await q.job(job_key)
         if job is not None:
@@ -70,29 +70,28 @@ async def queue_overview(_: dict = Depends(_admin)):
     per_queue = []
     all_workers: dict = {}
 
-    for name, info in zip(queues.keys(), infos):
-        total_queued    += info.get("queued", 0)
-        total_active    += info.get("active", 0)
+    for name, info in zip(queues.keys(), infos, strict=True):
+        total_queued += info.get("queued", 0)
+        total_active += info.get("active", 0)
         total_scheduled += info.get("scheduled", 0)
         all_workers.update(info.get("workers") or {})
-        per_queue.append({
-            "name": name,
-            "queued":    info.get("queued", 0),
-            "active":    info.get("active", 0),
-            "scheduled": info.get("scheduled", 0),
-        })
+        per_queue.append(
+            {
+                "name": name,
+                "queued": info.get("queued", 0),
+                "active": info.get("active", 0),
+                "scheduled": info.get("scheduled", 0),
+            }
+        )
 
-    workers = [
-        {"id": wid, "stats": winfo.get("stats") or {}}
-        for wid, winfo in all_workers.items()
-    ]
+    workers = [{"id": wid, "stats": winfo.get("stats") or {}} for wid, winfo in all_workers.items()]
     return {
         "name": "all",
-        "queued":    total_queued,
-        "active":    total_active,
+        "queued": total_queued,
+        "active": total_active,
         "scheduled": total_scheduled,
-        "workers":   workers,
-        "queues":    per_queue,
+        "workers": workers,
+        "queues": per_queue,
     }
 
 
@@ -146,7 +145,7 @@ async def list_jobs(
             matched.append(_serialize_job(job))
 
     total = len(matched)
-    return {"jobs": matched[offset: offset + limit], "total": total}
+    return {"jobs": matched[offset : offset + limit], "total": total}
 
 
 @router.get("/jobs/{job_key}")

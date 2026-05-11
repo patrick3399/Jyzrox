@@ -23,7 +23,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -797,6 +796,7 @@ class TestWsReceiver:
     async def test_ws_receiver_raises_on_websocket_disconnect(self):
         """WebSocketDisconnect propagates up from _ws_receiver."""
         from fastapi import WebSocketDisconnect
+
         from routers.ws import _ws_receiver
 
         ws = AsyncMock()
@@ -870,8 +870,8 @@ class TestWebsocketEndpoint:
         ):
             client = self._make_client()
             # starlette TestClient raises WebSocketDisconnect or similar when
-            # the server closes without accepting.
-            with pytest.raises(Exception):
+            # the server closes without accepting; exact type is not deterministic.
+            with pytest.raises(Exception):  # noqa: B017
                 with client.websocket_connect("/api/ws") as ws:
                     ws.receive_json()
 
@@ -884,7 +884,7 @@ class TestWebsocketEndpoint:
             patch("routers.ws.get_redis", return_value=mock_redis),
         ):
             client = self._make_client()
-            with pytest.raises(Exception):
+            with pytest.raises(Exception):  # noqa: B017
                 with client.websocket_connect("/api/ws", cookies={"vault_session": "1:badtoken"}) as ws:
                     ws.receive_json()
 
@@ -1123,9 +1123,8 @@ class TestWebsocketEndpointTaskCleanup:
         which makes it the first task to complete and triggers cancellation of the
         remaining two tasks (_pubsub_listener, _ping_loop).
         """
-        from routers.ws import websocket_endpoint
-
         from core.auth import sign_session
+        from routers.ws import websocket_endpoint
 
         session_data = sign_session(json.dumps({"role": "admin"}))
         mock_redis = AsyncMock()
@@ -1252,8 +1251,7 @@ class TestValidateWsSessionHmacRegression:
 
         # The key assertion: must NOT return ("1", "viewer") which the bug caused.
         assert result == ("1", "admin"), (
-            f"Expected ('1', 'admin') but got {result!r}. "
-            "Likely the HMAC suffix was not stripped before JSON parsing."
+            f"Expected ('1', 'admin') but got {result!r}. Likely the HMAC suffix was not stripped before JSON parsing."
         )
 
     async def test_validate_ws_session_with_unsigned_legacy_session_is_rejected(self):
@@ -1300,6 +1298,5 @@ class TestValidateWsSessionHmacRegression:
             result = await _validate_ws_session(ws)
 
         assert result is None, (
-            f"Expected None for tampered HMAC but got {result!r}. "
-            "Signature mismatch should reject the session."
+            f"Expected None for tampered HMAC but got {result!r}. Signature mismatch should reject the session."
         )

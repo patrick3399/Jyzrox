@@ -81,10 +81,10 @@ async def set_proxied_image(gid: int, page: int, data: bytes) -> None:
 
 # ── Pixiv cache operations ───────────────────────────────────────────
 
-_TTL_PIXIV_SEARCH = 300      # 5min
-_TTL_PIXIV_ILLUST = 3600     # 1h
-_TTL_PIXIV_USER = 1800       # 30min
-_TTL_PIXIV_IMAGE = 86400     # 24h
+_TTL_PIXIV_SEARCH = 300  # 5min
+_TTL_PIXIV_ILLUST = 3600  # 1h
+_TTL_PIXIV_USER = 1800  # 30min
+_TTL_PIXIV_IMAGE = 86400  # 24h
 
 
 async def get_pixiv_search_cache(key: str) -> dict | None:

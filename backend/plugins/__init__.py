@@ -5,11 +5,11 @@ from plugins.registry import plugin_registry
 
 async def init_plugins() -> None:
     """Register all built-in plugins. Called during app startup and worker startup."""
-    from plugins.builtin.gallery_dl.source import GalleryDlPlugin
     from plugins.builtin.ehentai.browse import EhBrowsePlugin
     from plugins.builtin.ehentai.source import EhSourcePlugin
-    from plugins.builtin.pixiv.source import PixivSourcePlugin
+    from plugins.builtin.gallery_dl.source import GalleryDlPlugin
     from plugins.builtin.pixiv._browse import PixivBrowsePlugin
+    from plugins.builtin.pixiv.source import PixivSourcePlugin
 
     plugin_registry.register(GalleryDlPlugin())
     plugin_registry.register(EhBrowsePlugin())

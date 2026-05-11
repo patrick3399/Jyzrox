@@ -126,10 +126,12 @@ class TestListFollowed:
 
     async def test_list_followed_filter_by_source(self, client, db_session):
         """?source= query param should filter results to that source only."""
-        await _insert_subscription(db_session, source="pixiv", source_id="p1", name="Pixiv A",
-                                   url="https://www.pixiv.net/users/p1")
-        await _insert_subscription(db_session, source="twitter", source_id="t1", name="Twitter B",
-                                   url="https://x.com/t1")
+        await _insert_subscription(
+            db_session, source="pixiv", source_id="p1", name="Pixiv A", url="https://www.pixiv.net/users/p1"
+        )
+        await _insert_subscription(
+            db_session, source="twitter", source_id="t1", name="Twitter B", url="https://x.com/t1"
+        )
 
         resp = await client.get("/api/artists/followed?source=pixiv")
         assert resp.status_code == 200
@@ -156,11 +158,13 @@ class TestListFollowed:
     async def test_list_followed_user_isolation(self, client, db_session, make_client):
         """Subscriptions from another user should NOT appear in the current user's list."""
         # Insert for user 1 (the authed user)
-        await _insert_subscription(db_session, user_id=1, source_id="u1", name="My Artist",
-                                   url="https://www.pixiv.net/users/u1")
+        await _insert_subscription(
+            db_session, user_id=1, source_id="u1", name="My Artist", url="https://www.pixiv.net/users/u1"
+        )
         # Insert for user 2 (a different user)
-        await _insert_subscription(db_session, user_id=2, source_id="u2", name="Other Artist",
-                                   url="https://www.pixiv.net/users/u2")
+        await _insert_subscription(
+            db_session, user_id=2, source_id="u2", name="Other Artist", url="https://www.pixiv.net/users/u2"
+        )
 
         resp = await client.get("/api/artists/followed")
         assert resp.status_code == 200
@@ -231,8 +235,9 @@ class TestUnfollowArtist:
 
     async def test_unfollow_existing_artist(self, client, db_session):
         """Unfollowing an existing subscription should return status=ok."""
-        await _insert_subscription(db_session, source="pixiv", source_id="del_me",
-                                   url="https://www.pixiv.net/users/del_me")
+        await _insert_subscription(
+            db_session, source="pixiv", source_id="del_me", url="https://www.pixiv.net/users/del_me"
+        )
 
         resp = await client.delete("/api/artists/follow/del_me?source=pixiv")
         assert resp.status_code == 200
@@ -245,16 +250,18 @@ class TestUnfollowArtist:
 
     async def test_unfollow_wrong_source_returns_404(self, client, db_session):
         """Unfollowing with the wrong source param should return 404."""
-        await _insert_subscription(db_session, source="pixiv", source_id="cross_src",
-                                   url="https://www.pixiv.net/users/cross_src")
+        await _insert_subscription(
+            db_session, source="pixiv", source_id="cross_src", url="https://www.pixiv.net/users/cross_src"
+        )
 
         resp = await client.delete("/api/artists/follow/cross_src?source=twitter")
         assert resp.status_code == 404
 
     async def test_unfollow_default_source_is_pixiv(self, client, db_session):
         """?source= defaults to pixiv when not specified."""
-        await _insert_subscription(db_session, source="pixiv", source_id="default_src",
-                                   url="https://www.pixiv.net/users/default_src")
+        await _insert_subscription(
+            db_session, source="pixiv", source_id="default_src", url="https://www.pixiv.net/users/default_src"
+        )
 
         resp = await client.delete("/api/artists/follow/default_src")
         assert resp.status_code == 200
@@ -278,9 +285,13 @@ class TestUnfollowArtist:
 
     async def test_unfollow_other_users_subscription_returns_404(self, client, db_session):
         """Attempting to unfollow another user's subscription should return 404."""
-        await _insert_subscription(db_session, user_id=2, source="pixiv",
-                                   source_id="other_user_artist",
-                                   url="https://www.pixiv.net/users/other_user_artist")
+        await _insert_subscription(
+            db_session,
+            user_id=2,
+            source="pixiv",
+            source_id="other_user_artist",
+            url="https://www.pixiv.net/users/other_user_artist",
+        )
 
         resp = await client.delete("/api/artists/follow/other_user_artist?source=pixiv")
         assert resp.status_code == 404
@@ -301,8 +312,9 @@ class TestPatchFollow:
 
     async def test_patch_auto_download(self, client, db_session):
         """Patching auto_download on an existing subscription should return status=ok."""
-        await _insert_subscription(db_session, source="pixiv", source_id="patch_me",
-                                   url="https://www.pixiv.net/users/patch_me")
+        await _insert_subscription(
+            db_session, source="pixiv", source_id="patch_me", url="https://www.pixiv.net/users/patch_me"
+        )
 
         resp = await client.patch(
             "/api/artists/follow/patch_me?source=pixiv",
@@ -313,8 +325,9 @@ class TestPatchFollow:
 
     async def test_patch_artist_name(self, client, db_session):
         """Patching artist_name should update the subscription name."""
-        await _insert_subscription(db_session, source="pixiv", source_id="rename_me",
-                                   url="https://www.pixiv.net/users/rename_me")
+        await _insert_subscription(
+            db_session, source="pixiv", source_id="rename_me", url="https://www.pixiv.net/users/rename_me"
+        )
 
         resp = await client.patch(
             "/api/artists/follow/rename_me?source=pixiv",
@@ -324,8 +337,9 @@ class TestPatchFollow:
 
     async def test_patch_artist_avatar(self, client, db_session):
         """Patching artist_avatar should update the avatar_url."""
-        await _insert_subscription(db_session, source="pixiv", source_id="avatar_me",
-                                   url="https://www.pixiv.net/users/avatar_me")
+        await _insert_subscription(
+            db_session, source="pixiv", source_id="avatar_me", url="https://www.pixiv.net/users/avatar_me"
+        )
 
         resp = await client.patch(
             "/api/artists/follow/avatar_me?source=pixiv",
@@ -355,8 +369,9 @@ class TestPatchFollow:
 
     async def test_patch_empty_body_returns_400(self, client, db_session):
         """PATCH with no updatable fields should return 400 invalid_request."""
-        await _insert_subscription(db_session, source="pixiv", source_id="empty_patch",
-                                   url="https://www.pixiv.net/users/empty_patch")
+        await _insert_subscription(
+            db_session, source="pixiv", source_id="empty_patch", url="https://www.pixiv.net/users/empty_patch"
+        )
 
         resp = await client.patch(
             "/api/artists/follow/empty_patch?source=pixiv",
@@ -374,9 +389,13 @@ class TestPatchFollow:
 
     async def test_patch_other_users_subscription_returns_404(self, client, db_session):
         """PATCH on another user's subscription should return 404."""
-        await _insert_subscription(db_session, user_id=2, source="pixiv",
-                                   source_id="other_patch",
-                                   url="https://www.pixiv.net/users/other_patch")
+        await _insert_subscription(
+            db_session,
+            user_id=2,
+            source="pixiv",
+            source_id="other_patch",
+            url="https://www.pixiv.net/users/other_patch",
+        )
 
         resp = await client.patch(
             "/api/artists/follow/other_patch?source=pixiv",
@@ -386,8 +405,9 @@ class TestPatchFollow:
 
     async def test_patch_default_source_is_pixiv(self, client, db_session):
         """?source= defaults to pixiv when not specified."""
-        await _insert_subscription(db_session, source="pixiv", source_id="default_patch",
-                                   url="https://www.pixiv.net/users/default_patch")
+        await _insert_subscription(
+            db_session, source="pixiv", source_id="default_patch", url="https://www.pixiv.net/users/default_patch"
+        )
 
         resp = await client.patch(
             "/api/artists/follow/default_patch",

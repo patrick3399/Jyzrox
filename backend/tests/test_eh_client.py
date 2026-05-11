@@ -19,7 +19,6 @@ from unittest.mock import AsyncMock, MagicMock
 import httpx
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # _check_auth
 # ---------------------------------------------------------------------------
@@ -30,6 +29,7 @@ class TestCheckAuth:
 
     def _client(self):
         from services.eh_client import EhClient
+
         return EhClient(cookies={})
 
     def _resp(self, content_disposition: str = "") -> MagicMock:
@@ -111,9 +111,18 @@ class TestParseGmetadata:
 
         result = _parse_gmetadata(self._raw())
         assert set(result.keys()) >= {
-            "gid", "token", "title", "title_jpn", "category",
-            "thumb", "uploader", "posted_at", "pages", "rating",
-            "tags", "expunged",
+            "gid",
+            "token",
+            "title",
+            "title_jpn",
+            "category",
+            "thumb",
+            "uploader",
+            "posted_at",
+            "pages",
+            "rating",
+            "tags",
+            "expunged",
         }
 
     def test_type_coercions_are_correct(self):
@@ -188,7 +197,7 @@ class TestDetectMediaType:
     def test_random_bytes_fall_back_to_jpeg(self):
         from services.eh_client import _detect_media_type
 
-        assert _detect_media_type(b"\xDE\xAD\xBE\xEF" * 20) == "image/jpeg"
+        assert _detect_media_type(b"\xde\xad\xbe\xef" * 20) == "image/jpeg"
 
 
 # ---------------------------------------------------------------------------
@@ -201,6 +210,7 @@ class TestGdataBatching:
 
     def _client(self):
         from services.eh_client import EhClient
+
         c = EhClient(cookies={})
         c._http = AsyncMock()
         return c
@@ -280,6 +290,7 @@ class TestParseDetailHtml:
 
     def _client(self):
         from services.eh_client import EhClient
+
         return EhClient(cookies={})
 
     def test_large_preview_format_extracts_ptoken_and_thumb(self):
@@ -288,7 +299,7 @@ class TestParseDetailHtml:
             '<div class="gdtl" style="height:270px">'
             '<a href="/s/abcdef1234/100-1">'
             '<img alt="1" src="https://thumb.example.com/img1.jpg" style="border:0">'
-            '</a></div>'
+            "</a></div>"
         )
         client = self._client()
         token_map, preview_map = client._parse_detail_html(html, gid=100)
@@ -300,10 +311,10 @@ class TestParseDetailHtml:
         # Build a minimal gdtm block whose style matches _NORMAL_PREVIEW_RE.
         html = (
             '<div class="gdtm" style="height:170px;'
-            'background:transparent url(https://sprite.example.com/s.jpg) -100px 0px no-repeat;'
+            "background:transparent url(https://sprite.example.com/s.jpg) -100px 0px no-repeat;"
             'width:100px;height:143px">'
             '<a href="/s/1111111111/100-2"><img alt="2"></a>'
-            '</div>'
+            "</div>"
         )
         client = self._client()
         token_map, preview_map = client._parse_detail_html(html, gid=100)
@@ -326,7 +337,7 @@ class TestParseDetailHtml:
             '<a class="gdtl" href="https://e-hentai.org/s/2222222222/200-3">'
             '<div id="imgWrap" style="width:120px;height:170px;'
             'background:transparent url(https://new.example.com/n.jpg) -240px 0 no-repeat">'
-            '</div></a>'
+            "</div></a>"
         )
         client = self._client()
         token_map, preview_map = client._parse_detail_html(html, gid=200)
@@ -342,7 +353,7 @@ class TestParseDetailHtml:
             '<div class="gdtl" style="height:270px">'
             '<a href="/s/abcdef1234/999-1">'
             '<img alt="1" src="https://thumb.example.com/other.jpg">'
-            '</a></div>'
+            "</a></div>"
         )
         client = self._client()
         # gid=100, but the link has gid 999
@@ -366,6 +377,7 @@ class TestGetShowkey:
 
     def _client(self):
         from services.eh_client import EhClient
+
         c = EhClient(cookies={})
         c._http = AsyncMock()
         return c
@@ -396,12 +408,7 @@ class TestGetShowkey:
     async def test_missing_nl_param_returns_none(self):
         """When the page has no nl() call, nl_param should be None."""
         client = self._client()
-        html = (
-            "<html><body>"
-            + "x" * 300
-            + 'var showkey="xyz789";'
-            + "</body></html>"
-        )
+        html = "<html><body>" + "x" * 300 + 'var showkey="xyz789";' + "</body></html>"
         client._http.get = AsyncMock(return_value=self._mock_page(html))
 
         showkey, nl_param = await client.get_showkey(100, 1, "ptoken12345")
@@ -428,6 +435,7 @@ class TestGetImageUrlViaApi:
 
     def _client(self):
         from services.eh_client import EhClient
+
         c = EhClient(cookies={}, use_ex=False)
         c._http = AsyncMock()
         return c
@@ -506,6 +514,7 @@ class TestDownloadImageWithRetry:
 
     def _client(self):
         from services.eh_client import EhClient
+
         c = EhClient(cookies={})
         c._http = AsyncMock()
         c._img_http = AsyncMock()
@@ -538,12 +547,8 @@ class TestDownloadImageWithRetry:
         from services.eh_client import ShowpageResult
 
         client = self._client()
-        client.get_image_url_via_api = AsyncMock(
-            return_value=ShowpageResult(image_url="https://h.example.com/img.jpg")
-        )
-        client._download_image_bytes = AsyncMock(
-            return_value=(self._FAKE_BYTES, "image/jpeg", "jpg")
-        )
+        client.get_image_url_via_api = AsyncMock(return_value=ShowpageResult(image_url="https://h.example.com/img.jpg"))
+        client._download_image_bytes = AsyncMock(return_value=(self._FAKE_BYTES, "image/jpeg", "jpg"))
 
         data, media_type, ext = await client.download_image_with_retry("sk", 1, 1, "ik", max_retries=3)
         assert data == self._FAKE_BYTES
@@ -613,9 +618,7 @@ class TestDownloadImageWithRetry:
                 origin_url="https://full.example.com/fullimg.jpg",
             )
         )
-        client._download_image_bytes = AsyncMock(
-            side_effect=httpx.TimeoutException("always times out")
-        )
+        client._download_image_bytes = AsyncMock(side_effect=httpx.TimeoutException("always times out"))
 
         with pytest.raises(RuntimeError, match="Failed to download"):
             await client.download_image_with_retry("sk", 1, 1, "ik", max_retries=2)

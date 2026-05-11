@@ -115,12 +115,16 @@ async def list_subscriptions(
             urls_missing_job_gallery = [s.url for s in subs if s.id not in gallery_by_sub_id]
             if urls_missing_job_gallery:
                 source_url_rows = (
-                    await session.execute(
-                        select(Gallery)
-                        .where(Gallery.source_url.in_(urls_missing_job_gallery), gallery_access_filter(auth))
-                        .order_by(Gallery.source_url.asc(), Gallery.added_at.desc())
+                    (
+                        await session.execute(
+                            select(Gallery)
+                            .where(Gallery.source_url.in_(urls_missing_job_gallery), gallery_access_filter(auth))
+                            .order_by(Gallery.source_url.asc(), Gallery.added_at.desc())
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 gallery_by_source_url: dict[str, Gallery] = {}
                 for gallery in source_url_rows:
                     if gallery.source_url:

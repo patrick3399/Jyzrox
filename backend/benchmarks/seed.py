@@ -19,7 +19,7 @@ Scale targets:
 import hashlib
 import random
 import time
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 import asyncpg
 
@@ -58,12 +58,29 @@ _VISIBILITIES = ["public", "private", "system"]
 _VIS_WEIGHTS = [0.90, 0.05, 0.05]
 
 _WORDS = [
-    "azure", "crimson", "shadow", "light", "storm", "bloom", "drift",
-    "spiral", "echo", "prism", "tide", "frost", "ember", "glow", "flux",
-    "veil", "arc", "peak", "hollow", "surge",
+    "azure",
+    "crimson",
+    "shadow",
+    "light",
+    "storm",
+    "bloom",
+    "drift",
+    "spiral",
+    "echo",
+    "prism",
+    "tide",
+    "frost",
+    "ember",
+    "glow",
+    "flux",
+    "veil",
+    "arc",
+    "peak",
+    "hollow",
+    "surge",
 ]
 
-_NOW = datetime.now(tz=timezone.utc)
+_NOW = datetime.now(tz=UTC)
 
 
 def _rand_added_at() -> datetime:
@@ -98,6 +115,7 @@ def _phash_quarters(phash_int: int) -> tuple[int, int, int, int]:
     q1 = (phash_int >> 16) & mask
     q2 = (phash_int >> 32) & mask
     q3 = (phash_int >> 48) & mask
+
     # Convert to signed SMALLINT range (-32768..32767)
     def _signed(v: int) -> int:
         return v if v < 32768 else v - 65536
@@ -176,9 +194,21 @@ async def _phase_blobs(conn: asyncpg.Connection) -> tuple[int, list[str]]:
     await conn.copy_records_to_table(
         "blobs",
         records=records,
-        columns=["sha256", "file_size", "media_type", "width", "height",
-                 "phash_int", "phash_q0", "phash_q1", "phash_q2", "phash_q3", "extension",
-                 "storage", "ref_count"],
+        columns=[
+            "sha256",
+            "file_size",
+            "media_type",
+            "width",
+            "height",
+            "phash_int",
+            "phash_q0",
+            "phash_q1",
+            "phash_q2",
+            "phash_q3",
+            "extension",
+            "storage",
+            "ref_count",
+        ],
     )
     return BLOB_COUNT, sha_list
 
@@ -209,27 +239,40 @@ async def _phase_galleries(conn: asyncpg.Connection) -> tuple[int, list[tuple]]:
         # Store gallery_rows for image/gallery_tag generation
         gallery_rows.append((i + 1, pages, added_at))  # (gallery_id, pages, added_at)
 
-        records.append((
-            source,
-            source_id,
-            title,
-            pages,
-            rating,
-            False,           # favorited
-            "completed",     # download_status
-            added_at,
-            visibility,
-            user_id,
-            deleted_at,
-            tags_array_val,
-        ))
+        records.append(
+            (
+                source,
+                source_id,
+                title,
+                pages,
+                rating,
+                False,  # favorited
+                "completed",  # download_status
+                added_at,
+                visibility,
+                user_id,
+                deleted_at,
+                tags_array_val,
+            )
+        )
 
     await conn.copy_records_to_table(
         "galleries",
         records=records,
-        columns=["source", "source_id", "title", "pages", "rating",
-                 "favorited", "download_status",
-                 "added_at", "visibility", "created_by_user_id", "deleted_at", "tags_array"],
+        columns=[
+            "source",
+            "source_id",
+            "title",
+            "pages",
+            "rating",
+            "favorited",
+            "download_status",
+            "added_at",
+            "visibility",
+            "created_by_user_id",
+            "deleted_at",
+            "tags_array",
+        ],
     )
     return GALLERY_COUNT, gallery_rows
 
@@ -373,6 +416,7 @@ async def seed_all(dsn: str) -> dict[str, int]:
     counts: dict[str, int] = {}
 
     try:
+
         async def _timed(name: str, coro):
             t0 = time.perf_counter()
             result = await coro

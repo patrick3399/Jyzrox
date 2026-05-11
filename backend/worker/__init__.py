@@ -283,8 +283,6 @@ async def startup(ctx: dict) -> None:
             (await session.execute(select(DownloadJob).where(DownloadJob.status == "running"))).scalars().all()
         )
         if running_jobs:
-
-
             # Fix orphaned galleries stuck in "downloading" status (batch query)
             from db.models import Image
 
@@ -340,7 +338,6 @@ async def startup(ctx: dict) -> None:
             (await session.execute(select(DownloadJob).where(DownloadJob.status == "queued"))).scalars().all()
         )
         if stale_queued:
-
             for job in stale_queued:
                 job_key = compute_job_key(job.id, job.retry_count)
                 try:
@@ -362,7 +359,6 @@ async def startup(ctx: dict) -> None:
         # to "running" without re-enqueueing — leaving the job stuck forever.
         paused_jobs = (await session.execute(select(DownloadJob).where(DownloadJob.status == "paused"))).scalars().all()
         if paused_jobs:
-
             for job in paused_jobs:
                 if paused_strategy == "keep_paused":
                     job_key = compute_job_key(job.id, job.retry_count)
@@ -554,12 +550,12 @@ async def rate_limit_schedule_job(ctx: dict) -> dict:
 
     try:
         start_hour = int(start_val) if start_val is not None else 0
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         start_hour = 0
 
     try:
         end_hour = int(end_val) if end_val is not None else 6
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         end_hour = 6
 
     current_hour = datetime.now(UTC).hour
@@ -595,12 +591,12 @@ async def log_cleanup_job(ctx: dict) -> dict:
 
     try:
         max_entries = int(max_entries_val) if max_entries_val is not None else 10000
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         max_entries = 10000
 
     try:
         retention_days = int(retention_days_val) if retention_days_val is not None else 7
-    except (ValueError, TypeError):
+    except ValueError, TypeError:
         retention_days = 7
 
     cutoff = datetime.now(UTC) - timedelta(days=retention_days)
@@ -680,6 +676,7 @@ def _make_startup_log(label: str):
             r = get_redis()
         ctx["redis"] = r
         logger.info("SAQ %s worker started", label)
+
     return _startup
 
 
@@ -693,21 +690,21 @@ _render_startup = _make_startup_log("render")
 def _build_cron_jobs() -> list[CronJob]:
     """Build CronJob list from the scheduled task catalog."""
     func_map = {
-        "scheduled_scan_job":         scheduled_scan_job,
-        "reconciliation_job":         reconciliation_job,
-        "database_backup_job":        database_backup_job,
-        "check_followed_artists":     check_followed_artists,
-        "dedup_tier1_job":            dedup_tier1_job,
-        "dedup_tier2_job":            dedup_tier2_job,
-        "dedup_tier3_job":            dedup_tier3_job,
+        "scheduled_scan_job": scheduled_scan_job,
+        "reconciliation_job": reconciliation_job,
+        "database_backup_job": database_backup_job,
+        "check_followed_artists": check_followed_artists,
+        "dedup_tier1_job": dedup_tier1_job,
+        "dedup_tier2_job": dedup_tier2_job,
+        "dedup_tier3_job": dedup_tier3_job,
         "retry_failed_downloads_job": retry_failed_downloads_job,
-        "ehtag_sync_job":             ehtag_sync_job,
-        "subscription_scheduler":     subscription_scheduler,
-        "rate_limit_schedule_job":    rate_limit_schedule_job,
-        "trash_gc_job":               trash_gc_job,
-        "log_cleanup_job":            log_cleanup_job,
-        "disk_monitor_job":           disk_monitor_job,
-        "adaptive_persist_job":       adaptive_persist_job,
+        "ehtag_sync_job": ehtag_sync_job,
+        "subscription_scheduler": subscription_scheduler,
+        "rate_limit_schedule_job": rate_limit_schedule_job,
+        "trash_gc_job": trash_gc_job,
+        "log_cleanup_job": log_cleanup_job,
+        "disk_monitor_job": disk_monitor_job,
+        "adaptive_persist_job": adaptive_persist_job,
     }
     jobs = []
     for t in CATALOG:
@@ -741,12 +738,14 @@ def build_workers() -> tuple:
 
     concurrency = {
         QUEUE_INTERACTIVE: env_int("WORKER_CONCURRENCY_INTERACTIVE", DEFAULT_CONCURRENCY[QUEUE_INTERACTIVE]),
-        QUEUE_INGEST:      env_int("WORKER_CONCURRENCY_INGEST",       DEFAULT_CONCURRENCY[QUEUE_INGEST]),
-        QUEUE_RENDER:      env_int("WORKER_CONCURRENCY_RENDER",        DEFAULT_CONCURRENCY[QUEUE_RENDER]),
+        QUEUE_INGEST: env_int("WORKER_CONCURRENCY_INGEST", DEFAULT_CONCURRENCY[QUEUE_INGEST]),
+        QUEUE_RENDER: env_int("WORKER_CONCURRENCY_RENDER", DEFAULT_CONCURRENCY[QUEUE_RENDER]),
     }
     logger.info(
         "Worker concurrency — interactive: %d, ingest: %d, render: %d",
-        concurrency[QUEUE_INTERACTIVE], concurrency[QUEUE_INGEST], concurrency[QUEUE_RENDER],
+        concurrency[QUEUE_INTERACTIVE],
+        concurrency[QUEUE_INGEST],
+        concurrency[QUEUE_RENDER],
     )
 
     worker_interactive = Worker(

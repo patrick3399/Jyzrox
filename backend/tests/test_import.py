@@ -12,9 +12,8 @@ so we patch `core.database.async_session` to redirect DB writes to the test DB.
 """
 
 import json
-import os
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, call, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # POST /api/import/batch/scan — scan directory with pattern
@@ -79,7 +78,7 @@ class TestBatchScan:
             if path == start:
                 return "."
             if path.startswith(start.rstrip("/") + "/"):
-                return path[len(start.rstrip("/")) + 1:]
+                return path[len(start.rstrip("/")) + 1 :]
             return path
 
         with (
@@ -122,7 +121,7 @@ class TestBatchScan:
             if path == start:
                 return "."
             if path.startswith(start.rstrip("/") + "/"):
-                return path[len(start.rstrip("/")) + 1:]
+                return path[len(start.rstrip("/")) + 1 :]
             return path
 
         with (
@@ -276,7 +275,11 @@ class TestBatchStart:
             )
 
         assert resp.status_code == 400
-        assert "mode" in resp.json()["detail"].lower() or "copy" in resp.json()["detail"].lower() or "link" in resp.json()["detail"].lower()
+        assert (
+            "mode" in resp.json()["detail"].lower()
+            or "copy" in resp.json()["detail"].lower()
+            or "link" in resp.json()["detail"].lower()
+        )
 
     async def test_start_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""
@@ -482,7 +485,7 @@ class TestImportJob:
             call_count[0] += 1
             if call_count[0] == 1:
                 return gallery_scalar  # gallery upsert
-            return excl_result         # excluded blobs query
+            return excl_result  # excluded blobs query
 
         mock_session.execute = AsyncMock(side_effect=_execute_side_effect)
 
@@ -505,7 +508,7 @@ class TestImportJob:
             patch("asyncio.to_thread", new_callable=AsyncMock, return_value=fixed_hash),
         ):
             # No media files remain after exclusion, so expect failed
-            result = await import_job(_make_ctx(), str(gallery_dir))
+            await import_job(_make_ctx(), str(gallery_dir))
 
         # store_blob should never be called — excluded blob was skipped
         mock_store_blob.assert_not_called()
@@ -1356,10 +1359,7 @@ class TestBatchImportJob:
         batch_id = "batch-progress-test"
 
         # Three galleries, all will fail (paths don't exist)
-        galleries = [
-            {"path": str(tmp_path / f"g{i}"), "artist": None, "title": f"Gallery {i}"}
-            for i in range(3)
-        ]
+        galleries = [{"path": str(tmp_path / f"g{i}"), "artist": None, "title": f"Gallery {i}"} for i in range(3)]
 
         mock_session = _make_mock_session()
         err_result = MagicMock()
@@ -1423,7 +1423,6 @@ class TestRecentImports:
         assert resp.status_code == 200
         data = resp.json()
         assert len(data) == 2
-        sources = {g["id"] for g in data}
         titles = [g["title"] for g in data]
         assert all("Local Gallery" in t for t in titles)
 
@@ -1482,14 +1481,25 @@ class TestRescanStatus:
     async def test_rescan_status_running(self, client, mock_redis):
         """With an active rescan stored in Redis, running=True should be returned."""
         import json as _json
-        mock_redis.get = AsyncMock(
-            return_value=_json.dumps({"status": "running", "current": 3, "total": 10}).encode()
-        )
+
+        mock_redis.get = AsyncMock(return_value=_json.dumps({"status": "running", "current": 3, "total": 10}).encode())
         with patch("routers.import_router.get_redis", return_value=mock_redis):
             resp = await client.get("/api/import/rescan/status")
         assert resp.status_code == 200
         data = resp.json()
         assert data["running"] is True
+
+    async def test_rescan_status_running_reports_current_and_total(self, client, mock_redis):
+        """running=True response must include current and total progress fields."""
+        progress = json.dumps({"status": "running", "current": 5, "total": 100})
+        mock_redis.get = AsyncMock(return_value=progress.encode())
+        with patch("routers.import_router.get_redis", return_value=mock_redis):
+            resp = await client.get("/api/import/rescan/status")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["running"] is True
+        assert data["current"] == 5
+        assert data["total"] == 100
 
     async def test_rescan_status_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""
@@ -1582,39 +1592,6 @@ class TestRescan:
         assert resp.status_code == 401
 
 
-# ---------------------------------------------------------------------------
-# GET /api/import/rescan/status — rescan progress from Redis
-# ---------------------------------------------------------------------------
-
-
-class TestRescanStatus:
-    """GET /api/import/rescan/status — rescan progress."""
-
-    async def test_rescan_status_not_running_when_no_redis_data(self, client, mock_redis):
-        """No Redis data should return running=False."""
-        mock_redis.get = AsyncMock(return_value=None)
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
-            resp = await client.get("/api/import/rescan/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["running"] is False
-
-    async def test_rescan_status_running_when_redis_says_running(self, client, mock_redis):
-        """Redis data with status=running should return running=True."""
-        progress = json.dumps({"status": "running", "current": 5, "total": 100})
-        mock_redis.get = AsyncMock(return_value=progress.encode())
-        with patch("routers.import_router.get_redis", return_value=mock_redis):
-            resp = await client.get("/api/import/rescan/status")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert data["running"] is True
-        assert data["current"] == 5
-        assert data["total"] == 100
-
-    async def test_rescan_status_requires_auth(self, unauthed_client):
-        """Unauthenticated request should return 401."""
-        resp = await unauthed_client.get("/api/import/rescan/status")
-        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------
@@ -1719,26 +1696,6 @@ class TestMonitorToggle:
         assert resp.status_code == 401
 
 
-# ---------------------------------------------------------------------------
-# GET /api/import/recent — recent local gallery imports
-# ---------------------------------------------------------------------------
-
-
-class TestRecentImports:
-    """GET /api/import/recent — recently added local galleries."""
-
-    async def test_recent_imports_empty_returns_empty_list(self, client, db_session_factory):
-        """No local galleries in DB should return empty list."""
-        with patch("routers.import_router.async_session", db_session_factory):
-            resp = await client.get("/api/import/recent")
-        assert resp.status_code == 200
-        data = resp.json()
-        assert isinstance(data, list)
-
-    async def test_recent_imports_requires_auth(self, unauthed_client):
-        """Unauthenticated request should return 401."""
-        resp = await unauthed_client.get("/api/import/recent")
-        assert resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------

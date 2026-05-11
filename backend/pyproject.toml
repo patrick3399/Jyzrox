@@ -57,6 +57,12 @@ ignore = [
 "tests/test_download_worker.py" = [
     "E402",   # sys.path setup must precede test helper imports
 ]
+"benchmarks/**" = [
+    "S311",   # pseudo-random generators — benchmark seed data, not cryptographic use
+]
+"core/local_patterns.py" = [
+    "S105",   # token_value != "_" — pattern token comparison, not a hardcoded password
+]
 
 [tool.ruff.lint.isort]
 known-first-party = ["core", "db", "routers", "services"]

@@ -15,8 +15,7 @@ import hashlib
 import os
 import sys
 from contextlib import ExitStack
-from datetime import UTC, datetime
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -29,8 +28,10 @@ if os.path.abspath(_backend_dir) not in sys.path:
 # Fixtures
 # ---------------------------------------------------------------------------
 
+
 def _token_hash(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
+
 
 async def _insert_token(db_session, user_id: int = 1, token: str = "test-rss-token") -> str:
     """Insert a user + api_token row for RSS auth and return the raw token."""
@@ -44,14 +45,12 @@ async def _insert_token(db_session, user_id: int = 1, token: str = "test-rss-tok
         {"id": user_id, "username": f"user{user_id}", "email": None, "pw": "hash"},
     )
     await db_session.execute(
-        text(
-            "INSERT OR REPLACE INTO api_tokens (id, user_id, name, token_hash) "
-            "VALUES (:id, :user_id, 'rss', :hash)"
-        ),
+        text("INSERT OR REPLACE INTO api_tokens (id, user_id, name, token_hash) VALUES (:id, :user_id, 'rss', :hash)"),
         {"id": f"tok-{user_id}", "user_id": user_id, "hash": _token_hash(token)},
     )
     await db_session.commit()
     return token
+
 
 async def _insert_gallery(db_session, gallery_id: int = 1, title: str = "Test Gallery") -> None:
     """Insert a minimal gallery row."""
@@ -66,6 +65,7 @@ async def _insert_gallery(db_session, gallery_id: int = 1, title: str = "Test Ga
         {"id": gallery_id, "src_id": str(gallery_id), "title": title},
     )
     await db_session.commit()
+
 
 async def _insert_subscription(
     db_session,
@@ -86,16 +86,18 @@ async def _insert_subscription(
     )
     await db_session.commit()
 
+
 # ---------------------------------------------------------------------------
 # rss_client fixture — like `client` but also patches routers.rss.async_session
 # ---------------------------------------------------------------------------
 
+
 @pytest.fixture
 async def rss_client(db_session, db_session_factory, mock_redis):
     """AsyncClient that patches routers.rss.async_session to use the test DB."""
-    import main as _main_mod
     from httpx import ASGITransport, AsyncClient
-    from core.auth import require_auth
+
+    import main as _main_mod
 
     _app = _main_mod.app
 
@@ -127,9 +129,11 @@ async def rss_client(db_session, db_session_factory, mock_redis):
         ) as ac:
             yield ac
 
+
 # ---------------------------------------------------------------------------
 # Tests: GET /api/rss/recent
 # ---------------------------------------------------------------------------
+
 
 class TestRssRecent:
     """Tests for GET /api/rss/recent."""
@@ -199,9 +203,11 @@ class TestRssRecent:
         assert resp.status_code == 200
         assert "<?xml" in resp.text
 
+
 # ---------------------------------------------------------------------------
 # Tests: GET /api/rss/subscriptions/{sub_id}
 # ---------------------------------------------------------------------------
+
 
 class TestRssSubscription:
     """Tests for GET /api/rss/subscriptions/{sub_id}."""
@@ -224,17 +230,14 @@ class TestRssSubscription:
 
         assert resp.status_code == 404
 
-    async def test_subscription_owned_by_other_user_returns_404(
-        self, rss_client, db_session
-    ):
+    async def test_subscription_owned_by_other_user_returns_404(self, rss_client, db_session):
         """A subscription belonging to user_id=2 should return 404 for user_id=1."""
         # Insert user 1's token
         token = await _insert_token(db_session, user_id=1)
         # Insert user 2's subscription
         await db_session.execute(
             __import__("sqlalchemy").text(
-                "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-                "VALUES (2, 'user2', 'hash', 'viewer')"
+                "INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (2, 'user2', 'hash', 'viewer')"
             )
         )
         await db_session.commit()

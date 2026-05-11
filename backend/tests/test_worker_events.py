@@ -4,8 +4,6 @@ import os
 import sys
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 # Ensure backend directory is on the path
 _backend_dir = os.path.join(os.path.dirname(__file__), "..")
 if os.path.abspath(_backend_dir) not in sys.path:
@@ -15,6 +13,7 @@ if os.path.abspath(_backend_dir) not in sys.path:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_redis(return_value=None):
     """Return an AsyncMock Redis client."""
     redis = AsyncMock()
@@ -23,6 +22,7 @@ def _make_redis(return_value=None):
     redis.setex = AsyncMock()
     redis.delete = AsyncMock()
     return redis
+
 
 def _make_session(scalars_return=None):
     """Return a mock async context-manager session."""
@@ -42,9 +42,11 @@ def _make_session(scalars_return=None):
     session.__aexit__ = AsyncMock(return_value=False)
     return session
 
+
 # ---------------------------------------------------------------------------
 # trash_gc_job
 # ---------------------------------------------------------------------------
+
 
 class TestTrashGcJobEmitsEvent:
     """trash_gc_job emits TRASH_CLEANED on successful deletion."""
@@ -113,9 +115,11 @@ class TestTrashGcJobEmitsEvent:
         # Job must succeed despite emit failure
         assert result["status"] == "ok"
 
+
 # ---------------------------------------------------------------------------
 # retry_failed_downloads_job
 # ---------------------------------------------------------------------------
+
 
 class TestRetryJobEmitsEvent:
     """retry_failed_downloads_job emits RETRY_PROCESSED on success."""
@@ -180,7 +184,8 @@ class TestRetryJobEmitsEvent:
         ):
             # Monkey-patch DownloadJob.updated_at for this test
             from db.models import DownloadJob as DJ
-            _had_attr = hasattr(DJ, 'updated_at')
+
+            _had_attr = hasattr(DJ, "updated_at")
             if not _had_attr:
                 # Add updated_at as a plain class attribute (not mapped) for test compat
                 DJ.updated_at = DJ.created_at
@@ -213,9 +218,11 @@ class TestRetryJobEmitsEvent:
 
         assert result["status"] in ("ok", "error")
 
+
 # ---------------------------------------------------------------------------
 # thumbnail_job
 # ---------------------------------------------------------------------------
+
 
 class TestThumbnailJobEmitsEvent:
     """thumbnail_job emits THUMBNAILS_GENERATED after processing."""
@@ -272,9 +279,11 @@ class TestThumbnailJobEmitsEvent:
 
         assert result["status"] == "done"
 
+
 # ---------------------------------------------------------------------------
 # dedup_scan_job
 # ---------------------------------------------------------------------------
+
 
 class TestDedupScanJobEmitsEvent:
     """dedup_scan_job emits DEDUP_SCAN_COMPLETED after successful completion."""
@@ -284,10 +293,12 @@ class TestDedupScanJobEmitsEvent:
         from worker.dedup_scan import dedup_scan_job
 
         redis = AsyncMock()
-        redis.get = AsyncMock(side_effect=lambda key: {
-            "dedup:progress:status": None,
-            "setting:dedup_phash_enabled": b"0",
-        }.get(key))
+        redis.get = AsyncMock(
+            side_effect=lambda key: {
+                "dedup:progress:status": None,
+                "setting:dedup_phash_enabled": b"0",
+            }.get(key)
+        )
 
         mock_emit = AsyncMock()
         progress_mock = MagicMock()
@@ -323,9 +334,11 @@ class TestDedupScanJobEmitsEvent:
         assert result["status"] == "already_running"
         mock_emit.assert_not_awaited()
 
+
 # ---------------------------------------------------------------------------
 # reconciliation_job
 # ---------------------------------------------------------------------------
+
 
 class TestReconciliationJobEmitsEvent:
     """reconciliation_job emits RECONCILIATION_COMPLETED on success."""
@@ -366,9 +379,11 @@ class TestReconciliationJobEmitsEvent:
         # Library path does not exist → returns early with done status
         assert result["status"] == "done"
 
+
 # ---------------------------------------------------------------------------
 # ehtag_sync_job
 # ---------------------------------------------------------------------------
+
 
 class TestEhtagSyncJobEmitsEvent:
     """ehtag_sync_job emits EHTAG_SYNC_COMPLETED after successful sync."""
@@ -452,9 +467,11 @@ class TestEhtagSyncJobEmitsEvent:
         # The important thing is no unhandled exception escapes the function.
         assert result["status"] in ("ok", "error")
 
+
 # ---------------------------------------------------------------------------
 # tag_job  (tagging worker)
 # ---------------------------------------------------------------------------
+
 
 class TestTaggingJobEmitsEvent:
     """tag_job emits GALLERY_TAGGED after successful AI tagging."""
@@ -576,9 +593,11 @@ class TestTaggingJobEmitsEvent:
         if raised is not None:
             assert "bus error" in str(raised)
 
+
 # ---------------------------------------------------------------------------
 # import_job  (importer worker)
 # ---------------------------------------------------------------------------
+
 
 class TestImporterJobEmitsEvent:
     """import_job emits IMPORT_COMPLETED after successfully ingesting a gallery."""
@@ -721,9 +740,11 @@ class TestImporterJobEmitsEvent:
                 except RuntimeError as exc:
                     assert "bus error" in str(exc)
 
+
 # ---------------------------------------------------------------------------
 # scan jobs (rescan_library_job, auto_discover_job)
 # ---------------------------------------------------------------------------
+
 
 class TestScanJobEmitsEvent:
     """rescan_library_job emits RESCAN_COMPLETED; auto_discover_job emits GALLERY_DISCOVERED."""

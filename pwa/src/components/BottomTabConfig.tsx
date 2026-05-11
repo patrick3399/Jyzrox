@@ -76,7 +76,7 @@ export function BottomTabConfig() {
   const selectedCount = selected.length
 
   return (
-    <div className="px-5 pb-5 border-t border-vault-border">
+    <div className="border-t border-vault-border pb-5">
       <p className="text-xs text-vault-text-muted mt-4 mb-4">{t('settings.bottomTabDesc')}</p>
 
       {/* Current order preview */}
@@ -127,6 +127,7 @@ export function BottomTabConfig() {
               key={tab.href}
               onClick={() => toggleTab(tab.href)}
               disabled={isDisabled}
+              aria-pressed={isSelected}
               className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm text-left transition-colors ${
                 isSelected
                   ? 'border-vault-accent bg-vault-accent/10 text-vault-accent'

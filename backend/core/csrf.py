@@ -38,8 +38,9 @@ class CSRFMiddleware(BaseHTTPMiddleware):
 
         # Check runtime toggle
         try:
-            from core.redis_client import get_redis
             from core.config import settings
+            from core.redis_client import get_redis
+
             val = await get_redis().get("setting:csrf_enabled")
             if val is not None:
                 enabled = val == b"1"

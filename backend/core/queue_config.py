@@ -5,9 +5,9 @@ edit only this file. core/queue.py and worker/__init__.py import from here.
 """
 
 # ── Queue names ──────────────────────────────────────────────────────────────
-QUEUE_INTERACTIVE = "interactive"   # user-triggered actions + cron
-QUEUE_INGEST = "ingest"             # import pipeline stages 1–2
-QUEUE_RENDER = "render"             # CPU-bound bulk image processing
+QUEUE_INTERACTIVE = "interactive"  # user-triggered actions + cron
+QUEUE_INGEST = "ingest"  # import pipeline stages 1–2
+QUEUE_RENDER = "render"  # CPU-bound bulk image processing
 
 ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_RENDER)
 
@@ -56,12 +56,12 @@ ALL_QUEUES: tuple[str, ...] = (QUEUE_INTERACTIVE, QUEUE_INGEST, QUEUE_RENDER)
 
 JOB_QUEUE_ROUTING: dict[str, str] = {
     # render — CPU-bound, lowest priority
-    "thumbnail_job":            QUEUE_RENDER,
-    "thumbhash_backfill_job":   QUEUE_RENDER,
+    "thumbnail_job": QUEUE_RENDER,
+    "thumbhash_backfill_job": QUEUE_RENDER,
     # ingest — import pipeline, must precede render
-    "local_import_job":         QUEUE_INGEST,
-    "cover_thumbnail_job":      QUEUE_INGEST,
-    "auto_discover_job":        QUEUE_INGEST,
+    "local_import_job": QUEUE_INGEST,
+    "cover_thumbnail_job": QUEUE_INGEST,
+    "auto_discover_job": QUEUE_INGEST,
     # everything else → QUEUE_INTERACTIVE (default)
 }
 
@@ -72,7 +72,7 @@ JOB_QUEUE_ROUTING: dict[str, str] = {
 #   WORKER_CONCURRENCY_RENDER       (default 2)
 #
 DEFAULT_CONCURRENCY: dict[str, int] = {
-    QUEUE_INTERACTIVE: 6,   # I/O-bound; high concurrency is safe
-    QUEUE_INGEST:      4,   # mixed disk I/O
-    QUEUE_RENDER:      2,   # CPU-bound; limited by core count
+    QUEUE_INTERACTIVE: 6,  # I/O-bound; high concurrency is safe
+    QUEUE_INGEST: 4,  # mixed disk I/O
+    QUEUE_RENDER: 2,  # CPU-bound; limited by core count
 }

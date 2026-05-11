@@ -132,13 +132,14 @@ async def rss_recent(
     """Atom feed of the 50 most recently added galleries."""
     async with async_session() as session:
         galleries = (
-            await session.execute(
-                select(Gallery)
-                .where(gallery_access_filter(auth))
-                .order_by(desc(Gallery.added_at))
-                .limit(50)
+            (
+                await session.execute(
+                    select(Gallery).where(gallery_access_filter(auth)).order_by(desc(Gallery.added_at)).limit(50)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     base_url = _base_url(request)
     root = _make_feed("Recent Galleries — Jyzrox", "urn:jyzrox:rss:recent", request)
@@ -162,9 +163,7 @@ async def rss_subscription(
     """Atom feed of completed downloads for a specific subscription."""
     async with async_session() as session:
         subscription = (
-            await session.execute(
-                select(Subscription).where(Subscription.id == sub_id)
-            )
+            await session.execute(select(Subscription).where(Subscription.id == sub_id))
         ).scalar_one_or_none()
 
         if not subscription or subscription.user_id != auth["user_id"]:
@@ -172,19 +171,23 @@ async def rss_subscription(
 
         # Join download_jobs to galleries for done jobs belonging to this subscription
         rows = (
-            await session.execute(
-                select(Gallery)
-                .join(DownloadJob, DownloadJob.gallery_id == Gallery.id)
-                .where(
-                    DownloadJob.subscription_id == sub_id,
-                    DownloadJob.status == "done",
-                    DownloadJob.gallery_id.isnot(None),
-                    gallery_access_filter(auth),
+            (
+                await session.execute(
+                    select(Gallery)
+                    .join(DownloadJob, DownloadJob.gallery_id == Gallery.id)
+                    .where(
+                        DownloadJob.subscription_id == sub_id,
+                        DownloadJob.status == "done",
+                        DownloadJob.gallery_id.isnot(None),
+                        gallery_access_filter(auth),
+                    )
+                    .order_by(desc(DownloadJob.finished_at))
+                    .limit(50)
                 )
-                .order_by(desc(DownloadJob.finished_at))
-                .limit(50)
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
     sub_name = subscription.name or f"Subscription {sub_id}"
     base_url = _base_url(request)

@@ -1,8 +1,8 @@
 """Shared helpers for the dedup pipeline workers."""
 
-from db.models import Blob
 import asyncio
 
+from db.models import Blob
 
 _MASK64 = (1 << 64) - 1
 _MASK16 = 0xFFFF
@@ -51,17 +51,18 @@ def _opencv_pixel_diff(path_a: str, path_b: str) -> tuple[float, str]:
 
 def _now_iso() -> str:
     from datetime import UTC, datetime
+
     return datetime.now(UTC).isoformat()
 
 
 class DedupProgress:
-    STATUS_KEY  = "dedup:progress:status"
-    SIGNAL_KEY  = "dedup:progress:signal"
+    STATUS_KEY = "dedup:progress:status"
+    SIGNAL_KEY = "dedup:progress:signal"
     CURRENT_KEY = "dedup:progress:current"
-    TOTAL_KEY   = "dedup:progress:total"
-    TIER_KEY    = "dedup:progress:tier"
-    MODE_KEY    = "dedup:progress:mode"
-    ALL_KEYS    = [STATUS_KEY, SIGNAL_KEY, CURRENT_KEY, TOTAL_KEY, TIER_KEY, MODE_KEY]
+    TOTAL_KEY = "dedup:progress:total"
+    TIER_KEY = "dedup:progress:tier"
+    MODE_KEY = "dedup:progress:mode"
+    ALL_KEYS = [STATUS_KEY, SIGNAL_KEY, CURRENT_KEY, TOTAL_KEY, TIER_KEY, MODE_KEY]
 
     def __init__(self, r):
         self.r = r

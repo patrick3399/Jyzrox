@@ -153,7 +153,10 @@ async def download_eh_gallery(
                     # Download via showpage API
                     try:
                         data, _media_type, ext = await client.download_image_with_retry(
-                            showkey, gid, page_num, ptoken,
+                            showkey,
+                            gid,
+                            page_num,
+                            ptoken,
                             max_retries=settings.eh_download_max_retries,
                         )
                     except Image509Error:

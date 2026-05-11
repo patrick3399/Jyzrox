@@ -43,7 +43,9 @@ def _natural_sort_key(path: Path) -> tuple[tuple[int, str | int], ...]:
     return tuple((1, int(part)) if part.isdigit() else (0, part.casefold()) for part in parts)
 
 
-async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id: int | None = None, source_url: str | None = None) -> dict:
+async def import_job(
+    ctx: dict, path: str, db_job_id: str | None = None, user_id: int | None = None, source_url: str | None = None
+) -> dict:
     """
     Ingest a downloaded gallery directory into the database.
     Handles gallery-dl E-Hentai and Pixiv output formats.
@@ -78,6 +80,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
 
     # Resolve to canonical source_id (e.g., "exhentai" → "ehentai")
     from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
+
     _cfg = _get_site_config(raw_source)
     source = _cfg.source_id
     source_id = gallery_path.name
@@ -88,7 +91,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
             break
 
     tags = _normalize_tags(_extract_tags(gallery_path, metadata), source)
-    media_files_raw = [f for f in gallery_path.rglob('*') if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
+    media_files_raw = [f for f in gallery_path.rglob("*") if f.is_file() and f.suffix.lower() in _MEDIA_EXTS]
     # Validate magic bytes for images; pass video files through without check
     media_files = []
     skipped = 0
@@ -109,9 +112,11 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
     async with AsyncSessionLocal() as session:
         # Try Parseable plugin first, fallback to legacy _build_gallery
         from plugins.registry import plugin_registry
+
         parser = plugin_registry.get_parser(source)
         if parser:
             from plugins.builtin.gallery_dl._metadata import parse_gallery_dl_import
+
             import_data = parse_gallery_dl_import(gallery_path, metadata, fallback_source=source)
             gallery_values = {
                 "source": import_data.source,
@@ -126,7 +131,9 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
                 "download_status": "complete",
                 "metadata_updated_at": func.now(),
                 "tags_array": import_data.tags,
-                "artist_id": _subscription_artist_id(import_data.source, import_data.source_id, import_data.artist_id, source_url),
+                "artist_id": _subscription_artist_id(
+                    import_data.source, import_data.source_id, import_data.artist_id, source_url
+                ),
                 "created_by_user_id": user_id,
                 "source_url": source_url,
             }
@@ -162,9 +169,11 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
         gallery_id = (await session.execute(stmt)).scalar_one()
 
         # Load excluded blob hashes for this gallery
-        excluded_rows = (await session.execute(
-            select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)
-        )).scalars().all()
+        excluded_rows = (
+            (await session.execute(select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)))
+            .scalars()
+            .all()
+        )
         excluded_set: set[str] = set(excluded_rows)
 
         # Compute hashes with bounded concurrency to avoid thread pool exhaustion
@@ -212,10 +221,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
         ]
         if image_values:
             img_stmt = (
-                pg_insert(Image)
-                .values(image_values)
-                .on_conflict_do_nothing()
-                .returning(Image.id, Image.blob_sha256)
+                pg_insert(Image).values(image_values).on_conflict_do_nothing().returning(Image.id, Image.blob_sha256)
             )
             result = await session.execute(img_stmt)
             inserted_rows = result.all()
@@ -225,9 +231,7 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
                 sha_counts = Counter(row.blob_sha256 for row in inserted_rows)
                 for sha, count in sha_counts.items():
                     await session.execute(
-                        update(Blob)
-                        .where(Blob.sha256 == sha)
-                        .values(ref_count=Blob.ref_count + count)
+                        update(Blob).where(Blob.sha256 == sha).values(ref_count=Blob.ref_count + count)
                     )
 
         # Upsert tags + gallery_tags
@@ -270,7 +274,14 @@ async def import_job(ctx: dict, path: str, db_job_id: str | None = None, user_id
         await core.queue.enqueue("tag_job", gallery_id=gallery_id)
 
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=len(allowed_pairs), source=source)
+
+    await emit_safe(
+        EventType.IMPORT_COMPLETED,
+        resource_type="gallery",
+        resource_id=gallery_id,
+        pages=len(allowed_pairs),
+        source=source,
+    )
 
     return {"status": "done", "gallery_id": gallery_id}
 
@@ -297,6 +308,7 @@ def _extract_tags(gallery_path: Path, metadata: dict) -> list[str]:
 def _normalize_tags(tags: list[str], source: str) -> list[str]:
     """Normalize namespace names across sources for consistency."""
     from plugins.builtin.gallery_dl._metadata import _normalize_tags as _meta_normalize_tags
+
     return _meta_normalize_tags(tags, source)
 
 
@@ -321,6 +333,7 @@ def _build_gallery(
     # Artist ID extraction — delegate to shared logic
     # ehentai and pixiv are now in _sites.py so _extract_artist handles them correctly
     from plugins.builtin.gallery_dl._metadata import _extract_artist
+
     artist_id = _extract_artist(source, meta, tags)
 
     return {
@@ -404,15 +417,17 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         else:
             skipped_magic += 1
     if skipped_magic:
-        logger.warning("[local_import] gallery_id=%d: skipped %d file(s) with invalid magic bytes", gallery_id, skipped_magic)
+        logger.warning(
+            "[local_import] gallery_id=%d: skipped %d file(s) with invalid magic bytes", gallery_id, skipped_magic
+        )
     files = sorted(files_validated, key=_natural_sort_key)
 
     if not files:
         return {"status": "failed", "error": "no supported files found"}
 
     total = len(files)
-    processed = 0   # actual new Image rows inserted (used for gallery.pages)
-    attempted = 0   # files attempted regardless of conflict (used for progress display)
+    processed = 0  # actual new Image rows inserted (used for gallery.pages)
+    attempted = 0  # files attempted regardless of conflict (used for progress display)
     r = ctx["redis"]
 
     # Load gallery to get source/source_id for library symlink creation
@@ -426,16 +441,18 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
 
     # Load excluded blob hashes for this gallery before processing files
     async with AsyncSessionLocal() as _excl_session:
-        excluded_rows = (await _excl_session.execute(
-            select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)
-        )).scalars().all()
+        excluded_rows = (
+            (await _excl_session.execute(select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)))
+            .scalars()
+            .all()
+        )
     excluded_set: set[str] = set(excluded_rows)
 
     async with AsyncSessionLocal() as session:
         final_pages = processed
-        existing_rows = (await session.execute(
-            select(Image.page_num, Image.blob_sha256).where(Image.gallery_id == gallery_id)
-        )).all()
+        existing_rows = (
+            await session.execute(select(Image.page_num, Image.blob_sha256).where(Image.gallery_id == gallery_id))
+        ).all()
         known_sha256s = {row.blob_sha256 for row in existing_rows}
         existing_page_by_sha = {row.blob_sha256: row.page_num for row in existing_rows}
         max_page = max((row.page_num for row in existing_rows), default=0)
@@ -488,11 +505,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
 
             if inserted is not None:
                 # New Image row created — increment blob ref_count.
-                await session.execute(
-                    update(Blob)
-                    .where(Blob.sha256 == sha256)
-                    .values(ref_count=Blob.ref_count + 1)
-                )
+                await session.execute(update(Blob).where(Blob.sha256 == sha256).values(ref_count=Blob.ref_count + 1))
                 processed += 1
                 max_page += 1
                 known_sha256s.add(sha256)
@@ -511,9 +524,9 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         # Update gallery page count and status
         gallery = await session.get(Gallery, gallery_id)
         if gallery:
-            image_count = (await session.execute(
-                select(func.count(Image.id)).where(Image.gallery_id == gallery_id)
-            )).scalar_one()
+            image_count = (
+                await session.execute(select(func.count(Image.id)).where(Image.gallery_id == gallery_id))
+            ).scalar_one()
             final_pages = image_count
             gallery.pages = image_count
             gallery.download_status = "complete"
@@ -553,12 +566,17 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         await core.queue.enqueue("tag_job", gallery_id=gallery_id)
 
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=final_pages, source="local")
+
+    await emit_safe(
+        EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=final_pages, source="local"
+    )
 
     return {"status": "done", "processed": processed}
 
 
-async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[dict], batch_id: str, user_id: int | None = None) -> dict:
+async def batch_import_job(
+    ctx: dict, root_dir: str, mode: str, galleries: list[dict], batch_id: str, user_id: int | None = None
+) -> dict:
     """Batch import multiple galleries from a root directory."""
     import json as _json
 
@@ -603,10 +621,15 @@ async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[
             await r.setex(
                 f"import:batch:{batch_id}",
                 3600,
-                _json.dumps({
-                    "total": total, "completed": completed, "failed": failed,
-                    "status": "running", "current_gallery_id": gallery_id,
-                }),
+                _json.dumps(
+                    {
+                        "total": total,
+                        "completed": completed,
+                        "failed": failed,
+                        "status": "running",
+                        "current_gallery_id": gallery_id,
+                    }
+                ),
             )
 
             # Directly call local_import_job logic
@@ -621,25 +644,38 @@ async def batch_import_job(ctx: dict, root_dir: str, mode: str, galleries: list[
         await r.setex(
             f"import:batch:{batch_id}",
             3600,
-            _json.dumps({
-                "total": total, "completed": completed, "failed": failed,
-                "status": "running", "current_gallery_id": None,
-            }),
+            _json.dumps(
+                {
+                    "total": total,
+                    "completed": completed,
+                    "failed": failed,
+                    "status": "running",
+                    "current_gallery_id": None,
+                }
+            ),
         )
 
     # Final status
     await r.setex(
         f"import:batch:{batch_id}",
         300,
-        _json.dumps({
-            "total": total, "completed": completed, "failed": failed,
-            "status": "done", "current_gallery_id": None,
-        }),
+        _json.dumps(
+            {
+                "total": total,
+                "completed": completed,
+                "failed": failed,
+                "status": "done",
+                "current_gallery_id": None,
+            }
+        ),
     )
 
     logger.info("[batch_import] batch_id=%s: %d completed, %d failed", batch_id, completed, failed)
 
     from core.events import EventType, emit_safe
-    await emit_safe(EventType.IMPORT_COMPLETED, resource_type="system", completed=completed, failed=failed, batch_id=batch_id)
+
+    await emit_safe(
+        EventType.IMPORT_COMPLETED, resource_type="system", completed=completed, failed=failed, batch_id=batch_id
+    )
 
     return {"status": "done", "completed": completed, "failed": failed}

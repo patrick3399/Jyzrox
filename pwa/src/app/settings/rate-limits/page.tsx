@@ -5,6 +5,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { useAdminGuard } from '@/hooks/useAdminGuard'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { SaveStatus, type SaveStatusValue } from '@/components/settings/SettingsShared'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
@@ -93,6 +94,7 @@ export default function RateLimitsSettingsPage() {
   const [subDelay, setSubDelay] = useState(500)
   const [subBatchMax, setSubBatchMax] = useState(0)
   const [updateCheckDays, setUpdateCheckDays] = useState(-1)
+  const [saveStatus, setSaveStatus] = useState<SaveStatusValue>('idle')
 
   const updateCheckDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const subDelayDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
@@ -135,13 +137,16 @@ export default function RateLimitsSettingsPage() {
         }
       }
       clearTimeout(debounceRef.current)
+      setSaveStatus('saving')
       debounceRef.current = setTimeout(async () => {
         const merged = pendingPatchRef.current
         pendingPatchRef.current = {}
         try {
           const updated = await api.settings.patchRateLimits(merged)
           setData(updated)
+          setSaveStatus('saved')
         } catch (err) {
+          setSaveStatus('error')
           toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
         }
       }, 300)
@@ -200,11 +205,14 @@ export default function RateLimitsSettingsPage() {
   const handleSubDelayChange = useCallback((v: number) => {
     setSubDelay(v)
     clearTimeout(subDelayDebounce.current)
+    setSaveStatus('saving')
     subDelayDebounce.current = setTimeout(async () => {
       try {
         await api.settings.setFeatureValue('subscription_enqueue_delay_ms', Math.max(100, v))
+        setSaveStatus('saved')
         toast.success(t('common.saved'))
       } catch {
+        setSaveStatus('error')
         toast.error(t('common.failedToSave'))
       }
     }, 500)
@@ -213,11 +221,14 @@ export default function RateLimitsSettingsPage() {
   const handleSubBatchMaxChange = useCallback((v: number) => {
     setSubBatchMax(v)
     clearTimeout(subBatchDebounce.current)
+    setSaveStatus('saving')
     subBatchDebounce.current = setTimeout(async () => {
       try {
         await api.settings.setFeatureValue('subscription_batch_max', Math.max(0, v))
+        setSaveStatus('saved')
         toast.success(t('common.saved'))
       } catch {
+        setSaveStatus('error')
         toast.error(t('common.failedToSave'))
       }
     }, 500)
@@ -226,11 +237,14 @@ export default function RateLimitsSettingsPage() {
   const handleUpdateCheckDaysChange = useCallback((v: number) => {
     setUpdateCheckDays(v)
     clearTimeout(updateCheckDebounce.current)
+    setSaveStatus('saving')
     updateCheckDebounce.current = setTimeout(async () => {
       try {
         await api.settings.setFeatureValue('gallery_update_check_days', Math.max(-1, v))
+        setSaveStatus('saved')
         toast.success(t('common.saved'))
       } catch {
+        setSaveStatus('error')
         toast.error(t('common.failedToSave'))
       }
     }, 500)
@@ -278,7 +292,10 @@ export default function RateLimitsSettingsPage() {
       </h1>
 
       <div className="space-y-5">
-        <p className="text-xs text-vault-text-muted">{t('settings.rateLimitsDesc')}</p>
+        <div className="flex items-start justify-between gap-4">
+          <p className="text-xs text-vault-text-muted">{t('settings.rateLimitsDesc')}</p>
+          <SaveStatus status={saveStatus} />
+        </div>
 
         {/* Per-site config */}
         {orderedSites.map((site) => {
@@ -364,6 +381,9 @@ export default function RateLimitsSettingsPage() {
               </span>
               <button
                 onClick={() => handleScheduleChange('enabled', !data.schedule.enabled)}
+                role="switch"
+                aria-checked={data.schedule.enabled}
+                aria-label={t('settings.rateLimitsScheduleEnable')}
                 className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
                   data.schedule.enabled ? 'bg-green-600' : 'bg-vault-border'
                 }`}

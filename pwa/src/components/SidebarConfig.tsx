@@ -127,7 +127,7 @@ export function SidebarConfig({ userRole }: SidebarConfigProps) {
   const orderCount = config.order.length
 
   return (
-    <div className="px-5 pb-5 border-t border-vault-border">
+    <div className="border-t border-vault-border pb-5">
       <p className="text-xs text-vault-text-muted mt-4 mb-4">{t('settings.sidebarOrderDesc')}</p>
 
       {/* Current order (draggable chips) */}
@@ -176,6 +176,7 @@ export function SidebarConfig({ userRole }: SidebarConfigProps) {
             <button
               key={page.href}
               onClick={() => toggleHref(page.href)}
+              aria-pressed={isVisible}
               className={`flex items-center gap-2.5 px-3 py-2.5 rounded-lg border text-sm text-left transition-colors ${
                 isVisible
                   ? 'border-vault-accent bg-vault-accent/10 text-vault-accent'

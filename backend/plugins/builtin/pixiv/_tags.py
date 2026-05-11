@@ -37,12 +37,14 @@ def process_pixiv_tags(detail: dict) -> tuple[list[str], list[dict]]:
                 seen_tags.add(canonical.lower())
             # Store Japanese as translation
             if name and translated and name != translated:
-                tag_translations_data.append({
-                    "namespace": "general",
-                    "name": translated,
-                    "language": "ja",
-                    "translation": name,
-                })
+                tag_translations_data.append(
+                    {
+                        "namespace": "general",
+                        "name": translated,
+                        "language": "ja",
+                        "translation": name,
+                    }
+                )
         elif isinstance(tag, str) and tag.lower() not in seen_tags:
             tag_list.append(tag)
             seen_tags.add(tag.lower())

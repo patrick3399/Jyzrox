@@ -3,7 +3,7 @@
 import asyncio
 import json
 import logging
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 
 from plugins.models import NewWork
 
@@ -12,8 +12,9 @@ logger = logging.getLogger(__name__)
 MAX_PAGES = 10
 PAGE_DELAY = 3  # seconds between page fetches
 
+
 async def check_eh_new_works(
-    query: str,              # EH search query (e.g. "uploader:Foo", "female:catgirl")
+    query: str,  # EH search query (e.g. "uploader:Foo", "female:catgirl")
     last_known: str | None,  # last seen max gid (string), None = first check
     credentials: dict | None,
 ) -> list[NewWork]:
@@ -94,18 +95,20 @@ async def check_eh_new_works(
                     posted_raw = gallery.get("posted_at")
                     if posted_raw:
                         try:
-                            posted_at = datetime.fromtimestamp(int(posted_raw), tz=timezone.utc)
+                            posted_at = datetime.fromtimestamp(int(posted_raw), tz=UTC)
                         except ValueError, TypeError, OSError:
                             pass
 
                     url = f"https://e-hentai.org/g/{gid}/{token}/"
-                    new_works.append(NewWork(
-                        url=url,
-                        title=title,
-                        source_id=str(gid),
-                        thumbnail_url=thumb,
-                        posted_at=posted_at,
-                    ))
+                    new_works.append(
+                        NewWork(
+                            url=url,
+                            title=title,
+                            source_id=str(gid),
+                            thumbnail_url=thumb,
+                            posted_at=posted_at,
+                        )
+                    )
 
                 # First check: only take first page, do not paginate.
                 if first_check:

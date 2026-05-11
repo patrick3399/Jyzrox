@@ -18,10 +18,7 @@ from sqlalchemy import text
 async def _ensure_user(db_session, user_id: int = 1) -> None:
     """Insert the user if not already present (required for FK constraints)."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash) "
-            "VALUES (:id, :u, :p)"
-        ),
+        text("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (:id, :u, :p)"),
         {"id": user_id, "u": f"hist_user_{user_id}", "p": "x"},
     )
     await db_session.commit()
@@ -37,10 +34,7 @@ async def _insert_history(
     """Insert a browse_history row and return its id."""
     sid = source_id or uuid.uuid4().hex[:8]
     result = await db_session.execute(
-        text(
-            "INSERT INTO browse_history (user_id, source, source_id, title) "
-            "VALUES (:uid, :s, :si, :t) RETURNING id"
-        ),
+        text("INSERT INTO browse_history (user_id, source, source_id, title) VALUES (:uid, :s, :si, :t) RETURNING id"),
         {"uid": user_id, "s": source, "si": sid, "t": title},
     )
     await db_session.commit()
@@ -145,10 +139,7 @@ class TestRecordHistory:
         assert resp.status_code == 201
 
         list_resp = await hist_client.get("/api/history/")
-        pixiv_items = [
-            i for i in list_resp.json()["items"]
-            if i["source"] == "pixiv" and i["source_id"] == "upsert1"
-        ]
+        pixiv_items = [i for i in list_resp.json()["items"] if i["source"] == "pixiv" and i["source_id"] == "upsert1"]
         # Must be exactly one record (upsert)
         assert len(pixiv_items) == 1
         assert pixiv_items[0]["title"] == "Updated"
@@ -206,10 +197,7 @@ class TestDeleteHistoryEntry:
         await _ensure_user(db_session, user_id=1)
         # Insert entry for user 2
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO users (id, username, password_hash) "
-                "VALUES (2, 'other_user', 'x')"
-            )
+            text("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (2, 'other_user', 'x')")
         )
         await db_session.commit()
         entry_id = await _insert_history(db_session, user_id=2, title="Other User Entry")
@@ -257,10 +245,7 @@ class TestClearHistory:
         """Clearing history must not delete entries of other users."""
         await _ensure_user(db_session, user_id=1)
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO users (id, username, password_hash) "
-                "VALUES (2, 'other_clear', 'x')"
-            )
+            text("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (2, 'other_clear', 'x')")
         )
         await db_session.commit()
 
@@ -272,7 +257,5 @@ class TestClearHistory:
         assert resp.status_code == 200
 
         # User 2's entry must still exist
-        remaining = await db_session.execute(
-            text("SELECT COUNT(*) FROM browse_history WHERE user_id = 2")
-        )
+        remaining = await db_session.execute(text("SELECT COUNT(*) FROM browse_history WHERE user_id = 2"))
         assert remaining.scalar_one() == 1

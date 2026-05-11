@@ -12,7 +12,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from sqlalchemy import text
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -196,6 +195,7 @@ def test_detect_jyzrox_version_returns_tag_when_git_succeeds():
 
     with patch("subprocess.run", return_value=fake_result), patch.dict("os.environ", {}, clear=False):
         import os
+
         os.environ.pop("APP_VERSION", None)
         version = _detect_version()
 
@@ -211,6 +211,7 @@ def test_detect_jyzrox_version_returns_dev_when_git_output_is_empty():
 
     with patch("subprocess.run", return_value=fake_result), patch.dict("os.environ", {}, clear=False):
         import os
+
         os.environ.pop("APP_VERSION", None)
         version = _detect_version()
 
@@ -221,8 +222,12 @@ def test_detect_jyzrox_version_returns_dev_on_exception():
     """_detect_version returns 'dev' when subprocess.run raises."""
     from core.version import _detect_version
 
-    with patch("subprocess.run", side_effect=FileNotFoundError("git not found")), patch.dict("os.environ", {}, clear=False):
+    with (
+        patch("subprocess.run", side_effect=FileNotFoundError("git not found")),
+        patch.dict("os.environ", {}, clear=False),
+    ):
         import os
+
         os.environ.pop("APP_VERSION", None)
         version = _detect_version()
 
@@ -538,7 +543,6 @@ async def test_get_tagger_info_returns_none_when_http_fails():
 
 async def test_get_tagger_info_returns_none_when_status_not_200():
     """_get_tagger_info returns None when tagger responds with non-200 status."""
-    import httpx
 
     from routers.system import _get_tagger_info
 
@@ -559,7 +563,6 @@ async def test_get_tagger_info_returns_none_when_status_not_200():
 
 async def test_get_tagger_info_returns_json_on_200():
     """_get_tagger_info returns parsed JSON body when tagger responds 200 (lines 156-157)."""
-    import httpx
 
     from routers.system import _get_tagger_info
 

@@ -27,7 +27,7 @@ async def get_int_setting(redis_key: str, default: int) -> int:
     if val is not None:
         try:
             return int(val)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
     return default
 
@@ -38,6 +38,6 @@ async def get_float_setting(redis_key: str, default: float) -> float:
     if val is not None:
         try:
             return float(val)
-        except (ValueError, TypeError):
+        except ValueError, TypeError:
             pass
     return default

@@ -1,11 +1,11 @@
 """Tests for queue routing configuration."""
-import pytest
+
 from core.queue_config import (
     ALL_QUEUES,
     DEFAULT_CONCURRENCY,
     JOB_QUEUE_ROUTING,
-    QUEUE_INTERACTIVE,
     QUEUE_INGEST,
+    QUEUE_INTERACTIVE,
     QUEUE_RENDER,
 )
 
@@ -31,9 +31,15 @@ def test_ingest_jobs_route_to_ingest_queue():
 def test_unlisted_jobs_are_not_in_routing_map():
     """Jobs not listed default to interactive at call sites — they must be absent."""
     interactive_jobs = [
-        "download_job", "import_job", "batch_import_job", "tag_job",
-        "dedup_scan_job", "rescan_gallery_job", "reconciliation_job",
-        "ehtag_sync_job", "disk_monitor_job",
+        "download_job",
+        "import_job",
+        "batch_import_job",
+        "tag_job",
+        "dedup_scan_job",
+        "rescan_gallery_job",
+        "reconciliation_job",
+        "ehtag_sync_job",
+        "disk_monitor_job",
     ]
     for job in interactive_jobs:
         assert job not in JOB_QUEUE_ROUTING, f"{job} should not be in routing map"

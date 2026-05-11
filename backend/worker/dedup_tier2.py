@@ -67,11 +67,7 @@ async def dedup_tier2_job(ctx: dict) -> dict:
                 same_gal_subq = (
                     select(Image.gallery_id)
                     .where(Image.blob_sha256 == pair.sha_a)
-                    .where(
-                        Image.gallery_id.in_(
-                            select(Image.gallery_id).where(Image.blob_sha256 == pair.sha_b)
-                        )
-                    )
+                    .where(Image.gallery_id.in_(select(Image.gallery_id).where(Image.blob_sha256 == pair.sha_b)))
                     .limit(1)
                     .exists()
                 )

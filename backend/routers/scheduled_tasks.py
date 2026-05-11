@@ -36,7 +36,7 @@ def _next_run(cron_expr: str, enabled: bool, last_run: str | None) -> str | None
     try:
         base = datetime.fromisoformat(last_run) if last_run else datetime.now(UTC)
         return croniter(cron_expr, base).get_next(datetime).isoformat()
-    except (ValueError, KeyError):
+    except ValueError, KeyError:
         return None
 
 

@@ -29,10 +29,7 @@ from sqlalchemy import text
 async def _insert_gallery(db_session, title="Export Gallery", tags_array="[]"):
     """Insert a gallery and return its id."""
     await db_session.execute(
-        text(
-            "INSERT INTO galleries (source, source_id, title, tags_array) "
-            "VALUES ('local', :sid, :title, :tags)"
-        ),
+        text("INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('local', :sid, :title, :tags)"),
         {"sid": str(id(title)), "title": title, "tags": tags_array},
     )
     await db_session.commit()
@@ -209,17 +206,12 @@ class TestExportKohya:
         sha = "sha_huge_blob_export_test"
         await db_session.execute(
             text(
-                "INSERT OR IGNORE INTO blobs "
-                "(sha256, file_size, extension, storage) "
-                "VALUES (:sha, :fs, '.jpg', 'cas')"
+                "INSERT OR IGNORE INTO blobs (sha256, file_size, extension, storage) VALUES (:sha, :fs, '.jpg', 'cas')"
             ),
             {"sha": sha, "fs": _3gb},
         )
         await db_session.execute(
-            text(
-                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256) "
-                "VALUES (:gid, 1, 'huge.jpg', :sha)"
-            ),
+            text("INSERT INTO images (gallery_id, page_num, filename, blob_sha256) VALUES (:gid, 1, 'huge.jpg', :sha)"),
             {"gid": gid, "sha": sha},
         )
         await db_session.commit()

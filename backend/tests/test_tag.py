@@ -17,7 +17,6 @@ Notes on SQLite compatibility:
 import pytest
 from sqlalchemy import text
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -25,10 +24,7 @@ from sqlalchemy import text
 
 async def _insert_user(db_session, user_id=1):
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash) "
-            "VALUES (:id, 'taguser', 'x')"
-        ),
+        text("INSERT OR IGNORE INTO users (id, username, password_hash) VALUES (:id, 'taguser', 'x')"),
         {"id": user_id},
     )
     await db_session.commit()
@@ -37,10 +33,7 @@ async def _insert_user(db_session, user_id=1):
 async def _insert_tag(db_session, namespace, name, count=0):
     """Insert a tag row and return its rowid."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO tags (namespace, name, count) "
-            "VALUES (:ns, :name, :count)"
-        ),
+        text("INSERT OR IGNORE INTO tags (namespace, name, count) VALUES (:ns, :name, :count)"),
         {"ns": namespace, "name": name, "count": count},
     )
     await db_session.commit()
@@ -54,18 +47,12 @@ async def _insert_tag(db_session, namespace, name, count=0):
 async def _insert_blocked_tag(db_session, user_id, namespace, name):
     """Insert a blocked_tags row and return its rowid."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO blocked_tags (user_id, namespace, name) "
-            "VALUES (:uid, :ns, :name)"
-        ),
+        text("INSERT OR IGNORE INTO blocked_tags (user_id, namespace, name) VALUES (:uid, :ns, :name)"),
         {"uid": user_id, "ns": namespace, "name": name},
     )
     await db_session.commit()
     result = await db_session.execute(
-        text(
-            "SELECT id FROM blocked_tags "
-            "WHERE user_id = :uid AND namespace = :ns AND name = :name"
-        ),
+        text("SELECT id FROM blocked_tags WHERE user_id = :uid AND namespace = :ns AND name = :name"),
         {"uid": user_id, "ns": namespace, "name": name},
     )
     return result.scalar()
@@ -73,10 +60,7 @@ async def _insert_blocked_tag(db_session, user_id, namespace, name):
 
 async def _insert_alias(db_session, alias_ns, alias_name, canonical_id):
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO tag_aliases (alias_namespace, alias_name, canonical_id) "
-            "VALUES (:ans, :an, :cid)"
-        ),
+        text("INSERT OR IGNORE INTO tag_aliases (alias_namespace, alias_name, canonical_id) VALUES (:ans, :an, :cid)"),
         {"ans": alias_ns, "an": alias_name, "cid": canonical_id},
     )
     await db_session.commit()
@@ -84,10 +68,7 @@ async def _insert_alias(db_session, alias_ns, alias_name, canonical_id):
 
 async def _insert_implication(db_session, antecedent_id, consequent_id):
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO tag_implications (antecedent_id, consequent_id) "
-            "VALUES (:ant, :con)"
-        ),
+        text("INSERT OR IGNORE INTO tag_implications (antecedent_id, consequent_id) VALUES (:ant, :con)"),
         {"ant": antecedent_id, "con": consequent_id},
     )
     await db_session.commit()
@@ -312,9 +293,7 @@ class TestBlockedTags:
         """All blocked tag endpoints require authentication."""
         assert (await unauthed_client.get("/api/tags/blocked")).status_code == 401
         assert (
-            await unauthed_client.post(
-                "/api/tags/blocked", json={"namespace": "general", "name": "x"}
-            )
+            await unauthed_client.post("/api/tags/blocked", json={"namespace": "general", "name": "x"})
         ).status_code == 401
         assert (await unauthed_client.delete("/api/tags/blocked/1")).status_code == 401
 
@@ -508,10 +487,7 @@ class TestTagImplications:
 async def _insert_gallery(db_session, source="test", source_id="g1", title="Test Gallery"):
     """Insert a minimal gallery row and return its id."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO galleries (source, source_id, title) "
-            "VALUES (:src, :sid, :title)"
-        ),
+        text("INSERT OR IGNORE INTO galleries (source, source_id, title) VALUES (:src, :sid, :title)"),
         {"src": source, "sid": source_id, "title": title},
     )
     await db_session.commit()
@@ -546,6 +522,7 @@ class TestManualTagGallery:
         _fake_th = types.ModuleType("worker.tag_helpers")
         _fake_th.rebuild_gallery_tags_array = AsyncMock(return_value=[])
         _fake_th.upsert_tag_translations = AsyncMock()
+
         # Real pure function — no heavy deps, safe to use directly
         def _parse_tag_strings(tags):
             seen, result = set(), []
@@ -555,6 +532,7 @@ class TestManualTagGallery:
                     seen.add((ns, name))
                     result.append((ns, name))
             return result
+
         _fake_th.parse_tag_strings = _parse_tag_strings
         monkeypatch.setitem(sys.modules, "worker.tag_helpers", _fake_th)
 
@@ -569,8 +547,9 @@ class TestManualTagGallery:
         also supports on_conflict_do_update on SQLite 3.24+.
         rebuild_gallery_tags_array is replaced with a no-op coroutine.
         """
-        import routers.tag as _tag_mod
         from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        import routers.tag as _tag_mod
 
         TestManualTagGallery._patch_worker_helpers(monkeypatch)
         monkeypatch.setattr(_tag_mod, "pg_insert", sqlite_insert)
@@ -760,9 +739,7 @@ class TestTagTranslations:
         assert resp.status_code == 200
         assert resp.json() == {}
 
-    async def test_get_translations_returns_matching_translations(
-        self, client, db_session
-    ):
+    async def test_get_translations_returns_matching_translations(self, client, db_session):
         """Existing translations should be returned keyed by 'namespace:name'."""
         await _insert_translation(db_session, "artist", "alice", "zh", "愛麗絲")
         await _insert_translation(db_session, "general", "cat_ears", "zh", "貓耳")
@@ -791,9 +768,7 @@ class TestTagTranslations:
 
     async def test_get_translations_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""
-        resp = await unauthed_client.get(
-            "/api/tags/translations", params={"tags": "artist:alice"}
-        )
+        resp = await unauthed_client.get("/api/tags/translations", params={"tags": "artist:alice"})
         assert resp.status_code == 401
 
     async def test_upsert_translation_creates_entry(self, client):
@@ -892,9 +867,7 @@ class TestImportEhtag:
         from unittest.mock import AsyncMock
 
         mock_import = AsyncMock(return_value=50000)
-        monkeypatch.setattr(
-            "services.ehtag_importer.import_ehtag_translations", mock_import
-        )
+        monkeypatch.setattr("services.ehtag_importer.import_ehtag_translations", mock_import)
 
         resp = await client.post("/api/tags/import-ehtag")
         assert resp.status_code == 200
@@ -907,9 +880,7 @@ class TestImportEhtag:
         from unittest.mock import AsyncMock
 
         mock_import = AsyncMock(side_effect=Exception("CDN timeout"))
-        monkeypatch.setattr(
-            "services.ehtag_importer.import_ehtag_translations", mock_import
-        )
+        monkeypatch.setattr("services.ehtag_importer.import_ehtag_translations", mock_import)
 
         resp = await client.post("/api/tags/import-ehtag")
         assert resp.status_code == 502
@@ -958,9 +929,7 @@ class TestAutocompleteTranslation:
         await _insert_tag(db_session, "character", "rem_trans_test")
         await _insert_translation(db_session, "character", "rem_trans_test", "zh", "雷姆")
 
-        resp = await client.get(
-            "/api/tags/autocomplete", params={"q": "雷姆", "language": "zh"}
-        )
+        resp = await client.get("/api/tags/autocomplete", params={"q": "雷姆", "language": "zh"})
         assert resp.status_code == 200
         results = resp.json()
         assert len(results) >= 1
@@ -990,9 +959,7 @@ class TestAutocompleteTranslation:
 
     async def test_autocomplete_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""
-        resp = await unauthed_client.get(
-            "/api/tags/autocomplete", params={"q": "test"}
-        )
+        resp = await unauthed_client.get("/api/tags/autocomplete", params={"q": "test"})
         assert resp.status_code == 401
 
 
@@ -1007,6 +974,7 @@ class TestRetagEndpoints:
     async def test_retag_gallery_not_found(self, client, monkeypatch):
         """Retag a non-existent gallery should return 404."""
         from core.config import settings
+
         monkeypatch.setattr(settings, "tag_model_enabled", True)
 
         resp = await client.post("/api/tags/retag/99999")
@@ -1015,6 +983,7 @@ class TestRetagEndpoints:
     async def test_retag_gallery_tag_model_disabled(self, client, monkeypatch):
         """When TAG_MODEL_ENABLED is false, retag should return 400."""
         from core.config import settings
+
         monkeypatch.setattr(settings, "tag_model_enabled", False)
 
         resp = await client.post("/api/tags/retag/1")
@@ -1038,6 +1007,7 @@ class TestRetagEndpoints:
     async def test_retag_all_tag_model_disabled(self, client, monkeypatch):
         """retag-all when tag model is disabled should return 400."""
         from core.config import settings
+
         monkeypatch.setattr(settings, "tag_model_enabled", False)
 
         resp = await client.post("/api/tags/retag-all")
@@ -1081,8 +1051,9 @@ class TestTagCursorHelpers:
 
     def test_encode_decode_roundtrip(self):
         """Encoding then decoding a cursor should reproduce the original values."""
-        from routers.tag import _decode_tag_cursor, _encode_tag_cursor
         from unittest.mock import MagicMock
+
+        from routers.tag import _decode_tag_cursor, _encode_tag_cursor
 
         fake_tag = MagicMock()
         fake_tag.id = 42
@@ -1096,8 +1067,8 @@ class TestTagCursorHelpers:
 
     def test_decode_invalid_cursor_raises_400(self):
         """Decoding a garbage string should raise HTTPException with status 400."""
-        import pytest
         from fastapi import HTTPException
+
         from routers.tag import _decode_tag_cursor
 
         with pytest.raises(HTTPException) as exc_info:
@@ -1108,8 +1079,9 @@ class TestTagCursorHelpers:
     def test_decode_valid_base64_but_not_json_raises_400(self):
         """Base64 that decodes to non-JSON should still raise HTTPException 400."""
         import base64
-        import pytest
+
         from fastapi import HTTPException
+
         from routers.tag import _decode_tag_cursor
 
         bad_cursor = base64.urlsafe_b64encode(b"not-json").decode()
@@ -1139,8 +1111,9 @@ class TestListTagsCursorPagination:
 
         # The offset path does not return a cursor, so we must request with cursor=
         # by encoding the last tag of page 1 manually.
-        from routers.tag import _encode_tag_cursor
         from unittest.mock import MagicMock
+
+        from routers.tag import _encode_tag_cursor
 
         last = data1["tags"][-1]
         fake_tag = MagicMock()
@@ -1165,8 +1138,9 @@ class TestListTagsCursorPagination:
             await _insert_tag(db_session, "general", f"hn_tag_{i:02d}", count=i + 1)
 
         # Encode cursor pointing just before the highest-count tag so all 10 remain
-        from routers.tag import _encode_tag_cursor
         from unittest.mock import MagicMock
+
+        from routers.tag import _encode_tag_cursor
 
         # Simulate a cursor ahead of all tags (very high count)
         fake_tag = MagicMock()
@@ -1186,8 +1160,9 @@ class TestListTagsCursorPagination:
         for i in range(3):
             await _insert_tag(db_session, "general", f"lp_tag_{i:02d}", count=i + 1)
 
-        from routers.tag import _encode_tag_cursor
         from unittest.mock import MagicMock
+
+        from routers.tag import _encode_tag_cursor
 
         fake_tag = MagicMock()
         fake_tag.id = 999999
@@ -1213,17 +1188,16 @@ class TestListTagsCursorPagination:
         for i in range(6):
             await _insert_tag(db_session, "general", f"general_tag_{i:02d}", count=i + 1)
 
-        from routers.tag import _encode_tag_cursor
         from unittest.mock import MagicMock
+
+        from routers.tag import _encode_tag_cursor
 
         fake_tag = MagicMock()
         fake_tag.id = 999999
         fake_tag.count = 99999
         cursor = _encode_tag_cursor(fake_tag)
 
-        resp = await client.get(
-            "/api/tags/", params={"cursor": cursor, "limit": 10, "namespace": "artist"}
-        )
+        resp = await client.get("/api/tags/", params={"cursor": cursor, "limit": 10, "namespace": "artist"})
         assert resp.status_code == 200
         data = resp.json()
         for tag in data["tags"]:
@@ -1329,8 +1303,7 @@ class TestHasCycleEdgeCases:
         We set max_depth=2 and build a graph where BFS expands exactly 2 nodes
         that are not the target, so the function conservatively returns True.
         """
-        import pytest
-        from unittest.mock import AsyncMock, MagicMock, patch
+        from unittest.mock import MagicMock
 
         # Build a mock session that simulates a graph with no actual cycle but
         # enough nodes to hit the depth limit.
@@ -1382,6 +1355,7 @@ class TestManualTagRemoveEdgeCases:
         _fake_th = types.ModuleType("worker.tag_helpers")
         _fake_th.rebuild_gallery_tags_array = AsyncMock(return_value=[])
         _fake_th.upsert_tag_translations = AsyncMock()
+
         def _parse_tag_strings(tags):
             seen, result = set(), []
             for tag_str in tags:
@@ -1390,12 +1364,11 @@ class TestManualTagRemoveEdgeCases:
                     seen.add((ns, name))
                     result.append((ns, name))
             return result
+
         _fake_th.parse_tag_strings = _parse_tag_strings
         monkeypatch.setitem(sys.modules, "worker.tag_helpers", _fake_th)
 
-    async def test_remove_bare_name_defaults_to_general_namespace(
-        self, client, db_session, monkeypatch
-    ):
+    async def test_remove_bare_name_defaults_to_general_namespace(self, client, db_session, monkeypatch):
         """A bare tag name (no colon) in a remove action should resolve to general:<name>.
 
         This exercises line 683: `ns, name = "general", tag_str`.
@@ -1424,9 +1397,7 @@ class TestManualTagRemoveEdgeCases:
         assert data["status"] == "ok"
         assert data["affected"] == 1
 
-    async def test_remove_empty_tags_list_returns_affected_zero(
-        self, client, db_session, monkeypatch
-    ):
+    async def test_remove_empty_tags_list_returns_affected_zero(self, client, db_session, monkeypatch):
         """Removing with an empty tags list should return affected=0 (lines 689-691).
 
         The parsed_remove list is empty, so the endpoint returns early.
@@ -1443,9 +1414,7 @@ class TestManualTagRemoveEdgeCases:
         assert data["status"] == "ok"
         assert data["affected"] == 0
 
-    async def test_remove_tag_with_non_manual_source_returns_affected_zero(
-        self, client, db_session, monkeypatch
-    ):
+    async def test_remove_tag_with_non_manual_source_returns_affected_zero(self, client, db_session, monkeypatch):
         """Removing a tag that exists but has source != 'manual' should return affected=0.
 
         This exercises lines 720-723: manual_tag_ids is empty after the

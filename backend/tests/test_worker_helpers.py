@@ -22,7 +22,6 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -205,6 +204,7 @@ class TestSetJobStatus:
     async def test_db_exception_is_caught(self):
         """SQLAlchemyError during session should be caught, not raised."""
         import sqlalchemy.exc
+
         from worker.helpers import _set_job_status
 
         bad_session = AsyncMock()
@@ -300,6 +300,7 @@ class TestSetJobProgress:
     async def test_db_exception_is_caught(self):
         """SQLAlchemyError during session should be caught, not raised."""
         import sqlalchemy.exc
+
         from worker.helpers import _set_job_progress
 
         bad_session = AsyncMock()
@@ -569,7 +570,7 @@ class TestValidateImageMagicFtypBox:
     def _write_ftyp_file(self, tmp_path, filename):
         """Write a minimal file with 'ftyp' at bytes 4-7."""
         # Structure: 4 bytes size + b'ftyp' + 4 bytes brand = 12 bytes
-        data = b'\x00\x00\x00\x1c' + b'ftyp' + b'avif' + b'\x00' * 4
+        data = b"\x00\x00\x00\x1c" + b"ftyp" + b"avif" + b"\x00" * 4
         f = tmp_path / filename
         f.write_bytes(data)
         return f
@@ -621,7 +622,7 @@ class TestValidateImageMagicFtypBox:
         from worker.helpers import _validate_image_magic
 
         # Put 'ftyp' at the very start — this is NOT the ISOBMFF ftyp box pattern
-        data = b'ftyp' + b'\x00' * 8
+        data = b"ftyp" + b"\x00" * 8
         f = tmp_path / "image.avif"
         f.write_bytes(data)
         # 'ftyp' at offset 0 is not a known magic prefix → should fail
@@ -632,7 +633,7 @@ class TestValidateImageMagicFtypBox:
         from worker.helpers import _validate_image_magic
 
         # 7 bytes: len check `len(header) >= 8` will be False
-        data = b'\x00\x00\x00\x1c' + b'fty'  # only 7 bytes
+        data = b"\x00\x00\x00\x1c" + b"fty"  # only 7 bytes
         f = tmp_path / "image.avif"
         f.write_bytes(data)
         assert _validate_image_magic(f) is False
@@ -649,11 +650,9 @@ class TestRebuildTagCounts:
     async def _insert_tag(self, session, namespace, name, count=0):
         """Insert a tag and return its id."""
         from sqlalchemy import text as _text
+
         await session.execute(
-            _text(
-                "INSERT OR IGNORE INTO tags (namespace, name, count) "
-                "VALUES (:ns, :name, :count)"
-            ),
+            _text("INSERT OR IGNORE INTO tags (namespace, name, count) VALUES (:ns, :name, :count)"),
             {"ns": namespace, "name": name, "count": count},
         )
         await session.commit()
@@ -666,11 +665,9 @@ class TestRebuildTagCounts:
     async def _insert_gallery(self, session, source_id="g1"):
         """Insert a gallery and return its id."""
         from sqlalchemy import text as _text
+
         await session.execute(
-            _text(
-                "INSERT OR IGNORE INTO galleries (source, source_id, title) "
-                "VALUES ('test', :sid, 'Test')"
-            ),
+            _text("INSERT OR IGNORE INTO galleries (source, source_id, title) VALUES ('test', :sid, 'Test')"),
             {"sid": source_id},
         )
         await session.commit()
@@ -683,6 +680,7 @@ class TestRebuildTagCounts:
     async def _insert_gallery_tag(self, session, gallery_id, tag_id):
         """Insert a gallery_tag row."""
         from sqlalchemy import text as _text
+
         await session.execute(
             _text(
                 "INSERT OR IGNORE INTO gallery_tags (gallery_id, tag_id, confidence, source) "
@@ -695,6 +693,7 @@ class TestRebuildTagCounts:
     async def _get_tag_count(self, session, tag_id):
         """Get the current count for a tag."""
         from sqlalchemy import text as _text
+
         result = await session.execute(
             _text("SELECT count FROM tags WHERE id = :tid"),
             {"tid": tag_id},

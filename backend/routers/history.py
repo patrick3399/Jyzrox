@@ -42,14 +42,18 @@ async def list_history(
             )
         ).scalar_one()
         rows = (
-            await session.execute(
-                select(BrowseHistory)
-                .where(BrowseHistory.user_id == user_id)
-                .order_by(desc(BrowseHistory.viewed_at))
-                .limit(limit)
-                .offset(offset)
+            (
+                await session.execute(
+                    select(BrowseHistory)
+                    .where(BrowseHistory.user_id == user_id)
+                    .order_by(desc(BrowseHistory.viewed_at))
+                    .limit(limit)
+                    .offset(offset)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
     return {
         "items": [_h(r) for r in rows],
         "total": total,
@@ -102,9 +106,7 @@ async def clear_history(
     """Clear all browse history for the current user."""
     user_id = auth["user_id"]
     async with async_session() as session:
-        result = await session.execute(
-            delete(BrowseHistory).where(BrowseHistory.user_id == user_id)
-        )
+        result = await session.execute(delete(BrowseHistory).where(BrowseHistory.user_id == user_id))
         await session.commit()
     return {"status": "ok", "deleted": result.rowcount}
 

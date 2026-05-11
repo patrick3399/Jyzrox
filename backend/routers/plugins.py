@@ -7,6 +7,7 @@ from plugins.registry import plugin_registry
 
 router = APIRouter(tags=["plugins"])
 
+
 @router.get("/")
 async def list_plugins(_: dict = Depends(require_auth)):
     """List all registered plugins with their metadata and credential status."""

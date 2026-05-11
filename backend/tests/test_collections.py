@@ -15,10 +15,7 @@ from sqlalchemy import text
 async def _ensure_user(db_session, user_id: int = 1) -> None:
     """Insert the user row if not already present."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-            "VALUES (:id, :u, 'x', 'admin')"
-        ),
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, 'x', 'admin')"),
         {"id": user_id, "u": f"col_user_{user_id}"},
     )
     await db_session.commit()
@@ -445,9 +442,7 @@ class TestCollectionsUserIsolation:
             )
         )
         result = await db_session.execute(
-            text(
-                "INSERT INTO collections (user_id, name) VALUES (2, 'Other User Col') RETURNING id"
-            )
+            text("INSERT INTO collections (user_id, name) VALUES (2, 'Other User Col') RETURNING id")
         )
         await db_session.commit()
         return result.scalar_one()
@@ -498,9 +493,7 @@ class TestCollectionsUserIsolation:
         )
         assert resp.status_code == 404
 
-    async def test_remove_gallery_from_other_users_collection_returns_404(
-        self, client, db_session
-    ):
+    async def test_remove_gallery_from_other_users_collection_returns_404(self, client, db_session):
         """DELETE gallery from another user's collection must return 404."""
         await _ensure_user(db_session)
         col_id = await self._setup_other_user_collection(db_session)
@@ -603,23 +596,15 @@ class TestListCollectionsCoverThumb:
     async def _insert_blob(self, db_session, sha: str) -> None:
         """Insert a minimal blob row."""
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO blobs (sha256, file_size, extension) "
-                "VALUES (:sha, 1024, 'jpg')"
-            ),
+            text("INSERT OR IGNORE INTO blobs (sha256, file_size, extension) VALUES (:sha, 1024, 'jpg')"),
             {"sha": sha},
         )
         await db_session.commit()
 
-    async def _insert_image(
-        self, db_session, gallery_id: int, page_num: int, sha: str
-    ) -> None:
+    async def _insert_image(self, db_session, gallery_id: int, page_num: int, sha: str) -> None:
         """Insert an image row linking a gallery to a blob."""
         await db_session.execute(
-            text(
-                "INSERT INTO images (gallery_id, page_num, blob_sha256) "
-                "VALUES (:gid, :pn, :sha)"
-            ),
+            text("INSERT INTO images (gallery_id, page_num, blob_sha256) VALUES (:gid, :pn, :sha)"),
             {"gid": gallery_id, "pn": page_num, "sha": sha},
         )
         await db_session.commit()
@@ -701,20 +686,14 @@ class TestGetCollectionWithGalleries:
 
     async def _insert_blob(self, db_session, sha: str) -> None:
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO blobs (sha256, file_size, extension) "
-                "VALUES (:sha, 1024, 'jpg')"
-            ),
+            text("INSERT OR IGNORE INTO blobs (sha256, file_size, extension) VALUES (:sha, 1024, 'jpg')"),
             {"sha": sha},
         )
         await db_session.commit()
 
     async def _insert_image(self, db_session, gallery_id: int, page_num: int, sha: str) -> None:
         await db_session.execute(
-            text(
-                "INSERT INTO images (gallery_id, page_num, blob_sha256) "
-                "VALUES (:gid, :pn, :sha)"
-            ),
+            text("INSERT INTO images (gallery_id, page_num, blob_sha256) VALUES (:gid, :pn, :sha)"),
             {"gid": gallery_id, "pn": page_num, "sha": sha},
         )
         await db_session.commit()
@@ -792,9 +771,7 @@ class TestGetCollectionWithGalleries:
             json={"gallery_ids": gids},
         )
 
-        resp = await client.get(
-            f"/api/collections/{col['id']}", params={"page": 0, "limit": 2}
-        )
+        resp = await client.get(f"/api/collections/{col['id']}", params={"page": 0, "limit": 2})
         assert resp.status_code == 200
         data = resp.json()
         assert data["has_next"] is True
@@ -815,9 +792,7 @@ class TestGetCollectionWithGalleries:
             json={"gallery_ids": gids},
         )
 
-        resp = await client.get(
-            f"/api/collections/{col['id']}", params={"page": 1, "limit": 2}
-        )
+        resp = await client.get(f"/api/collections/{col['id']}", params={"page": 1, "limit": 2})
         assert resp.status_code == 200
         data = resp.json()
         assert len(data["galleries"]) == 1
@@ -834,10 +809,7 @@ class TestAddGalleriesVisibility:
 
     async def _setup_member_user(self, db_session, user_id: int = 3) -> None:
         await db_session.execute(
-            text(
-                "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-                "VALUES (:id, :u, 'x', 'member')"
-            ),
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, 'x', 'member')"),
             {"id": user_id, "u": f"member_user_{user_id}"},
         )
         await db_session.commit()
@@ -878,9 +850,7 @@ class TestAddGalleriesVisibility:
         assert data["added"] == 1
         assert 777777 in data["denied"]
 
-    async def test_non_admin_cannot_add_private_gallery_of_another_user(
-        self, make_client, db_session
-    ):
+    async def test_non_admin_cannot_add_private_gallery_of_another_user(self, make_client, db_session):
         """Non-admin member must not add a private gallery owned by another user."""
         await _ensure_user(db_session)
         await self._setup_member_user(db_session, user_id=3)
@@ -895,9 +865,7 @@ class TestAddGalleriesVisibility:
         await db_session.commit()
 
         async with make_client(user_id=3, role="member") as member_client:
-            col_resp = await member_client.post(
-                "/api/collections/", json={"name": "Member Col"}
-            )
+            col_resp = await member_client.post("/api/collections/", json={"name": "Member Col"})
             assert col_resp.status_code == 200
             col_id = col_resp.json()["id"]
 
@@ -910,9 +878,7 @@ class TestAddGalleriesVisibility:
         assert data["added"] == 0
         assert gid in data["denied"]
 
-    async def test_non_admin_can_add_public_gallery_of_another_user(
-        self, make_client, db_session
-    ):
+    async def test_non_admin_can_add_public_gallery_of_another_user(self, make_client, db_session):
         """Non-admin member can add a public gallery owned by another user."""
         await _ensure_user(db_session)
         await self._setup_member_user(db_session, user_id=4)
@@ -927,9 +893,7 @@ class TestAddGalleriesVisibility:
         await db_session.commit()
 
         async with make_client(user_id=4, role="member") as member_client:
-            col_resp = await member_client.post(
-                "/api/collections/", json={"name": "Public Gal Col"}
-            )
+            col_resp = await member_client.post("/api/collections/", json={"name": "Public Gal Col"})
             assert col_resp.status_code == 200
             col_id = col_resp.json()["id"]
 
@@ -999,9 +963,7 @@ class TestAddGalleriesVisibility:
 class TestRemoveGalleryUpdatedAt:
     """remove_gallery_from_collection must update the collection's updated_at timestamp."""
 
-    async def test_remove_gallery_from_nonexistent_collection_returns_404(
-        self, client, db_session
-    ):
+    async def test_remove_gallery_from_nonexistent_collection_returns_404(self, client, db_session):
         """Removing a gallery from a collection that doesn't exist → 404."""
         await _ensure_user(db_session)
 

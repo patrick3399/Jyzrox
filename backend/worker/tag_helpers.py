@@ -86,11 +86,7 @@ async def rebuild_tag_counts(session) -> int:
     )
 
     # Update tags where count differs
-    stmt = (
-        Tag.__table__.update()
-        .where(Tag.id == subq.c.tag_id)
-        .values(count=subq.c.actual_count)
-    )
+    stmt = Tag.__table__.update().where(Tag.id == subq.c.tag_id).values(count=subq.c.actual_count)
     result = await session.execute(stmt)
 
     # Zero out tags with no gallery_tags entries

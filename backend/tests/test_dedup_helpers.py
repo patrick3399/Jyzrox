@@ -9,15 +9,14 @@ Covers:
 """
 
 import sys
-from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_blob(sha256: str, width: int | None, height: int | None, file_size: int) -> MagicMock:
     """Return a MagicMock that looks like a Blob ORM row."""
@@ -113,8 +112,8 @@ class TestClassifyPairResolutionHeuristic:
         1.10 ratio must NOT trigger the resolution branch.
         """
         # pixels_a = 110, pixels_b = 100  →  110 > 100*1.10 = 110.0  is False
-        blob_a = _make_blob("aaa", 11, 10, 200_000)   # 110 pixels
-        blob_b = _make_blob("bbb", 10, 10, 200_000)   # 100 pixels
+        blob_a = _make_blob("aaa", 11, 10, 200_000)  # 110 pixels
+        blob_b = _make_blob("bbb", 10, 10, 200_000)  # 100 pixels
         label, winner, reason = _classify_pair(blob_a, blob_b, heuristic_enabled=True)
         # must NOT resolve on higher_resolution
         assert reason != "higher_resolution"
@@ -148,7 +147,7 @@ class TestClassifyPairFileSizeHeuristic:
         from worker.dedup_helpers import _classify_pair
 
         """Equal pixel counts — A has >1.20x the file size of B — A wins."""
-        blob_a = _make_blob("aaa", 100, 100, 1_210_000)   # 1_210_000 > 1_000_000 * 1.20
+        blob_a = _make_blob("aaa", 100, 100, 1_210_000)  # 1_210_000 > 1_000_000 * 1.20
         blob_b = _make_blob("bbb", 100, 100, 1_000_000)
         label, winner, reason = _classify_pair(blob_a, blob_b, heuristic_enabled=True)
         assert label == "quality_conflict"
@@ -224,7 +223,7 @@ class TestClassifyPairEdgeCases:
         assert reason == "higher_resolution"
 
     def test_classify_pair_exact_equal_blobs_returns_variant(self):
-        from worker.dedup_helpers import _classify_pair, _opencv_pixel_diff
+        from worker.dedup_helpers import _classify_pair
 
         """Identical pixel count and file size → variant with no winner."""
         blob_a = _make_blob("aaa", 1920, 1080, 800_000)
@@ -270,7 +269,7 @@ class TestOpencvPixelDiff:
 
         """mean_diff < 10 → similarity near 1.0, diff_type 'compression_noise'."""
         mean_diff = 3.0
-        std_diff = 2.0   # 2.0 <= 3.0 * 1.5 → also noise branch
+        std_diff = 2.0  # 2.0 <= 3.0 * 1.5 → also noise branch
         mock_cv2, mock_np = _build_cv2_mock(mean_diff, std_diff)
 
         with patch.dict(sys.modules, {"cv2": mock_cv2, "numpy": mock_np}):
@@ -285,7 +284,7 @@ class TestOpencvPixelDiff:
 
         """mean_diff >= 10 and std_diff > mean_diff*1.5 → 'localized_diff'."""
         mean_diff = 20.0
-        std_diff = 40.0   # 40.0 > 20.0 * 1.5 = 30.0
+        std_diff = 40.0  # 40.0 > 20.0 * 1.5 = 30.0
         mock_cv2, mock_np = _build_cv2_mock(mean_diff, std_diff)
 
         with patch.dict(sys.modules, {"cv2": mock_cv2, "numpy": mock_np}):
@@ -321,7 +320,7 @@ class TestOpencvPixelDiff:
 
         """mean_diff >= 10 but std_diff <= mean_diff*1.5 → still 'compression_noise'."""
         mean_diff = 15.0
-        std_diff = 10.0   # 10.0 <= 15.0 * 1.5 = 22.5
+        std_diff = 10.0  # 10.0 <= 15.0 * 1.5 = 22.5
         mock_cv2, mock_np = _build_cv2_mock(mean_diff, std_diff)
 
         with patch.dict(sys.modules, {"cv2": mock_cv2, "numpy": mock_np}):
@@ -330,10 +329,10 @@ class TestOpencvPixelDiff:
         assert diff_type == "compression_noise"
 
     def test_opencv_pixel_diff_similarity_formula(self):
-        from worker.dedup_helpers import _opencv_pixel_diff, _now_iso
+        from worker.dedup_helpers import _opencv_pixel_diff
 
         """similarity == 1.0 - (mean_diff / 255.0) for any valid mean_diff."""
-        mean_diff = 51.0   # → similarity = 1.0 - 0.2 = 0.8
+        mean_diff = 51.0  # → similarity = 1.0 - 0.2 = 0.8
         std_diff = 5.0
         mock_cv2, mock_np = _build_cv2_mock(mean_diff, std_diff)
 
@@ -592,7 +591,6 @@ class TestDedupProgressWaitForResume:
         redis.getdel = AsyncMock(side_effect=[None, b"stop"])
 
         dp = DedupProgress(redis)
-        paused_call_index = None
         call_order = []
 
         original_set = redis.set

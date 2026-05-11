@@ -20,7 +20,7 @@ def env_int(name: str, default: int) -> int:
     """Read an integer from an environment variable, falling back to `default`."""
     try:
         return max(1, int(os.environ.get(name, str(default))))
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         return default
 
 

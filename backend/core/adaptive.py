@@ -10,7 +10,7 @@ import logging
 import re
 from dataclasses import asdict, dataclass
 from datetime import UTC, datetime
-from enum import Enum
+from enum import StrEnum
 
 logger = logging.getLogger(__name__)
 
@@ -20,9 +20,11 @@ _RE_403 = re.compile(r"HTTP Error 403|403 Forbidden", re.IGNORECASE)
 
 # ── Data models ───────────────────────────────────────────────────────
 
-class AdaptiveSignal(str, Enum):
+
+class AdaptiveSignal(StrEnum):
     HTTP_403 = "http_403"
     HTML_RESPONSE = "html_response"
+
 
 @dataclass
 class AdaptiveState:
@@ -42,10 +44,12 @@ class AdaptiveState:
         except ValueError, TypeError, AttributeError:
             return AdaptiveState()
 
+
 # ── AdaptiveEngine ────────────────────────────────────────────────────
 
 _ADAPTIVE_TTL = 86400  # 24 hours
 _MAX_PERSIST_PER_RUN = 200
+
 
 class AdaptiveEngine:
     """Redis-backed adaptive state manager.
@@ -260,6 +264,7 @@ return new_raw
             await pipe.execute()
 
         return loaded
+
 
 # ── Singleton ─────────────────────────────────────────────────────────
 

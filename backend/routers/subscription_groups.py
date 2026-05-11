@@ -8,10 +8,10 @@ from pydantic import BaseModel
 from sqlalchemy import func as sa_func
 from sqlalchemy import select, update
 
+import core.queue
 from core.auth import require_role
 from core.database import async_session
 from core.utils import validate_cron
-import core.queue
 from db.models import Subscription, SubscriptionGroup
 
 logger = logging.getLogger(__name__)

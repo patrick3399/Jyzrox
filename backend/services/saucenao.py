@@ -100,15 +100,17 @@ async def search_by_image(
         if isinstance(author, list):
             author = ", ".join(author)
 
-        results.append({
-            "similarity": similarity,
-            "source_url": source_url,
-            "title": title,
-            "author": author,
-            "source_name": index_name,
-            "thumbnail": thumbnail,
-            "ext_urls": ext_urls,
-        })
+        results.append(
+            {
+                "similarity": similarity,
+                "source_url": source_url,
+                "title": title,
+                "author": author,
+                "source_name": index_name,
+                "thumbnail": thumbnail,
+                "ext_urls": ext_urls,
+            }
+        )
 
     results.sort(key=lambda r: r["similarity"], reverse=True)
     return results

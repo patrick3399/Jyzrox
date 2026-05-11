@@ -10,7 +10,7 @@ from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 
 from core.auth import verify_session
 from core.redis_client import get_pubsub, get_redis
-from services.cache import clear_system_alerts, get_system_alerts
+from services.cache import clear_system_alerts, get_system_alerts  # noqa: F401
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["websocket"])
@@ -34,7 +34,7 @@ async def _validate_ws_session(ws: WebSocket) -> tuple[str, str] | None:
         try:
             data = json.loads(verified)
             role = data.get("role", "viewer")
-        except (json.JSONDecodeError, TypeError):
+        except json.JSONDecodeError, TypeError:
             pass
         return (user_id_str, role)
     except (ValueError, ConnectionError, OSError) as exc:

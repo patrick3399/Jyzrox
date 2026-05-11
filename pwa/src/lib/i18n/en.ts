@@ -710,6 +710,7 @@ const en: Record<string, string> = {
   'reader.preparingReader': 'Preparing reader...',
   'reader.loadingTooLong': 'Loading is taking longer than expected...',
   'settings.reader': 'Reader',
+  'settings.defaults': 'Defaults',
 
   // ── Browse (extra) ──
   'browse.addedToQueueJob': 'Added to queue (job: {jobId})',
@@ -1006,7 +1007,8 @@ const en: Record<string, string> = {
   'rss.subscriptionFeed': 'Subscription Feed',
 
   'settings.galleryUpdateCheckDays': 'Gallery metadata auto-check',
-  'settings.galleryUpdateCheckDaysDesc': '-1 = never, 0 = always, N = check if older than N days (EH and Pixiv only)',
+  'settings.galleryUpdateCheckDaysDesc':
+    '-1 = never, 0 = always, N = check if older than N days (EH and Pixiv only)',
 
   'settings.subscriptionEnqueue': 'Subscription Enqueue',
   'settings.subscriptionEnqueueDelay': 'Enqueue Delay',
@@ -1065,6 +1067,16 @@ const en: Record<string, string> = {
   'settings.noTokens': 'No API tokens created yet.',
   'settings.unnamed': 'Unnamed',
   'settings.tokenExpired': 'Expired',
+  'settings.tokenCreatedAt': 'Created {date}',
+  'settings.tokenLastUsedAt': 'Last used {date}',
+  'settings.tokenNeverUsed': 'Never used',
+  'settings.tokenExpiresAt': 'Expires {date}',
+  'settings.tokenExpiredAt': 'Expired {date}',
+  'settings.tokenNoExpiration': 'No expiration',
+  'settings.usage': 'Usage',
+  'settings.apiTokenUsagePrefix': 'Use the',
+  'settings.apiTokenUsageSuffix': 'header to authenticate external API requests.',
+  'settings.availableEndpoints': 'Available endpoints:',
   'settings.copied': 'Copied',
   'settings.confirmRevokeSession': 'Are you sure you want to revoke this session?',
   'settings.confirmDeleteToken': 'Are you sure you want to delete this API token?',

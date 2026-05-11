@@ -23,6 +23,7 @@ router = APIRouter(tags=["artists"])
 def _artist_url(source: str, artist_id: str) -> str:
     """Generate a canonical URL for an artist."""
     from plugins.builtin.gallery_dl._sites import get_site_config
+
     cfg = get_site_config(source)
     if cfg.artist_url_tpl:
         return cfg.artist_url_tpl.format(artist_id)
@@ -117,12 +118,16 @@ async def list_followed(
             urls_missing_job_gallery = [s.url for s in subs if s.id not in gallery_by_sub_id]
             if urls_missing_job_gallery:
                 source_url_rows = (
-                    await session.execute(
-                        select(Gallery)
-                        .where(Gallery.source_url.in_(urls_missing_job_gallery), gallery_access_filter(auth))
-                        .order_by(Gallery.source_url.asc(), desc(Gallery.added_at))
+                    (
+                        await session.execute(
+                            select(Gallery)
+                            .where(Gallery.source_url.in_(urls_missing_job_gallery), gallery_access_filter(auth))
+                            .order_by(Gallery.source_url.asc(), desc(Gallery.added_at))
+                        )
                     )
-                ).scalars().all()
+                    .scalars()
+                    .all()
+                )
                 gallery_by_source_url: dict[str, Gallery] = {}
                 for gallery in source_url_rows:
                     if gallery.source_url:
@@ -179,23 +184,28 @@ async def follow_artist(
     url = normalize_subscription_url(_artist_url(req.source, req.artist_id))
 
     async with async_session() as session:
-        stmt = pg_insert(Subscription).values(
-            user_id=user_id,
-            url=url,
-            name=req.artist_name,
-            source=req.source,
-            source_id=req.artist_id,
-            avatar_url=req.artist_avatar,
-            auto_download=req.auto_download,
-        ).on_conflict_do_update(
-            constraint="subscriptions_user_id_url_key",
-            set_={
-                "name": req.artist_name,
-                "avatar_url": req.artist_avatar,
-                "auto_download": req.auto_download,
-                "enabled": True,
-            },
-        ).returning(Subscription.id)
+        stmt = (
+            pg_insert(Subscription)
+            .values(
+                user_id=user_id,
+                url=url,
+                name=req.artist_name,
+                source=req.source,
+                source_id=req.artist_id,
+                avatar_url=req.artist_avatar,
+                auto_download=req.auto_download,
+            )
+            .on_conflict_do_update(
+                constraint="subscriptions_user_id_url_key",
+                set_={
+                    "name": req.artist_name,
+                    "avatar_url": req.artist_avatar,
+                    "auto_download": req.auto_download,
+                    "enabled": True,
+                },
+            )
+            .returning(Subscription.id)
+        )
 
         result = await session.execute(stmt)
         row = result.fetchone()
@@ -217,7 +227,9 @@ async def unfollow_artist(
 
     async with async_session() as session:
         result = await session.execute(
-            delete(Subscription).where(_subscription_artist_clause(user_id, source, artist_id)).returning(Subscription.id)
+            delete(Subscription)
+            .where(_subscription_artist_clause(user_id, source, artist_id))
+            .returning(Subscription.id)
         )
         deleted = result.fetchone()
         await session.commit()
@@ -252,7 +264,10 @@ async def patch_follow(
 
     async with async_session() as session:
         result = await session.execute(
-            update(Subscription).where(_subscription_artist_clause(user_id, source, artist_id)).values(**updates).returning(Subscription.id)
+            update(Subscription)
+            .where(_subscription_artist_clause(user_id, source, artist_id))
+            .values(**updates)
+            .returning(Subscription.id)
         )
         updated = result.fetchone()
         await session.commit()

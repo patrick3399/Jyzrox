@@ -7,10 +7,21 @@ import { t } from '@/lib/i18n'
 import { loadReaderSettings, saveReaderSettings } from '@/components/Reader/hooks'
 import type { ViewMode, ScaleMode, ReadingDirection } from '@/components/Reader/types'
 
-function ReaderToggle({ value, onToggle }: { value: boolean; onToggle: () => void }) {
+function ReaderToggle({
+  value,
+  label,
+  onToggle,
+}: {
+  value: boolean
+  label: string
+  onToggle: () => void
+}) {
   return (
     <button
       onClick={onToggle}
+      role="switch"
+      aria-checked={value}
+      aria-label={label}
       className={`relative w-11 h-6 rounded-full transition-colors shrink-0 ${value ? 'bg-vault-accent' : 'bg-vault-border'}`}
     >
       <span
@@ -57,6 +68,7 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
           <ReaderSettingRow label={t('reader.autoAdvance')} desc={t('reader.autoAdvanceDesc')}>
             <ReaderToggle
               value={s.autoAdvanceEnabled}
+              label={t('reader.autoAdvance')}
               onToggle={() => {
                 saveReaderSettings({ autoAdvanceEnabled: !s.autoAdvanceEnabled })
                 onForceRerender()
@@ -96,6 +108,7 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
           <ReaderSettingRow label={t('reader.statusBar')} desc={t('reader.statusBarDesc')}>
             <ReaderToggle
               value={s.statusBarEnabled}
+              label={t('reader.statusBar')}
               onToggle={() => {
                 saveReaderSettings({ statusBarEnabled: !s.statusBarEnabled })
                 onForceRerender()
@@ -107,6 +120,7 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
               <ReaderSettingRow label={t('reader.statusBarClock')}>
                 <ReaderToggle
                   value={s.statusBarShowClock}
+                  label={t('reader.statusBarClock')}
                   onToggle={() => {
                     saveReaderSettings({ statusBarShowClock: !s.statusBarShowClock })
                     onForceRerender()
@@ -116,6 +130,7 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
               <ReaderSettingRow label={t('reader.statusBarProgress')}>
                 <ReaderToggle
                   value={s.statusBarShowProgress}
+                  label={t('reader.statusBarProgress')}
                   onToggle={() => {
                     saveReaderSettings({ statusBarShowProgress: !s.statusBarShowProgress })
                     onForceRerender()
@@ -125,6 +140,7 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
               <ReaderSettingRow label={t('reader.statusBarPageCount')}>
                 <ReaderToggle
                   value={s.statusBarShowPageCount}
+                  label={t('reader.statusBarPageCount')}
                   onToggle={() => {
                     saveReaderSettings({ statusBarShowPageCount: !s.statusBarShowPageCount })
                     onForceRerender()
@@ -138,7 +154,9 @@ function ReaderSettingsSection({ onForceRerender }: { onForceRerender: () => voi
 
       {/* Defaults */}
       <div>
-        <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">Defaults</p>
+        <p className="text-xs text-vault-text-muted uppercase tracking-wide mb-2">
+          {t('settings.defaults')}
+        </p>
         <div className="bg-vault-input border border-vault-border rounded-lg px-3 py-3 space-y-3">
           <ReaderSettingRow label={t('reader.defaultViewMode')}>
             <select

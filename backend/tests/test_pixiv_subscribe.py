@@ -25,6 +25,7 @@ if os.path.abspath(_backend_dir) not in sys.path:
 # Helpers
 # ---------------------------------------------------------------------------
 
+
 def _make_illust(illust_id: int, title: str = "Test", create_date: str = "2024-01-01T12:00:00"):
     """Return a dict mimicking a Pixiv illust object."""
     return {
@@ -37,6 +38,7 @@ def _make_illust(illust_id: int, title: str = "Test", create_date: str = "2024-0
         },
     }
 
+
 def _make_pixiv_client_mock(illusts: list) -> MagicMock:
     """Build an async context-manager mock for PixivClient."""
     client = AsyncMock()
@@ -48,9 +50,11 @@ def _make_pixiv_client_mock(illusts: list) -> MagicMock:
     cm.__aexit__ = AsyncMock(return_value=False)
     return cm
 
+
 # ---------------------------------------------------------------------------
 # Tests
 # ---------------------------------------------------------------------------
+
 
 class TestCheckPixivNewWorks:
     """Unit tests for check_pixiv_new_works()."""
@@ -75,9 +79,7 @@ class TestCheckPixivNewWorks:
         """Dict with other keys but no refresh_token returns []."""
         from plugins.builtin.pixiv._subscribe import check_pixiv_new_works
 
-        result = await check_pixiv_new_works(
-            "12345", last_known=None, credentials={"username": "user"}
-        )
+        result = await check_pixiv_new_works("12345", last_known=None, credentials={"username": "user"})
 
         assert result == []
 
@@ -91,9 +93,7 @@ class TestCheckPixivNewWorks:
         bad_cm.__aexit__ = AsyncMock(return_value=False)
 
         with patch.object(_pxclient, "PixivClient", return_value=bad_cm):
-            result = await check_pixiv_new_works(
-                "99999", last_known=None, credentials={"refresh_token": "tok"}
-            )
+            result = await check_pixiv_new_works("99999", last_known=None, credentials={"refresh_token": "tok"})
 
         assert result == []
 
@@ -105,9 +105,7 @@ class TestCheckPixivNewWorks:
         cm = _make_pixiv_client_mock(illusts=[])
 
         with patch.object(_pxclient, "PixivClient", return_value=cm):
-            result = await check_pixiv_new_works(
-                "12345", last_known=None, credentials={"refresh_token": "tok"}
-            )
+            result = await check_pixiv_new_works("12345", last_known=None, credentials={"refresh_token": "tok"})
 
         assert result == []
 
@@ -120,9 +118,7 @@ class TestCheckPixivNewWorks:
         cm = _make_pixiv_client_mock(illusts=illusts)
 
         with patch.object(_pxclient, "PixivClient", return_value=cm):
-            result = await check_pixiv_new_works(
-                "12345", last_known=None, credentials={"refresh_token": "tok"}
-            )
+            result = await check_pixiv_new_works("12345", last_known=None, credentials={"refresh_token": "tok"})
 
         assert len(result) == 3
         source_ids = [w.source_id for w in result]
@@ -140,9 +136,7 @@ class TestCheckPixivNewWorks:
         cm = _make_pixiv_client_mock(illusts=illusts)
 
         with patch.object(_pxclient, "PixivClient", return_value=cm):
-            result = await check_pixiv_new_works(
-                "12345", last_known="198", credentials={"refresh_token": "tok"}
-            )
+            result = await check_pixiv_new_works("12345", last_known="198", credentials={"refresh_token": "tok"})
 
         # Should include 200 and 199 only (stop before 198)
         assert len(result) == 2
@@ -160,9 +154,7 @@ class TestCheckPixivNewWorks:
         cm = _make_pixiv_client_mock(illusts=illusts)
 
         with patch.object(_pxclient, "PixivClient", return_value=cm):
-            result = await check_pixiv_new_works(
-                "12345", last_known=None, credentials="bare-refresh-token"
-            )
+            result = await check_pixiv_new_works("12345", last_known=None, credentials="bare-refresh-token")
 
         assert len(result) == 1
         assert result[0].source_id == "300"
@@ -176,9 +168,7 @@ class TestCheckPixivNewWorks:
         cm = _make_pixiv_client_mock(illusts=[illust])
 
         with patch.object(_pxclient, "PixivClient", return_value=cm):
-            result = await check_pixiv_new_works(
-                "12345", last_known=None, credentials={"refresh_token": "tok"}
-            )
+            result = await check_pixiv_new_works("12345", last_known=None, credentials={"refresh_token": "tok"})
 
         assert len(result) == 1
         assert result[0].thumbnail_url == "https://i.pximg.net/sq/400.jpg"
@@ -192,9 +182,7 @@ class TestCheckPixivNewWorks:
         cm = _make_pixiv_client_mock(illusts=[illust])
 
         with patch.object(_pxclient, "PixivClient", return_value=cm):
-            result = await check_pixiv_new_works(
-                "12345", last_known=None, credentials={"refresh_token": "tok"}
-            )
+            result = await check_pixiv_new_works("12345", last_known=None, credentials={"refresh_token": "tok"})
 
         assert len(result) == 1
         assert result[0].posted_at is None
@@ -208,8 +196,6 @@ class TestCheckPixivNewWorks:
         cm = _make_pixiv_client_mock(illusts=[illust])
 
         with patch.object(_pxclient, "PixivClient", return_value=cm):
-            result = await check_pixiv_new_works(
-                "12345", last_known=None, credentials={"refresh_token": "tok"}
-            )
+            result = await check_pixiv_new_works("12345", last_known=None, credentials={"refresh_token": "tok"})
 
         assert result[0].url == "https://www.pixiv.net/artworks/600"

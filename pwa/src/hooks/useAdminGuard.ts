@@ -4,8 +4,8 @@ import { useProfile } from '@/hooks/useProfile'
 
 /**
  * Redirects non-admin users away from admin-only pages.
- * Returns true if the user is authorized (admin) or still loading.
- * Returns false if the user is confirmed non-admin (caller should render null).
+ * Returns true only after the profile confirms admin access.
+ * Returns false while loading or when the user is confirmed non-admin.
  */
 export function useAdminGuard(fallback = '/settings'): boolean {
   const router = useRouter()
@@ -15,5 +15,5 @@ export function useAdminGuard(fallback = '/settings'): boolean {
     if (!isLoading && profile?.role !== 'admin') router.replace(fallback)
   }, [isLoading, profile, router, fallback])
 
-  return isLoading || profile?.role === 'admin'
+  return !isLoading && profile?.role === 'admin'
 }

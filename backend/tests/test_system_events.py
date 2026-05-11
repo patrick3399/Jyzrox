@@ -1,16 +1,32 @@
 """Tests for GET /api/system/events endpoint."""
 
 import json
-from unittest.mock import AsyncMock, patch
-
-import pytest
+from unittest.mock import AsyncMock
 
 
 async def test_get_recent_events_returns_events(client, mock_redis):
     """GET /api/system/events returns recent events from EventBus."""
     sample_events = [
-        json.dumps({"event_type": "download.completed", "timestamp": "2024-01-01T00:00:00", "actor_user_id": 1, "resource_type": "download_job", "resource_id": "abc", "data": {}}).encode(),
-        json.dumps({"event_type": "gallery.deleted", "timestamp": "2024-01-01T00:01:00", "actor_user_id": 1, "resource_type": "gallery", "resource_id": 42, "data": {}}).encode(),
+        json.dumps(
+            {
+                "event_type": "download.completed",
+                "timestamp": "2024-01-01T00:00:00",
+                "actor_user_id": 1,
+                "resource_type": "download_job",
+                "resource_id": "abc",
+                "data": {},
+            }
+        ).encode(),
+        json.dumps(
+            {
+                "event_type": "gallery.deleted",
+                "timestamp": "2024-01-01T00:01:00",
+                "actor_user_id": 1,
+                "resource_type": "gallery",
+                "resource_id": 42,
+                "data": {},
+            }
+        ).encode(),
     ]
     mock_redis.lrange = AsyncMock(return_value=sample_events)
 

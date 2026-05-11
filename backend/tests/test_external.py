@@ -9,7 +9,7 @@ routers.external.async_session to use the SQLite test engine.
 
 import hashlib
 import uuid
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import patch
 
 from sqlalchemy import text
 
@@ -28,10 +28,7 @@ _TEST_TOKEN_HASH = hashlib.sha256(_TEST_TOKEN.encode()).hexdigest()
 async def _insert_user(db_session) -> int:
     """Insert a minimal user row and return its id."""
     result = await db_session.execute(
-        text(
-            "INSERT INTO users (username, password_hash) VALUES (:u, :p) "
-            "RETURNING id"
-        ),
+        text("INSERT INTO users (username, password_hash) VALUES (:u, :p) RETURNING id"),
         {"u": f"extuser_{uuid.uuid4().hex[:8]}", "p": "x"},
     )
     await db_session.commit()
@@ -42,10 +39,7 @@ async def _insert_token(db_session, user_id: int, token_hash: str) -> str:
     """Insert an api_token row and return its id."""
     token_id = str(uuid.uuid4())
     await db_session.execute(
-        text(
-            "INSERT INTO api_tokens (id, user_id, token_hash) "
-            "VALUES (:id, :uid, :hash)"
-        ),
+        text("INSERT INTO api_tokens (id, user_id, token_hash) VALUES (:id, :uid, :hash)"),
         {"id": token_id, "uid": user_id, "hash": token_hash},
     )
     await db_session.commit()
@@ -55,10 +49,7 @@ async def _insert_token(db_session, user_id: int, token_hash: str) -> str:
 async def _insert_gallery(db_session, source="ehentai", source_id="1") -> int:
     """Insert a minimal gallery and return its id."""
     result = await db_session.execute(
-        text(
-            "INSERT INTO galleries (source, source_id, title, tags_array) "
-            "VALUES (:s, :si, :t, :ta) RETURNING id"
-        ),
+        text("INSERT INTO galleries (source, source_id, title, tags_array) VALUES (:s, :si, :t, :ta) RETURNING id"),
         {"s": source, "si": source_id, "t": "Test Gallery", "ta": "[]"},
     )
     await db_session.commit()
@@ -164,6 +155,7 @@ def _make_pg_stat_mock(gallery_count: int = 0, image_count: int = 0, tag_count: 
     pg_stat query returns the given counts, while other queries (like the
     active_downloads COUNT) still use the real SQLite session.
     """
+
     class _FakeResult:
         def __init__(self, rows):
             self._rows = rows
@@ -190,7 +182,7 @@ def _make_pg_stat_mock(gallery_count: int = 0, image_count: int = 0, tag_count: 
 
         async def execute(self, stmt, params=None):
             # Detect the pg_stat query by inspecting the compiled SQL string
-            stmt_str = str(stmt) if hasattr(stmt, '__str__') else ""
+            stmt_str = str(stmt) if hasattr(stmt, "__str__") else ""
             if "pg_stat_user_tables" in stmt_str:
                 rows = [
                     ("galleries", gallery_count),
@@ -393,12 +385,7 @@ class TestExternalTags:
         user_id = await _insert_user(db_session)
         await _insert_token(db_session, user_id, _TEST_TOKEN_HASH)
 
-        await db_session.execute(
-            text(
-                "INSERT INTO tags (namespace, name, count) "
-                "VALUES ('artist', 'test_artist', 5)"
-            )
-        )
+        await db_session.execute(text("INSERT INTO tags (namespace, name, count) VALUES ('artist', 'test_artist', 5)"))
         await db_session.commit()
 
         resp = await ext_client.get(
@@ -878,35 +865,45 @@ class TestExternalGalleriesFilters:
 
         # One gallery that matches all criteria
         r1 = await db_session.execute(
-            text("INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('ehentai', 'combo_match_1', 'My test combo gallery', '[]') RETURNING id")
+            text(
+                "INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('ehentai', 'combo_match_1', 'My test combo gallery', '[]') RETURNING id"
+            )
         )
         await db_session.commit()
         match_gid = r1.scalar_one()
 
         # Gallery missing one criterion: wrong source (pixiv)
         r2 = await db_session.execute(
-            text("INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('pixiv', 'combo_src_1', 'My test combo gallery', '[]') RETURNING id")
+            text(
+                "INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('pixiv', 'combo_src_1', 'My test combo gallery', '[]') RETURNING id"
+            )
         )
         await db_session.commit()
         src_gid = r2.scalar_one()
 
         # Gallery missing one criterion: not favorited (no user_favorites row)
         r3 = await db_session.execute(
-            text("INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('ehentai', 'combo_fav_1', 'My test combo gallery', '[]') RETURNING id")
+            text(
+                "INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('ehentai', 'combo_fav_1', 'My test combo gallery', '[]') RETURNING id"
+            )
         )
         await db_session.commit()
         fav_miss_gid = r3.scalar_one()
 
         # Gallery missing one criterion: low rating (rating=1 in user_ratings)
         r4 = await db_session.execute(
-            text("INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('ehentai', 'combo_rat_1', 'My test combo gallery', '[]') RETURNING id")
+            text(
+                "INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('ehentai', 'combo_rat_1', 'My test combo gallery', '[]') RETURNING id"
+            )
         )
         await db_session.commit()
         rat_gid = r4.scalar_one()
 
         # Gallery missing one criterion: title does not match q
         r5 = await db_session.execute(
-            text("INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('ehentai', 'combo_ttl_1', 'Unrelated Title', '[]') RETURNING id")
+            text(
+                "INSERT INTO galleries (source, source_id, title, tags_array) VALUES ('ehentai', 'combo_ttl_1', 'Unrelated Title', '[]') RETURNING id"
+            )
         )
         await db_session.commit()
         ttl_gid = r5.scalar_one()

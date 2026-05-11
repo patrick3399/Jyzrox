@@ -11,8 +11,7 @@ core.queue.enqueue is already patched globally by the conftest.
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
-from saq.job import TERMINAL_STATUSES, Status
-
+from saq.job import Status
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -32,8 +31,8 @@ def _make_mock_job(
     # Status must be a real Status enum so TERMINAL_STATUSES membership checks work
     job.status = Status(status) if isinstance(status, str) else status
     job.kwargs = kwargs.get("kwargs", {})
-    job.result = kwargs.get("result", None)
-    job.error = kwargs.get("error", None)
+    job.result = kwargs.get("result")
+    job.error = kwargs.get("error")
     job.queued = kwargs.get("queued", 1700000000000)
     job.started = kwargs.get("started", 1700000001000)
     job.completed = kwargs.get("completed", 1700000002000)
@@ -41,9 +40,7 @@ def _make_mock_job(
     job.attempts = kwargs.get("attempts", 1)
     job.meta = kwargs.get("meta", {})
     job.abort = AsyncMock()
-    job.to_dict = MagicMock(
-        return_value={"function": function, "status": status, "key": key}
-    )
+    job.to_dict = MagicMock(return_value={"function": function, "status": status, "key": key})
     return job
 
 
@@ -55,7 +52,7 @@ def _make_mock_queue(jobs=None, workers=None):
     async def _info(jobs=False, offset=0, limit=20, **kwargs):
         raw_jobs = []
         if jobs:
-            for j in (locals().get("_jobs") or []):
+            for j in locals().get("_jobs") or []:
                 raw_jobs.append(j.to_dict())
         return {
             "name": "default",
@@ -128,7 +125,7 @@ async def test_overview_returns_queue_stats(client, mock_queue):
     assert resp.status_code == 200
     data = resp.json()
     assert data["name"] == "all"
-    assert data["queued"] == 9    # 3 queues × 3 each
+    assert data["queued"] == 9  # 3 queues × 3 each
     assert data["active"] == 3
     assert data["scheduled"] == 6
     assert "workers" in data
@@ -165,9 +162,7 @@ async def test_overview_calls_info_with_jobs_false(client, mock_queue):
 
     assert mock_queue.info.call_count == 3
     for call in mock_queue.info.call_args_list:
-        assert call.kwargs.get("jobs") is False or (
-            call.args and call.args[0] is False
-        )
+        assert call.kwargs.get("jobs") is False or (call.args and call.args[0] is False)
 
 
 # ---------------------------------------------------------------------------

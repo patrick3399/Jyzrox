@@ -7,14 +7,11 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.auth import require_auth
-from core.version import __version__
-from core.database import AsyncSessionLocal
 from core.errors import api_error, parse_accept_language
-from core.rate_limit import check_rate_limit, get_client_ip, _is_private
-from db.models import Subscription
+from core.rate_limit import _is_private, check_rate_limit, get_client_ip
+from core.version import __version__
 from plugins.base import BrowsePlugin
 from plugins.models import (
     BrowseSchema,
@@ -36,6 +33,7 @@ _ALLOWED_PXIMG_HOSTS = {"i.pximg.net", "i-f.pximg.net", "s.pximg.net"}
 # ---------------------------------------------------------------------------
 # PixivBrowsePlugin class
 # ---------------------------------------------------------------------------
+
 
 class PixivBrowsePlugin(BrowsePlugin):
     """BrowsePlugin + Browsable for Pixiv."""
@@ -64,7 +62,13 @@ class PixivBrowsePlugin(BrowsePlugin):
     def browse_schema(self) -> BrowseSchema:
         return BrowseSchema(
             search_fields=[
-                FieldDef(name="word", field_type="text", label="Search keyword", required=True, placeholder="character name, tag..."),
+                FieldDef(
+                    name="word",
+                    field_type="text",
+                    label="Search keyword",
+                    required=True,
+                    placeholder="character name, tag...",
+                ),
                 FieldDef(name="sort", field_type="select", label="Sort"),
                 FieldDef(name="search_target", field_type="select", label="Search target"),
                 FieldDef(name="duration", field_type="select", label="Duration"),
@@ -120,10 +124,12 @@ class PixivBrowsePlugin(BrowsePlugin):
 
     def credential_flows(self) -> list[CredentialFlow]:
         from plugins.builtin.pixiv._credentials import pixiv_credential_flows
+
         return pixiv_credential_flows()
 
     async def verify_credential(self, credentials: dict) -> CredentialStatus:
         from plugins.builtin.pixiv._credentials import verify_pixiv_credential
+
         return await verify_pixiv_credential(credentials)
 
     # ------------------------------------------------------------------
@@ -134,16 +140,20 @@ class PixivBrowsePlugin(BrowsePlugin):
         """Return the Pixiv browse router."""
         return _browse_router
 
+
 # ---------------------------------------------------------------------------
 # Browse router — formerly routers/pixiv.py
 # ---------------------------------------------------------------------------
 
 _browse_router = APIRouter(tags=["pixiv"])
 
+
 def _locale(request: Request) -> str:
     return parse_accept_language(request.headers.get("accept-language"))
 
+
 # ── Client factory ────────────────────────────────────────────────────
+
 
 async def _make_client(locale: str = "en") -> PixivClient:
     """Load Pixiv refresh_token from DB credentials and return a client."""
@@ -152,7 +162,9 @@ async def _make_client(locale: str = "en") -> PixivClient:
         raise api_error(400, "pixiv_not_configured", locale)
     return PixivClient(refresh_token=refresh_token)
 
+
 # ── Media type detection ──────────────────────────────────────────────
+
 
 def _detect_media_type(data: bytes) -> str:
     if data[:8] == b"\x89PNG\r\n\x1a\n":
@@ -163,12 +175,14 @@ def _detect_media_type(data: bytes) -> str:
         return "image/webp"
     return "image/jpeg"
 
+
 # ── Ranking ───────────────────────────────────────────────────────────
 
 _R18_MODE_MAP = {
     "daily_r18": "day_r18",
     "weekly_r18": "week_r18",
 }
+
 
 @_browse_router.get("/ranking")
 async def get_ranking(
@@ -261,7 +275,9 @@ async def get_ranking(
     await cache.set_json(cache_key, result, 300)  # 5min
     return result
 
+
 # ── Public search (no Pixiv credentials) ─────────────────────────────
+
 
 @_browse_router.get("/search-public")
 async def search_public(
@@ -321,43 +337,8 @@ async def search_public(
     # Normalize to a format similar to the authenticated search
     illusts = []
     for item in artworks:
-        illusts.append({
-            "id": int(item.get("id", 0)),
-            "title": item.get("title", ""),
-            "image_urls": {
-                "square_medium": item.get("url", ""),
-                "medium": item.get("url", ""),
-            },
-            "user": {
-                "id": int(item.get("userId", 0)),
-                "name": item.get("userName", ""),
-                "profile_image_urls": {
-                    "medium": item.get("profileImageUrl", ""),
-                },
-            },
-            "page_count": item.get("pageCount", 1),
-            "width": item.get("width", 0),
-            "height": item.get("height", 0),
-            "tags": item.get("tags", []),
-            "create_date": item.get("createDate", ""),
-            "total_view": 0,  # not available in public API
-            "total_bookmarks": 0,  # not available in public API
-        })
-
-    result = {
-        "illusts": illusts,
-        "total": total,
-        "next_offset": page * 60 if len(artworks) >= 60 else None,
-    }
-
-    # Also include popular works if available (first page only)
-    popular = body.get("popular", {})
-    if popular:
-        popular_recent = popular.get("recent", [])
-        popular_permanent = popular.get("permanent", [])
-        popular_illusts = []
-        for item in (popular_permanent + popular_recent):
-            popular_illusts.append({
+        illusts.append(
+            {
                 "id": int(item.get("id", 0)),
                 "title": item.get("title", ""),
                 "image_urls": {
@@ -376,9 +357,48 @@ async def search_public(
                 "height": item.get("height", 0),
                 "tags": item.get("tags", []),
                 "create_date": item.get("createDate", ""),
-                "total_view": 0,
-                "total_bookmarks": 0,
-            })
+                "total_view": 0,  # not available in public API
+                "total_bookmarks": 0,  # not available in public API
+            }
+        )
+
+    result = {
+        "illusts": illusts,
+        "total": total,
+        "next_offset": page * 60 if len(artworks) >= 60 else None,
+    }
+
+    # Also include popular works if available (first page only)
+    popular = body.get("popular", {})
+    if popular:
+        popular_recent = popular.get("recent", [])
+        popular_permanent = popular.get("permanent", [])
+        popular_illusts = []
+        for item in popular_permanent + popular_recent:
+            popular_illusts.append(
+                {
+                    "id": int(item.get("id", 0)),
+                    "title": item.get("title", ""),
+                    "image_urls": {
+                        "square_medium": item.get("url", ""),
+                        "medium": item.get("url", ""),
+                    },
+                    "user": {
+                        "id": int(item.get("userId", 0)),
+                        "name": item.get("userName", ""),
+                        "profile_image_urls": {
+                            "medium": item.get("profileImageUrl", ""),
+                        },
+                    },
+                    "page_count": item.get("pageCount", 1),
+                    "width": item.get("width", 0),
+                    "height": item.get("height", 0),
+                    "tags": item.get("tags", []),
+                    "create_date": item.get("createDate", ""),
+                    "total_view": 0,
+                    "total_bookmarks": 0,
+                }
+            )
         if popular_illusts:
             result["popular"] = popular_illusts
 
@@ -389,7 +409,9 @@ async def search_public(
     await cache.set_json(cache_key, result, 300)  # 5min
     return result
 
+
 # ── Search ────────────────────────────────────────────────────────────
+
 
 @_browse_router.get("/search")
 async def search_illust(
@@ -425,7 +447,9 @@ async def search_illust(
     await cache.set_pixiv_search_cache(cache_key, result)
     return result
 
+
 # ── Illust detail ─────────────────────────────────────────────────────
+
 
 async def _fetch_illust_public(illust_id: int) -> dict:
     """Fetch illust detail via Pixiv public ajax API (no credentials required)."""
@@ -485,14 +509,16 @@ async def _fetch_illust_public(illust_id: int) -> dict:
     meta_pages = []
     for p in pages:
         p_urls = p.get("urls", {})
-        meta_pages.append({
-            "image_urls": {
-                "square_medium": p_urls.get("thumb_mini", ""),
-                "medium": p_urls.get("small", ""),
-                "large": p_urls.get("regular", ""),
-                "original": p_urls.get("original", ""),
+        meta_pages.append(
+            {
+                "image_urls": {
+                    "square_medium": p_urls.get("thumb_mini", ""),
+                    "medium": p_urls.get("small", ""),
+                    "large": p_urls.get("regular", ""),
+                    "original": p_urls.get("original", ""),
+                }
             }
-        })
+        )
 
     # Normalize to same format as authenticated API response
     result = {
@@ -521,14 +547,11 @@ async def _fetch_illust_public(illust_id: int) -> dict:
         "total_comments": body.get("commentCount", 0),
         "type": body.get("illustType", 0),  # 0=illust, 1=manga, 2=ugoira
         "meta_pages": meta_pages,
-        "meta_single_page": (
-            {"original_image_url": urls.get("original", "")}
-            if body.get("pageCount", 1) == 1
-            else {}
-        ),
+        "meta_single_page": ({"original_image_url": urls.get("original", "")} if body.get("pageCount", 1) == 1 else {}),
     }
 
     return result
+
 
 @_browse_router.get("/illust/{illust_id}")
 async def get_illust(
@@ -566,6 +589,7 @@ async def get_illust(
         content=result,
         headers={"Cache-Control": "private, max-age=3600"},
     )
+
 
 @_browse_router.get("/illust/{illust_id}/pages")
 async def get_illust_pages(
@@ -622,7 +646,9 @@ async def get_illust_pages(
 
     return {"pages": pages, "page_count": page_count}
 
+
 # ── User detail ───────────────────────────────────────────────────────
+
 
 @_browse_router.get("/user/{user_id}")
 async def get_user(
@@ -654,7 +680,9 @@ async def get_user(
     await cache.set_pixiv_user_cache(user_id, result)
     return result
 
+
 # ── User illusts ─────────────────────────────────────────────────────
+
 
 @_browse_router.get("/user/{user_id}/illusts")
 async def get_user_illusts(
@@ -681,7 +709,9 @@ async def get_user_illusts(
     await cache.set_pixiv_search_cache(cache_key, result)
     return result
 
+
 # ── User bookmarks ───────────────────────────────────────────────────
+
 
 @_browse_router.get("/user/{user_id}/bookmarks")
 async def get_user_bookmarks(
@@ -708,6 +738,7 @@ async def get_user_bookmarks(
     await cache.set_pixiv_search_cache(cache_key, result)
     return result
 
+
 @_browse_router.get("/bookmarks")
 async def get_my_bookmarks(
     restrict: str = Query(default="public"),
@@ -724,11 +755,12 @@ async def get_my_bookmarks(
     async with client:
         try:
             from core.redis_client import get_redis
+
             r = get_redis()
             rt_tail = client.refresh_token[-10:] if client.refresh_token else "none"
             uid_key = f"pixiv:uid:{rt_tail}"
             uid = await r.get(uid_key)
-            
+
             if uid:
                 user_id = int(uid.decode() if isinstance(uid, bytes) else uid)
             else:
@@ -748,7 +780,9 @@ async def get_my_bookmarks(
     await cache.set_pixiv_search_cache(cache_key, result)
     return result
 
+
 # ── Illust bookmark operations ────────────────────────────────────────
+
 
 @_browse_router.get("/illust/{illust_id}/bookmark")
 async def get_illust_bookmark(
@@ -769,10 +803,11 @@ async def get_illust_bookmark(
     async with client:
         try:
             return await client.illust_bookmark_detail(illust_id)
-        except PermissionError as e:
+        except PermissionError:
             raise api_error(401, "pixiv_token_invalid")
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=str(e))
+
 
 @_browse_router.post("/illust/{illust_id}/bookmark")
 async def add_illust_bookmark(
@@ -785,17 +820,19 @@ async def add_illust_bookmark(
     async with client:
         try:
             await client.illust_bookmark_add(illust_id, restrict=restrict)
-        except PermissionError as e:
+        except PermissionError:
             raise api_error(401, "pixiv_token_invalid")
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=str(e))
     # Invalidate illust cache + all my_bookmarks pages
     from core.redis_client import get_redis
+
     redis = get_redis()
     await redis.delete(f"pixiv:illust:{illust_id}")
     async for key in redis.scan_iter("my_bookmarks:*"):
         await redis.delete(key)
     return {"ok": True}
+
 
 @_browse_router.delete("/illust/{illust_id}/bookmark")
 async def delete_illust_bookmark(
@@ -807,19 +844,22 @@ async def delete_illust_bookmark(
     async with client:
         try:
             await client.illust_bookmark_delete(illust_id)
-        except PermissionError as e:
+        except PermissionError:
             raise api_error(401, "pixiv_token_invalid")
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=str(e))
     # Invalidate illust cache + all my_bookmarks pages
     from core.redis_client import get_redis
+
     redis = get_redis()
     await redis.delete(f"pixiv:illust:{illust_id}")
     async for key in redis.scan_iter("my_bookmarks:*"):
         await redis.delete(key)
     return {"ok": True}
 
+
 # ── User follow operations ────────────────────────────────────────────
+
 
 @_browse_router.post("/user/{user_id}/follow")
 async def follow_user(
@@ -838,8 +878,10 @@ async def follow_user(
             raise HTTPException(status_code=502, detail=str(e))
     # Invalidate user cache so is_followed refreshes
     from core.redis_client import get_redis
+
     await get_redis().delete(f"pixiv:user:{user_id}")
     return {"ok": True}
+
 
 @_browse_router.delete("/user/{user_id}/follow")
 async def unfollow_user(
@@ -856,10 +898,13 @@ async def unfollow_user(
         except httpx.HTTPError as e:
             raise HTTPException(status_code=502, detail=str(e))
     from core.redis_client import get_redis
+
     await get_redis().delete(f"pixiv:user:{user_id}")
     return {"ok": True}
 
+
 # ── My following list ────────────────────────────────────────────────
+
 
 @_browse_router.get("/following")
 async def get_my_following(
@@ -877,6 +922,7 @@ async def get_my_following(
     async with client:
         try:
             from core.redis_client import get_redis
+
             r = get_redis()
             rt_tail = client.refresh_token[-10:] if client.refresh_token else "none"
             uid_key = f"pixiv:uid:{rt_tail}"
@@ -901,7 +947,9 @@ async def get_my_following(
     await cache.set_pixiv_search_cache(cache_key, result)
     return result
 
+
 # ── Following feed ───────────────────────────────────────────────────
+
 
 @_browse_router.get("/following/feed")
 async def get_following_feed(
@@ -927,7 +975,9 @@ async def get_following_feed(
     await cache.set_pixiv_search_cache(cache_key, result)
     return result
 
+
 # ── Image proxy ───────────────────────────────────────────────────────
+
 
 @_browse_router.get("/image-proxy")
 async def image_proxy(

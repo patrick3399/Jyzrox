@@ -1,7 +1,8 @@
 """Structured API error codes with i18n support."""
 
 import logging
-from fastapi import HTTPException, Request
+
+from fastapi import HTTPException
 
 logger = logging.getLogger(__name__)
 

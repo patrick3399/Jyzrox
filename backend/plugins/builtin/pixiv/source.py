@@ -9,7 +9,7 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.version import __version__
@@ -32,6 +32,7 @@ logger = logging.getLogger(__name__)
 _PIXIV_ART_RE = re.compile(r"pixiv\.net/(?:en/)?(?:artworks|i)/(\d+)")
 # Matches: /users/12345
 _PIXIV_USER_RE = re.compile(r"pixiv\.net/(?:en/)?users/(\d+)")
+
 
 class PixivSourcePlugin(SourcePlugin):
     """SourcePlugin for Pixiv illustrations and user galleries."""
@@ -98,6 +99,7 @@ class PixivSourcePlugin(SourcePlugin):
 
         # Build metadata dict in the same format as download_pixiv_illust writes
         from plugins.builtin.pixiv._tags import process_pixiv_tags
+
         tag_list, tag_translations_data = process_pixiv_tags(detail)
 
         user = detail.get("user", {})
@@ -106,6 +108,7 @@ class PixivSourcePlugin(SourcePlugin):
         if create_date:
             try:
                 from datetime import datetime as _dt
+
                 posted_ts = int(_dt.fromisoformat(create_date.replace("Z", "+00:00")).timestamp())
             except ValueError, TypeError:
                 pass
@@ -238,6 +241,7 @@ class PixivSourcePlugin(SourcePlugin):
     def parse_import(self, dest_dir: Path, raw_meta: dict | None = None) -> GalleryImportData:
         """Parse downloaded Pixiv gallery into structured import data."""
         from plugins.builtin.pixiv._metadata import parse_pixiv_import
+
         return parse_pixiv_import(dest_dir, raw_meta)
 
     # ── CredentialProvider protocol methods ───────────────────────────
@@ -245,11 +249,13 @@ class PixivSourcePlugin(SourcePlugin):
     def credential_flows(self) -> list[CredentialFlow]:
         """Declare Pixiv credential flows: token + OAuth + cookie."""
         from plugins.builtin.pixiv._credentials import pixiv_credential_flows
+
         return pixiv_credential_flows()
 
     async def verify_credential(self, credentials: dict) -> CredentialStatus:
         """Verify Pixiv refresh token."""
         from plugins.builtin.pixiv._credentials import verify_pixiv_credential
+
         return await verify_pixiv_credential(credentials)
 
     # ── Subscribable protocol methods ─────────────────────────────────
@@ -262,6 +268,7 @@ class PixivSourcePlugin(SourcePlugin):
     ) -> list[NewWork]:
         """Check a Pixiv artist for new works since last_known."""
         from plugins.builtin.pixiv._subscribe import check_pixiv_new_works
+
         return await check_pixiv_new_works(artist_id, last_known, credentials)
 
     # ── Legacy SourcePlugin abstract method ───────────────────────────
@@ -281,7 +288,7 @@ class PixivSourcePlugin(SourcePlugin):
         posted_raw = raw.get("posted")
         if posted_raw:
             try:
-                posted_at = datetime.fromtimestamp(int(posted_raw), tz=timezone.utc)
+                posted_at = datetime.fromtimestamp(int(posted_raw), tz=UTC)
             except ValueError, TypeError, OSError:
                 pass
 

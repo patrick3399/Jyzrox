@@ -24,8 +24,14 @@ from services.credential import get_credential, list_credentials, set_credential
 from services.eh_client import EhClient
 from services.settings_store import (
     get_float_setting as _get_float_setting,
+)
+from services.settings_store import (
     get_int_setting as _get_int_setting,
+)
+from services.settings_store import (
     get_toggle as _get_toggle,
+)
+from services.settings_store import (
     set_toggle as _set_toggle,
 )
 

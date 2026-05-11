@@ -12,14 +12,12 @@ Strategy:
 """
 
 from contextlib import asynccontextmanager
-from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _mock_settings(tag_model_enabled: bool = True) -> MagicMock:
     s = MagicMock()
@@ -29,6 +27,7 @@ def _mock_settings(tag_model_enabled: bool = True) -> MagicMock:
     s.tag_general_threshold = 0.35
     s.tag_character_threshold = 0.85
     return s
+
 
 def _mock_http_client(available: bool = True, tags: list | None = None):
     """Build an httpx.AsyncClient mock with pre-configured /health and /predict."""
@@ -52,11 +51,13 @@ def _mock_http_client(available: bool = True, tags: list | None = None):
     client.post = AsyncMock(return_value=predict_resp)
     return client
 
+
 def _make_mock_blob(sha256: str = "aa" * 32, extension: str = ".jpg") -> MagicMock:
     blob = MagicMock()
     blob.sha256 = sha256
     blob.extension = extension
     return blob
+
 
 def _make_mock_image(
     img_id: int,
@@ -70,6 +71,7 @@ def _make_mock_image(
     img.blob = blob
     img.tags_array = tags_array or []
     return img
+
 
 def _make_mock_session(images: list) -> MagicMock:
     """Return a mock async session that yields `images` from a scalars().all() query."""
@@ -89,6 +91,7 @@ def _make_mock_session(images: list) -> MagicMock:
     session.commit = AsyncMock()
     return session
 
+
 def _make_session_factory_from_mock(mock_session: MagicMock):
     """Wrap a mock session so ``async with AsyncSessionLocal() as s:`` yields it."""
 
@@ -102,9 +105,11 @@ def _make_session_factory_from_mock(mock_session: MagicMock):
 
     return _Factory()
 
+
 # ---------------------------------------------------------------------------
 # TestTaggingJob
 # ---------------------------------------------------------------------------
+
 
 class TestTaggingJob:
     """Tests for worker.tagging.tag_job."""
@@ -229,11 +234,7 @@ class TestTaggingJob:
                 raise RuntimeError("predict failure")
             resp = MagicMock()
             resp.status_code = 200
-            resp.json = MagicMock(
-                return_value={
-                    "tags": [{"namespace": "general", "name": "solo", "confidence": 0.9}]
-                }
-            )
+            resp.json = MagicMock(return_value={"tags": [{"namespace": "general", "name": "solo", "confidence": 0.9}]})
             resp.raise_for_status = MagicMock()
             return resp
 
@@ -263,9 +264,7 @@ class TestTaggingJob:
         fake_path.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
 
         blob = _make_mock_blob()
-        img = _make_mock_image(
-            img_id=20, gallery_id=4, blob=blob, tags_array=["existing:tag"]
-        )
+        img = _make_mock_image(img_id=20, gallery_id=4, blob=blob, tags_array=["existing:tag"])
 
         mock_session = _make_mock_session(images=[img])
         fake_db = _make_session_factory_from_mock(mock_session)

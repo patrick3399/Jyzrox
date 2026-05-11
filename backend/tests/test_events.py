@@ -17,10 +17,7 @@ Covers:
 import json
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
 from core.events import Event, EventBus, EventType, emit, event_bus
-
 
 # ---------------------------------------------------------------------------
 # EventType

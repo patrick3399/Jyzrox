@@ -42,6 +42,9 @@ function BrowseSettings() {
               if (!next) localStorage.removeItem('eh_search_history')
               setHistoryEnabled(next)
             }}
+            role="switch"
+            aria-checked={historyEnabled}
+            aria-label={t('settings.searchHistory')}
             className={`relative w-11 h-6 rounded-full transition-colors ${historyEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
           >
             <span
@@ -62,6 +65,7 @@ function BrowseSettings() {
                 localStorage.setItem('browse_load_mode', 'pagination')
                 setLoadMode('pagination')
               }}
+              aria-pressed={loadMode === 'pagination'}
               className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'pagination' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
             >
               {t('settings.pagination')}
@@ -71,6 +75,7 @@ function BrowseSettings() {
                 localStorage.setItem('browse_load_mode', 'scroll')
                 setLoadMode('scroll')
               }}
+              aria-pressed={loadMode === 'scroll'}
               className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'scroll' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
             >
               {t('settings.infiniteScroll')}
@@ -112,6 +117,9 @@ function BrowseSettings() {
               localStorage.setItem('history_enabled', next ? 'true' : 'false')
               setBrowseHistoryEnabled(next)
             }}
+            role="switch"
+            aria-checked={browseHistoryEnabled}
+            aria-label={t('settings.browseHistory')}
             className={`relative w-11 h-6 rounded-full transition-colors ${browseHistoryEnabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
           >
             <span

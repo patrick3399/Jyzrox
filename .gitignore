@@ -69,3 +69,6 @@ screenshots/
 # Original icon sources (moved to pwa/public/)
 /icon.png
 /icon_clean.png
+
+# Superpowers skill docs
+docs/superpowers/

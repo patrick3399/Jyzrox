@@ -10,16 +10,17 @@ import psutil
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select, text, update
+from sqlalchemy.orm import selectinload
 
+import core.queue
 from core.auth import gallery_access_filter
 from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
 from core.utils import detect_source
-import core.queue
-from db.models import ApiToken, Blob, DownloadJob, Gallery, Image, Tag
-from services.cas import cas_url, thumb_url as cas_thumb_url, resolve_blob_path
-from sqlalchemy.orm import selectinload
+from db.models import ApiToken, DownloadJob, Gallery, Image, Tag
+from services.cas import cas_url, resolve_blob_path
+from services.cas import thumb_url as cas_thumb_url
 
 logger = logging.getLogger(__name__)
 
@@ -69,8 +70,8 @@ async def verify_api_token(x_api_token: str = Header(...)):
 
 # ── Rate limiter ──────────────────────────────────────────────────────
 
-_RATE_LIMIT_REQUESTS = 10   # max requests per window
-_RATE_LIMIT_WINDOW = 60     # window size in seconds
+_RATE_LIMIT_REQUESTS = 10  # max requests per window
+_RATE_LIMIT_WINDOW = 60  # window size in seconds
 
 
 async def _check_rate_limit(token_id: int) -> None:
@@ -97,10 +98,14 @@ async def system_status(token_data: dict = Depends(verify_api_token)):
 
     async with async_session() as session:
         # Fast estimated counts via pg_stat (< 1ms vs 2-5s for COUNT(*) on large tables)
-        row_estimates = (await session.execute(text(
-            "SELECT relname, n_live_tup::bigint FROM pg_stat_user_tables "
-            "WHERE relname IN ('galleries', 'images', 'tags')"
-        ))).all()
+        row_estimates = (
+            await session.execute(
+                text(
+                    "SELECT relname, n_live_tup::bigint FROM pg_stat_user_tables "
+                    "WHERE relname IN ('galleries', 'images', 'tags')"
+                )
+            )
+        ).all()
         counts = {r[0]: r[1] for r in row_estimates}
         gallery_count = counts.get("galleries", 0)
         image_count = counts.get("images", 0)
@@ -123,9 +128,12 @@ async def system_status(token_data: dict = Depends(verify_api_token)):
 
     try:
         import asyncio as _asyncio
-        import subprocess
+
         proc = await _asyncio.create_subprocess_exec(
-            "df", "-i", "--output=itotal,iused,iavail,ipcent", settings.data_cas_path,
+            "df",
+            "-i",
+            "--output=itotal,iused,iavail,ipcent",
+            settings.data_cas_path,
             stdout=_asyncio.subprocess.PIPE,
             stderr=_asyncio.subprocess.PIPE,
         )
@@ -190,13 +198,13 @@ async def list_galleries(
     if favorited is not None:
         if favorited:
             from db.models import UserFavorite
+
             filters.append(
-                Gallery.id.in_(
-                    select(UserFavorite.gallery_id).where(UserFavorite.user_id == token_data["user_id"])
-                )
+                Gallery.id.in_(select(UserFavorite.gallery_id).where(UserFavorite.user_id == token_data["user_id"]))
             )
     if min_rating is not None:
         from db.models import UserRating
+
         filters.append(
             Gallery.id.in_(
                 select(UserRating.gallery_id).where(
@@ -207,10 +215,18 @@ async def list_galleries(
         )
 
     async with async_session() as session:
-        count_result = await session.execute(select(func.count()).select_from(Gallery).where(*filters, gallery_access_filter(token_data)))
+        count_result = await session.execute(
+            select(func.count()).select_from(Gallery).where(*filters, gallery_access_filter(token_data))
+        )
         total = count_result.scalar() or 0
 
-        data_query = select(Gallery).where(*filters, gallery_access_filter(token_data)).order_by(Gallery.added_at.desc()).limit(limit).offset(page * limit)
+        data_query = (
+            select(Gallery)
+            .where(*filters, gallery_access_filter(token_data))
+            .order_by(Gallery.added_at.desc())
+            .limit(limit)
+            .offset(page * limit)
+        )
         rows = (await session.execute(data_query)).scalars().all()
 
     galleries = []
@@ -245,7 +261,9 @@ async def get_gallery(
 ):
     """Get a single gallery by ID."""
     async with async_session() as session:
-        r = (await session.execute(select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))).scalar_one_or_none()
+        r = (
+            await session.execute(select(Gallery).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))
+        ).scalar_one_or_none()
 
     if not r:
         raise HTTPException(status_code=404, detail="Gallery not found")
@@ -280,7 +298,9 @@ async def get_gallery_images(
     """List images for a gallery."""
     async with async_session() as session:
         # Verify gallery exists and is accessible
-        gallery = (await session.execute(select(Gallery.id).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))).fetchone()
+        gallery = (
+            await session.execute(select(Gallery.id).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))
+        ).fetchone()
         if not gallery:
             raise HTTPException(status_code=404, detail="Gallery not found")
 
@@ -327,7 +347,9 @@ async def get_image_file(
     """Stream an image file for external readers (Mihon)."""
     async with async_session() as session:
         # Verify gallery is accessible before serving the image
-        gallery_check = (await session.execute(select(Gallery.id).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))).fetchone()
+        gallery_check = (
+            await session.execute(select(Gallery.id).where(Gallery.id == gallery_id, gallery_access_filter(token_data)))
+        ).fetchone()
         if not gallery_check:
             raise HTTPException(status_code=404, detail="Gallery not found")
 
@@ -357,6 +379,7 @@ async def get_image_file(
     content_type = ext_map.get(row.blob.extension.lower(), "application/octet-stream")
 
     from fastapi.responses import FileResponse
+
     return FileResponse(str(file_path), media_type=content_type)
 
 
@@ -422,6 +445,7 @@ async def enqueue_download(
 
     # Viewers cannot trigger downloads
     from core.auth import ROLE_HIERARCHY
+
     if ROLE_HIERARCHY.get(token_data.get("role", ""), 0) < ROLE_HIERARCHY["member"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions: member role required")
 
@@ -448,7 +472,9 @@ async def enqueue_download(
     #    eventually time out without a matching DB row.
     try:
         async with async_session() as session:
-            session.add(DownloadJob(id=job_id, url=resolved_url, source=source, status="queued", user_id=token_data["user_id"]))
+            session.add(
+                DownloadJob(id=job_id, url=resolved_url, source=source, status="queued", user_id=token_data["user_id"])
+            )
             await session.commit()
     except Exception as exc:
         logger.warning(

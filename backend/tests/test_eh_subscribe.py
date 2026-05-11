@@ -15,12 +15,10 @@ the function body via `from X import Y`:
   - "core.config.settings"          (not the _subscribe module)
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
+from datetime import UTC
+from unittest.mock import AsyncMock, patch
 
 from plugins.models import NewWork
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -96,6 +94,7 @@ class TestCheckEhNewWorksIncremental:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="uploader:Foo",
                 last_known="100",
@@ -121,6 +120,7 @@ class TestCheckEhNewWorksIncremental:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="female:catgirl",
                 last_known="100",
@@ -147,6 +147,7 @@ class TestCheckEhNewWorksIncremental:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="artist:test",
                 last_known="200",
@@ -178,6 +179,7 @@ class TestCheckEhNewWorksFirstCheck:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="uploader:Bar",
                 last_known=None,
@@ -200,6 +202,7 @@ class TestCheckEhNewWorksFirstCheck:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="nonexistent query",
                 last_known=None,
@@ -229,6 +232,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="female:catgirl",
                 last_known="50",
@@ -251,6 +255,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="female:catgirl",
                 last_known="50",
@@ -280,6 +285,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             await check_eh_new_works(
                 query="test",
                 last_known=None,
@@ -306,6 +312,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="uploader:Multi",
                 last_known="100",
@@ -338,6 +345,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             await check_eh_new_works(
                 query="artist:cursor_test",
                 last_known="100",
@@ -361,6 +369,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="test",
                 last_known="10",
@@ -391,6 +400,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             await check_eh_new_works(
                 query="test",
                 last_known=None,
@@ -415,6 +425,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="test",
                 last_known=None,
@@ -436,6 +447,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="test",
                 last_known=None,
@@ -456,6 +468,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="test",
                 last_known=None,
@@ -466,7 +479,7 @@ class TestCheckEhNewWorksEdgeCases:
 
     async def test_newwork_fields_populated_correctly(self):
         """NewWork URL, title, source_id, thumbnail_url and posted_at must be set."""
-        from datetime import datetime, timezone
+        from datetime import datetime
 
         gid = 12345
         token = "abc1234567"
@@ -490,6 +503,7 @@ class TestCheckEhNewWorksEdgeCases:
             patch("asyncio.sleep", new_callable=AsyncMock),
         ):
             from plugins.builtin.ehentai._subscribe import check_eh_new_works
+
             results = await check_eh_new_works(
                 query="test",
                 last_known=None,
@@ -502,6 +516,5 @@ class TestCheckEhNewWorksEdgeCases:
         assert work.title == "Test Gallery"
         assert work.source_id == str(gid)
         assert work.thumbnail_url == "https://ehgt.org/thumb/001.jpg"
-        expected_dt = datetime.fromtimestamp(posted_ts, tz=timezone.utc)
+        expected_dt = datetime.fromtimestamp(posted_ts, tz=UTC)
         assert work.posted_at == expected_dt
-

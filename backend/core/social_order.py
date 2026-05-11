@@ -47,7 +47,7 @@ def _timestamp_key(value: datetime | None) -> int:
         return 0
     try:
         return int(value.timestamp() * 1_000_000)
-    except (OSError, OverflowError, ValueError):
+    except OSError, OverflowError, ValueError:
         return 0
 
 
@@ -55,10 +55,7 @@ def social_image_sort_key(image: Any) -> tuple[int, int, int, int, int]:
     """Sort key for newest-first social image order."""
     parsed = parse_social_filename(getattr(image, "filename", None))
     stable_position = (
-        getattr(image, "source_position", None)
-        or getattr(image, "page_num", None)
-        or getattr(image, "id", None)
-        or 0
+        getattr(image, "source_position", None) or getattr(image, "page_num", None) or getattr(image, "id", None) or 0
     )
     image_id = getattr(image, "id", None) or 0
     if parsed:

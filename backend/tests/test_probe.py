@@ -709,9 +709,11 @@ class TestFingerprintFieldAdditionalBranches:
 
     def test_fingerprint_returns_text_for_unknown_type(self):
         """An object of an unrecognized type falls through to 'text'."""
+
         # line 375: final return "text" for unknown types
         class CustomObj:
             pass
+
         assert _fingerprint_field("custom", [CustomObj()]) == "text"
 
 
@@ -741,6 +743,7 @@ class TestDiffFieldsKeyAbsence:
         meta_field = next(f for f in fields if f.key == "meta")
         # sample_value should be a valid JSON string
         import json as _json
+
         _json.loads(meta_field.sample_value)
 
 
@@ -752,8 +755,7 @@ class TestScoreMappingsAdditionalBranches:
 
     def _make_probe_fields(self, field_specs: list[tuple[str, str, str]]) -> list[ProbeField]:
         return [
-            ProbeField(key=key, field_type=ft, sample_value="sample", level=level)
-            for key, ft, level in field_specs
+            ProbeField(key=key, field_type=ft, sample_value="sample", level=level) for key, ft, level in field_specs
         ]
 
     def test_score_mappings_id_hint_skipped_when_type_is_not_numeric_id(self):
@@ -793,28 +795,33 @@ class TestDetectSource:
     def test_detect_source_returns_none_for_empty_raw(self):
         """Empty raw list → None."""
         from core.probe import _detect_source
+
         assert _detect_source([]) is None
 
     def test_detect_source_returns_none_when_no_category(self):
         """raw[0] with no 'category' key → None."""
         from core.probe import _detect_source
+
         assert _detect_source([{"title": "Test"}]) is None
 
     def test_detect_source_returns_none_for_unknown_category(self):
         """Unrecognized category string → None (no site match)."""
         from core.probe import _detect_source
+
         result = _detect_source([{"category": "totally_unknown_extractor_xyz"}])
         assert result is None
 
     def test_detect_source_matches_ehentai_by_category(self):
         """'ehentai' category matches the ehentai site."""
         from core.probe import _detect_source
+
         result = _detect_source([{"category": "ehentai"}])
         assert result == "ehentai"
 
     def test_detect_source_matches_case_insensitively(self):
         """Category matching is case-insensitive."""
         from core.probe import _detect_source
+
         result = _detect_source([{"category": "EHentai"}])
         assert result == "ehentai"
 
@@ -869,7 +876,7 @@ class TestRunGalleryDlProbe:
         mock_proc.stdout = AsyncMock()
         mock_proc.kill = MagicMock()
         mock_proc.wait = AsyncMock()
-        mock_proc.stdout.read = AsyncMock(side_effect=asyncio.TimeoutError())
+        mock_proc.stdout.read = AsyncMock(side_effect=TimeoutError())
 
         with (
             patch("worker.gallery_dl_venv.get_gdl_bin", return_value="/usr/bin/gallery-dl"),

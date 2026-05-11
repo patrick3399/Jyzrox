@@ -53,6 +53,9 @@ export function ToggleRow({
       <button
         onClick={() => onChange(!checked)}
         disabled={disabled}
+        role="switch"
+        aria-checked={checked}
+        aria-label={label}
         className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 focus:outline-none ${
           checked ? 'bg-green-600' : 'bg-vault-border'
         } ${disabled ? 'opacity-50 cursor-not-allowed' : ''}`}
@@ -64,6 +67,34 @@ export function ToggleRow({
         />
       </button>
     </div>
+  )
+}
+
+// ── Save Status ──
+
+export type SaveStatusValue = 'idle' | 'saving' | 'saved' | 'error'
+
+export function SaveStatus({ status }: { status: SaveStatusValue }) {
+  if (status === 'idle') return null
+
+  const statusClass =
+    status === 'error'
+      ? 'text-red-400'
+      : status === 'saved'
+        ? 'text-green-400'
+        : 'text-vault-text-muted'
+
+  const label =
+    status === 'saving'
+      ? t('settings.saving')
+      : status === 'saved'
+        ? t('common.saved')
+        : t('common.failedToSave')
+
+  return (
+    <span aria-live="polite" className={`text-xs ${statusClass}`}>
+      {label}
+    </span>
   )
 }
 

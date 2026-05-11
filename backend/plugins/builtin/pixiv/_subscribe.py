@@ -1,11 +1,12 @@
 """Pixiv subscription check for the Subscribable protocol."""
 
 import logging
-from datetime import UTC, datetime
+from datetime import datetime
 
 from plugins.models import NewWork
 
 logger = logging.getLogger(__name__)
+
 
 async def check_pixiv_new_works(
     artist_id: str,
@@ -60,12 +61,14 @@ async def check_pixiv_new_works(
         images = ill.get("image_urls") or {}
         thumbnail = images.get("square_medium") or images.get("medium")
 
-        new_works.append(NewWork(
-            url=f"https://www.pixiv.net/artworks/{ill_id}",
-            title=ill.get("title", ""),
-            source_id=ill_id,
-            thumbnail_url=thumbnail,
-            posted_at=posted_at,
-        ))
+        new_works.append(
+            NewWork(
+                url=f"https://www.pixiv.net/artworks/{ill_id}",
+                title=ill.get("title", ""),
+                source_id=ill_id,
+                thumbnail_url=thumbnail,
+                posted_at=posted_at,
+            )
+        )
 
     return new_works

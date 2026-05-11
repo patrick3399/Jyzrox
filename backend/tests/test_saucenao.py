@@ -18,7 +18,6 @@ import httpx
 
 from services.saucenao import RateLimitError, SauceNaoError
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -245,9 +244,7 @@ async def test_saucenao_search_httpx_error_returns_502(client):
         patch("routers.saucenao.resolve_blob_path", return_value=path_mock),
         patch(
             "routers.saucenao.search_by_image",
-            AsyncMock(
-                side_effect=httpx.HTTPError("connection failed")
-            ),
+            AsyncMock(side_effect=httpx.HTTPError("connection failed")),
         ),
     ):
         resp = await client.post("/api/saucenao/search", json={"image_id": 1})

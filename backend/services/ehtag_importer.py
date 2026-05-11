@@ -13,11 +13,22 @@ logger = logging.getLogger(__name__)
 EHTAG_CDN_URL = "https://cdn.jsdelivr.net/gh/EhTagTranslation/DatabaseReleases@latest/db.text.json"
 
 # Namespaces to import (skip 'rows' which is metadata)
-_VALID_NAMESPACES = frozenset({
-    "artist", "character", "parody", "group", "language",
-    "misc", "other", "reclass", "cosplayer",
-    "female", "male", "mixed",
-})
+_VALID_NAMESPACES = frozenset(
+    {
+        "artist",
+        "character",
+        "parody",
+        "group",
+        "language",
+        "misc",
+        "other",
+        "reclass",
+        "cosplayer",
+        "female",
+        "male",
+        "mixed",
+    }
+)
 
 
 def parse_ehtag_payload(payload: dict) -> list[dict]:
@@ -37,12 +48,14 @@ def parse_ehtag_payload(payload: dict) -> list[dict]:
             translation = tag_info.get("name", "")
             if not translation:
                 continue
-            rows.append({
-                "namespace": namespace,
-                "name": tag_name,
-                "language": "zh",
-                "translation": translation,
-            })
+            rows.append(
+                {
+                    "namespace": namespace,
+                    "name": tag_name,
+                    "language": "zh",
+                    "translation": translation,
+                }
+            )
     return rows
 
 

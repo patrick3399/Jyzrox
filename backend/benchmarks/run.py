@@ -18,7 +18,8 @@ from pathlib import Path
 
 import asyncpg
 from sqlalchemy import Text, cast, desc, select, text
-from sqlalchemy.dialects.postgresql import ARRAY, insert as pg_insert
+from sqlalchemy.dialects.postgresql import ARRAY
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 # ---------------------------------------------------------------------------
@@ -29,6 +30,7 @@ _backend_dir = str(Path(__file__).parent.parent)
 if _backend_dir not in sys.path:
     sys.path.insert(0, _backend_dir)
 
+from benchmarks import seed  # noqa: E402
 from db.models import (  # noqa: E402
     Blob,
     Gallery,
@@ -39,7 +41,6 @@ from db.models import (  # noqa: E402
     UserFavorite,
     UserRating,
 )
-from benchmarks import seed  # noqa: E402
 
 # ---------------------------------------------------------------------------
 # DATABASE_URL parsing
@@ -266,8 +267,7 @@ async def bench_gallery_list_cursor_p50(session: AsyncSession) -> BenchResult:
             .where(
                 Gallery.deleted_at.is_(None),
                 Gallery.visibility == "public",
-                (Gallery.added_at < last.added_at)
-                | ((Gallery.added_at == last.added_at) & (Gallery.id < last.id)),
+                (Gallery.added_at < last.added_at) | ((Gallery.added_at == last.added_at) & (Gallery.id < last.id)),
             )
             .order_by(desc(Gallery.added_at), desc(Gallery.id))
             .limit(20)
@@ -302,12 +302,7 @@ async def bench_cover_map_batch(session: AsyncSession) -> BenchResult:
     """Batch cover lookup for 20 gallery IDs (page_num == 1)."""
     # Fetch 20 gallery IDs to use as a stable input
     id_rows = (
-        await session.execute(
-            select(Gallery.id)
-            .where(Gallery.deleted_at.is_(None))
-            .order_by(Gallery.id)
-            .limit(20)
-        )
+        await session.execute(select(Gallery.id).where(Gallery.deleted_at.is_(None)).order_by(Gallery.id).limit(20))
     ).all()
     gallery_ids = [row[0] for row in id_rows]
 
@@ -328,9 +323,7 @@ async def bench_tag_autocomplete(session: AsyncSession) -> BenchResult:
     """Tag autocomplete — ILIKE prefix search on namespace and name."""
     stmt = (
         select(Tag)
-        .where(
-            (Tag.namespace + ":" + Tag.name).ilike("general:general_00%")
-        )
+        .where((Tag.namespace + ":" + Tag.name).ilike("general:general_00%"))
         .order_by(desc(Tag.count))
         .limit(20)
     )
@@ -397,9 +390,7 @@ async def bench_search_combined(session: AsyncSession) -> BenchResult:
 
 async def bench_gallery_detail(session: AsyncSession) -> BenchResult:
     """Single gallery lookup by primary key."""
-    gid_row = (
-        await session.execute(select(Gallery.id).where(Gallery.deleted_at.is_(None)).limit(1))
-    ).first()
+    gid_row = (await session.execute(select(Gallery.id).where(Gallery.deleted_at.is_(None)).limit(1))).first()
     gid = gid_row[0] if gid_row else 1
     stmt = select(Gallery).where(Gallery.id == gid)
     return await _run_bench("gallery_detail", "Gallery Images", session, stmt)
@@ -407,24 +398,15 @@ async def bench_gallery_detail(session: AsyncSession) -> BenchResult:
 
 async def bench_gallery_images_page1(session: AsyncSession) -> BenchResult:
     """Images for a single gallery — first page of 40."""
-    gid_row = (
-        await session.execute(select(Gallery.id).where(Gallery.deleted_at.is_(None)).limit(1))
-    ).first()
+    gid_row = (await session.execute(select(Gallery.id).where(Gallery.deleted_at.is_(None)).limit(1))).first()
     gid = gid_row[0] if gid_row else 1
-    stmt = (
-        select(Image)
-        .where(Image.gallery_id == gid)
-        .order_by(Image.page_num)
-        .limit(40)
-    )
+    stmt = select(Image).where(Image.gallery_id == gid).order_by(Image.page_num).limit(40)
     return await _run_bench("gallery_images_page1", "Gallery Images", session, stmt)
 
 
 async def bench_gallery_tags(session: AsyncSession) -> BenchResult:
     """Gallery tags for a single gallery (gallery_tags JOIN tags)."""
-    gid_row = (
-        await session.execute(select(Gallery.id).where(Gallery.deleted_at.is_(None)).limit(1))
-    ).first()
+    gid_row = (await session.execute(select(Gallery.id).where(Gallery.deleted_at.is_(None)).limit(1))).first()
     gid = gid_row[0] if gid_row else 1
     stmt = (
         select(GalleryTag, Tag)
@@ -465,9 +447,7 @@ async def bench_explorer_galleries_by_source(session: AsyncSession) -> BenchResu
 
 async def bench_explorer_gallery_images(session: AsyncSession) -> BenchResult:
     """Explorer: all images for a specific gallery (no page limit)."""
-    gid_row = (
-        await session.execute(select(Gallery.id).where(Gallery.deleted_at.is_(None)).limit(1))
-    ).first()
+    gid_row = (await session.execute(select(Gallery.id).where(Gallery.deleted_at.is_(None)).limit(1))).first()
     gid = gid_row[0] if gid_row else 1
     stmt = (
         select(Image.id, Image.page_num, Image.filename, Image.blob_sha256)
@@ -484,12 +464,7 @@ async def bench_explorer_gallery_images(session: AsyncSession) -> BenchResult:
 
 async def bench_dedup_load_blobs(session: AsyncSession) -> BenchResult:
     """Dedup worker: load sha256 + phash_int for all blobs with a known pHash."""
-    stmt = (
-        select(Blob.sha256, Blob.phash_int)
-        .where(Blob.phash_int.is_not(None))
-        .order_by(Blob.sha256)
-        .limit(10_000)
-    )
+    stmt = select(Blob.sha256, Blob.phash_int).where(Blob.phash_int.is_not(None)).order_by(Blob.sha256).limit(10_000)
     return await _run_bench("dedup_load_blobs", "Worker Pressure", session, stmt)
 
 
@@ -501,23 +476,17 @@ async def bench_tag_upsert_batch(session: AsyncSession) -> BenchResult:
     r = BenchResult(name="tag_upsert_batch", flow="Worker Pressure")
 
     # Fetch stable image and tag IDs for the upsert input.
-    image_id_rows = (
-        await session.execute(select(Image.id).order_by(Image.id).limit(100))
-    ).all()
-    tag_id_rows = (
-        await session.execute(select(Tag.id).order_by(Tag.id).limit(3))
-    ).all()
+    image_id_rows = (await session.execute(select(Image.id).order_by(Image.id).limit(100))).all()
+    tag_id_rows = (await session.execute(select(Tag.id).order_by(Tag.id).limit(3))).all()
 
     image_ids = [row[0] for row in image_id_rows]
     tag_ids = [row[0] for row in tag_id_rows]
 
     upsert_stmt = (
         pg_insert(ImageTag)
-        .values([
-            {"image_id": img_id, "tag_id": tag_id, "confidence": 0.9}
-            for img_id in image_ids
-            for tag_id in tag_ids
-        ])
+        .values(
+            [{"image_id": img_id, "tag_id": tag_id, "confidence": 0.9} for img_id in image_ids for tag_id in tag_ids]
+        )
         .on_conflict_do_nothing()
     )
 
@@ -608,12 +577,7 @@ async def main() -> None:
             for bench_fn in _ALL_BENCHMARKS:
                 r = await bench_fn(session)
                 results.append(r)
-                print(
-                    f"  {r.name:<35} "
-                    f"p50={r.p50:>7.1f}ms  "
-                    f"p95={r.p95:>7.1f}ms  "
-                    f"p99={r.p99:>7.1f}ms"
-                )
+                print(f"  {r.name:<35} p50={r.p50:>7.1f}ms  p95={r.p95:>7.1f}ms  p99={r.p99:>7.1f}ms")
 
         print_summary(results)
 

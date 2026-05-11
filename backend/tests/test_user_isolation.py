@@ -16,7 +16,6 @@ import uuid
 import pytest
 from sqlalchemy import text
 
-
 # ---------------------------------------------------------------------------
 # Shared helpers
 # ---------------------------------------------------------------------------
@@ -25,17 +24,11 @@ from sqlalchemy import text
 async def _ensure_users(db_session) -> None:
     """Create test users 1 (admin) and 2 (member) if they do not exist yet."""
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-            "VALUES (:id, :u, :p, :r)"
-        ),
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, :p, :r)"),
         {"id": 1, "u": "user_one", "p": "x", "r": "admin"},
     )
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-            "VALUES (:id, :u, :p, :r)"
-        ),
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, :p, :r)"),
         {"id": 2, "u": "user_two", "p": "x", "r": "member"},
     )
     await db_session.commit()
@@ -64,15 +57,11 @@ class TestSubscriptionIsolation:
     """User 2 must not see or modify user 1's subscriptions."""
 
     @pytest.mark.asyncio
-    async def test_list_subscriptions_does_not_leak_other_users_data(
-        self, db_session, make_client
-    ):
+    async def test_list_subscriptions_does_not_leak_other_users_data(self, db_session, make_client):
         """User 2 GET /api/subscriptions/ returns an empty list, not user 1's subscription."""
         await _ensure_users(db_session)
         await db_session.execute(
-            text(
-                "INSERT INTO subscriptions (user_id, url) VALUES (:uid, :url)"
-            ),
+            text("INSERT INTO subscriptions (user_id, url) VALUES (:uid, :url)"),
             {"uid": 1, "url": "https://example.com/artist-isolation"},
         )
         await db_session.commit()
@@ -86,15 +75,11 @@ class TestSubscriptionIsolation:
         assert data["subscriptions"] == []
 
     @pytest.mark.asyncio
-    async def test_get_subscription_returns_404_for_other_users_record(
-        self, db_session, make_client
-    ):
+    async def test_get_subscription_returns_404_for_other_users_record(self, db_session, make_client):
         """User 2 GET /api/subscriptions/{id} for a user-1 subscription returns 404."""
         await _ensure_users(db_session)
         await db_session.execute(
-            text(
-                "INSERT INTO subscriptions (user_id, url) VALUES (:uid, :url)"
-            ),
+            text("INSERT INTO subscriptions (user_id, url) VALUES (:uid, :url)"),
             {"uid": 1, "url": "https://example.com/artist-get-404"},
         )
         await db_session.commit()
@@ -107,15 +92,11 @@ class TestSubscriptionIsolation:
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_delete_subscription_returns_404_for_other_users_record(
-        self, db_session, make_client
-    ):
+    async def test_delete_subscription_returns_404_for_other_users_record(self, db_session, make_client):
         """User 2 DELETE /api/subscriptions/{id} for a user-1 subscription returns 404."""
         await _ensure_users(db_session)
         await db_session.execute(
-            text(
-                "INSERT INTO subscriptions (user_id, url) VALUES (:uid, :url)"
-            ),
+            text("INSERT INTO subscriptions (user_id, url) VALUES (:uid, :url)"),
             {"uid": 1, "url": "https://example.com/artist-del-404"},
         )
         await db_session.commit()
@@ -137,15 +118,11 @@ class TestCollectionIsolation:
     """User 2 must not see or modify user 1's collections."""
 
     @pytest.mark.asyncio
-    async def test_list_collections_does_not_leak_other_users_data(
-        self, db_session, make_client
-    ):
+    async def test_list_collections_does_not_leak_other_users_data(self, db_session, make_client):
         """User 2 GET /api/collections/ returns an empty list, not user 1's collection."""
         await _ensure_users(db_session)
         await db_session.execute(
-            text(
-                "INSERT INTO collections (user_id, name) VALUES (:uid, :name)"
-            ),
+            text("INSERT INTO collections (user_id, name) VALUES (:uid, :name)"),
             {"uid": 1, "name": "User1 Private Collection"},
         )
         await db_session.commit()
@@ -158,15 +135,11 @@ class TestCollectionIsolation:
         assert data["collections"] == []
 
     @pytest.mark.asyncio
-    async def test_get_collection_returns_404_for_other_users_record(
-        self, db_session, make_client
-    ):
+    async def test_get_collection_returns_404_for_other_users_record(self, db_session, make_client):
         """User 2 GET /api/collections/{id} for a user-1 collection returns 404."""
         await _ensure_users(db_session)
         await db_session.execute(
-            text(
-                "INSERT INTO collections (user_id, name) VALUES (:uid, :name)"
-            ),
+            text("INSERT INTO collections (user_id, name) VALUES (:uid, :name)"),
             {"uid": 1, "name": "User1 Secret"},
         )
         await db_session.commit()
@@ -179,15 +152,11 @@ class TestCollectionIsolation:
         assert resp.status_code == 404
 
     @pytest.mark.asyncio
-    async def test_delete_collection_returns_404_for_other_users_record(
-        self, db_session, make_client
-    ):
+    async def test_delete_collection_returns_404_for_other_users_record(self, db_session, make_client):
         """User 2 DELETE /api/collections/{id} for a user-1 collection returns 404."""
         await _ensure_users(db_session)
         await db_session.execute(
-            text(
-                "INSERT INTO collections (user_id, name) VALUES (:uid, :name)"
-            ),
+            text("INSERT INTO collections (user_id, name) VALUES (:uid, :name)"),
             {"uid": 1, "name": "User1 Delete Target"},
         )
         await db_session.commit()
@@ -209,9 +178,7 @@ class TestHistoryIsolation:
     """User 2 must not see or modify user 1's browse history."""
 
     @pytest.mark.asyncio
-    async def test_list_history_does_not_leak_other_users_data(
-        self, db_session, make_client
-    ):
+    async def test_list_history_does_not_leak_other_users_data(self, db_session, make_client):
         """User 2 GET /api/history/ returns an empty list, not user 1's history."""
         await _ensure_users(db_session)
         await db_session.execute(
@@ -232,9 +199,7 @@ class TestHistoryIsolation:
         assert data["items"] == []
 
     @pytest.mark.asyncio
-    async def test_delete_history_entry_returns_404_for_other_users_record(
-        self, db_session, make_client
-    ):
+    async def test_delete_history_entry_returns_404_for_other_users_record(self, db_session, make_client):
         """User 2 DELETE /api/history/{id} for a user-1 entry returns 404."""
         await _ensure_users(db_session)
         await db_session.execute(
@@ -263,17 +228,12 @@ class TestDownloadJobIsolation:
     """User 2 must not see user 1's download jobs."""
 
     @pytest.mark.asyncio
-    async def test_list_jobs_does_not_include_other_users_jobs(
-        self, db_session, make_client
-    ):
+    async def test_list_jobs_does_not_include_other_users_jobs(self, db_session, make_client):
         """User 2 GET /api/download/jobs does not contain user 1's job."""
         await _ensure_users(db_session)
         job_id = str(uuid.uuid4())
         await db_session.execute(
-            text(
-                "INSERT INTO download_jobs (id, url, user_id, status) "
-                "VALUES (:id, :url, :uid, 'queued')"
-            ),
+            text("INSERT INTO download_jobs (id, url, user_id, status) VALUES (:id, :url, :uid, 'queued')"),
             {"id": job_id, "url": "https://example.com/iso-job", "uid": 1},
         )
         await db_session.commit()
@@ -287,17 +247,12 @@ class TestDownloadJobIsolation:
         assert job_id not in returned_ids
 
     @pytest.mark.asyncio
-    async def test_get_job_returns_403_for_other_users_job(
-        self, db_session, make_client
-    ):
+    async def test_get_job_returns_403_for_other_users_job(self, db_session, make_client):
         """User 2 GET /api/download/jobs/{id} for a user-1 job returns 403."""
         await _ensure_users(db_session)
         job_id = str(uuid.uuid4())
         await db_session.execute(
-            text(
-                "INSERT INTO download_jobs (id, url, user_id, status) "
-                "VALUES (:id, :url, :uid, 'queued')"
-            ),
+            text("INSERT INTO download_jobs (id, url, user_id, status) VALUES (:id, :url, :uid, 'queued')"),
             {"id": job_id, "url": "https://example.com/iso-job-403", "uid": 1},
         )
         await db_session.commit()
@@ -317,17 +272,12 @@ class TestFavoriteIsolation:
     """User 2's favorited=true filter must not return user 1's favorited galleries."""
 
     @pytest.mark.asyncio
-    async def test_library_favorited_filter_does_not_leak_other_users_favorites(
-        self, db_session, make_client
-    ):
+    async def test_library_favorited_filter_does_not_leak_other_users_favorites(self, db_session, make_client):
         """User 2 GET /api/library/?favorited=true returns empty, not user 1's favorite."""
         await _ensure_users(db_session)
         gallery_id = await _insert_gallery(db_session, source_id="fav-iso-gallery")
         await db_session.execute(
-            text(
-                "INSERT INTO user_favorites (user_id, gallery_id) "
-                "VALUES (:uid, :gid)"
-            ),
+            text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (:uid, :gid)"),
             {"uid": 1, "gid": gallery_id},
         )
         await db_session.commit()
@@ -350,23 +300,18 @@ class TestRatingIsolation:
     """User 2 fetching a gallery must see my_rating=null, not user 1's rating."""
 
     @pytest.mark.asyncio
-    async def test_gallery_detail_my_rating_is_null_for_other_users_rating(
-        self, db_session, make_client
-    ):
+    async def test_gallery_detail_my_rating_is_null_for_other_users_rating(self, db_session, make_client):
         """User 2 fetching a gallery rated 5 by user 1 sees my_rating as null."""
         await _ensure_users(db_session)
         gallery_id = await _insert_gallery(db_session, source_id="rating-iso-gallery")
         await db_session.execute(
-            text(
-                "INSERT INTO user_ratings (user_id, gallery_id, rating) "
-                "VALUES (:uid, :gid, 5)"
-            ),
+            text("INSERT INTO user_ratings (user_id, gallery_id, rating) VALUES (:uid, :gid, 5)"),
             {"uid": 1, "gid": gallery_id},
         )
         await db_session.commit()
 
         async with make_client(user_id=2, role="member") as ac:
-            resp = await ac.get(f"/api/library/galleries/test/rating-iso-gallery")
+            resp = await ac.get("/api/library/galleries/test/rating-iso-gallery")
 
         assert resp.status_code == 200
         data = resp.json()

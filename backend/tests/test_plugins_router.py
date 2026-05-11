@@ -8,9 +8,7 @@ depend on which plugins happen to be registered in the current environment.
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from sqlalchemy import text
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -19,10 +17,7 @@ from sqlalchemy import text
 
 async def _insert_user(db_session):
     await db_session.execute(
-        text(
-            "INSERT OR IGNORE INTO users (id, username, password_hash, role) "
-            "VALUES (1, 'admin', 'hash', 'admin')"
-        )
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'admin', 'hash', 'admin')")
     )
     await db_session.commit()
 
@@ -80,9 +75,7 @@ async def test_plugins_list_returns_plugins_array(client, db_session, db_session
     assert len(data["plugins"]) == 1
 
 
-async def test_plugins_list_each_plugin_has_required_fields(
-    client, db_session, db_session_factory
-):
+async def test_plugins_list_each_plugin_has_required_fields(client, db_session, db_session_factory):
     await _insert_user(db_session)
     meta = _make_plugin_meta("test_source", "Test Plugin")
 

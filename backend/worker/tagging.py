@@ -1,7 +1,5 @@
 """AI tagging job for the worker package."""
 
-import logging
-
 import httpx
 from sqlalchemy import case, func, literal
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -122,10 +120,15 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
 
         tagged = 0
         async with AsyncSessionLocal() as session:
-            images = (await session.execute(
-                select(Image).where(Image.gallery_id == gallery_id)
-                .options(selectinload(Image.blob))
-            )).scalars().all()
+            images = (
+                (
+                    await session.execute(
+                        select(Image).where(Image.gallery_id == gallery_id).options(selectinload(Image.blob))
+                    )
+                )
+                .scalars()
+                .all()
+            )
 
             for img in images:
                 blob = img.blob
@@ -170,9 +173,9 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
 
                     if missing:
                         for ns, name in missing:
-                            row = (await session.execute(
-                                select(Tag.id).where(Tag.namespace == ns, Tag.name == name)
-                            )).scalar_one_or_none()
+                            row = (
+                                await session.execute(select(Tag.id).where(Tag.namespace == ns, Tag.name == name))
+                            ).scalar_one_or_none()
                             if row:
                                 tag_id_map[(ns, name)] = row
 
@@ -182,11 +185,13 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
                     # Upsert image_tags
                     it_values = []
                     for (ns, name), tid in tag_id_map.items():
-                        it_values.append({
-                            "image_id": img.id,
-                            "tag_id": tid,
-                            "confidence": conf_map.get((ns, name)),
-                        })
+                        it_values.append(
+                            {
+                                "image_id": img.id,
+                                "tag_id": tid,
+                                "confidence": conf_map.get((ns, name)),
+                            }
+                        )
 
                     if it_values:
                         it_stmt = (
@@ -209,6 +214,7 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
             # Aggregate AI tags to gallery level
             count = await _aggregate_to_gallery(session, gallery_id, settings.tag_general_threshold)
             from worker.tag_helpers import rebuild_gallery_tags_array
+
             await rebuild_gallery_tags_array(session, gallery_id)
             logger.info("[tag] gallery_id=%d: %d tags aggregated to gallery", gallery_id, count)
 
@@ -217,6 +223,7 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
     logger.info("[tag] gallery_id=%d: %d images tagged", gallery_id, tagged)
 
     from core.events import EventType, emit_safe
+
     await emit_safe(EventType.GALLERY_TAGGED, resource_type="gallery", resource_id=gallery_id, tags_count=count)
 
     return {"status": "done", "tagged": tagged}

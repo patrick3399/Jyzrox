@@ -9,11 +9,7 @@ Strategy:
 - Patch get_redis / get_download_delay to avoid Redis connections.
 """
 
-from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
-
-import pytest
-
+from unittest.mock import AsyncMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers / shared fixtures
@@ -321,8 +317,8 @@ class TestEhDownloaderErrorHandling:
 
     async def test_download_gallery_509_error_returns_failed(self, tmp_path):
         """When Image509Error is raised, the download should return status 'failed' with 509 message."""
-        from services.eh_downloader import download_eh_gallery
         from services.eh_client import Image509Error
+        from services.eh_downloader import download_eh_gallery
 
         mock_client = _make_eh_client_mock()
         mock_client.download_image_with_retry = AsyncMock(side_effect=Image509Error("509"))

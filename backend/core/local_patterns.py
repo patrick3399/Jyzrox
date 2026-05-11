@@ -7,7 +7,6 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Literal
 
-
 DEFAULT_LIBRARY_PATTERN = "{title}"
 DEFAULT_IMPORT_MODE = "link"
 

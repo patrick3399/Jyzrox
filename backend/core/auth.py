@@ -56,7 +56,7 @@ def verify_session(raw: str) -> str | None:
     if idx == -1:
         logger.warning("Session data has no HMAC signature — rejected")
         return None
-    data, sig = raw[:idx], raw[idx + 1:]
+    data, sig = raw[:idx], raw[idx + 1 :]
     if len(sig) != 64:
         logger.warning("Session data has invalid signature format — rejected")
         return None
@@ -112,7 +112,9 @@ async def require_auth(
             if stored_ip and current_ip and stored_ip != current_ip:
                 logger.warning(
                     "Session IP changed for user %s: %s -> %s",
-                    user_id_str, stored_ip, current_ip,
+                    user_id_str,
+                    stored_ip,
+                    current_ip,
                 )
                 meta["ip"] = current_ip
                 _session_changed = True
@@ -228,5 +230,5 @@ def gallery_access_filter(auth: dict):
             Gallery.created_by_user_id == user_id,
             Gallery.created_by_user_id.is_(None),
             Gallery.visibility == "public",
-        )
+        ),
     )

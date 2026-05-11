@@ -11,7 +11,6 @@ Covers:
 from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Plugin instantiation helper
 # ---------------------------------------------------------------------------
@@ -20,6 +19,7 @@ from unittest.mock import AsyncMock, patch
 def _make_plugin():
     """Return a fresh EhSourcePlugin instance."""
     from plugins.builtin.ehentai.source import EhSourcePlugin
+
     return EhSourcePlugin()
 
 
@@ -97,7 +97,9 @@ class TestEhSourceDownloadNoCredentials:
         mock_redis.get = AsyncMock(return_value=None)  # no Redis override for use_ex
 
         with (
-            patch("services.eh_downloader.download_eh_gallery", new_callable=AsyncMock, return_value=mock_result) as mock_dl,
+            patch(
+                "services.eh_downloader.download_eh_gallery", new_callable=AsyncMock, return_value=mock_result
+            ) as mock_dl,
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("core.config.settings") as mock_settings,
         ):
@@ -131,7 +133,9 @@ class TestEhSourceDownloadNoCredentials:
         mock_redis.get = AsyncMock(return_value=None)
 
         with (
-            patch("services.eh_downloader.download_eh_gallery", new_callable=AsyncMock, return_value=mock_result) as mock_dl,
+            patch(
+                "services.eh_downloader.download_eh_gallery", new_callable=AsyncMock, return_value=mock_result
+            ) as mock_dl,
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("core.config.settings") as mock_settings,
         ):
@@ -222,7 +226,9 @@ class TestEhSourceDownloadWithCredentials:
         mock_redis.get = AsyncMock(return_value=None)
 
         with (
-            patch("services.eh_downloader.download_eh_gallery", new_callable=AsyncMock, return_value=mock_result) as mock_dl,
+            patch(
+                "services.eh_downloader.download_eh_gallery", new_callable=AsyncMock, return_value=mock_result
+            ) as mock_dl,
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("core.config.settings") as mock_settings,
         ):
@@ -243,6 +249,7 @@ class TestEhSourceDownloadWithCredentials:
     async def test_download_with_string_credentials_parses_json(self):
         """String JSON credential should be parsed and passed as cookies."""
         import json
+
         plugin = _make_plugin()
 
         fake_cookies = {"ipb_member_id": "99999", "ipb_pass_hash": "phash"}
@@ -252,7 +259,9 @@ class TestEhSourceDownloadWithCredentials:
         mock_redis.get = AsyncMock(return_value=None)
 
         with (
-            patch("services.eh_downloader.download_eh_gallery", new_callable=AsyncMock, return_value=mock_result) as mock_dl,
+            patch(
+                "services.eh_downloader.download_eh_gallery", new_callable=AsyncMock, return_value=mock_result
+            ) as mock_dl,
             patch("core.redis_client.get_redis", return_value=mock_redis),
             patch("core.config.settings") as mock_settings,
         ):

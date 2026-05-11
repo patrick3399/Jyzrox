@@ -6,8 +6,10 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
+
 def _make_eval_response(state_dict: dict) -> bytes:
     return json.dumps(state_dict).encode()
+
 
 def _default_state_dict(**overrides) -> dict:
     base = {
@@ -18,6 +20,7 @@ def _default_state_dict(**overrides) -> dict:
     base.update(overrides)
     return base
 
+
 def _mock_pipeline():
     pipe = MagicMock()
     pipe.delete = MagicMock()
@@ -25,6 +28,7 @@ def _mock_pipeline():
     pipe.set = MagicMock()
     pipe.execute = AsyncMock(return_value=[])
     return pipe
+
 
 @pytest.fixture
 def mock_redis():
@@ -40,7 +44,9 @@ def mock_redis():
     r._pipe = pipe
     return r
 
+
 # ── AdaptiveSignal v3 ──
+
 
 def test_adaptive_signal_v3_only_credential_signals():
     from core.adaptive import AdaptiveSignal
@@ -50,6 +56,7 @@ def test_adaptive_signal_v3_only_credential_signals():
     for removed in ("HTTP_429", "HTTP_503", "TIMEOUT", "CONNECTION_ERROR", "SUCCESS", "EMPTY_FILE"):
         assert not hasattr(AdaptiveSignal, removed)
 
+
 def test_adaptive_signal_is_str_enum():
     from core.adaptive import AdaptiveSignal
 
@@ -57,7 +64,9 @@ def test_adaptive_signal_is_str_enum():
     assert AdaptiveSignal.HTTP_403 == "http_403"
     assert AdaptiveSignal.HTML_RESPONSE == "html_response"
 
+
 # ── AdaptiveState v3 ──
+
 
 def test_adaptive_state_v3_has_three_fields():
     from core.adaptive import AdaptiveState
@@ -70,6 +79,7 @@ def test_adaptive_state_v3_has_three_fields():
     assert not hasattr(s, "http_timeout_add")
     assert not hasattr(s, "consecutive_success")
 
+
 def test_adaptive_state_from_dict():
     from core.adaptive import AdaptiveState
 
@@ -77,13 +87,16 @@ def test_adaptive_state_from_dict():
     assert s.credential_warning is True
     assert s.last_signal == "http_403"
 
+
 def test_adaptive_state_from_dict_handles_bad_input():
     from core.adaptive import AdaptiveState
 
     s = AdaptiveState.from_dict({})
     assert s.credential_warning is False
 
+
 # ── _validate_download_content (still in source.py, test here for convenience) ──
+
 
 def test_validate_download_content_returns_empty_for_zero_byte_file(tmp_path):
     from plugins.builtin.gallery_dl.source import _validate_download_content
@@ -92,12 +105,14 @@ def test_validate_download_content_returns_empty_for_zero_byte_file(tmp_path):
     f.write_bytes(b"")
     assert _validate_download_content(f) == "empty"
 
+
 def test_validate_download_content_returns_html_for_small_html_file(tmp_path):
     from plugins.builtin.gallery_dl.source import _validate_download_content
 
     f = tmp_path / "bad.jpg"
     f.write_bytes(b"<!DOCTYPE html><html><head><title>Access Denied</title></head></html>")
     assert _validate_download_content(f) == "html"
+
 
 def test_validate_download_content_returns_none_for_valid_binary_file(tmp_path):
     from plugins.builtin.gallery_dl.source import _validate_download_content
@@ -106,12 +121,15 @@ def test_validate_download_content_returns_none_for_valid_binary_file(tmp_path):
     f.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * (200 * 1024))
     assert _validate_download_content(f) is None
 
+
 def test_validate_download_content_returns_none_for_missing_file():
     from plugins.builtin.gallery_dl.source import _validate_download_content
 
     assert _validate_download_content(Path("/nonexistent/file.jpg")) is None
 
+
 # ── AdaptiveEngine.record_signal ──
+
 
 @pytest.mark.asyncio
 async def test_record_403_sets_credential_warning(mock_redis):
@@ -126,6 +144,7 @@ async def test_record_403_sets_credential_warning(mock_redis):
     assert state.last_signal == "http_403"
     mock_redis.eval.assert_called_once()
 
+
 @pytest.mark.asyncio
 async def test_record_html_response_sets_credential_warning(mock_redis):
     from core.adaptive import AdaptiveEngine, AdaptiveSignal
@@ -136,6 +155,7 @@ async def test_record_html_response_sets_credential_warning(mock_redis):
         engine = AdaptiveEngine()
         state = await engine.record_signal("ehentai", AdaptiveSignal.HTML_RESPONSE)
     assert state.credential_warning is True
+
 
 @pytest.mark.asyncio
 async def test_record_signal_no_count_param(mock_redis):
@@ -148,7 +168,9 @@ async def test_record_signal_no_count_param(mock_redis):
     params = list(sig.parameters.keys())
     assert "count" not in params
 
+
 # ── AdaptiveEngine.get_state ──
+
 
 @pytest.mark.asyncio
 async def test_get_state_returns_default_when_no_redis_key(mock_redis):
@@ -161,6 +183,7 @@ async def test_get_state_returns_default_when_no_redis_key(mock_redis):
     assert isinstance(state, AdaptiveState)
     assert state.credential_warning is False
 
+
 @pytest.mark.asyncio
 async def test_get_state_returns_parsed_state_from_redis(mock_redis):
     from core.adaptive import AdaptiveEngine
@@ -171,6 +194,7 @@ async def test_get_state_returns_parsed_state_from_redis(mock_redis):
         engine = AdaptiveEngine()
         state = await engine.get_state("ehentai")
     assert state.credential_warning is True
+
 
 @pytest.mark.asyncio
 async def test_get_state_falls_back_to_db_when_redis_empty(mock_redis):
@@ -194,7 +218,9 @@ async def test_get_state_falls_back_to_db_when_redis_empty(mock_redis):
     assert state.credential_warning is True
     mock_redis.set.assert_called_once()
 
+
 # ── AdaptiveEngine.reset ──
+
 
 @pytest.mark.asyncio
 async def test_reset_clears_state_for_source(mock_redis):
@@ -208,7 +234,9 @@ async def test_reset_clears_state_for_source(mock_redis):
     pipe.delete.assert_called_once_with("adaptive:ehentai")
     pipe.srem.assert_called_once_with("adaptive:dirty", "ehentai")
 
+
 # ── AdaptiveEngine.persist_dirty ──
+
 
 @pytest.mark.asyncio
 async def test_persist_dirty_writes_db_upsert(mock_redis):
@@ -231,6 +259,7 @@ async def test_persist_dirty_writes_db_upsert(mock_redis):
         count = await engine.persist_dirty()
     assert count == 1
 
+
 @pytest.mark.asyncio
 async def test_persist_dirty_returns_zero_when_empty(mock_redis):
     from core.adaptive import AdaptiveEngine
@@ -241,7 +270,9 @@ async def test_persist_dirty_returns_zero_when_empty(mock_redis):
         count = await engine.persist_dirty()
     assert count == 0
 
+
 # ── AdaptiveEngine.load_all_from_db ──
+
 
 @pytest.mark.asyncio
 async def test_load_all_from_db_pipeline_set(mock_redis):
@@ -269,6 +300,7 @@ async def test_load_all_from_db_pipeline_set(mock_redis):
         count = await engine.load_all_from_db()
     assert count == 1
     assert pipe.set.call_count == 1
+
 
 @pytest.mark.asyncio
 async def test_load_all_from_db_returns_zero_when_no_rows(mock_redis):

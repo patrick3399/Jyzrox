@@ -38,12 +38,7 @@ async def thumbhash_backfill_job(ctx: dict, batch_size: int = 500) -> dict:
 
     while True:
         async with AsyncSessionLocal() as session:
-            stmt = (
-                select(Blob)
-                .where(Blob.thumbhash.is_(None))
-                .order_by(Blob.sha256)
-                .limit(batch_size)
-            )
+            stmt = select(Blob).where(Blob.thumbhash.is_(None)).order_by(Blob.sha256).limit(batch_size)
             if last_sha:
                 stmt = stmt.where(Blob.sha256 > last_sha)
 
@@ -70,7 +65,9 @@ async def thumbhash_backfill_job(ctx: dict, batch_size: int = 500) -> dict:
 
             await session.commit()
 
-        logger.info("[thumbhash_backfill] processed=%d failed=%d last=%s", processed, failed, last_sha[:12] if last_sha else "")
+        logger.info(
+            "[thumbhash_backfill] processed=%d failed=%d last=%s", processed, failed, last_sha[:12] if last_sha else ""
+        )
 
     logger.info("[thumbhash_backfill] done: processed=%d failed=%d", processed, failed)
     return {"status": "done", "processed": processed, "failed": failed}

@@ -130,15 +130,17 @@ async def login(req: LoginRequest, request: Request, response: Response):
 
     token = secrets.token_urlsafe(32)
     ua = request.headers.get("user-agent", "")
-    session_meta = _sign_session(json.dumps(
-        {
-            "user_id": user.id,
-            "role": user.role,
-            "ip": client_ip,
-            "user_agent": ua[:256],
-            "created_at": datetime.now(UTC).isoformat(),
-        }
-    ))
+    session_meta = _sign_session(
+        json.dumps(
+            {
+                "user_id": user.id,
+                "role": user.role,
+                "ip": client_ip,
+                "user_agent": ua[:256],
+                "created_at": datetime.now(UTC).isoformat(),
+            }
+        )
+    )
     await get_redis().setex(f"session:{user.id}:{token}", _SESSION_TTL, session_meta)
 
     is_https = _is_https(request)
@@ -186,12 +188,13 @@ async def check_auth(
                 raw = session_data if isinstance(session_data, str) else session_data.decode()
                 if _verify_session(raw) is not None:
                     return {"status": "ok"}
-        except (ValueError, UnicodeDecodeError):
+        except ValueError, UnicodeDecodeError:
             pass
 
     # Fallback to Basic Auth (for OPDS clients)
     if authorization and authorization.lower().startswith("basic "):
         import base64
+
         try:
             decoded = base64.b64decode(authorization[6:]).decode("utf-8")
             username, password = decoded.split(":", 1)
@@ -245,7 +248,7 @@ async def list_sessions(
                 raw_str = raw if isinstance(raw, str) else raw.decode()
                 verified = _verify_session(raw_str)
                 meta = json.loads(verified) if verified else {}
-            except (json.JSONDecodeError, UnicodeDecodeError):
+            except json.JSONDecodeError, UnicodeDecodeError:
                 meta = {}
 
             sessions.append(
@@ -518,7 +521,7 @@ async def change_password(
         cursor, keys = await redis.scan(cursor, match=f"{prefix}*", count=100)
         for key in keys:
             key_str = key if isinstance(key, str) else key.decode()
-            token = key_str[len(prefix):]
+            token = key_str[len(prefix) :]
             if token != current_token:
                 await redis.delete(key_str)
         if cursor == 0:

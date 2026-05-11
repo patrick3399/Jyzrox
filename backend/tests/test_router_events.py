@@ -11,9 +11,7 @@ import uuid
 from datetime import UTC, datetime
 from unittest.mock import AsyncMock, patch
 
-import pytest
 from sqlalchemy import text
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -87,9 +85,7 @@ async def _insert_subscription(db_session):
 async def _insert_collection(db_session):
     """Insert a collection and return its id."""
     await db_session.execute(
-        text(
-            "INSERT INTO collections (user_id, name) VALUES (:user_id, :name)"
-        ),
+        text("INSERT INTO collections (user_id, name) VALUES (:user_id, :name)"),
         {"user_id": 1, "name": "Event Test Collection"},
     )
     await db_session.commit()
@@ -113,6 +109,7 @@ async def test_delete_gallery_emits_gallery_deleted(client, db_session):
     assert resp.status_code == 200
     mock_emit.assert_called_once()
     from core.events import EventType
+
     assert mock_emit.call_args.args[0] == EventType.GALLERY_DELETED
 
 
@@ -133,6 +130,7 @@ async def test_restore_gallery_emits_gallery_restored(client, db_session):
     assert resp.status_code == 200
     mock_emit.assert_called_once()
     from core.events import EventType
+
     assert mock_emit.call_args.args[0] == EventType.GALLERY_RESTORED
 
 
@@ -150,6 +148,7 @@ async def test_update_gallery_emits_gallery_updated(client, db_session):
     assert resp.status_code == 200
     mock_emit.assert_called_once()
     from core.events import EventType
+
     assert mock_emit.call_args.args[0] == EventType.GALLERY_UPDATED
 
 
@@ -172,6 +171,7 @@ async def test_enqueue_download_emits_download_enqueued(client):
     if resp.status_code == 200:
         mock_emit.assert_called_once()
         from core.events import EventType
+
         assert mock_emit.call_args.args[0] == EventType.DOWNLOAD_ENQUEUED
     else:
         # If enqueue failed (503), emit was not called — that is also correct behavior.
@@ -191,6 +191,7 @@ async def test_cancel_download_emits_download_cancelled(client, db_session, mock
     assert resp.status_code == 200
     mock_emit.assert_called_once()
     from core.events import EventType
+
     assert mock_emit.call_args.args[0] == EventType.DOWNLOAD_CANCELLED
 
 
@@ -213,6 +214,7 @@ async def test_create_subscription_emits_subscription_created(client, db_session
     if resp.status_code == 200:
         mock_emit.assert_called_once()
         from core.events import EventType
+
         assert mock_emit.call_args.args[0] == EventType.SUBSCRIPTION_CREATED
 
 
@@ -227,6 +229,7 @@ async def test_delete_subscription_emits_subscription_deleted(client, db_session
     assert resp.status_code == 200
     mock_emit.assert_called_once()
     from core.events import EventType
+
     assert mock_emit.call_args.args[0] == EventType.SUBSCRIPTION_DELETED
 
 
@@ -247,6 +250,7 @@ async def test_create_collection_emits_collection_updated(client):
     assert resp.status_code == 200
     mock_emit.assert_called_once()
     from core.events import EventType
+
     assert mock_emit.call_args.args[0] == EventType.COLLECTION_UPDATED
 
 
@@ -261,6 +265,7 @@ async def test_delete_collection_emits_collection_updated(client, db_session):
     assert resp.status_code == 200
     mock_emit.assert_called_once()
     from core.events import EventType
+
     assert mock_emit.call_args.args[0] == EventType.COLLECTION_UPDATED
 
 
@@ -287,4 +292,5 @@ async def test_dedup_start_scan_emits_dedup_scan_started(client, mock_redis):
     assert resp.status_code == 200
     mock_emit.assert_called_once()
     from core.events import EventType
+
     assert mock_emit.call_args.args[0] == EventType.DEDUP_SCAN_STARTED

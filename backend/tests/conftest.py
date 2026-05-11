@@ -16,7 +16,7 @@ import os
 import sys
 import types as _types
 from contextlib import ExitStack, asynccontextmanager
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 

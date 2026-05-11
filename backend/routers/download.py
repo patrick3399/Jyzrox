@@ -88,9 +88,7 @@ async def _normalize_finished_gallery_statuses(db: AsyncSession, gallery_ids: li
         gid: count
         for gid, count in (
             await db.execute(
-                select(Image.gallery_id, func.count())
-                .where(Image.gallery_id.in_(stale_ids))
-                .group_by(Image.gallery_id)
+                select(Image.gallery_id, func.count()).where(Image.gallery_id.in_(stale_ids)).group_by(Image.gallery_id)
             )
         ).all()
     }
@@ -236,9 +234,7 @@ async def enqueue_download(
         merged_options["filesize_min"] = req.filesize_min
     if req.filesize_max:
         merged_options["filesize_max"] = req.filesize_max
-    result = await _enqueue(
-        req.url, db, options=merged_options or None, total=req.total, user_id=auth["user_id"]
-    )
+    result = await _enqueue(req.url, db, options=merged_options or None, total=req.total, user_id=auth["user_id"])
     from core.events import EventType, emit_safe
 
     await emit_safe(

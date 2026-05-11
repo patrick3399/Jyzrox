@@ -3,6 +3,7 @@
 from dataclasses import dataclass
 from typing import Literal
 
+
 @dataclass(frozen=True, slots=True)
 class SourceDisplayConfig:
     """Display preferences for a given source."""
@@ -10,7 +11,9 @@ class SourceDisplayConfig:
     image_order: Literal["asc", "desc"] = "asc"
     cover_page: Literal["first", "last"] = "first"
 
+
 _DEFAULT = SourceDisplayConfig()
+
 
 def get_display_config(source: str) -> SourceDisplayConfig:
     """Return display config for the given source.

@@ -10,13 +10,13 @@ import psutil
 from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from sqlalchemy import text
 
+import core.queue
 from core.auth import require_auth, require_role
-from core.version import __version__
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.redis_client import get_redis
 from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
-import core.queue
+from core.version import __version__
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["system"])

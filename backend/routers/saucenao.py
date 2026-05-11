@@ -35,9 +35,7 @@ async def saucenao_search(body: SearchRequest, _: dict = Depends(require_auth)):
 
     async with async_session() as session:
         result = await session.execute(
-            select(Image, Blob)
-            .join(Blob, Image.blob_sha256 == Blob.sha256)
-            .where(Image.id == body.image_id)
+            select(Image, Blob).join(Blob, Image.blob_sha256 == Blob.sha256).where(Image.id == body.image_id)
         )
         row = result.one_or_none()
         if not row:

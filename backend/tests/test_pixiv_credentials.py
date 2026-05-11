@@ -28,6 +28,7 @@ if os.path.abspath(_backend_dir) not in sys.path:
 # Tests: pixiv_credential_flows()
 # ---------------------------------------------------------------------------
 
+
 class TestPixivCredentialFlows:
     """Unit tests for pixiv_credential_flows()."""
 
@@ -97,9 +98,11 @@ class TestPixivCredentialFlows:
         field_names = [f.name for f in login_flow.fields]
         assert "phpsessid" in field_names
 
+
 # ---------------------------------------------------------------------------
 # Tests: verify_pixiv_credential()
 # ---------------------------------------------------------------------------
+
 
 class TestVerifyPixivCredential:
     """Unit tests for verify_pixiv_credential()."""

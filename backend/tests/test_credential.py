@@ -10,12 +10,11 @@ DB functions are unit-tested by patching services.credential.AsyncSessionLocal
 with a mock async context manager, following the same pattern as test_retry.py.
 """
 
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from cryptography.exceptions import InvalidTag
-
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -119,7 +118,7 @@ class TestGetCredential:
         """Should return None when expires_at is in the past (tz-aware)."""
         from services.credential import encrypt
 
-        expired_at = datetime.now(timezone.utc) - timedelta(hours=1)
+        expired_at = datetime.now(UTC) - timedelta(hours=1)
         cred = _make_mock_cred(
             value_encrypted=encrypt("secret"),
             expires_at=expired_at,

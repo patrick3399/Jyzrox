@@ -104,7 +104,7 @@ async def get_logs(
         entries.append(entry)
 
     total = len(entries)
-    page = entries[offset: offset + limit]
+    page = entries[offset : offset + limit]
     return {
         "logs": page,
         "total": total,

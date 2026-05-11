@@ -48,7 +48,9 @@ class _ImportRequest:
     mode: str
 
 
-def _cover_image_for_gallery(gallery: Gallery, images: list[Image], excluded_set: set[str] | None = None) -> Image | None:
+def _cover_image_for_gallery(
+    gallery: Gallery, images: list[Image], excluded_set: set[str] | None = None
+) -> Image | None:
     excluded = excluded_set or set()
     eligible = []
     for img in images:

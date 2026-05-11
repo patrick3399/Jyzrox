@@ -180,12 +180,14 @@ export default function AccountSettingsPage() {
                 <div className="flex bg-vault-input border border-vault-border rounded overflow-hidden">
                   <button
                     onClick={() => handleAvatarStyleChange('gravatar')}
+                    aria-pressed={avatarStyle === 'gravatar'}
                     className={`flex-1 px-3 py-1.5 text-xs transition-colors ${avatarStyle === 'gravatar' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
                   >
                     {t('settings.avatarGravatar')}
                   </button>
                   <button
                     onClick={() => handleAvatarStyleChange('manual')}
+                    aria-pressed={avatarStyle === 'manual'}
                     className={`flex-1 px-3 py-1.5 text-xs transition-colors ${avatarStyle === 'manual' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
                   >
                     {t('settings.avatarCustom')}

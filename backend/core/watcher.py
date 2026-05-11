@@ -1,6 +1,5 @@
 """Real-time library directory monitoring via watchdog."""
 
-import asyncio
 import logging
 import threading
 from pathlib import Path
@@ -120,6 +119,7 @@ class LibraryWatcher:
         self.stop()
 
         from core.config import settings
+
         use_polling = settings.watcher_use_polling
 
         if not use_polling:
@@ -143,6 +143,7 @@ class LibraryWatcher:
 
         if use_polling:
             from watchdog.observers.polling import PollingObserver
+
             self._observer = PollingObserver(timeout=settings.watcher_polling_interval)
             self._handler = _LibraryHandler(enqueue_fn, debounce_secs)
             for p in paths:
@@ -198,6 +199,7 @@ class LibraryWatcher:
     @property
     def is_polling(self) -> bool:
         from watchdog.observers.polling import PollingObserver
+
         return isinstance(self._observer, PollingObserver)
 
     @property

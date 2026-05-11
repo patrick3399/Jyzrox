@@ -16,12 +16,8 @@ Covers:
 """
 
 import json
-import os
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, call, patch
-
-import pytest
-
+from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -262,11 +258,11 @@ class TestReconciliationJob:
         phase3_result = _make_result_with_rows([])
 
         execute_returns = [
-            phase1_galleries_result,   # select Gallery WHERE tuple IN
-            phase1_images_result,      # select Image WHERE gallery_id IN
-            _make_empty_result(),      # DELETE FROM galleries (empty galleries)
-            phase2_result,             # select Gallery for orphan check
-            phase3_result,             # blob GC query
+            phase1_galleries_result,  # select Gallery WHERE tuple IN
+            phase1_images_result,  # select Image WHERE gallery_id IN
+            _make_empty_result(),  # DELETE FROM galleries (empty galleries)
+            phase2_result,  # select Gallery for orphan check
+            phase3_result,  # blob GC query
         ]
 
         session = _make_session_ctx(execute_side_effects=execute_returns)
@@ -313,10 +309,10 @@ class TestReconciliationJob:
         phase3_result = _make_result_with_rows([])
 
         execute_returns = [
-            phase2_galleries_result,   # select Gallery for orphan check
-            phase2_images_result,      # select Image WHERE gallery_id IN
-            _make_empty_result(),      # DELETE FROM galleries
-            phase3_result,             # blob GC
+            phase2_galleries_result,  # select Gallery for orphan check
+            phase2_images_result,  # select Image WHERE gallery_id IN
+            _make_empty_result(),  # DELETE FROM galleries
+            phase3_result,  # blob GC
         ]
 
         session = _make_session_ctx(execute_side_effects=execute_returns)
@@ -357,9 +353,9 @@ class TestReconciliationJob:
         delete_result = _make_empty_result()
 
         execute_returns = [
-            phase2_galleries_result,   # Phase 2 orphan galleries
-            phase3_blob_gc_result,     # Phase 3 GC query
-            delete_result,             # DELETE FROM blobs
+            phase2_galleries_result,  # Phase 2 orphan galleries
+            phase3_blob_gc_result,  # Phase 3 GC query
+            delete_result,  # DELETE FROM blobs
         ]
 
         session = _make_session_ctx(execute_side_effects=execute_returns)
@@ -404,12 +400,11 @@ class TestReconciliationJob:
         phase2_galleries_result = _make_result_with_rows([])
         phase3_blob_gc_result = _make_result_with_rows([drifted_blob])
         correction_result = _make_empty_result()  # UPDATE blobs SET ref_count
-        commit_point = _make_empty_result()
 
         execute_returns = [
             phase2_galleries_result,
             phase3_blob_gc_result,
-            correction_result,   # UPDATE for drifted blob
+            correction_result,  # UPDATE for drifted blob
         ]
 
         session = _make_session_ctx(execute_side_effects=execute_returns)
@@ -447,10 +442,12 @@ class TestReconciliationJob:
         def _scandir_side_effect(path):
             return iter([])
 
-        session = _make_session_ctx(execute_side_effects=[
-            _make_result_with_rows([]),  # Phase 2
-            _make_result_with_rows([]),  # Phase 3
-        ])
+        session = _make_session_ctx(
+            execute_side_effects=[
+                _make_result_with_rows([]),  # Phase 2
+                _make_result_with_rows([]),  # Phase 3
+            ]
+        )
 
         with (
             patch("worker.reconciliation._cron_should_run", new_callable=AsyncMock, return_value=True),
@@ -484,10 +481,12 @@ class TestReconciliationJob:
         def _scandir_side_effect(path):
             return iter([])
 
-        session = _make_session_ctx(execute_side_effects=[
-            _make_result_with_rows([]),
-            _make_result_with_rows([]),
-        ])
+        session = _make_session_ctx(
+            execute_side_effects=[
+                _make_result_with_rows([]),
+                _make_result_with_rows([]),
+            ]
+        )
 
         with (
             patch("worker.reconciliation._cron_should_run", new_callable=AsyncMock, return_value=True),
@@ -500,10 +499,7 @@ class TestReconciliationJob:
         ):
             await reconciliation_job(ctx)
 
-        last_result_calls = [
-            c for c in redis.setex.call_args_list
-            if c.args[0] == "reconcile:last_result"
-        ]
+        last_result_calls = [c for c in redis.setex.call_args_list if c.args[0] == "reconcile:last_result"]
         assert len(last_result_calls) == 1
         # TTL should be 30 days (86400 * 30)
         assert last_result_calls[0].args[1] == 86400 * 30
@@ -540,12 +536,14 @@ class TestReconciliationJob:
                 return iter([gal_entry])
             return iter([broken_link])
 
-        session = _make_session_ctx(execute_side_effects=[
-            _make_result_with_rows([]),  # Phase 1 Gallery query
-            _make_result_with_rows([]),  # Phase 1 Images query
-            _make_result_with_rows([]),  # Phase 2
-            _make_result_with_rows([]),  # Phase 3
-        ])
+        session = _make_session_ctx(
+            execute_side_effects=[
+                _make_result_with_rows([]),  # Phase 1 Gallery query
+                _make_result_with_rows([]),  # Phase 1 Images query
+                _make_result_with_rows([]),  # Phase 2
+                _make_result_with_rows([]),  # Phase 3
+            ]
+        )
 
         with (
             patch("worker.reconciliation._cron_should_run", new_callable=AsyncMock, return_value=True),
@@ -578,10 +576,12 @@ class TestReconciliationJob:
         def _scandir_side_effect(path):
             return iter([])
 
-        session = _make_session_ctx(execute_side_effects=[
-            _make_result_with_rows([]),
-            _make_result_with_rows([]),
-        ])
+        session = _make_session_ctx(
+            execute_side_effects=[
+                _make_result_with_rows([]),
+                _make_result_with_rows([]),
+            ]
+        )
 
         mock_cron_record = AsyncMock()
 
@@ -617,9 +617,9 @@ class TestReconciliationJob:
             return iter([])
 
         execute_returns = [
-            _make_result_with_rows([]),          # Phase 2
+            _make_result_with_rows([]),  # Phase 2
             _make_result_with_rows([orphan_blob]),  # Phase 3 GC
-            _make_empty_result(),                 # DELETE blobs
+            _make_empty_result(),  # DELETE blobs
         ]
 
         session = _make_session_ctx(execute_side_effects=execute_returns)
@@ -660,10 +660,12 @@ class TestReconciliationJob:
         gal1 = _make_dir_entry("gal_1", is_dir=True, path=str(lib_base / "src_a" / "gal_1"))
         gal2 = _make_dir_entry("gal_2", is_dir=True, path=str(lib_base / "src_a" / "gal_2"))
         # Each gallery has one valid (non-symlink) file
-        file1 = _make_dir_entry("img1.jpg", is_dir=False, is_symlink=False,
-                                path=str(lib_base / "src_a" / "gal_1" / "img1.jpg"))
-        file2 = _make_dir_entry("img2.jpg", is_dir=False, is_symlink=False,
-                                path=str(lib_base / "src_a" / "gal_2" / "img2.jpg"))
+        file1 = _make_dir_entry(
+            "img1.jpg", is_dir=False, is_symlink=False, path=str(lib_base / "src_a" / "gal_1" / "img1.jpg")
+        )
+        file2 = _make_dir_entry(
+            "img2.jpg", is_dir=False, is_symlink=False, path=str(lib_base / "src_a" / "gal_2" / "img2.jpg")
+        )
 
         def _scandir_side_effect(path):
             path_str = str(path)
@@ -698,8 +700,5 @@ class TestReconciliationJob:
             result = await reconciliation_job(ctx)
 
         assert result["status"] == "done"
-        # Phase 1 gallery query should have been called with both keys
-        phase1_execute_call = session.execute.call_args_list[0]
-        # The query is built with tuple_(Gallery.source, Gallery.source_id).in_(chunk_keys)
         # We verify execute was called (i.e., both galleries were included in the scan)
         assert session.execute.call_count >= 1

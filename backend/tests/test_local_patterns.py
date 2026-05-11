@@ -17,7 +17,6 @@ from core.local_patterns import (
     validate_library_pattern,
 )
 
-
 # ---------------------------------------------------------------------------
 # split_library_pattern_path — placeholder branch (lines 39-43)
 # ---------------------------------------------------------------------------
@@ -28,9 +27,7 @@ def test_split_library_pattern_path_with_placeholder_parses_root_and_pattern():
     result = split_library_pattern_path("/srv/library/{title}")
     assert result.pattern == "{title}"
     # root_path should be the realpath of /srv/library
-    assert result.root_path.endswith("library") or result.root_path == str(
-        Path("/srv/library").resolve()
-    )
+    assert result.root_path.endswith("library") or result.root_path == str(Path("/srv/library").resolve())
 
 
 def test_split_library_pattern_path_with_nested_placeholder():
@@ -138,7 +135,5 @@ def test_pattern_match_success_returns_groupdict():
 
 def test_pattern_match_multi_segment_success():
     """Multi-segment pattern with multiple placeholders must match correctly."""
-    result = pattern_match(
-        "{artist}/{title}", Path("/lib"), Path("/lib/john/painting")
-    )
+    result = pattern_match("{artist}/{title}", Path("/lib"), Path("/lib/john/painting"))
     assert result == {"artist": "john", "title": "painting"}

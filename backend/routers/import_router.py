@@ -194,7 +194,14 @@ async def batch_start(
             )
             await session.execute(stmt)
             await session.commit()
-    await core.queue.enqueue("batch_import_job", root_dir=real_root, mode=req.mode, galleries=req.galleries, batch_id=batch_id, user_id=auth["user_id"])
+    await core.queue.enqueue(
+        "batch_import_job",
+        root_dir=real_root,
+        mode=req.mode,
+        galleries=req.galleries,
+        batch_id=batch_id,
+        user_id=auth["user_id"],
+    )
 
     return {"batch_id": batch_id, "total": total}
 

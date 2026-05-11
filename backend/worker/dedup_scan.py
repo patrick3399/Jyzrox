@@ -2,17 +2,17 @@
 
 import logging
 
-from sqlalchemy import delete, func, select
+from sqlalchemy import delete, func, select, update
+from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.database import async_session
 from core.redis_client import get_redis
 from db.models import Blob, BlobRelationship, Image
-from sqlalchemy.dialects.postgresql import insert as pg_insert
-from sqlalchemy import update
 from worker.dedup_helpers import (
-    _MASK64, _MASK16,
-    _classify_pair, _now_iso,
+    _MASK16,
+    _MASK64,
     DedupProgress,
+    _classify_pair,
 )
 
 logger = logging.getLogger("worker.dedup_scan")
@@ -89,25 +89,26 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
         a_q1 = (a.phash_q1 or 0) & _MASK16
         a_phash = a.phash_int & _MASK64
 
-        for b in blobs[i + 1:]:
-            q01_dist = (
-                bin(a_q0 ^ ((b.phash_q0 or 0) & _MASK16)).count('1')
-                + bin(a_q1 ^ ((b.phash_q1 or 0) & _MASK16)).count('1')
-            )
+        for b in blobs[i + 1 :]:
+            q01_dist = bin(a_q0 ^ ((b.phash_q0 or 0) & _MASK16)).count("1") + bin(
+                a_q1 ^ ((b.phash_q1 or 0) & _MASK16)
+            ).count("1")
             if q01_dist > threshold:
                 continue
 
-            dist = bin(a_phash ^ (b.phash_int & _MASK64)).count('1')
+            dist = bin(a_phash ^ (b.phash_int & _MASK64)).count("1")
             if dist > threshold:
                 continue
 
-            pairs_batch.append({
-                "sha_a": a.sha256,
-                "sha_b": b.sha256,
-                "hamming_dist": dist,
-                "relationship": "needs_t2",
-                "tier": 1,
-            })
+            pairs_batch.append(
+                {
+                    "sha_a": a.sha256,
+                    "sha_b": b.sha256,
+                    "hamming_dist": dist,
+                    "relationship": "needs_t2",
+                    "tier": 1,
+                }
+            )
 
             if len(pairs_batch) >= 1000:
                 await _flush()
@@ -135,9 +136,7 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
     opencv_enabled = opencv_raw == b"1"
 
     async with async_session() as session:
-        count_result = await session.execute(
-            select(func.count()).where(BlobRelationship.relationship == "needs_t2")
-        )
+        count_result = await session.execute(select(func.count()).where(BlobRelationship.relationship == "needs_t2"))
         needs_t2_count = count_result.scalar_one()
 
     await progress.advance_tier(2, total=needs_t2_count)
@@ -177,11 +176,7 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
                 same_gal_subq = (
                     select(Image.gallery_id)
                     .where(Image.blob_sha256 == pair.sha_a)
-                    .where(
-                        Image.gallery_id.in_(
-                            select(Image.gallery_id).where(Image.blob_sha256 == pair.sha_b)
-                        )
-                    )
+                    .where(Image.gallery_id.in_(select(Image.gallery_id).where(Image.blob_sha256 == pair.sha_b)))
                     .limit(1)
                     .exists()
                 )
@@ -233,11 +228,13 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
         await progress.finish()
 
         from core.events import EventType, emit_safe
+
         await emit_safe(EventType.DEDUP_SCAN_COMPLETED, resource_type="system", mode=mode)
 
         return {"status": "ok", "tier1_inserted": total_inserted, "tier2_processed": t2_processed}
 
     import asyncio
+
     from services.cas import resolve_blob_path
     from worker.dedup_helpers import _opencv_pixel_diff
 
@@ -245,9 +242,7 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
     threshold_cv = float(threshold_cv_raw) if threshold_cv_raw else 0.85
 
     async with async_session() as session:
-        count_result = await session.execute(
-            select(func.count()).where(BlobRelationship.relationship == "needs_t3")
-        )
+        count_result = await session.execute(select(func.count()).where(BlobRelationship.relationship == "needs_t3"))
         needs_t3_count = count_result.scalar_one()
 
     await progress.advance_tier(3, total=needs_t3_count)
@@ -339,6 +334,7 @@ async def dedup_scan_job(ctx: dict, mode: str = "pending") -> dict:
     logger.info("Tier 3 done, processed: %d", t3_processed)
 
     from core.events import EventType, emit_safe
+
     await emit_safe(EventType.DEDUP_SCAN_COMPLETED, resource_type="system", mode=mode)
 
     return {

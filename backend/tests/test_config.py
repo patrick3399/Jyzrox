@@ -7,8 +7,6 @@ Covers:
 - get_all_library_paths(): env-only, deduplication, and DB merge
 """
 
-import sys
-import os
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
@@ -125,7 +123,7 @@ class TestSettingsEnvOverride:
 
     def test_settings_env_override_redis_url(self, monkeypatch):
         """REDIS_URL env var must override the default redis_url."""
-        from core.config import get_settings, Settings
+        from core.config import Settings, get_settings
 
         monkeypatch.setenv("REDIS_URL", "redis://custom-host:6380")
         get_settings.cache_clear()
@@ -140,7 +138,7 @@ class TestSettingsEnvOverride:
 
     def test_settings_env_override_cookie_secure_false(self, monkeypatch):
         """COOKIE_SECURE=false must disable cookie_secure for local HTTP dev."""
-        from core.config import get_settings, Settings
+        from core.config import Settings, get_settings
 
         monkeypatch.setenv("COOKIE_SECURE", "false")
         get_settings.cache_clear()
@@ -155,7 +153,7 @@ class TestSettingsEnvOverride:
 
     def test_settings_env_override_eh_max_concurrency(self, monkeypatch):
         """EH_MAX_CONCURRENCY env var must override the default of 2."""
-        from core.config import get_settings, Settings
+        from core.config import Settings, get_settings
 
         monkeypatch.setenv("EH_MAX_CONCURRENCY", "10")
         get_settings.cache_clear()
@@ -180,7 +178,7 @@ class TestGetAllLibraryPaths:
     @pytest.mark.asyncio
     async def test_no_env_and_no_db_paths_returns_empty(self):
         """With no env paths and an empty DB result, the returned list is empty."""
-        from core.config import get_settings, Settings
+        from core.config import Settings
 
         # Patch settings so extra_library_paths is empty
         mock_settings = Settings(
@@ -212,7 +210,7 @@ class TestGetAllLibraryPaths:
     @pytest.mark.asyncio
     async def test_env_paths_are_deduplicated(self):
         """Duplicate paths in extra_library_paths must appear only once."""
-        from core.config import get_settings, Settings
+        from core.config import Settings
 
         mock_settings = Settings(
             database_url="sqlite+aiosqlite:///:memory:",
@@ -243,7 +241,7 @@ class TestGetAllLibraryPaths:
     @pytest.mark.asyncio
     async def test_db_paths_merged_and_deduplicated_with_env_paths(self):
         """DB paths must be appended after env paths, with duplicates dropped."""
-        from core.config import get_settings, Settings
+        from core.config import Settings
 
         mock_settings = Settings(
             database_url="sqlite+aiosqlite:///:memory:",
@@ -275,7 +273,7 @@ class TestGetAllLibraryPaths:
     @pytest.mark.asyncio
     async def test_db_exception_is_silenced_env_paths_still_returned(self):
         """If the DB query raises, the function must not raise and still return env paths."""
-        from core.config import get_settings, Settings
+        from core.config import Settings
 
         mock_settings = Settings(
             database_url="sqlite+aiosqlite:///:memory:",

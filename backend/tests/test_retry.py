@@ -9,9 +9,6 @@ import uuid
 from datetime import UTC, datetime, timedelta
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
-
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -296,7 +293,7 @@ class TestImageValidation:
         from worker.helpers import _validate_image_magic
 
         f = tmp_path / "test.jpg"
-        f.write_bytes(b'\xff\xd8\xff\xe0' + b'\x00' * 100)
+        f.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
         assert _validate_image_magic(f) is True
 
     def test_valid_png(self, tmp_path):
@@ -304,7 +301,7 @@ class TestImageValidation:
         from worker.helpers import _validate_image_magic
 
         f = tmp_path / "test.png"
-        f.write_bytes(b'\x89PNG\r\n\x1a\n' + b'\x00' * 100)
+        f.write_bytes(b"\x89PNG\r\n\x1a\n" + b"\x00" * 100)
         assert _validate_image_magic(f) is True
 
     def test_valid_gif(self, tmp_path):
@@ -312,7 +309,7 @@ class TestImageValidation:
         from worker.helpers import _validate_image_magic
 
         f = tmp_path / "test.gif"
-        f.write_bytes(b'GIF89a' + b'\x00' * 100)
+        f.write_bytes(b"GIF89a" + b"\x00" * 100)
         assert _validate_image_magic(f) is True
 
     def test_wrong_extension(self, tmp_path):
@@ -320,7 +317,7 @@ class TestImageValidation:
         from worker.helpers import _validate_image_magic
 
         f = tmp_path / "test.png"
-        f.write_bytes(b'\xff\xd8\xff\xe0' + b'\x00' * 100)
+        f.write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
         assert _validate_image_magic(f) is False
 
     def test_truncated_file(self, tmp_path):
@@ -328,7 +325,7 @@ class TestImageValidation:
         from worker.helpers import _validate_image_magic
 
         f = tmp_path / "test.jpg"
-        f.write_bytes(b'\xff\xd8')
+        f.write_bytes(b"\xff\xd8")
         assert _validate_image_magic(f) is False
 
     def test_corrupt_data(self, tmp_path):
@@ -336,7 +333,7 @@ class TestImageValidation:
         from worker.helpers import _validate_image_magic
 
         f = tmp_path / "test.jpg"
-        f.write_bytes(b'\x00\x00\x00\x00' + b'\x00' * 100)
+        f.write_bytes(b"\x00\x00\x00\x00" + b"\x00" * 100)
         assert _validate_image_magic(f) is False
 
     def test_nonexistent_file(self, tmp_path):
@@ -352,5 +349,5 @@ class TestImageValidation:
 
         f = tmp_path / "test.webp"
         # RIFF + 4 bytes size + WEBP
-        f.write_bytes(b'RIFF\x00\x00\x00\x00WEBP' + b'\x00' * 100)
+        f.write_bytes(b"RIFF\x00\x00\x00\x00WEBP" + b"\x00" * 100)
         assert _validate_image_magic(f) is True

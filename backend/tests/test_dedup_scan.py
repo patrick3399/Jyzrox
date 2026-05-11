@@ -18,7 +18,6 @@ along with Redis.  Tests verify control-flow branches:
 
 from unittest.mock import AsyncMock, MagicMock, patch
 
-
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
@@ -62,8 +61,17 @@ def _make_mock_redis(status=None):
     return r
 
 
-def _make_blob(sha256, phash_int=None, phash_q0=None, phash_q1=None, phash_q2=None, phash_q3=None,
-               width=100, height=100, file_size=1000):
+def _make_blob(
+    sha256,
+    phash_int=None,
+    phash_q0=None,
+    phash_q1=None,
+    phash_q2=None,
+    phash_q3=None,
+    width=100,
+    height=100,
+    file_size=1000,
+):
     """Return a mock Blob row."""
     blob = MagicMock()
     blob.sha256 = sha256
@@ -78,8 +86,9 @@ def _make_blob(sha256, phash_int=None, phash_q0=None, phash_q1=None, phash_q2=No
     return blob
 
 
-def _make_blob_relationship(sha_a, sha_b, hamming_dist=5, relationship="needs_t2", id_=1,
-                             suggested_keep=None, reason=None):
+def _make_blob_relationship(
+    sha_a, sha_b, hamming_dist=5, relationship="needs_t2", id_=1, suggested_keep=None, reason=None
+):
     """Return a mock BlobRelationship row."""
     rel = MagicMock()
     rel.id = id_
@@ -152,13 +161,15 @@ class TestTier1PhashScan:
         mock_redis = _make_mock_redis()
         # Simulate: status=None, phash_enabled=b"1", threshold=None (default 10)
         # then tier2 needs_t2 count=0, heuristic=None, opencv=None
-        mock_redis.get = AsyncMock(side_effect=[
-            None,       # status check
-            b"1",       # phash enabled
-            None,       # threshold (use default 10)
-            None,       # heuristic_enabled
-            None,       # opencv_enabled
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,  # status check
+                b"1",  # phash enabled
+                None,  # threshold (use default 10)
+                None,  # heuristic_enabled
+                None,  # opencv_enabled
+            ]
+        )
         mock_redis.getdel = AsyncMock(return_value=None)
 
         # Session that returns empty blob list and zero counts
@@ -184,13 +195,15 @@ class TestTier1PhashScan:
         blob_b = _make_blob("sha_b", phash_int=0xDEADBEEF, phash_q0=0, phash_q1=0)
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None,       # status
-            b"1",       # phash_enabled
-            b"10",      # threshold
-            None,       # heuristic_enabled
-            None,       # opencv_enabled
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,  # status
+                b"1",  # phash_enabled
+                b"10",  # threshold
+                None,  # heuristic_enabled
+                None,  # opencv_enabled
+            ]
+        )
         mock_redis.getdel = AsyncMock(return_value=None)
 
         # Use a single versatile session
@@ -243,13 +256,15 @@ class TestTier1PhashScan:
         blob_b = _make_blob("sha_diff_b", phash_int=0xFFFFFFFFFFFFFFFF, phash_q0=0xFFFF, phash_q1=0xFFFF)
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None,   # status
-            b"1",   # phash_enabled
-            b"10",  # threshold=10
-            None,   # heuristic_enabled
-            None,   # opencv_enabled
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,  # status
+                b"1",  # phash_enabled
+                b"10",  # threshold=10
+                None,  # heuristic_enabled
+                None,  # opencv_enabled
+            ]
+        )
         mock_redis.getdel = AsyncMock(return_value=None)
 
         query_n = {"n": 0}
@@ -298,11 +313,13 @@ class TestStopSignal:
         blob_b = _make_blob("sha_stop_b", phash_int=0xABCD, phash_q0=0, phash_q1=0)
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None,    # status check
-            b"1",    # phash_enabled
-            b"10",   # threshold
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,  # status check
+                b"1",  # phash_enabled
+                b"10",  # threshold
+            ]
+        )
         # First getdel = stop signal (after first blob processed)
         mock_redis.getdel = AsyncMock(return_value=b"stop")
 
@@ -350,13 +367,15 @@ class TestResetMode:
         from worker.dedup_scan import dedup_scan_job
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None,   # status
-            b"1",   # phash_enabled
-            b"10",  # threshold
-            None,   # heuristic
-            None,   # opencv
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,  # status
+                b"1",  # phash_enabled
+                b"10",  # threshold
+                None,  # heuristic
+                None,  # opencv
+            ]
+        )
         mock_redis.getdel = AsyncMock(return_value=None)
 
         delete_called = {"called": False}
@@ -507,8 +526,9 @@ class TestDedupHelpers:
 
     def test_now_iso_returns_iso_format_string(self):
         """_now_iso should return a valid ISO 8601 string."""
-        from worker.dedup_helpers import _now_iso
         from datetime import datetime
+
+        from worker.dedup_helpers import _now_iso
 
         result = _now_iso()
 
@@ -682,13 +702,15 @@ class TestTier1AdditionalBranches:
         blob_b = _make_blob("sha_hd_b", phash_int=0xFFFFFFFFFFFFFFFF, phash_q0=0, phash_q1=0)
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None,    # status
-            b"1",    # phash_enabled
-            b"10",   # threshold=10 (dist=64 > 10 → skip)
-            None,    # heuristic_enabled
-            None,    # opencv_enabled
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,  # status
+                b"1",  # phash_enabled
+                b"10",  # threshold=10 (dist=64 > 10 → skip)
+                None,  # heuristic_enabled
+                None,  # opencv_enabled
+            ]
+        )
         mock_redis.getdel = AsyncMock(return_value=None)
 
         query_n = {"n": 0}
@@ -725,19 +747,18 @@ class TestTier1AdditionalBranches:
 
         # Create 46 blobs with identical phash (0 hamming distance).
         # 46 blobs → 46*45/2 = 1035 pairs, which exceeds 1000 → triggers flush.
-        blobs = [
-            _make_blob(f"sha_{i:03d}", phash_int=0xDEADBEEF, phash_q0=0, phash_q1=0)
-            for i in range(46)
-        ]
+        blobs = [_make_blob(f"sha_{i:03d}", phash_int=0xDEADBEEF, phash_q0=0, phash_q1=0) for i in range(46)]
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None,    # status
-            b"1",    # phash_enabled
-            b"10",   # threshold
-            None,    # heuristic_enabled
-            None,    # opencv_enabled
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,  # status
+                b"1",  # phash_enabled
+                b"10",  # threshold
+                None,  # heuristic_enabled
+                None,  # opencv_enabled
+            ]
+        )
         mock_redis.getdel = AsyncMock(return_value=None)
 
         flush_called = {"count": 0}
@@ -795,13 +816,15 @@ class TestPauseSignalTier1:
         blob_b = _make_blob("sha_pause_b", phash_int=0xABCD, phash_q0=0, phash_q1=0)
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None,    # status check
-            b"1",    # phash_enabled
-            b"10",   # threshold
-            None,    # heuristic_enabled
-            None,    # opencv_enabled
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,  # status check
+                b"1",  # phash_enabled
+                b"10",  # threshold
+                None,  # heuristic_enabled
+                None,  # opencv_enabled
+            ]
+        )
         # First check_signal returns "pause", second returns None
         mock_redis.getdel = AsyncMock(side_effect=[b"pause", b"resume", None, None])
 
@@ -842,11 +865,13 @@ class TestPauseSignalTier1:
         blob_b = _make_blob("sha_ps_b", phash_int=0xABCD, phash_q0=0, phash_q1=0)
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None,    # status check
-            b"1",    # phash_enabled
-            b"10",   # threshold
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,  # status check
+                b"1",  # phash_enabled
+                b"10",  # threshold
+            ]
+        )
         # check_signal returns "pause", then wait_for_resume gets "stop"
         mock_redis.getdel = AsyncMock(side_effect=[b"pause", b"stop"])
 
@@ -892,8 +917,9 @@ class TestTier2HeuristicLoop:
     def _make_needs_t2_pair(self, id_=1, sha_a="sha_a", sha_b="sha_b"):
         return _make_blob_relationship(sha_a, sha_b, id_=id_, relationship="needs_t2")
 
-    async def _run_with_t2_pair(self, pair, blob_a, blob_b, same_gal=False,
-                                 heuristic=None, opencv=None, extra_redis_gets=None):
+    async def _run_with_t2_pair(
+        self, pair, blob_a, blob_b, same_gal=False, heuristic=None, opencv=None, extra_redis_gets=None
+    ):
         """Helper: run dedup_scan_job with tier 1 returning no pairs and tier 2 having one pair.
 
         Query ordering (absolute index):
@@ -909,11 +935,11 @@ class TestTier2HeuristicLoop:
 
         mock_redis = _make_mock_redis()
         base_gets = [
-            None,     # status check
-            b"1",     # phash_enabled
-            b"10",    # threshold
-            heuristic or None,   # heuristic_enabled
-            opencv or None,      # opencv_enabled
+            None,  # status check
+            b"1",  # phash_enabled
+            b"10",  # threshold
+            heuristic or None,  # heuristic_enabled
+            opencv or None,  # opencv_enabled
         ]
         if extra_redis_gets:
             base_gets.extend(extra_redis_gets)
@@ -988,9 +1014,15 @@ class TestTier2HeuristicLoop:
         pair = self._make_needs_t2_pair()
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None, b"1", b"10", None, None,
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,
+                b"1",
+                b"10",
+                None,
+                None,
+            ]
+        )
         mock_redis.getdel = AsyncMock(return_value=None)
 
         query_n = {"n": 0}
@@ -1040,13 +1072,14 @@ class TestTier2HeuristicLoop:
     async def test_tier2_heuristic_classification_updates_relationship(self):
         """Pair processed by heuristic classify → relationship updated in DB (lines 201-215)."""
         pair = self._make_needs_t2_pair()
-        blob_a = _make_blob("sha_t2_a", phash_int=0x1111, phash_q0=0, phash_q1=0,
-                             width=1920, height=1080, file_size=500000)
-        blob_b = _make_blob("sha_t2_b", phash_int=0x1111, phash_q0=0, phash_q1=0,
-                             width=800, height=600, file_size=200000)
+        blob_a = _make_blob(
+            "sha_t2_a", phash_int=0x1111, phash_q0=0, phash_q1=0, width=1920, height=1080, file_size=500000
+        )
+        blob_b = _make_blob(
+            "sha_t2_b", phash_int=0x1111, phash_q0=0, phash_q1=0, width=800, height=600, file_size=200000
+        )
 
-        result = await self._run_with_t2_pair(pair, blob_a, blob_b, same_gal=False,
-                                               heuristic=b"1")
+        result = await self._run_with_t2_pair(pair, blob_a, blob_b, same_gal=False, heuristic=b"1")
 
         assert result["status"] == "ok"
         assert result["tier2_processed"] == 1
@@ -1063,9 +1096,15 @@ class TestTier2HeuristicLoop:
         blob_b = _make_blob("sha_t2s_b", phash_int=0x5678, phash_q0=0, phash_q1=0)
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None, b"1", b"10", None, None,
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,
+                b"1",
+                b"10",
+                None,
+                None,
+            ]
+        )
         # tier1 has 0 blobs so no check_signal in tier1.
         # tier2 processes 1 pair then calls check_signal → b"stop"
         mock_redis.getdel = AsyncMock(return_value=b"stop")
@@ -1132,18 +1171,17 @@ class TestTier2HeuristicLoop:
 class TestTier3OpenCV:
     """Tests for Tier 3 OpenCV pixel-diff processing."""
 
-    async def _run_with_t3(self, pair, blob_a, blob_b, opencv_score=0.9,
-                            opencv_exception=None, threshold_cv=None):
+    async def _run_with_t3(self, pair, blob_a, blob_b, opencv_score=0.9, opencv_exception=None, threshold_cv=None):
         """Run dedup_scan_job configured for tier 3 processing."""
         from worker.dedup_scan import dedup_scan_job
 
         mock_redis = _make_mock_redis()
         gets = [
-            None,    # status
-            b"1",    # phash_enabled
-            b"10",   # threshold
-            None,    # heuristic_enabled (tier 2)
-            b"1",    # opencv_enabled (tier 2 → needs_t3)
+            None,  # status
+            b"1",  # phash_enabled
+            b"10",  # threshold
+            None,  # heuristic_enabled (tier 2)
+            b"1",  # opencv_enabled (tier 2 → needs_t3)
             # tier 3 settings:
             threshold_cv or b"0.85",  # opencv_threshold
         ]
@@ -1178,8 +1216,7 @@ class TestTier3OpenCV:
                 fc = fetch_count["n"]
                 if fc == 1:
                     # tier2 pairs → one needs_t2 pair
-                    t2_pair = _make_blob_relationship("sha_t3_a", "sha_t3_b",
-                                                       relationship="needs_t2", id_=10)
+                    t2_pair = _make_blob_relationship("sha_t3_a", "sha_t3_b", relationship="needs_t2", id_=10)
                     r.scalars.return_value = MagicMock()
                     r.scalars.return_value.__iter__ = MagicMock(return_value=iter([t2_pair]))
                     t2_pair_returned["done"] = True
@@ -1242,13 +1279,15 @@ class TestTier3OpenCV:
         from worker.dedup_scan import dedup_scan_job
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None,    # status
-            b"1",    # phash_enabled
-            b"10",   # threshold
-            None,    # heuristic_enabled
-            None,    # opencv_enabled (falsy → skip tier 3)
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,  # status
+                b"1",  # phash_enabled
+                b"10",  # threshold
+                None,  # heuristic_enabled
+                None,  # opencv_enabled (falsy → skip tier 3)
+            ]
+        )
         mock_redis.getdel = AsyncMock(return_value=None)
 
         query_n = {"n": 0}
@@ -1282,13 +1321,19 @@ class TestTier3OpenCV:
     async def test_tier3_pair_processed_with_high_similarity_score(self):
         """Tier 3 pair with score >= threshold → classified and updated (lines 301-325)."""
         pair = _make_blob_relationship(
-            "sha_t3_a", "sha_t3_b", relationship="needs_t3", id_=20,
-            suggested_keep=None, reason=None,
+            "sha_t3_a",
+            "sha_t3_b",
+            relationship="needs_t3",
+            id_=20,
+            suggested_keep=None,
+            reason=None,
         )
-        blob_a = _make_blob("sha_t3_a", phash_int=0xAAAA, phash_q0=0, phash_q1=0,
-                             width=1920, height=1080, file_size=500000)
-        blob_b = _make_blob("sha_t3_b", phash_int=0xAAAA, phash_q0=0, phash_q1=0,
-                             width=800, height=600, file_size=200000)
+        blob_a = _make_blob(
+            "sha_t3_a", phash_int=0xAAAA, phash_q0=0, phash_q1=0, width=1920, height=1080, file_size=500000
+        )
+        blob_b = _make_blob(
+            "sha_t3_b", phash_int=0xAAAA, phash_q0=0, phash_q1=0, width=800, height=600, file_size=200000
+        )
 
         result = await self._run_with_t3(pair, blob_a, blob_b, opencv_score=0.95)
         assert result["status"] == "ok"
@@ -1296,8 +1341,12 @@ class TestTier3OpenCV:
     async def test_tier3_pair_processed_with_low_similarity_score(self):
         """Tier 3 pair with score < threshold → resolved (not a duplicate) (lines 308-310)."""
         pair = _make_blob_relationship(
-            "sha_t3_a", "sha_t3_b", relationship="needs_t3", id_=21,
-            suggested_keep="sha_t3_a", reason="higher_resolution",
+            "sha_t3_a",
+            "sha_t3_b",
+            relationship="needs_t3",
+            id_=21,
+            suggested_keep="sha_t3_a",
+            reason="higher_resolution",
         )
         blob_a = _make_blob("sha_t3_a", phash_int=0xBBBB, phash_q0=0, phash_q1=0)
         blob_b = _make_blob("sha_t3_b", phash_int=0xBBBB, phash_q0=0, phash_q1=0)
@@ -1308,13 +1357,15 @@ class TestTier3OpenCV:
     async def test_tier3_opencv_exception_marks_quality_conflict(self):
         """OpenCV exception during pair processing → quality_conflict (lines 291-299)."""
         pair = _make_blob_relationship(
-            "sha_t3_a", "sha_t3_b", relationship="needs_t3", id_=22,
+            "sha_t3_a",
+            "sha_t3_b",
+            relationship="needs_t3",
+            id_=22,
         )
         blob_a = _make_blob("sha_t3_a", phash_int=0xCCCC, phash_q0=0, phash_q1=0)
         blob_b = _make_blob("sha_t3_b", phash_int=0xCCCC, phash_q0=0, phash_q1=0)
 
-        result = await self._run_with_t3(pair, blob_a, blob_b,
-                                          opencv_exception=ValueError("decode failed"))
+        result = await self._run_with_t3(pair, blob_a, blob_b, opencv_exception=ValueError("decode failed"))
         assert result["status"] == "ok"
 
     async def test_tier3_missing_blob_is_resolved(self):
@@ -1322,14 +1373,23 @@ class TestTier3OpenCV:
         from worker.dedup_scan import dedup_scan_job
 
         pair = _make_blob_relationship(
-            "sha_t3miss_a", "sha_t3miss_b", relationship="needs_t3", id_=23,
+            "sha_t3miss_a",
+            "sha_t3miss_b",
+            relationship="needs_t3",
+            id_=23,
         )
 
         mock_redis = _make_mock_redis()
-        mock_redis.get = AsyncMock(side_effect=[
-            None, b"1", b"10", None, b"1",
-            b"0.85",
-        ])
+        mock_redis.get = AsyncMock(
+            side_effect=[
+                None,
+                b"1",
+                b"10",
+                None,
+                b"1",
+                b"0.85",
+            ]
+        )
         mock_redis.getdel = AsyncMock(return_value=None)
 
         query_n = {"n": 0}

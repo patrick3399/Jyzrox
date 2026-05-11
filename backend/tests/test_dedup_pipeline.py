@@ -9,17 +9,15 @@ Strategy:
 - Insert blobs / blob_relationships directly via raw SQL (SQLite-compatible).
 """
 
-import sys
 from contextlib import asynccontextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
-import pytest
 from sqlalchemy import text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
 
 def _make_session_cm(factory):
     """Wrap async_sessionmaker so ``async with async_session() as s:`` works."""
@@ -34,6 +32,7 @@ def _make_session_cm(factory):
             return _cm()
 
     return _Factory()
+
 
 async def _insert_blob(
     session,
@@ -71,6 +70,7 @@ async def _insert_blob(
     )
     await session.commit()
 
+
 async def _insert_relationship(
     session,
     sha_a: str,
@@ -97,6 +97,7 @@ async def _insert_relationship(
     await session.commit()
     return result.fetchone()[0]
 
+
 def _make_redis(overrides: dict | None = None) -> AsyncMock:
     r = AsyncMock()
     r.get = AsyncMock(return_value=None)
@@ -113,9 +114,11 @@ def _make_redis(overrides: dict | None = None) -> AsyncMock:
             setattr(r, k, v)
     return r
 
+
 # ---------------------------------------------------------------------------
 # TestDedupTier1
 # ---------------------------------------------------------------------------
+
 
 class TestDedupTier1:
     """Tests for worker.dedup_tier1.dedup_tier1_job."""
@@ -186,9 +189,7 @@ class TestDedupTier1:
         # Both blobs have identical phash_int so dist=0 which passes threshold=0
         assert result["status"] == "ok"
 
-    async def test_pigeonhole_prefilter_skips_dissimilar_pairs(
-        self, db_session, db_session_factory
-    ):
+    async def test_pigeonhole_prefilter_skips_dissimilar_pairs(self, db_session, db_session_factory):
         """Pairs where q0+q1 hamming already exceeds threshold are skipped early."""
         from worker.dedup_tier1 import dedup_tier1_job
 
@@ -218,18 +219,13 @@ class TestDedupTier1:
         # The pair with high q0 difference must have been skipped
         count = (
             await db_session.execute(
-                text(
-                    "SELECT COUNT(*) FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT COUNT(*) FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).scalar()
         assert count == 0
 
-    async def test_similar_pairs_stored_in_blob_relationships(
-        self, db_session, db_session_factory
-    ):
+    async def test_similar_pairs_stored_in_blob_relationships(self, db_session, db_session_factory):
         """Blobs within hamming threshold must be inserted into blob_relationships."""
         from worker.dedup_tier1 import dedup_tier1_job
 
@@ -257,18 +253,11 @@ class TestDedupTier1:
 
         assert result["status"] == "ok"
         count = (
-            await db_session.execute(
-                text(
-                    "SELECT COUNT(*) FROM blob_relationships "
-                    "WHERE relationship='needs_t2'"
-                )
-            )
+            await db_session.execute(text("SELECT COUNT(*) FROM blob_relationships WHERE relationship='needs_t2'"))
         ).scalar()
         assert count >= 1
 
-    async def test_batch_flush_inserts_on_conflict_do_nothing(
-        self, db_session, db_session_factory
-    ):
+    async def test_batch_flush_inserts_on_conflict_do_nothing(self, db_session, db_session_factory):
         """Running tier1 twice must not duplicate relationships (on_conflict_do_nothing)."""
         from worker.dedup_tier1 import dedup_tier1_job
 
@@ -296,18 +285,13 @@ class TestDedupTier1:
 
         count = (
             await db_session.execute(
-                text(
-                    "SELECT COUNT(*) FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT COUNT(*) FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).scalar()
         assert count == 1
 
-    async def test_progress_redis_keys_written_on_completion(
-        self, db_session, db_session_factory
-    ):
+    async def test_progress_redis_keys_written_on_completion(self, db_session, db_session_factory):
         """After job completes, Redis keys for last_run and last_status must be set."""
         from worker.dedup_tier1 import dedup_tier1_job
 
@@ -367,22 +351,21 @@ class TestDedupTier1:
             patch("worker.dedup_tier1.get_redis", return_value=r),
             patch("worker.dedup_tier1.async_session", fake_db),
         ):
-            result = await dedup_tier1_job({})
+            await dedup_tier1_job({})
 
         count = (
             await db_session.execute(
-                text(
-                    "SELECT COUNT(*) FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT COUNT(*) FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).scalar()
         assert count == 0
 
+
 # ---------------------------------------------------------------------------
 # TestDedupTier2
 # ---------------------------------------------------------------------------
+
 
 class TestDedupTier2:
     """Tests for worker.dedup_tier2.dedup_tier2_job."""
@@ -400,9 +383,7 @@ class TestDedupTier2:
         assert result["status"] == "skipped"
         assert result["reason"] == "disabled"
 
-    async def test_no_needs_t2_relationships_returns_zero(
-        self, db_session, db_session_factory
-    ):
+    async def test_no_needs_t2_relationships_returns_zero(self, db_session, db_session_factory):
         """When no needs_t2 pairs exist, processed count must be 0."""
         from worker.dedup_tier2 import dedup_tier2_job
 
@@ -419,9 +400,7 @@ class TestDedupTier2:
         assert result["status"] == "ok"
         assert result["processed"] == 0
 
-    async def test_heuristic_higher_resolution_classify(
-        self, db_session, db_session_factory
-    ):
+    async def test_heuristic_higher_resolution_classify(self, db_session, db_session_factory):
         """Blob with much higher resolution must produce quality_conflict/higher_resolution."""
         from worker.dedup_tier2 import dedup_tier2_job
 
@@ -455,10 +434,7 @@ class TestDedupTier2:
 
         row = (
             await db_session.execute(
-                text(
-                    "SELECT relationship, reason FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT relationship, reason FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).fetchone()
@@ -473,12 +449,8 @@ class TestDedupTier2:
         sha_a = "ga" + "0" * 62
         sha_b = "gb" + "0" * 62
         # Same resolution, but blob_a file is 1.5x bigger → larger_file
-        await _insert_blob(
-            session=db_session, sha256=sha_a, width=100, height=100, file_size=15000
-        )
-        await _insert_blob(
-            session=db_session, sha256=sha_b, width=100, height=100, file_size=10000
-        )
+        await _insert_blob(session=db_session, sha256=sha_a, width=100, height=100, file_size=15000)
+        await _insert_blob(session=db_session, sha256=sha_b, width=100, height=100, file_size=10000)
         await _insert_relationship(db_session, sha_a, sha_b, "needs_t2")
 
         r = _make_redis()
@@ -501,10 +473,7 @@ class TestDedupTier2:
 
         row = (
             await db_session.execute(
-                text(
-                    "SELECT relationship, reason FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT relationship, reason FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).fetchone()
@@ -512,20 +481,14 @@ class TestDedupTier2:
         assert row[0] == "quality_conflict"
         assert row[1] == "larger_file"
 
-    async def test_heuristic_similar_size_produces_variant(
-        self, db_session, db_session_factory
-    ):
+    async def test_heuristic_similar_size_produces_variant(self, db_session, db_session_factory):
         """Blobs with equal resolution and similar file size must be classified as variant."""
         from worker.dedup_tier2 import dedup_tier2_job
 
         sha_a = "ha" + "0" * 62
         sha_b = "hb" + "0" * 62
-        await _insert_blob(
-            session=db_session, sha256=sha_a, width=100, height=100, file_size=10000
-        )
-        await _insert_blob(
-            session=db_session, sha256=sha_b, width=100, height=100, file_size=10050
-        )
+        await _insert_blob(session=db_session, sha256=sha_a, width=100, height=100, file_size=10000)
+        await _insert_blob(session=db_session, sha256=sha_b, width=100, height=100, file_size=10050)
         await _insert_relationship(db_session, sha_a, sha_b, "needs_t2")
 
         r = _make_redis()
@@ -548,19 +511,14 @@ class TestDedupTier2:
 
         row = (
             await db_session.execute(
-                text(
-                    "SELECT relationship FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT relationship FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).fetchone()
         assert row is not None
         assert row[0] == "variant"
 
-    async def test_opencv_enabled_routes_to_needs_t3(
-        self, db_session, db_session_factory
-    ):
+    async def test_opencv_enabled_routes_to_needs_t3(self, db_session, db_session_factory):
         """When opencv is enabled, pairs must be moved to needs_t3 instead of direct classify."""
         from worker.dedup_tier2 import dedup_tier2_job
 
@@ -590,10 +548,7 @@ class TestDedupTier2:
 
         row = (
             await db_session.execute(
-                text(
-                    "SELECT relationship FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT relationship FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).fetchone()
@@ -633,9 +588,7 @@ class TestDedupTier2:
 
         assert result["processed"] >= 3
 
-    async def test_progress_redis_keys_written_on_completion(
-        self, db_session_factory
-    ):
+    async def test_progress_redis_keys_written_on_completion(self, db_session_factory):
         """After job completes, Redis last_run and last_status keys must be set."""
         from worker.dedup_tier2 import dedup_tier2_job
 
@@ -665,9 +618,11 @@ class TestDedupTier2:
 
         assert result["status"] == "skipped"
 
+
 # ---------------------------------------------------------------------------
 # TestDedupTier3
 # ---------------------------------------------------------------------------
+
 
 class TestDedupTier3:
     """Tests for worker.dedup_tier3.dedup_tier3_job."""
@@ -685,9 +640,7 @@ class TestDedupTier3:
         assert result["status"] == "skipped"
         assert result["reason"] == "disabled"
 
-    async def test_no_needs_t3_relationships_returns_zero(
-        self, db_session, db_session_factory
-    ):
+    async def test_no_needs_t3_relationships_returns_zero(self, db_session, db_session_factory):
         """When no needs_t3 pairs exist, processed count must be 0."""
         from worker.dedup_tier3 import dedup_tier3_job
 
@@ -704,9 +657,7 @@ class TestDedupTier3:
         assert result["status"] == "ok"
         assert result["processed"] == 0
 
-    async def test_opencv_pixel_diff_integration_similar_images(
-        self, db_session, db_session_factory
-    ):
+    async def test_opencv_pixel_diff_integration_similar_images(self, db_session, db_session_factory):
         """High similarity score must move pair to quality_conflict."""
         from worker.dedup_tier3 import dedup_tier3_job
 
@@ -732,7 +683,9 @@ class TestDedupTier3:
         with (
             patch("worker.dedup_tier3.get_redis", return_value=r),
             patch("worker.dedup_tier3.async_session", fake_db),
-            patch("worker.dedup_tier3.resolve_blob_path", return_value=MagicMock(__str__=lambda self: "/fake/path.jpg")),
+            patch(
+                "worker.dedup_tier3.resolve_blob_path", return_value=MagicMock(__str__=lambda self: "/fake/path.jpg")
+            ),
             patch(
                 "worker.dedup_tier3._opencv_pixel_diff",
                 return_value=(0.95, "compression_noise"),
@@ -745,19 +698,14 @@ class TestDedupTier3:
 
         row = (
             await db_session.execute(
-                text(
-                    "SELECT relationship FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT relationship FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).fetchone()
         assert row is not None
         assert row[0] in ("quality_conflict", "variant")
 
-    async def test_opencv_pixel_diff_false_positive_dismissal(
-        self, db_session, db_session_factory
-    ):
+    async def test_opencv_pixel_diff_false_positive_dismissal(self, db_session, db_session_factory):
         """Low similarity score must move pair to resolved (false positive)."""
         from worker.dedup_tier3 import dedup_tier3_job
 
@@ -782,7 +730,9 @@ class TestDedupTier3:
         with (
             patch("worker.dedup_tier3.get_redis", return_value=r),
             patch("worker.dedup_tier3.async_session", fake_db),
-            patch("worker.dedup_tier3.resolve_blob_path", return_value=MagicMock(__str__=lambda self: "/fake/path.jpg")),
+            patch(
+                "worker.dedup_tier3.resolve_blob_path", return_value=MagicMock(__str__=lambda self: "/fake/path.jpg")
+            ),
             patch(
                 "worker.dedup_tier3._opencv_pixel_diff",
                 return_value=(0.40, "localized_diff"),
@@ -792,19 +742,14 @@ class TestDedupTier3:
 
         row = (
             await db_session.execute(
-                text(
-                    "SELECT relationship FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT relationship FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).fetchone()
         assert row is not None
         assert row[0] == "resolved"
 
-    async def test_opencv_failure_does_not_crash_batch(
-        self, db_session, db_session_factory
-    ):
+    async def test_opencv_failure_does_not_crash_batch(self, db_session, db_session_factory):
         """When _opencv_pixel_diff raises, pair must be marked quality_conflict and processing continues."""
         from worker.dedup_tier3 import dedup_tier3_job
 
@@ -854,19 +799,14 @@ class TestDedupTier3:
         # First pair must be marked quality_conflict (failure fallback)
         row_ab = (
             await db_session.execute(
-                text(
-                    "SELECT relationship FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT relationship FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).fetchone()
         assert row_ab is not None
         assert row_ab[0] == "quality_conflict"
 
-    async def test_progress_redis_keys_written_on_completion(
-        self, db_session_factory
-    ):
+    async def test_progress_redis_keys_written_on_completion(self, db_session_factory):
         """After job completes, Redis last_run and last_status keys must be set."""
         from worker.dedup_tier3 import dedup_tier3_job
 
@@ -931,10 +871,7 @@ class TestDedupTier3:
 
         row = (
             await db_session.execute(
-                text(
-                    "SELECT relationship FROM blob_relationships "
-                    "WHERE sha_a=:a AND sha_b=:b"
-                ),
+                text("SELECT relationship FROM blob_relationships WHERE sha_a=:a AND sha_b=:b"),
                 {"a": sha_a, "b": sha_b},
             )
         ).fetchone()

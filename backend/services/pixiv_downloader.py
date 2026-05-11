@@ -168,13 +168,12 @@ async def download_pixiv_illust(
                     await asyncio.sleep(await get_typed_download_delay("pixiv", "page", 500))
 
             except Exception as exc:
-                logger.error(
-                    "Failed to download page %d of illust %d: %s", i + 1, illust_id, exc
-                )
+                logger.error("Failed to download page %d of illust %d: %s", i + 1, illust_id, exc)
                 failed_pages.append(i + 1)
 
         # Write metadata.json compatible with import_job
         from plugins.builtin.pixiv._tags import process_pixiv_tags
+
         tag_list, tag_translations_data = process_pixiv_tags(detail)
 
         user = detail.get("user", {})
@@ -184,9 +183,7 @@ async def download_pixiv_illust(
             try:
                 from datetime import datetime as _dt
 
-                posted_ts = int(
-                    _dt.fromisoformat(create_date.replace("Z", "+00:00")).timestamp()
-                )
+                posted_ts = int(_dt.fromisoformat(create_date.replace("Z", "+00:00")).timestamp())
             except ValueError, TypeError:
                 pass
 
@@ -352,7 +349,9 @@ async def download_pixiv_user_works(
                 if on_progress:
                     await on_progress(downloaded, total)
 
-                await asyncio.sleep(await get_typed_download_delay("pixiv", "illust", 2000))  # Rate limit between illustrations
+                await asyncio.sleep(
+                    await get_typed_download_delay("pixiv", "illust", 2000)
+                )  # Rate limit between illustrations
 
             except Exception as exc:
                 logger.error("Failed to download illust %d: %s", illust_id, exc)

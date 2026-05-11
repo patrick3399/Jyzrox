@@ -5,6 +5,7 @@ import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { t } from '@/lib/i18n'
 import { toast } from 'sonner'
+import { SaveStatus, type SaveStatusValue } from '@/components/settings/SettingsShared'
 import {
   loadSWCacheConfig,
   saveSWCacheConfig,
@@ -15,6 +16,7 @@ import {
 export default function CacheSettingsPage() {
   useLocale()
   const [swCacheConfig, setSwCacheConfig] = useState<SWCacheConfig>(DEFAULT_SW_CACHE_CONFIG)
+  const [saveStatus, setSaveStatus] = useState<SaveStatusValue>('idle')
 
   useEffect(() => {
     setSwCacheConfig(loadSWCacheConfig())
@@ -22,14 +24,21 @@ export default function CacheSettingsPage() {
 
   const handleSWCacheChange = useCallback((key: keyof SWCacheConfig, value: number) => {
     setSwCacheConfig((prev) => ({ ...prev, [key]: value }))
+    setSaveStatus('saving')
   }, [])
 
   const handleSWCacheBlur = useCallback(() => {
-    setSwCacheConfig((prev) => {
-      saveSWCacheConfig(prev)
-      return prev
-    })
-    toast.success(t('common.saved'))
+    try {
+      setSwCacheConfig((prev) => {
+        saveSWCacheConfig(prev)
+        return prev
+      })
+      setSaveStatus('saved')
+      toast.success(t('common.saved'))
+    } catch {
+      setSaveStatus('error')
+      toast.error(t('common.failedToSave'))
+    }
   }, [])
 
   const handleClearBrowserCache = useCallback(async () => {
@@ -47,7 +56,10 @@ export default function CacheSettingsPage() {
 
       <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
         <div className="px-5 pb-5 pt-5">
-          <p className="text-xs text-vault-text-muted mb-4">{t('settings.browserCacheDesc')}</p>
+          <div className="mb-4 flex items-start justify-between gap-4">
+            <p className="text-xs text-vault-text-muted">{t('settings.browserCacheDesc')}</p>
+            <SaveStatus status={saveStatus} />
+          </div>
 
           <div className="space-y-4">
             {/* Media Cache TTL */}

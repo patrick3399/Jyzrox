@@ -22,6 +22,7 @@ NAMESPACE_MAP = {
 
 _DIR_FMT_FIELD_RE = re.compile(r"\{(\w+)(?:\[(\w+)\])?\}")
 
+
 @lru_cache(maxsize=64)
 def _get_identity_field(category: str) -> tuple[str, str | None] | None:
     """Extract the identity field from gallery-dl's directory_fmt for a category.
@@ -31,6 +32,7 @@ def _get_identity_field(category: str) -> tuple[str, str | None] | None:
     """
     try:
         from gallery_dl import extractor
+
         classes = [e for e in extractor._list_classes() if getattr(e, "category", None) == category]
         if not classes:
             return None
@@ -44,6 +46,7 @@ def _get_identity_field(category: str) -> tuple[str, str | None] | None:
     except ImportError, AttributeError, IndexError, TypeError:
         pass
     return None
+
 
 def _resolve_source_id(meta: dict, cfg, dest_dir_name: str) -> str:
     """Resolve source_id from metadata, using gallery-dl directory_fmt when available."""
@@ -85,6 +88,7 @@ def _resolve_source_id(meta: dict, cfg, dest_dir_name: str) -> str:
 
     return dest_dir_name
 
+
 def _extract_title(source: str, meta: dict, source_id: str) -> str:
     """Extract title from metadata using per-source field priority."""
     from plugins.builtin.gallery_dl._sites import get_site_config
@@ -113,7 +117,10 @@ def _extract_title(source: str, meta: dict, source_id: str) -> str:
         or f"{source}_{source_id}"
     )
 
-def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fallback_source: str | None = None) -> GalleryImportData:
+
+def parse_gallery_dl_import(
+    dest_dir: Path, raw_meta: dict | None = None, *, fallback_source: str | None = None
+) -> GalleryImportData:
     """Parse a gallery-dl download directory into GalleryImportData.
 
     Args:
@@ -137,7 +144,9 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fal
     # For sites not in GDL_SITES, fall back to the raw gallery-dl category name
     # (e.g., "artstation", "newgrounds") so galleries aren't all lumped under "gallery_dl".
     raw_source = meta.get("category") or fallback_source or "gallery_dl"
-    from plugins.builtin.gallery_dl._sites import _DEFAULT_CONFIG, get_site_config as _get_site_config
+    from plugins.builtin.gallery_dl._sites import _DEFAULT_CONFIG
+    from plugins.builtin.gallery_dl._sites import get_site_config as _get_site_config
+
     _cfg = _get_site_config(raw_source)
     source = raw_source if _cfg is _DEFAULT_CONFIG else _cfg.source_id
     source_id = _resolve_source_id(meta, _cfg, dest_dir.name)
@@ -175,6 +184,7 @@ def parse_gallery_dl_import(dest_dir: Path, raw_meta: dict | None = None, *, fal
         extra={},
     )
 
+
 def _extract_tags(gallery_path: Path, metadata: dict, source: str | None = None) -> list[str]:
     """Extract tags in 'namespace:name' format from metadata or tags.txt."""
     tags: list[str] = []
@@ -202,9 +212,11 @@ def _extract_tags(gallery_path: Path, metadata: dict, source: str | None = None)
     # Extract hashtags from content for social platforms
     if source:
         from plugins.builtin.gallery_dl._sites import get_site_config
+
         cfg = get_site_config(source)
         if cfg.category == "social":
             import re
+
             content = metadata.get("content") or metadata.get("description") or ""
             seen = {t.lower() for t in tags}
             for ht in re.findall(r"#([\w\u3040-\u309f\u30a0-\u30ff\u4e00-\u9fff\uac00-\ud7af]+)", content):
@@ -215,9 +227,11 @@ def _extract_tags(gallery_path: Path, metadata: dict, source: str | None = None)
 
     return tags
 
+
 def _normalize_tags(tags: list[str], source: str) -> list[str]:
     """Normalize namespace names across booru sources for consistency."""
     from plugins.builtin.gallery_dl._sites import get_site_config
+
     cfg = get_site_config(source)
     if not cfg.normalize_namespaces:
         return tags
@@ -230,6 +244,7 @@ def _normalize_tags(tags: list[str], source: str) -> list[str]:
         else:
             normalized.append(tag)
     return normalized
+
 
 def _extract_artist(source: str, meta: dict, tags: list[str]) -> str | None:
     """Extract artist_id from metadata based on source type (data-driven)."""
