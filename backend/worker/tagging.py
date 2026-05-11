@@ -115,8 +115,8 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
 
     async with httpx.AsyncClient() as client:
         if not await _tagger_available(client):
-            logger.warning("[tag] gallery_id=%d skipped (tagger service unavailable)", gallery_id)
-            return {"status": "skipped", "reason": "tagger_unavailable"}
+            # Raise so SAQ retries on transient outage — edge case #211
+            raise RuntimeError(f"tagger unavailable for gallery_id={gallery_id}")
 
         tagged = 0
         async with AsyncSessionLocal() as session:

@@ -181,15 +181,19 @@ async def import_job(
 
         async def _sha256_limited(f):
             async with _hash_sem:
-                return await asyncio.to_thread(_sha256, f)
+                try:
+                    return await asyncio.to_thread(_sha256, f)
+                except (FileNotFoundError, OSError) as exc:
+                    logger.warning("[import] skipping deleted file %s: %s", f.name, exc)
+                    return None
 
         hashes = await asyncio.gather(*[_sha256_limited(f) for f in media_files])
 
-        # Filter out files whose sha256 is in the excluded set
+        # Filter out missing files (None hash) and excluded blobs
         allowed_pairs = [
             (img_file, sha256)
             for img_file, sha256 in zip(media_files, hashes, strict=False)
-            if sha256 not in excluded_set
+            if sha256 is not None and sha256 not in excluded_set
         ]
         if len(allowed_pairs) < len(media_files):
             logger.info(
@@ -459,7 +463,11 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         existing_missing_thumb = False
 
         for f in files:
-            sha256 = await asyncio.to_thread(_sha256, f)
+            try:
+                sha256 = await asyncio.to_thread(_sha256, f)
+            except (FileNotFoundError, OSError) as exc:
+                logger.warning("[local_import] gallery_id=%d: skipping deleted file %s: %s", gallery_id, f.name, exc)
+                continue
 
             if sha256 in excluded_set:
                 logger.debug("[local_import] gallery_id=%d: skipping excluded blob %s", gallery_id, sha256[:12])

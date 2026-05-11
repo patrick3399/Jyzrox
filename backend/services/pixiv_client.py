@@ -2,6 +2,8 @@
 
 import asyncio
 import logging
+import secrets
+import time
 from urllib.parse import parse_qs, urlparse
 
 import httpx
@@ -91,9 +93,10 @@ class PixivClient:
         # Acquire a Redis lock to prevent concurrent refreshes
         lock_acquired = await r.set(_LOCK_KEY, "1", nx=True, ex=_LOCK_TIMEOUT)
         if not lock_acquired:
-            # Another instance is refreshing — wait and retry
-            for _ in range(_LOCK_TIMEOUT * 10):
-                await asyncio.sleep(0.1)
+            # Another instance is refreshing — wait with jitter to avoid stampede (#202/#203)
+            deadline = time.monotonic() + _LOCK_TIMEOUT
+            while time.monotonic() < deadline:
+                await asyncio.sleep(0.1 + secrets.randbelow(50) / 1000)
                 cached = await r.get(_TOKEN_KEY)
                 if cached:
                     access_token = cached.decode() if isinstance(cached, bytes) else cached

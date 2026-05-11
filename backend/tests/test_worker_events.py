@@ -477,7 +477,9 @@ class TestTaggingJobEmitsEvent:
     """tag_job emits GALLERY_TAGGED after successful AI tagging."""
 
     async def test_tag_job_does_not_emit_when_tagger_unavailable(self):
-        """tag_job skips and does not emit when tagger microservice is offline."""
+        """tag_job raises RuntimeError (no emit) when tagger microservice is offline — edge case #211."""
+        import pytest
+
         from worker.tagging import tag_job
 
         mock_emit = AsyncMock()
@@ -487,10 +489,9 @@ class TestTaggingJobEmitsEvent:
             patch("core.events.emit_safe", mock_emit),
         ):
             mock_settings.tag_model_enabled = True
-            result = await tag_job({}, gallery_id=1)
+            with pytest.raises(RuntimeError, match="tagger unavailable"):
+                await tag_job({}, gallery_id=1)
 
-        assert result["status"] == "skipped"
-        assert result["reason"] == "tagger_unavailable"
         mock_emit.assert_not_awaited()
 
     async def test_tag_job_does_not_emit_when_model_disabled(self):

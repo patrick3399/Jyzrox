@@ -125,26 +125,27 @@ class TestTaggingJob:
         assert result["status"] == "skipped"
         assert "TAG_MODEL_ENABLED" in result["reason"]
 
-    async def test_tagger_unavailable_returns_skipped(self):
-        """When tagger health check returns model_loaded=False, job must return skipped."""
+    async def test_tagger_unavailable_raises_for_retry(self):
+        """When tagger health check fails, job must raise RuntimeError so SAQ retries — edge case #211.
+
+        Before the fix, the job returned {"status": "skipped", "reason": "tagger_unavailable"},
+        silently dropping the gallery from the tagging queue on any transient outage.
+        """
+        import pytest
+
         from worker.tagging import tag_job
 
         mock_s = _mock_settings(tag_model_enabled=True)
         unavail_client = _mock_http_client(available=False)
-        mock_session = _make_mock_session(images=[])
-        fake_db = _make_session_factory_from_mock(mock_session)
 
         with (
             patch("worker.tagging.settings", mock_s),
-            patch("worker.tagging.AsyncSessionLocal", fake_db),
             patch("worker.tagging.httpx.AsyncClient") as mock_cls,
         ):
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=unavail_client)
             mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
-            result = await tag_job({}, gallery_id=1)
-
-        assert result["status"] == "skipped"
-        assert result["reason"] == "tagger_unavailable"
+            with pytest.raises(RuntimeError, match="tagger unavailable"):
+                await tag_job({}, gallery_id=1)
 
     async def test_successful_tagging_returns_tagged_count(self, tmp_path):
         """Successful tagging of all images must return tagged count equal to image count."""
@@ -341,3 +342,22 @@ class TestTaggingJob:
 
         assert result["status"] == "done"
         assert result["tagged"] == 0
+
+
+# ---------------------------------------------------------------------------
+# Regression: edge case #211 — tagger transient outage must raise, not skip
+# ---------------------------------------------------------------------------
+
+
+class TestTaggerUnavailableRaisesForRetry:
+    """tag_job must raise RuntimeError on transient outage so SAQ retries — edge case #211."""
+
+    async def test_enabled_false_still_returns_skipped(self):
+        """TAG_MODEL_ENABLED=false is a permanent skip, not a transient error."""
+        from worker.tagging import tag_job
+
+        mock_s = _mock_settings(tag_model_enabled=False)
+        with patch("worker.tagging.settings", mock_s):
+            result = await tag_job({}, gallery_id=99)
+
+        assert result["status"] == "skipped"

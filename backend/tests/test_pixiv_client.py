@@ -553,3 +553,58 @@ class TestCallErrorHandling:
         ):
             with pytest.raises(Exception, match="network timeout"):
                 await client._call(lambda: None)
+
+
+# ---------------------------------------------------------------------------
+# Regression: edge cases #202/#203 — wait loop uses monotonic deadline + jitter
+# ---------------------------------------------------------------------------
+
+
+class TestTokenLockWaitLoop:
+    """_ensure_token wait loop must use monotonic deadline and add sleep jitter — #202/#203."""
+
+    async def test_lock_contention_raises_timeout_not_hangs(self):
+        """When lock holder never releases, PermissionError raised within ~LOCK_TIMEOUT — #202/#203.
+
+        Before the fix, the loop ran a fixed number of iterations (LOCK_TIMEOUT*10).
+        After the fix it checks time.monotonic() against a deadline, so it always
+        terminates within the declared timeout even if individual sleeps drift.
+        """
+        import time
+
+        client = _build_pixiv_client()
+
+        mock_r = _make_mock_redis(cached_token=None)
+        mock_r.set = AsyncMock(return_value=False)  # lock already held, never acquired
+
+        with (
+            patch("services.pixiv_client.get_redis", return_value=mock_r),
+            patch("services.pixiv_client._LOCK_TIMEOUT", 1),  # 1-second deadline for speed
+        ):
+            start = time.monotonic()
+            with pytest.raises(PermissionError, match="timed out"):
+                await client._ensure_token()
+            elapsed = time.monotonic() - start
+
+        assert elapsed < 5, f"Timeout took too long ({elapsed:.1f}s); deadline not respected"
+
+    async def test_lock_contention_resolves_when_token_appears(self):
+        """When token appears in Redis during wait, _ensure_token returns without error."""
+        call_count = 0
+
+        async def _get_side_effect(_key):
+            nonlocal call_count
+            call_count += 1
+            return b"cached_token" if call_count >= 2 else None
+
+        client = _build_pixiv_client()
+
+        mock_r = _make_mock_redis(cached_token=None)
+        mock_r.set = AsyncMock(return_value=False)  # lock already held
+        mock_r.get = AsyncMock(side_effect=_get_side_effect)
+
+        with (
+            patch("services.pixiv_client.get_redis", return_value=mock_r),
+            patch("asyncio.to_thread", new_callable=AsyncMock),
+        ):
+            await client._ensure_token()  # must not raise

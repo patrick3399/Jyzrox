@@ -4,7 +4,7 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import delete, desc, func, select
 from sqlalchemy.dialects.postgresql import insert as pg_insert
 
@@ -17,12 +17,12 @@ router = APIRouter(tags=["history"])
 
 
 class HistoryRecord(BaseModel):
-    source: str
-    source_id: str
-    title: str | None = None
-    thumb: str | None = None
+    source: str = Field(max_length=256)
+    source_id: str = Field(max_length=2048)  # edge case #142: prevent unbounded rows
+    title: str | None = Field(default=None, max_length=512)
+    thumb: str | None = Field(default=None, max_length=1024)
     gid: int | None = None
-    token: str | None = None
+    token: str | None = Field(default=None, max_length=64)
 
 
 @router.get("/")

@@ -1170,8 +1170,11 @@ async def batch_galleries(
     if body.action == "rate" and (body.rating is None or body.rating < 0 or body.rating > 5):
         raise HTTPException(status_code=400, detail="Rating must be 0-5 for rate action")
 
+    # Deduplicate while preserving order — edge case #141
+    gallery_ids = list(dict.fromkeys(body.gallery_ids))
+
     if body.action == "favorite":
-        for gid in body.gallery_ids:
+        for gid in gallery_ids:
             stmt = (
                 pg_insert(UserFavorite)
                 .values(
@@ -1182,20 +1185,20 @@ async def batch_galleries(
             )
             await db.execute(stmt)
         await db.commit()
-        return {"status": "ok", "affected": len(body.gallery_ids)}
+        return {"status": "ok", "affected": len(gallery_ids)}
 
     elif body.action == "unfavorite":
         result = await db.execute(
             sa_delete(UserFavorite).where(
                 UserFavorite.user_id == auth["user_id"],
-                UserFavorite.gallery_id.in_(body.gallery_ids),
+                UserFavorite.gallery_id.in_(gallery_ids),
             )
         )
         await db.commit()
         return {"status": "ok", "affected": result.rowcount}
 
     elif body.action == "add_to_reading_list":
-        for gid in body.gallery_ids:
+        for gid in gallery_ids:
             stmt = (
                 pg_insert(UserReadingList)
                 .values(
@@ -1206,20 +1209,20 @@ async def batch_galleries(
             )
             await db.execute(stmt)
         await db.commit()
-        return {"status": "ok", "affected": len(body.gallery_ids)}
+        return {"status": "ok", "affected": len(gallery_ids)}
 
     elif body.action == "remove_from_reading_list":
         result = await db.execute(
             sa_delete(UserReadingList).where(
                 UserReadingList.user_id == auth["user_id"],
-                UserReadingList.gallery_id.in_(body.gallery_ids),
+                UserReadingList.gallery_id.in_(gallery_ids),
             )
         )
         await db.commit()
         return {"status": "ok", "affected": result.rowcount}
 
     elif body.action == "rate":
-        for gid in body.gallery_ids:
+        for gid in gallery_ids:
             if body.rating == 0:
                 await db.execute(
                     sa_delete(UserRating).where(
@@ -1242,7 +1245,7 @@ async def batch_galleries(
                 )
                 await db.execute(stmt)
         await db.commit()
-        return {"status": "ok", "affected": len(body.gallery_ids)}
+        return {"status": "ok", "affected": len(gallery_ids)}
 
     elif body.action == "add_to_collection":
         if body.collection_id is None:
@@ -1262,7 +1265,7 @@ async def batch_galleries(
         ).scalar_one()
 
         added = 0
-        for i, gid in enumerate(body.gallery_ids):
+        for i, gid in enumerate(gallery_ids):
             existing = (
                 await db.execute(
                     select(CollectionGallery).where(
@@ -1313,7 +1316,7 @@ async def batch_galleries(
         # Upsert gallery_tags for ALL galleries at once
         gt_values = [
             {"gallery_id": gid, "tag_id": tid, "confidence": 1.0, "source": "manual"}
-            for gid in body.gallery_ids
+            for gid in gallery_ids
             for tid in tag_ids
         ]
         if gt_values:
@@ -1337,7 +1340,7 @@ async def batch_galleries(
             await db.execute(gt_stmt)
 
         # Rebuild tags_array for each gallery
-        for gid in body.gallery_ids:
+        for gid in gallery_ids:
             await rebuild_gallery_tags_array(db, gid)
 
         # Recalculate counts for affected tags (correct, not inflated)
@@ -1347,7 +1350,7 @@ async def batch_galleries(
             await db.execute(Tag.__table__.update().where(Tag.id == tid).values(count=actual_count))
 
         await db.commit()
-        return {"status": "ok", "affected": len(body.gallery_ids)}
+        return {"status": "ok", "affected": len(gallery_ids)}
 
     elif body.action == "remove_tags":
         if not body.tags:
@@ -1368,7 +1371,7 @@ async def batch_galleries(
         # Bulk delete gallery_tags across all galleries in one statement
         del_result = await db.execute(
             sa_delete(GalleryTag).where(
-                GalleryTag.gallery_id.in_(body.gallery_ids),
+                GalleryTag.gallery_id.in_(gallery_ids),
                 GalleryTag.tag_id.in_(tag_ids),
                 GalleryTag.source == "manual",
             )
@@ -1382,14 +1385,14 @@ async def batch_galleries(
             await db.execute(Tag.__table__.update().where(Tag.id == tid).values(count=actual_count))
 
         # Rebuild tags_array for each gallery
-        for gid in body.gallery_ids:
+        for gid in gallery_ids:
             await rebuild_gallery_tags_array(db, gid)
 
         await db.commit()
         return {"status": "ok", "affected": removed}
 
     elif body.action == "delete":
-        return await _batch_delete_galleries(db, body.gallery_ids, auth)
+        return await _batch_delete_galleries(db, gallery_ids, auth)
 
 
 async def _batch_delete_galleries(db: AsyncSession, gallery_ids: list[int], auth: dict) -> dict:

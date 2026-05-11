@@ -259,3 +259,34 @@ class TestClearHistory:
         # User 2's entry must still exist
         remaining = await db_session.execute(text("SELECT COUNT(*) FROM browse_history WHERE user_id = 2"))
         assert remaining.scalar_one() == 1
+
+
+# ---------------------------------------------------------------------------
+# Regression: edge case #142 — source_id must have a length limit
+# ---------------------------------------------------------------------------
+
+
+class TestHistorySourceIdValidation:
+    """History POST must reject unbounded source_id — edge case #142."""
+
+    async def test_source_id_too_long_returns_422(self, hist_client):
+        """A source_id longer than 2048 chars must be rejected with 422 — edge case #142.
+
+        Before the fix, HistoryRecord had no Field(max_length=...) on source_id,
+        allowing multi-megabyte rows to be inserted into browse_history.
+        """
+        payload = {
+            "source": "local",
+            "source_id": "x" * 2049,
+        }
+        resp = await hist_client.post("/api/history/", json=payload)
+        assert resp.status_code == 422, f"Expected 422, got {resp.status_code}"
+
+    async def test_source_id_at_limit_is_accepted(self, hist_client):
+        """A source_id of exactly 2048 chars must be accepted — edge case #142."""
+        payload = {
+            "source": "local",
+            "source_id": "y" * 2048,
+        }
+        resp = await hist_client.post("/api/history/", json=payload)
+        assert resp.status_code == 201

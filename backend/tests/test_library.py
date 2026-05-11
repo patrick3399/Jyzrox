@@ -3877,3 +3877,40 @@ class TestSearchIlikeEscape:
         # Only "Gallery_Title" contains a literal underscore
         assert data["total"] == 1
         assert data["galleries"][0]["title"] == "Gallery_Title"
+
+
+# ---------------------------------------------------------------------------
+# Regression: edge case #141 — batch favorite with duplicate IDs
+# ---------------------------------------------------------------------------
+
+
+class TestBatchFavoriteDeduplication:
+    """Batch favorite action must deduplicate gallery_ids — edge case #141."""
+
+    async def test_favorite_with_duplicates_returns_deduplicated_affected_count(self, client, db_session):
+        """POST /galleries/batch favorite with [1, 1, 2] must return affected=2 — edge case #141.
+
+        Before the fix, the affected count reflected the raw input length (3),
+        misleading callers into thinking 3 rows were inserted when only 2 were.
+        """
+        gid1 = await _insert_gallery(db_session, source_id="dup1", title="Gallery A")
+        gid2 = await _insert_gallery(db_session, source_id="dup2", title="Gallery B")
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "favorite", "gallery_ids": [gid1, gid1, gid2]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["affected"] == 2, "Duplicate gallery_id must be collapsed before counting"
+
+    async def test_favorite_duplicate_ids_do_not_error(self, client, db_session):
+        """Duplicate IDs in batch favorite must not cause a DB error."""
+        gid = await _insert_gallery(db_session, source_id="dup3", title="Gallery C")
+
+        resp = await client.post(
+            "/api/library/galleries/batch",
+            json={"action": "favorite", "gallery_ids": [gid, gid, gid]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["affected"] == 1
