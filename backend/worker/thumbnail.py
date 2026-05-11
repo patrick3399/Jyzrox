@@ -1,7 +1,6 @@
 """Thumbnail generation job for the worker package."""
 
 import asyncio
-import base64
 import json
 import os
 import subprocess
@@ -18,6 +17,7 @@ from db.models import Gallery, Image
 from services.cas import resolve_blob_path, thumb_dir
 from worker.constants import logger
 from worker.helpers import env_int
+from worker.thumbhash_utils import encode_pil_thumbhash
 
 try:
     from PIL import Image as _PILImage
@@ -90,14 +90,7 @@ def _atomic_save_webp(image, dest: Path) -> None:
 
 def _encode_thumbhash(pil) -> str | None:
     try:
-        import thumbhash as _thumbhash
-
-        thumb_for_hash = pil.convert("RGBA")
-        thumb_for_hash.thumbnail((100, 100))
-        hash_value = _thumbhash.image_to_thumbhash(thumb_for_hash)
-        if isinstance(hash_value, str):
-            return hash_value
-        return base64.b64encode(hash_value).decode()
+        return encode_pil_thumbhash(pil)
     except Exception as exc:
         logger.warning("[thumbnail] thumbhash failed: %s", exc)
         return None

@@ -1,7 +1,6 @@
 """Backfill thumbhash for existing blobs that don't have one yet."""
 
 import asyncio
-import base64
 import logging
 
 from sqlalchemy.sql import select
@@ -9,6 +8,7 @@ from sqlalchemy.sql import select
 from core.database import AsyncSessionLocal
 from db.models import Blob
 from services.cas import thumb_dir
+from worker.thumbhash_utils import encode_pil_thumbhash
 
 logger = logging.getLogger(__name__)
 
@@ -18,16 +18,10 @@ def _generate_thumbhash(thumb_path) -> str | None:
 
     Runs in a thread pool via asyncio.to_thread to avoid blocking the event loop.
     """
-    import thumbhash as _thumbhash
     from PIL import Image as PILImage
 
     with PILImage.open(thumb_path) as pil:
-        pil.thumbnail((100, 100))
-        rgba = pil.convert("RGBA")
-        w, h = rgba.size
-        rgba_data = rgba.tobytes()
-        hash_bytes = _thumbhash.rgba_to_thumbhash(w, h, rgba_data)
-        return base64.b64encode(hash_bytes).decode()
+        return encode_pil_thumbhash(pil)
 
 
 async def thumbhash_backfill_job(ctx: dict, batch_size: int = 500) -> dict:

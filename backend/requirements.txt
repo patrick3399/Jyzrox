@@ -7,10 +7,11 @@ redis[hiredis]==6.4.0
 saq[redis]>=0.22,<1.0
 httpx==0.28.1
 pillow==12.2.0
+thumbhash==0.1.2
 cryptography==47.0.0
 pixivpy3==3.7.5
 pydantic-settings==2.14.1
-python-multipart==0.0.27
+python-multipart==0.0.28
 beautifulsoup4==4.14.3
 lxml==6.1.0
 bcrypt==5.0.0

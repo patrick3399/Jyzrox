@@ -7,6 +7,7 @@ Mocks:
 - asyncio.to_thread (avoids PIL/thumbhash deps)
 """
 
+import base64
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
@@ -58,6 +59,20 @@ def _make_mock_session(blobs_per_call: list[list]):
 
 class TestThumhhashBackfillJob:
     """Unit tests for thumbhash_backfill_job."""
+
+    def test_generate_thumbhash_uses_supported_thumbhash_api(self, tmp_path):
+        """The real encoder path should work with the installed thumbhash package."""
+        from PIL import Image
+
+        from worker.thumbhash_backfill import _generate_thumbhash
+
+        thumb_file = tmp_path / "thumb_160.webp"
+        Image.new("RGBA", (8, 8), (100, 80, 60, 255)).save(thumb_file, "WEBP")
+
+        result = _generate_thumbhash(thumb_file)
+
+        assert result
+        assert base64.b64decode(result)
 
     async def test_no_blobs_returns_done_with_zero_counts(self):
         """When no blobs need backfill, job returns status=done with 0 processed/failed."""

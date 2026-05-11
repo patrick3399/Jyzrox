@@ -91,6 +91,8 @@ def _make_pil_mocks(width=100, height=100):
 
     mock_rgba = MagicMock()
     mock_rgba.size = (min(width, 100), min(height, 100))
+    mock_rgba.width = mock_rgba.size[0]
+    mock_rgba.height = mock_rgba.size[1]
     mock_rgba.tobytes.return_value = b"\x00" * (mock_rgba.size[0] * mock_rgba.size[1] * 4)
 
     mock_pil_img.convert = MagicMock(side_effect=lambda m: mock_rgb if m == "RGB" else mock_rgba)
@@ -116,7 +118,7 @@ def _make_imagehash_mock(phash_hex="aabbccddeeff0011"):
 
 def _make_thumbhash_mock():
     mock_mod = MagicMock()
-    mock_mod.image_to_thumbhash.return_value = "thumbhash-value"
+    mock_mod.rgba_to_thumb_hash.return_value = list(b"thumbhash-value")
     return mock_mod
 
 
@@ -221,8 +223,8 @@ class TestGenerateSingleThumbnail:
         assert blob.width == 800
         assert blob.height == 600
         assert blob.phash == "aabbccddeeff0011"
-        assert blob.thumbhash == "thumbhash-value"
-        mock_thumbhash.image_to_thumbhash.assert_called()
+        assert blob.thumbhash == "dGh1bWJoYXNoLXZhbHVl"
+        mock_thumbhash.rgba_to_thumb_hash.assert_called()
 
     async def test_video_blob_calls_ffprobe_and_extract_frame(self, tmp_path):
         """Video blob: _ffprobe_metadata and _extract_video_frame are called."""
