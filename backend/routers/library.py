@@ -1170,7 +1170,7 @@ async def batch_galleries(
     if body.action == "rate" and (body.rating is None or body.rating < 0 or body.rating > 5):
         raise HTTPException(status_code=400, detail="Rating must be 0-5 for rate action")
 
-    # Deduplicate while preserving order — edge case #141
+    # Deduplicate while preserving order
     gallery_ids = list(dict.fromkeys(body.gallery_ids))
 
     if body.action == "favorite":

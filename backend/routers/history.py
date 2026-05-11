@@ -18,7 +18,7 @@ router = APIRouter(tags=["history"])
 
 class HistoryRecord(BaseModel):
     source: str = Field(max_length=256)
-    source_id: str = Field(max_length=2048)  # edge case #142: prevent unbounded rows
+    source_id: str = Field(max_length=2048)
     title: str | None = Field(default=None, max_length=512)
     thumb: str | None = Field(default=None, max_length=1024)
     gid: int | None = None

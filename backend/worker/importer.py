@@ -189,7 +189,6 @@ async def import_job(
 
         hashes = await asyncio.gather(*[_sha256_limited(f) for f in media_files])
 
-        # Filter out missing files (None hash) and excluded blobs
         allowed_pairs = [
             (img_file, sha256)
             for img_file, sha256 in zip(media_files, hashes, strict=False)
