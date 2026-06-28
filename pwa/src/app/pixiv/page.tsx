@@ -1044,14 +1044,21 @@ function PixivPageInner() {
   // ── Scroll restoration (per tab) ──
   // isReady is approximated by active tab match; actual data readiness is inside each tab
   const { saveScroll: saveRankingScroll, restoredPages: rankingRestoredPages } =
-    useScrollRestore<RankingPage>('pixiv_ranking_scrollY', activeTab === 'ranking')
+    useScrollRestore<RankingPage>('pixiv_ranking_scrollY', activeTab === 'ranking', {
+      persist: true,
+    })
   const { saveScroll: saveFeedScroll, restoredPages: feedRestoredPages } =
-    useScrollRestore<PixivSearchResult>('pixiv_feed_scrollY', activeTab === 'feed')
+    useScrollRestore<PixivSearchResult>('pixiv_feed_scrollY', activeTab === 'feed', {
+      persist: true,
+    })
   const { saveScroll: saveBookmarksScroll, restoredPages: bookmarksRestoredPages } =
-    useScrollRestore<PixivSearchResult>('pixiv_bookmarks_scrollY', activeTab === 'bookmarks')
+    useScrollRestore<PixivSearchResult>('pixiv_bookmarks_scrollY', activeTab === 'bookmarks', {
+      persist: true,
+    })
   const { saveScroll: saveSearchScroll } = useScrollRestore(
     'pixiv_search_scrollY',
     submittedQuery.length > 0,
+    { persist: true },
   )
 
   // focusedIndex is managed inside each tab component using useGridKeyboard

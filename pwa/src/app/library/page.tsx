@@ -157,6 +157,7 @@ function LibraryContent() {
   const { saveScroll, restoredPages } = useScrollRestore<SearchGalleriesResponse>(
     'library_scrollY',
     true,
+    { persist: true },
   )
 
   const { items: searchItems, data: searchData, total, isLoading, error, isReachingEnd, loadMore, mutate } =
