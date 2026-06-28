@@ -58,13 +58,15 @@ afterEach(() => {
 // ── Tests ─────────────────────────────────────────────────────────────
 
 describe('useAdminGuard — loading state', () => {
-  it('test_useAdminGuard_loading_returnsTrue', () => {
+  it('test_useAdminGuard_loading_returnsFalse', () => {
+    // Guard returns false while loading so admin-only UI never flashes before
+    // the profile confirms the role (see useAdminGuard doc comment).
     mockProfileLoading.current = true
     mockProfileData.current = undefined
 
     const { result } = renderHook(() => useAdminGuard())
 
-    expect(result.current).toBe(true)
+    expect(result.current).toBe(false)
   })
 
   it('test_useAdminGuard_loading_doesNotCallRouterReplace', () => {
