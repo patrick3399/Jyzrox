@@ -6,6 +6,7 @@ so no real filesystem layout is required. The async `decrement_ref_count` test
 uses an AsyncMock session and verifies `session.execute` is called.
 """
 
+import os
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -295,6 +296,146 @@ class TestThumbUrl:
         result = thumb_url(SHA)
 
         assert isinstance(result, str)
+
+
+# ---------------------------------------------------------------------------
+# TestStoreBlobConflict
+# ---------------------------------------------------------------------------
+
+
+class TestStoreBlobConflict:
+    """Regression tests for store_blob() upsert-on-conflict behaviour (edge case #43).
+
+    blobs is keyed by sha256. For external (link-mode) blobs the on-conflict path
+    must REFRESH external_path, otherwise the first path stored for a hash wins
+    forever: after the source folder moves, removing + re-importing the gallery
+    reuses the surviving blob row and the stale path persists. ref_count must
+    still NOT be touched on conflict (duplicate re-imports must not inflate it).
+    """
+
+    async def _capture_upsert_sql(self, tmp_path, *, storage, external_path):
+        """Call store_blob with a session that captures the executed statement,
+        and return the compiled PostgreSQL SQL string."""
+        from sqlalchemy.dialects import postgresql
+
+        from services.cas import store_blob
+
+        f = tmp_path / "img.jpg"
+        f.write_bytes(b"data")
+
+        captured = {}
+
+        async def fake_execute(stmt):
+            captured["stmt"] = stmt
+            res = MagicMock()
+            res.scalar_one.return_value = MagicMock()
+            return res
+
+        session = MagicMock()
+        session.execute = fake_execute
+
+        with patch("services.cas.settings", _mock_settings()):
+            await store_blob(f, SHA, session, storage=storage, external_path=external_path)
+
+        return str(captured["stmt"].compile(dialect=postgresql.dialect())).lower()
+
+    async def test_external_conflict_refreshes_external_path(self, tmp_path):
+        """On conflict, external blobs must update external_path so a re-import
+        after the source folder moved heals the stale path."""
+        sql = await self._capture_upsert_sql(tmp_path, storage="external", external_path="/mnt/new/img.jpg")
+
+        assert "on conflict" in sql
+        set_clause = sql.split("do update set", 1)[1].split("returning", 1)[0]
+        assert "external_path" in set_clause, f"DO UPDATE SET must refresh external_path, got: {set_clause!r}"
+
+    async def test_conflict_never_touches_ref_count(self, tmp_path):
+        """The on-conflict update must never write ref_count (would inflate it on
+        duplicate re-imports)."""
+        sql = await self._capture_upsert_sql(tmp_path, storage="external", external_path="/mnt/new/img.jpg")
+
+        set_clause = sql.split("do update set", 1)[1].split("returning", 1)[0]
+        assert "ref_count" not in set_clause, f"DO UPDATE SET must not touch ref_count, got: {set_clause!r}"
+
+
+# ---------------------------------------------------------------------------
+# TestCreateLibrarySymlink
+# ---------------------------------------------------------------------------
+
+
+class TestCreateLibrarySymlink:
+    """Regression tests for create_library_symlink(source, source_id, filename, blob).
+
+    The library symlink tree under /data/library is browsed by users outside the
+    container (host file browser / Samba), where the /data volume is mounted at a
+    different absolute path (e.g. ${JYZROX_DATA_ROOT}/data). CAS-backed symlinks
+    that stored an absolute /data/cas/... target therefore appeared as broken
+    symlinks on the host. CAS links must be RELATIVE so they resolve regardless
+    of the volume's mount point; external links stay absolute (identical bind mount).
+    """
+
+    def _make_cas_blob(self, sha256=SHA, extension=".jpg"):
+        blob = MagicMock()
+        blob.storage = "cas"
+        blob.external_path = None
+        blob.sha256 = sha256
+        blob.extension = extension
+        return blob
+
+    async def test_cas_symlink_is_relative_and_survives_volume_remount(self, tmp_path):
+        """A CAS symlink must use a relative target so it still resolves when the
+        data volume is mounted at a different absolute path (container vs host)."""
+        from services.cas import create_library_symlink
+
+        data_root = tmp_path / "data"
+        cas_root = data_root / "cas"
+        library_root = data_root / "library"
+
+        blob_file = cas_root / SHA[:2] / SHA[2:4] / f"{SHA}.jpg"
+        blob_file.parent.mkdir(parents=True)
+        blob_file.write_bytes(b"image-bytes")
+
+        blob = self._make_cas_blob()
+        with patch("services.cas.settings", _mock_settings(cas=str(cas_root), library=str(library_root))):
+            await create_library_symlink("ehentai", "12345", "001.jpg", blob)
+
+        link = library_root / "ehentai" / "12345" / "001.jpg"
+        assert link.is_symlink()
+        # The whole point: the target must NOT be an absolute /data/... path.
+        target = os.readlink(link)
+        assert not os.path.isabs(target), f"CAS symlink target must be relative, got {target!r}"
+        assert link.resolve().read_bytes() == b"image-bytes"
+
+        # Simulate the volume being mounted at a different absolute path by moving
+        # the entire data root. An absolute symlink would now dangle; a relative
+        # one keeps resolving because library/ and cas/ moved together.
+        remounted = tmp_path / "host_mountpoint"
+        data_root.rename(remounted)
+        moved_link = remounted / "library" / "ehentai" / "12345" / "001.jpg"
+        assert moved_link.resolve().exists(), "relative CAS symlink must survive a mount-point change"
+        assert moved_link.resolve().read_bytes() == b"image-bytes"
+
+    async def test_external_symlink_stays_absolute(self, tmp_path):
+        """External (link-mode) blobs live outside the data volume and rely on an
+        identical bind-mount path, so their symlink target stays absolute."""
+        from services.cas import create_library_symlink
+
+        library_root = tmp_path / "data" / "library"
+        ext_file = tmp_path / "mnt" / "images" / "pic.jpg"
+        ext_file.parent.mkdir(parents=True)
+        ext_file.write_bytes(b"x")
+
+        blob = MagicMock()
+        blob.storage = "external"
+        blob.external_path = str(ext_file)
+        blob.sha256 = SHA
+        blob.extension = ".jpg"
+
+        with patch("services.cas.settings", _mock_settings(library=str(library_root))):
+            await create_library_symlink("local", "art/title", "pic.jpg", blob)
+
+        link = library_root / "local" / "art__title" / "pic.jpg"
+        assert link.is_symlink()
+        assert os.readlink(link) == str(ext_file)
 
 
 # ---------------------------------------------------------------------------

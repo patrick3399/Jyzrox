@@ -115,9 +115,16 @@ async def store_blob(
         )
         .on_conflict_do_update(
             index_elements=["sha256"],
-            # No-op update so that RETURNING still returns the existing row
-            # without touching ref_count.
-            set_={"sha256": pg_insert(Blob).excluded.sha256},
+            # Refresh storage + external_path so a re-import after the source
+            # folder moved heals the stale path (edge case #43): blobs are keyed
+            # by sha256, so without this the first path stored for a hash would
+            # win forever and remove + re-import could never fix it. ref_count is
+            # deliberately NOT updated here — duplicate re-imports must not
+            # inflate it (callers increment only when an Image row is inserted).
+            set_={
+                "storage": pg_insert(Blob).excluded.storage,
+                "external_path": pg_insert(Blob).excluded.external_path,
+            },
         )
         .returning(Blob)
     )
@@ -138,7 +145,18 @@ async def create_library_symlink(source: str, source_id: str, filename: str, blo
     if link.is_symlink() or link.exists():
         link.unlink()
 
-    link.symlink_to(target)
+    # CAS blobs live under the same data volume as the library tree, so use a
+    # RELATIVE target. The /data volume is mounted at a different absolute path
+    # inside the container (/data) than on the host (${JYZROX_DATA_ROOT}/data);
+    # a relative link (library/ and cas/ are siblings) resolves correctly in
+    # both, while an absolute /data/cas/... target dangles when the tree is
+    # browsed from the host (file browser / Samba). External blobs live outside
+    # the data volume and rely on an identical bind-mount path, so they keep an
+    # absolute target.
+    if blob.storage == "external" and blob.external_path:
+        link.symlink_to(target)
+    else:
+        link.symlink_to(os.path.relpath(target, link_dir))
 
 
 async def decrement_ref_count(sha256: str, session: AsyncSession) -> None:
