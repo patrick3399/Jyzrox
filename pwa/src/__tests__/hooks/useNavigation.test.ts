@@ -55,12 +55,19 @@ vi.mock('@/components/SidebarConfig', () => ({
   SIDEBAR_CONFIG_KEY: 'test-key',
 }))
 
+let currentNavPath = '/'
+
+vi.mock('next/navigation', () => ({
+  usePathname: () => currentNavPath,
+}))
+
 // ── Import after mocks ────────────────────────────────────────────────
 
 import { useNavigation } from '@/hooks/useNavigation'
 import { PAGE_REGISTRY } from '@/lib/pageRegistry'
 import { useTheme } from 'next-themes'
 import { useProfile } from '@/hooks/useProfile'
+import { rememberLocation } from '@/lib/navMemory'
 
 // ── Helpers ───────────────────────────────────────────────────────────
 
@@ -85,6 +92,8 @@ function adminOnlyHrefs(): string[] {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  sessionStorage.clear()
+  currentNavPath = '/'
   // Default: loadSidebarConfig returns all sidebar hrefs in default order
   mockLoadSidebarConfig.mockReturnValue({ order: allSidebarHrefs(), hidden: [] })
   // Default: theme is 'light'
@@ -360,5 +369,47 @@ describe('useNavigation — themeLabel', () => {
 
     // undefined theme → themeKey becomes 'system' → returns 'common.system'
     expect(result.current.themeLabel).toBe('common.system')
+  })
+})
+
+describe('useNavigation — nav memory', () => {
+  it('test_resolveHref_trackedRoot_returnsRememberedUrl', () => {
+    rememberLocation(['/library'], '/library', 'sort=name&page=2')
+
+    const { result } = renderHook(() => useNavigation())
+
+    expect(result.current.resolveHref('/library')).toBe('/library?sort=name&page=2')
+  })
+
+  it('test_resolveHref_nothingRemembered_returnsBareHref', () => {
+    const { result } = renderHook(() => useNavigation())
+
+    expect(result.current.resolveHref('/library')).toBe('/library')
+  })
+
+  it('test_handleNavClick_activeLink_scrollsTopAndPreventsNavigation', () => {
+    currentNavPath = '/library'
+    const scrollSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+
+    const { result } = renderHook(() => useNavigation())
+    const e = { preventDefault: vi.fn() } as unknown as React.MouseEvent
+
+    act(() => result.current.handleNavClick(e, '/library'))
+
+    expect(e.preventDefault).toHaveBeenCalled()
+    expect(scrollSpy).toHaveBeenCalledWith(expect.objectContaining({ top: 0 }))
+  })
+
+  it('test_handleNavClick_nonActiveLink_doesNothing', () => {
+    currentNavPath = '/pixiv'
+    const scrollSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+
+    const { result } = renderHook(() => useNavigation())
+    const e = { preventDefault: vi.fn() } as unknown as React.MouseEvent
+
+    act(() => result.current.handleNavClick(e, '/library'))
+
+    expect(e.preventDefault).not.toHaveBeenCalled()
+    expect(scrollSpy).not.toHaveBeenCalled()
   })
 })

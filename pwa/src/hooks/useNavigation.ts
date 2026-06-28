@@ -1,4 +1,5 @@
-import { useState, useEffect, useMemo, useCallback } from 'react'
+import { useState, useEffect, useMemo, useCallback, type MouseEvent } from 'react'
+import { usePathname } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import { Sun, Moon, Monitor } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
@@ -6,6 +7,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { PAGE_REGISTRY, hasRole, type PageDef } from '@/lib/pageRegistry'
+import { getTabHref } from '@/lib/navMemory'
 import {
   getDefaultSidebarConfig,
   loadSidebarConfig,
@@ -30,6 +32,7 @@ const THEME_LABEL: Record<string, () => string> = {
 
 export function useNavigation() {
   useLocale()
+  const pathname = usePathname()
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()
   const { data: profile } = useProfile()
@@ -77,6 +80,37 @@ export function useNavigation() {
     return groups.filter((g) => g.links.length > 0)
   }, [visibleLinks])
 
+  // Per-link resolved hrefs (last visited URL per tab root). Computed after
+  // mount to avoid a hydration mismatch; first render falls back to bare hrefs.
+  // Shared by Sidebar + MobileNav so desktop and the mobile drawer match the
+  // BottomTabBar's restore behaviour.
+  const [resolvedHrefs, setResolvedHrefs] = useState<Record<string, string>>({})
+
+  useEffect(() => {
+    const next: Record<string, string> = {}
+    for (const group of groupedLinks) {
+      for (const link of group.links) {
+        next[link.href] = getTabHref(link.href)
+      }
+    }
+    setResolvedHrefs(next)
+  }, [groupedLinks, pathname])
+
+  const resolveHref = useCallback(
+    (href: string) => resolvedHrefs[href] ?? href,
+    [resolvedHrefs],
+  )
+
+  const handleNavClick = useCallback(
+    (e: MouseEvent, href: string) => {
+      const isActive = pathname === href || (href !== '/' && pathname.startsWith(href))
+      if (!isActive) return // let the link navigate to its remembered href
+      e.preventDefault()
+      window.scrollTo({ top: 0 })
+    },
+    [pathname],
+  )
+
   // Theme cycling
   const cycleTheme = useCallback(() => {
     const idx = THEME_CYCLE.indexOf(theme as (typeof THEME_CYCLE)[number])
@@ -92,6 +126,8 @@ export function useNavigation() {
     logout,
     visibleLinks,
     groupedLinks,
+    resolveHref,
+    handleNavClick,
     cycleTheme,
     ThemeIcon,
     themeLabel,
