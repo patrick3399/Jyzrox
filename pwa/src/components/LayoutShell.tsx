@@ -1,8 +1,9 @@
 'use client'
 
-import { useState, useCallback } from 'react'
+import { useState, useCallback, Suspense } from 'react'
 import { usePathname } from 'next/navigation'
 import { Sidebar } from './Sidebar'
+import { NavMemoryTracker } from './NavMemoryTracker'
 import { MobileNav } from './MobileNav'
 import { BottomTabBar } from './BottomTabBar'
 import { Toaster } from 'sonner'
@@ -66,6 +67,11 @@ function LayoutShellInner({
 
   return (
     <>
+      {/* Records per-tab last location for BottomTabBar restoration */}
+      <Suspense fallback={null}>
+        <NavMemoryTracker />
+      </Suspense>
+
       {/* Desktop sidebar — hidden on mobile */}
       <Sidebar downloadStats={downloadStats} />
 
