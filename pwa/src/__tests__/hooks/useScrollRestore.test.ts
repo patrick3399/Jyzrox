@@ -15,12 +15,15 @@ import { renderHook, act } from '@testing-library/react'
 
 // ── Hoisted mock helpers ──────────────────────────────────────────────
 
-const { mockGetItem, mockSetItem, mockRemoveItem, mockScrollTo } = vi.hoisted(() => ({
-  mockGetItem: vi.fn(),
-  mockSetItem: vi.fn(),
-  mockRemoveItem: vi.fn(),
-  mockScrollTo: vi.fn(),
-}))
+const { mockGetItem, mockSetItem, mockRemoveItem, mockScrollTo, mockAddEventListener, mockRemoveEventListener } =
+  vi.hoisted(() => ({
+    mockGetItem: vi.fn(),
+    mockSetItem: vi.fn(),
+    mockRemoveItem: vi.fn(),
+    mockScrollTo: vi.fn(),
+    mockAddEventListener: vi.fn(),
+    mockRemoveEventListener: vi.fn(),
+  }))
 
 // ── Module / global mocks ─────────────────────────────────────────────
 
@@ -44,6 +47,8 @@ beforeEach(() => {
       ...globalThis.window,
       scrollTo: mockScrollTo,
       scrollY: 0,
+      addEventListener: mockAddEventListener,
+      removeEventListener: mockRemoveEventListener,
     },
     writable: true,
     configurable: true,
@@ -184,6 +189,60 @@ describe('useScrollRestore — saveScroll(pages)', () => {
       result.current.saveScroll()
     })
     expect(mockSetItem).toHaveBeenCalledWith('feed-key', '100')
+  })
+})
+
+describe('useScrollRestore — persist mode', () => {
+  it('test_persist_restore_doesNotRemoveSessionStorageEntry', () => {
+    mockGetItem.mockReturnValue('480')
+
+    renderHook(() => useScrollRestore('browse-page', true, { persist: true }))
+
+    expect(mockScrollTo).toHaveBeenCalledWith(0, 480)
+    expect(mockRemoveItem).not.toHaveBeenCalled()
+  })
+
+  it('test_persist_isReadyAndPersist_registersScrollListener', () => {
+    renderHook(() => useScrollRestore('browse-page', true, { persist: true }))
+
+    expect(mockAddEventListener).toHaveBeenCalledWith('scroll', expect.any(Function), {
+      passive: true,
+    })
+  })
+
+  it('test_persist_notReady_doesNotRegisterScrollListener', () => {
+    // Inactive instances (e.g. a non-active pixiv sub-tab) must NOT capture, or
+    // they would overwrite their own key with the active tab's scrollY.
+    renderHook(() => useScrollRestore('browse-page', false, { persist: true }))
+
+    expect(mockAddEventListener).not.toHaveBeenCalled()
+  })
+
+  it('test_persist_onScroll_writesScrollYPreservingPages', () => {
+    mockGetItem.mockReturnValue(JSON.stringify({ scrollY: 0, pages: [{ id: 1 }] }))
+    Object.defineProperty(globalThis.window, 'scrollY', { value: 640, configurable: true })
+
+    renderHook(() => useScrollRestore<{ id: number }>('feed-key', true, { persist: true }))
+
+    // Grab the registered scroll handler and invoke it
+    const handler = mockAddEventListener.mock.calls.find((c) => c[0] === 'scroll')?.[1] as () => void
+    expect(handler).toBeTypeOf('function')
+    mockSetItem.mockClear()
+    handler()
+
+    expect(mockSetItem).toHaveBeenCalledWith(
+      'feed-key',
+      JSON.stringify({ scrollY: 640, pages: [{ id: 1 }] }),
+    )
+  })
+
+  it('test_default_mode_doesNotRegisterScrollListener', () => {
+    mockGetItem.mockReturnValue('480')
+
+    renderHook(() => useScrollRestore('browse-page', true))
+
+    expect(mockAddEventListener).not.toHaveBeenCalled()
+    expect(mockRemoveItem).toHaveBeenCalledWith('browse-page')
   })
 })
 
