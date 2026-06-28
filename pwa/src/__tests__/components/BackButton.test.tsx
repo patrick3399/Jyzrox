@@ -6,6 +6,7 @@ const mockRouter = { back: vi.fn(), push: vi.fn() }
 
 vi.mock('next/navigation', () => ({
   useRouter: () => mockRouter,
+  usePathname: () => '/',
 }))
 
 vi.mock('@/lib/i18n', () => ({
