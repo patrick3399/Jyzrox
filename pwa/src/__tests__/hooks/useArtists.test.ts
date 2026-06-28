@@ -36,7 +36,7 @@ vi.mock('@/lib/api', () => ({
 
 interface SwrCall {
   key: unknown
-  fetcher: (() => unknown) | null
+  fetcher: ((...args: unknown[]) => unknown) | null
   options: Record<string, unknown>
 }
 
@@ -44,7 +44,7 @@ const swrCalls: SwrCall[] = []
 
 const { mockUseSWR } = vi.hoisted(() => ({
   mockUseSWR: vi.fn(
-    (key: unknown, fetcher: (() => unknown) | null, options: Record<string, unknown> = {}) => {
+    (key: unknown, fetcher: ((...args: unknown[]) => unknown) | null, options: Record<string, unknown> = {}) => {
       swrCalls.push({ key, fetcher, options })
       return { data: undefined, isLoading: true, error: undefined }
     },
@@ -99,7 +99,8 @@ describe('useArtists', () => {
     const params = { sort: 'name', page: 2 }
     useArtists(params)
     await lastSwrCall().fetcher!()
-    expect(mockGetArtists).toHaveBeenCalledWith(params)
+    // fetcher forwards the SWR AbortSignal (undefined when invoked bare)
+    expect(mockGetArtists).toHaveBeenCalledWith(params, { signal: undefined })
   })
 })
 
@@ -119,8 +120,9 @@ describe('useArtistSummary', () => {
 
   it('test_useArtistSummary_fetcher_callsApiLibraryGetArtistSummary', async () => {
     useArtistSummary('pixiv:456')
-    await lastSwrCall().fetcher!()
-    expect(mockGetArtistSummary).toHaveBeenCalledWith('pixiv:456')
+    // fetcher destructures the SWR key for the id
+    await lastSwrCall().fetcher!(['artist-summary', 'pixiv:456'])
+    expect(mockGetArtistSummary).toHaveBeenCalledWith('pixiv:456', { signal: undefined })
   })
 })
 
@@ -141,7 +143,8 @@ describe('useArtistImages', () => {
   it('test_useArtistImages_fetcher_callsApiLibraryGetArtistImagesWithArtistIdAndParams', async () => {
     const params = { page: 1, limit: 50, sort: 'newest' as const }
     useArtistImages('pixiv:999', params)
-    await lastSwrCall().fetcher!()
-    expect(mockGetArtistImages).toHaveBeenCalledWith('pixiv:999', params)
+    // fetcher destructures the SWR key for the id; params come from the closure
+    await lastSwrCall().fetcher!(['artist-images', 'pixiv:999', JSON.stringify(params)])
+    expect(mockGetArtistImages).toHaveBeenCalledWith('pixiv:999', params, { signal: undefined })
   })
 })

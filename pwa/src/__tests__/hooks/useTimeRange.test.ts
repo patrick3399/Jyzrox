@@ -95,7 +95,8 @@ describe('useTimeRange', () => {
     useTimeRange(params)
     await lastSwrCall().fetcher!()
     expect(mockImageTimeRange).toHaveBeenCalledOnce()
-    expect(mockImageTimeRange).toHaveBeenCalledWith(params)
+    // fetcher forwards the SWR AbortSignal (undefined when invoked bare)
+    expect(mockImageTimeRange).toHaveBeenCalledWith(params, { signal: undefined })
   })
 
   it('test_useTimeRange_options_setsDedupingIntervalTo300000_regressionUnnecessaryRefetches', () => {
