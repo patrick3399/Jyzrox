@@ -58,6 +58,7 @@ def _make_gallery(
     import_mode: str = "cas",
     pages: int = 5,
     library_path: str | None = None,
+    deleted_at=None,
 ) -> MagicMock:
     g = MagicMock()
     g.id = gallery_id
@@ -67,6 +68,7 @@ def _make_gallery(
     g.import_mode = import_mode
     g.pages = pages
     g.library_path = library_path
+    g.deleted_at = deleted_at
     g.last_scanned_at = None
     return g
 
@@ -436,6 +438,44 @@ class TestRescanGalleryJob:
 
         assert result["status"] == "failed"
         assert "not found" in result["error"]
+
+    async def test_trashed_gallery_is_not_mutated_by_rescan(self):
+        """Edge case #58: a soft-deleted (trashed) gallery must be skipped by
+        rescan so its images/pages/thumbnails are not mutated before trash
+        retention expires. Only trash GC may mutate trashed galleries.
+
+        Without the guard, the watcher-triggered rescan_by_path_job path
+        (filesystem edits inside a still-present source dir) would delete the
+        missing-blob image and renumber pages on a trashed gallery.
+        """
+        from datetime import UTC, datetime
+
+        from worker.scan import rescan_gallery_job
+
+        gallery = _make_gallery(gallery_id=100, pages=1, deleted_at=datetime.now(UTC))
+
+        session = AsyncMock()
+        session.get = AsyncMock(return_value=gallery)
+        session.flush = AsyncMock()
+        session.commit = AsyncMock()
+        session.delete = AsyncMock()
+        session.execute = AsyncMock()
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        r = _make_redis()
+
+        with patch("worker.scan.AsyncSessionLocal", return_value=session):
+            result = await rescan_gallery_job({"redis": r}, gallery_id=100)
+
+        # session.execute must never run: we never reached the image query.
+        session.execute.assert_not_called()
+
+        # The trashed gallery must be left untouched: no image deletion,
+        # no commit, and the rescan reports it was skipped.
+        assert result["status"] == "skipped"
+        session.delete.assert_not_called()
+        session.commit.assert_not_called()
 
     async def test_missing_images_removed_from_db(self):
         """Images whose blob files are missing should be deleted from the session."""

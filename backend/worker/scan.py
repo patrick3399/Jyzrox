@@ -432,6 +432,15 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
             logger.error("[rescan_gallery] gallery_id=%d not found", gallery_id)
             return {"status": "failed", "error": "gallery not found"}
 
+        # Edge case #58: never mutate a trashed (soft-deleted) gallery. A
+        # rescan would delete images, renumber pages, or regenerate thumbnails
+        # before trash retention expires, weakening trash reversibility. This
+        # is the central guard for every entry point (watcher rescan_by_path,
+        # manual rescan, library-path rescan). Only trash GC may mutate trash.
+        if gallery.deleted_at is not None:
+            logger.info("[rescan_gallery] gallery_id=%d is trashed; skipping", gallery_id)
+            return {"status": "skipped", "reason": "trashed"}
+
         # Load excluded blob hashes for this gallery
         excluded_rows = (
             (await session.execute(select(ExcludedBlob.blob_sha256).where(ExcludedBlob.gallery_id == gallery_id)))
