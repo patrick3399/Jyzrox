@@ -673,7 +673,22 @@ async def retry_job(
 
     now = datetime.now(UTC)
 
-    job.retry_count += 1
+    # Enqueue the SAQ job BEFORE committing the queued-state transition, so a
+    # crash or enqueue failure after commit cannot orphan the job in "queued"
+    # with no queue entry (edge case #36/#89). Mirrors the resume path. The job
+    # key uses the post-increment retry_count, but enqueue_download_job() takes
+    # the key explicitly and does not read retry_count, so we can enqueue before
+    # mutating the row. On failure nothing is committed and the row stays
+    # failed/partial with its original retry_count.
+    new_retry_count = job.retry_count + 1
+    job_key = compute_job_key(job.id, new_retry_count)
+    try:
+        await enqueue_download_job(job, job_key)
+    except Exception as exc:
+        logger.error("[retry] manual retry enqueue failed for %s: %s", job_id, exc)
+        raise HTTPException(status_code=503, detail="Failed to enqueue retry job")
+
+    job.retry_count = new_retry_count
     job.status = "queued"
     job.finished_at = None
     job.error = None
@@ -686,17 +701,6 @@ async def retry_job(
     job.next_retry_at = now + timedelta(minutes=backoff_minutes)
 
     await db.commit()
-
-    job_key = compute_job_key(job.id, job.retry_count)
-    try:
-        await enqueue_download_job(job, job_key)
-    except Exception as exc:
-        logger.error("[retry] manual retry enqueue failed for %s: %s", job_id, exc)
-        job.retry_count -= 1
-        job.status = "failed"
-        job.error = f"Retry enqueue failed: {exc}"
-        await db.commit()
-        raise HTTPException(status_code=503, detail="Failed to enqueue retry job")
 
     return {"status": "queued", "retry_count": job.retry_count, "max_retries": job.max_retries}
 

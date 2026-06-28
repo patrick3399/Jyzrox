@@ -1631,6 +1631,65 @@ class TestRetryJobBranches:
         # 200 (success) or 404/500 (SQLite); just verify no crash
         assert resp.status_code in (200, 404, 500, 503)
 
+    async def test_retry_enqueues_before_committing_queued_state(self, mock_redis):
+        """Regression (#36/#89): the SAQ enqueue must happen BEFORE the DB commit
+        that flips the job to 'queued'.
+
+        Otherwise a process crash (not a Python exception) between commit and
+        enqueue orphans the job in 'queued' with no SAQ entry. The compensating
+        try/except only covers exceptions, not crashes. This mirrors the already
+        fixed resume path, which enqueues before committing.
+        """
+        import types
+
+        from routers.download import retry_job
+
+        job = types.SimpleNamespace(
+            id=uuid.uuid4(),
+            user_id=1,
+            status="failed",
+            retry_count=0,
+            max_retries=3,
+            finished_at="2026-01-01T00:00:00Z",
+            error="boom",
+            next_retry_at=None,
+            url="https://e-hentai.org/g/1/a/",
+            source="ehentai",
+            progress={},
+        )
+
+        sequence: list[str] = []
+
+        db = MagicMock()
+        db.get = AsyncMock(return_value=job)
+
+        async def _record_commit():
+            sequence.append("commit")
+
+        db.commit = AsyncMock(side_effect=_record_commit)
+
+        async def _record_enqueue(_job, _key):
+            sequence.append("enqueue")
+
+        mock_redis.get = AsyncMock(return_value=None)
+        request = MagicMock()
+        auth = {"user_id": 1, "role": "member"}
+
+        with (
+            patch("routers.download.get_redis", return_value=mock_redis),
+            patch(
+                "routers.download.enqueue_download_job",
+                new=AsyncMock(side_effect=_record_enqueue),
+            ),
+        ):
+            await retry_job(job.id, request, auth, db)
+
+        assert "enqueue" in sequence, "enqueue_download_job was never called"
+        assert "commit" in sequence, "db.commit was never called"
+        assert sequence.index("enqueue") < sequence.index("commit"), (
+            f"enqueue must precede the queued-state commit; got order: {sequence}"
+        )
+
 
 # ---------------------------------------------------------------------------
 # _j serializer — gallery fields (lines 496-498)
