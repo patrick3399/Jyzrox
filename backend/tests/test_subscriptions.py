@@ -14,6 +14,7 @@ plain SQLAlchemy and work correctly on SQLite.
 """
 
 import uuid
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from sqlalchemy import text
@@ -409,6 +410,145 @@ class TestDeleteSubscription:
         resp = await client.delete(f"/api/subscriptions/{sub_id}")
         assert resp.status_code == 200
         assert resp.json()["cancelled_jobs"] >= 1
+
+    async def test_delete_subscription_keeps_cancelled_active_job_row(self, mock_redis):
+        """Newly-cancelled active jobs remain for worker finalization instead of being deleted."""
+        from routers.subscriptions import delete_subscription
+
+        class _Result:
+            def __init__(self, value):
+                self.value = value
+
+            def scalars(self):
+                return self
+
+            def all(self):
+                return self.value
+
+        class _Job:
+            def __init__(self, job_id, status):
+                self.id = job_id
+                self.status = status
+
+        class _Session:
+            def __init__(self):
+                self.sub = type("SubscriptionRow", (), {"id": 123, "user_id": 1})()
+                self.active_job = _Job(active_job_id, "queued")
+                self.deleted_subscription = None
+                self.committed = False
+                self.executed_deletes = 0
+                self.selects = 0
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def get(self, _model, sub_id):
+                return self.sub if sub_id == self.sub.id else None
+
+            async def execute(self, statement):
+                if getattr(statement, "is_delete", False):
+                    self.executed_deletes += 1
+                    return _Result([])
+                self.selects += 1
+                if self.selects == 1:
+                    return _Result([old_cancelled_job_id])
+                return _Result([self.active_job])
+
+            async def delete(self, obj):
+                self.deleted_subscription = obj
+
+            async def commit(self):
+                self.committed = True
+
+        active_job_id = str(uuid.uuid4())
+        old_cancelled_job_id = str(uuid.uuid4())
+        session = _Session()
+
+        with (
+            patch("routers.subscriptions.async_session", return_value=session),
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            result = await delete_subscription(123, auth={"user_id": 1, "role": "admin"})
+
+        assert result["status"] == "ok"
+        assert session.active_job.status == "cancelled"
+        assert session.executed_deletes == 1
+        assert session.deleted_subscription is session.sub
+        assert session.committed
+        mock_redis.setex.assert_awaited_once_with(f"download:cancel:{active_job_id}", 3600, "1")
+
+    async def test_delete_subscription_cancel_flag_failure_rolls_back_db_changes(
+        self, mock_redis
+    ):
+        """Cancel flags are written before destructive DB commit, so Redis failure leaves DB intact."""
+        from routers.subscriptions import delete_subscription
+
+        class _Result:
+            def __init__(self, value):
+                self.value = value
+
+            def scalars(self):
+                return self
+
+            def all(self):
+                return self.value
+
+        class _Job:
+            def __init__(self, job_id):
+                self.id = job_id
+                self.status = "queued"
+
+        class _Session:
+            def __init__(self):
+                self.sub = type("SubscriptionRow", (), {"id": 123, "user_id": 1})()
+                self.active_job = _Job(job_id)
+                self.deleted_subscription = None
+                self.committed = False
+                self.executed_deletes = 0
+                self.selects = 0
+
+            async def __aenter__(self):
+                return self
+
+            async def __aexit__(self, exc_type, exc, tb):
+                return False
+
+            async def get(self, _model, sub_id):
+                return self.sub if sub_id == self.sub.id else None
+
+            async def execute(self, statement):
+                if getattr(statement, "is_delete", False):
+                    self.executed_deletes += 1
+                    return _Result([])
+                self.selects += 1
+                if self.selects == 1:
+                    return _Result([])
+                return _Result([self.active_job])
+
+            async def delete(self, obj):
+                self.deleted_subscription = obj
+
+            async def commit(self):
+                self.committed = True
+
+        job_id = str(uuid.uuid4())
+        session = _Session()
+        mock_redis.setex = AsyncMock(side_effect=RuntimeError("redis unavailable"))
+
+        with (
+            patch("routers.subscriptions.async_session", return_value=session),
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            pytest.raises(RuntimeError, match="redis unavailable"),
+        ):
+            await delete_subscription(123, auth={"user_id": 1, "role": "admin"})
+
+        assert session.deleted_subscription is None
+        assert not session.committed
+        assert session.active_job.status == "cancelled"
 
 
 # ---------------------------------------------------------------------------

@@ -360,10 +360,30 @@ async def delete_subscription(
         if not sub or sub.user_id != user_id:
             raise HTTPException(status_code=404, detail="Subscription not found")
 
-        # Cancel active jobs and delete finished jobs linked to this subscription.
+        # Delete finished jobs linked to this subscription before cancelling
+        # active ones; otherwise newly-cancelled active jobs would be removed.
         # Must run before the DELETE because the FK has ondelete="SET NULL",
         # which would clear subscription_id and leak jobs into the Queue page.
         from db.models import DownloadJob
+
+        terminal_job_ids = (
+            (
+                await session.execute(
+                    select(DownloadJob.id).where(
+                        DownloadJob.subscription_id == sub_id,
+                        DownloadJob.status.in_(["done", "failed", "cancelled", "partial"]),
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        if terminal_job_ids:
+            await session.execute(
+                delete(DownloadJob).where(
+                    DownloadJob.id.in_(terminal_job_ids),
+                )
+            )
 
         active_jobs = (
             (
@@ -381,24 +401,15 @@ async def delete_subscription(
             job.status = "cancelled"
             cancelled_jobs.append(str(job.id))
 
-        # Delete finished jobs so they don't appear in Queue after SET NULL
-        await session.execute(
-            delete(DownloadJob).where(
-                DownloadJob.subscription_id == sub_id,
-                DownloadJob.status.in_(["done", "failed", "cancelled", "partial"]),
-            )
-        )
+        if cancelled_jobs:
+            from core.redis_client import get_redis
+
+            redis = get_redis()
+            for job_id in cancelled_jobs:
+                await redis.setex(f"download:cancel:{job_id}", 3600, "1")
 
         await session.delete(sub)
         await session.commit()
-
-    # Set Redis cancel flags for running jobs so workers stop promptly
-    if cancelled_jobs:
-        from core.redis_client import get_redis
-
-        redis = get_redis()
-        for job_id in cancelled_jobs:
-            await redis.setex(f"download:cancel:{job_id}", 3600, "1")
 
     from core.events import EventType, emit_safe
 

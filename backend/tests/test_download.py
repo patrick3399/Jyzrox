@@ -1126,6 +1126,36 @@ class TestEnqueueFailurePaths:
         assert result["job_id"] == job_id
         assert result["status"] == "running"
 
+    async def test_enqueue_duplicate_paused_url_same_user_returns_existing_job(self):
+        """When same URL + user has a paused job, _enqueue returns it instead of creating a duplicate."""
+        from routers.download import _enqueue
+
+        job_id = str(uuid.uuid4())
+        existing_job = type(
+            "ExistingJob",
+            (),
+            {"id": job_id, "status": "paused", "source": "ehentai"},
+        )()
+
+        class _Result:
+            def scalar_one_or_none(self):
+                return existing_job
+
+        class _Db:
+            async def execute(self, _statement):
+                return _Result()
+
+        with patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock:
+            result = await _enqueue(
+                "https://e-hentai.org/g/997/paused/",
+                _Db(),
+                user_id=7,
+            )
+
+        assert result["job_id"] == job_id
+        assert result["status"] == "paused"
+        enqueue_mock.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # list_jobs — member non-admin with status filter count path

@@ -166,7 +166,7 @@ async def _enqueue(
         .where(
             DownloadJob.url == url,
             DownloadJob.user_id == user_id,
-            DownloadJob.status.in_(["queued", "running"]),
+            DownloadJob.status.in_(["queued", "running", "paused"]),
         )
         .limit(1)
     )
