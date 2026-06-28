@@ -136,7 +136,7 @@ function FolderPicker({
                 onBlur={handlePathSubmit}
                 autoFocus
                 className="flex-1 bg-vault-input border border-vault-accent rounded px-2 py-1 text-xs font-mono text-vault-text focus:outline-none"
-                placeholder="/mnt/G500/images/{artist}/{_}/{title}"
+                placeholder="/mnt/ssd-data/images/{artist}/{_}/{title}"
               />
             ) : (
               <button
@@ -218,12 +218,12 @@ function FolderPicker({
         <div className="px-4 py-3 border-t border-vault-border">
           <button
             onClick={() => {
-              setEditingPath('/mnt/G500/images/{artist}/{_}/{title}')
+              setEditingPath('/mnt/ssd-data/images/{artist}/{_}/{title}')
               setIsEditing(true)
             }}
             className="w-full mb-2 px-3 py-2 text-xs border border-vault-border text-vault-text rounded hover:border-vault-accent transition-colors font-mono"
           >
-            /mnt/G500/images/{'{artist}'}/{'{_}'}/{'{title}'}
+            /mnt/ssd-data/images/{'{artist}'}/{'{_}'}/{'{title}'}
           </button>
           <button
             onClick={() => onSelect(editingPath.trim() || currentPath || '/')}

@@ -43,7 +43,7 @@ describe('ImportPage', () => {
       matches: [
         {
           rel_path: 'Alice/Gallery',
-          abs_path: '/mnt/G500/images/Alice/Gallery',
+          abs_path: '/mnt/ssd-data/images/Alice/Gallery',
           artist: 'Alice',
           title: 'Gallery',
           file_count: 3,
@@ -69,7 +69,7 @@ describe('ImportPage', () => {
     render(<ImportPage />)
 
     fireEvent.click(screen.getByText('import.zoneB.selectFolder'))
-    fireEvent.click(screen.getByText('/mnt/G500/images/{artist}/{_}/{title}'))
+    fireEvent.click(screen.getByText('/mnt/ssd-data/images/{artist}/{_}/{title}'))
     fireEvent.click(screen.getByText('import.folderPicker.select'))
 
     fireEvent.click(screen.getByText('import.batch.scan'))
@@ -78,9 +78,9 @@ describe('ImportPage', () => {
 
     await waitFor(() => {
       expect(mockBatchStartTrigger).toHaveBeenCalledWith({
-        rootDir: '/mnt/G500/images/{artist}/{_}/{title}',
+        rootDir: '/mnt/ssd-data/images/{artist}/{_}/{title}',
         mode: 'copy',
-        galleries: [{ path: '/mnt/G500/images/Alice/Gallery', artist: 'Alice', title: 'Gallery' }],
+        galleries: [{ path: '/mnt/ssd-data/images/Alice/Gallery', artist: 'Alice', title: 'Gallery' }],
       })
     })
   })
