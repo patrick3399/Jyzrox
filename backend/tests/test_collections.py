@@ -586,6 +586,90 @@ class TestUpdateCollectionCoverGalleryId:
 
 
 # ---------------------------------------------------------------------------
+# Regression: edge case #125 — cover_gallery_id must be access-checked on PATCH
+# ---------------------------------------------------------------------------
+
+
+class TestUpdateCollectionCoverGalleryIdAccessControl:
+    """PATCH cover_gallery_id must reject galleries the caller cannot see — edge case #125.
+
+    Before the fix, update_collection stored cover_gallery_id without applying
+    gallery_access_filter, letting a user point their collection cover at another
+    user's private gallery and then read its CAS thumbnail via list_collections.
+    """
+
+    async def _setup_member_user(self, db_session, user_id: int = 7) -> None:
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (:id, :u, 'x', 'member')"),
+            {"id": user_id, "u": f"cover_member_{user_id}"},
+        )
+        await db_session.commit()
+
+    async def test_member_cannot_set_cover_to_other_users_private_gallery(self, make_client, db_session):
+        """A member must not set cover_gallery_id to another user's private gallery."""
+        await _ensure_user(db_session)  # user 1 (owner of the private gallery)
+        await self._setup_member_user(db_session, user_id=7)
+
+        gid = await _insert_gallery(db_session, source_id="cover_private1", user_id=1)
+        await db_session.execute(
+            text("UPDATE galleries SET visibility = 'private' WHERE id = :gid"),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        async with make_client(user_id=7, role="member") as member_client:
+            col_resp = await member_client.post("/api/collections/", json={"name": "Cover Leak Col"})
+            col_id = col_resp.json()["id"]
+
+            resp = await member_client.patch(
+                f"/api/collections/{col_id}",
+                json={"cover_gallery_id": gid},
+            )
+
+        # Must be rejected, not silently stored
+        assert resp.status_code == 404, resp.text
+
+        # And the cover must NOT have been persisted
+        stored = (
+            await db_session.execute(
+                text("SELECT cover_gallery_id FROM collections WHERE id = :id"),
+                {"id": col_id},
+            )
+        ).scalar_one()
+        assert stored is None, "Private gallery must not be stored as a collection cover"
+
+    async def test_member_can_set_cover_to_public_gallery_of_another_user(self, make_client, db_session):
+        """A member may set cover_gallery_id to another user's *public* gallery (still accessible)."""
+        await _ensure_user(db_session)
+        await self._setup_member_user(db_session, user_id=8)
+
+        gid = await _insert_gallery(db_session, source_id="cover_public1", user_id=1)
+        await db_session.execute(
+            text("UPDATE galleries SET visibility = 'public' WHERE id = :gid"),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        async with make_client(user_id=8, role="member") as member_client:
+            col_resp = await member_client.post("/api/collections/", json={"name": "Public Cover Col"})
+            col_id = col_resp.json()["id"]
+
+            resp = await member_client.patch(
+                f"/api/collections/{col_id}",
+                json={"cover_gallery_id": gid},
+            )
+
+        assert resp.status_code == 200, resp.text
+        stored = (
+            await db_session.execute(
+                text("SELECT cover_gallery_id FROM collections WHERE id = :id"),
+                {"id": col_id},
+            )
+        ).scalar_one()
+        assert stored == gid
+
+
+# ---------------------------------------------------------------------------
 # GET /api/collections/ — list with cover thumbnails
 # ---------------------------------------------------------------------------
 

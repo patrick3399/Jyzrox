@@ -222,6 +222,19 @@ async def update_collection(
     if patch.description is not None:
         collection.description = patch.description
     if patch.cover_gallery_id is not None:
+        # Edge case #125: the cover gallery must be visible to the caller. Without
+        # this check a user could point their collection cover at another user's
+        # private gallery and read its CAS thumbnail via list_collections.
+        cover_visible = (
+            await db.execute(
+                select(Gallery.id).where(
+                    Gallery.id == patch.cover_gallery_id,
+                    gallery_access_filter(auth),
+                )
+            )
+        ).scalar_one_or_none()
+        if cover_visible is None:
+            raise HTTPException(status_code=404, detail="Cover gallery not found")
         collection.cover_gallery_id = patch.cover_gallery_id
 
     collection.updated_at = datetime.now(UTC)
