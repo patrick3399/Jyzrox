@@ -8,10 +8,10 @@ saq[redis]>=0.22,<1.0
 httpx==0.28.1
 pillow==12.2.0
 thumbhash==0.1.2
-cryptography==47.0.0
+cryptography==48.0.1
 pixivpy3==3.7.5
-pydantic-settings==2.14.1
-python-multipart==0.0.28
+pydantic-settings==2.14.2
+python-multipart==0.0.31
 beautifulsoup4==4.14.3
 lxml==6.1.0
 bcrypt==5.0.0
