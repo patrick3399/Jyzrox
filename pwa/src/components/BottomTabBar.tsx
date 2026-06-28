@@ -1,12 +1,13 @@
 'use client'
 
 import Link from 'next/link'
-import { usePathname } from 'next/navigation'
+import { usePathname, useRouter } from 'next/navigation'
 import { Menu } from 'lucide-react'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
-import { useState, useEffect } from 'react'
+import { useState, useEffect, useRef, useCallback } from 'react'
 import { PAGE_REGISTRY, type PageDef } from '@/lib/pageRegistry'
+import { getTabHref, clearTabMemory } from '@/lib/navMemory'
 
 // Re-export for BottomTabConfig compatibility
 export type TabDefinition = PageDef
@@ -49,11 +50,42 @@ interface BottomTabBarProps {
 export function BottomTabBar({ onMoreClick, downloadStats: stats }: BottomTabBarProps) {
   useLocale()
   const pathname = usePathname()
+  const router = useRouter()
   const [tabs, setTabs] = useState<TabDefinition[]>(getDefaultTabs)
+  // Resolved hrefs (last visited URL per tab) — computed after mount to avoid a
+  // hydration mismatch; first render falls back to the bare tab href.
+  const [resolvedHrefs, setResolvedHrefs] = useState<Record<string, string>>({})
+  const lastTapRef = useRef<{ root: string; time: number }>({ root: '', time: 0 })
 
   useEffect(() => {
     setTabs(loadTabConfig())
   }, [])
+
+  useEffect(() => {
+    const next: Record<string, string> = {}
+    for (const tab of tabs) next[tab.href] = getTabHref(tab.href)
+    setResolvedHrefs(next)
+  }, [tabs, pathname])
+
+  const handleTabClick = useCallback(
+    (e: React.MouseEvent, root: string) => {
+      const isActive = pathname === root || (root !== '/' && pathname.startsWith(root))
+      if (!isActive) return // let <Link> navigate to the remembered href
+      e.preventDefault()
+      const now = Date.now()
+      const last = lastTapRef.current
+      if (last.root === root && now - last.time < 400) {
+        // double tap → reset this tab
+        lastTapRef.current = { root: '', time: 0 }
+        clearTabMemory(root)
+        router.push(root)
+      } else {
+        lastTapRef.current = { root, time: now }
+        window.scrollTo({ top: 0 })
+      }
+    },
+    [pathname, router],
+  )
 
   useEffect(() => {
     function onStorage(e: StorageEvent) {
@@ -75,7 +107,8 @@ export function BottomTabBar({ onMoreClick, downloadStats: stats }: BottomTabBar
         return (
           <Link
             key={href}
-            href={href}
+            href={resolvedHrefs[href] ?? href}
+            onClick={(e) => handleTabClick(e, href)}
             className={`flex flex-col items-center justify-center flex-1 gap-1 text-xs transition-colors relative ${
               isActive ? 'text-vault-accent' : 'text-vault-text-secondary hover:text-vault-text'
             }`}
