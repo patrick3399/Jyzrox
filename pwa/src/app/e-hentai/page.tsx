@@ -7,6 +7,7 @@ import { useCreateSubscription } from '@/hooks/useSubscriptions'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
+import { useScrollRestore } from '@/hooks/useScrollRestore'
 
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -784,22 +785,32 @@ function BrowsePage() {
     error: toplistError,
   } = useEhToplist(toplistTl, toplistPage, activeTab === 'toplist')
 
+  // True once the active tab has rendered content (so window.scrollTo can reach
+  // a saved position). Shared by the eh_browse_state back-restore below and the
+  // cross-tab persist restore.
+  const ehScrollReady =
+    activeTab === 'search' || activeTab === 'popular'
+      ? !!data || scrollGalleries.length > 0
+      : activeTab === 'favorites'
+        ? !!favData || favScrollGalleries.length > 0 || favPaginatedGalleries.length > 0
+        : !!toplistData
+
+  // Persist + restore window scroll across main-tab switches (BottomTabBar /
+  // Sidebar / drawer). Separate from eh_browse_state — additive, non-consuming,
+  // continuous capture — so leaving via a tab (which never saves browse state)
+  // still records and restores the scroll position.
+  useScrollRestore('ehentai_scrollY', ehScrollReady, { persist: true })
+
   // Restore scroll position after back-navigation (once data is loaded)
   const scrollRestoredRef = useRef(false)
   useEffect(() => {
     if (scrollRestoredRef.current || !restored?.scrollY) return
-    const hasData =
-      activeTab === 'search' || activeTab === 'popular'
-        ? !!data || scrollGalleries.length > 0
-        : activeTab === 'favorites'
-          ? !!favData || favScrollGalleries.length > 0 || favPaginatedGalleries.length > 0
-          : !!toplistData
-    if (!hasData) return
+    if (!ehScrollReady) return
     scrollRestoredRef.current = true
     requestAnimationFrame(() => {
       window.scrollTo(0, restored.scrollY)
     })
-  // eslint-disable-next-line react-hooks/exhaustive-deps -- activeTab intentionally excluded to avoid re-triggering restore on tab change
+  // eslint-disable-next-line react-hooks/exhaustive-deps -- activeTab + derived ehScrollReady intentionally excluded to avoid re-triggering restore on tab change
   }, [
     data,
     favData,
