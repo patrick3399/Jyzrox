@@ -432,6 +432,38 @@ describe('apiFetch — HTTP status codes', () => {
     })
   })
 
+  it('should NOT redirect to /forbidden on a source-specific 403 (e.g. eh_access_denied Sad Panda)', async () => {
+    // Bug: apiFetch treated every 403 as an app-level RBAC denial and force-redirected
+    // to /forbidden, even when the 403 actually came from a source-specific scrape
+    // failure (E-Hentai Sad Panda / 509 bandwidth limit), masking the real error.
+    vi.resetModules()
+    const { api } = await import('../lib/api')
+
+    const originalLocation = window.location
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: { pathname: '/e-hentai', href: '' } as Location,
+    })
+
+    vi.mocked(fetch).mockResolvedValueOnce(
+      makeResponse({
+        status: 403,
+        ok: false,
+        jsonBody: { detail: { code: 'eh_access_denied', message: 'ExHentai access denied (Sad Panda)' } },
+      }),
+    )
+
+    await expect(api.library.getGalleries()).rejects.toThrow('ExHentai access denied (Sad Panda)')
+    expect(window.location.href).toBe('')
+
+    Object.defineProperty(window, 'location', {
+      writable: true,
+      configurable: true,
+      value: originalLocation,
+    })
+  })
+
   it('should throw the rate-limit error message on 429 response', async () => {
     const { api } = await import('../lib/api')
 

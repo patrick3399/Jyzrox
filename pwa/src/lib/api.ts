@@ -119,8 +119,14 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
       }
       throw new Error('Unauthorized')
     }
-    // Forbidden → redirect to /forbidden
-    if (res.status === 403 && typeof window !== 'undefined') {
+    const body = await res.json().catch(() => ({}))
+    const raw = body?.detail
+    // Forbidden → redirect to /forbidden, but only for app-level RBAC denials.
+    // Source-specific 403s (e.g. eh_access_denied / eh_bandwidth_exceeded) carry
+    // a recognized error code and must surface as a normal error instead of
+    // hijacking the whole page with a generic "Access Denied" message.
+    const hasSourceErrorCode = typeof raw === 'object' && raw !== null && typeof raw.code === 'string'
+    if (res.status === 403 && !hasSourceErrorCode && typeof window !== 'undefined') {
       const p = window.location.pathname
       if (p !== '/forbidden' && !isRedirecting) {
         isRedirecting = true
@@ -128,8 +134,6 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
       }
       throw new Error('Forbidden')
     }
-    const body = await res.json().catch(() => ({}))
-    const raw = body?.detail
     let msg: string
     if (typeof raw === 'object' && raw !== null && raw.code) {
       const i18nKey = `error.${raw.code}`
