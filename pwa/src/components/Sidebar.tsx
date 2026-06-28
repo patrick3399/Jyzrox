@@ -13,7 +13,8 @@ interface SidebarProps {
 
 export function Sidebar({ downloadStats: stats }: SidebarProps) {
   const pathname = usePathname()
-  const { profile, logout, groupedLinks, cycleTheme, ThemeIcon, themeLabel } = useNavigation()
+  const { profile, logout, groupedLinks, resolveHref, handleNavClick, cycleTheme, ThemeIcon, themeLabel } =
+    useNavigation()
   const navCounts = useNavCounts()
 
   return (
@@ -39,7 +40,8 @@ export function Sidebar({ downloadStats: stats }: SidebarProps) {
                 return (
                   <Link
                     key={link.href}
-                    href={link.href}
+                    href={resolveHref(link.href)}
+                    onClick={(e) => handleNavClick(e, link.href)}
                     className={`flex items-center gap-3 px-3 py-2 rounded-lg text-sm transition-colors ${
                       isActive
                         ? 'bg-vault-accent/10 text-vault-accent font-medium'
