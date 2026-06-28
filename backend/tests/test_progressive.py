@@ -249,6 +249,141 @@ class TestProgressiveImporterCleanup:
 
 
 # ---------------------------------------------------------------------------
+# TestProgressiveImporterTrashedGuard — edge case audit #8
+# ---------------------------------------------------------------------------
+
+
+class TestProgressiveImporterTrashedGuard:
+    """Re-downloading / re-importing a trashed gallery must not mutate or
+    resurrect it (audit #8; same invariant as rescan #58 / BE-T16)."""
+
+    async def test_ensure_gallery_from_import_data_into_trashed_gallery_does_not_mutate(
+        self, db_session, db_session_factory
+    ):
+        """An upsert targeting a trashed gallery must skip without mutating it."""
+        from plugins.models import GalleryImportData
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(
+            db_session,
+            source="trash_src",
+            source_id="trash_001",
+            title="Original Title",
+            download_status="complete",
+            pages=5,
+        )
+        # Send it to trash.
+        await db_session.execute(
+            text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :gid"),
+            {"gid": gallery_id},
+        )
+        await db_session.commit()
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        data = GalleryImportData(
+            source="trash_src",
+            source_id="trash_001",
+            title="New Title From Redownload",
+            tags=["should", "not", "apply"],
+        )
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            returned_id = await importer.ensure_gallery_from_import_data(data)
+
+        assert returned_id == gallery_id
+        assert importer.skipped_trashed is True
+
+        row = (
+            await db_session.execute(
+                text("SELECT title, download_status, pages, deleted_at FROM galleries WHERE id = :gid"),
+                {"gid": gallery_id},
+            )
+        ).fetchone()
+        assert row is not None, "Trashed gallery must not be deleted"
+        assert row[0] == "Original Title", "Title must not be overwritten by the re-download"
+        assert row[1] == "complete", "download_status must not be flipped to 'downloading'"
+        assert row[2] == 5, "pages must not change"
+        assert row[3] is not None, "Gallery must remain in trash (deleted_at preserved)"
+
+    async def test_import_file_is_noop_when_skipped_trashed(self, db_session, db_session_factory, tmp_path):
+        """No image rows may be created while skipped_trashed is set."""
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(db_session, source="trash_src", source_id="trash_imgs")
+        await db_session.execute(
+            text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :gid"),
+            {"gid": gallery_id},
+        )
+        await db_session.commit()
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "trash_src"
+        importer.source_id = "trash_imgs"
+        importer.skipped_trashed = True
+
+        fake_file = tmp_path / "page.jpg"
+        fake_file.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        # store_blob must never be reached for a trashed gallery; mock it so the
+        # test fails loudly if the guard is removed (rather than relying on a
+        # downstream error swallowing the insert).
+        store_blob_mock = AsyncMock()
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive._sha256", return_value="ff" + "0" * 62),
+            patch("worker.progressive.store_blob", store_blob_mock),
+        ):
+            await importer.import_file(fake_file)
+            import asyncio
+
+            if importer._tasks:
+                await asyncio.gather(*importer._tasks, return_exceptions=True)
+
+        store_blob_mock.assert_not_called()
+        assert importer._processed == set(), "import_file must return before marking the file processed"
+
+        count = (
+            await db_session.execute(
+                text("SELECT COUNT(*) FROM images WHERE gallery_id = :gid"),
+                {"gid": gallery_id},
+            )
+        ).scalar()
+        assert count == 0, "import_file must be a no-op for a trashed gallery"
+
+    async def test_cleanup_does_not_delete_trashed_gallery_when_skipped(self, db_session, db_session_factory):
+        """cleanup() after a skipped trashed import must not delete the gallery (#53 guard)."""
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(db_session, source="trash_src", source_id="trash_clean")
+        await db_session.execute(
+            text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :gid"),
+            {"gid": gallery_id},
+        )
+        await db_session.commit()
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "trash_src"
+        importer.source_id = "trash_clean"
+        importer.skipped_trashed = True
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive.library_dir", return_value=Path("/nonexistent/lib")),
+            patch("worker.progressive.thumb_dir", return_value=Path("/nonexistent/thumb")),
+        ):
+            await importer.cleanup()
+
+        row = (await db_session.execute(text("SELECT id FROM galleries WHERE id = :id"), {"id": gallery_id})).fetchone()
+        assert row is not None, "cleanup() must not delete a pre-existing trashed gallery"
+
+
+# ---------------------------------------------------------------------------
 # TestProgressiveImporterAbort
 # ---------------------------------------------------------------------------
 
@@ -438,6 +573,8 @@ def _make_mock_session_for_ensure(gallery_id: int):
     execute_result.scalar_one = MagicMock(return_value=gallery_id)
     # scalar_one_or_none for max_page query in _load_gallery_state
     execute_result.scalar_one_or_none = MagicMock(return_value=None)
+    # first() for the trashed-conflict pre-check (audit #8): no existing gallery
+    execute_result.first = MagicMock(return_value=None)
     # scalars().all() for ExcludedBlob query in _load_gallery_state
     scalars_mock = MagicMock()
     scalars_mock.all = MagicMock(return_value=[])

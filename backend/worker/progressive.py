@@ -52,6 +52,11 @@ class ProgressiveImporter:
         self.title: str | None = None
         self.source: str | None = None
         self.source_id: str | None = None
+        # Audit #8: a re-download/subscription run that targets a trashed gallery
+        # (deleted_at set) must not mutate or resurrect it. When detected, the
+        # importer records the trashed gallery id here, sets this flag, and turns
+        # every mutating method (import_file/finalize/abort/cleanup) into a no-op.
+        self.skipped_trashed: bool = False
         self._processed: set[str] = set()
         self._page_counter = 0
         self.source_url: str | None = None
@@ -131,6 +136,33 @@ class ProgressiveImporter:
                 self._page_counter = max_page
                 logger.info("[progressive] resuming page counter at %d for gallery %d", max_page, self.gallery_id)
 
+    async def _detect_trashed_conflict(self, session, source: str, source_id: str) -> int | None:
+        """Audit #8: return the id of an existing *trashed* gallery for this
+        (source, source_id), or None.
+
+        When a re-download or subscription run upserts by (source, source_id),
+        the conflict target may be a gallery the user sent to trash. Mutating it
+        would silently resurrect content / flip status (the same invariant the
+        rescan path hardened in #58 / BE-T16). Callers must skip the upsert and
+        all imports when this returns a non-None id.
+        """
+        existing = (
+            await session.execute(
+                select(Gallery.id, Gallery.deleted_at).where(Gallery.source == source, Gallery.source_id == source_id)
+            )
+        ).first()
+        if existing is not None and existing.deleted_at is not None:
+            self.gallery_id = existing.id
+            self.skipped_trashed = True
+            logger.info(
+                "[progressive] skipping import into trashed gallery id=%d (%s:%s); restore it first",
+                existing.id,
+                source,
+                source_id,
+            )
+            return existing.id
+        return None
+
     async def ensure_gallery(self, metadata: dict, dest_dir: Path) -> int:
         """Create or update gallery record with download_status='downloading'.
 
@@ -145,6 +177,9 @@ class ProgressiveImporter:
         self.source_id = import_data.source_id
 
         async with AsyncSessionLocal() as session:
+            trashed_id = await self._detect_trashed_conflict(session, import_data.source, import_data.source_id)
+            if trashed_id is not None:
+                return trashed_id
             stmt = (
                 pg_insert(Gallery)
                 .values(
@@ -221,6 +256,9 @@ class ProgressiveImporter:
         self.source_id = source_id
 
         async with AsyncSessionLocal() as session:
+            trashed_id = await self._detect_trashed_conflict(session, source, source_id)
+            if trashed_id is not None:
+                return trashed_id
             stmt = (
                 pg_insert(Gallery)
                 .values(
@@ -268,6 +306,9 @@ class ProgressiveImporter:
         self.source_id = data.source_id
 
         async with AsyncSessionLocal() as session:
+            trashed_id = await self._detect_trashed_conflict(session, data.source, data.source_id)
+            if trashed_id is not None:
+                return trashed_id
             stmt = (
                 pg_insert(Gallery)
                 .values(
@@ -319,6 +360,9 @@ class ProgressiveImporter:
         Page number is assigned here (serial caller) to guarantee deterministic
         ordering regardless of how tasks are scheduled.
         """
+        # Audit #8: never import into a trashed gallery.
+        if self.skipped_trashed:
+            return
         str_path = str(file_path)
         if str_path in self._processed:
             return
@@ -561,6 +605,18 @@ class ProgressiveImporter:
                     logger.warning("[progressive] task error during finalize: %s", r)
             self._tasks.clear()
 
+        # Audit #8: trashed gallery — nothing was imported, so do not mutate the
+        # gallery row or enqueue cover/thumbnail/tag jobs. Just drop the temp dir.
+        if self.skipped_trashed:
+            try:
+                import shutil
+
+                if dest_dir.exists():
+                    shutil.rmtree(str(dest_dir), ignore_errors=True)
+            except Exception as exc:
+                logger.warning("[progressive] failed to remove temp dir %s: %s", dest_dir, exc)
+            return None
+
         if not self.gallery_id:
             return None
 
@@ -629,6 +685,10 @@ class ProgressiveImporter:
             await asyncio.gather(*self._tasks, return_exceptions=True)
             self._tasks.clear()
 
+        # Audit #8: never mutate a trashed gallery's status on abort.
+        if self.skipped_trashed:
+            return
+
         if not self.gallery_id:
             return
 
@@ -663,6 +723,11 @@ class ProgressiveImporter:
         if self._tasks:
             await asyncio.gather(*self._tasks, return_exceptions=True)
             self._tasks.clear()
+
+        # Audit #8 / #53: a skipped trashed gallery pre-existed this job and had
+        # nothing imported into it — cancelling must never delete it.
+        if self.skipped_trashed:
+            return
 
         if not self.gallery_id:
             return
