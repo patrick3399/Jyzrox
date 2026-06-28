@@ -203,6 +203,87 @@ class TestCreateSubscription:
 
 
 # ---------------------------------------------------------------------------
+# Upsert SET clause (regression for edge-case audit #10)
+# ---------------------------------------------------------------------------
+
+
+def _conflict_set_sql(stmt) -> str:
+    """Return the upper-cased ``ON CONFLICT DO UPDATE SET`` portion of a
+    pg_insert upsert compiled for the PostgreSQL dialect."""
+    from sqlalchemy.dialects import postgresql
+
+    compiled = str(stmt.compile(dialect=postgresql.dialect())).upper()
+    assert "ON CONFLICT" in compiled
+    return compiled.split("ON CONFLICT", 1)[1]
+
+
+class TestSubscriptionUpsertRefreshesSchedule:
+    """Regression: re-subscribing (on-conflict) must refresh next_check_at and
+    source, not just cron_expr.
+
+    The create endpoint updates cron_expr on conflict but previously left
+    next_check_at at its old value, so a user changing the schedule via
+    re-subscribe kept the stale next check time until the next run. source was
+    likewise never re-synced (edge-case audit #10).
+    """
+
+    def test_conflict_update_refreshes_next_check_at(self):
+        from datetime import UTC, datetime
+
+        from routers.subscriptions import _build_subscription_upsert
+
+        stmt = _build_subscription_upsert(
+            user_id=1,
+            url="https://example.com/artist/1",
+            name="n",
+            source="pixiv",
+            auto_download=True,
+            cron_expr="0 0 * * *",
+            next_check=datetime(2030, 1, 1, tzinfo=UTC),
+            group_id=None,
+        )
+        set_sql = _conflict_set_sql(stmt)
+        assert "NEXT_CHECK_AT" in set_sql, "next_check_at not refreshed on conflict"
+
+    def test_conflict_update_refreshes_source(self):
+        from datetime import UTC, datetime
+
+        from routers.subscriptions import _build_subscription_upsert
+
+        stmt = _build_subscription_upsert(
+            user_id=1,
+            url="https://example.com/artist/1",
+            name="n",
+            source="pixiv",
+            auto_download=True,
+            cron_expr="0 0 * * *",
+            next_check=datetime(2030, 1, 1, tzinfo=UTC),
+            group_id=None,
+        )
+        set_sql = _conflict_set_sql(stmt)
+        assert "SOURCE" in set_sql, "source not re-synced on conflict"
+
+    def test_conflict_update_does_not_touch_group_id(self):
+        """group_id must be preserved on conflict (moves go via PATCH/bulk-move)."""
+        from datetime import UTC, datetime
+
+        from routers.subscriptions import _build_subscription_upsert
+
+        stmt = _build_subscription_upsert(
+            user_id=1,
+            url="https://example.com/artist/1",
+            name="n",
+            source="pixiv",
+            auto_download=True,
+            cron_expr="0 0 * * *",
+            next_check=datetime(2030, 1, 1, tzinfo=UTC),
+            group_id=5,
+        )
+        set_sql = _conflict_set_sql(stmt)
+        assert "GROUP_ID" not in set_sql, "group_id must not be overwritten on conflict"
+
+
+# ---------------------------------------------------------------------------
 # GET /api/subscriptions/{sub_id}
 # ---------------------------------------------------------------------------
 
@@ -481,9 +562,7 @@ class TestDeleteSubscription:
         assert session.committed
         mock_redis.setex.assert_awaited_once_with(f"download:cancel:{active_job_id}", 3600, "1")
 
-    async def test_delete_subscription_cancel_flag_failure_rolls_back_db_changes(
-        self, mock_redis
-    ):
+    async def test_delete_subscription_cancel_flag_failure_rolls_back_db_changes(self, mock_redis):
         """Cancel flags are written before destructive DB commit, so Redis failure leaves DB intact."""
         from routers.subscriptions import delete_subscription
 

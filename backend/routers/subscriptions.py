@@ -21,6 +21,55 @@ router = APIRouter(tags=["subscriptions"])
 _member = require_role("member")
 
 
+def _build_subscription_upsert(
+    *,
+    user_id: int,
+    url: str,
+    name: str | None,
+    source: str | None,
+    auto_download: bool,
+    cron_expr: str,
+    next_check,
+    group_id: int | None,
+):
+    """Build the create-or-upsert statement for a subscription.
+
+    On conflict (same user_id+url, i.e. re-subscribing) the schedule fields are
+    refreshed alongside cron_expr: ``next_check_at`` is recomputed from the new
+    cron and ``source`` is re-synced from URL detection. Leaving next_check_at
+    stale here would keep the old schedule active despite the updated cron
+    (edge-case audit #10). ``group_id`` is intentionally NOT updated on conflict
+    — group moves go through PATCH / bulk-move, so an upsert without an explicit
+    group must not yank a subscription out of its existing group.
+    """
+    return (
+        pg_insert(Subscription)
+        .values(
+            user_id=user_id,
+            url=url,
+            name=name,
+            source=source,
+            source_id=None,
+            auto_download=auto_download,
+            cron_expr=cron_expr,
+            next_check_at=next_check,
+            group_id=group_id,
+        )
+        .on_conflict_do_update(
+            constraint="subscriptions_user_id_url_key",
+            set_={
+                "name": name,
+                "source": source,
+                "auto_download": auto_download,
+                "cron_expr": cron_expr,
+                "next_check_at": next_check,
+                "enabled": True,
+            },
+        )
+        .returning(Subscription.id)
+    )
+
+
 class CreateSubscriptionRequest(BaseModel):
     url: str
     name: str | None = None
@@ -182,29 +231,15 @@ async def create_subscription(
             )
         ).scalar_one_or_none()
 
-        stmt = (
-            pg_insert(Subscription)
-            .values(
-                user_id=user_id,
-                url=normalized_url,
-                name=req.name,
-                source=source,
-                source_id=None,
-                auto_download=req.auto_download,
-                cron_expr=cron_expr,
-                next_check_at=next_check,
-                group_id=req.group_id,
-            )
-            .on_conflict_do_update(
-                constraint="subscriptions_user_id_url_key",
-                set_={
-                    "name": req.name,
-                    "auto_download": req.auto_download,
-                    "cron_expr": cron_expr,
-                    "enabled": True,
-                },
-            )
-            .returning(Subscription.id)
+        stmt = _build_subscription_upsert(
+            user_id=user_id,
+            url=normalized_url,
+            name=req.name,
+            source=source,
+            auto_download=req.auto_download,
+            cron_expr=cron_expr,
+            next_check=next_check,
+            group_id=req.group_id,
         )
 
         result = await session.execute(stmt)
