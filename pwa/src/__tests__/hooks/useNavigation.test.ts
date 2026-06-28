@@ -49,6 +49,9 @@ vi.mock('@/components/LocaleProvider', () => ({
 
 vi.mock('@/components/SidebarConfig', () => ({
   loadSidebarConfig: mockLoadSidebarConfig,
+  // Initial useState value; immediately replaced by loadSidebarConfig() in the
+  // mount effect, so an empty-but-valid shape is sufficient here.
+  getDefaultSidebarConfig: () => ({ order: [], hidden: [] }),
   SIDEBAR_CONFIG_KEY: 'test-key',
 }))
 
