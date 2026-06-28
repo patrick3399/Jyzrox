@@ -605,8 +605,16 @@ CREATE INDEX IF NOT EXISTS idx_read_progress_gallery
 -- ── users.role constraint (#190) ──────────────────────────────────────
 -- Prevent arbitrary strings from being written into users.role.
 -- Valid values mirror ROLE_HIERARCHY in core/auth.py.
-ALTER TABLE users ADD CONSTRAINT IF NOT EXISTS chk_users_role
-  CHECK (role IN ('admin', 'member', 'viewer'));
+-- PostgreSQL has no `ADD CONSTRAINT IF NOT EXISTS`; guard via pg_constraint so
+-- this script stays idempotent (re-runnable by scripts/bootstrap_db.py).
+DO $$ BEGIN
+  IF NOT EXISTS (
+    SELECT 1 FROM pg_constraint WHERE conname = 'chk_users_role'
+  ) THEN
+    ALTER TABLE users ADD CONSTRAINT chk_users_role
+      CHECK (role IN ('admin', 'member', 'viewer'));
+  END IF;
+END $$;
 
 -- ── PostgreSQL 18 features ─────────────────────────────────────────────
 

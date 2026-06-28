@@ -19,6 +19,8 @@ x-backend-depends: &backend-depends
     condition: service_healthy
   redis:
     condition: service_healthy
+  migrate:
+    condition: service_completed_successfully
 
 # ━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━
 
@@ -193,6 +195,30 @@ services:
       - tagging
     logging: *default-logging
 
+  # One-shot schema bootstrap: creates the schema on a fresh DB and applies
+  # pending migrations on an existing one, then exits. api/worker wait for it to
+  # complete (see x-backend-depends). Owns schema setup instead of the fragile
+  # postgres docker-entrypoint-initdb.d single-fire mechanism. See issue #55.
+  migrate:
+    build:
+      context: ./backend
+      args:
+        APP_VERSION: ${APP_VERSION:-dev}
+    command: python -m scripts.bootstrap_db
+    restart: "no"
+    environment:
+      <<: *backend-env
+    env_file: "${JYZROX_ENV_FILE:-.env}"
+    volumes:
+      - ./db/init.sql:/app/db/init.sql:ro
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks:
+      - backend
+    security_opt: ["no-new-privileges:true"]
+    logging: *default-logging
+
   postgres:
     image: postgres:18-alpine
     command: >
@@ -203,7 +229,6 @@ services:
     env_file: "${JYZROX_ENV_FILE:-.env}"
     volumes:
       - postgres_data:/var/lib/postgresql
-      - ./db/init.sql:/docker-entrypoint-initdb.d/init.sql:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER:-vault} -d $${POSTGRES_DB:-vault} && psql -U $${POSTGRES_USER:-vault} -d $${POSTGRES_DB:-vault} -c 'SELECT 1' -q -t"]
       interval: 30s

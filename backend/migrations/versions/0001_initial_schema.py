@@ -8,23 +8,21 @@ This is the consolidated baseline migration representing the full schema
 as of v0.4 (formerly revisions 0001–0008 + 0002_multi_user_permissions).
 The complete schema is managed by db/init.sql.
 
-For a fresh installation:
-  docker compose up -d postgres
-  # db/init.sql is applied automatically via docker-entrypoint-initdb.d
-  alembic stamp 0001
-
-For an existing database already at revision 0008:
-  alembic stamp 0001
+Bootstrap is automated by the compose ``migrate`` service
+(``scripts/bootstrap_db.py``); no manual ``alembic stamp`` is required for a
+normal ``docker compose up``. If you ever bootstrap a fresh DB by hand, apply
+db/init.sql then ``alembic stamp head`` (NOT ``stamp 0001`` — init.sql already
+includes the 0002/0003 schema, so stamping 0001 would make ``upgrade head``
+re-run those migrations).
 """
-from typing import Sequence, Union
 
-from alembic import op
+from collections.abc import Sequence
 
 # revision identifiers, used by Alembic.
 revision: str = "0001"
-down_revision: Union[str, None] = None
-branch_labels: Union[str, Sequence[str], None] = None
-depends_on: Union[str, Sequence[str], None] = None
+down_revision: str | None = None
+branch_labels: str | Sequence[str] | None = None
+depends_on: str | Sequence[str] | None = None
 
 
 def upgrade() -> None:

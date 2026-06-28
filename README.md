@@ -65,7 +65,15 @@ cp .env.example .env
 docker compose up -d
 ```
 
-Open `http://localhost:35689`. The first visit starts the setup flow.
+The database schema is created and migrated automatically by the one-shot
+`migrate` service before `api`/`worker` start — no manual migration step is
+needed. Open `http://localhost:35689`; the first visit starts the setup flow.
+
+**Troubleshooting — empty database / worker restarts with `relation "..." does
+not exist`:** check that the `migrate` service ran successfully
+(`docker compose logs migrate`). If a previous partial run left a half-initialized
+`postgres_data` volume, reset it with `docker compose down -v` (this deletes all
+data) and bring the stack back up.
 
 API documentation is available after login at `/api/docs` and
 `/api/openapi.json`.

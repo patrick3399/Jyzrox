@@ -59,23 +59,22 @@ class TestUsersRoleConstraint:
         content = _INIT_SQL.read_text()
         assert "chk_users_role" in content, "init.sql must define chk_users_role CHECK constraint on users.role"
 
-    def test_role_check_constraint_includes_admin(self):
+    def _role_check_clause(self) -> str:
+        # Anchor on the CHECK clause itself, not the constraint name, since the
+        # name now also appears in the pg_constraint existence guard.
         content = _INIT_SQL.read_text()
-        constraint_block_start = content.find("chk_users_role")
-        constraint_block = content[constraint_block_start : constraint_block_start + 120]
-        assert "'admin'" in constraint_block
+        check_start = content.find("CHECK (role IN")
+        assert check_start != -1, "init.sql must define a CHECK (role IN ...) clause"
+        return content[check_start : check_start + 60]
+
+    def test_role_check_constraint_includes_admin(self):
+        assert "'admin'" in self._role_check_clause()
 
     def test_role_check_constraint_includes_member(self):
-        content = _INIT_SQL.read_text()
-        constraint_block_start = content.find("chk_users_role")
-        constraint_block = content[constraint_block_start : constraint_block_start + 120]
-        assert "'member'" in constraint_block
+        assert "'member'" in self._role_check_clause()
 
     def test_role_check_constraint_includes_viewer(self):
-        content = _INIT_SQL.read_text()
-        constraint_block_start = content.find("chk_users_role")
-        constraint_block = content[constraint_block_start : constraint_block_start + 120]
-        assert "'viewer'" in constraint_block
+        assert "'viewer'" in self._role_check_clause()
 
     def test_role_hierarchy_matches_db_constraint_values(self):
         """ROLE_HIERARCHY in core.auth must match the roles allowed by the DB constraint — edge case #190."""
