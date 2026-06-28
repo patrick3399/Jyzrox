@@ -32,6 +32,7 @@ def _make_sub(
     auto_download: bool = True,
     cron_expr: str = "0 */2 * * *",
     next_check_at=None,
+    group_id=None,
 ):
     """Return a MagicMock representing a Subscription row."""
     sub = MagicMock()
@@ -43,6 +44,7 @@ def _make_sub(
     sub.auto_download = auto_download
     sub.cron_expr = cron_expr
     sub.next_check_at = next_check_at
+    sub.group_id = group_id
     sub.name = f"sub-{sub_id}"
     return sub
 
@@ -537,3 +539,96 @@ class TestDuplicateGuardIncludesPaused:
 
         assert result["status"] == "skipped"
         assert result["reason"] == "active_job_exists"
+
+
+# ---------------------------------------------------------------------------
+# TestNextCheckAtAdvances (regression for edge-case audit #9)
+# ---------------------------------------------------------------------------
+
+
+def _capture_success_update_values(session_execute_calls):
+    """Extract the .values() dict of the success-path Subscription UPDATE.
+
+    The success path issues exactly one UPDATE whose values include
+    last_status='queued'; return it as a {column_key: literal} dict.
+    """
+    from sqlalchemy.sql.dml import Update
+
+    for call in session_execute_calls:
+        stmt = call.args[0] if call.args else None
+        if not isinstance(stmt, Update):
+            continue
+        vals = {c.key: (v.value if hasattr(v, "value") else v) for c, v in stmt._values.items()}
+        if vals.get("last_status") == "queued":
+            return vals
+    return None
+
+
+class TestNextCheckAtAdvances:
+    """Regression: ungrouped subscriptions must advance next_check_at after a check.
+
+    check_followed_artists() gates ungrouped subs on next_check_at <= now. If a
+    successful check never advances next_check_at, the sub stays perpetually due
+    and is re-enqueued on every 2h scheduler pass, ignoring its own cron_expr
+    (edge-case audit #9).
+    """
+
+    async def _run_enqueue(self, sub):
+        from worker.subscription import _enqueue_for_subscription
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+
+        mock_cfg = MagicMock()
+        mock_cfg.credential_requirement = "optional"
+        mock_cfg.source_id = "gallery_dl"
+
+        session = _make_mock_session(scalar_result=None)
+
+        with (
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
+            patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=mock_cfg),
+            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await _enqueue_for_subscription(_make_ctx(), sub)
+
+        return result, session.execute.call_args_list
+
+    async def test_ungrouped_sub_advances_next_check_at_from_cron(self):
+        """A successful ungrouped check writes a future next_check_at from cron_expr."""
+        from datetime import UTC, datetime
+
+        from croniter import croniter
+
+        stale = datetime(2020, 1, 1, tzinfo=UTC)
+        sub = _make_sub(cron_expr="0 0 * * *", next_check_at=stale, group_id=None)
+
+        before = datetime.now(UTC)
+        result, execute_calls = await self._run_enqueue(sub)
+        after = datetime.now(UTC)
+
+        assert result["status"] == "ok"
+        vals = _capture_success_update_values(execute_calls)
+        assert vals is not None, "no success-path UPDATE was issued"
+        assert "next_check_at" in vals, "next_check_at not advanced on ungrouped check"
+
+        next_check = vals["next_check_at"]
+        # Must be in the future (no longer the stale 2020 value)
+        assert next_check > after
+        # Must match the next cron occurrence computed around the check time
+        expected = croniter("0 0 * * *", before).get_next(datetime)
+        assert abs((next_check - expected).total_seconds()) < 86400
+
+    async def test_grouped_sub_does_not_advance_next_check_at(self):
+        """Grouped subs are group-driven; their next_check_at is left untouched."""
+        sub = _make_sub(cron_expr="0 0 * * *", group_id=7)
+
+        result, execute_calls = await self._run_enqueue(sub)
+
+        assert result["status"] == "ok"
+        vals = _capture_success_update_values(execute_calls)
+        assert vals is not None
+        assert "next_check_at" not in vals, "grouped sub should not write next_check_at"

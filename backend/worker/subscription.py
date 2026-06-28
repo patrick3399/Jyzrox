@@ -4,6 +4,7 @@ import asyncio
 import uuid
 from datetime import UTC, datetime
 
+from croniter import croniter
 from sqlalchemy import select, update
 
 import core.queue
@@ -12,6 +13,21 @@ from core.database import AsyncSessionLocal
 from db.models import DownloadJob, Subscription
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
+
+
+def _compute_next_check(cron_expr: str | None, base: datetime) -> datetime | None:
+    """Compute the next scheduled check time from a cron expression.
+
+    Returns ``None`` when the cron expression is missing or unparseable so the
+    caller leaves the existing ``next_check_at`` unchanged rather than crashing
+    the enqueue path.
+    """
+    if not cron_expr:
+        return None
+    try:
+        return croniter(cron_expr, base).get_next(datetime)
+    except Exception:
+        return None
 
 
 async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = False) -> dict:
@@ -141,19 +157,24 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
             total=None,
         )
 
-        # Update subscription (scheduling is now group-driven; no next_check_at update)
+        # Update subscription state after a successful enqueue.
         now = datetime.now(UTC)
+        values = {
+            "last_checked_at": now,
+            "last_job_id": job_id,
+            "last_status": "queued",
+            "last_error": None,
+        }
+        # Ungrouped subscriptions are gated by next_check_at in check_followed_artists;
+        # advance it from the per-sub cron so the schedule is honored instead of being
+        # re-checked on every 2h scheduler pass (edge-case audit #9). Group-assigned
+        # subs are scheduled by subscription_scheduler and ignore next_check_at.
+        if sub.group_id is None:
+            next_check = _compute_next_check(sub.cron_expr, now)
+            if next_check is not None:
+                values["next_check_at"] = next_check
         async with AsyncSessionLocal() as session:
-            await session.execute(
-                update(Subscription)
-                .where(Subscription.id == sub.id)
-                .values(
-                    last_checked_at=now,
-                    last_job_id=job_id,
-                    last_status="queued",
-                    last_error=None,
-                )
-            )
+            await session.execute(update(Subscription).where(Subscription.id == sub.id).values(**values))
             await session.commit()
 
         # WS event
