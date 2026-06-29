@@ -16,6 +16,7 @@ Covers:
 """
 
 import json
+from datetime import UTC, datetime
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
 
@@ -114,6 +115,58 @@ def _make_blob_gc_row(sha256, extension=".jpg", actual_refs=0, storage="cas", ex
 # ---------------------------------------------------------------------------
 # TestReconciliationJob
 # ---------------------------------------------------------------------------
+
+
+def _orphan_row(id, source, source_id, import_mode="link", deleted_at=None):
+    """A Phase-2 gallery row (id, source, source_id, import_mode, deleted_at)."""
+    row = MagicMock()
+    row.id = id
+    row.source = source
+    row.source_id = source_id
+    row.import_mode = import_mode
+    row.deleted_at = deleted_at
+    return row
+
+
+class TestOrphanGalleryIdsSanitization:
+    """Regression tests for edge case #46: Phase 2 compares the raw
+    Gallery.source_id against sanitized on-disk directory keys, so a link
+    gallery whose source_id contains '/' (e.g. local imports 'artist/month/title')
+    is wrongly flagged as a filesystem orphan and DELETED even though its
+    sanitized library directory exists on disk.
+    """
+
+    def test_link_gallery_with_slash_source_id_present_on_disk_is_not_orphan(self):
+        from worker.reconciliation import _orphan_gallery_ids
+
+        # On disk the directory name is the sanitized form ('/' -> '__').
+        fs_keys = {("local", "artist__month__title")}
+        row = _orphan_row(id=7, source="local", source_id="artist/month/title")
+
+        result = _orphan_gallery_ids([row], fs_keys)
+
+        assert result == [], "gallery whose sanitized dir exists on disk must not be deleted"
+
+    def test_link_gallery_truly_absent_from_disk_is_orphan(self):
+        from worker.reconciliation import _orphan_gallery_ids
+
+        fs_keys = {("local", "something_else")}
+        row = _orphan_row(id=8, source="local", source_id="artist/month/title")
+
+        result = _orphan_gallery_ids([row], fs_keys)
+
+        assert result == [8], "a link gallery with no matching disk dir is a real orphan"
+
+    def test_non_link_and_trashed_galleries_are_never_orphaned(self):
+        from worker.reconciliation import _orphan_gallery_ids
+
+        fs_keys: set = set()
+        download_row = _orphan_row(id=1, source="ehentai", source_id="123", import_mode="download")
+        trashed_row = _orphan_row(id=2, source="local", source_id="a/b", deleted_at=datetime.now(UTC))
+
+        result = _orphan_gallery_ids([download_row, trashed_row], fs_keys)
+
+        assert result == []
 
 
 class TestReconciliationJob:

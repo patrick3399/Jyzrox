@@ -12,9 +12,29 @@ from sqlalchemy.sql import select
 from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import Blob, Gallery, Image
-from services.cas import cas_path, create_library_symlink, thumb_dir
+from services.cas import cas_path, create_library_symlink, safe_source_id, thumb_dir
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run
+
+
+def _orphan_gallery_ids(db_rows, fs_keys: set[tuple[str, str]]) -> list[int]:
+    """Return ids of link-mode galleries whose library directory is missing on disk.
+
+    On-disk directory names are produced by ``safe_source_id()`` (e.g. '/' -> '__'),
+    so the DB ``source_id`` MUST be sanitized the same way before comparing against
+    ``fs_keys``. Comparing the raw ``source_id`` wrongly flags link galleries whose
+    id contains '/' (e.g. local imports 'artist/month/title') as filesystem orphans
+    and deletes them (edge case #46). ``safe_source_id`` is lossy, so any collision
+    only ever produces a false negative (a gallery is preserved), never a wrongful
+    delete — the safe direction.
+    """
+    return [
+        row.id
+        for row in db_rows
+        if (row.source, safe_source_id(row.source_id)) not in fs_keys
+        and row.import_mode == "link"
+        and row.deleted_at is None
+    ]
 
 
 async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
@@ -223,11 +243,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             )
         ).all()
 
-        orphan_gallery_ids = [
-            row.id
-            for row in db_gallery_rows
-            if (row.source, row.source_id) not in fs_keys and row.import_mode == "link" and row.deleted_at is None
-        ]
+        orphan_gallery_ids = _orphan_gallery_ids(db_gallery_rows, fs_keys)
         total_orphans = len(orphan_gallery_ids)
         logger.info("[reconcile] Phase 2: %d orphan galleries found", total_orphans)
 
