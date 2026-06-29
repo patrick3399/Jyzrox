@@ -266,3 +266,42 @@ async def test_get_effective_params_provides_all_download_pipeline_fields():
     assert isinstance(params.retries, int)
     assert isinstance(params.http_timeout, int)
     assert isinstance(params.inactivity_timeout, int)
+
+
+@pytest.mark.asyncio
+async def test_reset_adaptive_resets_redis_before_committing_db():
+    """Regression for edge case #138: reset_adaptive() must reset the Redis
+    adaptive state BEFORE committing the DB clear. The old order (commit then
+    Redis reset) left stale Redis adaptive state if the process died between the
+    two — surviving across restart with an already-cleared DB row.
+    """
+    from db.models import SiteConfig
+
+    svc = SiteConfigService()
+
+    mock_row = MagicMock(spec=SiteConfig)
+    mock_row.adaptive = {"backoff": 3}
+
+    order: list[str] = []
+
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=mock_row)
+    mock_session.commit = AsyncMock(side_effect=lambda: order.append("commit"))
+    mock_session.expunge = MagicMock()
+
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+    async def _reset(source_id):
+        order.append("reset")
+
+    with (
+        patch("core.site_config.AsyncSessionLocal", return_value=mock_ctx),
+        patch("core.adaptive.adaptive_engine.reset", side_effect=_reset),
+        patch.object(svc, "_invalidate", new_callable=AsyncMock),
+        patch.object(svc, "_merge", return_value=DownloadParams()),
+    ):
+        await svc.reset_adaptive("ehentai")
+
+    assert order == ["reset", "commit"], f"Redis reset must precede DB commit, got {order}"

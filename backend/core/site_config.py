@@ -144,8 +144,17 @@ class SiteConfigService:
 
     async def reset_adaptive(self, source_id: str) -> tuple[DownloadParams, SiteConfig | None]:
         """Clear all adaptive state for a source. Returns (params, row)."""
+        from core.adaptive import adaptive_engine
+
         async with AsyncSessionLocal() as session:
             row = await session.get(SiteConfig, source_id)
+            # Reset the Redis adaptive runtime state BEFORE committing the DB
+            # clear (edge case #138). If the process dies between the two, the
+            # only surviving inconsistency is a cleared Redis with an un-cleared
+            # DB row, which the next adaptive write self-heals; the reverse
+            # (stale Redis state surviving a cleared DB row across restart) is
+            # not self-healing.
+            await adaptive_engine.reset(source_id)
             if row is not None:
                 row.adaptive = {}
                 await session.commit()
@@ -153,9 +162,6 @@ class SiteConfigService:
             result = self._merge(source_id, row)
 
         await self._invalidate(source_id)
-        from core.adaptive import adaptive_engine
-
-        await adaptive_engine.reset(source_id)
         return result, row
 
     async def save_probe_result(self, source_id: str, probe_data: dict) -> None:
