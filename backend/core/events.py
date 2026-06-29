@@ -68,6 +68,7 @@ class EventType(StrEnum):
     # System alerts
     SYSTEM_ALERT = "system.alert"
     SYSTEM_DISK_LOW = "system.disk_low"
+    SYSTEM_MEMORY_HIGH = "system.memory_high"
     ADAPTIVE_BLOCKED = "adaptive.blocked"
 
     # System config

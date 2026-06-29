@@ -189,6 +189,16 @@ CATALOG: list[ScheduledTaskDef] = [
         configurable=False,
     ),
     ScheduledTaskDef(
+        task_id="memory_monitor",
+        name="Memory Monitor",
+        description="Check worker container memory usage and emit alerts when high",
+        job_name="memory_monitor_job",
+        default_cron="*/5 * * * *",
+        default_enabled=True,
+        saq_timeout=30,
+        configurable=False,
+    ),
+    ScheduledTaskDef(
         task_id="adaptive_persist",
         name="Adaptive State Persist",
         description="Flush adaptive download rate state to Redis",

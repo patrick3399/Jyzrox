@@ -658,6 +658,50 @@ async def disk_monitor_job(ctx: dict) -> dict:
     return {"status": "ok", "free_gb": free_gb}
 
 
+async def memory_monitor_job(ctx: dict) -> dict:
+    """Cron: warn when the worker container's memory use exceeds the alert threshold.
+
+    Reads the worker's own cgroup v2 memory (the same figure ``docker stats``
+    reports against the 2 GB limit) and logs a warning + emits an event when it
+    crosses ``settings.memory_alert_pct``. Replaces the external memory_monitor.sh
+    + CSV with an in-app, log-visible alert.
+    """
+    from core.config import settings
+    from worker.memory import read_container_memory
+
+    mem = read_container_memory()
+    if mem is None:
+        return {"status": "unknown"}
+
+    used_bytes, limit_bytes = mem
+    used_mb = used_bytes / (1024 * 1024)
+    limit_mb = limit_bytes / (1024 * 1024)
+    pct = used_bytes / limit_bytes * 100
+    threshold = settings.memory_alert_pct
+
+    if pct >= threshold:
+        from core.events import EventType, emit_safe
+
+        await emit_safe(
+            EventType.SYSTEM_MEMORY_HIGH,
+            resource_type="system",
+            used_mb=round(used_mb, 1),
+            limit_mb=round(limit_mb, 1),
+            pct=round(pct, 1),
+            threshold_pct=threshold,
+        )
+        logger.warning(
+            "[memory_monitor] HIGH: %.0f MB / %.0f MB (%.1f%%, threshold %.0f%%)",
+            used_mb,
+            limit_mb,
+            pct,
+            threshold,
+        )
+        return {"status": "high", "pct": round(pct, 1), "used_mb": round(used_mb, 1)}
+
+    return {"status": "ok", "pct": round(pct, 1), "used_mb": round(used_mb, 1)}
+
+
 async def adaptive_persist_job(ctx: dict) -> dict:
     """Persist dirty adaptive states from Redis to database."""
     from core.adaptive import adaptive_engine
@@ -705,6 +749,7 @@ def _build_cron_jobs() -> list[CronJob]:
         "trash_gc_job": trash_gc_job,
         "log_cleanup_job": log_cleanup_job,
         "disk_monitor_job": disk_monitor_job,
+        "memory_monitor_job": memory_monitor_job,
         "adaptive_persist_job": adaptive_persist_job,
     }
     jobs = []
@@ -779,6 +824,7 @@ def build_workers() -> tuple:
             ("gdl_upgrade_job", gdl_upgrade_job),
             ("gdl_rollback_job", gdl_rollback_job),
             disk_monitor_job,
+            memory_monitor_job,
             adaptive_persist_job,
         ],
         cron_jobs=_build_cron_jobs(),
@@ -852,6 +898,7 @@ __all__ = [
     "gdl_upgrade_job",
     "gdl_rollback_job",
     "disk_monitor_job",
+    "memory_monitor_job",
     "adaptive_persist_job",
     "startup",
     "shutdown",

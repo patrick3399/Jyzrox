@@ -58,6 +58,8 @@ class Settings(BaseSettings):
     backup_pg_dump_timeout: int = 3600
     # Disk space
     disk_min_free_gb: float = 2.0
+    # Worker container memory alert threshold (percent of the cgroup limit)
+    memory_alert_pct: float = 85.0
 
     # gallery-dl config (bind-mounted)
     gallery_dl_config: str = "/app/config/gallery-dl.json"

@@ -78,3 +78,85 @@ async def test_after_process_handles_missing_job(monkeypatch):
     await m.after_process_hook({})  # must not raise
 
     assert called == []
+
+
+# ---------------------------------------------------------------------------
+# Container memory reading (cgroup v2)
+# ---------------------------------------------------------------------------
+
+
+def test_read_container_memory_parses_cgroup_files(tmp_path):
+    from worker import memory as m
+
+    (tmp_path / "memory.current").write_text("104857600\n")
+    (tmp_path / "memory.max").write_text("2147483648\n")
+
+    assert m.read_container_memory(str(tmp_path / "memory.current"), str(tmp_path / "memory.max")) == (
+        104857600,
+        2147483648,
+    )
+
+
+def test_read_container_memory_returns_none_when_limit_is_unbounded(tmp_path):
+    """cgroup reports ``max`` when no memory limit is set — percentage is meaningless."""
+    from worker import memory as m
+
+    (tmp_path / "memory.current").write_text("100\n")
+    (tmp_path / "memory.max").write_text("max\n")
+
+    assert m.read_container_memory(str(tmp_path / "memory.current"), str(tmp_path / "memory.max")) is None
+
+
+def test_read_container_memory_returns_none_when_files_missing(tmp_path):
+    from worker import memory as m
+
+    assert m.read_container_memory(str(tmp_path / "nope"), str(tmp_path / "nope2")) is None
+
+
+# ---------------------------------------------------------------------------
+# memory_monitor_job — log/event alert when over threshold
+# ---------------------------------------------------------------------------
+
+
+async def test_memory_monitor_job_warns_when_usage_exceeds_threshold(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import worker
+    from core import events
+
+    # 90% of a 2 GB limit, default threshold 85% → must alert
+    monkeypatch.setattr("worker.memory.read_container_memory", lambda: (int(2_000_000_000 * 0.90), 2_000_000_000))
+    emit = AsyncMock()
+    monkeypatch.setattr(events, "emit_safe", emit)
+
+    result = await worker.memory_monitor_job({})
+
+    assert result["status"] == "high"
+    emit.assert_awaited_once()
+    assert emit.await_args.args[0] == events.EventType.SYSTEM_MEMORY_HIGH
+
+
+async def test_memory_monitor_job_silent_when_usage_below_threshold(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import worker
+    from core import events
+
+    monkeypatch.setattr("worker.memory.read_container_memory", lambda: (int(2_000_000_000 * 0.50), 2_000_000_000))
+    emit = AsyncMock()
+    monkeypatch.setattr(events, "emit_safe", emit)
+
+    result = await worker.memory_monitor_job({})
+
+    assert result["status"] == "ok"
+    emit.assert_not_awaited()
+
+
+async def test_memory_monitor_job_unknown_when_cgroup_unavailable(monkeypatch):
+    import worker
+
+    monkeypatch.setattr("worker.memory.read_container_memory", lambda: None)
+
+    result = await worker.memory_monitor_job({})
+
+    assert result["status"] == "unknown"

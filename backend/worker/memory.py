@@ -38,8 +38,39 @@ HEAVY_JOB_FUNCTIONS = frozenset(
     }
 )
 
+_CGROUP_MEMORY_CURRENT = "/sys/fs/cgroup/memory.current"
+_CGROUP_MEMORY_MAX = "/sys/fs/cgroup/memory.max"
+
 _libc = None
 _libc_loaded = False
+
+
+def read_container_memory(
+    current_path: str = _CGROUP_MEMORY_CURRENT,
+    max_path: str = _CGROUP_MEMORY_MAX,
+) -> tuple[int, int] | None:
+    """Return ``(used_bytes, limit_bytes)`` from cgroup v2.
+
+    Returns ``None`` if the cgroup files are unreadable (non-Linux / cgroup v1)
+    or when no memory limit is set (``memory.max`` == ``"max"``), where a
+    percentage would be meaningless.
+    """
+    try:
+        with open(current_path) as f:
+            used = int(f.read().strip())
+        with open(max_path) as f:
+            raw = f.read().strip()
+    except Exception:  # cgroup unreadable / non-numeric → no usable figure
+        return None
+    if raw == "max":
+        return None
+    try:
+        limit = int(raw)
+    except ValueError:
+        return None
+    if limit <= 0:
+        return None
+    return used, limit
 
 
 def _load_libc():
