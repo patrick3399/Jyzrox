@@ -36,8 +36,13 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
         await _cron_record(ctx, "retry_downloads", "skipped_disk_low")
         return {"status": "skipped_disk_low"}
 
+    # Operator-facing global cap. This is the live retry policy knob (settings
+    # UI, validated 1-10). It is authoritative for the retry cron so that
+    # raising OR lowering it takes effect immediately on existing jobs — the
+    # per-job DownloadJob.max_retries column is only ever the DB default and is
+    # never set per-job, so honoring the global is both correct and expected.
     max_retries_raw = await r.get("setting:retry_max_retries")
-    max_retries = int(max_retries_raw) if max_retries_raw else 3  # noqa: F841
+    max_retries = int(max_retries_raw) if max_retries_raw else 3
 
     base_delay_raw = await r.get("setting:retry_base_delay_minutes")
     base_delay = int(base_delay_raw) if base_delay_raw else 5
@@ -96,7 +101,7 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 select(DownloadJob)
                 .where(
                     DownloadJob.status.in_(["failed", "partial"]),
-                    DownloadJob.retry_count < DownloadJob.max_retries,
+                    DownloadJob.retry_count < max_retries,
                 )
                 .where(
                     (DownloadJob.next_retry_at == None) | (DownloadJob.next_retry_at <= now)  # noqa: E711
@@ -126,7 +131,7 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                         "[retry] re-queued job %s (attempt %d/%d)",
                         job.id,
                         job.retry_count,
-                        job.max_retries,
+                        max_retries,
                     )
                 except Exception as exc:
                     # Revert if enqueue fails

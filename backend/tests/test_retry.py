@@ -251,10 +251,12 @@ class TestRetryFailedDownloadsJob:
         mock_redis.get = AsyncMock(side_effect=_get_side_effect)
         mock_redis.enqueue_job = AsyncMock()
 
-        # Job with retry_count=0, max_retries=5 (matching Redis setting)
-        # Redis max_retries only affects new jobs; the job's own max_retries
-        # column is what the SQL query uses. This test verifies settings are
-        # read without error and that backoff uses the custom base_delay.
+        # The global retry_max_retries setting is the authoritative cap for the
+        # retry cron (see TestRetryRespectsGlobalMaxRetries). This test verifies
+        # settings are read without error and that backoff uses the custom
+        # base_delay. (Execute is fully mocked here, so the WHERE clause is not
+        # actually evaluated — the global-cap behavior is covered by the
+        # real-DB tests in TestRetryRespectsGlobalMaxRetries.)
         mock_job = _make_mock_job(status="failed", retry_count=0, max_retries=5)
 
         mock_session = AsyncMock()
@@ -283,6 +285,92 @@ class TestRetryFailedDownloadsJob:
         # Check it's roughly 20 minutes from now
         now = datetime.now(UTC)
         assert mock_job.next_retry_at >= now + expected_backoff - timedelta(seconds=5)
+
+
+class TestRetryRespectsGlobalMaxRetries:
+    """Regression tests for edge case #35: the operator-facing global
+    `setting:retry_max_retries` is read but unused — the retry cron compares
+    against the per-job `DownloadJob.max_retries` column (always the DB default
+    of 3) instead of the live global setting, so changing the global has no
+    effect. These tests run the real SQL query against the SQLite engine so the
+    WHERE clause is actually evaluated.
+    """
+
+    async def _insert_job(self, session, *, retry_count, max_retries=3, status="failed"):
+        from db.models import DownloadJob
+
+        job = DownloadJob(
+            id=uuid.uuid4(),
+            url="https://e-hentai.org/g/123/abc/",
+            source="ehentai",
+            status=status,
+            retry_count=retry_count,
+            max_retries=max_retries,
+            created_at=datetime.now(UTC),
+            error="boom",
+        )
+        session.add(job)
+        await session.commit()
+        return job.id
+
+    def _redis_with_global(self, value: bytes):
+        redis = AsyncMock()
+
+        def _get(key):
+            return {"setting:retry_max_retries": value}.get(key)
+
+        redis.get = AsyncMock(side_effect=_get)
+        return redis
+
+    async def test_raising_global_max_retries_retries_job_past_per_job_default(self, db_session, db_session_factory):
+        """Operator raises global retry_max_retries to 5; a job that exhausted
+        the per-job default (retry_count=3, max_retries=3) must now be retried."""
+        job_id = await self._insert_job(db_session, retry_count=3, max_retries=3)
+        redis = self._redis_with_global(b"5")
+
+        with (
+            patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.retry._cron_record", new_callable=AsyncMock),
+            patch("worker.retry.AsyncSessionLocal", db_session_factory),
+            patch("worker.retry.enqueue_download_job", new_callable=AsyncMock),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            from worker.retry import retry_failed_downloads_job
+
+            result = await retry_failed_downloads_job({"redis": redis})
+
+        assert result["retried"] == 1, "global max_retries=5 should make a retry_count=3 job retryable"
+
+        from db.models import DownloadJob
+
+        refreshed = await db_session.get(DownloadJob, job_id)
+        assert refreshed.status == "queued"
+        assert refreshed.retry_count == 4
+
+    async def test_lowering_global_max_retries_stops_retrying_job(self, db_session, db_session_factory):
+        """Operator lowers global retry_max_retries to 1; a job with
+        retry_count=1 (still under the per-job default of 3) must NOT be retried."""
+        job_id = await self._insert_job(db_session, retry_count=1, max_retries=3)
+        redis = self._redis_with_global(b"1")
+
+        with (
+            patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.retry._cron_record", new_callable=AsyncMock),
+            patch("worker.retry.AsyncSessionLocal", db_session_factory),
+            patch("worker.retry.enqueue_download_job", new_callable=AsyncMock),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            from worker.retry import retry_failed_downloads_job
+
+            result = await retry_failed_downloads_job({"redis": redis})
+
+        assert result["retried"] == 0, "global max_retries=1 should stop retrying a retry_count=1 job"
+
+        from db.models import DownloadJob
+
+        refreshed = await db_session.get(DownloadJob, job_id)
+        assert refreshed.status == "failed"
+        assert refreshed.retry_count == 1
 
 
 class TestImageValidation:
