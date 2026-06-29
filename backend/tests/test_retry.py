@@ -350,6 +350,68 @@ class TestStaleReaperUsesHeartbeat:
         assert never.status != "running"
 
 
+class TestStaleQueuedReaperChecksSaqMembership:
+    """Regression tests for edge case #34: the queued stale reaper fails any
+    queued job older than 30 min based on `created_at`, so a legitimate queued
+    backlog (low concurrency / source semaphore wait) is wrongly failed and then
+    re-enqueued in the same run — producing duplicate SAQ entries. A queued job
+    that still has a live SAQ queue entry must be preserved.
+    """
+
+    async def _insert_queued_job(self, session, *, created_minutes_ago):
+        from db.models import DownloadJob
+
+        job = DownloadJob(
+            id=uuid.uuid4(),
+            url="https://e-hentai.org/g/123/abc/",
+            source="ehentai",
+            status="queued",
+            retry_count=0,
+            max_retries=3,
+            created_at=datetime.now(UTC) - timedelta(minutes=created_minutes_ago),
+            progress={},
+        )
+        session.add(job)
+        await session.commit()
+        return job.id
+
+    async def test_queued_job_with_live_saq_entry_is_not_reaped(self, db_session, db_session_factory):
+        from saq.job import Status
+
+        live_id = await self._insert_queued_job(db_session, created_minutes_ago=40)
+        orphan_id = await self._insert_queued_job(db_session, created_minutes_ago=40)
+
+        live_saq_job = MagicMock()
+        live_saq_job.status = Status.QUEUED
+
+        async def _lookup(key):
+            # The live job still sits in the SAQ queue; the orphan has no entry.
+            return live_saq_job if key == str(live_id) else None
+
+        mock_queue = MagicMock()
+        mock_queue.job = AsyncMock(side_effect=_lookup)
+
+        with (
+            patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.retry._cron_record", new_callable=AsyncMock),
+            patch("worker.retry.AsyncSessionLocal", db_session_factory),
+            patch("worker.retry.get_queue", return_value=mock_queue),
+            patch("worker.retry.enqueue_download_job", new_callable=AsyncMock),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            from worker.retry import retry_failed_downloads_job
+
+            result = await retry_failed_downloads_job({"redis": AsyncMock(get=AsyncMock(return_value=None))})
+
+        # Only the orphan (no SAQ entry) is stale; the live-queued job is preserved.
+        assert result["stale_reaped"] == 1, "a queued job with a live SAQ entry must not be reaped"
+
+        from db.models import DownloadJob
+
+        live = await db_session.get(DownloadJob, live_id)
+        assert live.status == "queued"
+
+
 class TestRetryRespectsGlobalMaxRetries:
     """Regression tests for edge case #35: the operator-facing global
     `setting:retry_max_retries` is read but unused — the retry cron compares

@@ -3,9 +3,12 @@
 import logging
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select, update
+from saq.job import TERMINAL_STATUSES
+from sqlalchemy import select
 
 from core.database import AsyncSessionLocal
+from core.queue import get_queue
+from core.queue_config import JOB_QUEUE_ROUTING, QUEUE_INTERACTIVE
 from db.models import DownloadJob
 from worker.constants import DISK_LOW_KEY
 from worker.helpers import _cron_record, _cron_should_run, compute_job_key, enqueue_download_job
@@ -102,23 +105,44 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
                 stale_running_ids.append(job.id)
                 logger.warning("[stale-reaper] marked running job %s as failed (no progress update)", job.id)
 
-            # Stale reaper: queued jobs stuck for 30+ minutes
-            stale_queued_result = await session.execute(
-                update(DownloadJob)
-                .where(
-                    DownloadJob.status == "queued",
-                    DownloadJob.created_at < now - timedelta(minutes=30),
+            # Stale reaper: queued jobs stuck for 30+ minutes.
+            # A queued DB row is only stale if it has NO live SAQ entry. Failing a
+            # legitimately-waiting backlog job (low concurrency / source-semaphore
+            # wait) and then retrying it in the same run produces duplicate SAQ
+            # queue entries (edge case #34). created_at < now-30min stays as a
+            # cheap coarse pre-filter; the SAQ-membership check is authoritative.
+            queued_candidates = (
+                (
+                    await session.execute(
+                        select(DownloadJob).where(
+                            DownloadJob.status == "queued",
+                            DownloadJob.created_at < now - timedelta(minutes=30),
+                        )
+                    )
                 )
-                .values(
-                    status="failed",
-                    error="Stale: queued for 30+ minutes without starting",
-                    finished_at=now,
-                )
-                .returning(DownloadJob.id)
+                .scalars()
+                .all()
             )
-            stale_queued_ids = stale_queued_result.scalars().all()
-            for sid in stale_queued_ids:
-                logger.warning("[stale-reaper] marked queued job %s as failed (stuck in queue)", sid)
+            stale_queued_ids = []
+            download_queue = None
+            if queued_candidates:
+                try:
+                    download_queue = get_queue(JOB_QUEUE_ROUTING.get("download_job", QUEUE_INTERACTIVE))
+                except RuntimeError:
+                    # Queues not initialized in this context — cannot verify SAQ
+                    # membership, so skip queued reaping (preserve, the safe side).
+                    download_queue = None
+            for job in queued_candidates:
+                if download_queue is None:
+                    continue
+                saq_job = await download_queue.job(compute_job_key(job.id, job.retry_count))
+                if saq_job is not None and saq_job.status not in TERMINAL_STATUSES:
+                    continue  # still live in SAQ — legitimately waiting, not stale
+                job.status = "failed"
+                job.error = "Stale: queued 30+ minutes with no active queue entry"
+                job.finished_at = now
+                stale_queued_ids.append(job.id)
+                logger.warning("[stale-reaper] marked queued job %s as failed (no live SAQ entry)", job.id)
 
             stale_count = len(stale_running_ids) + len(stale_queued_ids)
             if stale_count > 0:
