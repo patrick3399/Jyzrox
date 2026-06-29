@@ -667,9 +667,9 @@ async def memory_monitor_job(ctx: dict) -> dict:
     + CSV with an in-app, log-visible alert.
     """
     from core.config import settings
-    from worker.memory import read_container_memory
+    from worker import memory as _mem
 
-    mem = read_container_memory()
+    mem = _mem.read_container_memory()
     if mem is None:
         return {"status": "unknown"}
 
@@ -678,6 +678,22 @@ async def memory_monitor_job(ctx: dict) -> dict:
     limit_mb = limit_bytes / (1024 * 1024)
     pct = used_bytes / limit_bytes * 100
     threshold = settings.memory_alert_pct
+
+    # DEBUG-only history recording (hardcoded switch, default off — see worker.memory).
+    if _mem.MEMORY_HISTORY_ENABLED:
+        samples = [("worker", round(used_mb, 1), round(limit_mb, 1), round(pct, 1))]
+        host = _mem.read_host_memory()
+        if host is not None:
+            h_used, h_total = host
+            samples.append(
+                (
+                    "host",
+                    round(h_used / (1024 * 1024), 1),
+                    round(h_total / (1024 * 1024), 1),
+                    round(h_used / h_total * 100, 1),
+                )
+            )
+        await _mem.persist_memory_history(samples)
 
     if pct >= threshold:
         from core.events import EventType, emit_safe

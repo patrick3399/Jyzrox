@@ -160,3 +160,77 @@ async def test_memory_monitor_job_unknown_when_cgroup_unavailable(monkeypatch):
     result = await worker.memory_monitor_job({})
 
     assert result["status"] == "unknown"
+
+
+# ---------------------------------------------------------------------------
+# Host memory reading (/proc/meminfo)
+# ---------------------------------------------------------------------------
+
+
+def test_read_host_memory_parses_meminfo(tmp_path):
+    from worker import memory as m
+
+    p = tmp_path / "meminfo"
+    p.write_text("MemTotal:       8000000 kB\nMemFree:         100000 kB\nMemAvailable:   3000000 kB\n")
+
+    used, total = m.read_host_memory(str(p))
+
+    assert total == 8000000 * 1024
+    assert used == (8000000 - 3000000) * 1024
+
+
+def test_read_host_memory_returns_none_when_missing(tmp_path):
+    from worker import memory as m
+
+    assert m.read_host_memory(str(tmp_path / "nope")) is None
+
+
+# ---------------------------------------------------------------------------
+# DEBUG history recording — hardcoded flag, default off
+# ---------------------------------------------------------------------------
+
+
+async def test_memory_history_flag_defaults_off():
+    """The DEBUG history switch must ship disabled so production never writes."""
+    from worker import memory as m
+
+    assert m.MEMORY_HISTORY_ENABLED is False
+
+
+async def test_memory_monitor_job_records_worker_and_host_when_flag_on(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import worker
+    from core import events
+    from worker import memory as m
+
+    monkeypatch.setattr("worker.memory.read_container_memory", lambda: (int(2_000_000_000 * 0.50), 2_000_000_000))
+    monkeypatch.setattr("worker.memory.read_host_memory", lambda: (int(8_000_000_000 * 0.50), 8_000_000_000))
+    monkeypatch.setattr(events, "emit_safe", AsyncMock())
+    monkeypatch.setattr(m, "MEMORY_HISTORY_ENABLED", True)
+    persist = AsyncMock()
+    monkeypatch.setattr(m, "persist_memory_history", persist)
+
+    await worker.memory_monitor_job({})
+
+    persist.assert_awaited_once()
+    samples = persist.await_args.args[0]
+    assert {s[0] for s in samples} == {"worker", "host"}
+
+
+async def test_memory_monitor_job_skips_history_when_flag_off(monkeypatch):
+    from unittest.mock import AsyncMock
+
+    import worker
+    from core import events
+    from worker import memory as m
+
+    monkeypatch.setattr("worker.memory.read_container_memory", lambda: (int(2_000_000_000 * 0.50), 2_000_000_000))
+    monkeypatch.setattr(events, "emit_safe", AsyncMock())
+    monkeypatch.setattr(m, "MEMORY_HISTORY_ENABLED", False)
+    persist = AsyncMock()
+    monkeypatch.setattr(m, "persist_memory_history", persist)
+
+    await worker.memory_monitor_job({})
+
+    persist.assert_not_awaited()
