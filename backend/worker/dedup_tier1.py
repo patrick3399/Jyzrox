@@ -8,7 +8,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from core.database import async_session
 from core.redis_client import get_redis
 from db.models import Blob, BlobRelationship
-from worker.dedup_helpers import _MASK16, _MASK64, _now_iso
+from worker.dedup_helpers import _now_iso, _scan_candidates
 
 logger = logging.getLogger("worker.dedup_tier1")
 
@@ -63,25 +63,10 @@ async def dedup_tier1_job(ctx: dict) -> dict:
             total_inserted += res.rowcount or 0
         pairs_batch.clear()
 
-    for i, a in enumerate(blobs):
-        # Pre-compute masked values for blob_a to avoid re-masking in inner loop
-        a_q0 = (a.phash_q0 or 0) & _MASK16
-        a_q1 = (a.phash_q1 or 0) & _MASK16
-        a_phash = a.phash_int & _MASK64
-
-        for b in blobs[i + 1 :]:
-            # Pigeonhole pre-filter: q0+q1 is a subset of all 64 bits.
-            # If their combined hamming already exceeds threshold, total must too → skip.
-            q01_dist = bin(a_q0 ^ ((b.phash_q0 or 0) & _MASK16)).count("1") + bin(
-                a_q1 ^ ((b.phash_q1 or 0) & _MASK16)
-            ).count("1")
-            if q01_dist > threshold:
-                continue
-
-            dist = bin(a_phash ^ (b.phash_int & _MASK64)).count("1")
-            if dist > threshold:
-                continue
-
+    for i in range(total):
+        a = blobs[i]
+        # Index-based scan (no slicing) — see worker.dedup_helpers._scan_candidates.
+        for b, dist in _scan_candidates(blobs, i, threshold):
             # sha256 already in ascending order (ORDER BY sha256 above)
             pairs_batch.append(
                 {

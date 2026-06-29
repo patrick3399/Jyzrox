@@ -8,6 +8,36 @@ _MASK64 = (1 << 64) - 1
 _MASK16 = 0xFFFF
 
 
+def _scan_candidates(blobs, i, threshold):
+    """Yield ``(b, dist)`` for every ``j > i`` whose pHash is within ``threshold``
+    Hamming distance of ``blobs[i]``, using a q0/q1 pigeonhole prefilter.
+
+    Iterates by index and never slices ``blobs``. The previous Tier-1 form
+    (``for b in blobs[i + 1:]``) allocated a fresh copy of the entire blob list
+    on every outer iteration — O(n^2) allocation churn that fragmented the worker
+    heap and prevented glibc from returning memory to the OS. ``blobs`` must be
+    ordered by ``sha256`` ascending so callers can treat ``blobs[i]`` as ``sha_a``.
+    """
+    a = blobs[i]
+    a_q0 = (a.phash_q0 or 0) & _MASK16
+    a_q1 = (a.phash_q1 or 0) & _MASK16
+    a_phash = a.phash_int & _MASK64
+    total = len(blobs)
+    for j in range(i + 1, total):
+        b = blobs[j]
+        q01_dist = bin(a_q0 ^ ((b.phash_q0 or 0) & _MASK16)).count("1") + bin(
+            a_q1 ^ ((b.phash_q1 or 0) & _MASK16)
+        ).count("1")
+        if q01_dist > threshold:
+            continue
+
+        dist = bin(a_phash ^ (b.phash_int & _MASK64)).count("1")
+        if dist > threshold:
+            continue
+
+        yield b, dist
+
+
 def _classify_pair(blob_a: Blob, blob_b: Blob, heuristic_enabled: bool) -> tuple[str, str | None, str | None]:
     """Classify a pair by resolution/file-size heuristics."""
     if not heuristic_enabled:

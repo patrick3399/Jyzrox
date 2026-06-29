@@ -36,6 +36,7 @@ from worker.importer import (
     import_job,
     local_import_job,
 )
+from worker.memory import after_process_hook
 from worker.reconciliation import reconciliation_job
 from worker.retry import retry_failed_downloads_job
 from worker.scan import (
@@ -784,6 +785,7 @@ def build_workers() -> tuple:
         concurrency=concurrency[QUEUE_INTERACTIVE],
         startup=startup,
         shutdown=shutdown,
+        after_process=after_process_hook,
     )
 
     worker_ingest = Worker(
@@ -795,6 +797,7 @@ def build_workers() -> tuple:
         ],
         concurrency=concurrency[QUEUE_INGEST],
         startup=_ingest_startup,
+        after_process=after_process_hook,
     )
 
     worker_render = Worker(
@@ -805,6 +808,7 @@ def build_workers() -> tuple:
         ],
         concurrency=concurrency[QUEUE_RENDER],
         startup=_render_startup,
+        after_process=after_process_hook,
     )
 
     return worker_interactive, worker_ingest, worker_render
