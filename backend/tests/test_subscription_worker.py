@@ -347,6 +347,39 @@ class TestCheckSingleSubscription:
 # ---------------------------------------------------------------------------
 
 
+class TestSubscriptionCheckLockTtl:
+    """Regression test for edge case #32: the per-subscription check lock used a
+    300s TTL while a group check can run up to GROUP_MAX_DURATION (1800s). If a
+    single sub check stalls past 300s the lock expires mid-run and another run
+    can acquire it and enqueue a duplicate for the same subscription. The lock
+    TTL must cover the group timeout.
+    """
+
+    async def test_check_lock_ttl_covers_group_timeout(self):
+        from worker.constants import GROUP_MAX_DURATION
+        from worker.subscription import _enqueue_for_subscription
+
+        captured = {}
+
+        async def _acquire(redis, key, ttl=300):
+            captured["ttl"] = ttl
+            return None  # lock not acquired → function returns early
+
+        sub = MagicMock()
+        sub.id = 1
+
+        with (
+            patch("worker.subscription.acquire_lock", side_effect=_acquire),
+            patch("core.redis_client.get_redis", return_value=MagicMock()),
+        ):
+            result = await _enqueue_for_subscription({"redis": MagicMock()}, sub)
+
+        assert result["reason"] == "check_in_progress"
+        assert captured["ttl"] >= GROUP_MAX_DURATION, (
+            f"check lock TTL {captured['ttl']}s must be >= group timeout {GROUP_MAX_DURATION}s"
+        )
+
+
 class TestCheckFollowedArtists:
     """Unit tests for check_followed_artists()."""
 

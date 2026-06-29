@@ -6,6 +6,12 @@ logger = logging.getLogger("worker")
 
 DISK_LOW_KEY = "system:disk_low"
 
+# Max wall-clock duration of a single subscription-group check. Shared so the
+# per-subscription check lock TTL can be kept >= this bound (edge case #32):
+# a sub check must hold its lock for at least as long as the group run that may
+# contain it, otherwise the lock can expire mid-check and allow a duplicate.
+GROUP_MAX_DURATION = 1800  # 30 minutes
+
 _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
 _VIDEO_EXTS = {".mp4", ".webm", ".mov"}
 _MEDIA_EXTS = _IMAGE_EXTS | _VIDEO_EXTS

@@ -9,9 +9,7 @@ from sqlalchemy import select, update
 import core.queue
 from core.database import AsyncSessionLocal
 from db.models import Subscription, SubscriptionGroup
-from worker.constants import logger
-
-GROUP_MAX_DURATION = 1800  # 30 minutes
+from worker.constants import GROUP_MAX_DURATION, logger
 
 
 def _cron_is_due(schedule: str, last_run: datetime | None) -> bool:

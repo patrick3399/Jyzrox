@@ -11,7 +11,7 @@ import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import DownloadJob, Subscription
-from worker.constants import logger
+from worker.constants import GROUP_MAX_DURATION, logger
 from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
 
 
@@ -45,10 +45,15 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
     if not pool:
         return {"status": "failed", "error": "no redis pool"}
 
-    # Race-condition guard: use Redis SETNX so only one concurrent check per sub proceeds
+    # Race-condition guard: use Redis SETNX so only one concurrent check per sub
+    # proceeds. The TTL must cover the longest a single check can run, which is
+    # bounded by the group timeout (edge case #32) — a shorter TTL could expire
+    # mid-check and let another run enqueue a duplicate for the same sub. The
+    # lock is released in `finally`, so this longer TTL only delays recovery
+    # after a hard worker crash.
     redis = get_redis()
     lock_key = f"subscription:check_lock:{sub.id}"
-    lock_value = await acquire_lock(redis, lock_key, ttl=300)
+    lock_value = await acquire_lock(redis, lock_key, ttl=GROUP_MAX_DURATION)
     if not lock_value:
         logger.info("[subscription] sub=%d check already in progress, skipping", sub.id)
         return {"status": "skipped", "reason": "check_in_progress"}
