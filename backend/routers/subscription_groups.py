@@ -4,7 +4,7 @@ import logging
 from datetime import UTC, datetime
 
 from fastapi import APIRouter, Depends, HTTPException, Request
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import func as sa_func
 from sqlalchemy import select, update
 
@@ -20,17 +20,23 @@ router = APIRouter(tags=["subscription-groups"])
 _admin = require_role("admin")
 
 
+# Group concurrency is passed straight to asyncio.Semaphore() in the worker, so
+# it must be a sane positive bound: <=0 stalls/raises and unbounded values give
+# no real cap (edge case #31).
+_CONCURRENCY = Field(default=2, ge=1, le=20)
+
+
 class CreateGroupRequest(BaseModel):
     name: str
     schedule: str = "0 */6 * * *"
-    concurrency: int = 2
+    concurrency: int = _CONCURRENCY
     priority: int = 5
 
 
 class UpdateGroupRequest(BaseModel):
     name: str | None = None
     schedule: str | None = None
-    concurrency: int | None = None
+    concurrency: int | None = Field(default=None, ge=1, le=20)
     priority: int | None = None
     enabled: bool | None = None
 

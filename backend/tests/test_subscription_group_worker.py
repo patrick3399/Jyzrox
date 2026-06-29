@@ -387,6 +387,45 @@ class TestCheckSubscriptionGroup:
         assert result["enqueued"] == 2
         assert result["errors"] == 0
 
+    async def test_negative_concurrency_row_does_not_crash_worker(self):
+        """Defense-in-depth for edge case #31: a group row with a negative
+        concurrency (predating the API bound) must be clamped, not passed to
+        asyncio.Semaphore(-1) which raises ValueError and fails the group check."""
+        from worker.subscription_group import check_subscription_group
+
+        group = _make_group(status="running", concurrency=-1)
+        sub1 = _make_sub(sub_id=1)
+
+        session1 = AsyncMock()
+        session1.commit = AsyncMock()
+        session1.get = AsyncMock(return_value=group)
+        subs_result = MagicMock()
+        subs_result.scalars.return_value.all.return_value = [sub1]
+        session1.execute = AsyncMock(return_value=subs_result)
+        session1.__aenter__ = AsyncMock(return_value=session1)
+        session1.__aexit__ = AsyncMock(return_value=False)
+
+        session2 = AsyncMock()
+        session2.commit = AsyncMock()
+        session2.execute = AsyncMock()
+        session2.__aenter__ = AsyncMock(return_value=session2)
+        session2.__aexit__ = AsyncMock(return_value=False)
+
+        async def _fake_enqueue(ctx, sub):
+            return {"status": "ok", "job_id": "fake-job"}
+
+        ctx = _make_ctx()
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", side_effect=[session1, session2]),
+            patch("worker.subscription._enqueue_for_subscription", side_effect=_fake_enqueue),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            result = await check_subscription_group(ctx, group_id=1)
+
+        assert result["status"] == "ok"
+        assert result["checked"] == 1
+        assert result["enqueued"] == 1
+
     async def test_enqueue_failure_increments_errors_not_enqueued(self):
         """When _enqueue_for_subscription raises for a sub, errors is incremented."""
         from worker.subscription_group import check_subscription_group

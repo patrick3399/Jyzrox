@@ -198,6 +198,56 @@ class TestCreateGroup:
         )
         assert resp.status_code == 422
 
+
+class TestGroupConcurrencyBounds:
+    """Regression tests for edge case #31: group concurrency is passed straight
+    to asyncio.Semaphore() in the worker with no bounds. A negative value raises
+    ValueError mid-run (the group check fails), 0 silently degrades, and huge
+    values give no real cap. The API must reject out-of-range concurrency.
+    """
+
+    async def test_create_group_zero_concurrency_returns_422(self, client, db_session):
+        await _ensure_user(db_session)
+        resp = await client.post(
+            "/api/subscription-groups/",
+            json={"name": "Zero", "schedule": "0 */6 * * *", "concurrency": 0},
+        )
+        assert resp.status_code == 422
+
+    async def test_create_group_negative_concurrency_returns_422(self, client, db_session):
+        await _ensure_user(db_session)
+        resp = await client.post(
+            "/api/subscription-groups/",
+            json={"name": "Neg", "schedule": "0 */6 * * *", "concurrency": -1},
+        )
+        assert resp.status_code == 422
+
+    async def test_create_group_excessive_concurrency_returns_422(self, client, db_session):
+        await _ensure_user(db_session)
+        resp = await client.post(
+            "/api/subscription-groups/",
+            json={"name": "Huge", "schedule": "0 */6 * * *", "concurrency": 21},
+        )
+        assert resp.status_code == 422
+
+    async def test_create_group_boundary_concurrency_is_accepted(self, client, db_session):
+        await _ensure_user(db_session)
+        for value in (1, 20):
+            resp = await client.post(
+                "/api/subscription-groups/",
+                json={"name": f"OK-{value}", "schedule": "0 */6 * * *", "concurrency": value},
+            )
+            assert resp.status_code == 200, f"concurrency={value} should be accepted"
+
+    async def test_patch_group_zero_concurrency_returns_422(self, client, db_session):
+        await _ensure_user(db_session)
+        gid = await _insert_group(db_session)
+        resp = await client.patch(
+            f"/api/subscription-groups/{gid}",
+            json={"concurrency": 0},
+        )
+        assert resp.status_code == 422
+
     async def test_create_group_default_schedule_accepted(self, client, db_session):
         """Name-only payload uses the default schedule."""
         await _ensure_user(db_session)

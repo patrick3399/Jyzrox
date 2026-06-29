@@ -101,7 +101,11 @@ async def check_subscription_group(ctx: dict, group_id: int) -> dict:
             return {"status": "skipped", "reason": "paused"}
 
         group_name = group.name
-        concurrency = group.concurrency or 2
+        # Clamp defensively: the API bounds concurrency to [1, 20], but a row
+        # predating that bound could hold 0/negative/huge values. Semaphore(<=0)
+        # raises ValueError / never runs and unbounded values give no real cap
+        # (edge case #31).
+        concurrency = max(1, min(group.concurrency or 2, 20))
 
         # Load eligible subscriptions in same session
         subs = (
