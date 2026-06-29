@@ -287,6 +287,69 @@ class TestRetryFailedDownloadsJob:
         assert mock_job.next_retry_at >= now + expected_backoff - timedelta(seconds=5)
 
 
+class TestStaleReaperUsesHeartbeat:
+    """Regression tests for edge case #33: the stale reaper marks ANY running
+    job older than one hour as failed based on `created_at`, ignoring the
+    `progress.last_update_at` heartbeat the worker writes on every progress
+    tick. A real long-running download that is actively making progress is
+    wrongly killed. Runs against the real SQLite engine.
+    """
+
+    async def _insert_running_job(self, session, *, created_minutes_ago, last_update_minutes_ago):
+        from db.models import DownloadJob
+
+        now = datetime.now(UTC)
+        progress = {}
+        if last_update_minutes_ago is not None:
+            progress = {"last_update_at": (now - timedelta(minutes=last_update_minutes_ago)).isoformat()}
+        job = DownloadJob(
+            id=uuid.uuid4(),
+            url="https://e-hentai.org/g/123/abc/",
+            source="ehentai",
+            status="running",
+            retry_count=0,
+            max_retries=3,
+            created_at=now - timedelta(minutes=created_minutes_ago),
+            progress=progress,
+        )
+        session.add(job)
+        await session.commit()
+        return job.id
+
+    async def test_actively_progressing_long_job_is_not_reaped(self, db_session, db_session_factory):
+        """A job created 2h ago but whose heartbeat is 5 min old is alive and
+        must NOT be reaped, even though created_at is well past the 1h mark."""
+        alive_id = await self._insert_running_job(db_session, created_minutes_ago=120, last_update_minutes_ago=5)
+        stuck_id = await self._insert_running_job(db_session, created_minutes_ago=120, last_update_minutes_ago=90)
+        never_progressed_id = await self._insert_running_job(
+            db_session, created_minutes_ago=120, last_update_minutes_ago=None
+        )
+
+        with (
+            patch("worker.retry._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.retry._cron_record", new_callable=AsyncMock),
+            patch("worker.retry.AsyncSessionLocal", db_session_factory),
+            patch("worker.retry.enqueue_download_job", new_callable=AsyncMock),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+        ):
+            from worker.retry import retry_failed_downloads_job
+
+            result = await retry_failed_downloads_job({"redis": AsyncMock(get=AsyncMock(return_value=None))})
+
+        from db.models import DownloadJob
+
+        alive = await db_session.get(DownloadJob, alive_id)
+        assert alive.status == "running", "a job with a fresh heartbeat must not be reaped"
+
+        # Only the stuck job and the never-progressed job (heartbeat falls back to
+        # created_at) are stale.
+        assert result["stale_reaped"] == 2
+        stuck = await db_session.get(DownloadJob, stuck_id)
+        never = await db_session.get(DownloadJob, never_progressed_id)
+        assert stuck.status != "running"
+        assert never.status != "running"
+
+
 class TestRetryRespectsGlobalMaxRetries:
     """Regression tests for edge case #35: the operator-facing global
     `setting:retry_max_retries` is read but unused — the retry cron compares

@@ -15,6 +15,22 @@ logger = logging.getLogger("worker")
 _MAX_BACKOFF_MINUTES = 1440  # 24 hours cap
 
 
+def _heartbeat_is_stale(last_update_at: str, threshold: datetime) -> bool:
+    """Return True if a progress heartbeat is older than `threshold`.
+
+    `last_update_at` is the ISO-8601 string written by the download worker's
+    on_progress callback. A malformed/unparseable value is treated as stale so a
+    job with a corrupt heartbeat is not left running forever.
+    """
+    try:
+        hb = datetime.fromisoformat(last_update_at)
+    except ValueError, TypeError:
+        return True
+    if hb.tzinfo is None:
+        hb = hb.replace(tzinfo=UTC)
+    return hb < threshold
+
+
 async def retry_failed_downloads_job(ctx: dict) -> dict:
     """Cron job: retry failed/partial downloads with exponential backoff."""
     if not await _cron_should_run(ctx, "retry_downloads", "*/15 * * * *", True):
@@ -55,23 +71,36 @@ async def retry_failed_downloads_job(ctx: dict) -> dict:
             now = datetime.now(UTC)
 
             # ── Stale reaper: detect zombie jobs ──────────────────────────
-            # Running jobs created 60+ minutes ago with no completion (no finished_at)
-            stale_running_result = await session.execute(
-                update(DownloadJob)
-                .where(
-                    DownloadJob.status == "running",
-                    DownloadJob.created_at < now - timedelta(hours=1),
+            # A running job is only stale if its progress HEARTBEAT
+            # (progress.last_update_at, written by on_progress every tick) has
+            # gone quiet for 60+ minutes — NOT merely because created_at is old.
+            # A long but actively-downloading job keeps a fresh heartbeat and
+            # must be left alone (edge case #33). created_at < now-1h is a cheap,
+            # lossless coarse pre-filter: a job created within the last hour
+            # cannot have a heartbeat older than an hour.
+            stale_threshold = now - timedelta(hours=1)
+            running_candidates = (
+                (
+                    await session.execute(
+                        select(DownloadJob).where(
+                            DownloadJob.status == "running",
+                            DownloadJob.created_at < stale_threshold,
+                        )
+                    )
                 )
-                .values(
-                    status="failed",
-                    error="Stale: no progress for 60+ minutes",
-                    finished_at=now,
-                )
-                .returning(DownloadJob.id)
+                .scalars()
+                .all()
             )
-            stale_running_ids = stale_running_result.scalars().all()
-            for sid in stale_running_ids:
-                logger.warning("[stale-reaper] marked running job %s as failed (no progress update)", sid)
+            stale_running_ids = []
+            for job in running_candidates:
+                last_update = (job.progress or {}).get("last_update_at")
+                if last_update and not _heartbeat_is_stale(last_update, stale_threshold):
+                    continue  # actively progressing — leave it running
+                job.status = "failed"
+                job.error = "Stale: no progress for 60+ minutes"
+                job.finished_at = now
+                stale_running_ids.append(job.id)
+                logger.warning("[stale-reaper] marked running job %s as failed (no progress update)", job.id)
 
             # Stale reaper: queued jobs stuck for 30+ minutes
             stale_queued_result = await session.execute(
