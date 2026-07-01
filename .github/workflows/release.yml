@@ -1,0 +1,90 @@
+name: Release
+
+on:
+  push:
+    branches: [main]
+
+concurrency:
+  group: release-main
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  quality:
+    uses: ./.github/workflows/quality.yml
+    secrets: inherit
+
+  version:
+    needs: quality
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.compute.outputs.version }}
+      tag: ${{ steps.compute.outputs.tag }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Compute next version (YYYY.MM.N, monthly reset at .0)
+        id: compute
+        run: |
+          set -euo pipefail
+          YEAR_MONTH=$(date -u +'%Y.%-m')
+          LAST=$(git tag -l "v${YEAR_MONTH}.*" | sed "s/^v${YEAR_MONTH}\.//" | sort -n | tail -1)
+          if [ -z "$LAST" ]; then
+            NEXT=0
+          else
+            NEXT=$((LAST + 1))
+          fi
+          VERSION="${YEAR_MONTH}.${NEXT}"
+          TAG="v${VERSION}"
+          echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
+          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
+
+      - name: Create and push tag
+        run: |
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ steps.compute.outputs.tag }}"
+          git push origin "${{ steps.compute.outputs.tag }}"
+
+  build:
+    needs: version
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - name: backend
+            context: ./backend
+            image: patrick339/jyzrox-backend
+          - name: pwa
+            context: ./pwa
+            image: patrick339/jyzrox-pwa
+          - name: nginx
+            context: ./nginx
+            image: patrick339/jyzrox-nginx
+          - name: tagger
+            context: ./tagger
+            image: patrick339/jyzrox-tagger
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: docker/setup-buildx-action@v3
+
+      - uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push ${{ matrix.name }}
+        uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.context }}
+          push: true
+          build-args: |
+            APP_VERSION=${{ needs.version.outputs.version }}
+          tags: |
+            ${{ matrix.image }}:${{ needs.version.outputs.version }}
+            ${{ matrix.image }}:latest
