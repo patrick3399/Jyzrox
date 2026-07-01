@@ -12,11 +12,6 @@ function BrowseSettings() {
       typeof window !== 'undefined' &&
       localStorage.getItem('eh_search_history_enabled') !== 'false',
   )
-  const [loadMode, setLoadMode] = useState(() =>
-    typeof window !== 'undefined'
-      ? localStorage.getItem('browse_load_mode') || 'pagination'
-      : 'pagination',
-  )
   const [perPage, setPerPage] = useState(() =>
     typeof window !== 'undefined' ? localStorage.getItem('browse_per_page') || '25' : '25',
   )
@@ -51,36 +46,6 @@ function BrowseSettings() {
               className={`absolute top-0.5 left-0.5 w-5 h-5 bg-white rounded-full transition-transform ${historyEnabled ? 'translate-x-5' : ''}`}
             />
           </button>
-        </div>
-
-        {/* Load mode: Pagination vs Infinite Scroll */}
-        <div className="flex items-center justify-between">
-          <div>
-            <p className="text-sm text-vault-text">{t('settings.loadMode')}</p>
-            <p className="text-xs text-vault-text-muted mt-0.5">{t('settings.loadModeDesc')}</p>
-          </div>
-          <div className="flex bg-vault-input border border-vault-border rounded overflow-hidden">
-            <button
-              onClick={() => {
-                localStorage.setItem('browse_load_mode', 'pagination')
-                setLoadMode('pagination')
-              }}
-              aria-pressed={loadMode === 'pagination'}
-              className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'pagination' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-            >
-              {t('settings.pagination')}
-            </button>
-            <button
-              onClick={() => {
-                localStorage.setItem('browse_load_mode', 'scroll')
-                setLoadMode('scroll')
-              }}
-              aria-pressed={loadMode === 'scroll'}
-              className={`px-3 py-1.5 text-xs transition-colors ${loadMode === 'scroll' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-            >
-              {t('settings.infiniteScroll')}
-            </button>
-          </div>
         </div>
 
         {/* Per page (library) */}
