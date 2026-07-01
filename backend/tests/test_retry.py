@@ -408,6 +408,9 @@ class TestStaleQueuedReaperChecksSaqMembership:
 
         from db.models import DownloadJob
 
+        orphan = await db_session.get(DownloadJob, orphan_id)
+        assert orphan.retry_count == 1, "the orphan (no SAQ entry) must be the one reaped and re-queued"
+
         live = await db_session.get(DownloadJob, live_id)
         assert live.status == "queued"
 
