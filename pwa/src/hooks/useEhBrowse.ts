@@ -17,9 +17,10 @@ import {
   type Filters,
   type Tab,
   type Cursor,
+  type FetchPlan,
 } from '@/lib/ehBrowseState'
 import { api } from '@/lib/api'
-import type { EhSearchResult, EhFavoritesResult, EhFavCategory } from '@/lib/types'
+import type { EhGallery, EhFavCategory } from '@/lib/types'
 
 const SNAPSHOT_KEY = 'eh_browse_snapshot'
 
@@ -46,60 +47,105 @@ export function useEhBrowse() {
   // View-adjacent metadata (favourite-category names/counts) — not part of identity.
   const [favCategories, setFavCategories] = useState<EhFavCategory[]>([])
 
-  const loadMore = useCallback(async () => {
-    const s = stateRef.current
-    if (s.status === 'seeding' || s.status === 'loading') return
-    if (s.items.length > 0 && !s.hasMore) return
+  // Fetch a single page for the given plan, normalising every tab to
+  // { galleries, cursor, hasMore, total }.
+  const fetchPage = useCallback(
+    async (
+      plan: FetchPlan,
+      signal: AbortSignal,
+    ): Promise<{ galleries: EhGallery[]; cursor: Cursor; hasMore: boolean; total: number | null }> => {
+      if (plan.kind === 'search') {
+        const res = await api.eh.search(plan.args, { signal })
+        return {
+          galleries: res.galleries,
+          cursor: res.next_gid != null ? { kind: 'gid', nextGid: res.next_gid } : null,
+          hasMore: res.next_gid != null,
+          total: res.total,
+        }
+      }
+      if (plan.kind === 'toplist') {
+        const res = await api.eh.getToplist(plan.args, { signal })
+        const hasMore = res.galleries.length >= EH_PAGE_SIZE
+        return {
+          galleries: res.galleries,
+          cursor: hasMore ? { kind: 'page', page: plan.args.page + 1 } : null,
+          hasMore,
+          total: res.total,
+        }
+      }
+      if (plan.kind === 'popular') {
+        const res = await api.eh.getPopular({ signal })
+        return { galleries: res.galleries, cursor: null, hasMore: false, total: res.total }
+      }
+      const res = await api.eh.getFavorites(plan.args, { signal })
+      if (res.categories?.length) setFavCategories(res.categories)
+      return {
+        galleries: res.galleries,
+        cursor: res.has_next && res.next_cursor ? { kind: 'fav', next: res.next_cursor } : null,
+        hasMore: res.has_next,
+        total: res.total,
+      }
+    },
+    [],
+  )
 
-    const keyAtStart = queryKey(s)
-    const seeding = s.items.length === 0
+  const loadMore = useCallback(async () => {
+    const s0 = stateRef.current
+    if (s0.status === 'seeding' || s0.status === 'loading') return
+    if (s0.items.length > 0 && !s0.hasMore) return
+
+    const keyAtStart = queryKey(s0)
+    const seeding = s0.items.length === 0
     inflightRef.current?.abort()
     const ac = new AbortController()
     inflightRef.current = ac
     dispatch({ type: 'LOAD_START', seeding })
 
-    const plan = buildParams(s)
+    // A completed fetch that advances the cursor but yields zero NEW items (after
+    // gid-dedupe) would leave the buffer unchanged — and VirtualGrid only re-fires
+    // onLoadMore when items.length grows, so the infinite scroll would wedge. EH
+    // favorites are ordered by favourite-time while the cursor is gid-based, so
+    // accumulated pages can fully overlap. Chain forward until we gather at least
+    // one new item, hit the end, or the cursor can no longer advance.
+    const seen = new Set(s0.items.map((g) => g.gid))
+    const collected: EhGallery[] = []
+    let cursor = s0.cursor
+    let hasMore = s0.hasMore
+    let total = s0.total
+    const MAX_CHAINED = 10
+
     try {
-      if (plan.kind === 'search' || plan.kind === 'popular' || plan.kind === 'toplist') {
-        let res: EhSearchResult
-        let cursor: Cursor
-        let hasMore: boolean
-        if (plan.kind === 'search') {
-          res = await api.eh.search(plan.args, { signal: ac.signal })
-          cursor = res.next_gid != null ? { kind: 'gid', nextGid: res.next_gid } : null
-          hasMore = res.next_gid != null
-        } else if (plan.kind === 'toplist') {
-          res = await api.eh.getToplist(plan.args, { signal: ac.signal })
-          hasMore = res.galleries.length >= EH_PAGE_SIZE
-          cursor = hasMore ? { kind: 'page', page: plan.args.page + 1 } : null
-        } else {
-          res = await api.eh.getPopular({ signal: ac.signal })
-          cursor = null
+      for (let i = 0; i < MAX_CHAINED; i++) {
+        const page = await fetchPage(buildParams({ ...s0, cursor }), ac.signal)
+        if (ac.signal.aborted || queryKey(stateRef.current) !== keyAtStart) return
+        if (seeding && i === 0) total = page.total
+        const fresh = page.galleries.filter((g) => !seen.has(g.gid))
+        for (const g of fresh) seen.add(g.gid)
+        collected.push(...fresh)
+        const prevCursor = cursor
+        cursor = page.cursor
+        hasMore = page.hasMore
+        if (fresh.length > 0 || !hasMore) break
+        // Zero new items but more claimed: only keep chaining if the cursor actually
+        // moved, otherwise we'd refetch the same page forever — treat as the end.
+        if (cursor == null || JSON.stringify(cursor) === JSON.stringify(prevCursor)) {
           hasMore = false
+          break
         }
-        if (ac.signal.aborted || queryKey(stateRef.current) !== keyAtStart) return
-        dispatch(
-          seeding
-            ? { type: 'SEED', items: res.galleries, total: res.total, cursor, hasMore }
-            : { type: 'APPEND', items: res.galleries, cursor, hasMore },
-        )
-      } else {
-        const res: EhFavoritesResult = await api.eh.getFavorites(plan.args, { signal: ac.signal })
-        if (ac.signal.aborted || queryKey(stateRef.current) !== keyAtStart) return
-        if (res.categories?.length) setFavCategories(res.categories)
-        const cursor: Cursor =
-          res.has_next && res.next_cursor ? { kind: 'fav', next: res.next_cursor } : null
-        dispatch(
-          seeding
-            ? { type: 'SEED', items: res.galleries, total: res.total, cursor, hasMore: res.has_next }
-            : { type: 'APPEND', items: res.galleries, cursor, hasMore: res.has_next },
-        )
       }
     } catch (err) {
       if (ac.signal.aborted) return
       dispatch({ type: 'LOAD_ERROR', error: err instanceof Error ? err.message : 'failed' })
+      return
     }
-  }, [])
+
+    if (ac.signal.aborted || queryKey(stateRef.current) !== keyAtStart) return
+    dispatch(
+      seeding
+        ? { type: 'SEED', items: collected, total, cursor, hasMore }
+        : { type: 'APPEND', items: collected, cursor, hasMore },
+    )
+  }, [fetchPage])
 
   const actions = useMemo(
     () => ({
@@ -140,7 +186,6 @@ export function useEhBrowse() {
     if (queryKey(stateRef.current) === queryKey(initialState)) return
     if (typeof window !== 'undefined') sessionStorage.removeItem(SNAPSHOT_KEY)
     dispatch({ type: 'RESET' })
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [searchStr])
 
   // ── Snapshot persistence: continuous scroll capture + write on every exit.

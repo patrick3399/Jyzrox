@@ -99,6 +99,79 @@ describe('useEhBrowse — loadMore', () => {
   })
 })
 
+describe('useEhBrowse — loadMore does not wedge on all-duplicate pages', () => {
+  const g = (gid: number) => ({ gid, token: `t${gid}` })
+  it('chains past a fully-overlapping favorites page until new items arrive', async () => {
+    searchStr = 'tab=favorites'
+    ;(api.eh.getFavorites as ReturnType<typeof vi.fn>).mockReset()
+    ;(api.eh.getFavorites as ReturnType<typeof vi.fn>)
+      // seed
+      .mockResolvedValueOnce({
+        galleries: [g(1), g(2)],
+        total: 10,
+        has_next: true,
+        next_cursor: 'A',
+        categories: [],
+      })
+      // append #1: entirely duplicate gids, but cursor advances A→B
+      .mockResolvedValueOnce({
+        galleries: [g(1), g(2)],
+        total: 10,
+        has_next: true,
+        next_cursor: 'B',
+        categories: [],
+      })
+      // append #2: fresh items
+      .mockResolvedValueOnce({
+        galleries: [g(3), g(4)],
+        total: 10,
+        has_next: true,
+        next_cursor: 'C',
+        categories: [],
+      })
+    const { result } = renderHook(() => useEhBrowse())
+    await act(async () => {
+      await result.current.loadMore()
+    }) // seed → [1,2]
+    expect(result.current.state.items.map((x) => x.gid)).toEqual([1, 2])
+    await act(async () => {
+      await result.current.loadMore()
+    }) // must skip the all-duplicate page and land fresh items
+    expect(result.current.state.items.map((x) => x.gid)).toEqual([1, 2, 3, 4])
+    expect(result.current.state.cursor).toEqual({ kind: 'fav', next: 'C' })
+  })
+
+  it('stops (hasMore=false) when a page is all-duplicate and the cursor cannot advance', async () => {
+    searchStr = 'tab=favorites'
+    ;(api.eh.getFavorites as ReturnType<typeof vi.fn>).mockReset()
+    ;(api.eh.getFavorites as ReturnType<typeof vi.fn>)
+      .mockResolvedValueOnce({
+        galleries: [g(1), g(2)],
+        total: 2,
+        has_next: true,
+        next_cursor: 'A',
+        categories: [],
+      })
+      // append: duplicates AND cursor does not advance (still 'A') → dead end
+      .mockResolvedValue({
+        galleries: [g(1), g(2)],
+        total: 2,
+        has_next: true,
+        next_cursor: 'A',
+        categories: [],
+      })
+    const { result } = renderHook(() => useEhBrowse())
+    await act(async () => {
+      await result.current.loadMore()
+    })
+    await act(async () => {
+      await result.current.loadMore()
+    })
+    expect(result.current.state.items.map((x) => x.gid)).toEqual([1, 2])
+    expect(result.current.state.hasMore).toBe(false)
+  })
+})
+
 describe('useEhBrowse — URL sync', () => {
   it('writes identity to the URL but never the view buffer', async () => {
     ;(api.eh.search as ReturnType<typeof vi.fn>).mockResolvedValue({
