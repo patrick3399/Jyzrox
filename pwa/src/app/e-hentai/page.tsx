@@ -832,9 +832,12 @@ function BrowsePage() {
     }
   }, [searchQuery, category, loadMode, advSearch, minRating, pageFrom, pageTo, selectedCats.size])
 
-  // Initialize scroll mode with first page from SWR
+  // Initialize scroll mode with first page from SWR.
+  // Gate matches the search-results render gate (`searchQuery || activeTab === 'search'`):
+  // a plain search from the search box sets `searchQuery` without switching the tab away
+  // from the default `popular`, and must still seed the scroll list.
   useEffect(() => {
-    if (loadMode !== 'scroll' || !data || activeTab !== 'search') return
+    if (loadMode !== 'scroll' || !data || (activeTab !== 'search' && !searchQuery)) return
     if (scrollNeedsSeedRef.current) {
       setScrollGalleries(data.galleries)
       setScrollNextGid(data.next_gid ?? null)
