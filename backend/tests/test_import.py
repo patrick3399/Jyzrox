@@ -1592,8 +1592,6 @@ class TestRescan:
         assert resp.status_code == 401
 
 
-
-
 # ---------------------------------------------------------------------------
 # POST /api/import/rescan/cancel — cancel running rescan
 # ---------------------------------------------------------------------------
@@ -1694,8 +1692,6 @@ class TestMonitorToggle:
             json={"enabled": True},
         )
         assert resp.status_code == 401
-
-
 
 
 # ---------------------------------------------------------------------------
