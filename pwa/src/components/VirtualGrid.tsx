@@ -82,6 +82,16 @@ export function VirtualGrid<T>({
     onColCountChangeRef.current = onColCountChange
   }, [onColCountChange])
 
+  // Emit the initial column count on mount. The ResizeObserver below only calls
+  // onColCountChange when it detects a CHANGE from this initial value, so without
+  // this the parent would never learn the real count and would keep its own
+  // default (e.g. useGridKeyboard's colCount staying at 4, making ArrowUp/Down
+  // jump by 4 instead of a full row on wider desktop grids).
+  useEffect(() => {
+    onColCountChangeRef.current?.(colCount)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
   // ResizeObserver on the container to detect width changes and keep scrollMargin up to date
   useEffect(() => {
     const el = containerRef.current
