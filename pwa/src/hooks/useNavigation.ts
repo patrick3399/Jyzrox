@@ -97,14 +97,25 @@ export function useNavigation() {
   }, [groupedLinks, pathname])
 
   const resolveHref = useCallback(
-    (href: string) => resolvedHrefs[href] ?? href,
-    [resolvedHrefs],
+    (href: string) => {
+      // Already inside this section? Point the link at the section root so the
+      // user can always get back to the list — not the remembered deep URL,
+      // which would be the very sub-page (e.g. a gallery detail) they're on.
+      const withinSection =
+        pathname === href || (href !== '/' && pathname.startsWith(href + '/'))
+      if (withinSection) return href
+      return resolvedHrefs[href] ?? href
+    },
+    [pathname, resolvedHrefs],
   )
 
   const handleNavClick = useCallback(
     (e: MouseEvent, href: string) => {
-      const isActive = pathname === href || (href !== '/' && pathname.startsWith(href))
-      if (!isActive) return // let the link navigate to its remembered href
+      // Only intercept when already exactly at the section root (list level):
+      // scroll to top instead of a no-op navigation. On a deeper sub-page, let
+      // the link navigate up to the section root; on another tab, let it restore
+      // the remembered URL.
+      if (pathname !== href) return
       e.preventDefault()
       window.scrollTo({ top: 0 })
     },

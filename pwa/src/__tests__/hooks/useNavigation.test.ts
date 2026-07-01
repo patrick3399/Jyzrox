@@ -412,4 +412,31 @@ describe('useNavigation — nav memory', () => {
     expect(e.preventDefault).not.toHaveBeenCalled()
     expect(scrollSpy).not.toHaveBeenCalled()
   })
+
+  // Regression: opening a gallery detail (/library/pixiv/123) used to make the
+  // Library nav link resolve to that deep URL, and handleNavClick prevented the
+  // click — leaving desktop users with no way back to the /library list.
+  it('test_resolveHref_onGallerySubPage_returnsSectionRootNotRememberedDeepUrl', () => {
+    rememberLocation(['/library'], '/library/pixiv/123', '')
+    currentNavPath = '/library/pixiv/123'
+
+    const { result } = renderHook(() => useNavigation())
+
+    // Must point back to the list, not the gallery the user is trying to leave.
+    expect(result.current.resolveHref('/library')).toBe('/library')
+  })
+
+  it('test_handleNavClick_onGallerySubPage_letsLinkNavigateToSectionRoot', () => {
+    currentNavPath = '/library/pixiv/123'
+    const scrollSpy = vi.spyOn(window, 'scrollTo').mockImplementation(() => {})
+
+    const { result } = renderHook(() => useNavigation())
+    const e = { preventDefault: vi.fn() } as unknown as React.MouseEvent
+
+    act(() => result.current.handleNavClick(e, '/library'))
+
+    // Not intercepted → <Link href="/library"> performs the navigation up to the list.
+    expect(e.preventDefault).not.toHaveBeenCalled()
+    expect(scrollSpy).not.toHaveBeenCalled()
+  })
 })
