@@ -176,10 +176,10 @@ export type FetchPlan =
   | { kind: 'popular'; args: Record<string, never> }
 
 function computeFCats(f: Filters): number | undefined {
-  // legacy mode (advanced closed): no category filter
-  if (!f.advancedOpen) return undefined
-  const sel = f.selectedCats.length === 0 ? ALL_CATS : f.selectedCats
-  if (sel.length === ALL_CATS.length) return undefined // all selected === no filter
+  // Category selection is always active (independent of the advanced panel).
+  // Empty === all categories === no filter.
+  const sel = f.selectedCats
+  if (sel.length === 0 || sel.length === ALL_CATS.length) return undefined
   let mask = 0
   for (const c of sel) mask |= CATEGORY_BITMASK[c] ?? 0
   return ALL_CATS_MASK ^ mask

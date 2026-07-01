@@ -90,12 +90,13 @@ describe('ehBrowseState — buildParams', () => {
     if (p.kind === 'search') expect(p.args.f_cats).toBeUndefined()
   })
 
-  it('search: partial category selection → f_cats = ALL ^ selected', () => {
+  it('search: partial category selection → f_cats = ALL ^ selected (even with advanced closed)', () => {
     let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
-    s = reducer(s, { type: 'SET_FILTER', patch: { advancedOpen: true, selectedCats: ['manga'] } })
+    s = reducer(s, { type: 'SET_FILTER', patch: { selectedCats: ['manga'] } })
     const p = buildParams(s)
-    // manga bit = 4 → f_cats = 1023 ^ 4 = 1019
+    // manga bit = 4 → f_cats = 1023 ^ 4 = 1019, regardless of advancedOpen
     if (p.kind === 'search') expect(p.args.f_cats).toBe(1019)
+    expect(s.filters.advancedOpen).toBe(false)
   })
 
   it('search: cursor carries next_gid on append', () => {

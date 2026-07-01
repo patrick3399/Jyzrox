@@ -1,6 +1,6 @@
 'use client'
 
-import { useReducer, useRef, useCallback, useMemo, useEffect } from 'react'
+import { useReducer, useRef, useCallback, useMemo, useEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   reducer,
@@ -19,7 +19,7 @@ import {
   type Cursor,
 } from '@/lib/ehBrowseState'
 import { api } from '@/lib/api'
-import type { EhSearchResult, EhFavoritesResult } from '@/lib/types'
+import type { EhSearchResult, EhFavoritesResult, EhFavCategory } from '@/lib/types'
 
 const SNAPSHOT_KEY = 'eh_browse_snapshot'
 
@@ -43,6 +43,8 @@ export function useEhBrowse() {
     stateRef.current = state
   })
   const inflightRef = useRef<AbortController | null>(null)
+  // View-adjacent metadata (favourite-category names/counts) — not part of identity.
+  const [favCategories, setFavCategories] = useState<EhFavCategory[]>([])
 
   const loadMore = useCallback(async () => {
     const s = stateRef.current
@@ -84,6 +86,7 @@ export function useEhBrowse() {
       } else {
         const res: EhFavoritesResult = await api.eh.getFavorites(plan.args, { signal: ac.signal })
         if (ac.signal.aborted || queryKey(stateRef.current) !== keyAtStart) return
+        if (res.categories?.length) setFavCategories(res.categories)
         const cursor: Cursor =
           res.has_next && res.next_cursor ? { kind: 'fav', next: res.next_cursor } : null
         dispatch(
@@ -171,5 +174,5 @@ export function useEhBrowse() {
     }
   }, [])
 
-  return { state, dispatch: dispatch as React.Dispatch<Action>, actions, loadMore }
+  return { state, dispatch: dispatch as React.Dispatch<Action>, actions, loadMore, favCategories }
 }
