@@ -1,0 +1,41 @@
+# git-cliff — Jyzrox release notes
+# Conventional-commit driven. Versioning is CalVer (YYYY.M.N), owned by the
+# Release workflow; git-cliff only renders notes, it does not bump versions.
+# Docs: https://git-cliff.org
+
+[changelog]
+header = ""
+body = """
+{% for group, commits in commits | group_by(attribute="group") %}
+### {{ group | striptags }}
+{% for commit in commits %}
+- {{ commit.message | split(pat="\n") | first | trim | upper_first }} (`{{ commit.id | truncate(length=7, end="") }}`)
+{%- endfor %}
+{% endfor %}
+{%- if previous and previous.version %}
+
+**Full Changelog**: https://github.com/patrick3399/Jyzrox/compare/{{ previous.version }}...{{ version }}
+{% endif -%}
+"""
+trim = true
+
+[git]
+conventional_commits = true
+filter_unconventional = false
+split_commits = false
+protect_breaking_commits = true
+filter_commits = false
+tag_pattern = "v[0-9]+.*"
+topo_order = false
+sort_commits = "newest"
+commit_parsers = [
+  { message = "^Merge ", skip = true },
+  { message = "^feat", group = "<!-- 0 -->🚀 Features" },
+  { message = "^fix", group = "<!-- 1 -->🐛 Bug Fixes" },
+  { message = "^perf", group = "<!-- 2 -->⚡ Performance" },
+  { message = "^refactor", group = "<!-- 3 -->♻️ Refactoring" },
+  { message = "^docs", group = "<!-- 4 -->📝 Documentation" },
+  { message = "^(test|ci|build|chore|style)", group = "<!-- 5 -->🔧 Maintenance" },
+  { message = "^revert", group = "<!-- 6 -->⏪ Reverts" },
+  { message = ".*", group = "<!-- 7 -->📦 Other" },
+]

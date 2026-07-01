@@ -3,13 +3,18 @@ name: Release
 on:
   push:
     branches: [main]
+    paths-ignore:
+      - "**.md"
+      - "docs/**"
+      - ".claude/**"
+      - "TODO.md"
 
 concurrency:
   group: release-main
   cancel-in-progress: false
 
 permissions:
-  contents: write
+  contents: read
 
 jobs:
   quality:
@@ -23,7 +28,7 @@ jobs:
       version: ${{ steps.compute.outputs.version }}
       tag: ${{ steps.compute.outputs.tag }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
         with:
           fetch-depth: 0
 
@@ -39,52 +44,103 @@ jobs:
             NEXT=$((LAST + 1))
           fi
           VERSION="${YEAR_MONTH}.${NEXT}"
-          TAG="v${VERSION}"
           echo "version=${VERSION}" >> "$GITHUB_OUTPUT"
-          echo "tag=${TAG}" >> "$GITHUB_OUTPUT"
-
-      - name: Create and push tag
-        run: |
-          git config user.name "github-actions[bot]"
-          git config user.email "github-actions[bot]@users.noreply.github.com"
-          git tag "${{ steps.compute.outputs.tag }}"
-          git push origin "${{ steps.compute.outputs.tag }}"
+          echo "tag=v${VERSION}" >> "$GITHUB_OUTPUT"
 
   build:
     needs: version
     runs-on: ubuntu-latest
     strategy:
+      fail-fast: false
       matrix:
         include:
           - name: backend
             context: ./backend
             image: patrick339/jyzrox-backend
+            pass_version: true
           - name: pwa
             context: ./pwa
             image: patrick339/jyzrox-pwa
+            pass_version: true
           - name: nginx
             context: ./nginx
             image: patrick339/jyzrox-nginx
+            pass_version: false
           - name: tagger
             context: ./tagger
             image: patrick339/jyzrox-tagger
+            pass_version: false
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v5
 
-      - uses: docker/setup-buildx-action@v3
+      - uses: docker/setup-buildx-action@v4
 
-      - uses: docker/login-action@v3
+      - uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
+      # Push only the versioned tag here. :latest is promoted in `finalize`
+      # after ALL images succeed, so a partial build never leaves a mixed
+      # :latest set nor an orphan git tag.
       - name: Build and push ${{ matrix.name }}
-        uses: docker/build-push-action@v6
+        uses: docker/build-push-action@v7
         with:
           context: ${{ matrix.context }}
           push: true
-          build-args: |
-            APP_VERSION=${{ needs.version.outputs.version }}
-          tags: |
-            ${{ matrix.image }}:${{ needs.version.outputs.version }}
-            ${{ matrix.image }}:latest
+          build-args: ${{ matrix.pass_version && format('APP_VERSION={0}', needs.version.outputs.version) || '' }}
+          tags: ${{ matrix.image }}:${{ needs.version.outputs.version }}
+          cache-from: type=gha,scope=${{ matrix.name }}
+          cache-to: type=gha,mode=max,scope=${{ matrix.name }}
+
+  finalize:
+    needs: [version, build]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v5
+        with:
+          fetch-depth: 0
+
+      - uses: docker/login-action@v4
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Promote :latest (all images built successfully)
+        run: |
+          set -euo pipefail
+          VERSION="${{ needs.version.outputs.version }}"
+          for image in \
+            patrick339/jyzrox-backend \
+            patrick339/jyzrox-pwa \
+            patrick339/jyzrox-nginx \
+            patrick339/jyzrox-tagger; do
+            docker buildx imagetools create -t "${image}:latest" "${image}:${VERSION}"
+          done
+
+      - name: Create and push tag (release marker, after images published)
+        run: |
+          set -euo pipefail
+          git config user.name "github-actions[bot]"
+          git config user.email "github-actions[bot]@users.noreply.github.com"
+          git tag "${{ needs.version.outputs.tag }}"
+          git push origin "${{ needs.version.outputs.tag }}"
+
+      - name: Generate release notes (git-cliff)
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest
+        env:
+          OUTPUT: RELEASE_NOTES.md
+
+      - name: Publish GitHub Release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh release create "${{ needs.version.outputs.tag }}" \
+            --title "${{ needs.version.outputs.tag }}" \
+            --notes-file RELEASE_NOTES.md
