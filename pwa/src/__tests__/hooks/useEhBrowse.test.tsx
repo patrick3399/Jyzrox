@@ -142,6 +142,17 @@ describe('useEhBrowse — snapshot restore', () => {
     expect(result.current.state.cursor).toEqual({ kind: 'gid', nextGid: 7 })
   })
 
+  it('resets to the home tab when the URL is cleared while mounted', () => {
+    searchStr = 'tab=favorites&favcat=3'
+    const { result, rerender } = renderHook(() => useEhBrowse())
+    expect(result.current.state.tab).toBe('favorites')
+    // External navigation to bare /e-hentai (e.g. nav double-tap) clears the query string.
+    searchStr = ''
+    rerender()
+    expect(result.current.state.tab).toBe('popular')
+    expect(result.current.state.filters.favCat).toBe('all')
+  })
+
   it('ignores a snapshot whose queryKey does not match the URL', () => {
     searchStr = 'tab=search&q=different'
     let s = rootReducer(base, { type: 'SET_TAB', tab: 'search' })

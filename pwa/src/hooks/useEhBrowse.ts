@@ -131,6 +131,18 @@ export function useEhBrowse() {
     router.replace(identityKey ? `/e-hentai?${identityKey}` : '/e-hentai', { scroll: false })
   }, [identityKey, router])
 
+  // React to an externally-cleared URL (e.g. tapping the nav link / double-tap reset
+  // navigates to bare /e-hentai while the page stays mounted): reset to the home tab
+  // and drop the snapshot. Guarded so our own popular-default URL writes don't loop.
+  const searchStr = searchParams.toString()
+  useEffect(() => {
+    if (searchStr !== '') return
+    if (queryKey(stateRef.current) === queryKey(initialState)) return
+    if (typeof window !== 'undefined') sessionStorage.removeItem(SNAPSHOT_KEY)
+    dispatch({ type: 'RESET' })
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [searchStr])
+
   // ── Snapshot persistence: continuous scroll capture + write on every exit.
   useEffect(() => {
     if (typeof window === 'undefined') return

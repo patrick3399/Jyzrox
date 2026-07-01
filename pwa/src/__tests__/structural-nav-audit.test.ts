@@ -54,39 +54,39 @@ describe('structural-nav-audit — Library saveScroll passes data', () => {
   })
 })
 
-describe('structural-nav-audit — E-hentai paginated favorites snapshot', () => {
-  it('test_ehentai_saveBrowseState_hasFavPaginatedGalleries', () => {
-    expect(src('app/e-hentai/page.tsx')).toContain('favPaginatedGalleries')
+describe('structural-nav-audit — E-hentai browse state architecture', () => {
+  // The e-hentai browse page runs on a single reducer (lib/ehBrowseState.ts) driven
+  // by useEhBrowse (hooks/useEhBrowse.ts). These assertions pin the memory/restore
+  // invariants that back-navigation and tab round-trips depend on.
+
+  it('test_ehentai_persistsSnapshotOnPageLifecycle', () => {
+    const hook = src('hooks/useEhBrowse.ts')
+    expect(hook).toContain('SNAPSHOT_KEY')
+    expect(hook).toContain("window.addEventListener('pagehide'")
+    expect(hook).toContain("document.addEventListener('visibilitychange'")
   })
 
-  it('test_ehentai_persistsBrowseStateOnPageLifecycle', () => {
-    const page = src('app/e-hentai/page.tsx')
-    expect(page).toContain('BROWSE_STATE_KEY')
-    expect(page).toContain("window.addEventListener('pagehide', saveBrowseState)")
-    expect(page).toContain("document.addEventListener('visibilitychange', handleVisibilityChange)")
-    expect(page).toContain('saveBrowseState()')
+  it('test_ehentai_restoreIsScopedToMatchingQueryKey', () => {
+    // A snapshot only restores when its persisted identity matches the current URL identity.
+    expect(src('lib/ehBrowseState.ts')).toContain('snap.queryKey !== currentKey')
+    expect(src('hooks/useEhBrowse.ts')).toContain('parseSnapshot(')
   })
 
-  it('test_ehentai_restoreDoesNotConsumeValidBrowseStateImmediately', () => {
-    const page = src('app/e-hentai/page.tsx')
-    expect(page).not.toContain('sessionStorage.removeItem(BROWSE_STATE_KEY)\n    try')
+  it('test_ehentai_emptyUrlResetsToHome', () => {
+    const hook = src('hooks/useEhBrowse.ts')
+    expect(hook).toContain('searchStr')
+    expect(hook).toContain("dispatch({ type: 'RESET' })")
   })
 
-  it('test_ehentai_restoreIsScopedToMatchingNonEmptyUrlState', () => {
-    const page = src('app/e-hentai/page.tsx')
-    expect(page).toContain('const urlStateKey = searchParams.toString()')
-    expect(page).toContain('(parsed as { urlStateKey?: unknown }).urlStateKey === urlStateKey')
-    expect(page).toContain("urlStateKey !== ''")
-    expect(page).toContain('sessionStorage.removeItem(BROWSE_STATE_KEY)')
-    expect(page).toContain('urlStateKey,')
-  })
-
-  it('test_ehentai_emptyUrlResetsBrowseStateToHome', () => {
-    const page = src('app/e-hentai/page.tsx')
-    expect(page).toContain('previousUrlStateKeyRef')
-    expect(page).toContain("if (urlStateKey !== '') return")
-    expect(page).toContain("setActiveTab('popular')")
-    expect(page).toContain('sessionStorage.removeItem(BROWSE_STATE_KEY)')
+  it('test_ehentai_urlCarriesIdentityNotView', () => {
+    // URL serialisation lives in identityToUrlParams and must not leak the view buffer/cursor/scroll.
+    const stateLib = src('lib/ehBrowseState.ts')
+    expect(stateLib).toContain('export function identityToUrlParams')
+    const fnBody = stateLib.slice(
+      stateLib.indexOf('export function identityToUrlParams'),
+      stateLib.indexOf('export function parseUrlToIdentity'),
+    )
+    expect(fnBody).not.toMatch(/\bitems\b|scrollY|nextGid/)
   })
 })
 
