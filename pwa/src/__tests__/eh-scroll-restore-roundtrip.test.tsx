@@ -82,8 +82,11 @@ describe('e-hentai favorites snapshot round-trip', () => {
     await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument())
     expect(api.eh.getFavorites).toHaveBeenCalledTimes(1)
 
-    // User has scrolled deep; unmount (bottom-tab navigation away) writes the snapshot.
+    // User has scrolled deep (real scrolling emits scroll events); unmount
+    // (bottom-tab navigation away) banks the position.
     setScrollY(5000)
+    fireEvent.scroll(window)
+    await flushRaf()
     first.unmount()
 
     // Return with the SAME url (navMemory remembers /e-hentai?tab=favorites&favcat=3)
@@ -96,6 +99,42 @@ describe('e-hentai favorites snapshot round-trip', () => {
     // Buffer restored, not refetched:
     expect(api.eh.getFavorites).toHaveBeenCalledTimes(1)
 
+    await flushRaf()
+    expect(scrollTo).toHaveBeenCalledWith(0, 5000)
+    vi.unstubAllGlobals()
+  })
+
+  it('unmount write must not capture the router scroll reset as the banked position', async () => {
+    // Next.js resets window scroll to 0 in the NEW page's layout phase, and
+    // React runs the old page's passive unmount cleanup AFTER that — so the
+    // exit write must use the last user scroll position, not live scrollY.
+    searchStr = 'tab=favorites&favcat=3'
+    ;(api.eh.getFavorites as ReturnType<typeof vi.fn>).mockResolvedValue({
+      galleries: [g(1, 'Alpha'), g(2, 'Beta')],
+      total: 2,
+      has_next: true,
+      next_cursor: 'A',
+      categories: [],
+    })
+
+    const first = render(<Page />)
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument())
+
+    // User scrolls deep; the continuous capture sees a real scroll event.
+    setScrollY(5000)
+    fireEvent.scroll(window)
+    await flushRaf()
+
+    // Router push away: Next scrolls to top BEFORE the unmount cleanup runs.
+    // (The reset's scroll event is delivered async, after the listener is gone.)
+    setScrollY(0)
+    first.unmount()
+
+    // Return to the list URL (smartBack push) — banked position must survive.
+    const scrollTo = vi.fn()
+    vi.stubGlobal('scrollTo', scrollTo)
+    render(<Page />)
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument())
     await flushRaf()
     expect(scrollTo).toHaveBeenCalledWith(0, 5000)
     vi.unstubAllGlobals()

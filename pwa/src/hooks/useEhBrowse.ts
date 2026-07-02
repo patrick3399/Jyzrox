@@ -144,23 +144,25 @@ export function useEhBrowse() {
     )
   }, [fetchPage])
 
+  // Last scroll position produced by the USER (scroll events / explicit calls).
+  // The unmount write must use this instead of live window.scrollY: on a push
+  // navigation Next resets the window scroll in the new page's layout phase,
+  // and React runs this page's passive unmount cleanup after that — reading
+  // window.scrollY there would bank 0 and lose the position.
+  const lastScrollYRef = useRef(0)
+
   // Bank the current view (buffer/cursor/scroll) into the per-identity snapshot
   // store. Used both by the lifecycle persistence below and by identity switches.
-  const persistView = useCallback((s: EhBrowseState) => {
+  const persistView = useCallback((s: EhBrowseState, scrollYOverride?: number) => {
     if (typeof window === 'undefined' || s.items.length === 0) return
+    const scrollY = scrollYOverride ?? window.scrollY
     const prev = sessionStorage.getItem(SNAPSHOT_KEY)
     try {
-      sessionStorage.setItem(
-        SNAPSHOT_KEY,
-        serializeSnapshot({ ...s, scrollY: window.scrollY }, prev),
-      )
+      sessionStorage.setItem(SNAPSHOT_KEY, serializeSnapshot({ ...s, scrollY }, prev))
     } catch {
       // quota — keep only this identity, without the buffer, so cursor/scroll survive
       try {
-        sessionStorage.setItem(
-          SNAPSHOT_KEY,
-          serializeSnapshot({ ...s, items: [], scrollY: window.scrollY }),
-        )
+        sessionStorage.setItem(SNAPSHOT_KEY, serializeSnapshot({ ...s, items: [], scrollY }))
       } catch {
         /* give up silently */
       }
@@ -230,9 +232,14 @@ export function useEhBrowse() {
   // ── Snapshot persistence: continuous scroll capture + write on every exit.
   useEffect(() => {
     if (typeof window === 'undefined') return
+    lastScrollYRef.current = window.scrollY
     const write = () => persistView(stateRef.current)
     let raf = 0
     const onScroll = () => {
+      // Track synchronously: scroll events reaching us come from the user (or
+      // our own restore) while the page is alive — the router's exit reset is
+      // delivered async, after this listener is removed.
+      lastScrollYRef.current = window.scrollY
       if (raf) return
       raf = requestAnimationFrame(() => {
         raf = 0
@@ -246,7 +253,9 @@ export function useEhBrowse() {
     window.addEventListener('pagehide', write)
     document.addEventListener('visibilitychange', onHide)
     return () => {
-      write()
+      // Unmount runs after the router already scrolled the window to top for
+      // the incoming page — bank the last USER position, not live scrollY.
+      persistView(stateRef.current, lastScrollYRef.current)
       window.removeEventListener('scroll', onScroll)
       window.removeEventListener('pagehide', write)
       document.removeEventListener('visibilitychange', onHide)
