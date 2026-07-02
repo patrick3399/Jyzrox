@@ -10,6 +10,7 @@
  */
 import { describe, it, expect, vi, beforeEach } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
+import { useLayoutEffect } from 'react'
 
 let searchStr = ''
 const push = vi.fn()
@@ -138,6 +139,43 @@ describe('e-hentai favorites snapshot round-trip', () => {
     await flushRaf()
     expect(scrollTo).toHaveBeenCalledWith(0, 5000)
     vi.unstubAllGlobals()
+  })
+
+  it('the incoming page’s scroll reset event cannot poison the banked position', async () => {
+    // Next resets window scroll in the INCOMING page's layout phase and the
+    // reset's scroll event fires before React's passive cleanups — so the
+    // browse page's scroll listener must already be detached by then (layout
+    // cleanup runs in the mutation phase, before sibling layout effects).
+    function RouterScrollReset() {
+      useLayoutEffect(() => {
+        setScrollY(0)
+        window.dispatchEvent(new Event('scroll'))
+      }, [])
+      return null
+    }
+    const Shell = ({ browse }: { browse: boolean }) => (browse ? <Page /> : <RouterScrollReset />)
+
+    searchStr = 'tab=favorites&favcat=3'
+    ;(api.eh.getFavorites as ReturnType<typeof vi.fn>).mockResolvedValue({
+      galleries: [g(1, 'Alpha'), g(2, 'Beta')],
+      total: 2,
+      has_next: true,
+      next_cursor: 'A',
+      categories: [],
+    })
+
+    const view = render(<Shell browse />)
+    await waitFor(() => expect(screen.getByText('Alpha')).toBeInTheDocument())
+    setScrollY(5000)
+    fireEvent.scroll(window)
+    await flushRaf()
+
+    // Navigate away: browse page unmounts in the same commit that mounts the
+    // "incoming page", whose layout effect resets scroll and emits the event.
+    view.rerender(<Shell browse={false} />)
+
+    const store = JSON.parse(sessionStorage.getItem('eh_browse_snapshot')!)
+    expect(store.snaps[0].scrollY).toBe(5000)
   })
 
   it('restores buffer and scroll position after an in-page tab switch away and back', async () => {

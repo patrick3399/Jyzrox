@@ -230,15 +230,24 @@ export function useEhBrowse() {
   }, [searchStr])
 
   // ── Snapshot persistence: continuous scroll capture + write on every exit.
-  useEffect(() => {
+  // MUST be a layout effect: on a push navigation Next resets window scroll in
+  // the incoming page's layout phase, and the reset's scroll event fires in the
+  // browser's rendering step — usually BEFORE React's passive cleanups flush.
+  // With a passive effect the reset event would hit the still-attached listener
+  // and poison lastScrollYRef with 0 (intermittently — it's a race). Layout
+  // cleanups of a removed tree run in the mutation phase, strictly before the
+  // incoming page's layout effects, so the listener is detached before the
+  // reset can happen at all.
+  useIsomorphicLayoutEffect(() => {
     if (typeof window === 'undefined') return
-    lastScrollYRef.current = window.scrollY
+    // Init to 0, not live scrollY: this runs before the router's own scroll
+    // handling for the new page, so window.scrollY may still be the PREVIOUS
+    // page's position. Real positions arrive via scroll events (user scrolling,
+    // our restore's scrollTo, or the browser's popstate restoration).
+    lastScrollYRef.current = 0
     const write = () => persistView(stateRef.current)
     let raf = 0
     const onScroll = () => {
-      // Track synchronously: scroll events reaching us come from the user (or
-      // our own restore) while the page is alive — the router's exit reset is
-      // delivered async, after this listener is removed.
       lastScrollYRef.current = window.scrollY
       if (raf) return
       raf = requestAnimationFrame(() => {
@@ -253,8 +262,7 @@ export function useEhBrowse() {
     window.addEventListener('pagehide', write)
     document.addEventListener('visibilitychange', onHide)
     return () => {
-      // Unmount runs after the router already scrolled the window to top for
-      // the incoming page — bank the last USER position, not live scrollY.
+      // Bank the last USER position, never live scrollY — see effect comment.
       persistView(stateRef.current, lastScrollYRef.current)
       window.removeEventListener('scroll', onScroll)
       window.removeEventListener('pagehide', write)
