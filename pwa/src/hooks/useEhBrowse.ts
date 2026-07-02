@@ -1,6 +1,6 @@
 'use client'
 
-import { useReducer, useRef, useCallback, useMemo, useEffect, useState } from 'react'
+import { useReducer, useRef, useCallback, useMemo, useEffect, useLayoutEffect, useState } from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   reducer,
@@ -24,6 +24,9 @@ import type { EhGallery, EhFavCategory } from '@/lib/types'
 
 const SNAPSHOT_KEY = 'eh_browse_snapshot'
 
+// useLayoutEffect warns during SSR; the server never scrolls, so useEffect is fine there.
+const useIsomorphicLayoutEffect = typeof window === 'undefined' ? useEffect : useLayoutEffect
+
 function initFromUrl(search: string): EhBrowseState {
   const identity = parseUrlToIdentity(new URLSearchParams(search))
   const base: EhBrowseState = { ...initialState, ...identity }
@@ -39,8 +42,15 @@ export function useEhBrowse() {
   const searchParams = useSearchParams()
   const [state, dispatch] = useReducer(reducer, searchParams.toString(), initFromUrl)
 
+  // stateRef must be fresh BEFORE child components' passive effects run: VirtualGrid
+  // fires onLoadMore from an effect in the very commit an append renders, and child
+  // effects flush before parent effects. With a passive-effect sync, loadMore would
+  // read the previous commit's status ('loading'), swallow the call, and — since
+  // VirtualGrid's fired-at gate only reopens when items.length grows — wedge the
+  // infinite scroll permanently. Layout effects (parent included) all flush before
+  // any passive effect, so this closes the race.
   const stateRef = useRef(state)
-  useEffect(() => {
+  useIsomorphicLayoutEffect(() => {
     stateRef.current = state
   })
   const inflightRef = useRef<AbortController | null>(null)
@@ -101,38 +111,9 @@ export function useEhBrowse() {
     inflightRef.current = ac
     dispatch({ type: 'LOAD_START', seeding })
 
-    // A completed fetch that advances the cursor but yields zero NEW items (after
-    // gid-dedupe) would leave the buffer unchanged — and VirtualGrid only re-fires
-    // onLoadMore when items.length grows, so the infinite scroll would wedge. EH
-    // favorites are ordered by favourite-time while the cursor is gid-based, so
-    // accumulated pages can fully overlap. Chain forward until we gather at least
-    // one new item, hit the end, or the cursor can no longer advance.
-    const seen = new Set(s0.items.map((g) => g.gid))
-    const collected: EhGallery[] = []
-    let cursor = s0.cursor
-    let hasMore = s0.hasMore
-    let total = s0.total
-    const MAX_CHAINED = 10
-
+    let page: { galleries: EhGallery[]; cursor: Cursor; hasMore: boolean; total: number | null }
     try {
-      for (let i = 0; i < MAX_CHAINED; i++) {
-        const page = await fetchPage(buildParams({ ...s0, cursor }), ac.signal)
-        if (ac.signal.aborted || queryKey(stateRef.current) !== keyAtStart) return
-        if (seeding && i === 0) total = page.total
-        const fresh = page.galleries.filter((g) => !seen.has(g.gid))
-        for (const g of fresh) seen.add(g.gid)
-        collected.push(...fresh)
-        const prevCursor = cursor
-        cursor = page.cursor
-        hasMore = page.hasMore
-        if (fresh.length > 0 || !hasMore) break
-        // Zero new items but more claimed: only keep chaining if the cursor actually
-        // moved, otherwise we'd refetch the same page forever — treat as the end.
-        if (cursor == null || JSON.stringify(cursor) === JSON.stringify(prevCursor)) {
-          hasMore = false
-          break
-        }
-      }
+      page = await fetchPage(buildParams(s0), ac.signal)
     } catch (err) {
       if (ac.signal.aborted) return
       dispatch({ type: 'LOAD_ERROR', error: err instanceof Error ? err.message : 'failed' })
@@ -140,10 +121,26 @@ export function useEhBrowse() {
     }
 
     if (ac.signal.aborted || queryKey(stateRef.current) !== keyAtStart) return
+
+    let { cursor, hasMore } = page
+    // A page that yields nothing new AND leaves the cursor where it was would just
+    // refetch itself forever — treat it as the end. (Genuinely overlapping pages that
+    // still advance the cursor keep hasMore, and the grid retries from the new cursor.)
+    const seen = new Set(s0.items.map((g) => g.gid))
+    const freshCount = page.galleries.filter((g) => !seen.has(g.gid)).length
+    if (
+      freshCount === 0 &&
+      hasMore &&
+      (cursor == null || JSON.stringify(cursor) === JSON.stringify(s0.cursor))
+    ) {
+      hasMore = false
+      cursor = null
+    }
+
     dispatch(
       seeding
-        ? { type: 'SEED', items: collected, total, cursor, hasMore }
-        : { type: 'APPEND', items: collected, cursor, hasMore },
+        ? { type: 'SEED', items: page.galleries, total: page.total, cursor, hasMore }
+        : { type: 'APPEND', items: page.galleries, cursor, hasMore },
     )
   }, [fetchPage])
 

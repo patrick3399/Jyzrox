@@ -1368,8 +1368,8 @@ function BrowsePage() {
         </div>
       )}
 
-      {/* Error */}
-      {state.error && !loading && (
+      {/* Error (empty list — mid-list errors surface below the grid instead) */}
+      {state.error && !loading && items.length === 0 && (
         <div className="bg-red-900/20 border border-red-800/50 rounded-lg p-4 text-sm">
           {state.error.includes('credentials not configured') || state.error.includes('503') ? (
             <p className="text-yellow-400">{t('browse.credentialsMissingDetail')}</p>
@@ -1407,10 +1407,24 @@ function BrowsePage() {
                   onClick={() => navigateToGallery(g)}
                 />
               )}
-              onLoadMore={state.hasMore ? loadMore : undefined}
+              onLoadMore={state.hasMore && state.status !== 'error' ? loadMore : undefined}
               hasMore={state.hasMore}
               isLoading={loading}
             />
+          )}
+
+          {/* Mid-list load failure: the top banner is scrolled far out of view here,
+              so surface the error + manual retry where the user is actually looking. */}
+          {state.error && !loading && (
+            <div className="flex flex-col items-center gap-2 py-4">
+              <span className="text-xs text-red-400">{t('browse.failedLoadResults')}</span>
+              <button
+                onClick={() => loadMore()}
+                className="px-4 py-1.5 rounded-full text-xs font-medium border border-vault-border text-vault-text-secondary hover:border-vault-border-hover hover:text-vault-text transition-colors"
+              >
+                {t('common.retry')}
+              </button>
+            </div>
           )}
 
           {/* End indicator */}

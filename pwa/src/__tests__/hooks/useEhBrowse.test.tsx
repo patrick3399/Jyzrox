@@ -101,7 +101,7 @@ describe('useEhBrowse — loadMore', () => {
 
 describe('useEhBrowse — loadMore does not wedge on all-duplicate pages', () => {
   const g = (gid: number) => ({ gid, token: `t${gid}` })
-  it('chains past a fully-overlapping favorites page until new items arrive', async () => {
+  it('keeps hasMore and advances the cursor when a page is fully duplicate but the cursor moved', async () => {
     searchStr = 'tab=favorites'
     ;(api.eh.getFavorites as ReturnType<typeof vi.fn>).mockReset()
     ;(api.eh.getFavorites as ReturnType<typeof vi.fn>)
@@ -136,7 +136,13 @@ describe('useEhBrowse — loadMore does not wedge on all-duplicate pages', () =>
     expect(result.current.state.items.map((x) => x.gid)).toEqual([1, 2])
     await act(async () => {
       await result.current.loadMore()
-    }) // must skip the all-duplicate page and land fresh items
+    }) // all-duplicate page: nothing appended, but the walk must not dead-end
+    expect(result.current.state.items.map((x) => x.gid)).toEqual([1, 2])
+    expect(result.current.state.hasMore).toBe(true)
+    expect(result.current.state.cursor).toEqual({ kind: 'fav', next: 'B' })
+    await act(async () => {
+      await result.current.loadMore()
+    }) // grid re-fires (gate reopens on zero-growth cycles) → fresh items land
     expect(result.current.state.items.map((x) => x.gid)).toEqual([1, 2, 3, 4])
     expect(result.current.state.cursor).toEqual({ kind: 'fav', next: 'C' })
   })

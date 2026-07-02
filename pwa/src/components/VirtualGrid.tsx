@@ -191,6 +191,18 @@ export function VirtualGrid<T>({
     prevItemsLength.current = items.length
   }, [items.length])
 
+  // A load cycle that completes without growing items (transient fetch error, or an
+  // append fully deduped away upstream) would otherwise leave the fired-at stamp at
+  // items.length and permanently gate onLoadMore. Reopen the gate on the isLoading
+  // falling edge so the next trigger can try again.
+  const prevIsLoading = useRef(isLoading)
+  useEffect(() => {
+    if (prevIsLoading.current && !isLoading && loadMoreFiredAt.current >= items.length) {
+      loadMoreFiredAt.current = -1
+    }
+    prevIsLoading.current = isLoading
+  }, [isLoading, items.length])
+
   // Trigger onLoadMore when the last virtual row enters the visible area
   const lastVirtualItem = virtualItems[virtualItems.length - 1]
   useEffect(() => {
@@ -198,8 +210,9 @@ export function VirtualGrid<T>({
     if (!hasMore || isLoading) return
     if (loadMoreFiredAt.current >= items.length) return
     if (lastVirtualItem.index >= rowCount - 1) {
+      if (!onLoadMoreRef.current) return
       loadMoreFiredAt.current = items.length
-      onLoadMoreRef.current?.()
+      onLoadMoreRef.current()
     }
   }, [lastVirtualItem, hasMore, isLoading, rowCount, items.length])
 
