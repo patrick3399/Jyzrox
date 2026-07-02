@@ -7,7 +7,7 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useState, useEffect, useRef, useCallback } from 'react'
 import { PAGE_REGISTRY, type PageDef } from '@/lib/pageRegistry'
-import { getTabHref, clearTabMemory } from '@/lib/navMemory'
+import { getTabHref, clearTabMemory, markTabRestore } from '@/lib/navMemory'
 
 // Re-export for BottomTabConfig compatibility
 export type TabDefinition = PageDef
@@ -70,7 +70,14 @@ export function BottomTabBar({ onMoreClick, downloadStats: stats }: BottomTabBar
   const handleTabClick = useCallback(
     (e: React.MouseEvent, root: string) => {
       const isActive = pathname === root || (root !== '/' && pathname.startsWith(root))
-      if (!isActive) return // let <Link> navigate to the remembered href
+      if (!isActive) {
+        // Restoring a deep sub-page from another section: flag it so the back
+        // button there climbs to the section list instead of history-backing
+        // into the section we're leaving now.
+        const target = resolvedHrefs[root] ?? root
+        if (target.split('?')[0] !== root) markTabRestore(target)
+        return // let <Link> navigate to the remembered href
+      }
       e.preventDefault()
       const now = Date.now()
       const last = lastTapRef.current
@@ -84,7 +91,7 @@ export function BottomTabBar({ onMoreClick, downloadStats: stats }: BottomTabBar
         window.scrollTo({ top: 0 })
       }
     },
-    [pathname, router],
+    [pathname, router, resolvedHrefs],
   )
 
   useEffect(() => {

@@ -7,7 +7,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { PAGE_REGISTRY, hasRole, type PageDef } from '@/lib/pageRegistry'
-import { getTabHref } from '@/lib/navMemory'
+import { getTabHref, markTabRestore } from '@/lib/navMemory'
 import {
   getDefaultSidebarConfig,
   loadSidebarConfig,
@@ -115,11 +115,18 @@ export function useNavigation() {
       // scroll to top instead of a no-op navigation. On a deeper sub-page, let
       // the link navigate up to the section root; on another tab, let it restore
       // the remembered URL.
-      if (pathname !== href) return
+      if (pathname !== href) {
+        // Restoring a deep sub-page from another section: flag it so the back
+        // button there climbs to the section list instead of history-backing
+        // into the section we're leaving now.
+        const target = resolveHref(href)
+        if (target.split('?')[0] !== href) markTabRestore(target)
+        return
+      }
       e.preventDefault()
       window.scrollTo({ top: 0 })
     },
-    [pathname],
+    [pathname, resolveHref],
   )
 
   // Theme cycling

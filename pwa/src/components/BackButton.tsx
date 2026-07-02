@@ -4,9 +4,27 @@ import { useEffect } from 'react'
 import { usePathname, useRouter } from 'next/navigation'
 import { ArrowLeft } from 'lucide-react'
 import { t } from '@/lib/i18n'
+import { consumeTabRestore, getListHref } from '@/lib/navMemory'
 
 interface BackButtonProps {
   fallback: string
+}
+
+/** History back that stays inside the section: when this page was reached via
+ *  a nav-tab restore of a deep URL, history's previous entry is whatever the
+ *  user detoured through (e.g. /trash) — climb to the section's last
+ *  list-level URL instead. Otherwise plain history back with a fallback. */
+export function smartBack(router: { back: () => void; push: (href: string) => void }, fallback: string): void {
+  const sectionRoot = fallback.split('?')[0]
+  if (consumeTabRestore(window.location.pathname + window.location.search)) {
+    router.push(getListHref(sectionRoot))
+    return
+  }
+  if (window.history.length > 1) {
+    router.back()
+  } else {
+    router.push(fallback)
+  }
 }
 
 export function BackButton({ fallback }: BackButtonProps) {
@@ -25,11 +43,7 @@ export function BackButton({ fallback }: BackButtonProps) {
       router.push(fallback)
       return
     }
-    if (window.history.length > 1) {
-      router.back()
-    } else {
-      router.push(fallback)
-    }
+    smartBack(router, fallback)
   }
 
   return (

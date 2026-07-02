@@ -9,7 +9,7 @@ import { RatingStars } from '@/components/RatingStars'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import DOMPurify from 'dompurify'
-import { BackButton } from '@/components/BackButton'
+import { BackButton, smartBack } from '@/components/BackButton'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { TagSearchPopover } from '@/components/TagSearchPopover'
 
@@ -459,7 +459,7 @@ function EhGalleryDetail() {
       }
       if (e.key === 'ArrowUp' || e.key === 'Escape') {
         e.preventDefault()
-        if (history.length > 1) { router.back() } else { router.push('/e-hentai') }
+        smartBack(router, '/e-hentai')
       }
     }
     window.addEventListener('keydown', handler)
