@@ -67,8 +67,9 @@ describe('structural-nav-audit — E-hentai browse state architecture', () => {
   })
 
   it('test_ehentai_restoreIsScopedToMatchingQueryKey', () => {
-    // A snapshot only restores when its persisted identity matches the current URL identity.
-    expect(src('lib/ehBrowseState.ts')).toContain('snap.queryKey !== currentKey')
+    // A snapshot only restores when its persisted identity matches the requested
+    // identity (store lookup filters on queryKey equality).
+    expect(src('lib/ehBrowseState.ts')).toContain('x.queryKey === currentKey')
     expect(src('hooks/useEhBrowse.ts')).toContain('parseSnapshot(')
   })
 

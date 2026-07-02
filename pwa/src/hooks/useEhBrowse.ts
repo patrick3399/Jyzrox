@@ -144,18 +144,60 @@ export function useEhBrowse() {
     )
   }, [fetchPage])
 
+  // Bank the current view (buffer/cursor/scroll) into the per-identity snapshot
+  // store. Used both by the lifecycle persistence below and by identity switches.
+  const persistView = useCallback((s: EhBrowseState) => {
+    if (typeof window === 'undefined' || s.items.length === 0) return
+    const prev = sessionStorage.getItem(SNAPSHOT_KEY)
+    try {
+      sessionStorage.setItem(
+        SNAPSHOT_KEY,
+        serializeSnapshot({ ...s, scrollY: window.scrollY }, prev),
+      )
+    } catch {
+      // quota — keep only this identity, without the buffer, so cursor/scroll survive
+      try {
+        sessionStorage.setItem(
+          SNAPSHOT_KEY,
+          serializeSnapshot({ ...s, items: [], scrollY: window.scrollY }),
+        )
+      } catch {
+        /* give up silently */
+      }
+    }
+  }, [])
+
+  // Identity-changing dispatch: bank the outgoing view first, then bring the
+  // incoming identity's banked view back (RESTORE) instead of reseeding from
+  // page 1 — this is what keeps buffer + scroll across in-page tab switches.
+  // Multi-action form folds compound updates (e.g. commitQuery = SET_TAB +
+  // COMMIT_QUERY) so the restore lookup targets the FINAL identity.
+  const dispatchIdentityChange = useCallback(
+    (...batch: Action[]) => {
+      const s0 = stateRef.current
+      const next = batch.reduce(reducer, s0)
+      const nextKey = queryKey(next)
+      const identityChanged = nextKey !== queryKey(s0)
+      if (identityChanged) persistView(s0)
+      for (const a of batch) dispatch(a)
+      if (!identityChanged || typeof window === 'undefined') return
+      const snap = parseSnapshot(sessionStorage.getItem(SNAPSHOT_KEY), nextKey)
+      if (snap) dispatch({ type: 'RESTORE', snapshot: snap })
+    },
+    [persistView],
+  )
+
   const actions = useMemo(
     () => ({
-      setTab: (tab: Tab) => dispatch({ type: 'SET_TAB', tab }),
-      commitQuery: (query: string) => {
-        dispatch({ type: 'SET_TAB', tab: 'search' })
-        dispatch({ type: 'COMMIT_QUERY', query })
-      },
-      setFilter: (patch: Partial<Filters>) => dispatch({ type: 'SET_FILTER', patch }),
+      setTab: (tab: Tab) => dispatchIdentityChange({ type: 'SET_TAB', tab }),
+      commitQuery: (query: string) =>
+        dispatchIdentityChange({ type: 'SET_TAB', tab: 'search' }, { type: 'COMMIT_QUERY', query }),
+      setFilter: (patch: Partial<Filters>) =>
+        dispatchIdentityChange({ type: 'SET_FILTER', patch }),
       setScroll: (scrollY: number) => dispatch({ type: 'SET_SCROLL', scrollY }),
       reset: () => dispatch({ type: 'RESET' }),
     }),
-    [],
+    [dispatchIdentityChange],
   )
 
   // ── URL sync: identity → URL. View (buffer/cursor/scroll) never goes in the URL.
@@ -188,23 +230,7 @@ export function useEhBrowse() {
   // ── Snapshot persistence: continuous scroll capture + write on every exit.
   useEffect(() => {
     if (typeof window === 'undefined') return
-    const write = () => {
-      const s = stateRef.current
-      if (s.items.length === 0) return
-      try {
-        sessionStorage.setItem(SNAPSHOT_KEY, serializeSnapshot({ ...s, scrollY: window.scrollY }))
-      } catch {
-        // quota — retry without the buffer so cursor/scroll still survive
-        try {
-          sessionStorage.setItem(
-            SNAPSHOT_KEY,
-            serializeSnapshot({ ...s, items: [], scrollY: window.scrollY }),
-          )
-        } catch {
-          /* give up silently */
-        }
-      }
-    }
+    const write = () => persistView(stateRef.current)
     let raf = 0
     const onScroll = () => {
       if (raf) return
@@ -226,7 +252,7 @@ export function useEhBrowse() {
       document.removeEventListener('visibilitychange', onHide)
       if (raf) cancelAnimationFrame(raf)
     }
-  }, [])
+  }, [persistView])
 
   return { state, dispatch: dispatch as React.Dispatch<Action>, actions, loadMore, favCategories }
 }

@@ -178,6 +178,66 @@ describe('useEhBrowse — loadMore does not wedge on all-duplicate pages', () =>
   })
 })
 
+describe('useEhBrowse — in-page identity switch restores the previous view', () => {
+  const g = (gid: number) => ({ gid, token: `t${gid}` })
+  it('switching tab away and back restores buffer, cursor and scrollY without refetching', async () => {
+    searchStr = 'tab=favorites&favcat=3'
+    ;(api.eh.getFavorites as ReturnType<typeof vi.fn>).mockResolvedValue({
+      galleries: [g(1), g(2)],
+      total: 2,
+      has_next: true,
+      next_cursor: 'A',
+      categories: [],
+    })
+    const { result } = renderHook(() => useEhBrowse())
+    await act(async () => {
+      await result.current.loadMore()
+    }) // seed favorites → [1,2]
+    expect(result.current.state.items.map((x) => x.gid)).toEqual([1, 2])
+
+    // User is deep in the list when they switch to another tab.
+    Object.defineProperty(window, 'scrollY', { value: 5000, configurable: true, writable: true })
+    act(() => result.current.actions.setTab('popular'))
+    expect(result.current.state.items).toHaveLength(0) // popular starts fresh
+    await act(async () => {
+      await result.current.loadMore()
+    }) // seed popular
+
+    Object.defineProperty(window, 'scrollY', { value: 0, configurable: true, writable: true })
+    act(() => result.current.actions.setTab('favorites'))
+
+    // Favorites view must come back from the snapshot, not reseed from page 1.
+    expect(result.current.state.items.map((x) => x.gid)).toEqual([1, 2])
+    expect(result.current.state.cursor).toEqual({ kind: 'fav', next: 'A' })
+    expect(result.current.state.hasMore).toBe(true)
+    expect(result.current.state.scrollY).toBe(5000)
+    expect(api.eh.getFavorites).toHaveBeenCalledTimes(1)
+  })
+
+  it('commitQuery from another tab restores a previously banked search view', async () => {
+    searchStr = 'tab=search&q=foo'
+    ;(api.eh.search as ReturnType<typeof vi.fn>).mockResolvedValue({
+      galleries: [{ gid: 7, token: 'x' }],
+      total: 1,
+      page: 0,
+      next_gid: 9,
+    })
+    const { result } = renderHook(() => useEhBrowse())
+    await act(async () => {
+      await result.current.loadMore()
+    }) // seed search "foo" → [7]
+
+    Object.defineProperty(window, 'scrollY', { value: 1234, configurable: true, writable: true })
+    act(() => result.current.actions.setTab('popular'))
+    act(() => result.current.actions.commitQuery('foo'))
+
+    // Same search identity as before → restored, not refetched.
+    expect(result.current.state.items.map((x) => x.gid)).toEqual([7])
+    expect(result.current.state.scrollY).toBe(1234)
+    expect(api.eh.search).toHaveBeenCalledTimes(1)
+  })
+})
+
 describe('useEhBrowse — URL sync', () => {
   it('writes identity to the URL but never the view buffer', async () => {
     ;(api.eh.search as ReturnType<typeof vi.fn>).mockResolvedValue({

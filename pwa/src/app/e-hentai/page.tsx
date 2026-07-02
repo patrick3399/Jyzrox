@@ -366,12 +366,17 @@ function BrowsePage() {
   }, [seedKey, ehConfigured])
 
   // ── Restore scroll position after the buffer renders ──
+  // Re-armed on every identity switch so an in-page tab round-trip (snapshot
+  // RESTORE without a remount) re-applies the banked scroll position too.
   const scrollApplied = useRef(false)
+  useEffect(() => {
+    scrollApplied.current = false
+  }, [seedKey])
   useEffect(() => {
     if (scrollApplied.current || items.length === 0 || state.scrollY <= 0) return
     scrollApplied.current = true
     requestAnimationFrame(() => window.scrollTo(0, state.scrollY))
-  }, [items.length, state.scrollY])
+  }, [seedKey, items.length, state.scrollY])
 
   // Load saved searches
   const refreshSavedSearches = useCallback(() => {

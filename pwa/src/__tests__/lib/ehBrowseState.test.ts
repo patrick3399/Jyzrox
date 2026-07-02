@@ -153,10 +153,38 @@ describe('ehBrowseState — snapshot', () => {
     let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
     const many = Array.from({ length: 500 }, (_, i) => g(i))
     s = reducer(s, { type: 'SEED', items: many, total: 500, cursor: null, hasMore: false })
-    const snap = JSON.parse(serializeSnapshot(s))
-    expect(snap.items).toHaveLength(300)
-    expect(snap.items[0].gid).toBe(0)
-    expect(snap.queryKey).toBe(queryKey(s))
+    const store = JSON.parse(serializeSnapshot(s))
+    expect(store.snaps).toHaveLength(1)
+    expect(store.snaps[0].items).toHaveLength(300)
+    expect(store.snaps[0].items[0].gid).toBe(0)
+    expect(store.snaps[0].queryKey).toBe(queryKey(s))
+  })
+
+  it('keeps one snapshot per identity, MRU-first, evicting beyond the history cap', () => {
+    // 6 different search identities → oldest falls out of the 5-slot store.
+    let raw: string | null = null
+    for (let i = 0; i < 6; i++) {
+      let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
+      s = reducer(s, { type: 'COMMIT_QUERY', query: `q${i}` })
+      s = reducer(s, { type: 'SEED', items: [g(i)], total: 1, cursor: null, hasMore: false })
+      raw = serializeSnapshot(s, raw)
+    }
+    const store = JSON.parse(raw!)
+    expect(store.snaps).toHaveLength(5)
+    // MRU order: q5 first, q1 last; q0 evicted.
+    expect(store.snaps[0].items[0].gid).toBe(5)
+    expect(store.snaps.some((x: { items: { gid: number }[] }) => x.items[0].gid === 0)).toBe(false)
+
+    // Re-banking an existing identity replaces its slot instead of duplicating.
+    let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
+    s = reducer(s, { type: 'COMMIT_QUERY', query: 'q3' })
+    s = reducer(s, { type: 'SEED', items: [g(99)], total: 1, cursor: null, hasMore: false })
+    const store2 = JSON.parse(serializeSnapshot(s, raw))
+    expect(store2.snaps).toHaveLength(5)
+    expect(store2.snaps[0].items[0].gid).toBe(99)
+    expect(
+      store2.snaps.filter((x: { queryKey: string }) => x.queryKey === queryKey(s)),
+    ).toHaveLength(1)
   })
   it('parseSnapshot returns null when queryKey mismatches', () => {
     const s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })

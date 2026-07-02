@@ -243,7 +243,27 @@ type Snapshot = {
   scrollY: number
 }
 
-export function serializeSnapshot(s: EhBrowseState): string {
+// The store keeps one snapshot per query identity (MRU-first) so in-page tab /
+// filter switches can bring back the previous view instead of reseeding. Capped
+// so a long session hopping across identities doesn't grow sessionStorage.
+type SnapshotStore = { snaps: Snapshot[] }
+export const SNAPSHOT_HISTORY_CAP = 5
+
+function parseStore(raw: string | null): Snapshot[] {
+  if (!raw) return []
+  try {
+    const parsed = JSON.parse(raw) as SnapshotStore
+    if (!parsed || !Array.isArray(parsed.snaps)) return []
+    return parsed.snaps.filter(
+      (x) => x && typeof x.queryKey === 'string' && Array.isArray(x.items),
+    )
+  } catch {
+    return []
+  }
+}
+
+/** Upsert this state's view into the snapshot store (MRU-first, capped). */
+export function serializeSnapshot(s: EhBrowseState, prevRaw: string | null = null): string {
   const snap: Snapshot = {
     queryKey: queryKey(s),
     items: s.items.slice(0, SNAPSHOT_CAP),
@@ -252,28 +272,24 @@ export function serializeSnapshot(s: EhBrowseState): string {
     hasMore: s.hasMore,
     scrollY: s.scrollY,
   }
-  return JSON.stringify(snap)
+  const rest = parseStore(prevRaw).filter((x) => x.queryKey !== snap.queryKey)
+  return JSON.stringify({ snaps: [snap, ...rest].slice(0, SNAPSHOT_HISTORY_CAP) })
 }
 
-/** Returns the view slice to RESTORE, or null when absent / stale / malformed. */
+/** Returns the view slice to RESTORE for `currentKey`, or null when absent / malformed. */
 export function parseSnapshot(
   raw: string | null,
   currentKey: string,
 ): Partial<EhBrowseState> | null {
-  if (!raw) return null
-  try {
-    const snap = JSON.parse(raw) as Snapshot
-    if (!snap || snap.queryKey !== currentKey || !Array.isArray(snap.items)) return null
-    return {
-      items: snap.items,
-      total: snap.total,
-      cursor: snap.cursor,
-      hasMore: snap.hasMore,
-      scrollY: snap.scrollY,
-      status: 'idle',
-    }
-  } catch {
-    return null
+  const snap = parseStore(raw).find((x) => x.queryKey === currentKey)
+  if (!snap) return null
+  return {
+    items: snap.items,
+    total: snap.total,
+    cursor: snap.cursor,
+    hasMore: snap.hasMore,
+    scrollY: snap.scrollY,
+    status: 'idle',
   }
 }
 
