@@ -261,6 +261,12 @@ export function VirtualGrid<T>({
                   gridTemplateColumns: `repeat(${colCount}, minmax(0, 1fr))`,
                   gap: gap,
                   height: measureRows ? undefined : rowHeight,
+                  // Cells hug their card instead of stretching to the (estimated,
+                  // deliberately generous) row height. Without this the keyboard
+                  // focus ring — drawn on the cell — wraps the padded track and
+                  // leaves a blank gap below the card; `start` makes it hug the
+                  // card exactly like the mouse-hover ring on the card itself.
+                  alignItems: 'start',
                 }}
               >
                 {rowItems.map((item, colIdx) => {

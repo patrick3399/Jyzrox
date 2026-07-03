@@ -67,4 +67,25 @@ describe('VirtualGrid row containment (focus-ring clip)', () => {
     // But layout isolation (needed by virtualization) must stay.
     expect(contain).toContain('layout')
   })
+
+  it('test_virtualGrid_cells_do_not_stretch_so_keyboard_focus_ring_hugs_the_card', () => {
+    const { container } = render(
+      <VirtualGrid
+        items={[1, 2, 3, 4, 5]}
+        columns={LIBRARY_COLUMNS}
+        gap={12}
+        renderItem={(n) => <span>{n}</span>}
+      />,
+    )
+
+    const row = container.querySelector<HTMLElement>('[data-index="0"]')
+    // The row's only child is the CSS grid that lays out the cells.
+    const grid = row!.querySelector<HTMLElement>('div')
+    expect(grid).not.toBeNull()
+    expect(grid!.style.display).toBe('grid')
+
+    // Cells must hug their card (align-items: start), not stretch to the padded
+    // row height — otherwise the focus ring wraps blank space below the card.
+    expect(grid!.style.alignItems).toBe('start')
+  })
 })
