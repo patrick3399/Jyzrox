@@ -246,7 +246,11 @@ export function VirtualGrid<T>({
                 height: measureRows ? undefined : rowHeight + gap,
                 transform: `translateY(${virtualRow.start - virtualizer.options.scrollMargin}px)`,
                 paddingBottom: gap,
-                contain: 'layout style paint',
+                // NB: no `paint` containment. `paint` clips all painting to this
+                // row's box, which cut off a grid cell's focus ring (drawn outside
+                // the cell via box-shadow) at the top/bottom row edge. `layout`
+                // still gives virtualization the size isolation it needs.
+                contain: 'layout style',
                 willChange: 'transform',
               }}
             >
