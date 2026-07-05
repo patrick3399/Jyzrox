@@ -51,6 +51,7 @@ async def _git(repo: str | Path, *args: str, env_extra: dict | None = None) -> t
         out, err = await asyncio.wait_for(proc.communicate(), timeout=_TIMEOUT)
     except TimeoutError:
         proc.kill()
+        await proc.wait()  # reap the killed process (avoid a zombie / ResourceWarning)
         raise NovelGitError(f"git {' '.join(args)} timed out")
     return proc.returncode or 0, out.decode(errors="replace"), err.decode(errors="replace")
 

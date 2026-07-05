@@ -22,7 +22,12 @@ def safe_repo_path(repo_root: str | Path, rel_path: str) -> Path:
     if not rel_path or rel_path.startswith("/"):
         raise NovelPathError(f"invalid path: {rel_path!r}")
     root = Path(repo_root).resolve()
-    candidate = (root / rel_path).resolve()
+    # A null byte (or other OS-invalid path) makes resolve() raise ValueError;
+    # surface it as NovelPathError so the router returns 400, not 500.
+    try:
+        candidate = (root / rel_path).resolve()
+    except (ValueError, OSError) as e:
+        raise NovelPathError(f"invalid path: {rel_path!r}") from e
     if candidate.suffix != ".md":
         raise NovelPathError(f"not a markdown file: {rel_path!r}")
     if root not in candidate.parents and candidate != root:
@@ -43,7 +48,10 @@ def list_works(repo_root: str | Path) -> list[dict]:
 
 def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
     root = Path(repo_root).resolve()
-    work_dir = (root / work).resolve()
+    try:
+        work_dir = (root / work).resolve()
+    except (ValueError, OSError) as e:
+        raise NovelPathError(f"invalid work: {work!r}") from e
     if root not in work_dir.parents and work_dir != root:
         raise NovelPathError(f"work escapes repo root: {work!r}")
     chapters: list[dict] = []
@@ -95,6 +103,10 @@ def keyword_scan(repo_root: str | Path, query: str, max_hits: int = 200) -> list
         return []
     hits: list[dict] = []
     for f in sorted(root.rglob("*.md")):
+        rel = f.relative_to(root)
+        # Skip repo-internal / hidden dirs (.git, etc.); 設定/ stays searchable.
+        if any(part.startswith(".") for part in rel.parts):
+            continue
         try:
             text = f.read_text(encoding="utf-8")
         except Exception:  # noqa: S112 — unreadable/binary file, skip silently

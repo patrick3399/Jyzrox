@@ -61,6 +61,35 @@ async def test_reset_to_origin_defaults_to_current_branch_not_main(tmp_path):
     assert (work / "第01章.md").read_text() == "v1\n"
 
 
+async def test_git_timeout_reaps_the_killed_process(monkeypatch):
+    """On timeout the subprocess must be killed AND reaped (await wait())."""
+    import asyncio as _asyncio
+
+    reaped = {"kill": False, "wait": False}
+
+    class _FakeProc:
+        returncode = -9
+
+        async def communicate(self):
+            await _asyncio.sleep(10)  # never completes within the patched timeout
+
+        def kill(self):
+            reaped["kill"] = True
+
+        async def wait(self):
+            reaped["wait"] = True
+
+    async def _fake_exec(*args, **kwargs):
+        return _FakeProc()
+
+    monkeypatch.setattr(novel_git.asyncio, "create_subprocess_exec", _fake_exec)
+    monkeypatch.setattr(novel_git, "_TIMEOUT", 0.05)
+    with pytest.raises(novel_git.NovelGitError):
+        await novel_git.head_sha("/tmp")
+    assert reaped["kill"] is True
+    assert reaped["wait"] is True
+
+
 async def test_diff_file_returns_commit_diff(repos):
     work = str(repos["work"])
     head = await novel_git.head_sha(work)

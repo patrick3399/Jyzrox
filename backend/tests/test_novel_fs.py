@@ -90,3 +90,28 @@ def test_keyword_scan_returns_path_line_context(tmp_path):
     hits = keyword_scan(tmp_path, "李四")
     assert hits and hits[0]["path"] == "作品A/第01章.md"
     assert "李四" in hits[0]["text"]
+
+
+def test_keyword_scan_skips_dot_directories(tmp_path):
+    """Search must not leak repo-internal files under a dot-dir (e.g. .git)."""
+    (tmp_path / "作品A").mkdir()
+    (tmp_path / "作品A" / "第01章.md").write_text("正文 keyword", encoding="utf-8")
+    gitdir = tmp_path / ".git"
+    gitdir.mkdir()
+    (gitdir / "leak.md").write_text("keyword in git internals", encoding="utf-8")
+    hits = keyword_scan(tmp_path, "keyword")
+    assert any(h["path"] == "作品A/第01章.md" for h in hits)
+    assert all(not h["path"].startswith(".git") for h in hits)
+
+
+def test_safe_repo_path_rejects_null_byte(tmp_path):
+    """A null byte must surface as NovelPathError (400), not a bare ValueError (500)."""
+    root = _repo(tmp_path)
+    with pytest.raises(NovelPathError):
+        safe_repo_path(root, "作品A/\x00.md")
+
+
+def test_list_chapters_rejects_null_byte(tmp_path):
+    root = _repo(tmp_path)
+    with pytest.raises(NovelPathError):
+        list_chapters(root, "作品A\x00")
