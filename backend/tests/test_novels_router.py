@@ -184,6 +184,67 @@ async def test_write_success_commits_and_emits(member_client, novel_repo):
     assert log.json()["commits"][0]["message"] == "edit: 作品A/第01章.md"
 
 
+async def test_write_rechecks_head_under_git_lock(member_client, novel_repo, monkeypatch):
+    """A commit that lands after the client read base_sha but before the write
+    serializes must be caught as stale — the optimistic-lock check runs under
+    the git lock, not before it (otherwise it is a lost-update TOCTOU)."""
+    import routers.novels as rn
+
+    work = novel_repo["work"]
+    head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+
+    real_acquire = rn.acquire_lock
+
+    async def racing_acquire(r, key, ttl=60):
+        # Simulate a concurrent commit advancing HEAD at lock-acquire time.
+        (work / "作品A" / "第01章.md").write_text("concurrent\n", encoding="utf-8")
+        _run(work, "commit", "-am", "concurrent edit")
+        return await real_acquire(r, key, ttl)
+
+    monkeypatch.setattr(rn, "acquire_lock", racing_acquire)
+    r = await member_client.put(
+        "/api/novels/file",
+        json={"path": "作品A/第01章.md", "content": "mine\n", "base_sha": head},
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"] == "stale base_sha"
+
+
+async def test_write_unchanged_content_is_noop_not_500(member_client, novel_repo):
+    """Saving the file with its current content must return 200, not 500."""
+    body = await member_client.get("/api/novels/file?path=作品A/第01章.md")
+    doc = body.json()
+    r = await member_client.put(
+        "/api/novels/file",
+        json={"path": "作品A/第01章.md", "content": doc["content"], "base_sha": doc["base_sha"]},
+    )
+    assert r.status_code == 200
+
+
+async def test_write_to_locked_repo_returns_409(member_client, novel_repo):
+    (novel_repo["work"] / ".jyzrox-locked").write_text("conflict\n", encoding="utf-8")
+    head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await member_client.put(
+        "/api/novels/file",
+        json={"path": "作品A/第01章.md", "content": "x\n", "base_sha": head},
+    )
+    assert r.status_code == 409
+    assert "locked" in str(r.json()["detail"])
+
+
+async def test_file_diff_rejects_arg_injection(viewer_client, novel_repo, tmp_path):
+    """rev=--output=<path> must be rejected (400), never write an arbitrary file."""
+    sentinel = tmp_path / "pwned.txt"
+    r = await viewer_client.get(f"/api/novels/file/diff?path=作品A/第01章.md&rev=--output={sentinel}")
+    assert r.status_code == 400
+    assert not sentinel.exists()
+
+
+async def test_file_history_rejects_traversal(viewer_client, novel_repo):
+    r = await viewer_client.get("/api/novels/file/history?path=../../etc/passwd")
+    assert r.status_code == 400
+
+
 async def test_reset_forbidden_for_member(member_client, novel_repo):
     # Two clients cannot coexist (they share _app.dependency_overrides), so the
     # member and admin cases are separate tests.

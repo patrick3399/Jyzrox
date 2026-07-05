@@ -70,12 +70,26 @@ async def search(q: str = Query(..., min_length=1), _: dict = Depends(require_au
 
 @router.get("/file/history")
 async def file_history(path: str = Query(...), _: dict = Depends(require_auth)):
-    return {"commits": await novel_git.log_file(_repo(), path)}
+    repo = _repo()
+    try:
+        novel_fs.safe_repo_path(repo, path)
+        return {"commits": await novel_git.log_file(repo, path)}
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except novel_git.NovelGitError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/file/diff")
 async def file_diff(path: str = Query(...), rev: str = Query(...), _: dict = Depends(require_auth)):
-    return {"diff": await novel_git.diff_file(_repo(), path, rev)}
+    repo = _repo()
+    try:
+        novel_fs.safe_repo_path(repo, path)
+        return {"diff": await novel_git.diff_file(repo, path, rev)}
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+    except novel_git.NovelGitError as e:
+        raise HTTPException(status_code=400, detail=str(e))
 
 
 @router.get("/status")
@@ -162,23 +176,30 @@ async def _with_git_lock(coro_factory):
 @router.put("/file")
 async def write_file(body: WriteBody, auth: dict = Depends(_member)):
     repo = _repo()
-    st = await novel_git.status(repo)
-    if st["locked"]:
-        raise HTTPException(status_code=409, detail="repo locked; resolve on desktop")
-    if st["head"] != body.base_sha:
-        current = novel_fs.read_file(repo, body.path)
-        raise HTTPException(
-            status_code=409,
-            detail={"error": "stale base_sha", "current": current, "current_sha": st["head"]},
-        )
+    # Fail fast on an unsafe path before taking the git lock.
     try:
-        novel_fs.write_file(repo, body.path, body.content)
+        novel_fs.safe_repo_path(repo, body.path)
     except novel_fs.NovelPathError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
     msg = body.message or f"edit: {body.path}"
 
     async def _do():
+        # The locked/base_sha check MUST run under the lock: checking before it
+        # is a lost-update TOCTOU (a commit could land between check and write).
+        st = await novel_git.status(repo)
+        if st["locked"]:
+            raise HTTPException(status_code=409, detail="repo locked; resolve on desktop")
+        if st["head"] != body.base_sha:
+            try:
+                current = novel_fs.read_file(repo, body.path)
+            except FileNotFoundError:
+                current = ""
+            raise HTTPException(
+                status_code=409,
+                detail={"error": "stale base_sha", "current": current, "current_sha": st["head"]},
+            )
+        novel_fs.write_file(repo, body.path, body.content)
         return await novel_git.commit_and_push(repo, body.path, msg)
 
     try:

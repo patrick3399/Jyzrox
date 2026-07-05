@@ -9,10 +9,15 @@ from __future__ import annotations
 
 import asyncio
 import os
+import re
 from pathlib import Path
 
 _TIMEOUT = 30
 _LOCK_SENTINEL = ".jyzrox-locked"
+# A revision reaching git must be a bare object name: hex sha1/sha256 (or a short
+# prefix). This blocks argument injection (e.g. rev="--output=/path") from ever
+# being parsed as a git option — the UI only ever passes commit hashes.
+_REV_RE = re.compile(r"\A[0-9a-fA-F]{4,64}\Z")
 _AUTHOR_ENV = {
     "GIT_AUTHOR_NAME": "Jyzrox",
     "GIT_AUTHOR_EMAIL": "jyzrox@local",
@@ -105,8 +110,12 @@ async def commit_file(repo: str | Path, rel_path: str, message: str) -> str:
     code, _, err = await _git(repo, "add", "--", rel_path)
     if code != 0:
         raise NovelGitError(err)
-    code, _, err = await _git(repo, "commit", "-m", message, "--", rel_path, env_extra=_AUTHOR_ENV)
+    code, out, err = await _git(repo, "commit", "-m", message, "--", rel_path, env_extra=_AUTHOR_ENV)
     if code != 0:
+        # Saving identical content leaves a clean tree — treat as a no-op edit
+        # rather than surfacing git's "nothing to commit" as a 500.
+        if "nothing to commit" in out or "nothing to commit" in err:
+            return await head_sha(repo)
         raise NovelGitError(err)
     return await head_sha(repo)
 
@@ -150,7 +159,11 @@ async def log_file(repo: str | Path, rel_path: str, limit: int = 50) -> list[dic
 
 
 async def diff_file(repo: str | Path, rel_path: str, rev: str) -> str:
-    code, out, err = await _git(repo, "show", f"{rev}", "--", rel_path)
+    if not _REV_RE.match(rev):
+        raise NovelGitError(f"invalid rev: {rev!r}")
+    # --end-of-options is a second guard: even a validated rev can never be
+    # reinterpreted as a git option.
+    code, out, err = await _git(repo, "show", "--end-of-options", rev, "--", rel_path)
     if code != 0:
         raise NovelGitError(err)
     return out

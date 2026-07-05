@@ -61,6 +61,33 @@ async def test_reset_to_origin_defaults_to_current_branch_not_main(tmp_path):
     assert (work / "第01章.md").read_text() == "v1\n"
 
 
+async def test_diff_file_returns_commit_diff(repos):
+    work = str(repos["work"])
+    head = await novel_git.head_sha(work)
+    diff = await novel_git.diff_file(work, "作品A/第01章.md", head)
+    assert "v1" in diff
+
+
+async def test_diff_file_rejects_option_injection(repos, tmp_path):
+    """A crafted `rev` starting with `--` must not reach git as an option.
+
+    `git show --output=<path>` would otherwise write the diff to an arbitrary
+    file (argument injection), even though we never invoke a shell.
+    """
+    work = str(repos["work"])
+    sentinel = tmp_path / "pwned.txt"
+    with pytest.raises(novel_git.NovelGitError):
+        await novel_git.diff_file(work, "作品A/第01章.md", f"--output={sentinel}")
+    assert not sentinel.exists()
+
+
+async def test_commit_and_push_noop_when_content_unchanged(repos):
+    """Saving identical content must be a no-op, not a `nothing to commit` error."""
+    work = str(repos["work"])
+    result = await novel_git.commit_and_push(work, "作品A/第01章.md", "edit: noop")
+    assert result["pushed"] is True
+
+
 async def test_diverged_edit_locks_repo(repos):
     """Desktop pushes a conflicting change; a local edit then conflicts → locked."""
     work = Path(repos["work"])
