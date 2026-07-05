@@ -14,10 +14,15 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import text
 
+from core import audit, events
 from core.auth import require_auth, require_role
 from core.config import settings
 from core.database import async_session
+from core.redis_client import get_redis
 from services import novel_fs, novel_git
+from worker.helpers import acquire_lock, release_lock
+
+_GIT_LOCK = "novel:git:lock"
 
 router = APIRouter(tags=["novels"])
 _member = require_role("member")
@@ -133,3 +138,80 @@ async def put_prefs(body: dict, auth: dict = Depends(require_auth)):
         )
         await s.commit()
     return {"ok": True}
+
+
+class WriteBody(BaseModel):
+    path: str
+    content: str
+    base_sha: str
+    message: str | None = None
+
+
+async def _with_git_lock(coro_factory):
+    """Serialize every repo-mutating git op on the Redis lock `novel:git:lock`."""
+    r = get_redis()
+    token = await acquire_lock(r, _GIT_LOCK, ttl=60)
+    if token is None:
+        raise HTTPException(status_code=409, detail="git busy, retry")
+    try:
+        return await coro_factory()
+    finally:
+        await release_lock(r, _GIT_LOCK, token)
+
+
+@router.put("/file")
+async def write_file(body: WriteBody, auth: dict = Depends(_member)):
+    repo = _repo()
+    st = await novel_git.status(repo)
+    if st["locked"]:
+        raise HTTPException(status_code=409, detail="repo locked; resolve on desktop")
+    if st["head"] != body.base_sha:
+        current = novel_fs.read_file(repo, body.path)
+        raise HTTPException(
+            status_code=409,
+            detail={"error": "stale base_sha", "current": current, "current_sha": st["head"]},
+        )
+    try:
+        novel_fs.write_file(repo, body.path, body.content)
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+    msg = body.message or f"edit: {body.path}"
+
+    async def _do():
+        return await novel_git.commit_and_push(repo, body.path, msg)
+
+    try:
+        result = await _with_git_lock(_do)
+    except novel_git.NovelLocked:
+        raise HTTPException(status_code=409, detail="conflict; repo locked; resolve on desktop")
+
+    await audit.log_audit(auth["user_id"], "novel.edit", body.path)
+    await events.emit_safe(
+        events.EventType.NOVEL_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="novel",
+        resource_id=body.path,
+    )
+    return result
+
+
+@router.post("/sync")
+async def sync(_: dict = Depends(_member)):
+    async def _do():
+        await novel_git.fetch(_repo())
+        pulled = await novel_git.pull_ff(_repo())
+        return {"pulled": pulled}
+
+    return await _with_git_lock(_do)
+
+
+@router.post("/reset")
+async def reset(auth: dict = Depends(_admin)):
+    async def _do():
+        await novel_git.reset_to_origin(_repo())
+        return {"ok": True}
+
+    result = await _with_git_lock(_do)
+    await audit.log_audit(auth["user_id"], "novel.reset", _repo())
+    return result
