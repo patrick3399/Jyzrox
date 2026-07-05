@@ -3,7 +3,19 @@ from pathlib import Path
 
 import pytest
 
-from services.novel_fs import NovelPathError, safe_repo_path
+from services.novel_fs import (
+    NovelPathError,
+    keyword_scan,
+    list_chapters,
+    list_works,
+    parse_acts,
+    parse_backlinks,
+    read_file,
+    safe_repo_path,
+    write_file,
+)
+
+_SAMPLE = "# 第一章\n\n### 幕一\n\n正文 [[張三]] 與 [[李四]]。\n\n### 幕二\n\n更多 [[張三]]。\n"
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -43,3 +55,38 @@ def test_safe_repo_path_rejects_symlink_escape(tmp_path):
     os.symlink(outside, link)
     with pytest.raises(NovelPathError):
         safe_repo_path(root, "作品A/link.md")
+
+
+def test_list_works_and_chapters(tmp_path):
+    (tmp_path / "作品A").mkdir()
+    (tmp_path / "作品A" / "第01章.md").write_text(_SAMPLE, encoding="utf-8")
+    (tmp_path / "設定").mkdir()  # excluded from works
+    works = list_works(tmp_path)
+    assert works == [{"name": "作品A", "chapter_count": 1}]
+    chapters = list_chapters(tmp_path, "作品A")
+    assert chapters[0]["path"] == "作品A/第01章.md"
+    assert chapters[0]["chars"] == len(_SAMPLE.encode("utf-8"))
+
+
+def test_parse_acts(tmp_path):
+    acts = parse_acts(_SAMPLE)
+    assert [a["title"] for a in acts] == ["幕一", "幕二"]
+    assert acts[0]["index"] == 0
+
+
+def test_parse_backlinks_distinct_in_order(tmp_path):
+    assert parse_backlinks(_SAMPLE) == ["張三", "李四"]
+
+
+def test_write_then_read_roundtrip(tmp_path):
+    (tmp_path / "作品A").mkdir()
+    write_file(tmp_path, "作品A/新.md", "內容")
+    assert read_file(tmp_path, "作品A/新.md") == "內容"
+
+
+def test_keyword_scan_returns_path_line_context(tmp_path):
+    (tmp_path / "作品A").mkdir()
+    (tmp_path / "作品A" / "第01章.md").write_text(_SAMPLE, encoding="utf-8")
+    hits = keyword_scan(tmp_path, "李四")
+    assert hits and hits[0]["path"] == "作品A/第01章.md"
+    assert "李四" in hits[0]["text"]
