@@ -42,6 +42,25 @@ async def test_status_reports_clean_head(repos):
     assert st["clean"] is True and st["locked"] is False and len(st["head"]) >= 7
 
 
+async def test_reset_to_origin_defaults_to_current_branch_not_main(tmp_path):
+    """The 214 repo uses `master`; reset_to_origin() with no branch must target it."""
+    bare = tmp_path / "origin.git"
+    bare.mkdir()
+    _run(bare, "init", "--bare", "-b", "master")
+    work = tmp_path / "work"
+    _run(tmp_path, "clone", str(bare), str(work))
+    _run(work, "config", "user.email", "jyzrox@local")
+    _run(work, "config", "user.name", "Jyzrox")
+    (work / "第01章.md").write_text("v1\n", encoding="utf-8")
+    _run(work, "add", ".")
+    _run(work, "commit", "-m", "init")
+    _run(work, "push", "origin", "master")
+    # Dirty the working tree, then reset without specifying a branch.
+    (work / "第01章.md").write_text("local mess\n", encoding="utf-8")
+    await novel_git.reset_to_origin(str(work))  # no branch arg → must use `master`
+    assert (work / "第01章.md").read_text() == "v1\n"
+
+
 async def test_diverged_edit_locks_repo(repos):
     """Desktop pushes a conflicting change; a local edit then conflicts → locked."""
     work = Path(repos["work"])

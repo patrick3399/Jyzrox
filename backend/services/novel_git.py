@@ -156,7 +156,11 @@ async def diff_file(repo: str | Path, rel_path: str, rev: str) -> str:
     return out
 
 
-async def reset_to_origin(repo: str | Path, branch: str = "main") -> None:
+async def reset_to_origin(repo: str | Path, branch: str | None = None) -> None:
+    # Default to the clone's actual branch — the 214 repo uses `master`, so a
+    # hardcoded `main` would reset to a non-existent origin/main and fail.
+    if branch is None:
+        branch = await _current_branch(repo)
     await _git(repo, "rebase", "--abort")  # ignore failure
     await fetch(repo)
     code, _, err = await _git(repo, "reset", "--hard", f"origin/{branch}")
