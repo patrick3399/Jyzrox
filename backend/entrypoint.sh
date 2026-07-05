@@ -24,4 +24,15 @@ for dir in /data/gallery /data/thumbs /data/training /data/avatars /data/cas /da
     chown "$PUID:$PGID" "$dir" 2>/dev/null || true
 done
 
+# Novel module: own the working clone and lock down the ssh deploy key.
+# The bind-mounted secret is root-owned read-only; ssh requires a 600 key owned
+# by the running user, so copy it to /tmp and tighten permissions there.
+mkdir -p /data/novel 2>/dev/null || true
+chown -R "$PUID:$PGID" /data/novel 2>/dev/null || true
+if [ -f /run/secrets/novel_deploy_key ]; then
+    cp /run/secrets/novel_deploy_key /tmp/novel_deploy_key
+    chown "$PUID:$PGID" /tmp/novel_deploy_key
+    chmod 600 /tmp/novel_deploy_key
+fi
+
 exec gosu appuser "$@"

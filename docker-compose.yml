@@ -13,6 +13,10 @@ x-backend-env: &backend-env
   PUID: ${PUID:-1042}
   PGID: ${PGID:-1042}
   DATABASE_URL: postgresql+asyncpg://${POSTGRES_USER:-vault}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB:-vault}
+  NOVEL_REPO_PATH: /data/novel
+  # entrypoint.sh copies the read-only secret to /tmp with 600 perms (ssh refuses
+  # group/world-readable keys); BatchMode keeps git from hanging on prompts.
+  GIT_SSH_COMMAND: "ssh -i /tmp/novel_deploy_key -o UserKnownHostsFile=/run/secrets/novel_known_hosts -o IdentitiesOnly=yes -o BatchMode=yes"
 
 x-backend-depends: &backend-depends
   postgres:
@@ -72,6 +76,11 @@ services:
       - app_data:/data
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - gallery_dl_venv:/opt/gallery-dl:ro
+      # host: generate secrets/novel_deploy_key + novel_known_hosts before up
+      # (see docs/superpowers/plans/2026-07-05-novel-module-phase0.md Task 0)
+      - ${JYZROX_DATA_ROOT}/novel:/data/novel
+      - ./secrets/novel_deploy_key:/run/secrets/novel_deploy_key:ro
+      - ./secrets/novel_known_hosts:/run/secrets/novel_known_hosts:ro
     depends_on:
       <<: *backend-depends
     networks:
@@ -117,6 +126,9 @@ services:
       # host: chown 1042:1042 ./config/gallery-dl && chmod 750 ./config/gallery-dl
       - ./config/gallery-dl:/home/appuser/.config/gallery-dl
       - gallery_dl_venv:/opt/gallery-dl
+      - ${JYZROX_DATA_ROOT}/novel:/data/novel
+      - ./secrets/novel_deploy_key:/run/secrets/novel_deploy_key:ro
+      - ./secrets/novel_known_hosts:/run/secrets/novel_known_hosts:ro
     depends_on:
       <<: *backend-depends
     networks:
