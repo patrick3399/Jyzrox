@@ -1,14 +1,18 @@
 'use client'
 
-import { useMemo } from 'react'
+import { useMemo, useState } from 'react'
 import Link from 'next/link'
 import { useParams, useSearchParams } from 'next/navigation'
-import { ArrowLeft, ChevronLeft, ChevronRight } from 'lucide-react'
+import { mutate } from 'swr'
+import { ArrowLeft, ChevronLeft, ChevronRight, Pencil } from 'lucide-react'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+import { useProfile } from '@/hooks/useProfile'
+import { hasRole } from '@/lib/pageRegistry'
 import { Reader } from '@/components/novels/Reader'
+import { Editor } from '@/components/novels/Editor'
 
 export default function NovelChapterPage() {
   useLocale()
@@ -17,6 +21,9 @@ export default function NovelChapterPage() {
   const work = decodeURIComponent(params?.work ?? '')
   const chapterName = decodeURIComponent(params?.chapter ?? '')
   const path = search?.get('path') ?? ''
+  const [editing, setEditing] = useState(false)
+  const { data: profile } = useProfile()
+  const canEdit = hasRole(profile?.role, 'member')
 
   const { data } = useSWR(work ? ['novel-chapters', work] : null, ([, w]) =>
     api.novels.listChapters(w),
@@ -44,13 +51,35 @@ export default function NovelChapterPage() {
           <ArrowLeft className="size-4" />
           {work}
         </Link>
-        <h1 className="truncate text-lg font-semibold text-vault-text">{chapterName}</h1>
+        <div className="flex min-w-0 items-center gap-3">
+          <h1 className="truncate text-lg font-semibold text-vault-text">{chapterName}</h1>
+          {canEdit && !editing && path && (
+            <button
+              type="button"
+              className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-2 py-1 text-xs text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+              onClick={() => setEditing(true)}
+            >
+              <Pencil className="size-3" />
+              {t('novels.edit')}
+            </button>
+          )}
+        </div>
       </div>
 
-      {path ? (
-        <Reader path={path} />
-      ) : (
+      {!path ? (
         <p className="py-10 text-center text-vault-text-muted">{t('novels.loadFailed')}</p>
+      ) : editing ? (
+        <Editor
+          path={path}
+          onSaved={() => {
+            setEditing(false)
+            mutate(['novel-file', path])
+            mutate(['novel-edit', path])
+          }}
+          onCancel={() => setEditing(false)}
+        />
+      ) : (
+        <Reader path={path} />
       )}
 
       <div className="mt-6 flex items-center justify-between">

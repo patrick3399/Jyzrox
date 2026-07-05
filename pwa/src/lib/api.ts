@@ -1803,6 +1803,9 @@ export interface NovelRepoStatus {
   clean: boolean
   locked: boolean
 }
+export type NovelWriteResult =
+  | { ok: true; head: string; pushed: boolean }
+  | { ok: false; status: number; conflict?: { current: string; current_sha: string }; message?: string }
 
 const novels = {
   listWorks: () => apiFetch<{ works: NovelWork[] }>('/api/novels/works'),
@@ -1811,11 +1814,40 @@ const novels = {
       `/api/novels/works/${encodeURIComponent(work)}/chapters`,
     ),
   readFile: (path: string) => apiFetch<NovelFile>(`/api/novels/file${qs({ path })}`),
-  writeFile: (body: { path: string; content: string; base_sha: string; message?: string }) =>
-    apiFetch<{ head: string; pushed: boolean }>('/api/novels/file', {
+  // Custom fetch: a 409 carries the server's current content, which apiFetch
+  // would collapse into a generic Error — the editor needs it for the diff hint.
+  writeFile: async (body: {
+    path: string
+    content: string
+    base_sha: string
+    message?: string
+  }): Promise<NovelWriteResult> => {
+    const csrf = getCookie('csrf_token')
+    const res = await fetch('/api/novels/file', {
       method: 'PUT',
+      credentials: 'include',
+      headers: {
+        'Content-Type': 'application/json',
+        ...(csrf ? { 'X-CSRF-Token': csrf } : {}),
+      },
       body: JSON.stringify(body),
-    }),
+    })
+    if (res.ok) {
+      const data = (await res.json()) as { head: string; pushed: boolean }
+      return { ok: true, head: data.head, pushed: data.pushed }
+    }
+    const errBody = await res.json().catch(() => ({}))
+    const detail = (errBody as { detail?: unknown })?.detail
+    if (res.status === 409 && typeof detail === 'object' && detail !== null && 'current' in detail) {
+      const d = detail as { current: string; current_sha: string }
+      return { ok: false, status: 409, conflict: { current: d.current, current_sha: d.current_sha } }
+    }
+    return {
+      ok: false,
+      status: res.status,
+      message: typeof detail === 'string' ? detail : `HTTP ${res.status}`,
+    }
+  },
   search: (q: string) => apiFetch<{ hits: NovelSearchHit[] }>(`/api/novels/search${qs({ q })}`),
   history: (path: string) =>
     apiFetch<{ commits: NovelCommit[] }>(`/api/novels/file/history${qs({ path })}`),
