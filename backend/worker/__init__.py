@@ -37,6 +37,7 @@ from worker.importer import (
     local_import_job,
 )
 from worker.memory import after_process_hook
+from worker.novel_sync import novel_sync_job
 from worker.reconciliation import reconciliation_job
 from worker.retry import retry_failed_downloads_job
 from worker.scan import (
@@ -767,6 +768,7 @@ def _build_cron_jobs() -> list[CronJob]:
         "disk_monitor_job": disk_monitor_job,
         "memory_monitor_job": memory_monitor_job,
         "adaptive_persist_job": adaptive_persist_job,
+        "novel_sync_job": novel_sync_job,
     }
     jobs = []
     for t in CATALOG:
@@ -842,6 +844,7 @@ def build_workers() -> tuple:
             disk_monitor_job,
             memory_monitor_job,
             adaptive_persist_job,
+            novel_sync_job,
         ],
         cron_jobs=_build_cron_jobs(),
         concurrency=concurrency[QUEUE_INTERACTIVE],
@@ -916,6 +919,7 @@ __all__ = [
     "disk_monitor_job",
     "memory_monitor_job",
     "adaptive_persist_job",
+    "novel_sync_job",
     "startup",
     "shutdown",
     "build_workers",

@@ -208,6 +208,15 @@ CATALOG: list[ScheduledTaskDef] = [
         saq_timeout=60,
         configurable=False,
     ),
+    ScheduledTaskDef(
+        task_id="novel_git_sync",
+        name="Novel Git Sync",
+        description="Fetch + fast-forward pull the novel repo and retry unpushed commits",
+        job_name="novel_sync_job",
+        default_cron="*/15 * * * *",
+        default_enabled=True,
+        saq_timeout=120,
+    ),
 ]
 
 # ── Lookup helpers ─────────────────────────────────────────────────────────
