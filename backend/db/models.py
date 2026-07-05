@@ -35,6 +35,16 @@ class User(Base):
     last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     avatar_style: Mapped[str] = mapped_column(Text, default="gravatar")
     locale: Mapped[str] = mapped_column(Text, default="en")
+    novel_prefs: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+
+
+class NovelReadProgress(Base):
+    __tablename__ = "novel_read_progress"
+
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    file_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    position: Mapped[str] = mapped_column(Text, nullable=False)
+    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class Gallery(Base):

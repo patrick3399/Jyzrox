@@ -616,6 +616,18 @@ DO $$ BEGIN
   END IF;
 END $$;
 
+-- ── Novel module ───────────────────────────────────────────────────────
+-- Markdown files are the source of truth; the DB stores only per-user state.
+ALTER TABLE users ADD COLUMN IF NOT EXISTS novel_prefs JSONB NOT NULL DEFAULT '{}'::jsonb;
+
+CREATE TABLE IF NOT EXISTS novel_read_progress (
+    user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    file_path  TEXT   NOT NULL,          -- repo-relative path
+    position   TEXT   NOT NULL,          -- in-chapter anchor (act index + paragraph offset)
+    updated_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (user_id, file_path)
+);
+
 -- ── PostgreSQL 18 features ─────────────────────────────────────────────
 
 -- UUIDv7: timestamp-ordered UUIDs for better B-tree index write performance

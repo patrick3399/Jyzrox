@@ -306,7 +306,17 @@ _SQLITE_SCHEMA = [
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_login_at TIMESTAMP,
         avatar_style TEXT DEFAULT 'gravatar',
-        locale TEXT DEFAULT 'en'
+        locale TEXT DEFAULT 'en',
+        novel_prefs TEXT DEFAULT '{}'
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS novel_read_progress (
+        user_id INTEGER NOT NULL,
+        file_path TEXT NOT NULL,
+        position TEXT NOT NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (user_id, file_path)
     )
     """,
     """
