@@ -1762,6 +1762,84 @@ const saucenao = {
     }),
 }
 
+// ── Novel module ──────────────────────────────────────────────────────
+
+export interface NovelWork {
+  name: string
+  chapter_count: number
+}
+export interface NovelChapter {
+  path: string
+  name: string
+  chars: number
+  mtime: number
+}
+export interface NovelAct {
+  index: number
+  title: string
+  line: number
+}
+export interface NovelFile {
+  path: string
+  content: string
+  base_sha: string
+  acts: NovelAct[]
+  backlinks: string[]
+}
+export interface NovelSearchHit {
+  path: string
+  line: number
+  text: string
+}
+export interface NovelCommit {
+  hash: string
+  date: string
+  message: string
+}
+export interface NovelRepoStatus {
+  head: string
+  ahead: number
+  behind: number
+  clean: boolean
+  locked: boolean
+}
+
+const novels = {
+  listWorks: () => apiFetch<{ works: NovelWork[] }>('/api/novels/works'),
+  listChapters: (work: string) =>
+    apiFetch<{ chapters: NovelChapter[] }>(
+      `/api/novels/works/${encodeURIComponent(work)}/chapters`,
+    ),
+  readFile: (path: string) => apiFetch<NovelFile>(`/api/novels/file${qs({ path })}`),
+  writeFile: (body: { path: string; content: string; base_sha: string; message?: string }) =>
+    apiFetch<{ head: string; pushed: boolean }>('/api/novels/file', {
+      method: 'PUT',
+      body: JSON.stringify(body),
+    }),
+  search: (q: string) => apiFetch<{ hits: NovelSearchHit[] }>(`/api/novels/search${qs({ q })}`),
+  history: (path: string) =>
+    apiFetch<{ commits: NovelCommit[] }>(`/api/novels/file/history${qs({ path })}`),
+  diff: (path: string, rev: string) =>
+    apiFetch<{ diff: string }>(`/api/novels/file/diff${qs({ path, rev })}`),
+  status: () => apiFetch<NovelRepoStatus>('/api/novels/status'),
+  sync: () => apiFetch<{ pulled: boolean }>('/api/novels/sync', { method: 'POST' }),
+  reset: () => apiFetch<{ ok: boolean }>('/api/novels/reset', { method: 'POST' }),
+  getProgress: (path: string) =>
+    apiFetch<{ path: string; position: string | null }>(`/api/novels/progress${qs({ path })}`),
+  putProgress: (path: string, position: string) =>
+    apiFetch<{ ok: boolean }>(`/api/novels/progress${qs({ path })}`, {
+      method: 'PUT',
+      body: JSON.stringify({ position }),
+    }),
+  getPrefs: () =>
+    apiFetch<{ preferences: Record<string, unknown> }>('/api/novels/preferences'),
+  putPrefs: (prefs: Record<string, unknown>) =>
+    apiFetch<{ ok: boolean }>('/api/novels/preferences', {
+      method: 'PUT',
+      body: JSON.stringify(prefs),
+    }),
+}
+
 // ── Exported API ──────────────────────────────────────────────────────
 
 export const api = {
@@ -1793,4 +1871,5 @@ export const api = {
   adminQueue,
   search,
   saucenao,
+  novels,
 }
