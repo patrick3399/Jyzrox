@@ -54,6 +54,7 @@ class Settings(BaseSettings):
     data_cas_path: str = "/data/cas"
     data_library_path: str = "/data/library"
     data_backups_path: str = "/data/backups"
+    novel_repo_path: str = "/data/novel"
     backup_retention_count: int = 14
     backup_pg_dump_timeout: int = 3600
     # Disk space

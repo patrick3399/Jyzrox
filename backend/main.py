@@ -29,6 +29,7 @@ from routers import (
     history,
     import_router,
     library,
+    novels,
     opds,
     queue_admin,
     rss,
@@ -172,6 +173,7 @@ app.include_router(history.router, prefix="/api/history")
 app.include_router(plugins_router.router, prefix="/api/plugins")
 app.include_router(artists.router, prefix="/api/artists")
 app.include_router(collections.router, prefix="/api/collections")
+app.include_router(novels.router, prefix="/api/novels")
 app.include_router(opds.router, prefix="/opds")
 app.include_router(scheduled_tasks.router, prefix="/api/scheduled-tasks")
 app.include_router(subscriptions.router, prefix="/api/subscriptions")

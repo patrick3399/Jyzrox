@@ -48,6 +48,9 @@ class EventType(StrEnum):
     # Tags
     TAGS_UPDATED = "tags.updated"
 
+    # Novel module
+    NOVEL_UPDATED = "novel.updated"
+
     # Dedup
     DEDUP_SCAN_STARTED = "dedup.scan_started"
     DEDUP_SCAN_COMPLETED = "dedup.scan_completed"
