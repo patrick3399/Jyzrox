@@ -13,6 +13,7 @@ import { useProfile } from '@/hooks/useProfile'
 import { hasRole } from '@/lib/pageRegistry'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
+import { BackButton } from '@/components/BackButton'
 import { NovelCreateDialog } from '@/components/novels/NovelCreateDialog'
 
 export default function NovelWorkPage() {
@@ -88,6 +89,8 @@ export default function NovelWorkPage() {
           }}
         />
       )}
+
+      <BackButton fallback="/novels" />
     </div>
   )
 }

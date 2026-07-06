@@ -12,6 +12,7 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useProfile } from '@/hooks/useProfile'
 import { hasRole } from '@/lib/pageRegistry'
+import { BackButton } from '@/components/BackButton'
 import { Reader } from '@/components/novels/Reader'
 import { Editor } from '@/components/novels/Editor'
 import { HistoryPanel } from '@/components/novels/HistoryPanel'
@@ -97,7 +98,7 @@ export default function NovelChapterPage() {
         <Reader path={path} canEdit={canEdit} />
       )}
 
-      <div className="mt-6 flex items-center justify-between">
+      <div className="mt-6 mb-[var(--fab-offset)] flex items-center justify-between">
         {prev ? (
           <Link
             href={chapterHref(prev.name, prev.path)}
@@ -121,6 +122,10 @@ export default function NovelChapterPage() {
           <span />
         )}
       </div>
+
+      {/* Always-reachable back to the work's chapter list (fixed FAB), matching
+          every other detail page — no need to scroll to the top breadcrumb. */}
+      <BackButton fallback={`/novels/${encodeURIComponent(work)}`} />
     </div>
   )
 }

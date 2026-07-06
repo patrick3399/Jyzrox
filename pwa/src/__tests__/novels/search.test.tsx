@@ -7,7 +7,8 @@ vi.mock('@/components/LoadingSpinner', () => ({
   LoadingSpinner: () => <span data-testid="loading-spinner" />,
 }))
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  usePathname: () => '/novels/search',
 }))
 
 const h = vi.hoisted(() => ({

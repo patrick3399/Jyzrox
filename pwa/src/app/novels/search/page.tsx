@@ -9,6 +9,7 @@ import { novelChapterHref } from '@/lib/novels'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { BackButton } from '@/components/BackButton'
 
 function hitHref(path: string): string {
   const parts = path.split('/')
@@ -80,6 +81,8 @@ export default function NovelSearchPage() {
           ))}
         </ul>
       )}
+
+      <BackButton fallback="/novels" />
     </div>
   )
 }
