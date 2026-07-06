@@ -1820,7 +1820,7 @@ const novels = {
   writeFile: async (body: {
     path: string
     content: string
-    base_sha: string
+    base_sha?: string
     message?: string
     create?: boolean
   }): Promise<NovelWriteResult> => {
@@ -1861,14 +1861,13 @@ const novels = {
     }
   },
   // Create a new chapter file (new work = new folder via its first chapter).
-  // Reuses PUT /file with create:true so the backend refuses to clobber.
+  // Reuses PUT /file with create:true; the backend refuses to clobber and needs
+  // no base_sha (a new file has no base revision), so this is a single request.
   createFile: async (work: string, name: string): Promise<NovelWriteResult> => {
-    const status = await novels.status()
     const path = `${work}/${name}.md`
     return novels.writeFile({
       path,
       content: `# ${name}\n\n`,
-      base_sha: status.head,
       create: true,
       message: `create: ${path}`,
     })

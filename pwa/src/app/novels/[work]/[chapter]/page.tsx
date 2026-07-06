@@ -7,6 +7,7 @@ import { mutate } from 'swr'
 import { ArrowLeft, ChevronLeft, ChevronRight, History, Pencil } from 'lucide-react'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
+import { novelChapterHref } from '@/lib/novels'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useProfile } from '@/hooks/useProfile'
@@ -40,8 +41,7 @@ export default function NovelChapterPage() {
     }
   }, [data?.chapters, path])
 
-  const chapterHref = (name: string, p: string) =>
-    `/novels/${encodeURIComponent(work)}/${encodeURIComponent(name)}?path=${encodeURIComponent(p)}`
+  const chapterHref = (name: string, p: string) => novelChapterHref(work, name, p)
 
   return (
     <div className="mx-auto w-full max-w-5xl px-4 py-6">

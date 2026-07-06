@@ -53,7 +53,6 @@ export function Reader({ path, canEdit = false }: { path: string; canEdit?: bool
   const [editingRange, setEditingRange] = useState<BlockRange | null>(null)
   const [saving, setSaving] = useState(false)
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const containerRef = useRef<HTMLDivElement | null>(null)
 
   // Load server prefs once (localStorage acts as the fast first paint).
   useEffect(() => {
@@ -154,12 +153,11 @@ export function Reader({ path, canEdit = false }: { path: string; canEdit?: bool
           base_sha: data.base_sha,
           message: `edit: ${path}`,
         })
-        if (result.ok) {
-          toast.success(t('novels.saved'))
-          setEditingRange(null)
-          mutate(['novel-file', path])
-        } else if (result.conflict) {
-          toast.error(t('novels.staleConflict'))
+        if (result.ok || result.conflict) {
+          // Both close the editor and refetch; a conflict just also warns.
+          toast[result.ok ? 'success' : 'error'](
+            result.ok ? t('novels.saved') : t('novels.staleConflict'),
+          )
           setEditingRange(null)
           mutate(['novel-file', path])
         } else {
@@ -219,7 +217,6 @@ export function Reader({ path, canEdit = false }: { path: string; canEdit?: bool
           </button>
         </div>
         <article
-          ref={containerRef}
           data-theme={prefs.theme}
           data-testid="reader-content"
           className="rounded-lg px-5 py-6"

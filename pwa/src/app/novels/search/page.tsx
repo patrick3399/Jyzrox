@@ -5,6 +5,7 @@ import Link from 'next/link'
 import { ArrowLeft, Search } from 'lucide-react'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
+import { novelChapterHref } from '@/lib/novels'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -12,9 +13,8 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 function hitHref(path: string): string {
   const parts = path.split('/')
   const work = parts[0] ?? ''
-  const file = parts[parts.length - 1] ?? ''
-  const chapter = file.replace(/\.md$/, '')
-  return `/novels/${encodeURIComponent(work)}/${encodeURIComponent(chapter)}?path=${encodeURIComponent(path)}`
+  const chapter = (parts[parts.length - 1] ?? '').replace(/\.md$/, '')
+  return novelChapterHref(work, chapter, path)
 }
 
 export default function NovelSearchPage() {

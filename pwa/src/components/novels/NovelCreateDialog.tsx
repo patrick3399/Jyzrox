@@ -32,11 +32,7 @@ export function NovelCreateDialog({
 
   const handleCreate = async () => {
     const chap = chapterName.trim()
-    if (mode === 'work' && !targetWork) {
-      setError(t('novels.nameRequired'))
-      return
-    }
-    if (!chap) {
+    if ((mode === 'work' && !targetWork) || !chap) {
       setError(t('novels.nameRequired'))
       return
     }

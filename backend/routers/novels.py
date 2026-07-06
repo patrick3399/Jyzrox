@@ -169,7 +169,9 @@ async def put_prefs(body: dict, auth: dict = Depends(require_auth)):
 class WriteBody(BaseModel):
     path: str
     content: str
-    base_sha: str
+    # Not required for create: a brand-new file has no base revision to be stale
+    # against; its only invariant is that the path is free (see file_exists guard).
+    base_sha: str = ""
     message: str | None = None
     create: bool = False
 
@@ -203,7 +205,12 @@ async def write_file(body: WriteBody, auth: dict = Depends(_member)):
         st = await novel_git.status(repo)
         if st["locked"]:
             raise HTTPException(status_code=409, detail="repo locked; resolve on desktop")
-        if st["head"] != body.base_sha:
+        if body.create:
+            # A create's only invariant is that the path is free — no base_sha.
+            # Checked under the git lock so a concurrent create can't slip in.
+            if novel_fs.file_exists(repo, body.path):
+                raise HTTPException(status_code=409, detail={"error": "file exists"})
+        elif st["head"] != body.base_sha:
             try:
                 current = novel_fs.read_file(repo, body.path)
             except FileNotFoundError:
@@ -212,10 +219,6 @@ async def write_file(body: WriteBody, auth: dict = Depends(_member)):
                 status_code=409,
                 detail={"error": "stale base_sha", "current": current, "current_sha": st["head"]},
             )
-        # Create must not clobber an existing chapter. Checked under the git lock
-        # (with the base_sha check) so a concurrent create can't slip in between.
-        if body.create and novel_fs.file_exists(repo, body.path):
-            raise HTTPException(status_code=409, detail={"error": "file exists"})
         novel_fs.write_file(repo, body.path, body.content)
         return await novel_git.commit_and_push(repo, body.path, msg)
 

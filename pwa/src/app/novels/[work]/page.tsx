@@ -6,6 +6,7 @@ import { useParams, useRouter } from 'next/navigation'
 import { BookText, ArrowLeft, Plus } from 'lucide-react'
 import useSWR, { mutate } from 'swr'
 import { api } from '@/lib/api'
+import { novelChapterHref } from '@/lib/novels'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useProfile } from '@/hooks/useProfile'
@@ -83,10 +84,7 @@ export default function NovelWorkPage() {
           onCreated={(createdWork, chapter) => {
             setShowCreate(false)
             mutate(['novel-chapters', work])
-            const path = `${createdWork}/${chapter}.md`
-            router.push(
-              `/novels/${encodeURIComponent(createdWork)}/${encodeURIComponent(chapter)}?path=${encodeURIComponent(path)}`,
-            )
+            router.push(novelChapterHref(createdWork, chapter, `${createdWork}/${chapter}.md`))
           }}
         />
       )}

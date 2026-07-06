@@ -6,6 +6,7 @@ import { useRouter } from 'next/navigation'
 import { BookText, Plus, Search } from 'lucide-react'
 import useSWR, { mutate } from 'swr'
 import { api } from '@/lib/api'
+import { novelChapterHref } from '@/lib/novels'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useProfile } from '@/hooks/useProfile'
@@ -25,10 +26,7 @@ export default function NovelsPage() {
   const works = data?.works ?? []
 
   const goToChapter = (work: string, chapter: string) => {
-    const path = `${work}/${chapter}.md`
-    router.push(
-      `/novels/${encodeURIComponent(work)}/${encodeURIComponent(chapter)}?path=${encodeURIComponent(path)}`,
-    )
+    router.push(novelChapterHref(work, chapter, `${work}/${chapter}.md`))
   }
 
   return (

@@ -13,6 +13,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Pencil } from 'lucide-react'
 import { remarkWikilink } from './remarkWikilink'
+import { useLongPress } from '@/hooks/useLongPress'
 import { t } from '@/lib/i18n'
 import type { NovelAct } from '@/lib/api'
 
@@ -23,9 +24,6 @@ type MdNode = {
   position?: { start: { line: number }; end: { line: number } }
 }
 type BlockProps = { node?: MdNode; children?: ReactNode }
-
-const LONG_PRESS_MS = 500
-const MOVE_CANCEL_PX = 10
 
 function rangeOf(node?: MdNode): BlockRange | null {
   const pos = node?.position
@@ -184,27 +182,25 @@ export function MarkdownView({
       return r ? { 'data-line-start': r.start, 'data-line-end': r.end } : {}
     }
 
-    const isEditing = (node?: MdNode) => {
-      const r = rangeOf(node)
-      return !!(r && editingRange && r.start === editingRange.start && r.end === editingRange.end)
-    }
+    const isEditing = (r: BlockRange | null) =>
+      !!(r && editingRange && r.start === editingRange.start && r.end === editingRange.end)
+
+    const editorFor = (r: BlockRange) => (
+      <BlockEditor
+        path={path}
+        baseSha={baseSha}
+        range={r}
+        initialText={seedFor(r)}
+        saving={saving}
+        onSave={(rr, text) => onSaveBlock?.(rr, text)}
+        onCancel={() => onCancelEdit?.()}
+      />
+    )
 
     const block = (tag: string) => {
       const Block = ({ node, children }: BlockProps) => {
         const r = rangeOf(node)
-        if (editable && r && isEditing(node)) {
-          return (
-            <BlockEditor
-              path={path}
-              baseSha={baseSha}
-              range={r}
-              initialText={seedFor(r)}
-              saving={saving}
-              onSave={(rr, text) => onSaveBlock?.(rr, text)}
-              onCancel={() => onCancelEdit?.()}
-            />
-          )
-        }
+        if (editable && r && isEditing(r)) return editorFor(r)
         // hr is a void element — it can hold neither children nor the pencil.
         if (tag === 'hr') return createElement('hr', lineAttrs(node))
         return createElement(
@@ -239,19 +235,7 @@ export function MarkdownView({
     const heading = (tag: string) => {
       const Heading = ({ node, children }: BlockProps) => {
         const r = rangeOf(node)
-        if (editable && r && isEditing(node)) {
-          return (
-            <BlockEditor
-              path={path}
-              baseSha={baseSha}
-              range={r}
-              initialText={seedFor(r)}
-              saving={saving}
-              onSave={(rr, text) => onSaveBlock?.(rr, text)}
-              onCancel={() => onCancelEdit?.()}
-            />
-          )
-        }
+        if (editable && r && isEditing(r)) return editorFor(r)
         const attrs: Record<string, string | number> = lineAttrs(node)
         if (r) {
           const actIndex = lineToAct.get(r.start - 1)
@@ -291,12 +275,9 @@ export function MarkdownView({
     onRequestEdit,
   ])
 
-  // Container-level right-click (desktop) + long-press (touch) → find the
-  // nearest block with a source range and request its edit. Centralizing avoids
-  // per-block event handlers.
-  const pressTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const pressStart = useRef<{ x: number; y: number } | null>(null)
-
+  // Right-click (desktop) + long-press (touch) on a block → request its edit.
+  // Reuses the shared useLongPress hook (which also suppresses the synthetic
+  // click that follows a long-press). Handlers are only wired when editable.
   const blockRangeFromEvent = useCallback((target: EventTarget | null): BlockRange | null => {
     if (!(target instanceof HTMLElement)) return null
     const el = target.closest('[data-line-start]')
@@ -307,59 +288,17 @@ export function MarkdownView({
     return { start, end }
   }, [])
 
-  const onContextMenu = useCallback(
-    (e: React.MouseEvent) => {
-      if (!editable) return
+  const longPress = useLongPress({
+    onLongPress: (e) => {
       const r = blockRangeFromEvent(e.target)
-      if (!r) return
-      e.preventDefault()
-      onRequestEdit?.(r)
+      if (r) onRequestEdit?.(r)
     },
-    [editable, blockRangeFromEvent, onRequestEdit],
-  )
-
-  const clearPress = useCallback(() => {
-    if (pressTimer.current) clearTimeout(pressTimer.current)
-    pressTimer.current = undefined
-    pressStart.current = null
-  }, [])
-
-  const onTouchStart = useCallback(
-    (e: React.TouchEvent) => {
-      if (!editable) return
-      const touch = e.touches[0]
-      pressStart.current = { x: touch.clientX, y: touch.clientY }
-      const r = blockRangeFromEvent(e.target)
-      if (!r) return
-      pressTimer.current = setTimeout(() => {
-        onRequestEdit?.(r)
-        clearPress()
-      }, LONG_PRESS_MS)
-    },
-    [editable, blockRangeFromEvent, onRequestEdit, clearPress],
-  )
-
-  const onTouchMove = useCallback(
-    (e: React.TouchEvent) => {
-      if (!pressStart.current) return
-      const touch = e.touches[0]
-      const dx = Math.abs(touch.clientX - pressStart.current.x)
-      const dy = Math.abs(touch.clientY - pressStart.current.y)
-      if (dx > MOVE_CANCEL_PX || dy > MOVE_CANCEL_PX) clearPress()
-    },
-    [clearPress],
-  )
-
-  useEffect(() => () => clearPress(), [clearPress])
+  })
 
   return (
     <div
       className={editable ? 'novel-markdown novel-editable' : 'novel-markdown'}
-      onContextMenu={onContextMenu}
-      onTouchStart={onTouchStart}
-      onTouchMove={onTouchMove}
-      onTouchEnd={clearPress}
-      onTouchCancel={clearPress}
+      {...(editable ? longPress : {})}
     >
       <ReactMarkdown remarkPlugins={[remarkGfm, remarkWikilink]} components={components}>
         {content}

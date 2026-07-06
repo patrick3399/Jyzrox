@@ -276,15 +276,14 @@ async def test_file_history_rejects_traversal(viewer_client, novel_repo):
     assert r.status_code == 400
 
 
-async def test_create_new_file_commits(member_client, novel_repo):
-    """create=True on a brand-new path writes + commits the file."""
-    head = (await member_client.get("/api/novels/status")).json()["head"]
+async def test_create_new_file_commits_without_base_sha(member_client, novel_repo):
+    """create=True writes + commits a brand-new file with no base_sha at all —
+    a create has no base revision to be stale against."""
     r = await member_client.put(
         "/api/novels/file",
         json={
             "path": "作品B/第01章.md",
             "content": "# 新作品\n",
-            "base_sha": head,
             "create": True,
             "message": "create: 作品B/第01章.md",
         },
@@ -295,17 +294,21 @@ async def test_create_new_file_commits(member_client, novel_repo):
     assert "新作品" in got.json()["content"]
 
 
-async def test_create_existing_file_returns_409(member_client, novel_repo):
-    """create=True must refuse to clobber an existing chapter."""
-    head = (await member_client.get("/api/novels/status")).json()["head"]
+async def test_create_ignores_stale_base_sha(member_client, novel_repo):
+    """A create must not 409 on a stale/bogus base_sha — base_sha is irrelevant
+    for create; only the free-path invariant matters."""
     r = await member_client.put(
         "/api/novels/file",
-        json={
-            "path": "作品A/第01章.md",
-            "content": "覆蓋\n",
-            "base_sha": head,
-            "create": True,
-        },
+        json={"path": "作品B/第02章.md", "content": "x\n", "base_sha": "0000000", "create": True},
+    )
+    assert r.status_code == 200
+
+
+async def test_create_existing_file_returns_409(member_client, novel_repo):
+    """create=True must refuse to clobber an existing chapter (regardless of base_sha)."""
+    r = await member_client.put(
+        "/api/novels/file",
+        json={"path": "作品A/第01章.md", "content": "覆蓋\n", "create": True},
     )
     assert r.status_code == 409
     assert r.json()["detail"]["error"] == "file exists"
@@ -313,10 +316,9 @@ async def test_create_existing_file_returns_409(member_client, novel_repo):
 
 async def test_create_rejects_traversal(member_client, novel_repo):
     """create=True with an escaping path is rejected before any write."""
-    head = (await member_client.get("/api/novels/status")).json()["head"]
     r = await member_client.put(
         "/api/novels/file",
-        json={"path": "../evil.md", "content": "x", "base_sha": head, "create": True},
+        json={"path": "../evil.md", "content": "x", "create": True},
     )
     assert r.status_code == 400
 
@@ -325,7 +327,7 @@ async def test_create_viewer_forbidden(viewer_client, novel_repo):
     """Creating a file is a write → viewer gets 403."""
     r = await viewer_client.put(
         "/api/novels/file",
-        json={"path": "作品C/第01章.md", "content": "x", "base_sha": "deadbeef", "create": True},
+        json={"path": "作品C/第01章.md", "content": "x", "create": True},
     )
     assert r.status_code == 403
 
