@@ -56,26 +56,29 @@ class TestChooseAction:
 
 
 class TestMainDispatch:
-    def _run_main_with_state(self, has_alembic, has_core, heads=("head",), current="head"):
+    def _run_main_with_state(self, has_alembic, has_core, guard=None):
         detect = AsyncMock(return_value=(has_alembic, has_core))
         apply_init = AsyncMock()
         stamp = MagicMock()
         upgrade = MagicMock()
+        # bootstrap_db.main() imports assert_db_at_head from core.schema_guard at call
+        # time, so patch it at the source module.
+        guard = guard or AsyncMock()
         with (
             patch.object(bootstrap_db, "_detect_state", detect),
             patch.object(bootstrap_db, "_apply_init_sql", apply_init),
             patch.object(bootstrap_db, "_alembic_stamp_head", stamp),
             patch.object(bootstrap_db, "_alembic_upgrade_head", upgrade),
-            patch.object(bootstrap_db, "_script_heads", MagicMock(return_value=heads)),
-            patch.object(bootstrap_db, "_current_db_revision", AsyncMock(return_value=current)),
+            patch("core.schema_guard.assert_db_at_head", guard),
         ):
             bootstrap_db.main()
         return apply_init, stamp, upgrade
 
-    def test_main_raises_when_db_not_at_head_after_bootstrap(self):
-        # Stale migrate image / no-op upgrade: DB left at 0003 while head is 0004.
+    def test_main_raises_when_head_assertion_fails(self):
+        # Post-bootstrap guard rejects a stale/behind schema -> main propagates it.
+        failing_guard = AsyncMock(side_effect=RuntimeError("not at head"))
         with pytest.raises(RuntimeError):
-            self._run_main_with_state(True, True, heads=("0004",), current="0003")
+            self._run_main_with_state(True, True, guard=failing_guard)
 
     def test_empty_db_applies_init_sql_then_stamps_head(self):
         apply_init, stamp, upgrade = self._run_main_with_state(False, False)
@@ -135,31 +138,6 @@ class TestInitSqlValidity:
         sql = self._init_sql()
         assert "chk_users_role" in sql
         assert "pg_constraint" in sql  # guarded via existence check
-
-
-class TestVerifyAtHead:
-    """After bootstrap, the DB revision must equal the single code head, else raise.
-
-    Guards the distributed/stale-image failure mode: a silent `alembic upgrade`
-    no-op (DB left behind head) or a branched revision chain (e.g. the novel
-    0002 duplicate-id collision → two heads) must fail the migrate step loudly
-    (exit != 0) instead of letting the app boot against a stale schema.
-    """
-
-    def test_passes_when_db_at_single_head(self):
-        bootstrap_db.verify_at_head("0004", ("0004",))  # must not raise
-
-    def test_raises_when_db_behind_head(self):
-        with pytest.raises(RuntimeError, match="0003.*0004|not at head|head"):
-            bootstrap_db.verify_at_head("0003", ("0004",))
-
-    def test_raises_when_multiple_heads(self):
-        with pytest.raises(RuntimeError, match="[Mm]ultiple|head"):
-            bootstrap_db.verify_at_head("0004", ("0004", "0004xyz"))
-
-    def test_raises_when_no_revision_recorded(self):
-        with pytest.raises(RuntimeError):
-            bootstrap_db.verify_at_head(None, ("0004",))
 
 
 @pytest.mark.asyncio

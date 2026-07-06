@@ -196,6 +196,12 @@ async def _migrate_default_queue(r) -> None:
 
 async def startup(ctx: dict) -> None:
     logger.info("SAQ Worker started — Jyzrox")
+    # Fail fast if the DB is not migrated to this image's schema head (e.g. a
+    # stale/mismatched migrate step). Refuse to process jobs on a stale schema.
+    from core.config import settings
+    from core.schema_guard import assert_db_at_head
+
+    await assert_db_at_head(settings.gdl_archive_dsn)
     from core.redis_client import get_redis, init_redis
 
     await init_redis()

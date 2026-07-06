@@ -66,9 +66,23 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+async def _verify_schema_current() -> None:
+    """Fail fast unless the DB is migrated to this image's alembic head.
+
+    Guards the distributed-deploy case where a stale/mismatched migrate step
+    left the DB behind the app image's schema; the api process then crash-loops
+    instead of serving on a stale schema.
+    """
+    from core.config import settings
+    from core.schema_guard import assert_db_at_head
+
+    await assert_db_at_head(settings.gdl_archive_dsn)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     logger.info("Starting Jyzrox API rev 2.0...")
+    await _verify_schema_current()
     await init_redis()
     from core.log_handler import apply_log_level_from_redis, install_log_handler
 

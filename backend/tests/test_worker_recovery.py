@@ -164,6 +164,9 @@ def _startup_patches(redis_mock, session, mock_enqueue=None, mock_emit=None):
     mock_site_config.start_listener = AsyncMock()
 
     with (
+        # startup() first asserts the DB is at the schema head via asyncpg; the
+        # test DB is SQLite, so bypass the guard (its own tests cover it).
+        patch("core.schema_guard.assert_db_at_head", new_callable=AsyncMock),
         patch("core.redis_client.init_redis", new_callable=AsyncMock),
         patch("core.redis_client.get_redis", return_value=redis_mock),
         patch("core.log_handler.install_log_handler"),
