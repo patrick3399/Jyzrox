@@ -90,7 +90,7 @@ export default function NovelWorkPage() {
         />
       )}
 
-      <BackButton fallback="/novels" />
+      <BackButton fallback="/novels" toParent />
     </div>
   )
 }

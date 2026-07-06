@@ -123,9 +123,10 @@ export default function NovelChapterPage() {
         )}
       </div>
 
-      {/* Always-reachable back to the work's chapter list (fixed FAB), matching
-          every other detail page — no need to scroll to the top breadcrumb. */}
-      <BackButton fallback={`/novels/${encodeURIComponent(work)}`} />
+      {/* Always-reachable back that climbs to the work's chapter list (its
+          structural parent), not the browser's previous page — a chapter opened
+          from search or an adjacent chapter still goes up to the chapter list. */}
+      <BackButton fallback={`/novels/${encodeURIComponent(work)}`} toParent />
     </div>
   )
 }

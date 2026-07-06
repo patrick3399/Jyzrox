@@ -1,9 +1,10 @@
-import { describe, it, expect, vi } from 'vitest'
-import { render, screen } from '@testing-library/react'
+import { describe, it, expect, vi, beforeEach } from 'vitest'
+import { render, screen, fireEvent } from '@testing-library/react'
 
 // The bug this guards: novel sub-pages only had a top-of-page back link, so you
 // had to scroll to the top to leave a long chapter/list. They must now carry the
-// shared BackButton FAB (fixed, always reachable) like every other detail page.
+// shared BackButton FAB (fixed, always reachable) like every other detail page —
+// and it must climb the hierarchy (toParent), not replay browser history.
 
 vi.mock('@/lib/i18n', () => ({
   t: (key: string, vars?: Record<string, string | number>) =>
@@ -14,8 +15,9 @@ vi.mock('@/components/LoadingSpinner', () => ({
   LoadingSpinner: () => <span data-testid="loading-spinner" />,
 }))
 
+const nav = vi.hoisted(() => ({ push: vi.fn(), back: vi.fn(), replace: vi.fn() }))
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn(), back: vi.fn() }),
+  useRouter: () => nav,
   usePathname: () => '/novels/作品A/第01章',
   useParams: () => ({ work: '作品A', chapter: '第01章' }),
   useSearchParams: () => new URLSearchParams('path=作品A/第01章.md'),
@@ -43,19 +45,27 @@ import NovelSearchPage from '@/app/novels/search/page'
 
 const backFab = () => screen.getByRole('button', { name: /common\.back/i })
 
-describe('novel pages carry the shared BackButton FAB', () => {
-  it('chapter (reader) page has the back FAB', () => {
+describe('novel pages carry the shared BackButton FAB (climbs the hierarchy)', () => {
+  beforeEach(() => vi.clearAllMocks())
+
+  it('chapter (reader) page: back climbs to the work chapter list, not history', () => {
     render(<NovelChapterPage />)
-    expect(backFab()).toBeInTheDocument()
+    fireEvent.click(backFab())
+    expect(nav.push).toHaveBeenCalledWith('/novels/%E4%BD%9C%E5%93%81A')
+    expect(nav.back).not.toHaveBeenCalled()
   })
 
-  it('work (chapter list) page has the back FAB', () => {
+  it('work (chapter list) page: back climbs to /novels', () => {
     render(<NovelWorkPage />)
-    expect(backFab()).toBeInTheDocument()
+    fireEvent.click(backFab())
+    expect(nav.push).toHaveBeenCalledWith('/novels')
+    expect(nav.back).not.toHaveBeenCalled()
   })
 
-  it('search page has the back FAB', () => {
+  it('search page: back climbs to /novels', () => {
     render(<NovelSearchPage />)
-    expect(backFab()).toBeInTheDocument()
+    fireEvent.click(backFab())
+    expect(nav.push).toHaveBeenCalledWith('/novels')
+    expect(nav.back).not.toHaveBeenCalled()
   })
 })

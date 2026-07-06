@@ -8,6 +8,11 @@ import { consumeTabRestore, getListHref } from '@/lib/navMemory'
 
 interface BackButtonProps {
   fallback: string
+  /** Always navigate to `fallback` (the structural parent) instead of walking
+   *  browser history. Use for nested hierarchies where "back" should climb one
+   *  level up the tree, not return to whatever page was visited previously
+   *  (e.g. a chapter reached from search should go up to its chapter list). */
+  toParent?: boolean
 }
 
 /** History back that stays inside the section: when this page was reached via
@@ -27,7 +32,7 @@ export function smartBack(router: { back: () => void; push: (href: string) => vo
   }
 }
 
-export function BackButton({ fallback }: BackButtonProps) {
+export function BackButton({ fallback, toParent = false }: BackButtonProps) {
   const router = useRouter()
   const pathname = usePathname()
 
@@ -39,6 +44,10 @@ export function BackButton({ fallback }: BackButtonProps) {
   }, [])
 
   const handleClick = () => {
+    if (toParent) {
+      router.push(fallback)
+      return
+    }
     if (fallback === '/settings' && pathname?.startsWith('/settings/')) {
       router.push(fallback)
       return

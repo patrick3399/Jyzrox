@@ -82,7 +82,7 @@ export default function NovelSearchPage() {
         </ul>
       )}
 
-      <BackButton fallback="/novels" />
+      <BackButton fallback="/novels" toParent />
     </div>
   )
 }
