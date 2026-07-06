@@ -1,19 +1,35 @@
 'use client'
 
+import { useState } from 'react'
 import Link from 'next/link'
-import { BookText, Search } from 'lucide-react'
-import useSWR from 'swr'
+import { useRouter } from 'next/navigation'
+import { BookText, Plus, Search } from 'lucide-react'
+import useSWR, { mutate } from 'swr'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
+import { useProfile } from '@/hooks/useProfile'
+import { hasRole } from '@/lib/pageRegistry'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { RepoStatusBar } from '@/components/novels/RepoStatusBar'
+import { NovelCreateDialog } from '@/components/novels/NovelCreateDialog'
 
 export default function NovelsPage() {
   useLocale()
+  const router = useRouter()
   const { data, isLoading } = useSWR('novel-works', () => api.novels.listWorks())
+  const { data: profile } = useProfile()
+  const canEdit = hasRole(profile?.role, 'member')
+  const [showCreate, setShowCreate] = useState(false)
   const works = data?.works ?? []
+
+  const goToChapter = (work: string, chapter: string) => {
+    const path = `${work}/${chapter}.md`
+    router.push(
+      `/novels/${encodeURIComponent(work)}/${encodeURIComponent(chapter)}?path=${encodeURIComponent(path)}`,
+    )
+  }
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-6">
@@ -22,13 +38,25 @@ export default function NovelsPage() {
           <BookText className="size-6" />
           {t('novels.title')}
         </h1>
-        <Link
-          href="/novels/search"
-          className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
-        >
-          <Search className="size-4" />
-          {t('novels.search')}
-        </Link>
+        <div className="flex items-center gap-2">
+          {canEdit && (
+            <button
+              type="button"
+              onClick={() => setShowCreate(true)}
+              className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+            >
+              <Plus className="size-4" />
+              {t('novels.newWork')}
+            </button>
+          )}
+          <Link
+            href="/novels/search"
+            className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+          >
+            <Search className="size-4" />
+            {t('novels.search')}
+          </Link>
+        </div>
       </div>
 
       <RepoStatusBar />
@@ -53,6 +81,18 @@ export default function NovelsPage() {
             </li>
           ))}
         </ul>
+      )}
+
+      {showCreate && (
+        <NovelCreateDialog
+          mode="work"
+          onClose={() => setShowCreate(false)}
+          onCreated={(work, chapter) => {
+            setShowCreate(false)
+            mutate('novel-works')
+            goToChapter(work, chapter)
+          }}
+        />
       )}
     </div>
   )

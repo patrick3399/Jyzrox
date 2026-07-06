@@ -5,6 +5,7 @@ import pytest
 
 from services.novel_fs import (
     NovelPathError,
+    file_exists,
     keyword_scan,
     list_chapters,
     list_works,
@@ -82,6 +83,23 @@ def test_write_then_read_roundtrip(tmp_path):
     (tmp_path / "作品A").mkdir()
     write_file(tmp_path, "作品A/新.md", "內容")
     assert read_file(tmp_path, "作品A/新.md") == "內容"
+
+
+def test_file_exists_true_for_existing_md(tmp_path):
+    root = _repo(tmp_path)
+    assert file_exists(root, "作品A/第01章.md") is True
+
+
+def test_file_exists_false_for_missing_md(tmp_path):
+    root = _repo(tmp_path)
+    assert file_exists(root, "作品A/第99章.md") is False
+
+
+def test_file_exists_rejects_traversal(tmp_path):
+    """An escaping path must raise, not report False (which would let a create clobber it)."""
+    root = _repo(tmp_path)
+    with pytest.raises(NovelPathError):
+        file_exists(root, "../secret.md")
 
 
 def test_keyword_scan_returns_path_line_context(tmp_path):

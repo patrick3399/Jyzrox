@@ -14,6 +14,10 @@ vi.mock('@/components/LoadingSpinner', () => ({
   LoadingSpinner: () => <span data-testid="loading-spinner" />,
 }))
 
+vi.mock('next/navigation', () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+}))
+
 let mockWorks: unknown = undefined
 let mockLoading = false
 vi.mock('swr', () => ({

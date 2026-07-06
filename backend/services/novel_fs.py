@@ -72,6 +72,16 @@ def read_file(repo_root: str | Path, rel_path: str) -> str:
     return safe_repo_path(repo_root, rel_path).read_text(encoding="utf-8")
 
 
+def file_exists(repo_root: str | Path, rel_path: str) -> bool:
+    """Whether an allowed (`.md`, inside-root) file already exists at rel_path.
+
+    Path validation runs first, so an unsafe path raises NovelPathError rather
+    than silently reporting False — the create guard must not treat an escaping
+    path as "free to write".
+    """
+    return safe_repo_path(repo_root, rel_path).exists()
+
+
 def write_file(repo_root: str | Path, rel_path: str, content: str) -> None:
     path = safe_repo_path(repo_root, rel_path)
     path.parent.mkdir(parents=True, exist_ok=True)

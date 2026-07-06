@@ -276,6 +276,60 @@ async def test_file_history_rejects_traversal(viewer_client, novel_repo):
     assert r.status_code == 400
 
 
+async def test_create_new_file_commits(member_client, novel_repo):
+    """create=True on a brand-new path writes + commits the file."""
+    head = (await member_client.get("/api/novels/status")).json()["head"]
+    r = await member_client.put(
+        "/api/novels/file",
+        json={
+            "path": "作品B/第01章.md",
+            "content": "# 新作品\n",
+            "base_sha": head,
+            "create": True,
+            "message": "create: 作品B/第01章.md",
+        },
+    )
+    assert r.status_code == 200
+    got = await member_client.get("/api/novels/file?path=作品B/第01章.md")
+    assert got.status_code == 200
+    assert "新作品" in got.json()["content"]
+
+
+async def test_create_existing_file_returns_409(member_client, novel_repo):
+    """create=True must refuse to clobber an existing chapter."""
+    head = (await member_client.get("/api/novels/status")).json()["head"]
+    r = await member_client.put(
+        "/api/novels/file",
+        json={
+            "path": "作品A/第01章.md",
+            "content": "覆蓋\n",
+            "base_sha": head,
+            "create": True,
+        },
+    )
+    assert r.status_code == 409
+    assert r.json()["detail"]["error"] == "file exists"
+
+
+async def test_create_rejects_traversal(member_client, novel_repo):
+    """create=True with an escaping path is rejected before any write."""
+    head = (await member_client.get("/api/novels/status")).json()["head"]
+    r = await member_client.put(
+        "/api/novels/file",
+        json={"path": "../evil.md", "content": "x", "base_sha": head, "create": True},
+    )
+    assert r.status_code == 400
+
+
+async def test_create_viewer_forbidden(viewer_client, novel_repo):
+    """Creating a file is a write → viewer gets 403."""
+    r = await viewer_client.put(
+        "/api/novels/file",
+        json={"path": "作品C/第01章.md", "content": "x", "base_sha": "deadbeef", "create": True},
+    )
+    assert r.status_code == 403
+
+
 async def test_reset_forbidden_for_member(member_client, novel_repo):
     # Two clients cannot coexist (they share _app.dependency_overrides), so the
     # member and admin cases are separate tests.

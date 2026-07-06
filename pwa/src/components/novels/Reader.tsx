@@ -1,10 +1,13 @@
 'use client'
 
-import { useCallback, useEffect, useMemo, useRef, useState } from 'react'
-import useSWR from 'swr'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import useSWR, { mutate } from 'swr'
+import { toast } from 'sonner'
+import { Code, Eye } from 'lucide-react'
 import { api, type NovelFile } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
+import { MarkdownView, type BlockRange } from './MarkdownView'
 import {
   ReaderSettings,
   DEFAULT_READER_PREFS,
@@ -13,6 +16,7 @@ import {
 } from './ReaderSettings'
 
 const PREFS_CACHE_KEY = 'novel:prefs'
+const VIEWMODE_CACHE_KEY = 'novel:viewmode'
 
 const THEME_STYLES: Record<ReaderTheme, { background: string; color: string }> = {
   light: { background: '#ffffff', color: '#1a1a1a' },
@@ -31,59 +35,23 @@ function loadCachedPrefs(): ReaderPrefs {
   return DEFAULT_READER_PREFS
 }
 
-/** Render one line of novel markdown into a React node with a stable key. */
-function renderLine(line: string, index: number, actLineToIndex: Map<number, number>) {
-  const heading = /^(#{1,3})\s+(.*)$/.exec(line)
-  if (heading) {
-    const level = heading[1].length
-    const text = heading[2]
-    const actIndex = actLineToIndex.get(index)
-    const id = actIndex !== undefined ? `act-${actIndex}` : undefined
-    const cls =
-      level === 1
-        ? 'mt-6 mb-4 text-2xl font-bold'
-        : level === 2
-          ? 'mt-5 mb-3 text-xl font-semibold'
-          : 'mt-4 mb-2 text-lg font-semibold'
-    return (
-      <h3 key={index} id={id} className={cls}>
-        {text}
-      </h3>
-    )
+function loadCachedViewMode(): 'render' | 'raw' {
+  if (typeof window === 'undefined') return 'render'
+  try {
+    return window.localStorage.getItem(VIEWMODE_CACHE_KEY) === 'raw' ? 'raw' : 'render'
+  } catch {
+    return 'render'
   }
-  if (line.trim() === '') return <div key={index} className="h-3" />
-  return (
-    <p key={index} className="my-2 leading-relaxed">
-      {renderInline(line)}
-    </p>
-  )
 }
 
-/** Turn [[wikilinks]] into highlighted spans (clickable entity cards land in Phase 1). */
-function renderInline(line: string): React.ReactNode {
-  const parts: React.ReactNode[] = []
-  const regex = /\[\[([^\]|#]+)(?:[|#][^\]]*)?\]\]/g
-  let last = 0
-  let m: RegExpExecArray | null
-  let i = 0
-  while ((m = regex.exec(line)) !== null) {
-    if (m.index > last) parts.push(line.slice(last, m.index))
-    parts.push(
-      <span key={`wl-${i++}`} className="text-vault-accent underline decoration-dotted">
-        {m[1].trim()}
-      </span>,
-    )
-    last = m.index + m[0].length
-  }
-  if (last < line.length) parts.push(line.slice(last))
-  return parts
-}
-
-export function Reader({ path }: { path: string }) {
+export function Reader({ path, canEdit = false }: { path: string; canEdit?: boolean }) {
   const { data, isLoading } = useSWR<NovelFile>(path ? ['novel-file', path] : null, ([, p]) =>
     api.novels.readFile(p as string),
   )
   const [prefs, setPrefs] = useState<ReaderPrefs>(loadCachedPrefs)
+  const [viewMode, setViewMode] = useState<'render' | 'raw'>(loadCachedViewMode)
+  const [editingRange, setEditingRange] = useState<BlockRange | null>(null)
+  const [saving, setSaving] = useState(false)
   const scrollTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const containerRef = useRef<HTMLDivElement | null>(null)
 
@@ -115,11 +83,18 @@ export function Reader({ path }: { path: string }) {
     api.novels.putPrefs(next as unknown as Record<string, unknown>).catch(() => {})
   }, [])
 
-  const actLineToIndex = useMemo(() => {
-    const map = new Map<number, number>()
-    for (const act of data?.acts ?? []) map.set(act.line, act.index)
-    return map
-  }, [data?.acts])
+  const toggleViewMode = useCallback(() => {
+    setViewMode((prev) => {
+      const next = prev === 'render' ? 'raw' : 'render'
+      try {
+        window.localStorage.setItem(VIEWMODE_CACHE_KEY, next)
+      } catch {
+        // ignore quota
+      }
+      return next
+    })
+    setEditingRange(null)
+  }, [])
 
   // Restore saved progress once content is available.
   useEffect(() => {
@@ -164,10 +139,44 @@ export function Reader({ path }: { path: string }) {
     }
   }, [handleScroll])
 
+  const handleSaveBlock = useCallback(
+    async (range: BlockRange, text: string) => {
+      if (!data) return
+      setSaving(true)
+      try {
+        const lines = data.content.split('\n')
+        const before = lines.slice(0, range.start - 1)
+        const after = lines.slice(range.end)
+        const nextContent = [...before, ...text.split('\n'), ...after].join('\n')
+        const result = await api.novels.writeFile({
+          path,
+          content: nextContent,
+          base_sha: data.base_sha,
+          message: `edit: ${path}`,
+        })
+        if (result.ok) {
+          toast.success(t('novels.saved'))
+          setEditingRange(null)
+          mutate(['novel-file', path])
+        } else if (result.conflict) {
+          toast.error(t('novels.staleConflict'))
+          setEditingRange(null)
+          mutate(['novel-file', path])
+        } else {
+          toast.error(result.message || t('novels.saveFailed'))
+        }
+      } catch {
+        toast.error(t('novels.saveFailed'))
+      } finally {
+        setSaving(false)
+      }
+    },
+    [data, path],
+  )
+
   if (isLoading) return <LoadingSpinner />
   if (!data) return <p className="py-10 text-center text-vault-text-muted">{t('novels.loadFailed')}</p>
 
-  const lines = data.content.split('\n')
   const themeStyle = THEME_STYLES[prefs.theme]
 
   return (
@@ -197,8 +206,17 @@ export function Reader({ path }: { path: string }) {
       )}
 
       <div className="order-1 min-w-0 flex-1 lg:order-2">
-        <div className="mb-4">
+        <div className="mb-4 flex items-center justify-between gap-2">
           <ReaderSettings prefs={prefs} onChange={persistPrefs} />
+          <button
+            type="button"
+            aria-pressed={viewMode === 'raw'}
+            className="inline-flex shrink-0 items-center gap-1 rounded-lg border border-vault-border px-2 py-1 text-xs text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+            onClick={toggleViewMode}
+          >
+            {viewMode === 'raw' ? <Eye className="size-3" /> : <Code className="size-3" />}
+            {viewMode === 'raw' ? t('novels.viewRendered') : t('novels.viewRaw')}
+          </button>
         </div>
         <article
           ref={containerRef}
@@ -211,7 +229,24 @@ export function Reader({ path }: { path: string }) {
             fontSize: `${prefs.fontSize}px`,
           }}
         >
-          {lines.map((line, i) => renderLine(line, i, actLineToIndex))}
+          {viewMode === 'raw' ? (
+            <pre className="overflow-x-auto whitespace-pre-wrap font-mono text-sm">
+              {data.content}
+            </pre>
+          ) : (
+            <MarkdownView
+              content={data.content}
+              acts={data.acts}
+              editable={canEdit}
+              path={path}
+              baseSha={data.base_sha}
+              editingRange={editingRange}
+              saving={saving}
+              onRequestEdit={setEditingRange}
+              onSaveBlock={handleSaveBlock}
+              onCancelEdit={() => setEditingRange(null)}
+            />
+          )}
         </article>
 
         {data.backlinks.length > 0 && (

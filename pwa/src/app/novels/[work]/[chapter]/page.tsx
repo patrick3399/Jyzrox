@@ -94,7 +94,7 @@ export default function NovelChapterPage() {
       ) : showHistory ? (
         <HistoryPanel path={path} />
       ) : (
-        <Reader path={path} />
+        <Reader path={path} canEdit={canEdit} />
       )}
 
       <div className="mt-6 flex items-center justify-between">

@@ -1848,6 +1848,19 @@ const en: Record<string, string> = {
   'novels.themeLight': 'Light',
   'novels.themeDark': 'Dark',
   'novels.themeSepia': 'Sepia',
+  'novels.viewRaw': 'Source',
+  'novels.viewRendered': 'Rendered',
+  'novels.editThisBlock': 'Edit this section',
+  'novels.newWork': 'New work',
+  'novels.newChapter': 'New chapter',
+  'novels.workName': 'Work name',
+  'novels.firstChapterName': 'First chapter name',
+  'novels.chapterName': 'Chapter name',
+  'novels.create': 'Create',
+  'novels.createFailed': 'Could not create',
+  'novels.nameRequired': 'Name is required',
+  'novels.nameInvalid': 'Name cannot contain slashes',
+  'novels.fileExists': 'A file with that name already exists',
 }
 
 export default en

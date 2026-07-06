@@ -1822,6 +1822,7 @@ const novels = {
     content: string
     base_sha: string
     message?: string
+    create?: boolean
   }): Promise<NovelWriteResult> => {
     const csrf = getCookie('csrf_token')
     const res = await fetch('/api/novels/file', {
@@ -1843,11 +1844,34 @@ const novels = {
       const d = detail as { current: string; current_sha: string }
       return { ok: false, status: 409, conflict: { current: d.current, current_sha: d.current_sha } }
     }
+    // create=true against an existing path → {error: "file exists"}.
+    const detailError =
+      typeof detail === 'object' && detail !== null && 'error' in detail
+        ? (detail as { error: unknown }).error
+        : undefined
     return {
       ok: false,
       status: res.status,
-      message: typeof detail === 'string' ? detail : `HTTP ${res.status}`,
+      message:
+        typeof detail === 'string'
+          ? detail
+          : typeof detailError === 'string'
+            ? detailError
+            : `HTTP ${res.status}`,
     }
+  },
+  // Create a new chapter file (new work = new folder via its first chapter).
+  // Reuses PUT /file with create:true so the backend refuses to clobber.
+  createFile: async (work: string, name: string): Promise<NovelWriteResult> => {
+    const status = await novels.status()
+    const path = `${work}/${name}.md`
+    return novels.writeFile({
+      path,
+      content: `# ${name}\n\n`,
+      base_sha: status.head,
+      create: true,
+      message: `create: ${path}`,
+    })
   },
   search: (q: string) => apiFetch<{ hits: NovelSearchHit[] }>(`/api/novels/search${qs({ q })}`),
   history: (path: string) =>

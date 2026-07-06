@@ -171,6 +171,7 @@ class WriteBody(BaseModel):
     content: str
     base_sha: str
     message: str | None = None
+    create: bool = False
 
 
 async def _with_git_lock(coro_factory):
@@ -211,6 +212,10 @@ async def write_file(body: WriteBody, auth: dict = Depends(_member)):
                 status_code=409,
                 detail={"error": "stale base_sha", "current": current, "current_sha": st["head"]},
             )
+        # Create must not clobber an existing chapter. Checked under the git lock
+        # (with the base_sha check) so a concurrent create can't slip in between.
+        if body.create and novel_fs.file_exists(repo, body.path):
+            raise HTTPException(status_code=409, detail={"error": "file exists"})
         novel_fs.write_file(repo, body.path, body.content)
         return await novel_git.commit_and_push(repo, body.path, msg)
 

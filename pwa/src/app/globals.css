@@ -245,3 +245,125 @@ html {
   white-space: nowrap;
   border-radius: 6px;
 }
+
+/* Novel chapter Markdown rendering (react-markdown output). Tailwind's reset
+   strips heading sizes / list markers, so restore prose-like defaults here. */
+.novel-markdown h1 {
+  font-size: 1.5rem;
+  font-weight: 700;
+  margin: 1.5rem 0 1rem;
+}
+.novel-markdown h2 {
+  font-size: 1.25rem;
+  font-weight: 600;
+  margin: 1.25rem 0 0.75rem;
+}
+.novel-markdown h3,
+.novel-markdown h4,
+.novel-markdown h5,
+.novel-markdown h6 {
+  font-size: 1.125rem;
+  font-weight: 600;
+  margin: 1rem 0 0.5rem;
+}
+.novel-markdown p {
+  margin: 0.5rem 0;
+  line-height: 1.75;
+}
+.novel-markdown ul,
+.novel-markdown ol {
+  margin: 0.5rem 0;
+  padding-left: 1.5rem;
+}
+.novel-markdown ul {
+  list-style: disc;
+}
+.novel-markdown ol {
+  list-style: decimal;
+}
+.novel-markdown li {
+  margin: 0.25rem 0;
+}
+.novel-markdown blockquote {
+  border-left: 3px solid var(--color-vault-border);
+  padding-left: 1rem;
+  margin: 0.75rem 0;
+  color: var(--color-vault-text-secondary);
+}
+.novel-markdown hr {
+  border: 0;
+  border-top: 1px solid var(--color-vault-border);
+  margin: 1.5rem 0;
+}
+.novel-markdown a {
+  color: var(--color-vault-accent);
+  text-decoration: underline;
+}
+.novel-markdown strong {
+  font-weight: 700;
+}
+.novel-markdown em {
+  font-style: italic;
+}
+.novel-markdown code {
+  font-family: ui-monospace, monospace;
+  font-size: 0.9em;
+  background: var(--color-vault-input);
+  padding: 0.1em 0.35em;
+  border-radius: 4px;
+}
+.novel-markdown pre {
+  background: var(--color-vault-input);
+  padding: 0.75rem 1rem;
+  border-radius: 8px;
+  overflow-x: auto;
+  margin: 0.75rem 0;
+}
+.novel-markdown pre code {
+  background: none;
+  padding: 0;
+}
+.novel-markdown table {
+  border-collapse: collapse;
+  margin: 0.75rem 0;
+}
+.novel-markdown th,
+.novel-markdown td {
+  border: 1px solid var(--color-vault-border);
+  padding: 0.4rem 0.75rem;
+}
+
+/* Inline block-edit affordance: a subtle edit hint on hover (desktop). */
+.novel-editable [data-line-start] {
+  position: relative;
+}
+.novel-editable [data-line-start]:hover {
+  background: color-mix(in srgb, var(--color-vault-accent) 7%, transparent);
+  border-radius: 4px;
+}
+.novel-block-pencil {
+  position: absolute;
+  top: 0.15rem;
+  right: 0.15rem;
+  display: none;
+  align-items: center;
+  justify-content: center;
+  padding: 0.2rem;
+  border-radius: 4px;
+  color: var(--color-vault-text-muted);
+  background: var(--color-vault-card);
+  border: 1px solid var(--color-vault-border);
+}
+.novel-editable [data-line-start]:hover > .novel-block-pencil {
+  display: inline-flex;
+}
+.novel-block-pencil:hover {
+  color: var(--color-vault-accent);
+  border-color: var(--color-vault-accent);
+}
+/* Touch devices have no hover; long-press is the entry point, so hide the hint. */
+@media (hover: none) {
+  .novel-block-pencil {
+    display: none !important;
+  }
+}
