@@ -24,7 +24,19 @@ from worker.helpers import acquire_lock, release_lock
 
 _GIT_LOCK = "novel:git:lock"
 
-router = APIRouter(tags=["novels"])
+
+async def _require_novel_enabled():
+    """Raise 404 if the Novel feature is disabled (Redis override, else config default)."""
+    val = await get_redis().get("setting:novel_enabled")
+    if val is not None:
+        enabled = val == b"1"
+    else:
+        enabled = settings.novel_enabled
+    if not enabled:
+        raise HTTPException(status_code=404, detail="Novel module is disabled")
+
+
+router = APIRouter(tags=["novels"], dependencies=[Depends(_require_novel_enabled)])
 _member = require_role("member")
 _admin = require_role("admin")
 

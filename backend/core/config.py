@@ -28,6 +28,7 @@ class Settings(BaseSettings):
     download_eh_enabled: bool = True
     download_pixiv_enabled: bool = True
     download_gallery_dl_enabled: bool = True
+    novel_enabled: bool = False  # Novel module ships disabled (needs git secrets + hub); admin opts in
     download_job_timeout: int = 86400
 
     # E-Hentai limits

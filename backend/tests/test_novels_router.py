@@ -56,6 +56,17 @@ async def _novel_client(db_session, db_session_factory, role, mock_redis):
     async def _override_require_auth():
         return {"user_id": 1, "role": role}
 
+    # Novel feature flag defaults OFF; enable it for the normal-operation client
+    # so the router-level gate lets requests through (mirrors an admin toggle-on).
+    _orig_redis_get = mock_redis.get
+
+    async def _get_novel_enabled(key):
+        if key == "setting:novel_enabled":
+            return b"1"
+        return await _orig_redis_get(key)
+
+    mock_redis.get = AsyncMock(side_effect=_get_novel_enabled)
+
     _app.dependency_overrides[_fake_get_db] = _override_get_db
     _app.dependency_overrides[require_auth] = _override_require_auth
     patches = [
@@ -103,6 +114,26 @@ async def test_list_works_returns_folders(viewer_client, novel_repo):
     r = await viewer_client.get("/api/novels/works")
     assert r.status_code == 200
     assert any(w["name"] == "作品A" for w in r.json()["works"])
+
+
+async def test_novel_endpoints_return_404_when_flag_disabled(viewer_client, novel_repo, mock_redis):
+    """Redis override setting:novel_enabled=0 → router gate returns 404."""
+
+    async def _disabled(key):
+        if key == "setting:novel_enabled":
+            return b"0"
+        return None
+
+    mock_redis.get = AsyncMock(side_effect=_disabled)
+    r = await viewer_client.get("/api/novels/works")
+    assert r.status_code == 404
+
+
+async def test_novel_endpoints_disabled_by_default_without_redis_override(viewer_client, novel_repo, mock_redis):
+    """No Redis override → falls back to config default, which is OFF → 404."""
+    mock_redis.get = AsyncMock(return_value=None)
+    r = await viewer_client.get("/api/novels/works")
+    assert r.status_code == 404
 
 
 async def test_read_file_returns_content_and_base_sha(viewer_client, novel_repo):

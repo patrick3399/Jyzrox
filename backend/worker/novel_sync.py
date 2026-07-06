@@ -11,6 +11,7 @@ from __future__ import annotations
 
 from core.config import settings
 from services import novel_git
+from services.settings_store import get_toggle
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
 
@@ -20,6 +21,10 @@ _LOCK = "novel:git:lock"
 
 
 async def novel_sync_job(ctx: dict, force: bool = False) -> None:
+    # Master feature flag wins even over force: no novel = no git access.
+    if not await get_toggle("setting:novel_enabled", settings.novel_enabled):
+        logger.info("[novel-sync] skipped — novel feature disabled")
+        return
     r = ctx["redis"]
     if not force and not await _cron_should_run(ctx, TASK_ID, DEFAULT_CRON):
         return

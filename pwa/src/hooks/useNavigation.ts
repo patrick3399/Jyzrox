@@ -1,12 +1,14 @@
 import { useState, useEffect, useMemo, useCallback, type MouseEvent } from 'react'
 import { usePathname } from 'next/navigation'
 import { useTheme } from 'next-themes'
+import useSWR from 'swr'
 import { Sun, Moon, Monitor } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
 import { t } from '@/lib/i18n'
+import { api } from '@/lib/api'
 import { useLocale } from '@/components/LocaleProvider'
-import { PAGE_REGISTRY, hasRole, type PageDef } from '@/lib/pageRegistry'
+import { PAGE_REGISTRY, hasRole, passesFeatureFlag, type PageDef } from '@/lib/pageRegistry'
 import { getTabHref, markTabRestore } from '@/lib/navMemory'
 import {
   getDefaultSidebarConfig,
@@ -36,6 +38,7 @@ export function useNavigation() {
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()
   const { data: profile } = useProfile()
+  const { data: features } = useSWR('feature-toggles', () => api.settings.getFeatures())
   const [mounted, setMounted] = useState(false)
 
   // Sidebar config with cross-tab sync
@@ -54,12 +57,15 @@ export function useNavigation() {
     return () => window.removeEventListener('storage', handler)
   }, [])
 
-  // Visible links filtered by role
+  // Visible links filtered by role + feature flags
   const visibleLinks = useMemo(() => {
     return sidebarConfig.order
       .map((href) => PAGE_REGISTRY.find((p) => p.href === href))
-      .filter((p): p is PageDef => p != null && hasRole(profile?.role, p.minRole ?? 'viewer'))
-  }, [sidebarConfig.order, profile?.role])
+      .filter(
+        (p): p is PageDef =>
+          p != null && hasRole(profile?.role, p.minRole ?? 'viewer') && passesFeatureFlag(p, features),
+      )
+  }, [sidebarConfig.order, profile?.role, features])
 
   // Grouped links by role tier (for sidebar/mobile nav section headers)
   const groupedLinks = useMemo(() => {

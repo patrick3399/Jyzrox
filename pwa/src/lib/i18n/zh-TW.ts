@@ -289,6 +289,8 @@ const zhTW: Record<string, string> = {
   'settings.opdsDesc': '啟用供外部閱讀器使用的 OPDS 目錄 Feed（Panels、KOReader 等）。',
   'settings.externalApi': '外部 API',
   'settings.externalApiDesc': '啟用供第三方整合使用的 Token 驗證外部 API。',
+  'settings.novelModule': '小說模組',
+  'settings.novelModuleDesc': '啟用以 git 為後端的小說閱讀／編輯器。需先設定小說 repo 的 secrets。',
   'settings.aiTaggingToggleDesc': '為匯入的圖庫啟用 WD14 AI 標籤預測。',
   'settings.trashSection': '垃圾桶',
   'settings.trashEnabled': '啟用垃圾桶',

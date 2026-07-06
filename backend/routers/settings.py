@@ -572,6 +572,7 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "rate_limit_enabled": await _get_toggle("setting:rate_limit_enabled", app_settings.rate_limit_enabled),
         "opds_enabled": await _get_toggle("setting:opds_enabled", app_settings.opds_enabled),
         "external_api_enabled": await _get_toggle("setting:external_api_enabled", app_settings.external_api_enabled),
+        "novel_enabled": await _get_toggle("setting:novel_enabled", app_settings.novel_enabled),
         "ai_tagging_enabled": await _get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled),
         "tag_translation_enabled": await _get_toggle("setting:tag_translation_enabled", True),
         "download_eh_enabled": await _get_toggle("setting:download_eh_enabled", app_settings.download_eh_enabled),
@@ -609,6 +610,7 @@ async def patch_feature_toggle(
         "rate_limit_enabled": None,  # special case: modifies app_settings directly
         "opds_enabled": "setting:opds_enabled",
         "external_api_enabled": "setting:external_api_enabled",
+        "novel_enabled": "setting:novel_enabled",
         "ai_tagging_enabled": "setting:ai_tagging_enabled",
         "tag_translation_enabled": "setting:tag_translation_enabled",
         "download_eh_enabled": "setting:download_eh_enabled",

@@ -11,6 +11,7 @@ import { SkeletonGrid } from '@/components/Skeleton'
 import { EmptyState } from '@/components/EmptyState'
 import type { Gallery, DownloadJob } from '@/lib/types'
 import { loadDashboardConfig, DASHBOARD_LINKS_CONFIG_KEY } from '@/components/DashboardLinksConfig'
+import { passesFeatureFlag } from '@/lib/pageRegistry'
 
 const DISMISSED_KEY = 'dashboard:dismissed_alerts'
 const COMPACT_LINKS_KEY = 'dashboard_compact_links'
@@ -174,6 +175,8 @@ export default function Dashboard() {
   // Quick links config — user-customisable via Settings > Dashboard Quick Links
   // loadDashboardConfig() is SSR-safe (returns ALL_DASHBOARD_LINKS when window is undefined)
   const [quickLinks, setQuickLinks] = useState(() => loadDashboardConfig())
+  const { data: features } = useSWR('feature-toggles', () => api.settings.getFeatures())
+  const visibleQuickLinks = quickLinks.filter((link) => passesFeatureFlag(link, features))
 
   useEffect(() => {
     function onStorage(e: StorageEvent) {
@@ -255,7 +258,7 @@ export default function Dashboard() {
               : 'grid-cols-3 sm:grid-cols-4 md:grid-cols-5 lg:grid-cols-6 xl:grid-cols-7'
           }`}
         >
-          {quickLinks.map((link) => {
+          {visibleQuickLinks.map((link) => {
             const Icon = link.icon
             if (compactLinks) {
               return (

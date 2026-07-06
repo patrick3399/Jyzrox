@@ -76,6 +76,16 @@ function allSidebarHrefs(): string[] {
   return PAGE_REGISTRY.filter((p) => p.sidebar).map((p) => p.href)
 }
 
+/**
+ * Sidebar hrefs with no feature flag. Feature-gated pages (e.g. /novels) are
+ * hidden until their toggle loads on, so they are not part of the always-visible
+ * set even for admins. useNavigation does not mock the features fetch here, so
+ * `features` is undefined and every gated page stays hidden.
+ */
+function ungatedSidebarHrefs(): string[] {
+  return PAGE_REGISTRY.filter((p) => p.sidebar && !p.featureFlag).map((p) => p.href)
+}
+
 /** Returns hrefs that require at least 'member' role. */
 function memberPlusHrefs(): string[] {
   return PAGE_REGISTRY.filter(
@@ -122,9 +132,13 @@ describe('useNavigation — visibleLinks', () => {
     const { result } = renderHook(() => useNavigation())
 
     const visibleHrefs = result.current.visibleLinks.map((p) => p.href)
-    // Admin should see all sidebar pages
-    for (const href of allSidebarHrefs()) {
+    // Admin should see all ungated sidebar pages
+    for (const href of ungatedSidebarHrefs()) {
       expect(visibleHrefs).toContain(href)
+    }
+    // Feature-gated pages stay hidden until their flag loads on (features unmocked → undefined)
+    for (const p of PAGE_REGISTRY.filter((p) => p.sidebar && p.featureFlag)) {
+      expect(visibleHrefs).not.toContain(p.href)
     }
   })
 

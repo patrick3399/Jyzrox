@@ -13,6 +13,7 @@ def _ctx():
 
 
 async def test_sync_job_pulls_when_behind_and_retries_push(monkeypatch):
+    monkeypatch.setattr(novel_sync, "get_toggle", AsyncMock(return_value=True), raising=False)
     calls = []
     monkeypatch.setattr(novel_sync.novel_git, "fetch", AsyncMock(side_effect=lambda repo: calls.append("fetch")))
     monkeypatch.setattr(novel_sync.novel_git, "pull_ff", AsyncMock(side_effect=lambda repo: calls.append("pull")))
@@ -30,6 +31,7 @@ async def test_sync_job_pulls_when_behind_and_retries_push(monkeypatch):
 
 
 async def test_sync_job_skips_pull_when_locked(monkeypatch):
+    monkeypatch.setattr(novel_sync, "get_toggle", AsyncMock(return_value=True), raising=False)
     calls = []
     monkeypatch.setattr(novel_sync.novel_git, "fetch", AsyncMock(side_effect=lambda repo: calls.append("fetch")))
     monkeypatch.setattr(novel_sync.novel_git, "pull_ff", AsyncMock(side_effect=lambda repo: calls.append("pull")))
@@ -47,6 +49,7 @@ async def test_sync_job_skips_pull_when_locked(monkeypatch):
 
 
 async def test_sync_job_records_failure_but_does_not_raise(monkeypatch):
+    monkeypatch.setattr(novel_sync, "get_toggle", AsyncMock(return_value=True), raising=False)
     monkeypatch.setattr(novel_sync.novel_git, "fetch", AsyncMock(side_effect=RuntimeError("214 down")))
     recorded = []
     monkeypatch.setattr(
@@ -58,3 +61,14 @@ async def test_sync_job_records_failure_but_does_not_raise(monkeypatch):
     await novel_sync.novel_sync_job(_ctx(), force=True)  # must not raise
 
     assert recorded and recorded[0][0] == "failed"
+
+
+async def test_sync_job_skips_when_novel_feature_disabled_even_with_force(monkeypatch):
+    """Master feature flag off → job returns immediately, no git access, even force=True."""
+    monkeypatch.setattr(novel_sync, "get_toggle", AsyncMock(return_value=False), raising=False)
+    fetch = AsyncMock()
+    monkeypatch.setattr(novel_sync.novel_git, "fetch", fetch)
+
+    await novel_sync.novel_sync_job(_ctx(), force=True)
+
+    fetch.assert_not_called()

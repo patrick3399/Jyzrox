@@ -798,6 +798,7 @@ const settings = {
       rate_limit_enabled: boolean
       opds_enabled: boolean
       external_api_enabled: boolean
+      novel_enabled: boolean
       ai_tagging_enabled: boolean
       download_eh_enabled: boolean
       download_pixiv_enabled: boolean

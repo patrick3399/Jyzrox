@@ -92,6 +92,13 @@ export default function FeaturesSettingsPage() {
               disabled={featuresLoading}
             />
             <ToggleRow
+              label={t('settings.novelModule')}
+              description={t('settings.novelModuleDesc')}
+              checked={features.novel_enabled ?? false}
+              onChange={(v) => handleToggle('novel_enabled', v)}
+              disabled={featuresLoading}
+            />
+            <ToggleRow
               label={t('settings.aiTagging')}
               description={t('settings.aiTaggingToggleDesc')}
               checked={features.ai_tagging_enabled ?? false}

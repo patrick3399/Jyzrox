@@ -421,6 +421,8 @@ class TestFeatureToggles:
         assert "external_api_enabled" in data
         assert "ai_tagging_enabled" in data
         assert "retry_enabled" in data
+        assert "novel_enabled" in data
+        assert data["novel_enabled"] is False  # feature ships disabled by default
 
     async def test_get_features_requires_auth(self, unauthed_client):
         """Unauthenticated request should return 401."""
@@ -438,6 +440,19 @@ class TestFeatureToggles:
         assert resp.status_code == 200
         data = resp.json()
         assert data["feature"] == "opds_enabled"
+        assert data["enabled"] is True
+
+    async def test_patch_novel_enabled_toggle(self, client, mock_redis):
+        """novel_enabled should be an allowed boolean toggle admins can flip on."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/novel_enabled",
+                json={"enabled": True},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["feature"] == "novel_enabled"
         assert data["enabled"] is True
 
     async def test_patch_feature_unknown_returns_400(self, client, mock_redis):
