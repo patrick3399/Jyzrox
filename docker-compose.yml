@@ -64,6 +64,8 @@ services:
   api:
     build:
       context: ./backend
+      additional_contexts:
+        dbinit: ./db
       args:
         APP_VERSION: ${APP_VERSION:-dev}
     command: uvicorn main:app --host 0.0.0.0 --port 8000 --workers 2 --proxy-headers --forwarded-allow-ips='172.16.0.0/12,192.168.0.0/16,10.0.0.0/8'
@@ -106,6 +108,8 @@ services:
   worker:
     build:
       context: ./backend
+      additional_contexts:
+        dbinit: ./db
       args:
         APP_VERSION: ${APP_VERSION:-dev}
     command: python -m worker
@@ -218,6 +222,8 @@ services:
   migrate:
     build:
       context: ./backend
+      additional_contexts:
+        dbinit: ./db
       args:
         APP_VERSION: ${APP_VERSION:-dev}
     command: python -m scripts.bootstrap_db
@@ -225,8 +231,8 @@ services:
     environment:
       <<: *backend-env
     env_file: "${JYZROX_ENV_FILE:-.env}"
-    volumes:
-      - ./db/init.sql:/app/db/init.sql:ro
+    # init.sql is baked into the image (Dockerfile COPY --from=dbinit); no bind mount,
+    # so pulled/pre-built images bootstrap a fresh DB without the source tree.
     depends_on:
       postgres:
         condition: service_healthy

@@ -55,6 +55,31 @@ def choose_action(has_alembic_version: bool, has_core_schema: bool) -> Action:
     return "init_then_stamp"
 
 
+def verify_at_head(current: str | None, heads: tuple[str, ...]) -> None:
+    """Assert the DB is stamped at the one and only code head; raise otherwise.
+
+    Pure function so it can be unit-tested. Catches two failure modes that
+    otherwise pass silently (migrate exits 0 while the app boots on a stale
+    schema):
+
+    * ``len(heads) != 1`` — a branched/ambiguous revision chain (e.g. a
+      duplicate revision id creating two heads). ``alembic upgrade head`` is
+      then ill-defined and must not be trusted.
+    * ``current not in heads`` — the upgrade did not actually reach head
+      (partial/no-op upgrade, or a migrate image older than the app image).
+    """
+    if len(heads) != 1:
+        raise RuntimeError(
+            f"Expected exactly one alembic head, found {len(heads)}: {heads}. "
+            "The revision chain is branched — refusing to report success."
+        )
+    if current not in heads:
+        raise RuntimeError(
+            f"Database revision {current!r} is not at head {heads[0]!r} after bootstrap — "
+            "schema was not fully migrated (stale migrate image or failed upgrade?)."
+        )
+
+
 async def _detect_state(dsn: str) -> tuple[bool, bool]:
     """Return (has_alembic_version, has_core_schema) for the target database."""
     import asyncpg
@@ -115,6 +140,24 @@ def _alembic_stamp_head() -> None:
     command.stamp(_alembic_config(), "head")
 
 
+def _script_heads() -> tuple[str, ...]:
+    """Return the head revision id(s) declared by the migration scripts."""
+    from alembic.script import ScriptDirectory
+
+    return tuple(ScriptDirectory.from_config(_alembic_config()).get_heads())
+
+
+async def _current_db_revision(dsn: str) -> str | None:
+    """Return the revision id stamped in the DB's alembic_version table (or None)."""
+    import asyncpg
+
+    conn = await asyncpg.connect(dsn)
+    try:
+        return await conn.fetchval("SELECT version_num FROM alembic_version")
+    finally:
+        await conn.close()
+
+
 def main() -> None:
     logging.basicConfig(level=logging.INFO, format="%(asctime)s %(levelname)s %(message)s")
     from core.config import settings
@@ -140,6 +183,11 @@ def main() -> None:
         _alembic_stamp_head()
     else:  # "upgrade"
         _alembic_upgrade_head()
+
+    # Post-condition: the DB must be stamped at the single code head. Raising here
+    # exits non-zero, so a stale migrate image or a silent no-op upgrade fails the
+    # `migrate` step loudly instead of letting api/worker boot on a stale schema.
+    verify_at_head(asyncio.run(_current_db_revision(dsn)), _script_heads())
 
     # Alembic's env.py runs logging.fileConfig(), which disables pre-existing
     # loggers (including ours), so print the final status to guarantee it is

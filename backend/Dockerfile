@@ -47,6 +47,11 @@ WORKDIR /app
 
 COPY . .
 
+# Bake db/init.sql into the image (repo-root db/ is outside this build context,
+# supplied as the named build context `dbinit`). Lets migrate bootstrap a fresh
+# DB from a pulled/pre-built image without a source-tree bind mount.
+COPY --from=dbinit init.sql /app/db/init.sql
+
 # Copy swagger-ui static assets
 RUN mkdir -p /app/static/swagger-ui
 COPY --from=builder /install/swagger-ui-bundle.js /app/static/swagger-ui/
