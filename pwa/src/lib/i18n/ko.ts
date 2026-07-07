@@ -1607,6 +1607,7 @@ const ko: Record<string, string> = {
   'novels.firstAppearance': '첫 등장',
   'novels.noAppearances': '등장 기록이 없습니다',
   'novels.noNotes': '노트를 찾을 수 없습니다',
+  'novels.noteNotFound': '노트를 찾을 수 없습니다',
 }
 
 export default ko

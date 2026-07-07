@@ -1881,6 +1881,7 @@ const en: Record<string, string> = {
   'novels.firstAppearance': 'First appearance',
   'novels.noAppearances': 'No appearances found',
   'novels.noNotes': 'No notes found',
+  'novels.noteNotFound': 'Note not found',
 }
 
 export default en

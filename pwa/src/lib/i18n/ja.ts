@@ -1624,6 +1624,7 @@ const ja: Record<string, string> = {
   'novels.firstAppearance': '初登場',
   'novels.noAppearances': '登場記録がありません',
   'novels.noNotes': 'ノートが見つかりません',
+  'novels.noteNotFound': 'ノートが見つかりません',
 }
 
 export default ja

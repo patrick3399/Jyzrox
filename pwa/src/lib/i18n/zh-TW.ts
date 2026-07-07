@@ -1603,6 +1603,7 @@ const zhTW: Record<string, string> = {
   'novels.firstAppearance': '首次登場',
   'novels.noAppearances': '尚無登場記錄',
   'novels.noNotes': '找不到筆記',
+  'novels.noteNotFound': '找不到此筆記',
 }
 
 export default zhTW

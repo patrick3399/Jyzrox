@@ -1585,6 +1585,7 @@ const zhCN: Record<string, string> = {
   'novels.firstAppearance': '首次登场',
   'novels.noAppearances': '尚无登场记录',
   'novels.noNotes': '找不到笔记',
+  'novels.noteNotFound': '找不到此笔记',
 }
 
 export default zhCN
