@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime
 
 from sqlalchemy import (
+    JSON,
     BigInteger,
     Boolean,
     Float,
@@ -45,6 +46,41 @@ class NovelReadProgress(Base):
     file_path: Mapped[str] = mapped_column(Text, primary_key=True)
     position: Mapped[str] = mapped_column(Text, nullable=False)
     updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+# ── Novel knowledge index (Phase 1 Track A; derived, rebuildable from the tree) ──
+# PG-native array/json columns carry a `sqlite` variant so the ORM round-trips
+# plain Python lists/dicts on the in-memory test engine too.
+class NovelNote(Base):
+    __tablename__ = "novel_notes"
+
+    file_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    title: Mapped[str] = mapped_column(Text, nullable=False)
+    note_type: Mapped[str | None] = mapped_column(Text)
+    aliases: Mapped[list] = mapped_column(
+        ARRAY(Text).with_variant(JSON, "sqlite"), nullable=False, server_default=text("'{}'::text[]")
+    )
+    frontmatter: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, server_default=text("'{}'::jsonb")
+    )
+    indexed_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class NovelLink(Base):
+    __tablename__ = "novel_links"
+
+    src_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    dst_title: Mapped[str] = mapped_column(Text, primary_key=True)
+    dst_path: Mapped[str | None] = mapped_column(Text)
+
+
+class NovelMention(Base):
+    __tablename__ = "novel_mentions"
+
+    note_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    chapter_path: Mapped[str] = mapped_column(Text, primary_key=True)
+    mention_count: Mapped[int] = mapped_column(Integer, nullable=False)
+    first_offset: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class Gallery(Base):

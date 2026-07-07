@@ -628,6 +628,31 @@ CREATE TABLE IF NOT EXISTS novel_read_progress (
     PRIMARY KEY (user_id, file_path)
 );
 
+-- Knowledge index (Phase 1 Track A): derived, rebuildable from the working tree.
+CREATE TABLE IF NOT EXISTS novel_notes (
+    file_path   TEXT PRIMARY KEY,
+    title       TEXT NOT NULL,
+    note_type   TEXT,
+    aliases     TEXT[] NOT NULL DEFAULT '{}',
+    frontmatter JSONB NOT NULL DEFAULT '{}',
+    indexed_at  TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE TABLE IF NOT EXISTS novel_links (
+    src_path  TEXT NOT NULL,
+    dst_title TEXT NOT NULL,
+    dst_path  TEXT,
+    PRIMARY KEY (src_path, dst_title)
+);
+CREATE TABLE IF NOT EXISTS novel_mentions (
+    note_path     TEXT NOT NULL,
+    chapter_path  TEXT NOT NULL,
+    mention_count INT  NOT NULL,
+    first_offset  INT  NOT NULL,
+    PRIMARY KEY (note_path, chapter_path)
+);
+CREATE INDEX IF NOT EXISTS idx_novel_notes_type ON novel_notes (note_type);
+CREATE INDEX IF NOT EXISTS idx_novel_mentions_note ON novel_mentions (note_path);
+
 -- ── PostgreSQL 18 features ─────────────────────────────────────────────
 
 -- UUIDv7: timestamp-ordered UUIDs for better B-tree index write performance

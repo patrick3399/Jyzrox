@@ -320,6 +320,33 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS novel_notes (
+        file_path TEXT PRIMARY KEY,
+        title TEXT NOT NULL,
+        note_type TEXT,
+        aliases TEXT DEFAULT '[]',
+        frontmatter TEXT DEFAULT '{}',
+        indexed_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS novel_links (
+        src_path TEXT NOT NULL,
+        dst_title TEXT NOT NULL,
+        dst_path TEXT,
+        PRIMARY KEY (src_path, dst_title)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS novel_mentions (
+        note_path TEXT NOT NULL,
+        chapter_path TEXT NOT NULL,
+        mention_count INTEGER NOT NULL,
+        first_offset INTEGER NOT NULL,
+        PRIMARY KEY (note_path, chapter_path)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS galleries (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         source TEXT NOT NULL,
