@@ -1808,6 +1808,32 @@ export type NovelWriteResult =
   | { ok: true; head: string; pushed: boolean }
   | { ok: false; status: number; conflict?: { current: string; current_sha: string }; message?: string }
 
+export interface NovelGraphNode {
+  id: string
+  label: string
+  type: 'note' | 'chapter'
+}
+export interface NovelGraphEdge {
+  src: string
+  dst: string
+  kind: 'link' | 'mention'
+}
+export interface NovelGraph {
+  nodes: NovelGraphNode[]
+  edges: NovelGraphEdge[]
+}
+export interface NovelNoteSummary {
+  path: string
+  title: string
+  note_type: string | null
+  frontmatter: Record<string, unknown>
+}
+export interface NovelAppearance {
+  chapter_path: string
+  mention_count: number
+  first_offset: number
+}
+
 const novels = {
   listWorks: () => apiFetch<{ works: NovelWork[] }>('/api/novels/works'),
   listChapters: (work: string) =>
@@ -1894,6 +1920,13 @@ const novels = {
       method: 'PUT',
       body: JSON.stringify(prefs),
     }),
+  // ── Knowledge index (Phase 1 Track A) ──
+  graph: () => apiFetch<NovelGraph>('/api/novels/graph'),
+  notes: (params: { type?: string; tag?: string; sort?: string } = {}) =>
+    apiFetch<{ notes: NovelNoteSummary[] }>(`/api/novels/notes${qs(params)}`),
+  appearances: (path: string) =>
+    apiFetch<{ appearances: NovelAppearance[] }>(`/api/novels/notes/appearances${qs({ path })}`),
+  reindex: () => apiFetch<{ stats: Record<string, number> }>('/api/novels/reindex', { method: 'POST' }),
 }
 
 // ── Exported API ──────────────────────────────────────────────────────
