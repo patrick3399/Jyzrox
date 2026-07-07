@@ -8,9 +8,11 @@ from services.novel_fs import (
     file_exists,
     keyword_scan,
     list_chapters,
+    list_notes,
     list_works,
     parse_acts,
     parse_backlinks,
+    parse_frontmatter,
     read_file,
     safe_repo_path,
     write_file,
@@ -133,3 +135,45 @@ def test_list_chapters_rejects_null_byte(tmp_path):
     root = _repo(tmp_path)
     with pytest.raises(NovelPathError):
         list_chapters(root, "作品A\x00")
+
+
+# ── Knowledge-index adaptation (Phase 1 Track A): Setting notes vs chapters ──
+
+
+def test_list_chapters_excludes_setting_dir(tmp_path):
+    w = tmp_path / "作品A"
+    (w / "Setting").mkdir(parents=True)
+    (w / "01.md").write_text("x", encoding="utf-8")
+    (w / "Setting" / "角色-張三.md").write_text("# 張三\n", encoding="utf-8")
+    chapters = list_chapters(tmp_path, "作品A")
+    assert [c["path"] for c in chapters] == ["作品A/01.md"]
+
+
+def test_list_notes_finds_setting_notes_with_title(tmp_path):
+    w = tmp_path / "作品A"
+    (w / "Setting").mkdir(parents=True)
+    (w / "Setting" / "角色-張三.md").write_text("# 張三\n\n內容", encoding="utf-8")
+    notes = list_notes(tmp_path)
+    assert notes == [{"path": "作品A/Setting/角色-張三.md", "work": "作品A", "title": "張三"}]
+
+
+def test_list_notes_title_falls_back_to_stem(tmp_path):
+    w = tmp_path / "作品A"
+    (w / "Setting").mkdir(parents=True)
+    (w / "Setting" / "地點-王城.md").write_text("no heading here", encoding="utf-8")
+    assert list_notes(tmp_path)[0]["title"] == "地點-王城"
+
+
+def test_parse_frontmatter_none_returns_empty():
+    assert parse_frontmatter("# Title\nbody") == ({}, "# Title\nbody")
+
+
+def test_parse_frontmatter_valid():
+    fm, body = parse_frontmatter("---\ntype: character\naliases: [小三]\n---\n# 張三\n")
+    assert fm["type"] == "character" and fm["aliases"] == ["小三"]
+    assert body.strip() == "# 張三"
+
+
+def test_parse_frontmatter_malformed_does_not_raise():
+    fm, body = parse_frontmatter("---\n: : bad yaml : :\n---\nbody")
+    assert fm == {} and "body" in body

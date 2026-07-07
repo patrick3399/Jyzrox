@@ -12,6 +12,10 @@ from pathlib import Path
 _WIKILINK = re.compile(r"\[\[([^\]|#]+)")
 _ACT = re.compile(r"^### +(.*)$")
 _RESERVED_DIRS = {"設定"}
+# Directories holding worldview/entity notes rather than chapters. Excluded from
+# chapter listings and treated as the knowledge-index note corpus (Phase 1).
+_NOTE_DIRS = {"Setting", "設定"}
+_H1 = re.compile(r"^#\s+(.*)$", re.MULTILINE)
 
 
 class NovelPathError(Exception):
@@ -41,7 +45,7 @@ def list_works(repo_root: str | Path) -> list[dict]:
     for entry in sorted(root.iterdir(), key=lambda p: p.name):
         if not entry.is_dir() or entry.name.startswith(".") or entry.name in _RESERVED_DIRS:
             continue
-        count = sum(1 for _ in entry.rglob("*.md"))
+        count = sum(1 for f in entry.rglob("*.md") if not any(part in _NOTE_DIRS for part in f.relative_to(root).parts))
         works.append({"name": entry.name, "chapter_count": count})
     return works
 
@@ -56,16 +60,68 @@ def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
         raise NovelPathError(f"work escapes repo root: {work!r}")
     chapters: list[dict] = []
     for f in sorted(work_dir.rglob("*.md"), key=lambda p: p.name):
+        rel = f.relative_to(root)
+        # Setting/設定 notes are worldview entities, not chapters (Phase 1).
+        if any(part in _NOTE_DIRS for part in rel.parts):
+            continue
         stat = f.stat()
         chapters.append(
             {
-                "path": str(f.relative_to(root)),
+                "path": str(rel),
                 "name": f.stem,
                 "chars": stat.st_size,
                 "mtime": stat.st_mtime,
             }
         )
     return chapters
+
+
+def _note_title(text: str, stem: str) -> str:
+    m = _H1.search(text)
+    return m.group(1).strip() if m else stem
+
+
+def list_notes(repo_root: str | Path) -> list[dict]:
+    """Every `.md` under a Setting/設定 dir — the worldview/entity note corpus.
+
+    title = first `# ` heading, else filename stem. Hidden dirs (.git) skipped.
+    """
+    root = Path(repo_root).resolve()
+    notes: list[dict] = []
+    for f in sorted(root.rglob("*.md")):
+        rel = f.relative_to(root)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if not any(part in _NOTE_DIRS for part in rel.parts):
+            continue
+        try:
+            text = f.read_text(encoding="utf-8")
+        except Exception:  # noqa: S112 — unreadable/binary file, skip silently
+            continue
+        notes.append({"path": str(rel), "work": rel.parts[0], "title": _note_title(text, f.stem)})
+    return notes
+
+
+def parse_frontmatter(content: str) -> tuple[dict, str]:
+    """Split leading YAML frontmatter from the markdown body.
+
+    Tolerant by design (§4.5.8): no fence → ({}, content); malformed YAML →
+    ({}, body). Never raises — old notes without frontmatter must index cleanly.
+    """
+    if not content.startswith("---\n"):
+        return {}, content
+    end = content.find("\n---", 4)
+    if end == -1:
+        return {}, content
+    raw = content[4:end]
+    body = content[end + 4 :].lstrip("\n")
+    try:
+        import yaml
+
+        data = yaml.safe_load(raw)
+    except Exception:  # noqa: BLE001 — malformed frontmatter is tolerated
+        return {}, body
+    return (data if isinstance(data, dict) else {}), body
 
 
 def read_file(repo_root: str | Path, rel_path: str) -> str:
