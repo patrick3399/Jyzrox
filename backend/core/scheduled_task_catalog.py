@@ -217,6 +217,15 @@ CATALOG: list[ScheduledTaskDef] = [
         default_enabled=True,
         saq_timeout=120,
     ),
+    ScheduledTaskDef(
+        task_id="novel_index",
+        name="Novel Knowledge Index",
+        description="Rebuild novel notes/links/mentions index from the working tree",
+        job_name="novel_index_job",
+        default_cron="0 4 * * *",
+        default_enabled=True,
+        saq_timeout=300,
+    ),
 ]
 
 # ── Lookup helpers ─────────────────────────────────────────────────────────
