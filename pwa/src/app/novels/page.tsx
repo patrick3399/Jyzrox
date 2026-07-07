@@ -3,7 +3,7 @@
 import { useState } from 'react'
 import Link from 'next/link'
 import { useRouter } from 'next/navigation'
-import { BookText, Plus, Search } from 'lucide-react'
+import { BookText, NotebookText, Plus, Search, Share2 } from 'lucide-react'
 import useSWR, { mutate } from 'swr'
 import { api } from '@/lib/api'
 import { novelChapterHref } from '@/lib/novels'
@@ -47,6 +47,20 @@ export default function NovelsPage() {
               {t('novels.newWork')}
             </button>
           )}
+          <Link
+            href="/novels/graph"
+            className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+          >
+            <Share2 className="size-4" />
+            {t('novels.graph')}
+          </Link>
+          <Link
+            href="/novels/notes"
+            className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
+          >
+            <NotebookText className="size-4" />
+            {t('novels.notes')}
+          </Link>
           <Link
             href="/novels/search"
             className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
