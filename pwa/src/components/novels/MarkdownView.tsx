@@ -13,6 +13,7 @@ import ReactMarkdown, { type Components } from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import { Pencil } from 'lucide-react'
 import { remarkWikilink } from './remarkWikilink'
+import { remarkEntityLinks } from './remarkEntityLinks'
 import { useLongPress } from '@/hooks/useLongPress'
 import { t } from '@/lib/i18n'
 import type { NovelAct } from '@/lib/api'
@@ -151,6 +152,8 @@ export function MarkdownView({
   onRequestEdit,
   onSaveBlock,
   onCancelEdit,
+  entityNames,
+  entityHrefFor,
 }: {
   content: string
   acts: NovelAct[]
@@ -162,6 +165,9 @@ export function MarkdownView({
   onRequestEdit?: (range: BlockRange) => void
   onSaveBlock?: (range: BlockRange, text: string) => void
   onCancelEdit?: () => void
+  // Read-mode only: recognized entity names become links to their cards.
+  entityNames?: string[]
+  entityHrefFor?: (name: string) => string
 }) {
   // backend acts[].line is 0-based; heading node position is 1-based.
   const lineToAct = useMemo(() => {
@@ -169,6 +175,16 @@ export function MarkdownView({
     for (const a of acts) m.set(a.line, a.index)
     return m
   }, [acts])
+
+  // Entity linking only in read mode — under editing, block source-line mapping
+  // must stay 1:1 with the raw text, so no inline transforms beyond wikilinks.
+  const remarkPlugins = useMemo(() => {
+    const base = [remarkGfm, remarkWikilink]
+    if (!editable && entityNames && entityNames.length > 0 && entityHrefFor) {
+      base.push(remarkEntityLinks(entityNames, entityHrefFor))
+    }
+    return base
+  }, [editable, entityNames, entityHrefFor])
 
   const lines = useMemo(() => content.split('\n'), [content])
   const seedFor = useCallback(
@@ -300,7 +316,7 @@ export function MarkdownView({
       className={editable ? 'novel-markdown novel-editable' : 'novel-markdown'}
       {...(editable ? longPress : {})}
     >
-      <ReactMarkdown remarkPlugins={[remarkGfm, remarkWikilink]} components={components}>
+      <ReactMarkdown remarkPlugins={remarkPlugins} components={components}>
         {content}
       </ReactMarkdown>
     </div>
