@@ -58,3 +58,28 @@ def test_build_link_records_marks_broken(tmp_path):
     d = {link["dst_title"]: link for link in links}
     assert d["張三"]["dst_path"] == "作品A/Setting/角色-張三.md"
     assert d["不存在的人"]["dst_path"] is None
+
+
+# ── Task 4: async persistence (full rebuild) ──
+
+
+async def test_reindex_all_populates_and_is_idempotent(tmp_path, db_session):
+    from sqlalchemy import func as safunc
+    from sqlalchemy import select
+
+    from db.models import NovelMention, NovelNote
+
+    _repo(tmp_path)
+    r1 = await novel_index.reindex_all(db_session, tmp_path)
+    assert r1["notes"] == 1 and r1["mentions"] >= 2
+
+    n = (await db_session.execute(select(safunc.count()).select_from(NovelNote))).scalar()
+    assert n == 1
+    note = (await db_session.execute(select(NovelNote))).scalars().first()
+    assert note.aliases == ["張三", "小三"]  # round-trips as a Python list
+    assert note.frontmatter["type"] == "character"
+
+    r2 = await novel_index.reindex_all(db_session, tmp_path)
+    assert r2 == r1  # deterministic rebuild
+    m = (await db_session.execute(select(safunc.count()).select_from(NovelMention))).scalar()
+    assert m == r1["mentions"]

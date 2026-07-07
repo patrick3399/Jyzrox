@@ -14,6 +14,10 @@ from __future__ import annotations
 import re
 from pathlib import Path
 
+from sqlalchemy import delete
+from sqlalchemy.ext.asyncio import AsyncSession
+
+from db.models import NovelLink, NovelMention, NovelNote
 from services import novel_fs
 
 
@@ -116,3 +120,43 @@ def scan_mentions(repo_root: str | Path) -> list[dict]:
                 }
             )
     return out
+
+
+async def reindex_all(session: AsyncSession, repo_root: str | Path) -> dict:
+    """Full rebuild of the three derived tables from the working tree.
+
+    Delete-then-insert; deterministic (re-running yields identical rows). The
+    ORM column variants bind Python list/dict natively on both PG and SQLite.
+    Caller commits.
+    """
+    notes = build_note_records(repo_root)
+    links = build_link_records(repo_root)
+    mentions = scan_mentions(repo_root)
+
+    await session.execute(delete(NovelMention))
+    await session.execute(delete(NovelLink))
+    await session.execute(delete(NovelNote))
+
+    for n in notes:
+        session.add(
+            NovelNote(
+                file_path=n["file_path"],
+                title=n["title"],
+                note_type=n["note_type"],
+                aliases=n["aliases"],
+                frontmatter=n["frontmatter"],
+            )
+        )
+    for link in links:
+        session.add(NovelLink(src_path=link["src_path"], dst_title=link["dst_title"], dst_path=link["dst_path"]))
+    for m in mentions:
+        session.add(
+            NovelMention(
+                note_path=m["note_path"],
+                chapter_path=m["chapter_path"],
+                mention_count=m["mention_count"],
+                first_offset=m["first_offset"],
+            )
+        )
+    await session.flush()
+    return {"notes": len(notes), "links": len(links), "mentions": len(mentions)}
