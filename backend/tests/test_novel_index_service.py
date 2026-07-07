@@ -27,6 +27,19 @@ def test_note_aliases_tolerates_missing_aliases():
     assert novel_index.note_aliases({}, "李四") == ["李四"]
 
 
+def test_stem_aliases_extracts_names_from_structural_filenames():
+    # Real repo convention: <type>-<N號>-<name><version> / 參考-<names>
+    assert novel_index.stem_aliases("設定-1號-菈烏瑪v1") == ["菈烏瑪"]
+    assert novel_index.stem_aliases("設定-4號-哥倫比婭v2") == ["哥倫比婭"]
+    assert novel_index.stem_aliases("參考-多托雷-阿蕾奇諾-菈烏瑪") == ["多托雷", "阿蕾奇諾", "菈烏瑪"]
+    assert novel_index.stem_aliases("參考-菈烏瑪v2-1") == ["菈烏瑪"]
+
+
+def test_note_aliases_includes_stem_derived_names():
+    result = novel_index.note_aliases({}, "設定-1號-菈烏瑪v1", stem="設定-1號-菈烏瑪v1")
+    assert "菈烏瑪" in result
+
+
 def test_build_note_records_reads_frontmatter(tmp_path):
     recs = novel_index.build_note_records(_repo(tmp_path))
     assert len(recs) == 1

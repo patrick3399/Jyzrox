@@ -20,13 +20,36 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from db.models import NovelLink, NovelMention, NovelNote
 from services import novel_fs
 
+# The corpus names Setting notes like `設定-1號-菈烏瑪v1` / `參考-多托雷-阿蕾奇諾`,
+# where the real entity name is embedded between structural affixes. Stripping
+# those yields names that actually appear in prose (§4.5.8 real-repo adaptation).
+_STRUCT_TOKENS = {"設定", "參考", "角色", "地點", "事件", "物品", "概念", "反派", "配角", "主角", "資料", "檔案"}
+_NUMBERED = re.compile(r"^(?:no\.?\d+|\d+號|\d+)$", re.IGNORECASE)
+_VERSION = re.compile(r"v\d+(?:-\d+)?$", re.IGNORECASE)
 
-def note_aliases(frontmatter: dict, title: str) -> list[str]:
-    """Distinct names to scan bodies for: the title plus any `aliases` list."""
+
+def stem_aliases(stem: str) -> list[str]:
+    """Extract entity-name candidates from a note filename stem by dropping
+    structural affixes (type/number prefixes) and trailing version markers."""
+    out: list[str] = []
+    for raw in re.split(r"[-_ ]+", stem):
+        tok = _VERSION.sub("", raw).strip()
+        if not tok or tok in _STRUCT_TOKENS or _NUMBERED.match(tok):
+            continue
+        if len(tok) >= 2 and tok not in out:
+            out.append(tok)
+    return out
+
+
+def note_aliases(frontmatter: dict, title: str, stem: str = "") -> list[str]:
+    """Distinct names to scan bodies for: the title, any `aliases` list, and
+    names derived from the filename stem (the primary source for this corpus)."""
     names: list[str] = [title]
     raw = frontmatter.get("aliases") or []
     if isinstance(raw, list):
         names.extend(str(a).strip() for a in raw if str(a).strip())
+    if stem:
+        names.extend(stem_aliases(stem))
     seen: list[str] = []
     for n in names:
         if n and n not in seen:
@@ -39,12 +62,13 @@ def build_note_records(repo_root: str | Path) -> list[dict]:
     for note in novel_fs.list_notes(repo_root):
         text = novel_fs.read_file(repo_root, note["path"])
         fm, _ = novel_fs.parse_frontmatter(text)
+        stem = Path(note["path"]).stem
         recs.append(
             {
                 "file_path": note["path"],
                 "title": note["title"],
                 "note_type": fm.get("type"),
-                "aliases": note_aliases(fm, note["title"]),
+                "aliases": note_aliases(fm, note["title"], stem=stem),
                 "frontmatter": fm,
             }
         )
