@@ -340,3 +340,79 @@ async def test_reset_forbidden_for_member(member_client, novel_repo):
 
 async def test_reset_allowed_for_admin(admin_client, novel_repo):
     assert (await admin_client.post("/api/novels/reset")).status_code == 200
+
+
+# ── Knowledge index endpoints (Phase 1 Track A) ──
+
+
+def _make_indexed_repo(root):
+    w = root / "作品A"
+    (w / "Setting").mkdir(parents=True)
+    (w / "Setting" / "角色-張三.md").write_text(
+        "---\ntype: character\naliases: [小三]\ntags: [第一卷]\n---\n# 張三\n設定", encoding="utf-8"
+    )
+    (w / "01.md").write_text("張三與小三在此。", encoding="utf-8")
+    (w / "02.md").write_text("只有張三。", encoding="utf-8")
+
+
+@pytest.fixture()
+def indexed_repo(tmp_path, monkeypatch):
+    from core.config import settings
+
+    root = tmp_path / "idx"
+    root.mkdir()
+    _make_indexed_repo(root)
+    monkeypatch.setattr(settings, "novel_repo_path", str(root))
+    return str(root)
+
+
+@pytest.fixture()
+async def seed_index(indexed_repo, db_session):
+    from services import novel_index
+
+    await novel_index.reindex_all(db_session, indexed_repo)
+    await db_session.commit()
+    return indexed_repo
+
+
+async def test_graph_returns_note_and_chapter_nodes(viewer_client, seed_index):
+    r = await viewer_client.get("/api/novels/graph")
+    assert r.status_code == 200
+    body = r.json()
+    types = {n["type"] for n in body["nodes"]}
+    assert "note" in types and "chapter" in types
+    assert any(e["kind"] == "mention" for e in body["edges"])
+
+
+async def test_notes_filter_by_type(viewer_client, seed_index):
+    r = await viewer_client.get("/api/novels/notes?type=character")
+    assert r.status_code == 200
+    notes = r.json()["notes"]
+    assert notes and all(n["note_type"] == "character" for n in notes)
+
+
+async def test_notes_filter_by_type_excludes_nonmatching(viewer_client, seed_index):
+    r = await viewer_client.get("/api/novels/notes?type=location")
+    assert r.status_code == 200
+    assert r.json()["notes"] == []
+
+
+async def test_appearances_ordered_by_chapter(viewer_client, seed_index):
+    r = await viewer_client.get("/api/novels/notes/appearances", params={"path": "作品A/Setting/角色-張三.md"})
+    assert r.status_code == 200
+    aps = r.json()["appearances"]
+    chapters = [a["chapter_path"] for a in aps]
+    assert chapters == sorted(chapters)
+    assert chapters == ["作品A/01.md", "作品A/02.md"]
+
+
+async def test_reindex_requires_admin(viewer_client, indexed_repo):
+    r = await viewer_client.post("/api/novels/reindex")
+    assert r.status_code == 403
+
+
+async def test_reindex_as_admin_populates(admin_client, indexed_repo):
+    r = await admin_client.post("/api/novels/reindex")
+    assert r.status_code == 200
+    stats = r.json()["stats"]
+    assert stats["notes"] == 1 and stats["mentions"] >= 2

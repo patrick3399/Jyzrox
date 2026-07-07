@@ -12,14 +12,15 @@ from __future__ import annotations
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import text
+from sqlalchemy import select, text
 
 from core import audit, events
 from core.auth import require_auth, require_role
 from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
-from services import novel_fs, novel_git
+from db.models import NovelLink, NovelMention, NovelNote
+from services import novel_fs, novel_git, novel_index
 from worker.helpers import acquire_lock, release_lock
 
 _GIT_LOCK = "novel:git:lock"
@@ -256,3 +257,91 @@ async def reset(auth: dict = Depends(_admin)):
     result = await _with_git_lock(_do)
     await audit.log_audit(auth["user_id"], "novel.reset", _repo())
     return result
+
+
+# ── Knowledge index (Phase 1 Track A) ──────────────────────────────────────
+
+
+def _story_order(fm: dict) -> float:
+    """Sort key for the plot timeline; notes without story_order sink to the end."""
+    raw = fm.get("story_order")
+    if raw is None:
+        return float("inf")
+    try:
+        return float(raw)
+    except TypeError, ValueError:
+        return float("inf")
+
+
+@router.get("/graph")
+async def graph(_: dict = Depends(require_auth)):
+    """Nodes (notes + mentioned chapters) and edges (mention + resolved wikilinks)."""
+    async with async_session() as s:
+        notes = (await s.execute(select(NovelNote))).scalars().all()
+        mentions = (await s.execute(select(NovelMention))).scalars().all()
+        links = (await s.execute(select(NovelLink))).scalars().all()
+    nodes = [{"id": n.file_path, "label": n.title, "type": "note"} for n in notes]
+    chapters = sorted({m.chapter_path for m in mentions})
+    nodes += [{"id": c, "label": c.split("/")[-1], "type": "chapter"} for c in chapters]
+    edges = [{"src": m.note_path, "dst": m.chapter_path, "kind": "mention"} for m in mentions]
+    edges += [{"src": link.src_path, "dst": link.dst_path, "kind": "link"} for link in links if link.dst_path]
+    return {"nodes": nodes, "edges": edges}
+
+
+@router.get("/notes")
+async def list_notes_ep(
+    type: str | None = Query(None),
+    tag: str | None = Query(None),
+    sort: str | None = Query(None),
+    _: dict = Depends(require_auth),
+):
+    async with async_session() as s:
+        rows = (await s.execute(select(NovelNote))).scalars().all()
+    out = []
+    for n in rows:
+        fm = n.frontmatter or {}
+        if type and n.note_type != type:
+            continue
+        if tag and tag not in (fm.get("tags") or []):
+            continue
+        out.append({"path": n.file_path, "title": n.title, "note_type": n.note_type, "frontmatter": fm})
+    if sort == "story_order":
+        out.sort(key=lambda x: _story_order(x["frontmatter"]))
+    return {"notes": out}
+
+
+@router.get("/notes/appearances")
+async def appearances(path: str = Query(...), _: dict = Depends(require_auth)):
+    """A note's mentions across chapters, chapter-ordered (character appearance order)."""
+    async with async_session() as s:
+        rows = (
+            (
+                await s.execute(
+                    select(NovelMention).where(NovelMention.note_path == path).order_by(NovelMention.chapter_path)
+                )
+            )
+            .scalars()
+            .all()
+        )
+    return {
+        "appearances": [
+            {"chapter_path": r.chapter_path, "mention_count": r.mention_count, "first_offset": r.first_offset}
+            for r in rows
+        ]
+    }
+
+
+@router.post("/reindex")
+async def reindex(auth: dict = Depends(_admin)):
+    """Rebuild the knowledge index now (admin). Serialized on the git lock so it
+    never reads the tree mid-mutation."""
+
+    async def _do():
+        async with async_session() as s:
+            stats = await novel_index.reindex_all(s, _repo())
+            await s.commit()
+        return stats
+
+    stats = await _with_git_lock(_do)
+    await audit.log_audit(auth["user_id"], "novel.reindex", _repo())
+    return {"stats": stats}
