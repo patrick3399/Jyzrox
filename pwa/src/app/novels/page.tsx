@@ -36,37 +36,45 @@ export default function NovelsPage() {
           <BookText className="size-6" />
           {t('novels.title')}
         </h1>
-        <div className="flex items-center gap-2">
+        <div className="flex flex-wrap items-center justify-end gap-2">
           {canEdit && (
             <button
               type="button"
               onClick={() => setShowCreate(true)}
+              aria-label={t('novels.newWork')}
+              title={t('novels.newWork')}
               className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
             >
-              <Plus className="size-4" />
-              {t('novels.newWork')}
+              <Plus className="size-4 shrink-0" />
+              <span className="hidden sm:inline">{t('novels.newWork')}</span>
             </button>
           )}
           <Link
             href="/novels/graph"
+            aria-label={t('novels.graph')}
+            title={t('novels.graph')}
             className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
           >
-            <Share2 className="size-4" />
-            {t('novels.graph')}
+            <Share2 className="size-4 shrink-0" />
+            <span className="hidden sm:inline">{t('novels.graph')}</span>
           </Link>
           <Link
             href="/novels/notes"
+            aria-label={t('novels.notes')}
+            title={t('novels.notes')}
             className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
           >
-            <NotebookText className="size-4" />
-            {t('novels.notes')}
+            <NotebookText className="size-4 shrink-0" />
+            <span className="hidden sm:inline">{t('novels.notes')}</span>
           </Link>
           <Link
             href="/novels/search"
+            aria-label={t('novels.search')}
+            title={t('novels.search')}
             className="inline-flex items-center gap-1 rounded-lg border border-vault-border px-3 py-2 text-sm text-vault-text-muted hover:border-vault-accent hover:text-vault-text"
           >
-            <Search className="size-4" />
-            {t('novels.search')}
+            <Search className="size-4 shrink-0" />
+            <span className="hidden sm:inline">{t('novels.search')}</span>
           </Link>
         </div>
       </div>
