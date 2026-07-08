@@ -5,6 +5,7 @@ import pytest
 
 from services.novel_fs import (
     NovelPathError,
+    classify_path,
     file_exists,
     keyword_scan,
     list_chapters,
@@ -177,3 +178,39 @@ def test_parse_frontmatter_valid():
 def test_parse_frontmatter_malformed_does_not_raise():
     fm, body = parse_frontmatter("---\n: : bad yaml : :\n---\nbody")
     assert fm == {} and "body" in body
+
+
+@pytest.mark.parametrize(
+    ("rel", "expected"),
+    [
+        # main = first-level file directly under the work dir
+        ("作品A/01.md", "main"),
+        ("作品A/第01章.md", "main"),
+        # special root files
+        ("作品A/setting.md", "setting"),
+        ("作品A/Setting.md", "setting"),  # case-insensitive
+        ("作品A/FORMAT.md", "reference"),
+        ("作品A/format.md", "reference"),
+        # standard category dirs
+        ("作品A/Setting/設定-1號-角色v1.md", "setting"),
+        ("作品A/設定/角色.md", "setting"),
+        ("作品A/參考/大綱.md", "reference"),
+        ("作品A/草稿/03alt.md", "draft"),
+        ("作品A/廢案/03.md", "scrap"),
+        ("作品A/番外/短篇.md", "extra"),
+        # legacy aliases (read-only compatibility), case-insensitive
+        ("流螢 - 熔火之繭/Old/01.md", "scrap"),
+        ("流螢 - 熔火之繭/old/01.md", "scrap"),
+        ("璃月 - 等價交換/DEMO/demo1.md", "draft"),
+        ("惡靈古堡 - 赤紅深淵/extend/01n.md", "draft"),
+        # unknown subdir → reference, never silently main
+        ("作品A/notes/random.md", "reference"),
+        # nested subtree inherits the category
+        ("作品A/廢案/v1/03.md", "scrap"),
+        ("作品A/Setting/deep/角色.md", "setting"),
+        # repo-root file (FORMAT.md, AGENTS.md at repo root) → reference
+        ("FORMAT.md", "reference"),
+    ],
+)
+def test_classify_path(rel, expected):
+    assert classify_path(rel) == expected

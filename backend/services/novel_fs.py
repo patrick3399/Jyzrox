@@ -17,9 +17,45 @@ _RESERVED_DIRS = {"設定"}
 _NOTE_DIRS = {"Setting", "設定"}
 _H1 = re.compile(r"^#\s+(.*)$", re.MULTILINE)
 
+# Canon layout (Phase 1.5, spec 2026-07-08): category is derived purely from
+# the path. Folder-name matching is case-insensitive; legacy names (Old, DEMO,
+# extend) map to standard categories without moving any files.
+_CATEGORY_DIRS = {
+    "setting": "setting",
+    "設定": "setting",
+    "參考": "reference",
+    "草稿": "draft",
+    "廢案": "scrap",
+    "番外": "extra",
+    # legacy aliases found in the corpus
+    "old": "scrap",
+    "demo": "draft",
+    "extend": "draft",
+}
+# Work-root files that are not chapters.
+_SPECIAL_ROOT_FILES = {"setting.md": "setting", "format.md": "reference"}
+
 
 class NovelPathError(Exception):
     """Raised when a requested path is outside the repo or not an allowed file."""
+
+
+def classify_path(rel_path: str | Path) -> str:
+    """Category of a repo-relative `.md` path: main | extra | draft |
+    reference | scrap | setting. First matching directory (walking down from
+    the work root) decides; the whole subtree inherits it. Unknown subdirs are
+    'reference' so nothing is ever silently promoted to main."""
+    parts = Path(rel_path).parts
+    if len(parts) < 2:
+        return "reference"  # repo-root file, not part of any work
+    dirs = parts[1:-1]
+    if not dirs:
+        return _SPECIAL_ROOT_FILES.get(parts[-1].lower(), "main")
+    for d in dirs:
+        cat = _CATEGORY_DIRS.get(d.lower())
+        if cat:
+            return cat
+    return "reference"
 
 
 def safe_repo_path(repo_root: str | Path, rel_path: str) -> Path:
