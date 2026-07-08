@@ -1888,7 +1888,6 @@ const en: Record<string, string> = {
   'novels.categoryScrap': 'Scrapped',
   'novels.createCategory': 'Category',
   'novels.categoryMain': 'Main text',
-  'novels.sectionFiles': 'Files',
 }
 
 export default en

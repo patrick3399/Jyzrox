@@ -19,6 +19,10 @@ function hitHref(path: string): string {
   return novelChapterHref(work, chapter, path)
 }
 
+function isWorkCategoryKey(value: string): value is WorkCategory {
+  return value in CATEGORY_LABEL_KEYS
+}
+
 export default function NovelSearchPage() {
   useLocale()
   const [input, setInput] = useState('')
@@ -75,9 +79,9 @@ export default function NovelSearchPage() {
               >
                 <span className="flex items-center text-xs text-vault-text-muted">
                   {hit.path}:{hit.line + 1}
-                  {hit.category && hit.category !== 'main' && (
+                  {hit.category && hit.category !== 'main' && isWorkCategoryKey(hit.category) && (
                     <span className="ml-2 shrink-0 rounded border border-vault-border px-1.5 py-0.5 text-[10px] text-vault-text-muted">
-                      {t(CATEGORY_LABEL_KEYS[hit.category as WorkCategory] ?? 'novels.categoryReference')}
+                      {t(CATEGORY_LABEL_KEYS[hit.category])}
                     </span>
                   )}
                 </span>

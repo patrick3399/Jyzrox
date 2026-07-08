@@ -1614,7 +1614,6 @@ const ko: Record<string, string> = {
   'novels.categoryScrap': '폐기안',
   'novels.createCategory': '분류',
   'novels.categoryMain': '본문',
-  'novels.sectionFiles': '파일',
 }
 
 export default ko

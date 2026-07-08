@@ -1610,7 +1610,6 @@ const zhTW: Record<string, string> = {
   'novels.categoryScrap': '廢案',
   'novels.createCategory': '分類',
   'novels.categoryMain': '主文',
-  'novels.sectionFiles': '檔案',
 }
 
 export default zhTW
