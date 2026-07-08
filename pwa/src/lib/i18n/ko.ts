@@ -1612,6 +1612,8 @@ const ko: Record<string, string> = {
   'novels.categoryDraft': '초안',
   'novels.categoryReference': '참고',
   'novels.categoryScrap': '폐기안',
+  'novels.createCategory': '분류',
+  'novels.categoryMain': '본문',
   'novels.sectionFiles': '파일',
 }
 

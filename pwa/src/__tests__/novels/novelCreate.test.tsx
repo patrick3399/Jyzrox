@@ -22,8 +22,8 @@ describe('NovelCreateDialog', () => {
     })
     fireEvent.click(screen.getByRole('button', { name: 'novels.create' }))
 
-    await waitFor(() => expect(h.createFile).toHaveBeenCalledWith('新作品', '第一章'))
-    expect(onCreated).toHaveBeenCalledWith('新作品', '第一章')
+    await waitFor(() => expect(h.createFile).toHaveBeenCalledWith('新作品', '第一章', undefined))
+    expect(onCreated).toHaveBeenCalledWith('新作品', '第一章', '新作品/第一章.md')
   })
 
   it('creates a chapter in an existing work', async () => {
@@ -34,7 +34,8 @@ describe('NovelCreateDialog', () => {
     fireEvent.change(screen.getByLabelText('novels.chapterName'), { target: { value: '第二章' } })
     fireEvent.click(screen.getByRole('button', { name: 'novels.create' }))
 
-    await waitFor(() => expect(h.createFile).toHaveBeenCalledWith('作品A', '第二章'))
+    await waitFor(() => expect(h.createFile).toHaveBeenCalledWith('作品A', '第二章', undefined))
+    expect(onCreated).toHaveBeenCalledWith('作品A', '第二章', '作品A/第二章.md')
   })
 
   it('rejects an empty name without calling the API', () => {
@@ -60,5 +61,18 @@ describe('NovelCreateDialog', () => {
     fireEvent.change(screen.getByLabelText('novels.chapterName'), { target: { value: '第一章' } })
     fireEvent.click(screen.getByRole('button', { name: 'novels.create' }))
     await waitFor(() => expect(screen.getByText('novels.fileExists')).toBeInTheDocument())
+  })
+
+  it('creates the file inside the chosen category folder', async () => {
+    h.createFile.mockResolvedValue({ ok: true, head: 'sha', pushed: true })
+    const onCreated = vi.fn()
+    render(<NovelCreateDialog mode="chapter" work="作品A" onClose={vi.fn()} onCreated={onCreated} />)
+
+    fireEvent.change(screen.getByLabelText('novels.createCategory'), { target: { value: '草稿' } })
+    fireEvent.change(screen.getByLabelText('novels.chapterName'), { target: { value: '03alt' } })
+    fireEvent.click(screen.getByRole('button', { name: 'novels.create' }))
+
+    await waitFor(() => expect(h.createFile).toHaveBeenCalledWith('作品A', '03alt', '草稿'))
+    expect(onCreated).toHaveBeenCalledWith('作品A', '03alt', '作品A/草稿/03alt.md')
   })
 })

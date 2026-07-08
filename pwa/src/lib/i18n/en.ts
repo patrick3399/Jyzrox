@@ -1886,6 +1886,8 @@ const en: Record<string, string> = {
   'novels.categoryDraft': 'Drafts',
   'novels.categoryReference': 'Reference',
   'novels.categoryScrap': 'Scrapped',
+  'novels.createCategory': 'Category',
+  'novels.categoryMain': 'Main text',
   'novels.sectionFiles': 'Files',
 }
 

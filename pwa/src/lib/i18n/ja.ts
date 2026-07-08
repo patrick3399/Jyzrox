@@ -1629,6 +1629,8 @@ const ja: Record<string, string> = {
   'novels.categoryDraft': '下書き',
   'novels.categoryReference': '資料',
   'novels.categoryScrap': 'ボツ案',
+  'novels.createCategory': 'カテゴリ',
+  'novels.categoryMain': '本編',
   'novels.sectionFiles': 'ファイル',
 }
 

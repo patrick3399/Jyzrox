@@ -1608,6 +1608,8 @@ const zhTW: Record<string, string> = {
   'novels.categoryDraft': '草稿',
   'novels.categoryReference': '參考',
   'novels.categoryScrap': '廢案',
+  'novels.createCategory': '分類',
+  'novels.categoryMain': '主文',
   'novels.sectionFiles': '檔案',
 }
 

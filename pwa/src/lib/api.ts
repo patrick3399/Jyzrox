@@ -1,4 +1,5 @@
 import { t } from '@/lib/i18n'
+import { novelFilePath } from '@/lib/novels'
 
 import type {
   Gallery,
@@ -1901,8 +1902,8 @@ const novels = {
   // Create a new chapter file (new work = new folder via its first chapter).
   // Reuses PUT /file with create:true; the backend refuses to clobber and needs
   // no base_sha (a new file has no base revision), so this is a single request.
-  createFile: async (work: string, name: string): Promise<NovelWriteResult> => {
-    const path = `${work}/${name}.md`
+  createFile: async (work: string, name: string, subdir?: string): Promise<NovelWriteResult> => {
+    const path = novelFilePath(work, name, subdir)
     return novels.writeFile({
       path,
       content: `# ${name}\n\n`,

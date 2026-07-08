@@ -1590,6 +1590,8 @@ const zhCN: Record<string, string> = {
   'novels.categoryDraft': '草稿',
   'novels.categoryReference': '参考',
   'novels.categoryScrap': '废案',
+  'novels.createCategory': '分类',
+  'novels.categoryMain': '主文',
   'novels.sectionFiles': '文件',
 }
 

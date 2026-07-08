@@ -25,8 +25,8 @@ export default function NovelsPage() {
   const [showCreate, setShowCreate] = useState(false)
   const works = data?.works ?? []
 
-  const goToChapter = (work: string, chapter: string) => {
-    router.push(novelChapterHref(work, chapter, `${work}/${chapter}.md`))
+  const goToChapter = (work: string, chapter: string, path: string) => {
+    router.push(novelChapterHref(work, chapter, path))
   }
 
   return (
@@ -107,10 +107,10 @@ export default function NovelsPage() {
         <NovelCreateDialog
           mode="work"
           onClose={() => setShowCreate(false)}
-          onCreated={(work, chapter) => {
+          onCreated={(work, chapter, path) => {
             setShowCreate(false)
             mutate('novel-works')
-            goToChapter(work, chapter)
+            goToChapter(work, chapter, path)
           }}
         />
       )}

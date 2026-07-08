@@ -90,10 +90,10 @@ export default function NovelWorkPage() {
           mode="chapter"
           work={work}
           onClose={() => setShowCreate(false)}
-          onCreated={(createdWork, chapter) => {
+          onCreated={(createdWork, chapter, path) => {
             setShowCreate(false)
             mutate(['novel-chapters', work])
-            router.push(novelChapterHref(createdWork, chapter, `${createdWork}/${chapter}.md`))
+            router.push(novelChapterHref(createdWork, chapter, path))
           }}
         />
       )}
