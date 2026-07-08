@@ -116,6 +116,33 @@ async def test_list_works_returns_folders(viewer_client, novel_repo):
     assert any(w["name"] == "作品A" for w in r.json()["works"])
 
 
+@pytest.fixture()
+def polluted_novel_repo(novel_repo):
+    work = novel_repo["work"]
+    (work / "作品A" / "Old").mkdir()
+    (work / "作品A" / "Old" / "第01章.md").write_text("# 舊版\n", encoding="utf-8")
+    (work / "作品A" / "FORMAT.md").write_text("# 格式\n", encoding="utf-8")
+    _run(work, "add", ".")
+    _run(work, "commit", "-m", "pollute")
+    return novel_repo
+
+
+async def test_chapters_endpoint_excludes_old_dir_and_reports_category_counts(viewer_client, polluted_novel_repo):
+    r = await viewer_client.get("/api/novels/works/作品A/chapters")
+    assert r.status_code == 200
+    body = r.json()
+    assert [c["path"] for c in body["chapters"]] == ["作品A/第01章.md"]
+    assert body["categories"] == {"extra": 0, "draft": 0, "reference": 1, "scrap": 1}
+
+
+async def test_files_endpoint_lists_category_and_rejects_unknown(viewer_client, polluted_novel_repo):
+    r = await viewer_client.get("/api/novels/works/作品A/files", params={"category": "scrap"})
+    assert r.status_code == 200
+    assert [f["path"] for f in r.json()["files"]] == ["作品A/Old/第01章.md"]
+    bad = await viewer_client.get("/api/novels/works/作品A/files", params={"category": "main"})
+    assert bad.status_code == 400
+
+
 async def test_novel_endpoints_return_404_when_flag_disabled(viewer_client, novel_repo, mock_redis):
     """Redis override setting:novel_enabled=0 → router gate returns 404."""
 

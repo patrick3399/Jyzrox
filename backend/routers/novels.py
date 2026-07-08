@@ -51,10 +51,28 @@ async def list_works(_: dict = Depends(require_auth)):
     return {"works": novel_fs.list_works(_repo())}
 
 
+_FILE_CATEGORIES = {"extra", "draft", "reference", "scrap"}
+
+
 @router.get("/works/{work}/chapters")
 async def list_chapters(work: str, _: dict = Depends(require_auth)):
     try:
-        return {"chapters": novel_fs.list_chapters(_repo(), work)}
+        return {
+            "chapters": novel_fs.list_chapters(_repo(), work),
+            "categories": novel_fs.count_work_files(_repo(), work),
+        }
+    except novel_fs.NovelPathError as e:
+        raise HTTPException(status_code=400, detail=str(e))
+
+
+@router.get("/works/{work}/files")
+async def list_work_files_ep(work: str, category: str = Query(...), _: dict = Depends(require_auth)):
+    """Non-main canon categories only; main goes through /chapters, setting
+    through /notes."""
+    if category not in _FILE_CATEGORIES:
+        raise HTTPException(status_code=400, detail=f"unknown category: {category!r}")
+    try:
+        return {"files": novel_fs.list_work_files(_repo(), work, category)}
     except novel_fs.NovelPathError as e:
         raise HTTPException(status_code=400, detail=str(e))
 
