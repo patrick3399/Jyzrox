@@ -60,6 +60,7 @@ docs/ref/
 
 # Project meta (not needed for build)
 TODO.md
+TODO-NOVEL.md
 LICENSE
 .pre-commit-config.yaml
 
