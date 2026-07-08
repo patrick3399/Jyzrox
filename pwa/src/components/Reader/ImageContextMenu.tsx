@@ -11,6 +11,7 @@ import {
   ExternalLink,
   Search,
   ScanSearch,
+  SquareCheck,
   type LucideIcon,
 } from 'lucide-react'
 import { t } from '@/lib/i18n'
@@ -27,6 +28,7 @@ interface ImageContextMenuProps {
   onViewGallery?: () => void
   onFindSimilar?: () => void
   onFindSource?: () => void
+  onSelect?: () => void
 }
 
 export function ImageContextMenu({
@@ -41,6 +43,7 @@ export function ImageContextMenu({
   onViewGallery,
   onFindSimilar,
   onFindSource,
+  onSelect,
 }: ImageContextMenuProps) {
   const menuRef = useRef<HTMLDivElement>(null)
 
@@ -137,6 +140,7 @@ export function ImageContextMenu({
   const hasShare = typeof navigator !== 'undefined' && !!navigator.share
   const baseItems =
     (hasShare ? 3 : 2) +
+    (onSelect ? 1 : 0) +
     (onToggleFavorite ? 1 : 0) +
     (onViewGallery ? 1 : 0) +
     (onFindSimilar ? 1 : 0) +
@@ -150,6 +154,18 @@ export function ImageContextMenu({
 
   const items: { label: string; icon: LucideIcon; onClick: () => void; iconClassName?: string }[] =
     [
+      ...(onSelect
+        ? [
+            {
+              label: t('library.selectImages'),
+              icon: SquareCheck,
+              onClick: () => {
+                onSelect()
+                onClose()
+              },
+            },
+          ]
+        : []),
       ...(onViewGallery
         ? [
             {

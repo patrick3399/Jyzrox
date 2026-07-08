@@ -425,6 +425,7 @@ const ja: Record<string, string> = {
   'library.noAiTagsAboveThreshold': 'しきい値以上の AI タグなし',
   'library.selectImages': '選択',
   'library.cancelSelect': 'キャンセル',
+  'library.invertSelection': '選択を反転',
   'library.hideSelected': '除外 ({count})',
   'library.hideSelectedConfirm':
     '{count} 枚の画像を除外しますか？削除され、再インポート時にブロックされます。',
@@ -1204,6 +1205,7 @@ const ja: Record<string, string> = {
   'common.all': 'すべて',
   'common.tags': 'タグ',
   'common.cancel': 'キャンセル',
+  'common.undo': '元に戻す',
   'common.optional': '任意',
   'common.goBack': '戻る',
   'common.retry': 'リトライ',

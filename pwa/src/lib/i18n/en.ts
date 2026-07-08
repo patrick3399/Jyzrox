@@ -481,6 +481,7 @@ const en: Record<string, string> = {
   'library.noAiTagsAboveThreshold': 'No AI tags above threshold',
   'library.selectImages': 'Select',
   'library.cancelSelect': 'Cancel',
+  'library.invertSelection': 'Invert',
   'library.hideSelected': 'Exclude ({count})',
   'library.hideSelectedConfirm':
     'Exclude {count} selected image(s)? They will be deleted and blocked from re-imports.',
@@ -1290,6 +1291,7 @@ const en: Record<string, string> = {
   'common.all': 'All',
   'common.tags': 'Tags',
   'common.cancel': 'Cancel',
+  'common.undo': 'Undo',
   'common.optional': 'optional',
   'common.goBack': 'Go back',
   'common.retry': 'Try again',

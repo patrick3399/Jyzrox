@@ -13,7 +13,7 @@ from typing import Literal
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
-from pydantic import BaseModel
+from pydantic import BaseModel, Field
 from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, exists, func, not_, or_, select, tuple_
 from sqlalchemy import case as sql_case
 from sqlalchemy import delete as sa_delete
@@ -1913,19 +1913,27 @@ async def _compact_active_image_pages(db: AsyncSession, gallery_id: int) -> int:
     return len(images)
 
 
-async def _hide_image_row(db: AsyncSession, gallery: Gallery, img: Image) -> int:
-    if img.visibility != "active":
-        return await _active_image_count(db, gallery.id)
-
-    if img.source_position is None:
-        img.source_position = img.page_num
-    img.visibility = "user_hidden"
-    img.hidden_at = datetime.now(UTC)
-    img.page_num = -int(img.id)
-    await db.flush()
+async def _hide_image_rows(db: AsyncSession, gallery: Gallery, images: list[Image]) -> int:
+    """Mark images user_hidden with a single page compaction at the end."""
+    to_hide = [img for img in images if img.visibility == "active"]
+    hidden_at = datetime.now(UTC)
+    for img in to_hide:
+        if img.source_position is None:
+            img.source_position = img.page_num
+        img.visibility = "user_hidden"
+        img.hidden_at = hidden_at
+        img.page_num = -int(img.id)
+    if to_hide:
+        await db.flush()
     active_count = await _compact_active_image_pages(db, gallery.id)
     gallery.pages = active_count
     return active_count
+
+
+async def _hide_image_row(db: AsyncSession, gallery: Gallery, img: Image) -> int:
+    if img.visibility != "active":
+        return await _active_image_count(db, gallery.id)
+    return await _hide_image_rows(db, gallery, [img])
 
 
 async def _restore_image_row(db: AsyncSession, gallery: Gallery, img: Image) -> int:
@@ -2048,6 +2056,84 @@ async def restore_hidden_image(
     remaining_pages = await _restore_image_row(db, gallery, img)
     await db.commit()
     return {"status": "ok", "remaining_pages": remaining_pages}
+
+
+class ImageIdsBody(BaseModel):
+    image_ids: list[int] = Field(min_length=1, max_length=1000)
+
+
+@router.post("/galleries/{source}/{source_id}/images/hide-batch")
+async def hide_images_batch(
+    source: str,
+    source_id: str,
+    body: ImageIdsBody,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Hide multiple images in one transaction with a single page compaction.
+
+    Ids that are not active images of this gallery are silently skipped so the
+    client can retry a stale selection without errors.
+    """
+    gallery = await _get_or_404_by_source(db, source, source_id, auth)
+    _check_write_access(auth, gallery)
+
+    images = (
+        (
+            await db.execute(
+                select(Image).where(
+                    Image.gallery_id == gallery.id,
+                    Image.id.in_(body.image_ids),
+                    Image.visibility == "active",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    remaining_pages = await _hide_image_rows(db, gallery, list(images))
+    await db.commit()
+    return {"status": "ok", "hidden": len(images), "remaining_pages": remaining_pages}
+
+
+@router.post("/galleries/{source}/{source_id}/images/restore-batch")
+async def restore_images_batch(
+    source: str,
+    source_id: str,
+    body: ImageIdsBody,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    """Restore multiple user-hidden images (undo of a batch hide).
+
+    Images are restored in ascending source-position order so each one lands
+    at its original page like sequential single restores would.
+    """
+    gallery = await _get_or_404_by_source(db, source, source_id, auth)
+    _check_write_access(auth, gallery)
+
+    images = (
+        (
+            await db.execute(
+                select(Image).where(
+                    Image.gallery_id == gallery.id,
+                    Image.id.in_(body.image_ids),
+                    Image.visibility == "user_hidden",
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    ordered = sorted(
+        images,
+        key=lambda img: (img.source_position is None, img.source_position or 0, img.id),
+    )
+    remaining_pages = await _active_image_count(db, gallery.id)
+    for img in ordered:
+        remaining_pages = await _restore_image_row(db, gallery, img)
+    await db.commit()
+    return {"status": "ok", "restored": len(images), "remaining_pages": remaining_pages}
 
 
 # ── Read progress ────────────────────────────────────────────────────

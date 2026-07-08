@@ -146,9 +146,13 @@ export default function GalleryDetailPage() {
     source: string
   } | null>(null)
 
+  const images = imagesData?.images ?? []
+
   // Image multi-select & exclusion state
   const [selectMode, setSelectMode] = useState(false)
-  const [selectedPages, setSelectedPages] = useState<Set<number>>(new Set())
+  const [selectedIds, setSelectedIds] = useState<Set<number>>(new Set())
+  // Index (into `images`) of the last toggled tile — anchor for range selection
+  const selectAnchorRef = useRef<number | null>(null)
   const [isHiding, setIsHiding] = useState(false)
   const [excludedBlobs, setExcludedBlobs] = useState<
     Array<{ blob_sha256: string; excluded_at: string | null }>
@@ -457,45 +461,88 @@ export default function GalleryDetailPage() {
     }
   }
 
-  // Toggle image selection
-  const togglePage = (pageNum: number) => {
-    setSelectedPages((prev) => {
+  // Toggle a single image and move the range anchor to it
+  const toggleSelect = (image: GalleryImage, idx: number) => {
+    setSelectedIds((prev) => {
       const next = new Set(prev)
-      if (next.has(pageNum)) next.delete(pageNum)
-      else next.add(pageNum)
+      if (next.has(image.id)) next.delete(image.id)
+      else next.add(image.id)
       return next
     })
+    selectAnchorRef.current = idx
   }
 
-  // Batch hide selected images
+  // Select everything between the anchor and idx (shift-click / long-press)
+  const rangeSelectTo = (idx: number) => {
+    const anchor = selectAnchorRef.current
+    const lo = anchor === null ? idx : Math.min(anchor, idx)
+    const hi = anchor === null ? idx : Math.max(anchor, idx)
+    setSelectedIds((prev) => {
+      const next = new Set(prev)
+      for (let i = lo; i <= hi; i++) {
+        const img = images[i]
+        if (img) next.add(img.id)
+      }
+      return next
+    })
+    selectAnchorRef.current = idx
+  }
+
+  const selectAllLoaded = () => {
+    setSelectedIds(new Set(images.map((img) => img.id)))
+  }
+
+  const invertSelection = () => {
+    setSelectedIds((prev) => new Set(images.filter((img) => !prev.has(img.id)).map((img) => img.id)))
+  }
+
+  const exitSelectMode = () => {
+    setSelectMode(false)
+    setSelectedIds(new Set())
+    selectAnchorRef.current = null
+  }
+
+  const enterSelectModeWith = (imageId: number) => {
+    setSelectMode(true)
+    setSelectedIds(new Set([imageId]))
+    const idx = images.findIndex((img) => img.id === imageId)
+    selectAnchorRef.current = idx >= 0 ? idx : null
+  }
+
+  // Batch hide selected images in one request, with undo instead of confirm
   const handleHideSelected = async () => {
-    if (!source || !sourceId || selectedPages.size === 0) return
-    if (!confirm(t('library.hideSelectedConfirm', { count: selectedPages.size }))) return
+    if (!source || !sourceId || selectedIds.size === 0) return
+    const src = source
+    const sid = sourceId
+    const ids = [...selectedIds]
     setIsHiding(true)
-    let hidden = 0
     try {
-      // Delete one by one (page numbers shift after each delete, so sort descending)
-      const sorted = [...selectedPages].sort((a, b) => b - a)
-      for (const pageNum of sorted) {
-        try {
-          await api.library.deleteImage(source, sourceId, pageNum)
-          hidden++
-        } catch {
-          toast.error(t('library.hideImageFailed'))
-        }
-      }
-      if (hidden > 0) {
-        toast.success(t('library.imagesHidden', { count: hidden }))
-        mutateGallery()
-        mutateImages()
-        fetchHidden()
-      }
-    } finally {
-      setSelectedPages(new Set())
-      setSelectMode(false)
-      setIsHiding(false)
+      const res = await api.library.hideImagesBatch(src, sid, ids)
+      exitSelectMode()
+      toast.success(t('library.imagesHidden', { count: res.hidden }), {
+        action: {
+          label: t('common.undo'),
+          onClick: async () => {
+            try {
+              await api.library.restoreImagesBatch(src, sid, ids)
+              toast.success(t('library.hiddenRestored'))
+              mutateGallery()
+              mutateImages()
+              fetchHidden()
+            } catch {
+              toast.error(t('library.restoreFailed'))
+            }
+          },
+        },
+      })
+      mutateGallery()
+      mutateImages()
       fetchExcluded()
       fetchHidden()
+    } catch {
+      toast.error(t('library.hideImageFailed'))
+    } finally {
+      setIsHiding(false)
     }
   }
 
@@ -542,7 +589,6 @@ export default function GalleryDetailPage() {
   }
 
   const handleRestoreImage = async (imageId: number) => {
-    if (!confirm(t('library.restoreHiddenConfirm'))) return
     setRestoringImageId(imageId)
     try {
       await api.library.restoreImage(imageId)
@@ -582,6 +628,20 @@ export default function GalleryDetailPage() {
     onContextMenu: lpCtx,
   } = useLongPress({ onLongPress: handleImageLongPress })
 
+  // In select mode, long-press (touch) or right-click extends the selection
+  // from the anchor to the pressed tile — touch parity with shift-click.
+  const selectLpTargetRef = useRef<number | null>(null)
+  const handleSelectLongPress = () => {
+    const idx = selectLpTargetRef.current
+    if (idx !== null) rangeSelectTo(idx)
+  }
+  const {
+    onTouchStart: selLpStart,
+    onTouchMove: selLpMove,
+    onTouchEnd: selLpEnd,
+    onContextMenu: selLpCtx,
+  } = useLongPress({ onLongPress: handleSelectLongPress })
+
   const handleImageToggleFavorite = useCallback(async () => {
     if (!imageMenu) return
     const { imageId } = imageMenu
@@ -612,14 +672,27 @@ export default function GalleryDetailPage() {
 
   const handleImageHide = useCallback(async () => {
     if (!imageMenu || !source || !sourceId) return
-    const { pageNum } = imageMenu
+    const { imageId } = imageMenu
     setImageMenu(null)
 
-    if (!window.confirm(t('reader.hideImageConfirm'))) return
-
     try {
-      await api.library.deleteImage(source, sourceId, pageNum)
-      toast.success(t('reader.imageHidden'))
+      await api.library.hideImage(imageId)
+      toast.success(t('reader.imageHidden'), {
+        action: {
+          label: t('common.undo'),
+          onClick: async () => {
+            try {
+              await api.library.restoreImage(imageId)
+              toast.success(t('library.hiddenRestored'))
+              mutateGallery()
+              mutateImages()
+              fetchHidden()
+            } catch {
+              toast.error(t('library.restoreFailed'))
+            }
+          },
+        },
+      })
       mutateGallery()
       mutateImages()
       fetchExcluded()
@@ -668,7 +741,6 @@ export default function GalleryDetailPage() {
   const aiTags = tagData.filter(
     (tag) => tag.source === 'ai' && tag.confidence >= confidenceThreshold,
   )
-  const images = imagesData?.images ?? []
   const statusInfo =
     DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
   const artistDisplayName = getArtistDisplayName(gallery)
@@ -1184,18 +1256,27 @@ export default function GalleryDetailPage() {
               <>
                 <button
                   onClick={handleHideSelected}
-                  disabled={selectedPages.size === 0 || isHiding}
+                  disabled={selectedIds.size === 0 || isHiding}
                   className="px-3 py-1 rounded text-xs font-medium border bg-red-900/30 border-red-700/50 text-red-400 hover:bg-red-900/50 transition-colors disabled:opacity-50"
                 >
                   {isHiding
                     ? t('library.hidingImages')
-                    : t('library.hideSelected', { count: selectedPages.size })}
+                    : t('library.hideSelected', { count: selectedIds.size })}
                 </button>
                 <button
-                  onClick={() => {
-                    setSelectMode(false)
-                    setSelectedPages(new Set())
-                  }}
+                  onClick={selectAllLoaded}
+                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                >
+                  {t('library.selectAll')}
+                </button>
+                <button
+                  onClick={invertSelection}
+                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
+                >
+                  {t('library.invertSelection')}
+                </button>
+                <button
+                  onClick={exitSelectMode}
                   className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors"
                 >
                   {t('library.cancelSelect')}
@@ -1244,14 +1325,27 @@ export default function GalleryDetailPage() {
               hasMore={!imagesReachingEnd}
               isLoading={imagesLoadingMore}
               renderItem={(image, idx) => {
-                const isSelected = selectedPages.has(image.page_num)
+                const isSelected = selectedIds.has(image.id)
                 if (selectMode) {
                   return (
                     <button
                       key={image.id}
                       type="button"
-                      onClick={() => togglePage(image.page_num)}
-                      className={`relative group rounded border-2 transition-colors ${
+                      onClick={(e) => {
+                        if (e.shiftKey) rangeSelectTo(idx)
+                        else toggleSelect(image, idx)
+                      }}
+                      onTouchStart={(e) => {
+                        selectLpTargetRef.current = idx
+                        selLpStart(e)
+                      }}
+                      onTouchMove={selLpMove}
+                      onTouchEnd={selLpEnd}
+                      onContextMenu={(e) => {
+                        selectLpTargetRef.current = idx
+                        selLpCtx(e)
+                      }}
+                      className={`relative group rounded border-2 transition-colors select-none [-webkit-touch-callout:none] ${
                         isSelected
                           ? 'border-red-500 ring-2 ring-red-500/30'
                           : 'border-vault-border hover:border-vault-border-hover'
@@ -1427,6 +1521,7 @@ export default function GalleryDetailPage() {
           imageUrl={imageMenu.imageUrl}
           imageName={imageMenu.imageName}
           onHide={handleImageHide}
+          onSelect={() => enterSelectModeWith(imageMenu.imageId)}
           isFavorited={isFavorited(imageMenu.imageId)}
           onToggleFavorite={handleImageToggleFavorite}
           onFindSimilar={() => {

@@ -483,6 +483,18 @@ const library = {
       ...init,
     }),
 
+  hideImagesBatch: (source: string, sourceId: string, imageIds: number[], init?: RequestInit) =>
+    apiFetch<{ status: string; hidden: number; remaining_pages: number }>(
+      galleryApiPath(source, sourceId, '/images/hide-batch'),
+      { method: 'POST', body: JSON.stringify({ image_ids: imageIds }), ...init },
+    ),
+
+  restoreImagesBatch: (source: string, sourceId: string, imageIds: number[], init?: RequestInit) =>
+    apiFetch<{ status: string; restored: number; remaining_pages: number }>(
+      galleryApiPath(source, sourceId, '/images/restore-batch'),
+      { method: 'POST', body: JSON.stringify({ image_ids: imageIds }), ...init },
+    ),
+
   listHidden: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{
       gallery_id: number

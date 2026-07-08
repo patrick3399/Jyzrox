@@ -169,6 +169,7 @@ const ko: Record<string, string> = {
   'library.noAiTagsAboveThreshold': '임계값 이상의 AI 태그 없음',
   'library.selectImages': '선택',
   'library.cancelSelect': '취소',
+  'library.invertSelection': '선택 반전',
   'library.hideSelected': '제외 ({count})',
   'library.hideSelectedConfirm':
     '{count}개 이미지를 제외하시겠습니까? 삭제되며 재가져오기 시 차단됩니다.',
@@ -1044,6 +1045,7 @@ const ko: Record<string, string> = {
   'common.all': '전체',
   'common.tags': '태그',
   'common.cancel': '취소',
+  'common.undo': '실행 취소',
   'common.optional': '선택사항',
   'common.goBack': '뒤로',
   'common.retry': '재시도',

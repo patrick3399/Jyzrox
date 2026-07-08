@@ -654,6 +654,158 @@ class TestDeleteGalleryImage:
 
 
 # ---------------------------------------------------------------------------
+# Batch hide / restore images
+# ---------------------------------------------------------------------------
+
+
+class TestHideImagesBatch:
+    """POST /api/library/galleries/{source}/{source_id}/images/hide-batch"""
+
+    async def test_hide_batch_gallery_not_found_returns_404(self, client):
+        """Gallery not found → 404."""
+        resp = await client.post(
+            "/api/library/galleries/nonexistent/no_gallery/images/hide-batch",
+            json={"image_ids": [1]},
+        )
+        assert resp.status_code == 404
+
+    async def test_hide_batch_empty_image_ids_returns_422(self, client, db_session):
+        """Empty image_ids list is rejected by validation."""
+        await _insert_gallery(db_session, source="local", source_id="hb_empty", title="Batch")
+        resp = await client.post(
+            "/api/library/galleries/local/hb_empty/images/hide-batch",
+            json={"image_ids": []},
+        )
+        assert resp.status_code == 422
+
+    async def test_hide_batch_hides_all_selected_in_one_call(self, client, db_session):
+        """Batch hide marks every selected image hidden and compacts pages once."""
+        gid = await _insert_gallery(db_session, source="local", source_id="hb_ok", title="Five Pages", pages=5)
+        for n in range(1, 6):
+            await _insert_image(db_session, gid, page_num=n, filename=f"p{n}.jpg")
+
+        listing = await client.get("/api/library/galleries/local/hb_ok/images")
+        by_page = {img["page_num"]: img["id"] for img in listing.json()["images"]}
+
+        resp = await client.post(
+            "/api/library/galleries/local/hb_ok/images/hide-batch",
+            json={"image_ids": [by_page[2], by_page[4]]},
+        )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["status"] == "ok"
+        assert data["hidden"] == 2
+        assert data["remaining_pages"] == 3
+
+        visible = (await client.get("/api/library/galleries/local/hb_ok/images")).json()["images"]
+        assert [img["page_num"] for img in visible] == [1, 2, 3]
+        assert [img["filename"] for img in visible] == ["p1.jpg", "p3.jpg", "p5.jpg"]
+
+        hidden = (await client.get("/api/library/galleries/local/hb_ok/hidden")).json()["images"]
+        assert sorted(img["source_position"] for img in hidden) == [2, 4]
+        assert all(img["visibility"] == "user_hidden" for img in hidden)
+
+    async def test_hide_batch_ignores_foreign_gallery_and_already_hidden_ids(self, client, db_session):
+        """Ids from another gallery or already-hidden images are skipped, not errors."""
+        gid = await _insert_gallery(db_session, source="local", source_id="hb_own", title="Own", pages=2)
+        await _insert_image(db_session, gid, page_num=1, filename="p1.jpg")
+        await _insert_image(db_session, gid, page_num=2, filename="p2.jpg")
+        other_gid = await _insert_gallery(db_session, source="local", source_id="hb_other", title="Other", pages=1)
+        await _insert_image(db_session, other_gid, page_num=1, filename="o1.jpg")
+
+        own = (await client.get("/api/library/galleries/local/hb_own/images")).json()["images"]
+        other = (await client.get("/api/library/galleries/local/hb_other/images")).json()["images"]
+
+        first = await client.post(
+            "/api/library/galleries/local/hb_own/images/hide-batch",
+            json={"image_ids": [own[0]["id"]]},
+        )
+        assert first.status_code == 200
+
+        resp = await client.post(
+            "/api/library/galleries/local/hb_own/images/hide-batch",
+            json={"image_ids": [own[0]["id"], own[1]["id"], other[0]["id"]]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["hidden"] == 1
+        assert resp.json()["remaining_pages"] == 0
+
+        other_after = (await client.get("/api/library/galleries/local/hb_other/images")).json()["images"]
+        assert [img["filename"] for img in other_after] == ["o1.jpg"]
+
+    async def test_hide_batch_requires_auth(self, unauthed_client):
+        """Unauthenticated batch hide returns 401."""
+        resp = await unauthed_client.post(
+            "/api/library/galleries/local/whatever/images/hide-batch",
+            json={"image_ids": [1]},
+        )
+        assert resp.status_code == 401
+
+
+class TestRestoreImagesBatch:
+    """POST /api/library/galleries/{source}/{source_id}/images/restore-batch"""
+
+    async def test_restore_batch_returns_images_to_original_positions(self, client, db_session):
+        """Undo of a batch hide restores every image to its original page order."""
+        gid = await _insert_gallery(db_session, source="local", source_id="rb_ok", title="Five", pages=5)
+        for n in range(1, 6):
+            await _insert_image(db_session, gid, page_num=n, filename=f"p{n}.jpg")
+        imgs = (await client.get("/api/library/galleries/local/rb_ok/images")).json()["images"]
+        by_page = {img["page_num"]: img["id"] for img in imgs}
+
+        hide = await client.post(
+            "/api/library/galleries/local/rb_ok/images/hide-batch",
+            json={"image_ids": [by_page[2], by_page[4]]},
+        )
+        assert hide.status_code == 200
+
+        resp = await client.post(
+            "/api/library/galleries/local/rb_ok/images/restore-batch",
+            json={"image_ids": [by_page[2], by_page[4]]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["restored"] == 2
+        assert resp.json()["remaining_pages"] == 5
+
+        after = (await client.get("/api/library/galleries/local/rb_ok/images")).json()["images"]
+        assert [img["page_num"] for img in after] == [1, 2, 3, 4, 5]
+        assert [img["filename"] for img in after] == ["p1.jpg", "p2.jpg", "p3.jpg", "p4.jpg", "p5.jpg"]
+
+    async def test_restore_batch_ignores_active_and_foreign_ids(self, client, db_session):
+        """Ids that are not hidden images of this gallery are skipped, not errors."""
+        gid = await _insert_gallery(db_session, source="local", source_id="rb_skip", title="Two", pages=2)
+        await _insert_image(db_session, gid, page_num=1, filename="p1.jpg")
+        await _insert_image(db_session, gid, page_num=2, filename="p2.jpg")
+        other_gid = await _insert_gallery(db_session, source="local", source_id="rb_other", title="Other", pages=1)
+        await _insert_image(db_session, other_gid, page_num=1, filename="o1.jpg")
+
+        own = (await client.get("/api/library/galleries/local/rb_skip/images")).json()["images"]
+        other = (await client.get("/api/library/galleries/local/rb_other/images")).json()["images"]
+
+        hide = await client.post(
+            "/api/library/galleries/local/rb_skip/images/hide-batch",
+            json={"image_ids": [own[1]["id"]]},
+        )
+        assert hide.status_code == 200
+
+        resp = await client.post(
+            "/api/library/galleries/local/rb_skip/images/restore-batch",
+            json={"image_ids": [own[0]["id"], own[1]["id"], other[0]["id"]]},
+        )
+        assert resp.status_code == 200
+        assert resp.json()["restored"] == 1
+        assert resp.json()["remaining_pages"] == 2
+
+    async def test_restore_batch_requires_auth(self, unauthed_client):
+        """Unauthenticated batch restore returns 401."""
+        resp = await unauthed_client.post(
+            "/api/library/galleries/local/whatever/images/restore-batch",
+            json={"image_ids": [1]},
+        )
+        assert resp.status_code == 401
+
+
+# ---------------------------------------------------------------------------
 # Save / retrieve read progress (POST)
 # ---------------------------------------------------------------------------
 
