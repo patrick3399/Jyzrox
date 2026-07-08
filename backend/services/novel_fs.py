@@ -12,9 +12,6 @@ from pathlib import Path
 _WIKILINK = re.compile(r"\[\[([^\]|#]+)")
 _ACT = re.compile(r"^### +(.*)$")
 _RESERVED_DIRS = {"設定"}
-# Directories holding worldview/entity notes rather than chapters. Excluded from
-# chapter listings and treated as the knowledge-index note corpus (Phase 1).
-_NOTE_DIRS = {"Setting", "設定"}
 _H1 = re.compile(r"^#\s+(.*)$", re.MULTILINE)
 
 # Canon layout (Phase 1.5, spec 2026-07-08): category is derived purely from
@@ -86,14 +83,21 @@ def list_works(repo_root: str | Path) -> list[dict]:
     return works
 
 
-def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
+def _work_dir_of(repo_root: str | Path, work: str) -> tuple[Path, Path]:
     root = Path(repo_root).resolve()
     try:
         work_dir = (root / work).resolve()
-    except (ValueError, OSError) as e:
+    except ValueError as e:
+        raise NovelPathError(f"invalid work: {work!r}") from e
+    except OSError as e:
         raise NovelPathError(f"invalid work: {work!r}") from e
     if root not in work_dir.parents and work_dir != root:
         raise NovelPathError(f"work escapes repo root: {work!r}")
+    return root, work_dir
+
+
+def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
+    root, work_dir = _work_dir_of(repo_root, work)
     chapters: list[dict] = []
     for f in sorted(work_dir.glob("*.md"), key=lambda p: p.name):
         rel = f.relative_to(root)
@@ -113,15 +117,49 @@ def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
     return chapters
 
 
+def list_work_files(repo_root: str | Path, work: str, category: str) -> list[dict]:
+    """All `.md` files of one non-main category inside a work (spec §5.1)."""
+    root, work_dir = _work_dir_of(repo_root, work)
+    out: list[dict] = []
+    for f in sorted(work_dir.rglob("*.md"), key=lambda p: str(p)):
+        rel = f.relative_to(root)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        if classify_path(rel) != category:
+            continue
+        stat = f.stat()
+        out.append(
+            {"path": str(rel), "name": f.stem, "chars": stat.st_size, "mtime": stat.st_mtime, "category": category}
+        )
+    return out
+
+
+def count_work_files(repo_root: str | Path, work: str) -> dict[str, int]:
+    """Per-category file counts (excluding main/setting) so the UI can hide
+    empty sections without fetching each list."""
+    root, work_dir = _work_dir_of(repo_root, work)
+    counts = {"extra": 0, "draft": 0, "reference": 0, "scrap": 0}
+    for f in work_dir.rglob("*.md"):
+        rel = f.relative_to(root)
+        if any(part.startswith(".") for part in rel.parts):
+            continue
+        cat = classify_path(rel)
+        if cat in counts:
+            counts[cat] += 1
+    return counts
+
+
 def _note_title(text: str, stem: str) -> str:
     m = _H1.search(text)
     return m.group(1).strip() if m else stem
 
 
 def list_notes(repo_root: str | Path) -> list[dict]:
-    """Every `.md` under a Setting/設定 dir — the worldview/entity note corpus.
+    """Every `.md` classified as `setting` — the worldview/entity note corpus.
 
-    title = first `# ` heading, else filename stem. Hidden dirs (.git) skipped.
+    Covers both the work-root `setting.md` and nested `Setting/`/`設定/` dirs
+    (spec §3). title = first `# ` heading, else filename stem. Hidden dirs
+    (.git) skipped.
     """
     root = Path(repo_root).resolve()
     notes: list[dict] = []
@@ -129,7 +167,7 @@ def list_notes(repo_root: str | Path) -> list[dict]:
         rel = f.relative_to(root)
         if any(part.startswith(".") for part in rel.parts):
             continue
-        if not any(part in _NOTE_DIRS for part in rel.parts):
+        if classify_path(rel) != "setting":
             continue
         try:
             text = f.read_text(encoding="utf-8")
@@ -216,7 +254,14 @@ def keyword_scan(repo_root: str | Path, query: str, max_hits: int = 200) -> list
             continue
         for lineno, line in enumerate(text.splitlines()):
             if needle in line.lower():
-                hits.append({"path": str(f.relative_to(root)), "line": lineno, "text": line.strip()})
+                hits.append(
+                    {
+                        "path": str(rel),
+                        "line": lineno,
+                        "text": line.strip(),
+                        "category": classify_path(rel),
+                    }
+                )
                 if len(hits) >= max_hits:
                     return hits
     return hits

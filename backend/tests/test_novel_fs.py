@@ -6,10 +6,12 @@ import pytest
 from services.novel_fs import (
     NovelPathError,
     classify_path,
+    count_work_files,
     file_exists,
     keyword_scan,
     list_chapters,
     list_notes,
+    list_work_files,
     list_works,
     parse_acts,
     parse_backlinks,
@@ -243,3 +245,35 @@ def test_list_works_chapter_count_excludes_legacy_and_special_files(tmp_path):
 )
 def test_classify_path(rel, expected):
     assert classify_path(rel) == expected
+
+
+def test_list_notes_includes_work_root_setting_md(tmp_path):
+    root = _polluted_repo(tmp_path)
+    notes = {n["path"]: n for n in list_notes(root)}
+    assert "作品B/setting.md" in notes
+    assert notes["作品B/setting.md"]["title"] == "世界觀"
+    assert notes["作品B/setting.md"]["work"] == "作品B"
+    assert "作品B/Setting/設定-1號-張三v1.md" in notes
+
+
+def test_list_work_files_returns_category_subtree(tmp_path):
+    root = _polluted_repo(tmp_path)
+    scraps = list_work_files(root, "作品B", "scrap")
+    assert [f["path"] for f in scraps] == ["作品B/Old/01.md"]
+    assert scraps[0]["category"] == "scrap"
+    drafts = list_work_files(root, "作品B", "draft")
+    assert [f["path"] for f in drafts] == ["作品B/DEMO/demo1.md"]
+
+
+def test_count_work_files_per_category(tmp_path):
+    root = _polluted_repo(tmp_path)
+    counts = count_work_files(root, "作品B")
+    assert counts == {"extra": 0, "draft": 1, "reference": 1, "scrap": 1}
+
+
+def test_keyword_scan_hits_carry_category(tmp_path):
+    root = _polluted_repo(tmp_path)
+    hits = keyword_scan(root, "張三")
+    cats = {h["path"]: h["category"] for h in hits}
+    assert cats["作品B/01.md"] == "main"
+    assert cats["作品B/Old/01.md"] == "scrap"
