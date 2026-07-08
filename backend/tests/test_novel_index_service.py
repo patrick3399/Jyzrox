@@ -6,6 +6,7 @@ Task 2 covers the pure (no-DB) builders; Task 4 adds the async persistence tests
 from pathlib import Path
 
 from services import novel_index
+from services.novel_index import scan_mentions
 
 
 def _repo(tmp_path: Path) -> Path:
@@ -56,6 +57,19 @@ def test_scan_mentions_counts_title_and_alias(tmp_path):
     assert by_ch["作品A/01.md"]["mention_count"] == 2  # 張三 + 小三
     assert by_ch["作品A/01.md"]["first_offset"] == 0
     assert by_ch["作品A/02.md"]["mention_count"] == 1
+
+
+def test_scan_mentions_excludes_old_dir_duplicate_chapters(tmp_path):
+    w = tmp_path / "作品B"
+    (w / "Old").mkdir(parents=True)
+    (w / "Setting").mkdir()
+    (w / "01.md").write_text("張三登場。\n", encoding="utf-8")
+    (w / "Old" / "01.md").write_text("張三登場。\n", encoding="utf-8")
+    (w / "Setting" / "設定-1號-張三v1.md").write_text("# 張三\n", encoding="utf-8")
+    mentions = scan_mentions(tmp_path)
+    chapter_paths = {m["chapter_path"] for m in mentions}
+    assert "作品B/01.md" in chapter_paths
+    assert "作品B/Old/01.md" not in chapter_paths
 
 
 def test_scan_mentions_empty_when_no_notes(tmp_path):

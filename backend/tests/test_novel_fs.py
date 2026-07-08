@@ -180,6 +180,35 @@ def test_parse_frontmatter_malformed_does_not_raise():
     assert fm == {} and "body" in body
 
 
+def _polluted_repo(tmp_path: Path) -> Path:
+    """Mimics the real corpus: legacy Old/DEMO/extend dirs + special root files."""
+    w = tmp_path / "作品B"
+    (w / "Old").mkdir(parents=True)
+    (w / "DEMO").mkdir()
+    (w / "Setting").mkdir()
+    (w / "01.md").write_text("# 第一章\n\n張三登場。\n", encoding="utf-8")
+    (w / "02.md").write_text("", encoding="utf-8")  # 0-byte placeholder
+    (w / "setting.md").write_text("# 世界觀\n", encoding="utf-8")
+    (w / "FORMAT.md").write_text("# 格式\n", encoding="utf-8")
+    (w / "Old" / "01.md").write_text("# 舊版\n\n張三登場。\n", encoding="utf-8")
+    (w / "DEMO" / "demo1.md").write_text("# 試寫\n", encoding="utf-8")
+    (w / "Setting" / "設定-1號-張三v1.md").write_text("# 張三\n", encoding="utf-8")
+    return tmp_path
+
+
+def test_list_chapters_returns_only_main_not_legacy_or_special_files(tmp_path):
+    root = _polluted_repo(tmp_path)
+    paths = [c["path"] for c in list_chapters(root, "作品B")]
+    assert paths == ["作品B/01.md", "作品B/02.md"]
+    assert all(c["category"] == "main" for c in list_chapters(root, "作品B"))
+
+
+def test_list_works_chapter_count_excludes_legacy_and_special_files(tmp_path):
+    root = _polluted_repo(tmp_path)
+    works = {w["name"]: w["chapter_count"] for w in list_works(root)}
+    assert works["作品B"] == 2
+
+
 @pytest.mark.parametrize(
     ("rel", "expected"),
     [

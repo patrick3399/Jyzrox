@@ -81,7 +81,7 @@ def list_works(repo_root: str | Path) -> list[dict]:
     for entry in sorted(root.iterdir(), key=lambda p: p.name):
         if not entry.is_dir() or entry.name.startswith(".") or entry.name in _RESERVED_DIRS:
             continue
-        count = sum(1 for f in entry.rglob("*.md") if not any(part in _NOTE_DIRS for part in f.relative_to(root).parts))
+        count = sum(1 for f in entry.glob("*.md") if classify_path(f.relative_to(root)) == "main")
         works.append({"name": entry.name, "chapter_count": count})
     return works
 
@@ -95,10 +95,10 @@ def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
     if root not in work_dir.parents and work_dir != root:
         raise NovelPathError(f"work escapes repo root: {work!r}")
     chapters: list[dict] = []
-    for f in sorted(work_dir.rglob("*.md"), key=lambda p: p.name):
+    for f in sorted(work_dir.glob("*.md"), key=lambda p: p.name):
         rel = f.relative_to(root)
-        # Setting/設定 notes are worldview entities, not chapters (Phase 1).
-        if any(part in _NOTE_DIRS for part in rel.parts):
+        # Main text lives at the work root's first level only (spec §3 rule 4).
+        if classify_path(rel) != "main":
             continue
         stat = f.stat()
         chapters.append(
@@ -107,6 +107,7 @@ def list_chapters(repo_root: str | Path, work: str) -> list[dict]:
                 "name": f.stem,
                 "chars": stat.st_size,
                 "mtime": stat.st_mtime,
+                "category": "main",
             }
         )
     return chapters
