@@ -1625,6 +1625,11 @@ const ja: Record<string, string> = {
   'novels.noAppearances': '登場記録がありません',
   'novels.noNotes': 'ノートが見つかりません',
   'novels.noteNotFound': 'ノートが見つかりません',
+  'novels.categoryExtra': '番外編',
+  'novels.categoryDraft': '下書き',
+  'novels.categoryReference': '資料',
+  'novels.categoryScrap': 'ボツ案',
+  'novels.sectionFiles': 'ファイル',
 }
 
 export default ja

@@ -1882,6 +1882,11 @@ const en: Record<string, string> = {
   'novels.noAppearances': 'No appearances found',
   'novels.noNotes': 'No notes found',
   'novels.noteNotFound': 'Note not found',
+  'novels.categoryExtra': 'Extras',
+  'novels.categoryDraft': 'Drafts',
+  'novels.categoryReference': 'Reference',
+  'novels.categoryScrap': 'Scrapped',
+  'novels.sectionFiles': 'Files',
 }
 
 export default en

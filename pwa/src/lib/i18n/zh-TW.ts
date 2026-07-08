@@ -1604,6 +1604,11 @@ const zhTW: Record<string, string> = {
   'novels.noAppearances': '尚無登場記錄',
   'novels.noNotes': '找不到筆記',
   'novels.noteNotFound': '找不到此筆記',
+  'novels.categoryExtra': '番外',
+  'novels.categoryDraft': '草稿',
+  'novels.categoryReference': '參考',
+  'novels.categoryScrap': '廢案',
+  'novels.sectionFiles': '檔案',
 }
 
 export default zhTW

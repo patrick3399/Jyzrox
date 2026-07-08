@@ -1774,6 +1774,13 @@ export interface NovelChapter {
   name: string
   chars: number
   mtime: number
+  category?: string
+}
+export interface NovelCategoryCounts {
+  extra: number
+  draft: number
+  reference: number
+  scrap: number
 }
 export interface NovelAct {
   index: number
@@ -1791,6 +1798,7 @@ export interface NovelSearchHit {
   path: string
   line: number
   text: string
+  category?: string
 }
 export interface NovelCommit {
   hash: string
@@ -1837,8 +1845,12 @@ export interface NovelAppearance {
 const novels = {
   listWorks: () => apiFetch<{ works: NovelWork[] }>('/api/novels/works'),
   listChapters: (work: string) =>
-    apiFetch<{ chapters: NovelChapter[] }>(
+    apiFetch<{ chapters: NovelChapter[]; categories: NovelCategoryCounts }>(
       `/api/novels/works/${encodeURIComponent(work)}/chapters`,
+    ),
+  listWorkFiles: (work: string, category: string) =>
+    apiFetch<{ files: NovelChapter[] }>(
+      `/api/novels/works/${encodeURIComponent(work)}/files${qs({ category })}`,
     ),
   readFile: (path: string) => apiFetch<NovelFile>(`/api/novels/file${qs({ path })}`),
   // Custom fetch: a 409 carries the server's current content, which apiFetch

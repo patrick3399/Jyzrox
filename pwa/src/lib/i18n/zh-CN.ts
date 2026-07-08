@@ -1586,6 +1586,11 @@ const zhCN: Record<string, string> = {
   'novels.noAppearances': '尚无登场记录',
   'novels.noNotes': '找不到笔记',
   'novels.noteNotFound': '找不到此笔记',
+  'novels.categoryExtra': '番外',
+  'novels.categoryDraft': '草稿',
+  'novels.categoryReference': '参考',
+  'novels.categoryScrap': '废案',
+  'novels.sectionFiles': '文件',
 }
 
 export default zhCN

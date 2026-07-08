@@ -1608,6 +1608,11 @@ const ko: Record<string, string> = {
   'novels.noAppearances': '등장 기록이 없습니다',
   'novels.noNotes': '노트를 찾을 수 없습니다',
   'novels.noteNotFound': '노트를 찾을 수 없습니다',
+  'novels.categoryExtra': '외전',
+  'novels.categoryDraft': '초안',
+  'novels.categoryReference': '참고',
+  'novels.categoryScrap': '폐기안',
+  'novels.sectionFiles': '파일',
 }
 
 export default ko
