@@ -15,6 +15,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { BackButton } from '@/components/BackButton'
 import { NovelCreateDialog } from '@/components/novels/NovelCreateDialog'
+import { WorkCategorySection } from '@/components/novels/WorkCategorySection'
 
 export default function NovelWorkPage() {
   useLocale()
@@ -28,6 +29,8 @@ export default function NovelWorkPage() {
   const canEdit = hasRole(profile?.role, 'member')
   const [showCreate, setShowCreate] = useState(false)
   const chapters = data?.chapters ?? []
+  const categories = data?.categories
+  const hasAnyCategory = categories ? Object.values(categories).some((n) => n > 0) : false
 
   return (
     <div className="mx-auto w-full max-w-4xl px-4 py-6">
@@ -57,7 +60,7 @@ export default function NovelWorkPage() {
 
       {isLoading ? (
         <LoadingSpinner />
-      ) : chapters.length === 0 ? (
+      ) : chapters.length === 0 && !hasAnyCategory ? (
         <EmptyState icon={BookText} title={t('novels.noWorks')} />
       ) : (
         <ul className="flex flex-col gap-1">
@@ -76,6 +79,11 @@ export default function NovelWorkPage() {
           ))}
         </ul>
       )}
+
+      {categories &&
+        (['extra', 'draft', 'reference', 'scrap'] as const).map((cat) => (
+          <WorkCategorySection key={cat} work={work} category={cat} count={categories[cat]} />
+        ))}
 
       {showCreate && (
         <NovelCreateDialog

@@ -10,6 +10,7 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { BackButton } from '@/components/BackButton'
+import { CATEGORY_LABEL_KEYS, type WorkCategory } from '@/components/novels/WorkCategorySection'
 
 function hitHref(path: string): string {
   const parts = path.split('/')
@@ -72,8 +73,13 @@ export default function NovelSearchPage() {
                 href={hitHref(hit.path)}
                 className="block rounded-lg border border-vault-border bg-vault-card px-3 py-2 hover:border-vault-accent"
               >
-                <span className="block text-xs text-vault-text-muted">
+                <span className="flex items-center text-xs text-vault-text-muted">
                   {hit.path}:{hit.line + 1}
+                  {hit.category && hit.category !== 'main' && (
+                    <span className="ml-2 shrink-0 rounded border border-vault-border px-1.5 py-0.5 text-[10px] text-vault-text-muted">
+                      {t(CATEGORY_LABEL_KEYS[hit.category as WorkCategory] ?? 'novels.categoryReference')}
+                    </span>
+                  )}
                 </span>
                 <span className="block truncate text-sm text-vault-text">{hit.text}</span>
               </Link>
