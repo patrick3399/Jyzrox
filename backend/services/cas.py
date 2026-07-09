@@ -87,30 +87,10 @@ async def store_blob(
     else:
         media_type = "image"
 
-    # Hardlink into CAS if not external
-    if storage == "cas":
-        dest = cas_path(sha256, ext)
-        if not dest.exists():
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            try:
-                os.link(str(file_path), str(dest))
-            except FileExistsError:
-                # Lost a race with a concurrent worker importing the same blob:
-                # the content-addressed file is already in place (same bytes by
-                # construction), so this is success. Falling through to the copy
-                # fallback would overwrite a file readers may already be serving.
-                pass
-            except OSError:
-                # Cross-device link: copy to a temp file and atomically promote
-                # so concurrent readers never observe a partially written blob.
-                tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
-                try:
-                    shutil.copy2(str(file_path), str(tmp))
-                    os.replace(str(tmp), str(dest))
-                finally:
-                    tmp.unlink(missing_ok=True)
-
-    # Upsert blob record.
+    # Upsert blob record FIRST so the filesystem write below can use the
+    # canonical extension: identical bytes arriving under a different filename
+    # extension must not create a second CAS file (edge case #44) — the
+    # conflict path keeps the first-stored extension.
     # ref_count starts at 0 here; callers must increment it only when a new
     # Image row is actually inserted (on_conflict_do_nothing means duplicate
     # re-downloads must NOT inflate ref_count).
@@ -142,7 +122,32 @@ async def store_blob(
     )
 
     result = await session.execute(stmt)
-    return result.scalar_one()
+    blob = result.scalar_one()
+
+    # Hardlink into CAS if not external, at the canonical-extension path
+    if storage == "cas":
+        dest = cas_path(sha256, blob.extension)
+        if not dest.exists():
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            try:
+                os.link(str(file_path), str(dest))
+            except FileExistsError:
+                # Lost a race with a concurrent worker importing the same blob:
+                # the content-addressed file is already in place (same bytes by
+                # construction), so this is success. Falling through to the copy
+                # fallback would overwrite a file readers may already be serving.
+                pass
+            except OSError:
+                # Cross-device link: copy to a temp file and atomically promote
+                # so concurrent readers never observe a partially written blob.
+                tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
+                try:
+                    shutil.copy2(str(file_path), str(tmp))
+                    os.replace(str(tmp), str(dest))
+                finally:
+                    tmp.unlink(missing_ok=True)
+
+    return blob
 
 
 async def create_library_symlink(source: str, source_id: str, filename: str, blob: Blob) -> None:

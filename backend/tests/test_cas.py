@@ -375,9 +375,14 @@ class TestStoreBlobConcurrentWrite:
     """
 
     def _fake_session(self):
+        blob = MagicMock()
+        blob.sha256 = SHA
+        blob.extension = ".jpg"
+        blob.storage = "cas"
+
         async def fake_execute(_stmt):
             res = MagicMock()
-            res.scalar_one.return_value = MagicMock()
+            res.scalar_one.return_value = blob
             return res
 
         session = MagicMock()
@@ -547,3 +552,70 @@ class TestDecrementRefCount:
         result = await decrement_ref_count(SHA, session)
 
         assert result is None
+
+
+# ---------------------------------------------------------------------------
+# TestStoreBlobExtensionFirstWins
+# ---------------------------------------------------------------------------
+
+
+class TestStoreBlobExtensionFirstWins:
+    """Regression tests for edge case #44: blobs are keyed by sha256 and the
+    extension is not updated on conflict, but store_blob() used to write the
+    CAS file BEFORE the upsert using the incoming filename's extension — so
+    identical bytes arriving as .png after a .jpg import created a second,
+    unreferenced CAS file (sha.png) next to the canonical one (sha.jpg).
+    The upsert must run first and the filesystem write must use the canonical
+    extension from the returned blob row."""
+
+    def _session_returning(self, blob):
+        async def fake_execute(_stmt):
+            res = MagicMock()
+            res.scalar_one.return_value = blob
+            return res
+
+        session = MagicMock()
+        session.execute = fake_execute
+        return session
+
+    def _blob(self, extension):
+        blob = MagicMock()
+        blob.sha256 = SHA
+        blob.extension = extension
+        blob.storage = "cas"
+        blob.external_path = None
+        return blob
+
+    async def test_same_hash_different_extension_does_not_create_second_cas_file(self, tmp_path):
+        from services.cas import store_blob
+
+        cas_root = tmp_path / "cas"
+        canonical_blob = self._blob(".jpg")
+
+        first = tmp_path / "img.jpg"
+        first.write_bytes(b"same-bytes")
+        second = tmp_path / "img.png"  # identical content, different extension
+        second.write_bytes(b"same-bytes")
+
+        with patch("services.cas.settings", _mock_settings(cas=str(cas_root))):
+            await store_blob(first, SHA, self._session_returning(canonical_blob))
+            # DB row already exists: the upsert returns the canonical .jpg row
+            await store_blob(second, SHA, self._session_returning(canonical_blob))
+
+        blob_dir = cas_root / SHA[:2] / SHA[2:4]
+        files = sorted(p.name for p in blob_dir.iterdir())
+        assert files == [f"{SHA}.jpg"], f"second extension must not create a second CAS file, got {files}"
+
+    async def test_new_blob_writes_file_with_its_own_extension(self, tmp_path):
+        from services.cas import store_blob
+
+        cas_root = tmp_path / "cas"
+        fresh_blob = self._blob(".png")
+
+        src = tmp_path / "img.png"
+        src.write_bytes(b"fresh")
+
+        with patch("services.cas.settings", _mock_settings(cas=str(cas_root))):
+            await store_blob(src, SHA, self._session_returning(fresh_blob))
+
+        assert (cas_root / SHA[:2] / SHA[2:4] / f"{SHA}.png").read_bytes() == b"fresh"
