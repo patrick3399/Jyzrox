@@ -1013,3 +1013,126 @@ class TestProgressiveImporterPageNumbering:
                 await asyncio.gather(*importer._tasks, return_exceptions=True)
 
         assert captured_pages == [1, 2]
+
+
+# ---------------------------------------------------------------------------
+# TestProgressiveImporterSymlinkGuard — edge case #48
+# ---------------------------------------------------------------------------
+
+
+class TestProgressiveImporterSymlinkGuard:
+    """Regression tests for edge case #48: library symlinks must only be created
+    when an Image row was actually inserted.
+
+    _import_single used to call create_library_symlink() unconditionally after
+    the on-conflict insert, so a conflicting insert (no row created) still wrote
+    a symlink — leaving filesystem state the DB does not represent, which
+    reconciliation then treats as authoritative.
+    """
+
+    def _conflict_factory(self, db_session_factory):
+        """Session factory whose sessions report a conflict (no row) for any
+        INSERT into images, delegating everything else to the real session."""
+
+        class _ImagesInsertConflictSession:
+            def __init__(self, real):
+                self._real = real
+
+            def __getattr__(self, name):
+                return getattr(self._real, name)
+
+            async def execute(self, stmt, *args, **kwargs):
+                table = getattr(stmt, "table", None)
+                if getattr(stmt, "is_insert", False) and getattr(table, "name", None) == "images":
+                    res = MagicMock()
+                    res.scalar_one_or_none.return_value = None
+                    return res
+                return await self._real.execute(stmt, *args, **kwargs)
+
+        @asynccontextmanager
+        async def _cm():
+            async with db_session_factory() as session:
+                yield _ImagesInsertConflictSession(session)
+
+        class _Factory:
+            def __call__(self):
+                return _cm()
+
+        return _Factory()
+
+    async def test_insert_conflict_without_image_row_does_not_create_symlink(
+        self, db_session, db_session_factory, tmp_path
+    ):
+        """When the images insert conflicts (returns no row), no library symlink
+        may be created for the file."""
+        import asyncio
+
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(db_session, source_id="symlink_guard")
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "symlink_guard"
+
+        fake_file = tmp_path / "001.jpg"
+        fake_file.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        mock_blob = MagicMock()
+        mock_blob.sha256 = "aa" * 32
+        symlink_spy = AsyncMock()
+
+        with (
+            patch("worker.progressive.AsyncSessionLocal", self._conflict_factory(db_session_factory)),
+            patch("worker.progressive.store_blob", AsyncMock(return_value=mock_blob)),
+            patch("worker.progressive._sha256", return_value="aa" * 32),
+            patch("worker.progressive.create_library_symlink", symlink_spy),
+        ):
+            await importer.import_file(fake_file)
+            if importer._tasks:
+                await asyncio.gather(*importer._tasks, return_exceptions=True)
+
+        symlink_spy.assert_not_called()
+
+    async def test_inserted_image_row_still_creates_symlink(
+        self, db_session, db_session_factory, tmp_path, monkeypatch
+    ):
+        """Control: a successful insert must keep creating the library symlink."""
+        import asyncio
+
+        from sqlalchemy.dialects.sqlite import insert as sqlite_insert
+
+        from worker import progressive as progressive_mod
+        from worker.progressive import ProgressiveImporter
+
+        monkeypatch.setattr(progressive_mod, "pg_insert", sqlite_insert)
+        monkeypatch.setattr(progressive_mod.Image.__table__.c.tags_array, "default", None)
+
+        gallery_id = await _insert_gallery(db_session, source_id="symlink_ok")
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "symlink_ok"
+
+        fake_file = tmp_path / "001.jpg"
+        fake_file.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        mock_blob = MagicMock()
+        mock_blob.sha256 = "bb" * 32
+        symlink_spy = AsyncMock()
+        fake_factory = _make_session_factory_cm(db_session_factory)
+
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive.store_blob", AsyncMock(return_value=mock_blob)),
+            patch("worker.progressive._sha256", return_value="bb" * 32),
+            patch("worker.progressive.create_library_symlink", symlink_spy),
+        ):
+            await importer.import_file(fake_file)
+            if importer._tasks:
+                await asyncio.gather(*importer._tasks, return_exceptions=True)
+
+        symlink_spy.assert_called_once()
+        assert symlink_spy.call_args.args[2] == "001.jpg"

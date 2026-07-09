@@ -358,6 +358,90 @@ class TestStoreBlobConflict:
 
 
 # ---------------------------------------------------------------------------
+# TestStoreBlobConcurrentWrite
+# ---------------------------------------------------------------------------
+
+
+class TestStoreBlobConcurrentWrite:
+    """Regression tests for store_blob() concurrent-write behaviour (edge case #41).
+
+    store_blob() checks `dest.exists()` before hardlinking. Two workers importing
+    the same new blob can both pass the check; the loser's os.link then raises
+    FileExistsError. That must be treated as success (the content-addressed file
+    is already in place) — NOT routed into the cross-device copy fallback, which
+    would overwrite the winner's file non-atomically while readers may already
+    be serving it. The genuine cross-device fallback must promote atomically via
+    a temp file + os.replace so no reader ever observes a partial file.
+    """
+
+    def _fake_session(self):
+        async def fake_execute(_stmt):
+            res = MagicMock()
+            res.scalar_one.return_value = MagicMock()
+            return res
+
+        session = MagicMock()
+        session.execute = fake_execute
+        return session
+
+    async def test_hardlink_fileexists_race_is_success_without_copy_fallback(self, tmp_path):
+        """FileExistsError from os.link (lost race) must be swallowed as success
+        and must NOT trigger the copy fallback."""
+        from services.cas import store_blob
+
+        src = tmp_path / "img.jpg"
+        src.write_bytes(b"data")
+        cas_root = tmp_path / "cas"
+
+        with (
+            patch("services.cas.settings", _mock_settings(cas=str(cas_root))),
+            patch("services.cas.os.link", side_effect=FileExistsError) as link_mock,
+            patch("services.cas.shutil.copy2") as copy_mock,
+        ):
+            await store_blob(src, SHA, self._fake_session())
+
+        link_mock.assert_called_once()
+        copy_mock.assert_not_called()
+
+    async def test_cross_device_fallback_copies_to_temp_then_atomic_replace(self, tmp_path):
+        """A real cross-device fallback (EXDEV) must copy to a temp file and
+        atomically promote it, never copying onto the final destination directly."""
+        import errno
+        import shutil as real_shutil
+
+        from services.cas import store_blob
+
+        src = tmp_path / "img.jpg"
+        src.write_bytes(b"data")
+        cas_root = tmp_path / "cas"
+
+        copy_targets: list[str] = []
+        real_copy2 = real_shutil.copy2  # bind before patching, or the spy recurses into the mock
+
+        def spy_copy2(s, d):
+            copy_targets.append(str(d))
+            return real_copy2(s, d)
+
+        with (
+            patch("services.cas.settings", _mock_settings(cas=str(cas_root))),
+            patch("services.cas.os.link", side_effect=OSError(errno.EXDEV, "cross-device link")),
+            patch("services.cas.shutil.copy2", side_effect=spy_copy2),
+        ):
+            await store_blob(src, SHA, self._fake_session())
+
+        dest = cas_root / SHA[:2] / SHA[2:4] / f"{SHA}.jpg"
+        assert dest.read_bytes() == b"data"
+        # copy2 must never target the final CAS path directly (non-atomic window)
+        assert copy_targets, "copy fallback must have been used"
+        assert all(t != str(dest) for t in copy_targets), (
+            f"copy2 wrote directly to the final destination: {copy_targets!r}"
+        )
+        # no temp litter left behind
+        leftovers = [p for p in dest.parent.iterdir() if p != dest]
+        assert leftovers == [], f"temp files left in CAS dir: {leftovers!r}"
+
+
+# ---------------------------------------------------------------------------
 # TestCreateLibrarySymlink
 # ---------------------------------------------------------------------------
 

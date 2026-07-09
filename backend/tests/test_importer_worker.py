@@ -692,3 +692,191 @@ class TestLocalImportJob:
             _timeout=3600,
             _job_id="thumbnail:1",
         )
+
+
+# ---------------------------------------------------------------------------
+# local_import_job — symlink guard (edge case #48)
+# ---------------------------------------------------------------------------
+
+
+class TestLocalImportSymlinkGuard:
+    """Regression tests for edge case #48 in local_import_job: a library symlink
+    must only be created when an Image row was actually inserted. The insert is
+    on-conflict-do-nothing, so a conflicting insert used to still write a symlink
+    for a file the DB does not represent."""
+
+    def _sessions(self, *, insert_returns):
+        """Build the three sessions local_import_job opens, with the images
+        insert reporting `insert_returns` (None = conflict, int = inserted id)."""
+        # session 1: gallery lookup
+        s1 = AsyncMock()
+        gallery = MagicMock()
+        gallery.source = "local"
+        gallery.source_id = "guard_test"
+        s1.get = AsyncMock(return_value=gallery)
+
+        # session 2: excluded blobs
+        s2 = AsyncMock()
+        excl = MagicMock()
+        excl.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        s2.execute = AsyncMock(return_value=excl)
+
+        # session 3: main import loop
+        s3 = AsyncMock()
+        existing = MagicMock()
+        existing.all = MagicMock(return_value=[])
+        insert_res = MagicMock()
+        insert_res.scalar_one_or_none = MagicMock(return_value=insert_returns)
+        count_res = MagicMock()
+        count_res.scalar_one = MagicMock(return_value=1 if insert_returns else 0)
+        effects = [existing, insert_res]
+        if insert_returns is not None:
+            effects.append(MagicMock())  # blob ref_count UPDATE
+        effects.append(count_res)
+        s3.execute = AsyncMock(side_effect=effects)
+        s3.get = AsyncMock(return_value=MagicMock())
+        return s1, s2, s3
+
+    async def _run(self, tmp_path, *, insert_returns):
+        from worker.importer import local_import_job
+
+        gallery_dir = _create_test_gallery(tmp_path)
+        s1, s2, s3 = self._sessions(insert_returns=insert_returns)
+        symlink_spy = AsyncMock()
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", side_effect=_session_rotator([s1, s2, s3])),
+            patch("worker.importer._sha256", return_value="cc" * 32),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer.store_blob", AsyncMock(return_value=MagicMock())),
+            patch("worker.importer.create_library_symlink", symlink_spy),
+            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await local_import_job(_make_ctx(), source_dir=str(gallery_dir), mode="copy", gallery_id=1)
+
+        return result, symlink_spy
+
+    async def test_insert_conflict_without_image_row_does_not_create_symlink(self, tmp_path):
+        """A conflicting images insert (no row created) must not leave a symlink."""
+        result, symlink_spy = await self._run(tmp_path, insert_returns=None)
+
+        assert result["status"] == "done"
+        symlink_spy.assert_not_called()
+
+    async def test_inserted_image_row_still_creates_symlink(self, tmp_path):
+        """Control: a successful insert must keep creating the library symlink."""
+        result, symlink_spy = await self._run(tmp_path, insert_returns=42)
+
+        assert result["status"] == "done"
+        symlink_spy.assert_called_once()
+        assert symlink_spy.call_args.args[:2] == ("local", "guard_test")
+
+
+# ---------------------------------------------------------------------------
+# import_job — duplicate basename disambiguation (edge case #47)
+# ---------------------------------------------------------------------------
+
+
+class TestDisambiguateLibraryFilenames:
+    """Unit tests for _disambiguate_library_filenames (edge case #47).
+
+    Library symlinks are keyed by filename only; a recursive import containing
+    two files with the same basename in different subdirectories used to let
+    the second symlink silently replace the first, while the DB kept two image
+    rows — the library dir then exposed only one of them and reconciliation
+    could delete the "missing" DB image."""
+
+    def test_unique_names_pass_through(self):
+        from worker.importer import _disambiguate_library_filenames
+
+        paths = [Path("/g/001.jpg"), Path("/g/002.jpg")]
+        assert _disambiguate_library_filenames(paths) == ["001.jpg", "002.jpg"]
+
+    def test_duplicate_basenames_get_numbered_suffix(self):
+        from worker.importer import _disambiguate_library_filenames
+
+        paths = [Path("/g/sub1/001.jpg"), Path("/g/sub2/001.jpg"), Path("/g/sub3/001.jpg")]
+        assert _disambiguate_library_filenames(paths) == ["001.jpg", "001__2.jpg", "001__3.jpg"]
+
+    def test_suffix_collision_with_real_filename_skips_taken_name(self):
+        from worker.importer import _disambiguate_library_filenames
+
+        # A real file already named 001__2.jpg must not be overwritten by the
+        # generated suffix for the second 001.jpg.
+        paths = [Path("/g/a/001.jpg"), Path("/g/001__2.jpg"), Path("/g/b/001.jpg")]
+        assert _disambiguate_library_filenames(paths) == ["001.jpg", "001__2.jpg", "001__3.jpg"]
+
+    def test_extension_preserved_in_suffix(self):
+        from worker.importer import _disambiguate_library_filenames
+
+        paths = [Path("/g/a/x.png"), Path("/g/b/x.png")]
+        assert _disambiguate_library_filenames(paths) == ["x.png", "x__2.png"]
+
+
+class TestImportJobDuplicateBasenames:
+    """Wiring test for edge case #47: import_job must give duplicate basenames
+    distinct library filenames, used consistently for BOTH the symlink and the
+    Image.filename row so disk and DB stay in agreement."""
+
+    async def test_duplicate_basenames_get_distinct_symlinks_and_image_filenames(self, tmp_path):
+        from worker.importer import import_job
+
+        gallery_dir = tmp_path / "gallery"
+        (gallery_dir / "sub1").mkdir(parents=True)
+        (gallery_dir / "sub2").mkdir(parents=True)
+        (gallery_dir / "sub1" / "001.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100 + b"a")
+        (gallery_dir / "sub2" / "001.jpg").write_bytes(b"\xff\xd8\xff\xe0" + b"\x00" * 100 + b"b")
+        (gallery_dir / "metadata.json").write_text(json.dumps({"category": "ehentai", "title": "Dup Test", "gid": 777}))
+
+        mock_session = _make_mock_session()
+        default_result = mock_session.execute.return_value
+        captured_stmts = []
+
+        async def _exec(stmt, *args, **kwargs):
+            captured_stmts.append(stmt)
+            return default_result
+
+        mock_session.execute = AsyncMock(side_effect=_exec)
+
+        symlink_spy = AsyncMock()
+        mock_blob = MagicMock()
+
+        _site_cfg = MagicMock(source_id="ehentai", source_id_fields=("gid",), category="gallery")
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", return_value=_mock_session_ctx(mock_session)),
+            patch("worker.importer.store_blob", AsyncMock(return_value=mock_blob)),
+            patch("worker.importer.create_library_symlink", symlink_spy),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer._normalize_tags", side_effect=lambda t, s: t),
+            patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
+            patch("plugins.registry.plugin_registry.get_parser", return_value=None),
+            patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
+            patch("worker.importer.upsert_tag_translations", AsyncMock()),
+            patch("shutil.rmtree"),
+            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
+        ):
+            result = await import_job(_make_ctx(), path=str(gallery_dir), user_id=1)
+
+        assert result["status"] == "done"
+
+        # Both files must get a symlink, with distinct filenames
+        names = [c.args[2] for c in symlink_spy.call_args_list]
+        assert len(names) == 2, f"expected 2 symlinks, got {names!r}"
+        assert len(set(names)) == 2, f"duplicate basenames must be disambiguated, got {names!r}"
+        assert "001.jpg" in names
+
+        # The Image rows must use the same disambiguated names
+        from sqlalchemy.dialects import postgresql
+
+        img_inserts = [
+            s
+            for s in captured_stmts
+            if getattr(s, "is_insert", False) and getattr(getattr(s, "table", None), "name", None) == "images"
+        ]
+        assert img_inserts, "images bulk insert not captured"
+        params = img_inserts[0].compile(dialect=postgresql.dialect()).params
+        db_names = sorted(str(v) for k, v in params.items() if k.startswith("filename"))
+        assert db_names == sorted(names), f"DB filenames {db_names!r} must match symlink names {sorted(names)!r}"

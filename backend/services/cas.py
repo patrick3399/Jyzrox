@@ -94,9 +94,21 @@ async def store_blob(
             dest.parent.mkdir(parents=True, exist_ok=True)
             try:
                 os.link(str(file_path), str(dest))
+            except FileExistsError:
+                # Lost a race with a concurrent worker importing the same blob:
+                # the content-addressed file is already in place (same bytes by
+                # construction), so this is success. Falling through to the copy
+                # fallback would overwrite a file readers may already be serving.
+                pass
             except OSError:
-                # Cross-device link: fallback to copy
-                shutil.copy2(str(file_path), str(dest))
+                # Cross-device link: copy to a temp file and atomically promote
+                # so concurrent readers never observe a partially written blob.
+                tmp = dest.with_name(f".{dest.name}.{os.getpid()}.tmp")
+                try:
+                    shutil.copy2(str(file_path), str(tmp))
+                    os.replace(str(tmp), str(dest))
+                finally:
+                    tmp.unlink(missing_ok=True)
 
     # Upsert blob record.
     # ref_count starts at 0 here; callers must increment it only when a new

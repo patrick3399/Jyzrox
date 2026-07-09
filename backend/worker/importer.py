@@ -43,6 +43,29 @@ def _natural_sort_key(path: Path) -> tuple[tuple[int, str | int], ...]:
     return tuple((1, int(part)) if part.isdigit() else (0, part.casefold()) for part in parts)
 
 
+def _disambiguate_library_filenames(paths: list[Path]) -> list[str]:
+    """Map each media file to a unique library filename (edge case #47).
+
+    Recursive imports can contain the same basename in different
+    subdirectories, and library symlinks are keyed by filename only — without
+    disambiguation the last symlink silently replaces the others while the DB
+    keeps one image row per file. First occurrence keeps its basename; later
+    duplicates get a numbered suffix before the extension.
+    """
+    used: set[str] = set()
+    names: list[str] = []
+    for p in paths:
+        name = p.name
+        if name in used:
+            n = 2
+            while (candidate := f"{p.stem}__{n}{p.suffix}") in used:
+                n += 1
+            name = candidate
+        used.add(name)
+        names.append(name)
+    return names
+
+
 async def import_job(
     ctx: dict, path: str, db_job_id: str | None = None, user_id: int | None = None, source_url: str | None = None
 ) -> dict:
@@ -201,10 +224,15 @@ async def import_job(
                 len(media_files) - len(allowed_pairs),
             )
 
+        # Duplicate basenames from recursive downloads must not overwrite each
+        # other's symlink; the disambiguated name is also stored as the Image
+        # filename so disk and DB stay in agreement (edge case #47).
+        library_names = _disambiguate_library_filenames([img_file for img_file, _ in allowed_pairs])
+
         # Store each file in CAS and create library symlink
-        for img_file, sha256 in allowed_pairs:
+        for (img_file, sha256), lib_name in zip(allowed_pairs, library_names, strict=True):
             blob = await store_blob(img_file, sha256, session)
-            await create_library_symlink(source, source_id, img_file.name, blob)
+            await create_library_symlink(source, source_id, lib_name, blob)
 
         # Flush blob upserts before inserting images (FK: blob_sha256 → blobs.sha256)
         await session.flush()
@@ -216,11 +244,13 @@ async def import_job(
                 "gallery_id": gallery_id,
                 "page_num": page_num,
                 "source_position": page_num,
-                "filename": img_file.name,
+                "filename": lib_name,
                 "blob_sha256": sha256,
                 "added_at": now,
             }
-            for page_num, (img_file, sha256) in enumerate(allowed_pairs, start=1)
+            for page_num, ((_img_file, sha256), lib_name) in enumerate(
+                zip(allowed_pairs, library_names, strict=True), start=1
+            )
         ]
         if image_values:
             img_stmt = (
@@ -490,8 +520,6 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                 # Link mode: record external path, do not copy file
                 blob = await store_blob(f, sha256, session, storage="external", external_path=str(f))
 
-            await create_library_symlink(gallery_source, gallery_source_id, f.name, blob)
-
             # Flush blob upsert before inserting image (FK constraint)
             await session.flush()
 
@@ -513,6 +541,8 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             if inserted is not None:
                 # New Image row created — increment blob ref_count.
                 await session.execute(update(Blob).where(Blob.sha256 == sha256).values(ref_count=Blob.ref_count + 1))
+                # Symlink only for rows the DB actually represents (edge case #48)
+                await create_library_symlink(gallery_source, gallery_source_id, f.name, blob)
                 processed += 1
                 max_page += 1
                 known_sha256s.add(sha256)

@@ -493,8 +493,10 @@ class ProgressiveImporter:
                     if replacement_image is not None:
                         replacement_image.replaced_by_image_id = inserted
 
-                # Create library symlink before closing session (need blob data)
-                await create_library_symlink(self.source, self.source_id, file_path.name, blob)
+                    # Create library symlink before closing session (need blob data).
+                    # Only when a row was actually inserted — a conflicting insert
+                    # must not leave a symlink the DB does not represent (edge case #48).
+                    await create_library_symlink(self.source, self.source_id, file_path.name, blob)
                 await session.commit()
 
             logger.info("[progressive] imported: %s (page %d)", file_path.name, page_num)
