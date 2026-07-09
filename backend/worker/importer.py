@@ -18,6 +18,7 @@ from core.database import AsyncSessionLocal
 from core.social_order import reorder_social_gallery_images
 from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, Tag
 from services.cas import create_library_symlink, store_blob, thumb_dir
+from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
 from worker.constants import (
     _MEDIA_EXTS,
     _VIDEO_EXTS,
@@ -281,6 +282,28 @@ async def import_job(
         await rebuild_gallery_tags_array(session, gallery_id)
 
         await session.commit()
+
+    # Disaster-recovery sidecar: identifies the gallery when only the library
+    # tree survives a DB loss. Built from local values (best-effort write).
+    _posted_at = gallery_values.get("posted_at")
+    await write_gallery_sidecar(
+        source,
+        source_id,
+        {
+            "title": gallery_values.get("title"),
+            "title_jpn": gallery_values.get("title_jpn"),
+            "source": source,
+            "source_id": source_id,
+            "category": gallery_values.get("category"),
+            "language": gallery_values.get("language"),
+            "uploader": gallery_values.get("uploader"),
+            "artist_id": gallery_values.get("artist_id"),
+            "pages": gallery_values.get("pages"),
+            "source_url": source_url,
+            "tags": list(tags),
+            "posted_at": _posted_at.isoformat() if _posted_at is not None else None,
+        },
+    )
 
     # Delete the temporary download directory
     try:
@@ -560,6 +583,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
 
         # Update gallery page count and status
         gallery = await session.get(Gallery, gallery_id)
+        sidecar_payload = None
         if gallery:
             image_count = (
                 await session.execute(select(func.count(Image.id)).where(Image.gallery_id == gallery_id))
@@ -570,8 +594,14 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             if mode == "link" and not gallery.source_path:
                 gallery.source_path = os.path.realpath(src_path)
             gallery.metadata_updated_at = func.now()
+            # Capture before commit: attributes expire on commit
+            sidecar_payload = sidecar_payload_from_gallery(gallery)
 
         await session.commit()
+
+    # Disaster-recovery sidecar (best-effort)
+    if sidecar_payload is not None:
+        await write_gallery_sidecar(gallery_source, gallery_source_id, sidecar_payload)
 
     # Write done state with short TTL so frontend can display completion
     await r.setex(

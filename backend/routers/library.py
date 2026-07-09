@@ -64,6 +64,7 @@ from services.gallery_lifecycle import (
 from services.gallery_lifecycle import (
     invalidate_sources_cache as _invalidate_sources_cache,
 )
+from services.library_sidecar import SIDECAR_FILENAME
 from services.settings_store import get_toggle as _get_toggle
 
 logger = logging.getLogger(__name__)
@@ -1104,6 +1105,9 @@ async def list_gallery_files(
         entries = []
         try:
             for entry in os.scandir(gdir):
+                if entry.name == SIDECAR_FILENAME:
+                    # Disaster-recovery metadata sidecar, not gallery content
+                    continue
                 if not entry.is_file(follow_symlinks=False) and not entry.is_symlink():
                     continue
                 path = Path(entry.path)

@@ -1136,3 +1136,47 @@ class TestProgressiveImporterSymlinkGuard:
 
         symlink_spy.assert_called_once()
         assert symlink_spy.call_args.args[2] == "001.jpg"
+
+
+# ---------------------------------------------------------------------------
+# Disaster-recovery sidecar wiring (info.json)
+# ---------------------------------------------------------------------------
+
+
+class TestProgressiveFinalizeSidecar:
+    """finalize() must write the info.json disaster-recovery sidecar."""
+
+    async def test_finalize_writes_info_json_sidecar(self, db_session, db_session_factory, tmp_path):
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(db_session, source_id="sidecar_fin", pages=0)
+        sha = "dddddd" + "0" * 58
+        await _insert_blob(db_session, sha)
+        await _insert_image(db_session, gallery_id, 1, sha)
+
+        dest_dir = tmp_path / "gallery_dl_dest"
+        dest_dir.mkdir()
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "sidecar_fin"
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        mock_settings = MagicMock()
+        mock_settings.tag_model_enabled = False
+        sidecar_spy = AsyncMock(return_value=True)
+
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive.write_gallery_sidecar", sidecar_spy),
+            patch("core.config.settings", mock_settings),
+        ):
+            result = await importer.finalize(dest_dir, partial=False)
+
+        assert result == gallery_id
+        sidecar_spy.assert_awaited_once()
+        source, source_id, payload = sidecar_spy.call_args.args
+        assert source == "test_source"
+        assert source_id == "sidecar_fin"
+        assert payload["title"] == "Test Gallery"

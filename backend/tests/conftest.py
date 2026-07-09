@@ -38,6 +38,15 @@ os.environ["CREDENTIAL_ENCRYPT_KEY"] = "test-key-0123456789abcdef01234567"
 os.environ["COOKIE_SECURE"] = "false"
 os.environ["RATE_LIMIT_ENABLED"] = "false"
 
+# Point filesystem side effects (library sidecars, symlinks) at a throwaway
+# temp dir so tests that exercise real code paths never touch /data.
+import tempfile  # noqa: E402
+
+_test_data_root = tempfile.mkdtemp(prefix="jyzrox-test-data-")
+os.environ["DATA_LIBRARY_PATH"] = os.path.join(_test_data_root, "library")
+os.environ["DATA_CAS_PATH"] = os.path.join(_test_data_root, "cas")
+os.environ["DATA_THUMBS_PATH"] = os.path.join(_test_data_root, "thumbs")
+
 # Clear cached settings so env vars take effect
 from core.config import get_settings  # noqa: E402
 

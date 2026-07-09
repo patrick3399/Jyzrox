@@ -17,6 +17,7 @@ from core.social_order import reorder_social_gallery_images
 from db.models import Blob, ExcludedBlob, Gallery, Image
 from plugins.models import GalleryImportData
 from services.cas import create_library_symlink, decrement_ref_count, library_dir, store_blob, thumb_dir
+from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
 from worker.constants import _VIDEO_EXTS, logger
 from worker.helpers import _sha256, _validate_image_magic
 
@@ -637,7 +638,12 @@ class ProgressiveImporter:
                 gallery.download_status = "partial" if partial else "complete"
                 gallery.metadata_updated_at = func.now()
                 await self._link_archive_entries(session)
+                # Capture before commit: attributes expire on commit
+                sidecar_source, sidecar_source_id = gallery.source, gallery.source_id
+                sidecar_payload = sidecar_payload_from_gallery(gallery)
                 await session.commit()
+                # Disaster-recovery sidecar (best-effort)
+                await write_gallery_sidecar(sidecar_source, sidecar_source_id, sidecar_payload)
 
         try:
             import shutil

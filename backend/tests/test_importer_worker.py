@@ -880,3 +880,108 @@ class TestImportJobDuplicateBasenames:
         params = img_inserts[0].compile(dialect=postgresql.dialect()).params
         db_names = sorted(str(v) for k, v in params.items() if k.startswith("filename"))
         assert db_names == sorted(names), f"DB filenames {db_names!r} must match symlink names {sorted(names)!r}"
+
+
+# ---------------------------------------------------------------------------
+# Disaster-recovery sidecar wiring (info.json)
+# ---------------------------------------------------------------------------
+
+
+class TestImportJobSidecar:
+    """import_job must write the info.json disaster-recovery sidecar so a
+    gallery recovered from the library tree without the DB stays identifiable."""
+
+    async def test_import_writes_info_json_sidecar_with_gallery_metadata(self, tmp_path):
+        from worker.importer import import_job
+
+        gallery_dir = _create_test_gallery(
+            tmp_path,
+            metadata={
+                "category": "ehentai",
+                "title": "Test Gallery",
+                "tags": {"artist": ["test_artist"]},
+                "gid": 12345,
+            },
+        )
+
+        mock_session = _make_mock_session()
+        mock_blob = MagicMock()
+        _site_cfg = MagicMock(source_id="ehentai", source_id_fields=("gid",), category="gallery")
+        sidecar_spy = AsyncMock(return_value=True)
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", return_value=_mock_session_ctx(mock_session)),
+            patch("worker.importer.store_blob", AsyncMock(return_value=mock_blob)),
+            patch("worker.importer.create_library_symlink", AsyncMock()),
+            patch("worker.importer.write_gallery_sidecar", sidecar_spy),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer._normalize_tags", side_effect=lambda t, s: t),
+            patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=_site_cfg),
+            patch("plugins.registry.plugin_registry.get_parser", return_value=None),
+            patch(
+                "plugins.builtin.gallery_dl._metadata._extract_artist",
+                return_value="ehentai:test_artist",
+            ),
+            patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
+            patch("worker.importer.upsert_tag_translations", AsyncMock()),
+            patch("shutil.rmtree"),
+            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
+        ):
+            result = await import_job(_make_ctx(), path=str(gallery_dir), user_id=1)
+
+        assert result["status"] == "done"
+        sidecar_spy.assert_awaited_once()
+        source, source_id, payload = sidecar_spy.call_args.args
+        assert source == "ehentai"
+        assert source_id == "12345"
+        assert payload["title"] == "Test Gallery"
+        assert "artist:test_artist" in payload["tags"]
+
+
+class TestLocalImportSidecar:
+    """local_import_job must write the info.json sidecar after a successful import."""
+
+    async def test_local_import_writes_info_json_sidecar(self, tmp_path):
+        from worker.importer import local_import_job
+
+        gallery_dir = _create_test_gallery(tmp_path)
+
+        s1 = AsyncMock()
+        gallery_lookup = MagicMock()
+        gallery_lookup.source = "local"
+        gallery_lookup.source_id = "sidecar_test"
+        s1.get = AsyncMock(return_value=gallery_lookup)
+
+        s2 = AsyncMock()
+        excl = MagicMock()
+        excl.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+        s2.execute = AsyncMock(return_value=excl)
+
+        s3 = AsyncMock()
+        existing = MagicMock()
+        existing.all = MagicMock(return_value=[])
+        insert_res = MagicMock()
+        insert_res.scalar_one_or_none = MagicMock(return_value=42)
+        count_res = MagicMock()
+        count_res.scalar_one = MagicMock(return_value=1)
+        s3.execute = AsyncMock(side_effect=[existing, insert_res, MagicMock(), count_res])
+        s3.get = AsyncMock(return_value=MagicMock())
+
+        sidecar_spy = AsyncMock(return_value=True)
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", side_effect=_session_rotator([s1, s2, s3])),
+            patch("worker.importer._sha256", return_value="dd" * 32),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer.store_blob", AsyncMock(return_value=MagicMock())),
+            patch("worker.importer.create_library_symlink", AsyncMock()),
+            patch("worker.importer.write_gallery_sidecar", sidecar_spy),
+            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock),
+        ):
+            result = await local_import_job(_make_ctx(), source_dir=str(gallery_dir), mode="copy", gallery_id=1)
+
+        assert result["status"] == "done"
+        sidecar_spy.assert_awaited_once()
+        assert sidecar_spy.call_args.args[:2] == ("local", "sidecar_test")

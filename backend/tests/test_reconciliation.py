@@ -897,3 +897,157 @@ class TestPhase1SpecialCharSymlinkRepair:
         assert result["status"] == "done"
         symlink_spy.assert_awaited_once_with("local", "artist/2025/title", "002.jpg", blob)
         assert result["repaired_links"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Disaster-recovery sidecar (info.json) handling in Phase 1
+# ---------------------------------------------------------------------------
+
+
+class TestSidecarReconciliation:
+    """The info.json sidecar is gallery metadata, not gallery content: it must
+    not make an empty dir look valid, and reconciliation must backfill it for
+    matched galleries that lack one."""
+
+    def _fs(self, lib_base, dir_files):
+        """Build a scandir side effect for local/<dir_name> containing dir_files."""
+        dir_name = "gal_1"
+        source_entry = _make_dir_entry("local", is_dir=True, path=str(lib_base / "local"))
+        gal_entry = _make_dir_entry(dir_name, is_dir=True, path=str(lib_base / "local" / dir_name))
+        file_entries = [
+            _make_dir_entry(name, is_dir=False, is_symlink=False, path=str(lib_base / "local" / dir_name / name))
+            for name in dir_files
+        ]
+
+        def _scandir_side_effect(path):
+            path_str = str(path)
+            if path_str == str(lib_base):
+                return iter([source_entry])
+            if path_str.endswith("local"):
+                return iter([gal_entry])
+            if dir_name in path_str:
+                return iter(file_entries)
+            return iter([])
+
+        return _scandir_side_effect
+
+    def _patches(self, mock_settings, scandir_side_effect, session, sidecar_spy):
+        return (
+            patch("worker.reconciliation._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.reconciliation._cron_record", new_callable=AsyncMock),
+            patch("worker.reconciliation.settings", mock_settings),
+            patch("os.scandir", side_effect=scandir_side_effect),
+            patch("worker.reconciliation.AsyncSessionLocal", return_value=session),
+            patch("worker.reconciliation.write_gallery_sidecar", sidecar_spy),
+            patch("worker.reconciliation.cas_path", return_value=MagicMock(exists=MagicMock(return_value=False))),
+            patch("worker.reconciliation.thumb_dir", return_value=MagicMock(exists=MagicMock(return_value=False))),
+        )
+
+    async def test_sidecar_only_dir_still_counts_as_empty_link_gallery(self, tmp_path):
+        """A link-mode gallery dir containing ONLY info.json must still be
+        treated as empty (the sidecar is not content), so the empty-dir cleanup
+        keeps working."""
+        from contextlib import ExitStack
+
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        lib_base.mkdir()
+        mock_settings = MagicMock()
+        mock_settings.data_library_path = str(lib_base)
+
+        gallery = _gallery_entity(5, "local", "gal_1", import_mode="link")
+        execute_returns = [
+            _make_result_with_rows([gallery]),  # Phase 1 raw tuple IN
+            _make_result_with_rows([]),  # Phase 1 images
+            _make_empty_result(),  # DELETE empty link galleries
+            _make_result_with_rows([]),  # Phase 2
+            _make_result_with_rows([]),  # Phase 3
+        ]
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+        sidecar_spy = AsyncMock(return_value=True)
+
+        with ExitStack() as stack:
+            for p in self._patches(mock_settings, self._fs(lib_base, ["info.json"]), session, sidecar_spy):
+                stack.enter_context(p)
+            result = await reconciliation_job(_make_ctx())
+
+        assert result["status"] == "done"
+        assert result["removed_galleries"] == 1, "sidecar-only link dir must still count as empty"
+        sidecar_spy.assert_not_awaited()
+
+    async def test_missing_sidecar_backfilled_for_matched_gallery(self, tmp_path):
+        """A matched gallery whose dir has files but no info.json must get one."""
+        from contextlib import ExitStack
+
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        lib_base.mkdir()
+        mock_settings = MagicMock()
+        mock_settings.data_library_path = str(lib_base)
+
+        gallery = _gallery_entity(5, "local", "gal_1", import_mode="copy")
+        blob = MagicMock()
+        img_row = MagicMock()
+        img_row.id = 1
+        img_row.gallery_id = 5
+        img_row.filename = "001.jpg"
+        img_row.blob_sha256 = "aa" * 32
+        img_row.Blob = blob
+
+        execute_returns = [
+            _make_result_with_rows([gallery]),  # Phase 1 raw tuple IN
+            _make_result_with_rows([img_row]),  # Phase 1 images
+            _make_result_with_rows([]),  # Phase 2
+            _make_result_with_rows([]),  # Phase 3
+        ]
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+        sidecar_spy = AsyncMock(return_value=True)
+
+        with ExitStack() as stack:
+            for p in self._patches(mock_settings, self._fs(lib_base, ["001.jpg"]), session, sidecar_spy):
+                stack.enter_context(p)
+            result = await reconciliation_job(_make_ctx())
+
+        assert result["status"] == "done"
+        sidecar_spy.assert_awaited_once()
+        assert sidecar_spy.call_args.args[:2] == ("local", "gal_1")
+        assert result["sidecars_written"] == 1
+
+    async def test_existing_sidecar_not_rewritten(self, tmp_path):
+        """A dir that already has info.json must not be rewritten every run."""
+        from contextlib import ExitStack
+
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        lib_base.mkdir()
+        mock_settings = MagicMock()
+        mock_settings.data_library_path = str(lib_base)
+
+        gallery = _gallery_entity(5, "local", "gal_1", import_mode="copy")
+        blob = MagicMock()
+        img_row = MagicMock()
+        img_row.id = 1
+        img_row.gallery_id = 5
+        img_row.filename = "001.jpg"
+        img_row.blob_sha256 = "aa" * 32
+        img_row.Blob = blob
+
+        execute_returns = [
+            _make_result_with_rows([gallery]),  # Phase 1 raw tuple IN
+            _make_result_with_rows([img_row]),  # Phase 1 images
+            _make_result_with_rows([]),  # Phase 2
+            _make_result_with_rows([]),  # Phase 3
+        ]
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+        sidecar_spy = AsyncMock(return_value=True)
+
+        with ExitStack() as stack:
+            for p in self._patches(mock_settings, self._fs(lib_base, ["001.jpg", "info.json"]), session, sidecar_spy):
+                stack.enter_context(p)
+            result = await reconciliation_job(_make_ctx())
+
+        assert result["status"] == "done"
+        sidecar_spy.assert_not_awaited()

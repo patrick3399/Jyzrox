@@ -10,6 +10,7 @@ to work with the basic query paths or are noted as SQLite-limited.
 """
 
 import uuid
+from pathlib import Path
 from unittest.mock import patch
 
 import pytest
@@ -4146,3 +4147,25 @@ class TestSourceStats:
     async def test_stats_require_auth(self, unauthed_client):
         resp = await unauthed_client.get("/api/library/files/source_stats")
         assert resp.status_code == 401
+
+
+class TestListGalleryFilesHidesSidecar:
+    """The info.json disaster-recovery sidecar lives inside gallery library
+    dirs but is metadata, not content — the explorer file listing must hide it."""
+
+    async def test_info_json_sidecar_not_listed_as_gallery_file(self, client, db_session):
+        from core.config import settings as app_settings
+
+        await _insert_gallery(db_session, source="local", source_id="sidecar_g", title="Sidecar Gallery")
+
+        gdir = Path(app_settings.data_library_path) / "local" / "sidecar_g"
+        gdir.mkdir(parents=True, exist_ok=True)
+        (gdir / "001.jpg").write_bytes(b"\xff\xd8\xff" + b"\x00" * 10)
+        (gdir / "info.json").write_text('{"title": "Sidecar Gallery"}', encoding="utf-8")
+
+        resp = await client.get("/api/library/files/local/sidecar_g")
+
+        assert resp.status_code == 200
+        filenames = [f["filename"] for f in resp.json()["files"]]
+        assert "001.jpg" in filenames
+        assert "info.json" not in filenames

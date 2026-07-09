@@ -13,6 +13,7 @@ from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import Blob, Gallery, Image
 from services.cas import cas_path, create_library_symlink, safe_source_id, thumb_dir
+from services.library_sidecar import SIDECAR_FILENAME, sidecar_payload_from_gallery, write_gallery_sidecar
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run
 
@@ -98,7 +99,13 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
 
     await _cron_record(ctx, "reconciliation", "running")
 
-    stats = {"removed_images": 0, "removed_galleries": 0, "orphan_blobs_cleaned": 0, "repaired_links": 0}
+    stats = {
+        "removed_images": 0,
+        "removed_galleries": 0,
+        "orphan_blobs_cleaned": 0,
+        "repaired_links": 0,
+        "sidecars_written": 0,
+    }
 
     lib_base = Path(settings.data_library_path)
     if not lib_base.exists():
@@ -114,6 +121,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
     # the subsequent DB diff will mark those image records for deletion.
     gallery_map: dict[tuple[str, str], set[str]] = {}
     empty_gallery_dirs: set[tuple[str, str]] = set()
+    sidecar_missing: set[tuple[str, str]] = set()
 
     logger.info("[reconcile] Phase 1: scanning %s", lib_base)
     for source_entry in os.scandir(str(lib_base)):
@@ -127,7 +135,13 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
 
             disk_files: set[str] = set()
             has_valid = False
+            has_sidecar = False
             for fe in os.scandir(sid_entry.path):
+                if fe.name == SIDECAR_FILENAME:
+                    # Metadata sidecar, not gallery content: it must not make
+                    # an empty dir look valid nor enter the DB/disk diff.
+                    has_sidecar = True
+                    continue
                 if fe.is_symlink() and not Path(fe.path).exists():
                     # Broken symlink — remove it silently; absence from disk_files
                     # will cause DB record to be deleted in batch step below.
@@ -142,6 +156,8 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             gallery_map[(source, source_id)] = disk_files
             if not has_valid:
                 empty_gallery_dirs.add((source, source_id))
+            if not has_sidecar:
+                sidecar_missing.add((source, source_id))
 
     all_fs_keys = sorted(gallery_map.keys())
     total_fs = len(all_fs_keys)
@@ -202,6 +218,20 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                                     filename,
                                     exc,
                                 )
+
+            # Backfill the disaster-recovery sidecar (info.json) for matched,
+            # non-trashed, non-empty gallery dirs that lack one — this is how
+            # galleries imported before the sidecar existed get theirs.
+            for key in chunk_keys:
+                if key not in sidecar_missing or key in empty_gallery_dirs:
+                    continue
+                gallery = gallery_by_key.get(key)
+                if gallery is None or gallery.deleted_at is not None:
+                    continue
+                if await write_gallery_sidecar(
+                    gallery.source, gallery.source_id, sidecar_payload_from_gallery(gallery)
+                ):
+                    stats["sidecars_written"] += 1
 
             if dead_image_ids:
                 # Batch decrement ref_counts
