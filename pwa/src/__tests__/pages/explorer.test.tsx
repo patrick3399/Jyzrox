@@ -30,6 +30,7 @@ vi.mock('@/lib/i18n', () => ({
 vi.mock('@/lib/api', () => ({
   api: {
     library: {
+      sourceStats: vi.fn(),
       listFiles: vi.fn(),
       listGalleryFiles: vi.fn(),
       batchGalleries: vi.fn(),
@@ -61,7 +62,8 @@ vi.mock('swr', () => ({
     // The explorer page uses array keys like ['explorer-dirs', ...].
     // Match on the first element of the array.
     const keyStr = Array.isArray(key) ? String(key[0]) : key === null ? '__null__' : String(key)
-    if (key !== null && keyStr === 'explorer-dirs' && fetcher) void fetcher()
+    if (key !== null && (keyStr === 'explorer-dirs' || keyStr === 'explorer-source-stats') && fetcher)
+      void fetcher()
     return (
       (swrResponses[keyStr] as object) ?? {
         data: undefined,
@@ -83,8 +85,8 @@ describe('ExplorerPage', () => {
 
   it('test_explorer_renders_empty_state_with_no_data', async () => {
     swrResponses = {
-      'explorer-dirs': {
-        data: { directories: [], total: 0, page: 0 },
+      'explorer-source-stats': {
+        data: { stats: [] },
         error: undefined,
         isLoading: false,
         mutate: mockMutate,
@@ -102,7 +104,7 @@ describe('ExplorerPage', () => {
 
   it('test_explorer_shows_error_ui_on_api_failure', async () => {
     swrResponses = {
-      'explorer-dirs': {
+      'explorer-source-stats': {
         data: undefined,
         error: new Error('Network error'),
         isLoading: false,
@@ -120,7 +122,7 @@ describe('ExplorerPage', () => {
 
   it('test_explorer_retry_button_refetches_on_error', async () => {
     swrResponses = {
-      'explorer-dirs': {
+      'explorer-source-stats': {
         data: undefined,
         error: new Error('Network error'),
         isLoading: false,
@@ -140,40 +142,12 @@ describe('ExplorerPage', () => {
 
   it('test_explorer_displays_local_link_and_copy_source_groups', async () => {
     swrResponses = {
-      'explorer-dirs': {
+      'explorer-source-stats': {
         data: {
-          directories: [
-            {
-              gallery_id: 1,
-              source_id: 'linked',
-              title: 'Linked Gallery',
-              category: null,
-              file_count: 2,
-              rating: 0,
-              favorited: false,
-              is_favorited: false,
-              my_rating: 0,
-              source: 'local',
-              import_mode: 'link',
-              disk_size: 200,
-            },
-            {
-              gallery_id: 2,
-              source_id: 'copied',
-              title: 'Copied Gallery',
-              category: null,
-              file_count: 3,
-              rating: 0,
-              favorited: false,
-              is_favorited: false,
-              my_rating: 0,
-              source: 'local',
-              import_mode: 'copy',
-              disk_size: 300,
-            },
+          stats: [
+            { source: 'local', import_mode: 'link', gallery_count: 1, file_count: 2, disk_size: 200 },
+            { source: 'local', import_mode: 'copy', gallery_count: 1, file_count: 3, disk_size: 300 },
           ],
-          total: 2,
-          page: 0,
         },
         error: undefined,
         isLoading: false,
@@ -190,6 +164,16 @@ describe('ExplorerPage', () => {
 
   it('test_explorer_groups_local_galleries_without_artist_under_uncategorized', async () => {
     swrResponses = {
+      'explorer-source-stats': {
+        data: {
+          stats: [
+            { source: 'local', import_mode: 'link', gallery_count: 1, file_count: 2, disk_size: 200 },
+          ],
+        },
+        error: undefined,
+        isLoading: false,
+        mutate: mockMutate,
+      },
       'explorer-dirs': {
         data: {
           directories: [
@@ -230,6 +214,16 @@ describe('ExplorerPage', () => {
 
   it('test_explorer_queries_local_link_with_import_mode_filter', async () => {
     swrResponses = {
+      'explorer-source-stats': {
+        data: {
+          stats: [
+            { source: 'local', import_mode: 'link', gallery_count: 1, file_count: 2, disk_size: 200 },
+          ],
+        },
+        error: undefined,
+        isLoading: false,
+        mutate: mockMutate,
+      },
       'explorer-dirs': {
         data: {
           directories: [
@@ -269,5 +263,31 @@ describe('ExplorerPage', () => {
       page: 0,
       limit: 50,
     })
+  })
+
+  it('test_explorer_root_shows_source_whose_galleries_are_beyond_first_page', async () => {
+    // Regression: the root view used to group ONE page (newest 50) of
+    // /api/library/files, so a source with only old galleries (e.g. weibo)
+    // disappeared from the source list. The root must render every source
+    // returned by the whole-library stats endpoint instead.
+    swrResponses = {
+      'explorer-source-stats': {
+        data: {
+          stats: [
+            { source: 'pixiv', import_mode: null, gallery_count: 60, file_count: 600, disk_size: 6000 },
+            { source: 'weibo', import_mode: null, gallery_count: 1, file_count: 9, disk_size: 900 },
+          ],
+        },
+        error: undefined,
+        isLoading: false,
+        mutate: mockMutate,
+      },
+    }
+
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    expect(screen.getByText('Pixiv')).toBeDefined()
+    expect(screen.getByText('weibo')).toBeDefined()
   })
 })

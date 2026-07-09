@@ -4066,3 +4066,83 @@ class TestBatchFavoriteDeduplication:
         )
         assert resp.status_code == 200
         assert resp.json()["affected"] == 1
+
+
+# ---------------------------------------------------------------------------
+# Source stats (explorer root view)
+# ---------------------------------------------------------------------------
+
+
+class TestSourceStats:
+    """GET /api/library/files/source_stats — per-source aggregates for the
+    explorer root view.
+
+    Regression context: the explorer root used to derive its source folder
+    list by grouping ONE page (newest 50) of /api/library/files on the
+    frontend, so any source whose galleries were all older than the newest 50
+    (e.g. weibo) vanished from the root view and per-source stats were wrong.
+    """
+
+    async def test_source_with_only_old_galleries_still_appears_in_stats(self, client, db_session):
+        """A source whose only gallery is older than the newest page-size worth
+        of galleries must still appear (the bug hid it)."""
+        weibo_id = await _insert_gallery(db_session, source="weibo", source_id="w1", title="Weibo Gallery")
+        await _insert_image(db_session, weibo_id, page_num=1)
+        # 60 newer galleries (> the explorer page size of 50) from another source
+        for i in range(60):
+            await _insert_gallery(db_session, source="pixiv", source_id=f"p{i}", title=f"P{i}")
+
+        resp = await client.get("/api/library/files/source_stats")
+
+        assert resp.status_code == 200
+        stats = resp.json()["stats"]
+        by_key = {(s["source"], s["import_mode"]): s for s in stats}
+        assert ("weibo", None) in by_key, f"weibo missing from stats: {sorted(by_key)}"
+        assert by_key[("weibo", None)]["gallery_count"] == 1
+        assert by_key[("pixiv", None)]["gallery_count"] == 60
+
+    async def test_stats_aggregate_file_count_and_disk_size(self, client, db_session):
+        """file_count / disk_size must aggregate over ALL galleries of the source."""
+        gid = await _insert_gallery(db_session, source="weibo", source_id="w_files", title="W")
+        await _insert_image(db_session, gid, page_num=1, filename="001.jpg")
+        await _insert_image(db_session, gid, page_num=2, filename="002.jpg")
+
+        resp = await client.get("/api/library/files/source_stats")
+
+        assert resp.status_code == 200
+        stats = {s["source"]: s for s in resp.json()["stats"]}
+        assert stats["weibo"]["gallery_count"] == 1
+        assert stats["weibo"]["file_count"] == 2
+        assert stats["weibo"]["disk_size"] == 2000  # 2 blobs × 1000 bytes
+
+    async def test_stats_split_local_by_import_mode(self, client, db_session):
+        """local galleries must be reported per import_mode so the explorer can
+        keep its 'external folders' vs 'jyzrox import' split."""
+        await _insert_gallery(db_session, source="local", source_id="l1", import_mode="link", title="L1")
+        await _insert_gallery(db_session, source="local", source_id="l2", import_mode="copy", title="L2")
+
+        resp = await client.get("/api/library/files/source_stats")
+
+        assert resp.status_code == 200
+        by_key = {(s["source"], s["import_mode"]): s for s in resp.json()["stats"]}
+        assert by_key[("local", "link")]["gallery_count"] == 1
+        assert by_key[("local", "copy")]["gallery_count"] == 1
+
+    async def test_stats_exclude_trashed_galleries(self, client, db_session):
+        """Soft-deleted galleries must not be counted."""
+        gid = await _insert_gallery(db_session, source="weibo", source_id="w_trash", title="WT")
+        await db_session.execute(
+            text("UPDATE galleries SET deleted_at = CURRENT_TIMESTAMP WHERE id = :gid"),
+            {"gid": gid},
+        )
+        await db_session.commit()
+
+        resp = await client.get("/api/library/files/source_stats")
+
+        assert resp.status_code == 200
+        sources = [s["source"] for s in resp.json()["stats"]]
+        assert "weibo" not in sources
+
+    async def test_stats_require_auth(self, unauthed_client):
+        resp = await unauthed_client.get("/api/library/files/source_stats")
+        assert resp.status_code == 401

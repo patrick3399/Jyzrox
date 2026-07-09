@@ -660,6 +660,14 @@ export interface LibraryDirectory {
   disk_size: number
 }
 
+export interface SourceStat {
+  source: string
+  import_mode: string | null
+  gallery_count: number
+  file_count: number
+  disk_size: number
+}
+
 export interface LibraryFile {
   filename: string
   page_num: number | null

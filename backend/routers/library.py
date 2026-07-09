@@ -978,6 +978,47 @@ async def list_artist_images(
     }
 
 
+@router.get("/files/source_stats")
+async def source_stats(
+    auth: dict = Depends(require_auth),
+    db: AsyncSession = Depends(get_db),
+):
+    """Per-source aggregate stats for the explorer root view.
+
+    The root view must list every source in the library; deriving it from one
+    page of /files hides sources whose galleries are all older than the newest
+    page (and reports per-source stats computed over that page only).
+    local galleries are grouped per import_mode so the frontend can keep its
+    link/copy split.
+    """
+    stmt = (
+        select(
+            Gallery.source,
+            Gallery.import_mode,
+            func.count(func.distinct(Gallery.id)).label("gallery_count"),
+            func.count(Image.id).label("file_count"),
+            func.coalesce(func.sum(Blob.file_size), 0).label("disk_size"),
+        )
+        .outerjoin(Image, Image.gallery_id == Gallery.id)
+        .outerjoin(Blob, Blob.sha256 == Image.blob_sha256)
+        .where(gallery_access_filter(auth))
+        .group_by(Gallery.source, Gallery.import_mode)
+    )
+    rows = (await db.execute(stmt)).all()
+    return {
+        "stats": [
+            {
+                "source": row.source,
+                "import_mode": row.import_mode,
+                "gallery_count": row.gallery_count,
+                "file_count": row.file_count,
+                "disk_size": row.disk_size,
+            }
+            for row in rows
+        ]
+    }
+
+
 @router.get("/files")
 async def list_files(
     q: str = Query(default=""),

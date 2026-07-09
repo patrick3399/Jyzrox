@@ -38,6 +38,7 @@ import type {
   ArtistSummary,
   ArtistImageItem,
   ArtistDetail,
+  SourceStat,
   Collection,
   LibraryDirectory,
   LibraryFile,
@@ -453,6 +454,9 @@ const library = {
       `/api/library/files${qs(params as Record<string, unknown>)}`,
       init,
     ),
+
+  sourceStats: (init?: RequestInit) =>
+    apiFetch<{ stats: SourceStat[] }>('/api/library/files/source_stats', init),
 
   listGalleryFiles: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{

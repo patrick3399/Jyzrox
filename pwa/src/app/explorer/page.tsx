@@ -7,7 +7,7 @@ import { api } from '@/lib/api'
 import { readerHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { toast } from 'sonner'
-import type { LibraryDirectory, LibraryFile } from '@/lib/types'
+import type { LibraryDirectory, LibraryFile, SourceStat } from '@/lib/types'
 import { SkeletonGrid } from '@/components/Skeleton'
 
 // ── Utilities ─────────────────────────────────────────────────────────
@@ -47,11 +47,20 @@ function sourceDisplayName(source: string): string {
   return SOURCE_DISPLAY[source] ?? source
 }
 
-function sourceGroupKey(dir: Pick<LibraryDirectory, 'source' | 'import_mode'>): string {
+function sourceGroupKey(
+  dir: Pick<LibraryDirectory | SourceStat, 'source' | 'import_mode'>,
+): string {
   if (dir.source === 'local' && (dir.import_mode === 'link' || dir.import_mode === 'copy')) {
     return `local:${dir.import_mode}`
   }
   return dir.source ?? 'local'
+}
+
+// Aggregated per-source-folder stats shown on the root view
+interface SourceGroupInfo {
+  galleryCount: number
+  totalFiles: number
+  totalSize: number
 }
 
 function sourceApiValue(sourceKey: string | null): string | undefined {
@@ -105,16 +114,29 @@ export default function ExplorerPage() {
     return () => clearTimeout(timer)
   }, [searchQuery])
 
-  // Always fetch all directories (we group/filter on the frontend).
-  // When at root (source list) we fetch with no source filter.
-  // When inside a source, we pass the search query so pagination makes sense.
+  const isRoot = currentSource === null && currentGallery === null
+
+  // Root view: per-source aggregates over the WHOLE library. Deriving the
+  // source list by grouping one page of /files hid sources whose galleries
+  // were all older than the newest page (e.g. weibo) and computed per-source
+  // stats over that page only.
+  const {
+    data: statsData,
+    mutate: mutateStats,
+    isLoading: statsLoading,
+    error: statsError,
+  } = useSWR(isRoot ? ['explorer-source-stats'] : null, () => api.library.sourceStats())
+
+  // Inside a source: paginated gallery list, filtered server-side.
   const {
     data: dirData,
     mutate: mutateDirs,
     isLoading: dirsLoading,
     error: dirsError,
   } = useSWR(
-    currentGallery === null ? ['explorer-dirs', debouncedQuery, page, currentSource] : null,
+    currentSource !== null && currentGallery === null
+      ? ['explorer-dirs', debouncedQuery, page, currentSource]
+      : null,
     () =>
       api.library.listFiles({
         q: debouncedQuery || undefined,
@@ -288,8 +310,8 @@ export default function ExplorerPage() {
 
   const allDirectories: LibraryDirectory[] = dirData?.directories ?? []
 
-  // When inside a source, filter directories to that source only.
-  // At root level, all directories are used for grouping.
+  // Inside a source the API already filters; keep the client-side check as a
+  // guard against stale SWR data from a previous source.
   const filteredDirectories: LibraryDirectory[] =
     currentSource !== null
       ? allDirectories.filter((d) => sourceGroupKey(d) === currentSource)
@@ -297,31 +319,24 @@ export default function ExplorerPage() {
 
   const galleryTitle = currentGallery?.title ?? fileData?.title ?? ''
   const files: LibraryFile[] = fileData?.files ?? []
-  const _totalDirs = currentSource !== null ? filteredDirectories.length : (dirData?.total ?? 0)
   const totalPages = Math.ceil((dirData?.total ?? 0) / PAGE_LIMIT)
 
-  // Group all directories by source for the root view
+  // Root view: group whole-library aggregates by source folder key
   const sourceGroups = (() => {
-    const groups: Map<
-      string,
-      { galleries: LibraryDirectory[]; totalFiles: number; totalSize: number }
-    > = new Map()
-    for (const dir of allDirectories) {
-      const src = sourceGroupKey(dir)
-      if (!groups.has(src)) {
-        groups.set(src, { galleries: [], totalFiles: 0, totalSize: 0 })
-      }
-      const g = groups.get(src)!
-      g.galleries.push(dir)
-      g.totalFiles += dir.file_count ?? 0
-      g.totalSize += dir.disk_size ?? 0
+    const groups: Map<string, SourceGroupInfo> = new Map()
+    for (const stat of statsData?.stats ?? []) {
+      const key = sourceGroupKey(stat)
+      const g = groups.get(key) ?? { galleryCount: 0, totalFiles: 0, totalSize: 0 }
+      g.galleryCount += stat.gallery_count
+      g.totalFiles += stat.file_count
+      g.totalSize += stat.disk_size
+      groups.set(key, g)
     }
-    return groups
+    return new Map([...groups.entries()].sort(([a], [b]) => a.localeCompare(b)))
   })()
 
   // ── Breadcrumb segments ────────────────────────────────────────────
 
-  const isRoot = currentSource === null && currentGallery === null
   const isSourceView = currentSource !== null && currentGallery === null
   const isGalleryView = currentGallery !== null
 
@@ -448,14 +463,14 @@ export default function ExplorerPage() {
           if (e.target === e.currentTarget) setSelectedItems(new Set())
         }}
       >
-        {dirsError || filesError ? (
+        {statsError || dirsError || filesError ? (
           <div className="flex flex-col items-center justify-center py-16 gap-3">
             <AlertTriangle size={32} className="text-red-400" />
             <p className="text-sm text-vault-text-secondary">
-              {(dirsError ?? filesError)?.message ?? t('common.errorOccurred')}
+              {(statsError ?? dirsError ?? filesError)?.message ?? t('common.errorOccurred')}
             </p>
             <button
-              onClick={() => (filesError ? mutateFiles() : mutateDirs())}
+              onClick={() => (filesError ? mutateFiles() : dirsError ? mutateDirs() : mutateStats())}
               className="px-3 py-1.5 bg-vault-accent text-white rounded-lg text-sm"
             >
               {t('common.retry')}
@@ -481,7 +496,7 @@ export default function ExplorerPage() {
         ) : (
           <SourceView
             sourceGroups={sourceGroups}
-            loading={dirsLoading}
+            loading={statsLoading}
             viewMode={viewMode}
             onSourceDoubleClick={handleDoubleClickSource}
           />
@@ -540,10 +555,7 @@ export default function ExplorerPage() {
 // ── Source View (top-level: grouped by source) ────────────────────────
 
 interface SourceViewProps {
-  sourceGroups: Map<
-    string,
-    { galleries: LibraryDirectory[]; totalFiles: number; totalSize: number }
-  >
+  sourceGroups: Map<string, SourceGroupInfo>
   loading: boolean
   viewMode: 'grid' | 'list'
   onSourceDoubleClick: (source: string) => void
@@ -594,7 +606,7 @@ function SourceView({ sourceGroups, loading, viewMode, onSourceDoubleClick }: So
               </span>
             </div>
             <div className="text-xs text-vault-text-secondary space-y-1">
-              <div>{t('explorer.galleryCount', { count: String(info.galleries.length) })}</div>
+              <div>{t('explorer.galleryCount', { count: String(info.galleryCount) })}</div>
               <div>{t('explorer.totalFiles', { count: String(info.totalFiles) })}</div>
               <div>{formatSize(info.totalSize)}</div>
             </div>
@@ -625,7 +637,7 @@ function SourceView({ sourceGroups, loading, viewMode, onSourceDoubleClick }: So
             <span className="text-sm text-vault-text truncate">{sourceDisplayName(source)}</span>
           </div>
           <span className="text-xs text-vault-text-secondary text-right">
-            {info.galleries.length}
+            {info.galleryCount}
           </span>
           <span className="text-xs text-vault-text-secondary text-right">{info.totalFiles}</span>
           <span className="text-xs text-vault-text-secondary text-right">
