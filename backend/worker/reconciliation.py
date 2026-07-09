@@ -17,6 +17,8 @@ from services.library_sidecar import SIDECAR_FILENAME, sidecar_payload_from_gall
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run
 
+_CAS_ORPHAN_MIN_AGE_SECONDS = 24 * 3600  # files younger than this may belong to an in-flight import
+
 
 async def _galleries_by_fs_key(session, chunk_keys: list[tuple[str, str]]) -> dict[tuple[str, str], Gallery]:
     """Map on-disk (source, dir_name) keys to their Gallery rows.
@@ -89,6 +91,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
     - Phase 1: single scandir pass + chunked batch queries (chunk=500)
     - Phase 2: chunked NOT-IN queries for orphan galleries
     - Phase 3: single JOIN query for orphan blobs, batch update/delete
+    - Phase 4: CAS scan for stale files with no blobs row (edge case #42)
     """
     logger.info("[reconcile] Starting reconciliation")
     r = ctx["redis"]
@@ -105,6 +108,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
         "orphan_blobs_cleaned": 0,
         "repaired_links": 0,
         "sidecars_written": 0,
+        "cas_orphans_removed": 0,
     }
 
     lib_base = Path(settings.data_library_path)
@@ -430,6 +434,61 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
             stats["orphan_blobs_cleaned"],
             len(drifted),
         )
+
+    # ── Phase 4: CAS orphan files — on disk but no blobs row (edge case #42) ──
+    # store_blob() writes the CAS file before the DB transaction commits, so a
+    # rollback (or crash mid-import) leaves files no blobs row references; blob
+    # GC starts from DB rows and never sees them. Files younger than the age
+    # threshold are skipped — they may belong to an import still in flight —
+    # and a failed DB check aborts the phase (never delete blind).
+    cas_base = Path(settings.data_cas_path)
+    if cas_base.exists():
+        cutoff = datetime.now(UTC).timestamp() - _CAS_ORPHAN_MIN_AGE_SECONDS
+        candidates: list[tuple[str, Path]] = []
+        for d1 in os.scandir(str(cas_base)):
+            if not d1.is_dir(follow_symlinks=False):
+                continue
+            for d2 in os.scandir(d1.path):
+                if not d2.is_dir(follow_symlinks=False):
+                    continue
+                for fe in os.scandir(d2.path):
+                    if not fe.is_file(follow_symlinks=False):
+                        continue
+                    try:
+                        if fe.stat().st_mtime > cutoff:
+                            continue
+                    except OSError:
+                        continue
+                    # Filenames are {sha256}{ext}; anything that does not parse
+                    # to a known sha (e.g. stale .tmp files from crashed atomic
+                    # promotes) simply never matches a blobs row.
+                    candidates.append((fe.name.split(".", 1)[0], Path(fe.path)))
+
+        orphan_paths: list[Path] = []
+        if candidates:
+            try:
+                async with AsyncSessionLocal() as session:
+                    for chunk_start in range(0, len(candidates), _BLOB_CHUNK):
+                        chunk = candidates[chunk_start : chunk_start + _BLOB_CHUNK]
+                        chunk_shas = [sha for sha, _ in chunk]
+                        existing = set(
+                            (await session.execute(select(Blob.sha256).where(Blob.sha256.in_(chunk_shas))))
+                            .scalars()
+                            .all()
+                        )
+                        orphan_paths.extend(path for sha, path in chunk if sha not in existing)
+            except Exception as exc:
+                logger.warning("[reconcile] Phase 4 aborted, keeping all CAS files (DB check failed): %s", exc)
+                orphan_paths = []
+
+        for path in orphan_paths:
+            try:
+                path.unlink()
+                stats["cas_orphans_removed"] += 1
+            except OSError as exc:
+                logger.warning("[reconcile] failed to delete orphan CAS file %s: %s", path, exc)
+
+        logger.info("[reconcile] Phase 4 done: removed %d row-less CAS files", stats["cas_orphans_removed"])
 
     await _cron_record(ctx, "reconciliation", "ok")
 

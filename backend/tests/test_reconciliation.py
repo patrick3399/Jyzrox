@@ -1051,3 +1051,118 @@ class TestSidecarReconciliation:
 
         assert result["status"] == "done"
         sidecar_spy.assert_not_awaited()
+
+
+# ---------------------------------------------------------------------------
+# Phase 4: CAS orphan files (edge case #42)
+# ---------------------------------------------------------------------------
+
+
+class TestCasOrphanScan:
+    """Regression tests for edge case #42: store_blob() writes the CAS file
+    before the DB transaction commits, so a rollback (or crash mid-import)
+    leaves files no blobs row references — and blob GC starts from DB rows, so
+    they were invisible forever. Phase 4 removes such files, but only when they
+    are older than the safety threshold (an import may still be in flight) and
+    only after a successful DB check (a DB error must never delete blind)."""
+
+    def _mk_cas_file(self, cas_base, sha, ext=".jpg", age_seconds=0):
+        import os as _os
+        import time as _time
+
+        p = cas_base / sha[:2] / sha[2:4] / f"{sha}{ext}"
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b"x")
+        if age_seconds:
+            old = _time.time() - age_seconds
+            _os.utime(p, (old, old))
+        return p
+
+    async def _run(self, tmp_path, execute_returns):
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        lib_base.mkdir(exist_ok=True)
+        mock_settings = MagicMock()
+        mock_settings.data_library_path = str(lib_base)
+        mock_settings.data_cas_path = str(tmp_path / "cas")
+
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+
+        with (
+            patch("worker.reconciliation._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.reconciliation._cron_record", new_callable=AsyncMock),
+            patch("worker.reconciliation.settings", mock_settings),
+            patch("worker.reconciliation.AsyncSessionLocal", return_value=session),
+        ):
+            return await reconciliation_job(_make_ctx())
+
+    async def test_stale_cas_file_without_blob_row_is_deleted(self, tmp_path):
+        sha = "ab" * 32
+        orphan = self._mk_cas_file(tmp_path / "cas", sha, age_seconds=48 * 3600)
+
+        result = await self._run(
+            tmp_path,
+            [
+                _make_result_with_rows([]),  # Phase 2 galleries
+                _make_result_with_rows([]),  # Phase 3 blob GC
+                _make_result_with_rows([]),  # Phase 4 blob-row check → no rows
+            ],
+        )
+
+        assert result["status"] == "done"
+        assert not orphan.exists(), "stale row-less CAS file must be removed"
+        assert result["cas_orphans_removed"] == 1
+
+    async def test_stale_cas_file_with_blob_row_is_kept(self, tmp_path):
+        sha = "cd" * 32
+        kept = self._mk_cas_file(tmp_path / "cas", sha, age_seconds=48 * 3600)
+
+        result = await self._run(
+            tmp_path,
+            [
+                _make_result_with_rows([]),  # Phase 2
+                _make_result_with_rows([]),  # Phase 3
+                _make_result_with_rows([sha]),  # Phase 4 → row exists
+            ],
+        )
+
+        assert result["status"] == "done"
+        assert kept.exists(), "CAS file with a blobs row must never be deleted"
+        assert result["cas_orphans_removed"] == 0
+
+    async def test_recent_cas_file_without_blob_row_is_kept(self, tmp_path):
+        """A file younger than the age threshold may belong to an import whose
+        transaction has not committed yet — it must be skipped entirely."""
+        sha = "ef" * 32
+        recent = self._mk_cas_file(tmp_path / "cas", sha, age_seconds=0)
+
+        result = await self._run(
+            tmp_path,
+            [
+                _make_result_with_rows([]),  # Phase 2
+                _make_result_with_rows([]),  # Phase 3
+                # No Phase 4 query expected: no candidates
+            ],
+        )
+
+        assert result["status"] == "done"
+        assert recent.exists(), "recent CAS file must be left for the in-flight import"
+        assert result["cas_orphans_removed"] == 0
+
+    async def test_db_error_during_orphan_check_aborts_without_deleting(self, tmp_path):
+        sha = "12" * 32
+        orphan = self._mk_cas_file(tmp_path / "cas", sha, age_seconds=48 * 3600)
+
+        result = await self._run(
+            tmp_path,
+            [
+                _make_result_with_rows([]),  # Phase 2
+                _make_result_with_rows([]),  # Phase 3
+                Exception("db down"),  # Phase 4 check fails
+            ],
+        )
+
+        assert result["status"] == "done"
+        assert orphan.exists(), "a failed DB check must never delete CAS files"
+        assert result["cas_orphans_removed"] == 0
