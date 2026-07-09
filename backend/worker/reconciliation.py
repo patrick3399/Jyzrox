@@ -17,6 +17,44 @@ from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run
 
 
+async def _galleries_by_fs_key(session, chunk_keys: list[tuple[str, str]]) -> dict[tuple[str, str], Gallery]:
+    """Map on-disk (source, dir_name) keys to their Gallery rows.
+
+    Library directory names are produced by ``safe_source_id()``, so a raw
+    ``tuple_(source, source_id).in_(...)`` misses galleries whose id was
+    transformed ('/' → '__', edge case #46 residue): their symlink repair and
+    image-level reconciliation were silently skipped. Fast path: raw tuple IN
+    (covers ids that needed no sanitising). Keys still unmatched fall back to
+    loading the affected sources and matching on the sanitized form.
+
+    ``safe_source_id`` is lossy (#45): on a sanitized-name collision the first
+    match keeps the directory and the other gallery is left untouched — the
+    safe direction (skipped repair, never a wrongful delete).
+    """
+    rows = (
+        (await session.execute(select(Gallery).where(tuple_(Gallery.source, Gallery.source_id).in_(chunk_keys))))
+        .scalars()
+        .all()
+    )
+
+    by_key: dict[tuple[str, str], Gallery] = {}
+    for g in rows:
+        by_key.setdefault((g.source, safe_source_id(g.source_id)), g)
+
+    unmatched = [k for k in chunk_keys if k not in by_key]
+    if unmatched:
+        wanted_by_source: dict[str, set[str]] = {}
+        for src, sid in unmatched:
+            wanted_by_source.setdefault(src, set()).add(sid)
+        for src, wanted in wanted_by_source.items():
+            src_rows = (await session.execute(select(Gallery).where(Gallery.source == src))).scalars().all()
+            for g in src_rows:
+                sanitized = safe_source_id(g.source_id)
+                if sanitized in wanted:
+                    by_key.setdefault((src, sanitized), g)
+    return by_key
+
+
 def _orphan_gallery_ids(db_rows, fs_keys: set[tuple[str, str]]) -> list[int]:
     """Return ids of link-mode galleries whose library directory is missing on disk.
 
@@ -116,19 +154,10 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
         for chunk_start in range(0, total_fs, _CHUNK):
             chunk_keys = all_fs_keys[chunk_start : chunk_start + _CHUNK]
 
-            # Query Gallery records for this chunk using tuple IN
-            galleries = (
-                (
-                    await session.execute(
-                        select(Gallery).where(tuple_(Gallery.source, Gallery.source_id).in_(chunk_keys))
-                    )
-                )
-                .scalars()
-                .all()
-            )
-
-            gallery_by_key = {(g.source, g.source_id): g for g in galleries}
-            chunk_gallery_ids = [g.id for g in galleries]
+            # Query Gallery records for this chunk. Directory names are
+            # sanitized (safe_source_id), so matching must be too (#46 residue).
+            gallery_by_key = await _galleries_by_fs_key(session, chunk_keys)
+            chunk_gallery_ids = [g.id for g in gallery_by_key.values()]
 
             # Batch query images for galleries in this chunk
             rows = (
@@ -139,8 +168,8 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                 )
             ).all()
 
-            # Build reverse map: gallery_id -> (source, source_id)
-            id_to_key = {g.id: (g.source, g.source_id) for g in galleries}
+            # Build reverse map: gallery_id -> on-disk (source, dir_name) key
+            id_to_key = {g.id: key for key, g in gallery_by_key.items()}
 
             # Group DB rows by (source, source_id)
             db_by_gallery: dict[tuple[str, str], dict[str, tuple[int, str, Blob]]] = {}

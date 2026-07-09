@@ -249,7 +249,8 @@ class TestReconciliationJob:
             return iter([])
 
         execute_returns = [
-            _make_result_with_rows([]),  # Phase 1 Gallery
+            _make_result_with_rows([]),  # Phase 1 Gallery (raw tuple IN)
+            _make_result_with_rows([]),  # Phase 1 sanitized fallback (keys unmatched)
             _make_result_with_rows([]),  # Phase 1 Images
             _make_result_with_rows([]),  # Phase 2 orphan galleries
             _make_result_with_rows([]),  # Phase 3 blob GC
@@ -733,7 +734,8 @@ class TestReconciliationJob:
             return iter([])
 
         execute_returns = [
-            _make_result_with_rows([]),  # Phase 1 Gallery query (chunk)
+            _make_result_with_rows([]),  # Phase 1 Gallery query (chunk, raw tuple IN)
+            _make_result_with_rows([]),  # Phase 1 sanitized fallback (keys unmatched)
             _make_result_with_rows([]),  # Phase 1 Images query
             _make_result_with_rows([]),  # Phase 2
             _make_result_with_rows([]),  # Phase 3
@@ -755,3 +757,143 @@ class TestReconciliationJob:
         assert result["status"] == "done"
         # We verify execute was called (i.e., both galleries were included in the scan)
         assert session.execute.call_count >= 1
+
+
+# ---------------------------------------------------------------------------
+# Phase 1 sanitized-key matching (edge case #46 residue / #45)
+# ---------------------------------------------------------------------------
+
+
+def _gallery_entity(id, source, source_id, import_mode="copy", deleted_at=None):
+    g = MagicMock()
+    g.id = id
+    g.source = source
+    g.source_id = source_id
+    g.import_mode = import_mode
+    g.deleted_at = deleted_at
+    return g
+
+
+class TestGalleriesByFsKeySanitizedMatching:
+    """Regression tests for Phase 1 gallery matching (edge case #46 residue).
+
+    On-disk library dir names are produced by safe_source_id(), but Phase 1
+    used to query `tuple_(source, source_id).in_(chunk_keys)` with the RAW
+    source_id — so galleries whose id contains '/' (e.g. local
+    'artist/month/title') never matched their own directory and their symlink
+    repair / image-level reconciliation was silently skipped."""
+
+    async def test_special_char_source_id_matched_via_sanitized_fallback(self):
+        """A gallery whose source_id sanitizes to the on-disk dir name must be
+        matched even though the raw tuple IN misses it."""
+        from worker.reconciliation import _galleries_by_fs_key
+
+        gallery = _gallery_entity(7, "local", "artist/2025/title")
+        session = AsyncMock()
+        session.execute = AsyncMock(
+            side_effect=[
+                _make_result_with_rows([]),  # raw tuple IN → miss
+                _make_result_with_rows([gallery]),  # per-source fallback
+            ]
+        )
+
+        by_key = await _galleries_by_fs_key(session, [("local", "artist__2025__title")])
+
+        assert by_key == {("local", "artist__2025__title"): gallery}
+
+    async def test_fixed_point_ids_use_fast_path_without_extra_query(self):
+        """IDs that need no sanitising must be resolved by the tuple IN alone."""
+        from worker.reconciliation import _galleries_by_fs_key
+
+        gallery = _gallery_entity(1, "pixiv", "12345")
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=[_make_result_with_rows([gallery])])
+
+        by_key = await _galleries_by_fs_key(session, [("pixiv", "12345")])
+
+        assert by_key == {("pixiv", "12345"): gallery}
+        assert session.execute.await_count == 1
+
+    async def test_sanitized_collision_keeps_first_match_only(self):
+        """When 'a/b' and 'a__b' collide on the same dir name (#45 lossy
+        encoding), exactly one gallery claims the dir; the other is left
+        untouched (safe direction — never two owners)."""
+        from worker.reconciliation import _galleries_by_fs_key
+
+        raw_match = _gallery_entity(1, "local", "a__b")
+        session = AsyncMock()
+        session.execute = AsyncMock(side_effect=[_make_result_with_rows([raw_match])])
+
+        by_key = await _galleries_by_fs_key(session, [("local", "a__b")])
+
+        assert by_key == {("local", "a__b"): raw_match}
+        assert session.execute.await_count == 1
+
+
+class TestPhase1SpecialCharSymlinkRepair:
+    """End-to-end Phase 1 wiring: a special-char gallery's missing library
+    symlink must be repaired instead of silently skipped (edge case #46
+    residue)."""
+
+    async def test_special_char_gallery_missing_file_gets_symlink_repaired(self, tmp_path):
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        lib_base.mkdir()
+
+        mock_settings = MagicMock()
+        mock_settings.data_library_path = str(lib_base)
+
+        dir_name = "artist__2025__title"
+        source_entry = _make_dir_entry("local", is_dir=True, path=str(lib_base / "local"))
+        gal_entry = _make_dir_entry(dir_name, is_dir=True, path=str(lib_base / "local" / dir_name))
+        file_entry = _make_dir_entry(
+            "001.jpg", is_dir=False, is_symlink=False, path=str(lib_base / "local" / dir_name / "001.jpg")
+        )
+
+        def _scandir_side_effect(path):
+            path_str = str(path)
+            if path_str == str(lib_base):
+                return iter([source_entry])
+            if path_str.endswith("local"):
+                return iter([gal_entry])
+            if dir_name in path_str:
+                return iter([file_entry])
+            return iter([])
+
+        gallery = _gallery_entity(7, "local", "artist/2025/title", import_mode="copy")
+
+        blob = MagicMock()
+        img_row = MagicMock()
+        img_row.id = 11
+        img_row.gallery_id = 7
+        img_row.filename = "002.jpg"  # in DB but missing on disk → needs repair
+        img_row.blob_sha256 = "aa" * 32
+        img_row.Blob = blob
+
+        execute_returns = [
+            _make_result_with_rows([]),  # Phase 1 raw tuple IN → miss
+            _make_result_with_rows([gallery]),  # Phase 1 sanitized fallback
+            _make_result_with_rows([img_row]),  # Phase 1 images for chunk
+            _make_result_with_rows([]),  # Phase 2 orphan galleries
+            _make_result_with_rows([]),  # Phase 3 blob GC
+        ]
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+
+        symlink_spy = AsyncMock()
+
+        with (
+            patch("worker.reconciliation._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.reconciliation._cron_record", new_callable=AsyncMock),
+            patch("worker.reconciliation.settings", mock_settings),
+            patch("os.scandir", side_effect=_scandir_side_effect),
+            patch("worker.reconciliation.AsyncSessionLocal", return_value=session),
+            patch("worker.reconciliation.create_library_symlink", symlink_spy),
+            patch("worker.reconciliation.cas_path", return_value=MagicMock(exists=MagicMock(return_value=False))),
+            patch("worker.reconciliation.thumb_dir", return_value=MagicMock(exists=MagicMock(return_value=False))),
+        ):
+            result = await reconciliation_job(_make_ctx())
+
+        assert result["status"] == "done"
+        symlink_spy.assert_awaited_once_with("local", "artist/2025/title", "002.jpg", blob)
+        assert result["repaired_links"] == 1
