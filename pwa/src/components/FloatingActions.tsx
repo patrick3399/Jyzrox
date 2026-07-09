@@ -5,6 +5,11 @@ import { usePathname } from 'next/navigation'
 import { ArrowUp } from 'lucide-react'
 import { t } from '@/lib/i18n'
 
+// Grace period for the smooth scroll to run before we snap to the top. Long
+// enough that a normal smooth animation completes on its own, short enough that
+// a reflow-cancelled scroll is corrected without a visible stall.
+const SCROLL_TOP_SETTLE_MS = 450
+
 function getScrollRoot(): HTMLElement | null {
   return document.querySelector<HTMLElement>('[data-scroll-root="true"]')
 }
@@ -52,6 +57,19 @@ export function FloatingActions() {
         window.scrollTo({ top: 0, behavior: 'auto' })
       })
     }
+
+    // On a long window-virtualized list (e.g. a large gallery), rows are
+    // re-measured as they enter the viewport and reflow the document, which
+    // cancels the in-flight smooth scroll before it reaches y=0 — the page
+    // stalls partway. Once the animation has had time to run, snap to the top
+    // if we are not there yet so the button always lands at 0.
+    window.setTimeout(() => {
+      const r = getScrollRoot()
+      if ((r?.scrollTop ?? window.scrollY) > 0) {
+        r?.scrollTo({ top: 0, behavior: 'auto' })
+        window.scrollTo({ top: 0, behavior: 'auto' })
+      }
+    }, SCROLL_TOP_SETTLE_MS)
   }
 
   if (!showScrollTop) return null
