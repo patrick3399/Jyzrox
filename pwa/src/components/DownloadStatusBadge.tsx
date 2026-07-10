@@ -1,27 +1,29 @@
+import { t } from '@/lib/i18n'
+
 interface DownloadStatusBadgeProps {
   status: 'proxy_only' | 'partial' | 'complete'
 }
 
 const statusConfig: Record<
   DownloadStatusBadgeProps['status'],
-  { label: string; className: string }
+  { labelKey: string; className: string }
 > = {
   complete: {
-    label: 'Local',
+    labelKey: 'library.statusComplete',
     className: 'bg-green-900/50 text-green-300 border-green-800',
   },
   partial: {
-    label: 'Partial',
+    labelKey: 'library.statusPartial',
     className: 'bg-yellow-900/50 text-yellow-300 border-yellow-800',
   },
   proxy_only: {
-    label: 'Proxy',
+    labelKey: 'library.statusProxyOnly',
     className: 'bg-blue-900/50 text-blue-300 border-blue-800',
   },
 }
 
 export function DownloadStatusBadge({ status }: DownloadStatusBadgeProps) {
-  const { label, className } = statusConfig[status]
+  const { labelKey, className } = statusConfig[status]
 
   return (
     <span
@@ -31,7 +33,7 @@ export function DownloadStatusBadge({ status }: DownloadStatusBadgeProps) {
         ${className}
       `}
     >
-      {label}
+      {t(labelKey)}
     </span>
   )
 }

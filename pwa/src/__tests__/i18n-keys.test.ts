@@ -193,4 +193,28 @@ describe('i18n key consistency', () => {
     // the app. Promote to expect.fail() once locale files are caught up.
     expect(missing.length).toBeGreaterThanOrEqual(0)
   })
+
+  it('keeps completed high-traffic translation groups complete in every locale', () => {
+    const protectedPrefixes = [
+      'admin.queue.',
+      'adminEvents.',
+      'artists.',
+      'collections.',
+      'import.recent.',
+    ]
+    const locales: Record<string, Record<string, string>> = {
+      'zh-TW': zhTW,
+      'zh-CN': zhCN,
+      ja,
+      ko,
+    }
+    const protectedKeys = Object.keys(en).filter((key) =>
+      protectedPrefixes.some((prefix) => key.startsWith(prefix)),
+    )
+
+    for (const [locale, dictionary] of Object.entries(locales)) {
+      const missing = protectedKeys.filter((key) => !(key in dictionary))
+      expect(missing, `${locale} is missing protected i18n keys`).toEqual([])
+    }
+  })
 })

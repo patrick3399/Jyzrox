@@ -238,7 +238,7 @@ export function ImageContextMenu({
       <div
         ref={menuRef}
         role="menu"
-        aria-label="Image context menu"
+        aria-label={t('common.imageContextMenu')}
         tabIndex={-1}
         className="fixed z-[200] bg-neutral-900/95 backdrop-blur-sm border border-white/10 rounded-xl shadow-2xl overflow-hidden outline-none"
         style={{ left: adjustedX, top: adjustedY, width: MENU_WIDTH }}

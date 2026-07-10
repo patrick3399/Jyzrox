@@ -35,7 +35,8 @@ class User(Base):
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
     avatar_style: Mapped[str] = mapped_column(Text, default="gravatar")
-    locale: Mapped[str] = mapped_column(Text, default="en")
+    # NULL means follow the language preferences of the current browser/device.
+    locale: Mapped[str | None] = mapped_column(Text, nullable=True)
     novel_prefs: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
 
 

@@ -12,10 +12,13 @@ import { FloatingActions } from './FloatingActions'
 import { WsProvider } from '@/lib/ws'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
+import { useLocale } from '@/components/LocaleProvider'
 
 const AUTH_PATHS = ['/login', '/setup']
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
+  // Subscribe at the shell boundary so legacy direct t() call sites refresh.
+  const { locale } = useLocale()
   const pathname = usePathname()
   const isAuth = AUTH_PATHS.includes(pathname)
   const isReader = pathname.startsWith('/reader/')
@@ -38,6 +41,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
   return (
     <WsProvider>
       <LayoutShellInner
+        key={locale}
         isReader={isReader}
         drawerOpen={drawerOpen}
         onDrawerClose={handleDrawerClose}

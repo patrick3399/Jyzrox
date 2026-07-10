@@ -333,6 +333,17 @@ class TestUpdateProfile:
         resp = await client.patch("/api/auth/profile", json={"locale": "klingon"})
         assert resp.status_code == 400
 
+    async def test_update_profile_locale_null_restores_automatic_mode(self, client, db_session):
+        """A null locale clears the manual override and restores browser detection."""
+        user = await _create_user(db_session)
+        user.locale = "zh-TW"
+        await db_session.commit()
+
+        resp = await client.patch("/api/auth/profile", json={"locale": None})
+        assert resp.status_code == 200
+        await db_session.refresh(user)
+        assert user.locale is None
+
     async def test_update_profile_avatar_style_gravatar(self, client, db_session):
         """Updating avatar_style to 'gravatar' should return status=ok."""
         await _create_user(db_session)

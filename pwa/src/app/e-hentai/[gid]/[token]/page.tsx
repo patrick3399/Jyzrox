@@ -472,13 +472,13 @@ function EhGalleryDetail() {
     return (
       <div className="min-h-screen bg-vault-bg text-vault-text flex items-center justify-center">
         <div className="text-center">
-          <p className="text-red-400 text-lg font-semibold">Failed to load gallery</p>
+          <p className="text-red-400 text-lg font-semibold">{t('library.failedToLoad')}</p>
           <p className="text-sm text-vault-text-muted mt-1">{galleryError.message}</p>
           <button
             onClick={() => router.back()}
             className="mt-4 px-4 py-2 bg-vault-card rounded text-sm hover:bg-vault-card-hover"
           >
-            Go back
+            {t('reader.goBack')}
           </button>
         </div>
       </div>
@@ -578,7 +578,7 @@ function EhGalleryDetail() {
                       ? 'bg-pink-700 hover:bg-pink-600 text-white'
                       : 'bg-vault-card border border-vault-border hover:border-vault-border-hover text-vault-text-secondary'
                   }`}
-                  title="Favorite"
+                  title={t('common.favorite')}
                 >
                   {isFavorited ? '♥' : '♡'}
                 </button>

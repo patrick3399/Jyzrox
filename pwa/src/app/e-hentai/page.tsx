@@ -648,7 +648,7 @@ function BrowsePage() {
                     <span
                       onClick={(e) => handleHistoryRemove(q, e)}
                       className="text-vault-text-muted hover:text-red-400 text-xs opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity px-1"
-                      title="Remove"
+                      title={t('common.remove')}
                     >
                       ✕
                     </span>
@@ -753,7 +753,7 @@ function BrowsePage() {
                       <span
                         onClick={(e) => handleDeleteSavedSearch(s.id, e)}
                         className="text-vault-text-muted hover:text-red-400 text-xs opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity px-1 shrink-0"
-                        title="Delete"
+                        title={t('common.delete')}
                       >
                         ✕
                       </span>
@@ -813,7 +813,7 @@ function BrowsePage() {
                   <span
                     onClick={(e) => handleHistoryRemove(q, e)}
                     className="text-vault-text-muted hover:text-red-400 text-xs opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity px-1"
-                    title="Remove"
+                    title={t('common.remove')}
                   >
                     ✕
                   </span>
@@ -906,7 +906,7 @@ function BrowsePage() {
                       <span
                         onClick={(e) => handleDeleteSavedSearch(s.id, e)}
                         className="text-vault-text-muted hover:text-red-400 text-xs opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity px-1 shrink-0"
-                        title="Delete"
+                        title={t('common.delete')}
                       >
                         ✕
                       </span>

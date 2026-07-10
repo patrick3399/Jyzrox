@@ -2,6 +2,7 @@
 import { useEffect, useRef, useCallback } from 'react'
 import { createPortal } from 'react-dom'
 import type { LucideIcon } from 'lucide-react'
+import { t } from '@/lib/i18n'
 
 export interface ContextMenuItem {
   label: string
@@ -73,7 +74,7 @@ export function ContextMenu({ open, onClose, position, items }: ContextMenuProps
       <div
         ref={menuRef}
         role="menu"
-        aria-label="Context menu"
+        aria-label={t('common.contextMenu')}
         tabIndex={-1}
         className="fixed z-[9999] min-w-[180px] bg-vault-card border border-vault-border rounded-lg shadow-xl py-1 outline-none"
         style={{ left: x, top: y }}

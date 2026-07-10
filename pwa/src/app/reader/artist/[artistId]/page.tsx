@@ -4,6 +4,7 @@ import { useParams, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { t } from '@/lib/i18n'
 import type { ArtistImageItem, GalleryImage } from '@/lib/types'
 
 export default function ArtistReaderPage() {
@@ -21,7 +22,7 @@ export default function ArtistReaderPage() {
 
   useEffect(() => {
     if (!decodedArtistId) {
-      setError('Invalid artist ID.')
+      setError(t('reader.invalidArtistId'))
       return
     }
 
@@ -63,7 +64,7 @@ export default function ArtistReaderPage() {
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load artist images.')
+          setError(e instanceof Error ? e.message : t('reader.loadArtistImagesFailed'))
         }
       }
     }
@@ -92,7 +93,7 @@ export default function ArtistReaderPage() {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-black text-white">
         <div className="text-center">
-          <p className="text-lg font-semibold text-red-400">Error</p>
+          <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error}</p>
         </div>
       </div>
@@ -105,7 +106,9 @@ export default function ArtistReaderPage() {
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
           <p className="text-sm opacity-50">
-            {total !== null ? `Loading images... ${loaded}/${total}` : 'Loading images...'}
+            {total !== null
+              ? t('reader.loadingImagesProgress', { loaded, total })
+              : t('reader.loadingImages')}
           </p>
         </div>
       </div>

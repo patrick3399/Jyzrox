@@ -54,12 +54,12 @@ export default function ExportPage() {
         <table className="w-full text-left">
           <thead className="bg-vault-card-hover">
             <tr>
-              <th className="p-3 text-sm">ID</th>
-              <th className="p-3 text-sm">Title</th>
-              <th className="p-3 text-sm">Source</th>
-              <th className="p-3 text-sm">Pages</th>
-              <th className="p-3 text-sm">Tags</th>
-              <th className="p-3 text-sm">Export</th>
+              <th className="p-3 text-sm">{t('export.columnId')}</th>
+              <th className="p-3 text-sm">{t('export.columnTitle')}</th>
+              <th className="p-3 text-sm">{t('export.columnSource')}</th>
+              <th className="p-3 text-sm">{t('export.columnPages')}</th>
+              <th className="p-3 text-sm">{t('export.columnTags')}</th>
+              <th className="p-3 text-sm">{t('export.columnExport')}</th>
             </tr>
           </thead>
           <tbody>
@@ -68,7 +68,7 @@ export default function ExportPage() {
                 <td className="p-3 text-vault-text-muted text-sm">{g.id}</td>
                 <td className="p-3">
                   <div className="max-w-xs truncate" title={g.title}>
-                    {g.title || g.title_jpn || '(untitled)'}
+                    {g.title || g.title_jpn || t('export.untitled')}
                   </div>
                 </td>
                 <td className="p-3 text-sm text-vault-text-secondary">{g.source}</td>

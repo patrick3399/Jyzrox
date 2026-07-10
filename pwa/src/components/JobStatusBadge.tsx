@@ -1,42 +1,43 @@
 import type { DownloadJob } from '@/lib/types'
+import { t } from '@/lib/i18n'
 
 interface JobStatusBadgeProps {
   status: DownloadJob['status']
 }
 
-const statusConfig: Record<DownloadJob['status'], { label: string; className: string }> = {
+const statusConfig: Record<DownloadJob['status'], { labelKey: string; className: string }> = {
   queued: {
-    label: 'Queued',
+    labelKey: 'admin.queue.queued',
     className: 'bg-yellow-900/50 text-yellow-300 border-yellow-800',
   },
   running: {
-    label: 'Running...',
+    labelKey: 'settings.tasks.statusRunning',
     className: 'bg-blue-900/50 text-blue-300 border-blue-800 animate-pulse',
   },
   done: {
-    label: 'Done',
+    labelKey: 'admin.queue.completed',
     className: 'bg-green-900/50 text-green-300 border-green-800',
   },
   failed: {
-    label: 'Failed',
+    labelKey: 'admin.queue.failed',
     className: 'bg-red-900/50 text-red-300 border-red-800',
   },
   cancelled: {
-    label: 'Cancelled',
+    labelKey: 'queue.gdlStateCancelled',
     className: 'bg-gray-800/80 text-gray-400 border-gray-700',
   },
   paused: {
-    label: 'Paused',
+    labelKey: 'queue.gdlStatePaused',
     className: 'bg-orange-900/50 text-orange-300 border-orange-800',
   },
   partial: {
-    label: 'Partial',
+    labelKey: 'library.statusPartial',
     className: 'bg-amber-900/50 text-amber-300 border-amber-800',
   },
 }
 
 export function JobStatusBadge({ status }: JobStatusBadgeProps) {
-  const { label, className } = statusConfig[status]
+  const { labelKey, className } = statusConfig[status]
 
   return (
     <span
@@ -46,7 +47,7 @@ export function JobStatusBadge({ status }: JobStatusBadgeProps) {
         ${className}
       `}
     >
-      {label}
+      {t(labelKey)}
     </span>
   )
 }

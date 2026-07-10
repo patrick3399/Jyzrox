@@ -315,7 +315,7 @@ _SQLITE_SCHEMA = [
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         last_login_at TIMESTAMP,
         avatar_style TEXT DEFAULT 'gravatar',
-        locale TEXT DEFAULT 'en',
+        locale TEXT,
         novel_prefs TEXT DEFAULT '{}'
     )
     """,

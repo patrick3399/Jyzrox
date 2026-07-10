@@ -8,7 +8,15 @@
  */
 
 import { describe, it, expect, beforeEach } from 'vitest'
-import { t, setLocale, getLocale, formatDate, formatNumber, formatBytes } from '../../lib/i18n'
+import {
+  t,
+  setLocale,
+  getLocale,
+  formatDate,
+  formatNumber,
+  formatBytes,
+  resolveLocale,
+} from '../../lib/i18n'
 
 // ---------------------------------------------------------------------------
 // Reset locale before each test to prevent cross-test pollution
@@ -130,6 +138,18 @@ describe('setLocale / getLocale', () => {
     // 'xx' is not a valid Locale type, cast to bypass TypeScript
     setLocale('xx' as Parameters<typeof setLocale>[0])
     expect(getLocale()).toBe('en')
+  })
+})
+
+describe('resolveLocale', () => {
+  it('maps traditional and simplified Chinese variants', () => {
+    expect(resolveLocale('en-US;q=0.8,zh-Hant-HK;q=0.9')).toBe('zh-TW')
+    expect(resolveLocale(['zh-Hans-SG', 'en-US'])).toBe('zh-CN')
+  })
+
+  it('uses the first supported browser preference and falls back to English', () => {
+    expect(resolveLocale(['fr-FR', 'ja-JP', 'en-US'])).toBe('ja')
+    expect(resolveLocale('fr-FR,de-DE')).toBe('en')
   })
 })
 

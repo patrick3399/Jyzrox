@@ -337,7 +337,7 @@ function ZoneA() {
                       mutateLibraries()
                     }}
                     className="shrink-0 text-red-400/60 hover:text-red-400 transition-colors"
-                    title="Remove"
+                    title={t('common.remove')}
                   >
                     <X size={14} />
                   </button>

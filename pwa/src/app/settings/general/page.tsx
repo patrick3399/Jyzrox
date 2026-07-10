@@ -5,6 +5,11 @@ import { useLocale } from '@/components/LocaleProvider'
 import { BackButton } from '@/components/BackButton'
 import { SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
 import { t } from '@/lib/i18n'
+import {
+  getTagTranslationPreference,
+  setTagTranslationPreference,
+  type TagTranslationPreference,
+} from '@/lib/tagTranslation'
 
 function BrowseSettings() {
   const [historyEnabled, setHistoryEnabled] = useState(
@@ -98,7 +103,9 @@ function BrowseSettings() {
 }
 
 export default function GeneralSettingsPage() {
-  const { locale, setLocale: changeLocale } = useLocale()
+  const { locale, setLocale: changeLocale, isAutomatic } = useLocale()
+  const [tagTranslationPreference, setTagTranslationPreferenceState] =
+    useState<TagTranslationPreference>(getTagTranslationPreference)
 
   return (
     <div className="max-w-2xl">
@@ -111,15 +118,37 @@ export default function GeneralSettingsPage() {
           <div className="px-5 py-4">
             <h3 className="font-medium text-vault-text text-sm mb-3">{t('settings.language')}</h3>
             <select
-              value={locale}
-              onChange={(e) => changeLocale(e.target.value as Locale)}
+              value={isAutomatic ? 'auto' : locale}
+              onChange={(e) => changeLocale(e.target.value === 'auto' ? null : (e.target.value as Locale))}
               className="bg-vault-input text-vault-text text-sm rounded-lg px-3 py-2 border border-vault-border focus:outline-none focus:ring-1 focus:ring-vault-accent"
             >
+              <option value="auto">{t('settings.languageAutomatic')}</option>
               {SUPPORTED_LOCALES.map((loc: Locale) => (
                 <option key={loc} value={loc}>
                   {t(`common.locale.${loc}`)}
                 </option>
               ))}
+            </select>
+          </div>
+        </div>
+
+        <div className="bg-vault-card rounded-xl border border-vault-border overflow-hidden">
+          <div className="px-5 py-4">
+            <h3 className="font-medium text-vault-text text-sm mb-1">{t('settings.tagTranslation')}</h3>
+            <p className="text-xs text-vault-text-muted mb-3">{t('settings.tagTranslationDesc')}</p>
+            <select
+              value={tagTranslationPreference}
+              onChange={(e) => {
+                const preference = e.target.value as TagTranslationPreference
+                setTagTranslationPreference(preference)
+                setTagTranslationPreferenceState(preference)
+              }}
+              className="bg-vault-input text-vault-text text-sm rounded-lg px-3 py-2 border border-vault-border focus:outline-none focus:ring-1 focus:ring-vault-accent"
+            >
+              <option value="auto">{t('settings.tagTranslationAuto')}</option>
+              <option value="off">{t('settings.tagTranslationOff')}</option>
+              <option value="zh">{t('settings.tagTranslationZhCN')}</option>
+              <option value="zh-TW">{t('settings.tagTranslationZhTW')}</option>
             </select>
           </div>
         </div>

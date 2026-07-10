@@ -1,4 +1,4 @@
-import { t } from '@/lib/i18n'
+import { getLocale, t } from '@/lib/i18n'
 import { novelFilePath } from '@/lib/novels'
 
 import type {
@@ -94,6 +94,7 @@ if (typeof window !== 'undefined') {
 async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> {
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
+    'Accept-Language': getLocale(),
   }
 
   const method = (options.method || 'GET').toUpperCase()
@@ -212,7 +213,7 @@ const auth = {
       locale: string | null
     }>('/api/auth/profile'),
 
-  updateProfile: (data: { email?: string | null; avatar_style?: string; locale?: string }) =>
+  updateProfile: (data: { email?: string | null; avatar_style?: string; locale?: string | null }) =>
     apiFetch<{ status: string }>('/api/auth/profile', {
       method: 'PATCH',
       body: JSON.stringify(data),

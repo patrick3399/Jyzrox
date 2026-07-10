@@ -181,7 +181,7 @@ export default function ApiTokensSettingsPage() {
                                   toast.success(t('settings.copied'))
                                 }}
                                 className="px-1.5 py-1 text-vault-text-muted hover:text-vault-text transition-colors shrink-0"
-                                title="Copy"
+                                title={t('common.copy')}
                               >
                                 <Copy size={12} />
                               </button>

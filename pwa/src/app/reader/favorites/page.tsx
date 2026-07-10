@@ -5,6 +5,7 @@ import { useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { t } from '@/lib/i18n'
 import type { BrowseImage, GalleryImage } from '@/lib/types'
 
 type FavoriteReaderImage = GalleryImage & {
@@ -82,7 +83,7 @@ function FavoriteReaderInner() {
         }
       } catch (e) {
         if (!cancelled) {
-          setError(e instanceof Error ? e.message : 'Failed to load favorite images.')
+          setError(e instanceof Error ? e.message : t('reader.loadFavoriteImagesFailed'))
         }
       }
     }
@@ -105,7 +106,7 @@ function FavoriteReaderInner() {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-black text-white">
         <div className="text-center">
-          <p className="text-lg font-semibold text-red-400">Error</p>
+          <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error}</p>
         </div>
       </div>
@@ -117,7 +118,7 @@ function FavoriteReaderInner() {
       <div className="flex h-screen w-full items-center justify-center bg-black text-white">
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-          <p className="text-sm opacity-50">Loading favorite images... {loaded}</p>
+          <p className="text-sm opacity-50">{t('reader.loadingFavoriteImages', { loaded })}</p>
         </div>
       </div>
     )
@@ -126,7 +127,7 @@ function FavoriteReaderInner() {
   if (images.length === 0) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-black text-white">
-        <p className="text-sm opacity-60">No favorite images found.</p>
+        <p className="text-sm opacity-60">{t('reader.noFavoriteImages')}</p>
       </div>
     )
   }

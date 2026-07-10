@@ -121,7 +121,7 @@ export default function ReaderPage() {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-black text-white">
         <div className="text-center">
-          <p className="text-lg font-semibold text-red-400">Error</p>
+          <p className="text-lg font-semibold text-red-400">{t('common.error')}</p>
           <p className="mt-1 text-sm opacity-70">{error}</p>
         </div>
       </div>
@@ -133,7 +133,7 @@ export default function ReaderPage() {
       <div className="flex h-screen w-full items-center justify-center bg-black text-white">
         <div className="text-center">
           <div className="mx-auto mb-3 h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
-          <p className="text-sm opacity-50">Loading gallery…</p>
+          <p className="text-sm opacity-50">{t('reader.loadingGallery')}</p>
         </div>
       </div>
     )

@@ -1,9 +1,11 @@
 import type { Metadata, Viewport } from 'next'
+import { headers } from 'next/headers'
 import Script from 'next/script'
 import { ThemeProvider } from '@/components/ThemeProvider'
 import { LocaleProvider } from '@/components/LocaleProvider'
 import { LayoutShell } from '@/components/LayoutShell'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
+import { resolveLocale } from '@/lib/i18n'
 import './globals.css'
 
 export const metadata: Metadata = {
@@ -24,9 +26,10 @@ export const viewport: Viewport = {
   viewportFit: 'cover',
 }
 
-export default function RootLayout({ children }: { children: React.ReactNode }) {
+export default async function RootLayout({ children }: { children: React.ReactNode }) {
+  const initialLocale = resolveLocale((await headers()).get('accept-language'))
   return (
-    <html lang="en" suppressHydrationWarning>
+    <html lang={initialLocale} suppressHydrationWarning>
       <head>
         <link rel="icon" href="/favicon.ico" sizes="any" />
         <link rel="icon" href="/favicon-32x32.png" type="image/png" sizes="32x32" />
@@ -53,7 +56,7 @@ export default function RootLayout({ children }: { children: React.ReactNode }) 
           }}
         />
         <ThemeProvider>
-          <LocaleProvider>
+          <LocaleProvider initialLocale={initialLocale}>
             <LayoutShell>
               <ErrorBoundary>{children}</ErrorBoundary>
             </LayoutShell>

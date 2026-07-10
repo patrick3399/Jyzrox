@@ -1,37 +1,47 @@
 'use client'
 
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
-import { setLocale as setI18nLocale, SUPPORTED_LOCALES, type Locale } from '@/lib/i18n'
+import {
+  detectBrowserLocale,
+  setLocale as setI18nLocale,
+  SUPPORTED_LOCALES,
+  type Locale,
+} from '@/lib/i18n'
 import { api } from '@/lib/api'
 
 type LocaleContextType = {
   locale: Locale
-  setLocale: (locale: Locale) => void
+  setLocale: (locale: Locale | null) => void
+  isAutomatic: boolean
 }
 
 const LocaleContext = createContext<LocaleContextType | undefined>(undefined)
 
-const STORAGE_KEY = 'jyzrox-locale'
+const OVERRIDE_STORAGE_KEY = 'jyzrox-locale-override'
 
 function detectLocale(): Locale {
   if (typeof window === 'undefined') return 'en'
-  const stored = localStorage.getItem(STORAGE_KEY)
-  if (stored && SUPPORTED_LOCALES.includes(stored as Locale)) return stored as Locale
-  return 'en'
+  const override = localStorage.getItem(OVERRIDE_STORAGE_KEY)
+  if (override && SUPPORTED_LOCALES.includes(override as Locale)) return override as Locale
+  return detectBrowserLocale()
 }
 
-export function LocaleProvider({ children }: { children: React.ReactNode }) {
-  const [locale, setLocaleState] = useState<Locale>('en')
+export function LocaleProvider({ children, initialLocale }: { children: React.ReactNode; initialLocale?: Locale }) {
+  const [locale, setLocaleState] = useState<Locale>(() => initialLocale ?? detectLocale())
+  const [isAutomatic, setIsAutomatic] = useState(true)
 
   useEffect(() => {
-    const detected = detectLocale()
-    setI18nLocale(detected)
-    if (detected !== 'en') setLocaleState(detected)
-  }, [])
+    setI18nLocale(locale)
+  }, [locale])
 
-  const setLocale = useCallback((newLocale: Locale) => {
-    setI18nLocale(newLocale)
-    setLocaleState(newLocale)
+  const setLocale = useCallback((newLocale: Locale | null) => {
+    const automatic = newLocale === null
+    const nextLocale = newLocale ?? detectBrowserLocale()
+    setI18nLocale(nextLocale)
+    setLocaleState(nextLocale)
+    setIsAutomatic(automatic)
+    if (automatic) localStorage.removeItem(OVERRIDE_STORAGE_KEY)
+    else localStorage.setItem(OVERRIDE_STORAGE_KEY, newLocale)
     // Save to server (fire-and-forget)
     api.auth.updateProfile({ locale: newLocale }).catch(() => {})
   }, [])
@@ -47,6 +57,14 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
             setI18nLocale(serverLocale)
             setLocaleState(serverLocale)
           }
+          setIsAutomatic(false)
+          localStorage.setItem(OVERRIDE_STORAGE_KEY, serverLocale)
+        } else {
+          const automaticLocale = detectBrowserLocale()
+          setI18nLocale(automaticLocale)
+          setLocaleState(automaticLocale)
+          setIsAutomatic(true)
+          localStorage.removeItem(OVERRIDE_STORAGE_KEY)
         }
       })
       .catch(() => {}) // Not logged in or network error — use localStorage fallback
@@ -54,10 +72,9 @@ export function LocaleProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     document.documentElement.lang = locale
-    localStorage.setItem(STORAGE_KEY, locale)
   }, [locale])
 
-  return <LocaleContext value={{ locale, setLocale }}>{children}</LocaleContext>
+  return <LocaleContext value={{ locale, setLocale, isAutomatic }}>{children}</LocaleContext>
 }
 
 export function useLocale() {

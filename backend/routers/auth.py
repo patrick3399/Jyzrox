@@ -378,9 +378,9 @@ async def update_profile(req: UpdateProfileRequest, auth: dict = Depends(require
             raise HTTPException(status_code=400, detail="avatar_style must be 'gravatar' or 'manual'")
         update_values["avatar_style"] = req.avatar_style
 
-    if req.locale is not None:
+    if "locale" in req.model_fields_set:
         valid_locales = ("en", "zh-TW", "zh-CN", "ja", "ko")
-        if req.locale not in valid_locales:
+        if req.locale is not None and req.locale not in valid_locales:
             raise HTTPException(status_code=400, detail=f"locale must be one of: {', '.join(valid_locales)}")
         update_values["locale"] = req.locale
 
