@@ -68,6 +68,23 @@ class TestEhSourceCanHandle:
         plugin = _make_plugin()
         assert await plugin.can_handle("https://example.com/gallery/1") is False
 
+    async def test_tag_search_url_not_claimed_so_gallery_dl_fallback_applies(self):
+        """Regression: can_handle matched ANY e-hentai URL, but download() only
+        parses /g/{gid}/{token}/ — an artist tag URL was claimed by this plugin,
+        failed with 'Cannot parse EH gallery URL', and never reached the
+        gallery-dl fallback (which supports EH tag/search extractors).
+        """
+        plugin = _make_plugin()
+        assert await plugin.can_handle("https://e-hentai.org/tag/artist:someone") is False
+
+    async def test_search_url_not_claimed(self):
+        plugin = _make_plugin()
+        assert await plugin.can_handle("https://e-hentai.org/?f_search=language%3Achinese") is False
+
+    async def test_favorites_url_not_claimed(self):
+        plugin = _make_plugin()
+        assert await plugin.can_handle("https://exhentai.org/favorites.php") is False
+
 
 # ---------------------------------------------------------------------------
 # download() with no credentials

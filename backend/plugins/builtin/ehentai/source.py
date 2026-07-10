@@ -78,7 +78,12 @@ class EhSourcePlugin(SourcePlugin):
     )
 
     async def can_handle(self, url: str) -> bool:
-        return "e-hentai.org" in url or "exhentai.org" in url
+        # Claim only gallery URLs download() can actually parse. Other EH URLs
+        # (tag search, favorites, /s/ pages) must fall through to the
+        # gallery-dl fallback plugin, which has extractors for them.
+        from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
+
+        return EH_GALLERY_URL_RE.search(url) is not None
 
     async def resolve_metadata(
         self,
