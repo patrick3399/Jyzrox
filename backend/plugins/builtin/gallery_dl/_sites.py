@@ -455,3 +455,11 @@ def get_site_config(source: str) -> GdlSiteConfig:
 def get_site_by_domain(domain: str) -> GdlSiteConfig:
     """Look up site config by domain. Unknown domains → _DEFAULT_CONFIG."""
     return _BY_DOMAIN.get(domain, _DEFAULT_CONFIG)
+
+
+def cookie_writeback_path(job_id: str, source: str) -> str:
+    """Path gallery-dl exports refreshed cookies to (cookies-update) and the
+    worker's _writeback_cookies() reads back. Single source of truth — the
+    config writer and the worker reader must never drift apart.
+    """
+    return f"/tmp/gdl-cookies-{job_id}-{source}.txt"

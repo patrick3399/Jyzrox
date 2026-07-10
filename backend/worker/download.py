@@ -23,14 +23,14 @@ async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> Non
     if not isinstance(credentials, dict):
         return
 
-    from plugins.builtin.gallery_dl._sites import get_site_config
+    from plugins.builtin.gallery_dl._sites import cookie_writeback_path, get_site_config
     from services.credential import set_credential
 
     for src in credentials:
         cfg = get_site_config(src)
         if cfg.credential_type != "cookies":
             continue
-        cookie_path = Path(f"/tmp/gdl-cookies-{job_id}-{src}.txt")
+        cookie_path = Path(cookie_writeback_path(job_id, src))
         if not cookie_path.exists():
             continue
         try:

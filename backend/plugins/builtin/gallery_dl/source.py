@@ -150,7 +150,7 @@ async def _build_gallery_dl_config(
     Returns:
         Path to the config file written.
     """
-    from plugins.builtin.gallery_dl._sites import GDL_SITES, get_site_config
+    from plugins.builtin.gallery_dl._sites import GDL_SITES, cookie_writeback_path, get_site_config
 
     config: dict = {
         "extractor": {
@@ -241,14 +241,14 @@ async def _build_gallery_dl_config(
         cfg = get_site_config(src)
         ext = cfg.extractor or cfg.source_id
 
+        cookies_applied = False
         fragment = _try_parse_fragment(cred_val)
         if fragment is not None:
             config["extractor"].setdefault(ext, {}).update(fragment)
             if "cookies" in fragment:
                 for extra in cfg.extra_extractors:
                     config["extractor"].setdefault(extra, {})["cookies"] = fragment["cookies"]
-                # N8: cookies-update for sources with cookie auth
-                config["extractor"][ext]["cookies-update"] = True
+                cookies_applied = True
         else:
             if cfg.credential_type == "refresh_token":
                 config["extractor"].setdefault(ext, {})["refresh-token"] = cred_val
@@ -258,10 +258,19 @@ async def _build_gallery_dl_config(
                     config["extractor"].setdefault(ext, {})["cookies"] = cookies
                     for extra in cfg.extra_extractors:
                         config["extractor"].setdefault(extra, {})["cookies"] = cookies
-                    # N8: cookies-update for legacy format too
-                    config["extractor"][ext]["cookies-update"] = True
+                    cookies_applied = True
                 except json.JSONDecodeError, TypeError:
                     logger.warning("[gallery_dl] invalid cookie JSON for source %s, skipping", src)
+
+        # N8: cookies-update must be an explicit export path — a bare True tells
+        # gallery-dl to rewrite the *input* cookies file, which does not exist
+        # when cookies are passed inline as a dict (silent no-op). The worker's
+        # _writeback_cookies() reads this same path after the job finishes.
+        # Set on extra extractors too: EH jobs run under exhentai/e-hentai categories.
+        if cookies_applied and config_id:
+            cookie_export = cookie_writeback_path(config_id, src)
+            for name in (ext, *cfg.extra_extractors):
+                config["extractor"].setdefault(name, {})["cookies-update"] = cookie_export
 
     # N6: ugoira PP for Pixiv (convert animated illustrations to MP4)
     if "pixiv" in credentials and credentials["pixiv"]:

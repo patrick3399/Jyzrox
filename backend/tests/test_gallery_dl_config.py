@@ -298,12 +298,55 @@ async def test_v3_archive_format_not_overridden(mock_config_path):
 
 
 @pytest.mark.asyncio
-async def test_v3_cookie_source_has_cookies_update(mock_config_path):
+async def test_v3_cookie_update_is_writeback_path_not_true(mock_config_path):
+    """cookies-update must be the file path the worker's cookie writeback reads.
+
+    Regression: config wrote cookies-update=True, which gallery-dl treats as
+    "rewrite the input cookies file" — a no-op when cookies are passed inline
+    as a dict. Meanwhile _writeback_cookies() waited for
+    /tmp/gdl-cookies-{job}-{src}.txt that nothing wrote, so refreshed session
+    cookies were never persisted back to the DB.
+    """
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    path = await _build_gallery_dl_config(
+        {"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'}, config_id="job-123"
+    )
+    config = json.loads(path.read_text())
+    expected = "/tmp/gdl-cookies-job-123-ehentai.txt"
+    assert config["extractor"]["ehentai"]["cookies-update"] == expected
+    # EH downloads run under the exhentai/e-hentai extractor categories,
+    # so the export path must be set there too.
+    assert config["extractor"]["exhentai"]["cookies-update"] == expected
+    assert config["extractor"]["e-hentai"]["cookies-update"] == expected
+
+
+@pytest.mark.asyncio
+async def test_v3_cookie_update_fragment_format_gets_path(mock_config_path):
+    """Fragment-format cookie credentials get the same writeback path."""
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    path = await _build_gallery_dl_config({"twitter": '{"cookies": {"auth_token": "abc"}}'}, config_id="job-456")
+    config = json.loads(path.read_text())
+    assert config["extractor"]["twitter"]["cookies-update"] == "/tmp/gdl-cookies-job-456-twitter.txt"
+
+
+@pytest.mark.asyncio
+async def test_v3_cookie_update_omitted_without_config_id(mock_config_path):
+    """Without a job-scoped config_id there is no writeback reader — omit the option."""
     from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
 
     await _build_gallery_dl_config({"ehentai": '{"ipb_member_id": "1", "ipb_pass_hash": "x"}'})
     config = json.loads(mock_config_path.read_text())
-    assert config["extractor"]["ehentai"].get("cookies-update") is True
+    assert "cookies-update" not in config["extractor"]["ehentai"]
+
+
+@pytest.mark.asyncio
+async def test_v3_cookie_update_path_matches_worker_writeback_path(mock_config_path):
+    """The config-side path helper and the worker reader must agree on the path."""
+    from plugins.builtin.gallery_dl._sites import cookie_writeback_path
+
+    assert str(cookie_writeback_path("j1", "ehentai")) == "/tmp/gdl-cookies-j1-ehentai.txt"
 
 
 @pytest.mark.asyncio
@@ -365,8 +408,8 @@ async def test_v3_full_config_integration(mock_config_path):
     # N6: ugoira (pixiv present in credentials)
     assert "ugoira" in pp_names
 
-    # N8: cookies-update for EH (cookie-based auth)
-    assert config["extractor"]["ehentai"].get("cookies-update") is True
+    # N8: cookies-update for EH (cookie-based auth) — job-scoped writeback path
+    assert config["extractor"]["ehentai"].get("cookies-update") == "/tmp/gdl-cookies-test-job-123-ehentai.txt"
 
     # Credentials merged correctly
     assert config["extractor"]["ehentai"]["cookies"] == {"ipb_member_id": "1"}
