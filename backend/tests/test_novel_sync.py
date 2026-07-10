@@ -72,3 +72,73 @@ async def test_sync_job_skips_when_novel_feature_disabled_even_with_force(monkey
     await novel_sync.novel_sync_job(_ctx(), force=True)
 
     fetch.assert_not_called()
+
+
+# ── Phase 1.6: a cron pull that lands new commits must refresh the index ────
+
+
+def _order_mocks(monkeypatch, *, behind: int):
+    """Wire fetch/status/pull/push + lock mocks that record call order."""
+    import core.queue
+
+    order = []
+    monkeypatch.setattr(novel_sync, "get_toggle", AsyncMock(return_value=True), raising=False)
+    monkeypatch.setattr(novel_sync.novel_git, "fetch", AsyncMock())
+    monkeypatch.setattr(
+        novel_sync.novel_git,
+        "status",
+        AsyncMock(return_value={"head": "abc", "ahead": 0, "behind": behind, "clean": True, "locked": False}),
+    )
+
+    async def _pull(repo):
+        order.append("pull")
+        return True
+
+    monkeypatch.setattr(novel_sync.novel_git, "pull_ff", _pull)
+    monkeypatch.setattr(novel_sync.novel_git, "push", AsyncMock())
+    monkeypatch.setattr(novel_sync, "_cron_record", AsyncMock())
+
+    async def _release(r, key, token):
+        order.append("release")
+        return 1
+
+    monkeypatch.setattr(novel_sync, "release_lock", _release)
+
+    async def _enqueue(job_name, **kwargs):
+        order.append(("enqueue", job_name, kwargs))
+
+    monkeypatch.setattr(core.queue, "enqueue", _enqueue)
+    return order
+
+
+async def test_sync_job_pull_enqueues_novel_index_job_after_lock_release(monkeypatch):
+    """New commits pulled by the cron must trigger a reindex — and only after
+    the git lock is released, because novel_index_job takes the same lock and
+    skips WITHOUT retry when it is held."""
+    order = _order_mocks(monkeypatch, behind=2)
+
+    await novel_sync.novel_sync_job(_ctx(), force=True)
+
+    expected = ("enqueue", "novel_index_job", {"force": True})
+    assert expected in order
+    assert order.index("release") < order.index(expected)
+
+
+async def test_sync_job_without_new_commits_does_not_enqueue_index_job(monkeypatch):
+    order = _order_mocks(monkeypatch, behind=0)
+
+    await novel_sync.novel_sync_job(_ctx(), force=True)
+
+    assert "pull" not in order
+    assert not any(isinstance(c, tuple) and c[0] == "enqueue" for c in order)
+
+
+async def test_sync_job_index_enqueue_failure_does_not_raise(monkeypatch):
+    """Cron jobs must never crash the worker — a queue hiccup after a good
+    pull is logged, and the daily index cron self-heals."""
+    import core.queue
+
+    _order_mocks(monkeypatch, behind=2)
+    monkeypatch.setattr(core.queue, "enqueue", AsyncMock(side_effect=RuntimeError("queue down")))
+
+    await novel_sync.novel_sync_job(_ctx(), force=True)  # must not raise

@@ -9,6 +9,7 @@ STAB-003: worker may import services, never routers.
 
 from __future__ import annotations
 
+import core.queue
 from core.config import settings
 from services import novel_git
 from services.settings_store import get_toggle
@@ -33,13 +34,14 @@ async def novel_sync_job(ctx: dict, force: bool = False) -> None:
         logger.info("[novel-sync] skipped — git lock held")
         return
     repo = settings.novel_repo_path
+    pulled = False
     try:
         await novel_git.fetch(repo)
         st = await novel_git.status(repo)
         if st["locked"]:
             logger.info("[novel-sync] repo locked; skipping pull")
         elif st["clean"] and st["behind"] > 0:
-            await novel_git.pull_ff(repo)
+            pulled = await novel_git.pull_ff(repo)
         if st["ahead"] > 0:
             await novel_git.push(repo)  # retry unpushed (214 was offline)
         await _cron_record(ctx, TASK_ID, "ok")
@@ -48,3 +50,12 @@ async def novel_sync_job(ctx: dict, force: bool = False) -> None:
         await _cron_record(ctx, TASK_ID, "failed", str(exc))
     finally:
         await release_lock(r, _LOCK, token)
+    if pulled:
+        # New commits landed in the working tree — refresh the knowledge index.
+        # Enqueue AFTER releasing the git lock: novel_index_job takes the same
+        # lock and skips without retry when it is held. Best-effort — the daily
+        # index cron self-heals if the queue hiccups.
+        try:
+            await core.queue.enqueue("novel_index_job", force=True)
+        except Exception as exc:
+            logger.warning("[novel-sync] failed to enqueue novel_index_job: %s", exc)

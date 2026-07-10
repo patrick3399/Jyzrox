@@ -443,3 +443,102 @@ async def test_reindex_as_admin_populates(admin_client, indexed_repo):
     assert r.status_code == 200
     stats = r.json()["stats"]
     assert stats["notes"] == 1 and stats["mentions"] >= 2
+
+
+# ── Phase 1.6: index freshness — tree mutations must enqueue novel_index_job ─
+
+
+def _capture_enqueue(monkeypatch):
+    import core.queue
+
+    enqueued = []
+
+    async def _fake_enqueue(job_name, **kwargs):
+        enqueued.append((job_name, kwargs))
+
+    monkeypatch.setattr(core.queue, "enqueue", _fake_enqueue)
+    return enqueued
+
+
+async def test_write_success_enqueues_novel_index_job_with_force(member_client, novel_repo, monkeypatch):
+    """Without this, an edit from the reader leaves the knowledge index stale
+    until the daily 4am cron (Phase 1.6 bug: NOVEL_UPDATED had no consumer)."""
+    enqueued = _capture_enqueue(monkeypatch)
+    head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await member_client.put(
+        "/api/novels/file",
+        json={"path": "作品A/第01章.md", "content": "索引要跟上這次編輯\n", "base_sha": head},
+    )
+    assert r.status_code == 200
+    assert ("novel_index_job", {"force": True}) in enqueued
+
+
+async def test_write_succeeds_even_when_index_enqueue_fails(member_client, novel_repo, monkeypatch):
+    """The commit+push already happened; a queue outage must not turn the
+    response into a 5xx (the daily cron self-heals the index)."""
+    import core.queue
+
+    monkeypatch.setattr(core.queue, "enqueue", AsyncMock(side_effect=RuntimeError("queue down")))
+    head = (await member_client.get("/api/novels/file?path=作品A/第01章.md")).json()["base_sha"]
+    r = await member_client.put(
+        "/api/novels/file",
+        json={"path": "作品A/第01章.md", "content": "enqueue 掛了也要 200\n", "base_sha": head},
+    )
+    assert r.status_code == 200
+
+
+async def test_rejected_write_does_not_enqueue_novel_index_job(member_client, novel_repo, monkeypatch):
+    """A 409 (stale base_sha) mutates nothing — no pointless full reindex."""
+    enqueued = _capture_enqueue(monkeypatch)
+    r = await member_client.put(
+        "/api/novels/file",
+        json={"path": "作品A/第01章.md", "content": "x", "base_sha": "0000000"},
+    )
+    assert r.status_code == 409
+    assert enqueued == []
+
+
+async def test_sync_pull_with_changes_enqueues_novel_index_job(member_client, novel_repo, monkeypatch):
+    import routers.novels as rn
+
+    enqueued = _capture_enqueue(monkeypatch)
+    monkeypatch.setattr(rn.novel_git, "fetch", AsyncMock())
+    monkeypatch.setattr(
+        rn.novel_git,
+        "status",
+        AsyncMock(return_value={"head": "abc", "ahead": 0, "behind": 2, "clean": True, "locked": False}),
+    )
+    monkeypatch.setattr(rn.novel_git, "pull_ff", AsyncMock(return_value=True))
+    r = await member_client.post("/api/novels/sync")
+    assert r.status_code == 200
+    assert r.json()["pulled"] is True
+    assert ("novel_index_job", {"force": True}) in enqueued
+
+
+async def test_sync_already_up_to_date_does_not_enqueue_novel_index_job(member_client, novel_repo, monkeypatch):
+    """pull_ff returns True even when already up to date (ff-only exit 0) —
+    the enqueue gate must key on behind>0, not on pull_ff's return value."""
+    import routers.novels as rn
+
+    enqueued = _capture_enqueue(monkeypatch)
+    monkeypatch.setattr(rn.novel_git, "fetch", AsyncMock())
+    monkeypatch.setattr(
+        rn.novel_git,
+        "status",
+        AsyncMock(return_value={"head": "abc", "ahead": 0, "behind": 0, "clean": True, "locked": False}),
+    )
+    monkeypatch.setattr(rn.novel_git, "pull_ff", AsyncMock(return_value=True))
+    r = await member_client.post("/api/novels/sync")
+    assert r.status_code == 200
+    assert enqueued == []
+
+
+async def test_reset_enqueues_novel_index_job(admin_client, novel_repo, monkeypatch):
+    """reset --hard rewrites the working tree; the index must follow."""
+    import routers.novels as rn
+
+    enqueued = _capture_enqueue(monkeypatch)
+    monkeypatch.setattr(rn.novel_git, "reset_to_origin", AsyncMock())
+    r = await admin_client.post("/api/novels/reset")
+    assert r.status_code == 200
+    assert ("novel_index_job", {"force": True}) in enqueued

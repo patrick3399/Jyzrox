@@ -10,10 +10,13 @@ reverse.
 
 from __future__ import annotations
 
+import logging
+
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 from sqlalchemy import select, text
 
+import core.queue
 from core import audit, events
 from core.auth import require_auth, require_role
 from core.config import settings
@@ -24,6 +27,21 @@ from services import novel_fs, novel_git, novel_index
 from worker.helpers import acquire_lock, release_lock
 
 _GIT_LOCK = "novel:git:lock"
+logger = logging.getLogger(__name__)
+
+
+async def _enqueue_reindex() -> None:
+    """Refresh the knowledge index after a working-tree mutation.
+
+    Best-effort: the git mutation already succeeded, so a queue outage must not
+    fail the request — the daily index cron self-heals. Call this only AFTER
+    the git lock is released: novel_index_job takes the same lock and skips
+    without retry when it is held.
+    """
+    try:
+        await core.queue.enqueue("novel_index_job", force=True)
+    except Exception as exc:
+        logger.warning("failed to enqueue novel_index_job after novel mutation: %s", exc)
 
 
 async def _require_novel_enabled():
@@ -253,17 +271,25 @@ async def write_file(body: WriteBody, auth: dict = Depends(_member)):
         resource_type="novel",
         resource_id=body.path,
     )
+    await _enqueue_reindex()
     return result
 
 
 @router.post("/sync")
 async def sync(_: dict = Depends(_member)):
     async def _do():
-        await novel_git.fetch(_repo())
-        pulled = await novel_git.pull_ff(_repo())
-        return {"pulled": pulled}
+        repo = _repo()
+        await novel_git.fetch(repo)
+        # pull_ff exits 0 even when already up to date, so "new commits landed"
+        # must be read from behind>0 (post-fetch), not from pull_ff's result.
+        behind = (await novel_git.status(repo))["behind"] > 0
+        pulled = await novel_git.pull_ff(repo)
+        return {"pulled": pulled}, behind and pulled
 
-    return await _with_git_lock(_do)
+    result, tree_changed = await _with_git_lock(_do)
+    if tree_changed:
+        await _enqueue_reindex()
+    return result
 
 
 @router.post("/reset")
@@ -274,6 +300,7 @@ async def reset(auth: dict = Depends(_admin)):
 
     result = await _with_git_lock(_do)
     await audit.log_audit(auth["user_id"], "novel.reset", _repo())
+    await _enqueue_reindex()
     return result
 
 
