@@ -277,13 +277,16 @@ async def check_followed_artists(ctx: dict, user_id: int | None = None) -> dict:
             )
         subs = (await session.execute(query)).scalars().all()
 
+    from worker.subscription_group import _spacing_delay
+
     for sub in subs:
         try:
             result = await _enqueue_for_subscription(ctx, sub)
             total_checked += 1
             if result.get("status") == "ok":
                 total_enqueued += 1
-            await asyncio.sleep(2)
+            # Randomized spacing (anti-bot pacing; was a fixed 2s)
+            await asyncio.sleep(_spacing_delay())
         except Exception as exc:
             logger.error("[check_followed] error for sub %d (%s): %s", sub.id, sub.name, exc)
             continue

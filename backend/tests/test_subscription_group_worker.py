@@ -628,3 +628,180 @@ class TestRenewableLock:
         await release_lock(redis, "my:key", "abc123")
 
         redis.eval.assert_awaited_once_with(LOCK_RELEASE_LUA, 1, "my:key", "abc123")
+
+
+# ---------------------------------------------------------------------------
+# DL-005: scheduling jitter — group checks must not fire in machine-regular
+# patterns (both groups fired exactly on the cron minute with fixed spacing).
+# ---------------------------------------------------------------------------
+
+
+def _make_two_sessions_with_subs(group, subs):
+    """Session 1 loads group + subs; session 2 marks group complete."""
+    session1 = AsyncMock()
+    session1.commit = AsyncMock()
+    session1.get = AsyncMock(return_value=group)
+    subs_result = MagicMock()
+    subs_result.scalars.return_value.all.return_value = subs
+    session1.execute = AsyncMock(return_value=subs_result)
+    session1.__aenter__ = AsyncMock(return_value=session1)
+    session1.__aexit__ = AsyncMock(return_value=False)
+
+    session2 = AsyncMock()
+    session2.commit = AsyncMock()
+    session2.execute = AsyncMock()
+    session2.__aenter__ = AsyncMock(return_value=session2)
+    session2.__aexit__ = AsyncMock(return_value=False)
+    return session1, session2
+
+
+class TestSchedulingJitter:
+    def test_start_jitter_delay_within_bounds(self):
+        from worker.constants import GROUP_START_JITTER_MAX_S
+        from worker.subscription_group import _start_jitter_delay
+
+        for _ in range(200):
+            v = _start_jitter_delay()
+            assert 0.0 <= v <= GROUP_START_JITTER_MAX_S
+
+    def test_spacing_delay_within_bounds(self):
+        from worker.constants import SUB_CHECK_SPACING_RANGE_S
+        from worker.subscription_group import _spacing_delay
+
+        lo, hi = SUB_CHECK_SPACING_RANGE_S
+        for _ in range(200):
+            v = _spacing_delay()
+            assert lo <= v <= hi
+
+    async def test_scheduler_triggered_run_sleeps_start_jitter_before_checks(self):
+        """start_jitter=True (scheduler path) must sleep the jitter delay before
+        dispatching any subscription check."""
+        from worker.subscription_group import check_subscription_group
+
+        group = _make_group(status="running")
+        sub1 = _make_sub(sub_id=1)
+        session1, session2 = _make_two_sessions_with_subs(group, [sub1])
+
+        sleeps: list[float] = []
+
+        async def _record_sleep(delay, *args, **kwargs):
+            sleeps.append(delay)
+
+        order: list[str] = []
+
+        async def _fake_enqueue(ctx, sub):
+            order.append("enqueue")
+            return {"status": "ok", "job_id": "fake-job"}
+
+        ctx = _make_ctx()
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", side_effect=[session1, session2]),
+            patch("worker.subscription._enqueue_for_subscription", side_effect=_fake_enqueue),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+            patch("worker.subscription_group._start_jitter_delay", return_value=42.5),
+            patch("worker.subscription_group._spacing_delay", return_value=0.0),
+            patch("worker.subscription_group.asyncio.sleep", side_effect=_record_sleep),
+        ):
+            result = await check_subscription_group(ctx, group_id=1, start_jitter=True)
+
+        assert result["status"] == "ok"
+        assert 42.5 in sleeps
+        assert order == ["enqueue"]
+
+    async def test_manual_run_has_no_start_jitter(self):
+        """Default (manual Run Now) must not delay the user by the jitter."""
+        from worker.subscription_group import check_subscription_group
+
+        group = _make_group(status="running")
+        sub1 = _make_sub(sub_id=1)
+        session1, session2 = _make_two_sessions_with_subs(group, [sub1])
+
+        sleeps: list[float] = []
+
+        async def _record_sleep(delay, *args, **kwargs):
+            sleeps.append(delay)
+
+        async def _fake_enqueue(ctx, sub):
+            return {"status": "ok", "job_id": "fake-job"}
+
+        ctx = _make_ctx()
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", side_effect=[session1, session2]),
+            patch("worker.subscription._enqueue_for_subscription", side_effect=_fake_enqueue),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+            patch("worker.subscription_group._start_jitter_delay", return_value=42.5),
+            patch("worker.subscription_group._spacing_delay", return_value=3.3),
+            patch("worker.subscription_group.asyncio.sleep", side_effect=_record_sleep),
+        ):
+            result = await check_subscription_group(ctx, group_id=1)
+
+        assert result["status"] == "ok"
+        assert 42.5 not in sleeps
+
+    async def test_per_sub_spacing_sleep_applied(self):
+        """Each sub check sleeps a randomized spacing delay (was: no spacing)."""
+        from worker.subscription_group import check_subscription_group
+
+        group = _make_group(status="running", concurrency=1)
+        subs = [_make_sub(sub_id=1), _make_sub(sub_id=2)]
+        session1, session2 = _make_two_sessions_with_subs(group, subs)
+
+        sleeps: list[float] = []
+
+        async def _record_sleep(delay, *args, **kwargs):
+            sleeps.append(delay)
+
+        async def _fake_enqueue(ctx, sub):
+            return {"status": "ok", "job_id": "fake-job"}
+
+        ctx = _make_ctx()
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", side_effect=[session1, session2]),
+            patch("worker.subscription._enqueue_for_subscription", side_effect=_fake_enqueue),
+            patch("core.events.emit_safe", new_callable=AsyncMock),
+            patch("worker.subscription_group._spacing_delay", return_value=3.3),
+            patch("worker.subscription_group.asyncio.sleep", side_effect=_record_sleep),
+        ):
+            result = await check_subscription_group(ctx, group_id=1)
+
+        assert result["checked"] == 2
+        assert sleeps.count(3.3) == 2
+
+    async def test_scheduler_enqueues_with_explicit_timeout_and_jitter_flag(self):
+        """SAQ kills jobs at Job.timeout (default 10s!). The scheduler must
+        enqueue group checks with an explicit timeout covering jitter +
+        GROUP_MAX_DURATION, and mark them as scheduler-triggered (start_jitter).
+        """
+        from worker.constants import GROUP_JOB_TIMEOUT
+        from worker.subscription_group import subscription_scheduler
+
+        group = _make_group(last_completed_at=datetime.now(UTC) - timedelta(hours=3))
+
+        call_count = [0]
+
+        async def _execute_side_effect(*args, **kwargs):
+            call_count[0] += 1
+            result = MagicMock()
+            if call_count[0] == 1:
+                result.scalars.return_value.all.return_value = [group]
+            else:
+                result.fetchone = MagicMock(return_value=MagicMock(id=group.id))
+            return result
+
+        session = AsyncMock()
+        session.commit = AsyncMock()
+        session.execute = _execute_side_effect
+        session.__aenter__ = AsyncMock(return_value=session)
+        session.__aexit__ = AsyncMock(return_value=False)
+
+        ctx = _make_ctx()
+        with (
+            patch("worker.subscription_group.AsyncSessionLocal", return_value=session),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            result = await subscription_scheduler(ctx)
+
+        assert result["dispatched"] == 1
+        kwargs = mock_enqueue.call_args.kwargs
+        assert kwargs.get("_timeout") == GROUP_JOB_TIMEOUT
+        assert kwargs.get("start_jitter") is True

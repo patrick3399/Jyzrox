@@ -193,7 +193,11 @@ async def run_group(group_id: int, request: Request, auth: dict = Depends(_admin
             raise HTTPException(status_code=404, detail="Group not found")
 
     try:
-        await core.queue.enqueue("check_subscription_group", group_id=group_id)
+        # Explicit _timeout: SAQ's default Job.timeout is 10s. No start_jitter —
+        # a user pressing Run Now expects it to start immediately.
+        from worker.constants import GROUP_JOB_TIMEOUT
+
+        await core.queue.enqueue("check_subscription_group", _timeout=GROUP_JOB_TIMEOUT, group_id=group_id)
     except Exception as exc:
         logger.error("Failed to enqueue check_subscription_group: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))

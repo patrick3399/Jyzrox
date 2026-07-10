@@ -473,7 +473,7 @@ async def check_subscription(
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     try:
-        await core.queue.enqueue("check_single_subscription", sub_id=sub_id)
+        await core.queue.enqueue("check_single_subscription", _timeout=600, sub_id=sub_id)
     except Exception as exc:
         logger.error("Failed to enqueue check_single_subscription: %s", exc)
         raise HTTPException(status_code=500, detail=str(exc))
@@ -506,7 +506,7 @@ async def backfill_subscription(
         raise HTTPException(status_code=404, detail="Subscription not found")
 
     try:
-        await core.queue.enqueue("check_single_subscription", sub_id=sub_id, force_full_scan=True)
+        await core.queue.enqueue("check_single_subscription", _timeout=600, sub_id=sub_id, force_full_scan=True)
     except Exception as exc:
         logger.error("Failed to enqueue force re-scan for sub %d: %s", sub_id, exc)
         raise HTTPException(status_code=500, detail=str(exc))

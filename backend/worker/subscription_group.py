@@ -1,6 +1,7 @@
 """Subscription group scheduler and group check jobs."""
 
 import asyncio
+import random
 from datetime import UTC, datetime
 
 from croniter import croniter as _croniter_cls
@@ -9,7 +10,23 @@ from sqlalchemy import select, update
 import core.queue
 from core.database import AsyncSessionLocal
 from db.models import Subscription, SubscriptionGroup
-from worker.constants import GROUP_MAX_DURATION, logger
+from worker.constants import (
+    GROUP_JOB_TIMEOUT,
+    GROUP_MAX_DURATION,
+    GROUP_START_JITTER_MAX_S,
+    SUB_CHECK_SPACING_RANGE_S,
+    logger,
+)
+
+
+def _start_jitter_delay() -> float:
+    """Random delay before a scheduler-triggered group check starts."""
+    return random.uniform(0.0, GROUP_START_JITTER_MAX_S)  # noqa: S311 — pacing, not crypto
+
+
+def _spacing_delay() -> float:
+    """Random delay between individual subscription checks."""
+    return random.uniform(*SUB_CHECK_SPACING_RANGE_S)  # noqa: S311 — pacing, not crypto
 
 
 def _cron_is_due(schedule: str, last_run: datetime | None) -> bool:
@@ -68,9 +85,16 @@ async def subscription_scheduler(ctx: dict) -> dict:
             if not claimed:
                 continue
 
-            # Enqueue the group check job
+            # Enqueue the group check job. Explicit _timeout is mandatory:
+            # SAQ's default Job.timeout is 10s, which would kill any real
+            # group check mid-flight (and strand the group as 'running').
             try:
-                await core.queue.enqueue("check_subscription_group", group_id=group.id)
+                await core.queue.enqueue(
+                    "check_subscription_group",
+                    _timeout=GROUP_JOB_TIMEOUT,
+                    group_id=group.id,
+                    start_jitter=True,
+                )
                 dispatched += 1
                 logger.info("[scheduler] Dispatched group %d (%s)", group.id, group.name)
             except Exception as exc:
@@ -84,8 +108,13 @@ async def subscription_scheduler(ctx: dict) -> dict:
     return {"status": "ok", "dispatched": dispatched}
 
 
-async def check_subscription_group(ctx: dict, group_id: int) -> dict:
-    """Check all subscriptions in a group with concurrency control."""
+async def check_subscription_group(ctx: dict, group_id: int, start_jitter: bool = False) -> dict:
+    """Check all subscriptions in a group with concurrency control.
+
+    start_jitter: True for scheduler-triggered runs — sleep a random delay
+    before checking so traffic does not start exactly on the cron minute.
+    Manual "Run Now" keeps the default False and starts immediately.
+    """
     from worker.subscription import _enqueue_for_subscription
 
     async with AsyncSessionLocal() as session:
@@ -136,7 +165,7 @@ async def check_subscription_group(ctx: dict, group_id: int) -> dict:
     errors = 0
     skipped_timeout = 0
     sem = asyncio.Semaphore(concurrency)
-    deadline = datetime.now(UTC).timestamp() + GROUP_MAX_DURATION
+    deadline = 0.0  # set after the optional start jitter, before dispatch
 
     async def _check_one(sub):
         nonlocal checked, enqueued, errors, skipped_timeout
@@ -148,6 +177,8 @@ async def check_subscription_group(ctx: dict, group_id: int) -> dict:
         try:
             async with asyncio.timeout(remaining):
                 async with sem:
+                    # Randomized spacing between checks (anti-bot pacing)
+                    await asyncio.sleep(_spacing_delay())
                     checked += 1
                     result = await _enqueue_for_subscription(ctx, sub)
                     if result.get("status") == "ok":
@@ -159,6 +190,14 @@ async def check_subscription_group(ctx: dict, group_id: int) -> dict:
             logger.error("[group_check] Error for sub %d in group %d: %s", sub.id, group_id, exc)
 
     try:
+        if start_jitter:
+            delay = _start_jitter_delay()
+            logger.info("[group_check] Group %d start jitter: %.0fs", group_id, delay)
+            await asyncio.sleep(delay)
+
+        # Group budget starts after the jitter so jitter never eats check time.
+        deadline = datetime.now(UTC).timestamp() + GROUP_MAX_DURATION
+
         # Run all subscriptions with concurrency control
         await asyncio.gather(
             *[_check_one(sub) for sub in subs],

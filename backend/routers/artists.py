@@ -283,7 +283,9 @@ async def check_updates(
 ):
     """Manually trigger update check for followed artists."""
     try:
-        await core.queue.enqueue("check_followed_artists", user_id=auth["user_id"])
+        # Explicit _timeout: SAQ's default Job.timeout is 10s; per-user checks
+        # sleep a randomized spacing between subs and easily exceed it.
+        await core.queue.enqueue("check_followed_artists", _timeout=3600, user_id=auth["user_id"])
     except Exception as e:
         logger.error("Failed to enqueue check_followed_artists: %s", e)
         raise HTTPException(status_code=500, detail=str(e))
