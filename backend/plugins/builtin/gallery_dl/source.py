@@ -133,6 +133,7 @@ async def _build_gallery_dl_config(
     job_context: str = "manual",
     last_completed_at: datetime | None = None,
     force_full_scan: bool = False,
+    target_source_id: str | None = None,
 ) -> Path:
     """Write gallery-dl config with v3.0 features: PG archive, native rate-limiting, postprocessors.
 
@@ -146,6 +147,9 @@ async def _build_gallery_dl_config(
             again and the importer can repair missing DB/library rows.
             Mutually exclusive with ``last_completed_at`` — caller
             (worker.subscription) drops last_completed_at when this is True.
+        target_source_id: The site this job actually downloads from. Global
+            downloader options (rate) are only applied from this site's
+            params — other sites' settings must not leak into the job.
 
     Returns:
         Path to the config file written.
@@ -230,8 +234,9 @@ async def _build_gallery_dl_config(
         if params.proxy_url:
             entry["proxy"] = params.proxy_url
 
-        # N7: per-site rate limit
-        if params.rate_limit:
+        # N7: bandwidth cap. downloader.rate is a GLOBAL option — apply it only
+        # from the job's target site, or one site's cap throttles every site.
+        if params.rate_limit and site_cfg.source_id == target_source_id:
             config["downloader"]["rate"] = params.rate_limit
 
     # Merge credentials on top
@@ -724,12 +729,22 @@ class GalleryDlPlugin(SourcePlugin):
         if credentials is None:
             credentials = {}
 
+        # Resolve the job's target site up front — global downloader options
+        # in the config (rate) must be scoped to this site only.
+        from urllib.parse import urlparse as _urlparse
+
+        from plugins.builtin.gallery_dl._sites import get_site_by_domain
+
+        _domain = _urlparse(url).netloc.removeprefix("www.")
+        _site_cfg = get_site_by_domain(_domain)
+
         config_path = await _build_gallery_dl_config(
             credentials,
             config_id=options.get("config_id") if options else None,
             job_context=options.get("job_context", "manual") if options else "manual",
             last_completed_at=options.get("last_completed_at") if options else None,
             force_full_scan=bool(options.get("force_full_scan", False)) if options else False,
+            target_source_id=_site_cfg.source_id,
         )
 
         from worker.gallery_dl_venv import get_gdl_bin
@@ -758,13 +773,8 @@ class GalleryDlPlugin(SourcePlugin):
             cmd += ["--error-file", f"/tmp/gdl-errors-{config_id}.txt"]
 
         # Per-site download tuning via SiteConfigService
-        from urllib.parse import urlparse as _urlparse
-
         from core.site_config import site_config_service
-        from plugins.builtin.gallery_dl._sites import get_site_by_domain
 
-        _domain = _urlparse(url).netloc.removeprefix("www.")
-        _site_cfg = get_site_by_domain(_domain)
         _dl_params = await site_config_service.get_effective_download_params(_site_cfg.source_id)
 
         if _dl_params.retries != 4:  # only add if non-default

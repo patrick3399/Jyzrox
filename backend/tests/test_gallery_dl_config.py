@@ -342,6 +342,50 @@ async def test_v3_cookie_update_omitted_without_config_id(mock_config_path):
 
 
 @pytest.mark.asyncio
+async def test_v3_rate_limit_of_other_site_does_not_leak_into_job(mock_config_path, mock_site_config_service):
+    """Regression: any site's rate_limit was written into the global
+    downloader.rate (last-wins over GDL_SITES order), so e.g. a pixiv
+    bandwidth cap silently throttled ehentai downloads too.
+    """
+    from core.site_config import DownloadParams
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    mock_site_config_service.get_all_download_params.return_value = {
+        "pixiv": DownloadParams(rate_limit="500k"),
+    }
+    await _build_gallery_dl_config({}, target_source_id="ehentai")
+    config = json.loads(mock_config_path.read_text())
+    assert "rate" not in config.get("downloader", {})
+
+
+@pytest.mark.asyncio
+async def test_v3_rate_limit_applies_when_site_is_target(mock_config_path, mock_site_config_service):
+    from core.site_config import DownloadParams
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    mock_site_config_service.get_all_download_params.return_value = {
+        "pixiv": DownloadParams(rate_limit="500k"),
+    }
+    await _build_gallery_dl_config({}, target_source_id="pixiv")
+    config = json.loads(mock_config_path.read_text())
+    assert config["downloader"]["rate"] == "500k"
+
+
+@pytest.mark.asyncio
+async def test_v3_no_rate_limit_without_target_site(mock_config_path, mock_site_config_service):
+    """Without a resolved target site no bandwidth cap should be applied."""
+    from core.site_config import DownloadParams
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    mock_site_config_service.get_all_download_params.return_value = {
+        "pixiv": DownloadParams(rate_limit="500k"),
+    }
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    assert "rate" not in config.get("downloader", {})
+
+
+@pytest.mark.asyncio
 async def test_v3_cookie_update_path_matches_worker_writeback_path(mock_config_path):
     """The config-side path helper and the worker reader must agree on the path."""
     from plugins.builtin.gallery_dl._sites import cookie_writeback_path
