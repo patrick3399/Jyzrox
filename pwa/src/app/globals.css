@@ -2,6 +2,11 @@
 
 @custom-variant dark (&:where(.dark, .dark *));
 @custom-variant amoled (&:where(.amoled, .amoled *));
+/* Gate hover-reveal affordances to devices that can actually hover. On touch
+   devices (no hover) the guarded element stays visible instead of becoming an
+   invisible-but-tappable trap. Pair with a base `opacity-100`:
+   `opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100`. */
+@custom-variant can-hover (@media (hover: hover));
 
 @theme inline {
   --color-vault-bg: var(--color-bg);

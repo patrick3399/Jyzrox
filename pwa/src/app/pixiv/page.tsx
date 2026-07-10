@@ -137,15 +137,15 @@ function IllustCard({ illust, onNavigate }: { illust: PixivIllust; onNavigate?: 
         <button
           onClick={handleBookmark}
           disabled={bookmarking}
-          className={`absolute top-1.5 left-1.5 opacity-0 group-hover:opacity-100 transition-opacity bg-black/70 text-white text-xs px-1.5 py-0.5 rounded disabled:opacity-50 ${bookmarked ? 'text-yellow-400' : ''}`}
+          className={`absolute top-1.5 left-1.5 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity bg-black/70 text-white text-xs px-1.5 py-0.5 rounded disabled:opacity-50 ${bookmarked ? 'text-yellow-400' : ''}`}
         >
           {bookmarked ? '★' : '☆'}
         </button>
-        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-0 group-hover:opacity-100 transition-opacity duration-200" />
+        <div className="absolute inset-0 bg-gradient-to-t from-black/70 via-transparent to-transparent opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity duration-200" />
         <button
           onClick={handleDownload}
           disabled={downloading}
-          className="absolute bottom-2 right-2 opacity-0 group-hover:opacity-100 transition-opacity bg-vault-accent text-white text-xs px-2 py-1 rounded hover:bg-vault-accent/80 disabled:opacity-50"
+          className="absolute bottom-2 right-2 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity bg-vault-accent text-white text-xs px-2 py-1 rounded hover:bg-vault-accent/80 disabled:opacity-50"
         >
           {downloading ? t('pixiv.downloading') : t('pixiv.download')}
         </button>

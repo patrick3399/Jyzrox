@@ -109,7 +109,7 @@ function CollectionCard({
                 onEdit(collection)
               }}
               aria-label={t('collections.edit')}
-              className="p-1.5 rounded text-vault-text-secondary hover:text-vault-text hover:bg-vault-border/40 opacity-0 group-hover:opacity-100 transition-all"
+              className="p-1.5 rounded text-vault-text-secondary hover:text-vault-text hover:bg-vault-border/40 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all"
             >
               <Pencil size={15} />
             </button>
@@ -119,7 +119,7 @@ function CollectionCard({
                 onDelete(collection.id)
               }}
               aria-label={t('collections.delete')}
-              className="p-1.5 rounded text-vault-text-secondary hover:text-red-400 hover:bg-red-400/10 opacity-0 group-hover:opacity-100 transition-all"
+              className="p-1.5 rounded text-vault-text-secondary hover:text-red-400 hover:bg-red-400/10 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-all"
             >
               <Trash2 size={15} />
             </button>

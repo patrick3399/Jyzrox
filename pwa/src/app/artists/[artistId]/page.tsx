@@ -337,7 +337,7 @@ export default function ArtistDetailPage() {
                         </div>
                       )}
                       {/* Hover overlay with gallery title */}
-                      <div className="absolute inset-0 bg-black/60 opacity-0 group-hover:opacity-100 transition-opacity flex items-end p-1.5">
+                      <div className="absolute inset-0 bg-black/60 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity flex items-end p-1.5">
                         <p className="text-white text-[10px] line-clamp-2 leading-tight">
                           {image.gallery_title}
                         </p>

@@ -647,7 +647,7 @@ function BrowsePage() {
                     <span className="flex-1 truncate">{q}</span>
                     <span
                       onClick={(e) => handleHistoryRemove(q, e)}
-                      className="text-vault-text-muted hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity px-1"
+                      className="text-vault-text-muted hover:text-red-400 text-xs opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity px-1"
                       title="Remove"
                     >
                       ✕
@@ -752,7 +752,7 @@ function BrowsePage() {
                       )}
                       <span
                         onClick={(e) => handleDeleteSavedSearch(s.id, e)}
-                        className="text-vault-text-muted hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity px-1 shrink-0"
+                        className="text-vault-text-muted hover:text-red-400 text-xs opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity px-1 shrink-0"
                         title="Delete"
                       >
                         ✕
@@ -812,7 +812,7 @@ function BrowsePage() {
                   <span className="flex-1 truncate">{q}</span>
                   <span
                     onClick={(e) => handleHistoryRemove(q, e)}
-                    className="text-vault-text-muted hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity px-1"
+                    className="text-vault-text-muted hover:text-red-400 text-xs opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity px-1"
                     title="Remove"
                   >
                     ✕
@@ -905,7 +905,7 @@ function BrowsePage() {
                       )}
                       <span
                         onClick={(e) => handleDeleteSavedSearch(s.id, e)}
-                        className="text-vault-text-muted hover:text-red-400 text-xs opacity-0 group-hover:opacity-100 transition-opacity px-1 shrink-0"
+                        className="text-vault-text-muted hover:text-red-400 text-xs opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity px-1 shrink-0"
                         title="Delete"
                       >
                         ✕

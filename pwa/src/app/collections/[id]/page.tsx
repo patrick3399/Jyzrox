@@ -207,7 +207,7 @@ function CollectionDetailInner() {
               <button
                 onClick={() => handleRemove(g.id)}
                 aria-label={t('collections.removeGallery')}
-                className="absolute top-1.5 right-1.5 z-10 p-1 rounded bg-red-600/80 hover:bg-red-600 text-white opacity-0 group-hover:opacity-100 transition-opacity"
+                className="absolute top-1.5 right-1.5 z-10 p-1 rounded bg-red-600/80 hover:bg-red-600 text-white opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100 transition-opacity"
               >
                 <X size={14} />
               </button>

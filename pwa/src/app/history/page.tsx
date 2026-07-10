@@ -91,7 +91,7 @@ function HistoryCard({
           onDelete(item.id)
         }}
         className="absolute top-1.5 right-1.5 p-1 rounded-full bg-black/60 text-white/70
-                   hover:text-white hover:bg-black/80 opacity-0 group-hover:opacity-100
+                   hover:text-white hover:bg-black/80 opacity-100 can-hover:opacity-0 can-hover:group-hover:opacity-100
                    transition-opacity"
         title={t('history.remove')}
       >
