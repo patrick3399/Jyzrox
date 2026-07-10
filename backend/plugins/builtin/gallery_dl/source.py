@@ -163,9 +163,12 @@ async def _build_gallery_dl_config(
             # N1: PostgreSQL archive — tables pre-created in init.sql
             "archive": settings.gdl_archive_dsn,
             "archive-table": "{category}",
-            # N3: native rate limiting (offloaded from adaptive engine)
-            "sleep-429": 60,
-            "sleep-retries": 10,
+            # N3: native rate limiting (offloaded from adaptive engine).
+            # exp:BASE:START:MAX=VALUE -> sleep(n) = min(START + VALUE*BASE^(n-1), MAX)
+            # 429: 30s, 60s, 120s, 240s, capped at 300s
+            "sleep-429": "exp:2:0:300=30",
+            # retry: 5s, 10s, 20s, 40s, 80s, capped at 120s
+            "sleep-retries": "exp:2:0:120=5",
             # N4: content integrity
             "filesize-min": "1k",
             # N10b: file-unique prevents duplicate URLs within a single run
@@ -184,6 +187,17 @@ async def _build_gallery_dl_config(
             {"name": "metadata", "mode": "json", "include": list(_METADATA_INCLUDE)},
         ],
     }
+
+    # N3: EH rate limits are ban-adjacent — back off harder than the global
+    # default. gallery-dl runs both EH domains under the 'exhentai' category
+    # ('e-hentai' kept in sync with the cookie injection below).
+    for _eh_cat in ("exhentai", "e-hentai"):
+        config["extractor"][_eh_cat] = {
+            # 429: 60s, 120s, 240s, 480s, capped at 600s
+            "sleep-429": "exp:2:0:600=60",
+            # retry: 10s, 20s, 40s, 80s, 160s, capped at 300s
+            "sleep-retries": "exp:2:0:300=10",
+        }
 
     # N2: subscription optimization
     if job_context == "subscription":

@@ -184,6 +184,34 @@ async def test_v3_config_has_native_rate_limiting(mock_config_path):
 
 
 @pytest.mark.asyncio
+async def test_v3_sleep_429_uses_exponential_backoff_not_fixed(mock_config_path):
+    """Regression: fixed sleep-429=60 / sleep-retries=10 re-hit rate-limited
+    sites at a constant interval. Use gallery-dl's exp duration syntax
+    (exp:BASE:START:MAX=VALUE -> min(START + VALUE*BASE^(n-1), MAX)).
+    """
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    assert config["extractor"]["sleep-429"] == "exp:2:0:300=30"
+    assert config["extractor"]["sleep-retries"] == "exp:2:0:120=5"
+
+
+@pytest.mark.asyncio
+async def test_v3_eh_has_conservative_backoff_override(mock_config_path):
+    """EH 429s are ban-adjacent — back off harder than the global default.
+    gallery-dl runs both EH domains under the 'exhentai' category.
+    """
+    from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
+
+    await _build_gallery_dl_config({})
+    config = json.loads(mock_config_path.read_text())
+    for cat in ("exhentai", "e-hentai"):
+        assert config["extractor"][cat]["sleep-429"] == "exp:2:0:600=60"
+        assert config["extractor"][cat]["sleep-retries"] == "exp:2:0:300=10"
+
+
+@pytest.mark.asyncio
 async def test_v3_config_has_file_unique(mock_config_path):
     from plugins.builtin.gallery_dl.source import _build_gallery_dl_config
 
