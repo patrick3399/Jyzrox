@@ -9,6 +9,7 @@ routers.novels.async_session onto the SQLite test factory.
 import subprocess
 import sys
 from contextlib import ExitStack, asynccontextmanager
+from pathlib import Path
 from unittest.mock import AsyncMock, patch
 
 import pytest
@@ -542,3 +543,16 @@ async def test_reset_enqueues_novel_index_job(admin_client, novel_repo, monkeypa
     r = await admin_client.post("/api/novels/reset")
     assert r.status_code == 200
     assert ("novel_index_job", {"force": True}) in enqueued
+
+
+async def test_graph_includes_chapters_with_zero_mentions(viewer_client, seed_index):
+    """Spec §4.6 #7: the graph must show ALL chapter nodes. A chapter whose
+    text mentions no entity was previously absent (chapters were derived from
+    mention rows only)."""
+    (Path(seed_index) / "作品A" / "03.md").write_text("無任何實體出場的過場章。", encoding="utf-8")
+    r = await viewer_client.get("/api/novels/graph")
+    assert r.status_code == 200
+    chapter_ids = {n["id"] for n in r.json()["nodes"] if n["type"] == "chapter"}
+    assert "作品A/03.md" in chapter_ids
+    # mention-derived chapters must still be present
+    assert {"作品A/01.md", "作品A/02.md"} <= chapter_ids

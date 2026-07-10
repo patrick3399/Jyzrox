@@ -320,13 +320,26 @@ def _story_order(fm: dict) -> float:
 
 @router.get("/graph")
 async def graph(_: dict = Depends(require_auth)):
-    """Nodes (notes + mentioned chapters) and edges (mention + resolved wikilinks)."""
+    """Nodes (notes + ALL chapters) and edges (mention + resolved wikilinks).
+
+    Chapters are enumerated from the live tree so 0-mention chapters appear
+    too (spec §4.6 #7); mention-derived paths are unioned in so index rows
+    for files that moved since the last reindex keep their edges anchored.
+    """
     async with async_session() as s:
         notes = (await s.execute(select(NovelNote))).scalars().all()
         mentions = (await s.execute(select(NovelMention))).scalars().all()
         links = (await s.execute(select(NovelLink))).scalars().all()
     nodes = [{"id": n.file_path, "label": n.title, "type": "note"} for n in notes]
-    chapters = sorted({m.chapter_path for m in mentions})
+    repo = _repo()
+    try:
+        fs_chapters = {ch["path"] for w in novel_fs.list_works(repo) for ch in novel_fs.list_chapters(repo, w["name"])}
+    except OSError as exc:
+        # Repo unreadable must not take the whole graph down — degrade to the
+        # pre-Phase-1.6 mention-derived chapter set.
+        logger.warning("graph: chapter scan failed, falling back to mention-derived: %s", exc)
+        fs_chapters = set()
+    chapters = sorted(fs_chapters | {m.chapter_path for m in mentions})
     nodes += [{"id": c, "label": c.split("/")[-1], "type": "chapter"} for c in chapters]
     edges = [{"src": m.note_path, "dst": m.chapter_path, "kind": "mention"} for m in mentions]
     edges += [{"src": link.src_path, "dst": link.dst_path, "kind": "link"} for link in links if link.dst_path]
