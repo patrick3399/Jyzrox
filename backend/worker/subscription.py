@@ -30,7 +30,7 @@ def _compute_next_check(cron_expr: str | None, base: datetime) -> datetime | Non
         return None
 
 
-async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = False) -> dict:
+async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = False, manual: bool = False) -> dict:
     """Create a download job for a subscription and enqueue it.
 
     force_full_scan=True suppresses both date-after and gallery-dl's archive.
@@ -38,6 +38,9 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
     left archive entries without matching image/library rows. Existing local
     images are retained by the importer and social reordering keeps them in the
     gallery sequence even if the remote post disappeared.
+
+    manual=True (user-triggered single check) bypasses the consecutive-failure
+    backoff gate — the user explicitly asked for this check.
     """
     from core.redis_client import get_redis, publish_job_event
 
@@ -59,6 +62,20 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
         return {"status": "skipped", "reason": "check_in_progress"}
 
     try:
+        # DL-007: back off automatic checks for chronically failing subs
+        # (expired cookies, dead accounts). Manual checks bypass the gate.
+        if not manual:
+            from services.subscription_health import should_backoff
+
+            skip, failures = await should_backoff(sub.id, getattr(sub, "last_checked_at", None))
+            if skip:
+                logger.info(
+                    "[subscription] sub=%d in failure backoff (%d consecutive failures), skipping",
+                    sub.id,
+                    failures,
+                )
+                return {"status": "skipped", "reason": "failure_backoff", "failures": failures}
+
         # Source-enabled check
         source = sub.source or "gallery_dl"
         from services.source_health import is_source_enabled
@@ -220,7 +237,7 @@ async def check_single_subscription(ctx: dict, sub_id: int, force_full_scan: boo
             return {"status": "failed", "error": "subscription not found"}
 
     try:
-        return await _enqueue_for_subscription(ctx, sub, force_full_scan=force_full_scan)
+        return await _enqueue_for_subscription(ctx, sub, force_full_scan=force_full_scan, manual=True)
     except Exception as exc:
         logger.error("[subscription] error processing sub %d: %s", sub_id, exc)
         async with AsyncSessionLocal() as session:

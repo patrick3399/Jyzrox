@@ -78,14 +78,20 @@ async def _set_subscription_result(
             job = await session.get(DownloadJob, uuid.UUID(db_job_id))
             if not job or not job.subscription_id:
                 return
+            subscription_id = job.subscription_id
             values = {
                 "last_status": status,
                 "last_error": error[:500] if error else None,
             }
             if status == "done" and advance_success:
                 values["last_success_at"] = datetime.now(UTC)
-            await session.execute(update(Subscription).where(Subscription.id == job.subscription_id).values(**values))
+            await session.execute(update(Subscription).where(Subscription.id == subscription_id).values(**values))
             await session.commit()
+
+        # DL-007: track consecutive failures (alert + backoff for chronic ones)
+        from services.subscription_health import record_check_result
+
+        await record_check_result(subscription_id, status)
     except Exception as exc:
         logger.warning("[download] failed to update subscription result: %s", exc)
 
