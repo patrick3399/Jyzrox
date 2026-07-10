@@ -13,6 +13,7 @@ export interface ReaderImage {
   mediaType: 'image' | 'video' | 'gif'
   duration?: number
   thumbUrl?: string | null // pre-generated thumbnail URL for videos
+  thumbhash?: string | null // base64 thumbhash for blur-up placeholder (null = not available)
 }
 
 export interface ReaderState {

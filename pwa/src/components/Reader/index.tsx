@@ -23,6 +23,7 @@ import {
 import VideoPlayer from './VideoPlayer'
 import { ImageContextMenu } from './ImageContextMenu'
 import { SauceNaoModal } from '@/components/SauceNaoModal'
+import { useThumbhash } from '@/hooks/useThumbhash'
 
 // ── URL resolver ──────────────────────────────────────────────────────
 
@@ -88,6 +89,113 @@ function getScaleImageClass(scaleMode: ScaleMode): string {
   }
 }
 
+// ── ReaderImg (blur-up placeholder + load-error handling) ─────────────
+
+interface ReaderImgProps {
+  image: ReaderImage
+  className?: string
+  style?: React.CSSProperties
+  draggable?: boolean
+  loading?: 'lazy' | 'eager'
+  dataPage?: number
+  innerRef?: React.Ref<HTMLImageElement>
+  onLoad?: () => void
+  onError?: () => void
+}
+
+export function ReaderImg({
+  image,
+  className,
+  style,
+  draggable = false,
+  loading,
+  dataPage,
+  innerRef,
+  onLoad,
+  onError,
+}: ReaderImgProps) {
+  const [errored, setErrored] = useState(false)
+  const [reloadKey, setReloadKey] = useState(0)
+  const [loaded, setLoaded] = useState(false)
+
+  // Reset error/reload/loaded state whenever the underlying image changes.
+  const url = image.url
+  useEffect(() => {
+    setErrored(false)
+    setReloadKey(0)
+    setLoaded(false)
+  }, [url])
+
+  // Decode the thumbhash (if any) into a data URL for the blur-up placeholder.
+  const hashes = useMemo(() => (image.thumbhash ? [image.thumbhash] : []), [image.thumbhash])
+  const thumbhashUrls = useThumbhash(hashes)
+  const placeholderUrl = image.thumbhash ? thumbhashUrls.get(image.thumbhash) ?? null : null
+
+  if (errored) {
+    return (
+      <div
+        className={`flex flex-col items-center justify-center gap-2 bg-black/50 ${className ?? ''}`}
+        style={{ minHeight: '200px', minWidth: '200px', ...style }}
+      >
+        <span className="text-3xl text-white/40" aria-hidden>
+          ⚠
+        </span>
+        <p className="text-xs text-white/60">{t('reader.imageLoadFailed')}</p>
+        <button
+          onClick={() => {
+            setErrored(false)
+            setReloadKey((k) => k + 1)
+          }}
+          className="rounded bg-white/10 px-3 py-1 text-xs text-white hover:bg-white/20"
+        >
+          {t('reader.retry')}
+        </button>
+      </div>
+    )
+  }
+
+  // Cache-buster forces a real network re-request on retry.
+  const src =
+    reloadKey > 0 && url ? `${url}${url.includes('?') ? '&' : '?'}_r=${reloadKey}` : url ?? ''
+
+  // Show the blurred placeholder as the element's background until the real image loads.
+  const showPlaceholder = !loaded && placeholderUrl != null
+  const aspectRatio = image.width && image.height ? `${image.width} / ${image.height}` : undefined
+  const imgStyle: React.CSSProperties = {
+    ...style,
+    ...(showPlaceholder
+      ? {
+          backgroundImage: `url(${placeholderUrl})`,
+          backgroundSize: 'cover',
+          backgroundPosition: 'center',
+          backgroundRepeat: 'no-repeat',
+          ...(aspectRatio ? { aspectRatio } : {}),
+        }
+      : {}),
+  }
+
+  return (
+    <img
+      ref={innerRef}
+      src={src}
+      alt={`Page ${image.pageNum}`}
+      className={className}
+      style={imgStyle}
+      draggable={draggable}
+      loading={loading}
+      data-page={dataPage}
+      onLoad={() => {
+        setLoaded(true)
+        onLoad?.()
+      }}
+      onError={() => {
+        setErrored(true)
+        onError?.()
+      }}
+    />
+  )
+}
+
 // ── Media element (image vs video) ───────────────────────────────────
 
 function MediaElement({
@@ -99,6 +207,7 @@ function MediaElement({
   dataPage,
   innerRef,
   onLoad,
+  onError,
   onToggleOverlay,
   overlayVisible,
 }: {
@@ -110,6 +219,7 @@ function MediaElement({
   dataPage?: number
   innerRef?: React.Ref<HTMLImageElement | HTMLVideoElement>
   onLoad?: () => void
+  onError?: () => void
   onToggleOverlay?: () => void
   overlayVisible?: boolean
 }) {
@@ -146,16 +256,16 @@ function MediaElement({
   }
 
   return (
-    <img
-      ref={innerRef as React.Ref<HTMLImageElement>}
-      src={image.url}
-      alt={`Page ${image.pageNum}`}
+    <ReaderImg
+      image={image}
       className={className}
       style={style}
       draggable={draggable}
       loading={loading}
-      data-page={dataPage}
+      dataPage={dataPage}
+      innerRef={innerRef as React.Ref<HTMLImageElement>}
       onLoad={onLoad}
+      onError={onError}
     />
   )
 }
@@ -197,6 +307,7 @@ interface SinglePageViewProps {
   onPrev: () => void
   onToggleOverlay: () => void
   onImageLoaded: () => void
+  onImageError: () => void
   scaleMode: ScaleMode
   readingDirection: ReadingDirection
   showOverlay: boolean
@@ -212,6 +323,7 @@ function SinglePageView({
   onPrev,
   onToggleOverlay,
   onImageLoaded,
+  onImageError,
   scaleMode,
   readingDirection,
   showOverlay,
@@ -268,6 +380,7 @@ function SinglePageView({
           className={getScaleImageClass(scaleMode)}
           draggable={false}
           onLoad={onImageLoaded}
+          onError={onImageError}
           onToggleOverlay={onToggleOverlay}
           overlayVisible={showOverlay}
         />
@@ -509,6 +622,7 @@ function WebtoonView({
               className={scaleClass}
               dataPage={img.pageNum}
               onLoad={() => handleImageLoaded(img.pageNum)}
+              onError={() => handleImageLoaded(img.pageNum)}
             />
           </div>
         )
@@ -532,6 +646,7 @@ interface DoublePageViewProps {
   onPrev: () => void
   onToggleOverlay: () => void
   onImageLoaded: () => void
+  onImageError: () => void
   scaleMode: ScaleMode
   readingDirection: ReadingDirection
   showOverlay: boolean
@@ -548,6 +663,7 @@ function DoublePageView({
   onPrev,
   onToggleOverlay,
   onImageLoaded,
+  onImageError,
   scaleMode,
   readingDirection,
   showOverlay,
@@ -621,6 +737,7 @@ function DoublePageView({
                     className={imgClass}
                     draggable={false}
                     onLoad={onImageLoaded}
+                    onError={onImageError}
                     onToggleOverlay={onToggleOverlay}
                     overlayVisible={showOverlay}
                   />
@@ -651,6 +768,7 @@ function DoublePageView({
                     className={imgClass}
                     draggable={false}
                     onLoad={onImageLoaded}
+                    onError={onImageError}
                     onToggleOverlay={onToggleOverlay}
                     overlayVisible={showOverlay}
                   />
@@ -1585,6 +1703,7 @@ export default function Reader({
       mediaType: img.media_type,
       duration: img.duration ?? undefined,
       thumbUrl: img.thumb_path?.replace('/data/', '/media/') ?? undefined,
+      thumbhash: img.thumbhash ?? null,
     }))
 
   const {
@@ -1681,6 +1800,15 @@ export default function Reader({
     }
     setPageLoading(false)
   }, [state.currentPage])
+
+  // On image load failure, stop the spinner (ReaderImg shows its own retry placeholder).
+  const handleImageError = useCallback(() => {
+    if (loadingTimerRef.current) {
+      clearTimeout(loadingTimerRef.current)
+      loadingTimerRef.current = undefined
+    }
+    setPageLoading(false)
+  }, [])
 
   // When page changes, start a short timer before showing the spinner.
   // If the image loads before the timer fires (onLoad clears the timer), the spinner never appears.
@@ -2070,6 +2198,7 @@ export default function Reader({
             onPrev={rawPrevPage}
             onToggleOverlay={handleToggleOverlay}
             onImageLoaded={handleImageLoaded}
+            onImageError={handleImageError}
             scaleMode={state.scaleMode}
             readingDirection={state.readingDirection}
             showOverlay={state.showOverlay}
@@ -2099,6 +2228,7 @@ export default function Reader({
             onPrev={() => setPageWithPrefetch(state.currentPage - 2)}
             onToggleOverlay={handleToggleOverlay}
             onImageLoaded={handleImageLoaded}
+            onImageError={handleImageError}
             scaleMode={state.scaleMode}
             readingDirection={state.readingDirection}
             showOverlay={state.showOverlay}

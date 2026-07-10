@@ -705,6 +705,8 @@ const en: Record<string, string> = {
   'reader.videoUnmute': 'Unmute',
   'reader.progressSaveFailed': 'Failed to save reading progress',
   'reader.downloading': 'Downloading\u2026',
+  'reader.imageLoadFailed': 'Image failed to load',
+  'reader.retry': 'Retry',
   'reader.loadingMetadata': 'Loading metadata...',
   'reader.loadingTokens': 'Loading image tokens...',
   'reader.preparingReader': 'Preparing reader...',
