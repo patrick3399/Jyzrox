@@ -9,7 +9,7 @@ import json
 import logging
 import re
 from collections.abc import Awaitable, Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 from core.version import __version__
@@ -169,6 +169,16 @@ class PixivSourcePlugin(SourcePlugin):
         art_match = _PIXIV_ART_RE.search(url)
         user_match = _PIXIV_USER_RE.search(url)
 
+        # Incremental cutoff for subscription re-checks (native path has no
+        # gallery-dl archive/date-after). 1-day buffer mirrors the gallery-dl
+        # path's timezone-edge handling. force_full_scan runs never carry
+        # last_completed_at (the subscription worker drops it), so backfill
+        # keeps full-catalog behavior (BE-T13).
+        date_after = None
+        _lca = (options or {}).get("last_completed_at")
+        if isinstance(_lca, datetime):
+            date_after = _lca - timedelta(days=1)
+
         try:
             if art_match:
                 illust_id = int(art_match.group(1))
@@ -191,6 +201,7 @@ class PixivSourcePlugin(SourcePlugin):
                     cancel_check=cancel_check,
                     pause_check=pause_check,
                     on_file=on_file,
+                    date_after=date_after,
                 )
             else:
                 return DownloadResult(

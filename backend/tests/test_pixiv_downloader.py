@@ -489,3 +489,178 @@ class TestPixivDownloaderErrorHandling:
         # All reported paths should actually exist on disk
         for p in file_paths:
             assert p.exists()
+
+
+# ---------------------------------------------------------------------------
+# DL-006: incremental user-works re-check (date_after cutoff)
+# ---------------------------------------------------------------------------
+
+
+def _make_user_illusts_client(pages: list[dict]):
+    """PixivClient mock whose user_illusts returns the given pages in order."""
+    mock_client = AsyncMock()
+    mock_client.user_illusts = AsyncMock(side_effect=pages)
+    mock_client.__aenter__ = AsyncMock(return_value=mock_client)
+    mock_client.__aexit__ = AsyncMock(return_value=None)
+    return mock_client
+
+
+def _illust(illust_id: int, create_date: str | None) -> dict:
+    d: dict = {"id": illust_id}
+    if create_date is not None:
+        d["create_date"] = create_date
+    return d
+
+
+class TestPixivUserWorksIncremental:
+    """download_pixiv_user_works(date_after=...) — subscription re-checks must
+    not refetch the artist's entire catalog every run."""
+
+    async def test_date_after_skips_old_illusts_and_stops_pagination(self, tmp_path):
+        """Regression: every subscription re-check re-downloaded EVERY illust of
+        the user (bytes over the wire), relying on import-side SHA dedup only.
+        With a cutoff, older illusts are filtered and pagination stops at the
+        first page that crosses the cutoff.
+        """
+        from datetime import UTC, datetime
+
+        from services.pixiv_downloader import download_pixiv_user_works
+
+        pages = [
+            {
+                "illusts": [
+                    _illust(1001, "2026-07-10T12:00:00+09:00"),
+                    _illust(1002, "2026-06-01T12:00:00+09:00"),  # older than cutoff
+                ],
+                "next_offset": 30,
+            },
+            {"illusts": [_illust(1003, "2026-05-01T12:00:00+09:00")], "next_offset": None},
+        ]
+        mock_client = _make_user_illusts_client(pages)
+        downloaded_ids: list[int] = []
+
+        async def _fake_illust_dl(illust_id, **kwargs):
+            downloaded_ids.append(illust_id)
+            return {"status": "done", "downloaded": 1, "total": 1, "failed": []}
+
+        with (
+            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_downloader.download_pixiv_illust", side_effect=_fake_illust_dl),
+            patch("services.pixiv_downloader.get_typed_download_delay", new=AsyncMock(return_value=0)),
+        ):
+            result = await download_pixiv_user_works(
+                user_id=42,
+                refresh_token="tok",
+                output_dir=tmp_path,
+                date_after=datetime(2026, 7, 1, tzinfo=UTC),
+            )
+
+        assert result["status"] == "done"
+        assert downloaded_ids == [1001]
+        # Crossed the cutoff on page 1 — page 2 must never be requested.
+        assert mock_client.user_illusts.await_count == 1
+
+    async def test_no_date_after_fetches_all_pages(self, tmp_path):
+        """Manual downloads (no cutoff) keep full-catalog behavior."""
+        from services.pixiv_downloader import download_pixiv_user_works
+
+        pages = [
+            {"illusts": [_illust(1001, "2026-07-10T12:00:00+09:00")], "next_offset": 30},
+            {"illusts": [_illust(1002, "2026-05-01T12:00:00+09:00")], "next_offset": None},
+        ]
+        mock_client = _make_user_illusts_client(pages)
+        downloaded_ids: list[int] = []
+
+        async def _fake_illust_dl(illust_id, **kwargs):
+            downloaded_ids.append(illust_id)
+            return {"status": "done", "downloaded": 1, "total": 1, "failed": []}
+
+        with (
+            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_downloader.download_pixiv_illust", side_effect=_fake_illust_dl),
+            patch("services.pixiv_downloader.get_typed_download_delay", new=AsyncMock(return_value=0)),
+        ):
+            result = await download_pixiv_user_works(user_id=42, refresh_token="tok", output_dir=tmp_path)
+
+        assert result["status"] == "done"
+        assert downloaded_ids == [1001, 1002]
+        assert mock_client.user_illusts.await_count == 2
+
+    async def test_illust_without_create_date_is_kept_despite_cutoff(self, tmp_path):
+        """An illust missing create_date cannot be judged — keep it (import-side
+        dedup handles the duplicate) rather than silently dropping new work."""
+        from datetime import UTC, datetime
+
+        from services.pixiv_downloader import download_pixiv_user_works
+
+        pages = [
+            {"illusts": [_illust(1001, None)], "next_offset": None},
+        ]
+        mock_client = _make_user_illusts_client(pages)
+        downloaded_ids: list[int] = []
+
+        async def _fake_illust_dl(illust_id, **kwargs):
+            downloaded_ids.append(illust_id)
+            return {"status": "done", "downloaded": 1, "total": 1, "failed": []}
+
+        with (
+            patch("services.pixiv_downloader.PixivClient", return_value=mock_client),
+            patch("services.pixiv_downloader.download_pixiv_illust", side_effect=_fake_illust_dl),
+            patch("services.pixiv_downloader.get_typed_download_delay", new=AsyncMock(return_value=0)),
+        ):
+            result = await download_pixiv_user_works(
+                user_id=42,
+                refresh_token="tok",
+                output_dir=tmp_path,
+                date_after=datetime(2026, 7, 1, tzinfo=UTC),
+            )
+
+        assert result["status"] == "done"
+        assert downloaded_ids == [1001]
+
+
+class TestPixivPluginIncrementalWiring:
+    """Plugin download() must thread subscription last_completed_at into the
+    user-works downloader as a date_after cutoff (with the 1-day buffer)."""
+
+    async def test_last_completed_at_becomes_date_after_with_buffer(self, tmp_path):
+        from datetime import UTC, datetime
+
+        from plugins.builtin.pixiv.source import PixivSourcePlugin
+
+        captured: dict = {}
+
+        async def _fake_user_works(**kwargs):
+            captured.update(kwargs)
+            return {"status": "done", "downloaded": 0, "total": 0, "failed": []}
+
+        plugin = PixivSourcePlugin()
+        with patch("services.pixiv_downloader.download_pixiv_user_works", side_effect=_fake_user_works):
+            await plugin.download(
+                url="https://www.pixiv.net/users/42",
+                dest_dir=tmp_path,
+                credentials="tok",
+                options={"last_completed_at": datetime(2026, 7, 10, tzinfo=UTC)},
+            )
+
+        assert captured["date_after"] == datetime(2026, 7, 9, tzinfo=UTC)
+
+    async def test_manual_download_passes_no_cutoff(self, tmp_path):
+        from plugins.builtin.pixiv.source import PixivSourcePlugin
+
+        captured: dict = {}
+
+        async def _fake_user_works(**kwargs):
+            captured.update(kwargs)
+            return {"status": "done", "downloaded": 0, "total": 0, "failed": []}
+
+        plugin = PixivSourcePlugin()
+        with patch("services.pixiv_downloader.download_pixiv_user_works", side_effect=_fake_user_works):
+            await plugin.download(
+                url="https://www.pixiv.net/users/42",
+                dest_dir=tmp_path,
+                credentials="tok",
+                options={},
+            )
+
+        assert captured["date_after"] is None

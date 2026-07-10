@@ -9,6 +9,7 @@ import asyncio
 import json
 import logging
 from collections.abc import Awaitable, Callable
+from datetime import UTC, datetime
 from pathlib import Path
 
 from core.redis_client import get_typed_download_delay
@@ -224,6 +225,26 @@ async def download_pixiv_illust(
     }
 
 
+def _illust_is_after(illust: dict, cutoff: datetime | None) -> bool:
+    """True if the illust was created at/after the cutoff (or cannot be judged).
+
+    Missing/unparseable create_date keeps the illust — import-side SHA dedup
+    handles a redundant download, while dropping it could lose new work.
+    """
+    if cutoff is None:
+        return True
+    raw = illust.get("create_date")
+    if not raw:
+        return True
+    try:
+        created = datetime.fromisoformat(str(raw).replace("Z", "+00:00"))
+    except ValueError:
+        return True
+    if created.tzinfo is None:
+        created = created.replace(tzinfo=UTC)
+    return created >= cutoff
+
+
 async def download_pixiv_user_works(
     user_id: int,
     refresh_token: str,
@@ -233,6 +254,7 @@ async def download_pixiv_user_works(
     pause_check: Callable[[], Awaitable[bool]] | None = None,
     max_illusts: int = 0,
     on_file: Callable[[Path], Awaitable[None]] | None = None,
+    date_after: datetime | None = None,
 ) -> dict:
     """
     Download all works by a Pixiv user.
@@ -247,6 +269,10 @@ async def download_pixiv_user_works(
         on_progress: Callback(downloaded_illusts, total_illusts)
         cancel_check: Callback() -> True if cancelled
         max_illusts: Max number of illustrations to download (0 = all)
+        date_after: Incremental cutoff (subscription re-checks). Illusts
+            created before this are skipped and pagination stops at the first
+            page that crosses the cutoff — the API returns newest-first, so a
+            full-catalog walk on every re-check is wasted traffic.
 
     Returns:
         {"status": "done"|"cancelled"|"failed", "downloaded": int,
@@ -278,7 +304,13 @@ async def download_pixiv_user_works(
             if not illusts:
                 break
 
-            all_illusts.extend(illusts)
+            fresh = [i for i in illusts if _illust_is_after(i, date_after)]
+            all_illusts.extend(fresh)
+
+            # Crossed the incremental cutoff — pages are newest-first, so
+            # everything further back is older. Stop paginating.
+            if date_after is not None and len(fresh) < len(illusts):
+                break
 
             if max_illusts and len(all_illusts) >= max_illusts:
                 all_illusts = all_illusts[:max_illusts]
