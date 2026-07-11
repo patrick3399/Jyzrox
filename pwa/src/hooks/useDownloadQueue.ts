@@ -41,8 +41,10 @@ export function useDownloadJobs(params: JobListParams = {}) {
 }
 
 export function useEnqueueDownload() {
-  return useSWRMutation('download/enqueue', (_key: unknown, { arg }: { arg: { url: string } }) =>
-    api.download.enqueue(arg.url),
+  return useSWRMutation(
+    'download/enqueue',
+    (_key: unknown, { arg }: { arg: { url: string; options?: Record<string, unknown> } }) =>
+      api.download.enqueue(arg.url, undefined, arg.options),
   )
 }
 

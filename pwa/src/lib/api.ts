@@ -1458,6 +1458,7 @@ const subscriptions = {
     cron_expr?: string
     auto_download?: boolean
     group_id?: number | null
+    download_options?: Record<string, unknown>
   }) =>
     apiFetch<{ status: string; id: number; source: string | null; duplicate?: boolean }>(
       '/api/subscriptions/',
@@ -1477,6 +1478,7 @@ const subscriptions = {
       auto_download?: boolean
       cron_expr?: string
       group_id?: number | null
+      download_options?: Record<string, unknown>
     },
   ) =>
     apiFetch<{ status: string }>(`/api/subscriptions/${id}`, {

@@ -11,6 +11,7 @@ import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import DownloadJob, Subscription
+from plugins.models import NewWork
 from worker.constants import GROUP_MAX_DURATION, logger
 from worker.helpers import _cron_record, _cron_should_run, acquire_lock, release_lock
 
@@ -28,6 +29,91 @@ def _compute_next_check(cron_expr: str | None, base: datetime) -> datetime | Non
         return croniter(cron_expr, base).get_next(datetime)
     except Exception:
         return None
+
+
+async def _enqueue_fanbox_posts(ctx: dict, sub, *, force_full_scan: bool) -> dict:
+    """Discover Fanbox creator posts and queue each post as its own gallery job."""
+    from core.redis_client import publish_job_event
+    from plugins.builtin.fanbox.policy import fanbox_policy_from_options
+    from plugins.builtin.fanbox.source import FanboxSourcePlugin
+    from services.credential import get_credential
+
+    try:
+        policy = fanbox_policy_from_options(sub.download_options if isinstance(sub.download_options, dict) else {})
+        plugin = FanboxSourcePlugin()
+        credential = await get_credential("fanbox")
+        # Without a logged-in session, an "all accessible" creator sync means
+        # public/free content only. Avoid enqueueing a noisy job for every paid
+        # post merely to discover that the account has no entitlement.
+        selection_policy = policy
+        if not credential and policy.content != "free_only":
+            selection_policy = policy.model_copy(update={"content": "free_only"})
+        works, latest_id = await plugin.discover_posts(
+            sub.url,
+            None if force_full_scan else sub.last_item_id,
+            selection_policy,
+            credential,
+        )
+    except Exception as exc:
+        logger.warning("[subscription] Fanbox discovery failed for sub=%d: %s", sub.id, exc)
+        async with AsyncSessionLocal() as session:
+            await session.execute(update(Subscription).where(Subscription.id == sub.id).values(last_status="failed", last_error=str(exc)))
+            await session.commit()
+        return {"status": "failed", "error": str(exc)}
+
+    options = {"job_context": "subscription", "fanbox": policy.model_dump(mode="json")}
+    enqueued: list[tuple[uuid.UUID, NewWork]] = []
+    async with AsyncSessionLocal() as session:
+        for work in works:
+            active = (
+                await session.execute(
+                    select(DownloadJob.id).where(
+                        DownloadJob.url == work.url,
+                        DownloadJob.user_id == sub.user_id,
+                        DownloadJob.status.in_(["queued", "running", "paused"]),
+                    ).limit(1)
+                )
+            ).scalar_one_or_none()
+            if active:
+                continue
+            job_id = uuid.uuid4()
+            session.add(DownloadJob(
+                id=job_id, url=work.url, source="fanbox", status="queued", progress={},
+                options=options, user_id=sub.user_id, subscription_id=sub.id,
+            ))
+            enqueued.append((job_id, work))
+        await session.commit()
+
+    for job_id, work in enqueued:
+        await core.queue.enqueue(
+            "download_job", _job_id=str(job_id), _timeout=settings.download_job_timeout,
+            url=work.url, source="fanbox", options=options, db_job_id=str(job_id), total=None,
+        )
+
+    now = datetime.now(UTC)
+    values = {
+        "last_checked_at": now,
+        "last_success_at": now,
+        "last_job_id": enqueued[-1][0] if enqueued else None,
+        "last_item_id": latest_id or sub.last_item_id,
+        "last_status": "queued" if enqueued else "up_to_date",
+        "last_error": None,
+        "source_id": FanboxSourcePlugin.creator_id_from_url(sub.url),
+    }
+    if sub.group_id is None:
+        next_check = _compute_next_check(sub.cron_expr, now)
+        if next_check is not None:
+            values["next_check_at"] = next_check
+    async with AsyncSessionLocal() as session:
+        await session.execute(update(Subscription).where(Subscription.id == sub.id).values(**values))
+        await session.commit()
+
+    await publish_job_event({
+        "type": "subscription_checked", "sub_id": sub.id, "status": "ok",
+        "job_id": str(enqueued[-1][0]) if enqueued else None, "user_id": sub.user_id,
+        "discovered": len(works), "enqueued": len(enqueued),
+    })
+    return {"status": "ok", "job_id": str(enqueued[-1][0]) if enqueued else None, "enqueued": len(enqueued)}
 
 
 async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = False, manual: bool = False) -> dict:
@@ -116,6 +202,12 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
                     await session.commit()
                 return {"status": "skipped", "reason": "credentials_required"}
 
+        # Fanbox creator URLs are collection endpoints. Discovering first and
+        # enqueueing individual post URLs keeps each post as one gallery and
+        # lets the per-subscription policy apply before a paid post is fetched.
+        if source == "fanbox":
+            return await _enqueue_fanbox_posts(ctx, sub, force_full_scan=force_full_scan)
+
         # Duplicate guard: skip if this user already has a queued/running/paused job for this URL
         async with AsyncSessionLocal() as session:
             existing = (
@@ -139,9 +231,14 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
                 return {"status": "skipped", "reason": "active_job_exists"}
 
         # v3.0: inject subscription context for archive-mode and date-after optimization
-        options: dict | None = {
+        options: dict = {
             "job_context": "subscription",
         }
+        # Credentials are global account state. This per-subscription policy is
+        # intentionally copied into the queued job so different creators can
+        # use different free/paid selection rules.
+        if isinstance(getattr(sub, "download_options", None), dict):
+            options.update(sub.download_options)
         if force_full_scan:
             # Force re-scan: bypass date-after and archive so gallery-dl emits
             # every currently visible item; importer-side dedupe preserves local rows.
@@ -162,6 +259,7 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
                     source=sub.source or "gallery_dl",
                     status="queued",
                     progress={},
+                    options=options,
                     user_id=sub.user_id,
                     subscription_id=sub.id,
                 )

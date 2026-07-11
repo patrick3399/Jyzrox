@@ -31,6 +31,7 @@ def _build_subscription_upsert(
     cron_expr: str,
     next_check,
     group_id: int | None,
+    download_options: dict | None = None,
 ):
     """Build the create-or-upsert statement for a subscription.
 
@@ -54,6 +55,7 @@ def _build_subscription_upsert(
             cron_expr=cron_expr,
             next_check_at=next_check,
             group_id=group_id,
+            download_options=download_options or {},
         )
         .on_conflict_do_update(
             constraint="subscriptions_user_id_url_key",
@@ -64,6 +66,7 @@ def _build_subscription_upsert(
                 "cron_expr": cron_expr,
                 "next_check_at": next_check,
                 "enabled": True,
+                "download_options": download_options or {},
             },
         )
         .returning(Subscription.id)
@@ -76,6 +79,7 @@ class CreateSubscriptionRequest(BaseModel):
     cron_expr: str | None = None
     auto_download: bool = True
     group_id: int | None = None
+    download_options: dict | None = None
 
 
 class PatchSubscriptionRequest(BaseModel):
@@ -84,6 +88,7 @@ class PatchSubscriptionRequest(BaseModel):
     auto_download: bool | None = None
     cron_expr: str | None = None
     group_id: int | None = None
+    download_options: dict | None = None
 
 
 class BulkMoveRequest(BaseModel):
@@ -103,6 +108,7 @@ def _serialize_subscription(s, gallery: Gallery | None = None) -> dict:
         "auto_download": s.auto_download,
         "cron_expr": s.cron_expr,
         "group_id": s.group_id,
+        "download_options": s.download_options or {},
         "last_checked_at": s.last_checked_at.isoformat() if s.last_checked_at else None,
         "last_item_id": s.last_item_id,
         "last_status": s.last_status,
@@ -215,6 +221,14 @@ async def create_subscription(
         validate_cron(req.cron_expr)
 
     cron_expr = req.cron_expr or "0 */2 * * *"
+    download_options = req.download_options or {}
+    if source == "fanbox":
+        from plugins.builtin.fanbox.policy import normalized_fanbox_options
+
+        try:
+            download_options = normalized_fanbox_options(download_options)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
     from datetime import datetime
 
     from croniter import croniter
@@ -240,6 +254,7 @@ async def create_subscription(
             cron_expr=cron_expr,
             next_check=next_check,
             group_id=req.group_id,
+            download_options=download_options,
         )
 
         result = await session.execute(stmt)
@@ -359,6 +374,22 @@ async def update_subscription(
         updates["cron_expr"] = req.cron_expr
     if req.group_id is not None:
         updates["group_id"] = req.group_id
+    if req.download_options is not None:
+        # Policy validation needs the source from the owned subscription rather
+        # than trusting a caller-supplied source identifier.
+        async with async_session() as session:
+            source = (
+                await session.execute(select(Subscription.source).where(Subscription.id == sub_id, Subscription.user_id == user_id))
+            ).scalar_one_or_none()
+        if source == "fanbox":
+            from plugins.builtin.fanbox.policy import normalized_fanbox_options
+
+            try:
+                updates["download_options"] = normalized_fanbox_options(req.download_options)
+            except ValueError as exc:
+                raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
+        else:
+            updates["download_options"] = req.download_options
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")

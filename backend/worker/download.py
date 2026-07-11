@@ -299,6 +299,8 @@ async def download_job(
             progress["gdl_state_seconds"] = gdl_state_seconds
         if recent_log:
             progress["recent_log"] = list(recent_log)
+        if diagnostic_ctx.get("source_summary"):
+            progress["source_summary"] = dict(diagnostic_ctx["source_summary"])
         # Progressive importer skip counters (different from gallery-dl's
         # archive skips — these fire post-download for excluded/duplicate/invalid).
         importer_skip = {
@@ -551,6 +553,8 @@ async def download_job(
             "status_text": final_status_text,
             "gdl_state": "done",
         }
+        if diagnostic_ctx.get("source_summary"):
+            final_progress["source_summary"] = dict(diagnostic_ctx["source_summary"])
         importer_skip = {
             "duplicate": importer._skip_duplicate,
             "excluded": importer._skip_excluded,

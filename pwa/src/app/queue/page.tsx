@@ -447,6 +447,10 @@ export default function QueuePage() {
   const [sitesOpen, setSitesOpen] = useState(false)
   const [debouncedUrl, setDebouncedUrl] = useState('')
   const [expandedJobId, setExpandedJobId] = useState<string | null>(null)
+  const [fanboxContent, setFanboxContent] = useState<'free_only' | 'accessible' | 'paid_only' | 'price_range'>('accessible')
+  const [fanboxFeeMin, setFanboxFeeMin] = useState('')
+  const [fanboxFeeMax, setFanboxFeeMax] = useState('')
+  const isFanboxUrl = /fanbox\.cc\/(?:@[^/]+\/)?posts\/\d+/i.test(urlInput)
 
   useEffect(() => {
     const timer = setTimeout(() => setDebouncedUrl(urlInput), 300)
@@ -480,7 +484,18 @@ export default function QueuePage() {
     const url = urlInput.trim()
     if (!url) return
     try {
-      const result = await enqueue({ url })
+      const result = await enqueue({
+        url,
+        ...(isFanboxUrl ? {
+          options: {
+            fanbox: {
+              content: fanboxContent,
+              ...(fanboxFeeMin ? { fee_min: Number(fanboxFeeMin) } : {}),
+              ...(fanboxFeeMax ? { fee_max: Number(fanboxFeeMax) } : {}),
+            },
+          },
+        } : {}),
+      })
       toast.success(`${t('queue.queuedSuccess')} (job: ${result.job_id})`)
       setUrlInput('')
       await mutate()
@@ -495,7 +510,7 @@ export default function QueuePage() {
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Failed to enqueue download')
     }
-  }, [urlInput, enqueue, mutate])
+  }, [urlInput, enqueue, mutate, isFanboxUrl, fanboxContent, fanboxFeeMin, fanboxFeeMax])
 
   const handleCancel = useCallback(
     async (id: string) => {
@@ -593,6 +608,27 @@ export default function QueuePage() {
             {isEnqueuing ? t('queue.adding') : t('queue.add')}
           </button>
         </div>
+        {isFanboxUrl && (
+          <div className="mt-3 flex flex-wrap items-center gap-2 text-xs text-vault-text-muted">
+            <span>{t('fanbox.contentPolicy')}</span>
+            <select
+              value={fanboxContent}
+              onChange={(e) => setFanboxContent(e.target.value as 'free_only' | 'accessible' | 'paid_only' | 'price_range')}
+              className="bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text"
+            >
+              <option value="free_only">{t('fanbox.freeOnly')}</option>
+              <option value="accessible">{t('fanbox.accessible')}</option>
+              <option value="paid_only">{t('fanbox.paidOnly')}</option>
+              <option value="price_range">{t('fanbox.priceRange')}</option>
+            </select>
+            {fanboxContent === 'price_range' && (
+              <>
+                <input type="number" min="0" value={fanboxFeeMin} onChange={(e) => setFanboxFeeMin(e.target.value)} placeholder={t('fanbox.feeMin')} className="w-24 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text" />
+                <input type="number" min="0" value={fanboxFeeMax} onChange={(e) => setFanboxFeeMax(e.target.value)} placeholder={t('fanbox.feeMax')} className="w-24 bg-vault-input border border-vault-border rounded px-2 py-1 text-vault-text" />
+              </>
+            )}
+          </div>
+        )}
         {/* URL Recognition Badge */}
         {debouncedUrl.trim() && checkResult && (
           <div className="mt-2 flex items-center gap-2">

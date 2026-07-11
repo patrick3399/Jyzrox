@@ -230,6 +230,10 @@ class DownloadJob(Base):
     source: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, default="queued")
     progress: Mapped[dict] = mapped_column(JSONB, default=dict)
+    # Immutable request options (for example, a Fanbox content policy).  Queue
+    # payloads are transient, so keeping this on the job is required for retry
+    # and for explaining why a URL was filtered a particular way.
+    options: Mapped[dict] = mapped_column(JSONB, default=dict)
     error: Mapped[str | None] = mapped_column(Text)
     created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
@@ -377,6 +381,9 @@ class Subscription(Base):
     avatar_url: Mapped[str | None] = mapped_column(Text)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     auto_download: Mapped[bool] = mapped_column(Boolean, default=True)
+    # Source-specific download policy. Credentials remain global; this controls
+    # what this subscription chooses to fetch with those credentials.
+    download_options: Mapped[dict] = mapped_column(JSONB, default=dict)
     cron_expr: Mapped[str | None] = mapped_column(Text, default="0 */2 * * *")
     last_checked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     last_success_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))

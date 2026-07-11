@@ -124,6 +124,7 @@ CREATE TABLE IF NOT EXISTS download_jobs (
     source          TEXT,
     status          TEXT DEFAULT 'queued',
     progress        JSONB DEFAULT '{}',
+    options         JSONB DEFAULT '{}',
     error           TEXT,
     created_at      TIMESTAMPTZ DEFAULT now(),
     finished_at     TIMESTAMPTZ,
@@ -321,6 +322,7 @@ CREATE TABLE IF NOT EXISTS subscriptions (
     avatar_url      TEXT,
     enabled         BOOLEAN DEFAULT TRUE,
     auto_download   BOOLEAN DEFAULT TRUE,
+    download_options JSONB DEFAULT '{}',
     cron_expr       TEXT DEFAULT '0 */2 * * *',
     last_checked_at TIMESTAMPTZ,
     last_success_at TIMESTAMPTZ,
@@ -335,6 +337,8 @@ CREATE INDEX IF NOT EXISTS idx_subscriptions_next_check ON subscriptions(next_ch
 CREATE INDEX IF NOT EXISTS idx_subscriptions_user ON subscriptions(user_id);
 CREATE INDEX IF NOT EXISTS idx_subscriptions_source ON subscriptions(source, source_id);
 ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS group_id INT REFERENCES subscription_groups(id) ON DELETE SET NULL;
+ALTER TABLE subscriptions ADD COLUMN IF NOT EXISTS download_options JSONB DEFAULT '{}';
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS options JSONB DEFAULT '{}';
 CREATE INDEX IF NOT EXISTS idx_subscriptions_group ON subscriptions(group_id);
 
 -- Artist grouping

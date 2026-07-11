@@ -130,6 +130,23 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         http_timeout=45,
         inactivity_timeout=300,
     ),
+    GdlSiteConfig(
+        domain="fanbox.cc",
+        source_id="fanbox",
+        name="Pixiv Fanbox",
+        category="art",
+        has_tags=True,
+        credential_type="cookies",
+        credential_requirement="recommended",
+        credential_warning_code="fanbox_credentials_recommended",
+        artist_from="uploader",
+        subscribe_url_tpl="https://www.fanbox.cc/@{}",
+        subscribe_id_pattern=r"/(?:@)?([\\w-]+)",
+        retries=5,
+        http_timeout=45,
+        sleep_request=1.0,
+        inactivity_timeout=600,
+    ),
     # ── Social ──
     GdlSiteConfig(
         domain="twitter.com",

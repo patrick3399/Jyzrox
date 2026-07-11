@@ -1,4 +1,5 @@
 const en: Record<string, string> = {
+  'fanbox.contentPolicy': 'Fanbox content', 'fanbox.freeOnly': 'Free posts only', 'fanbox.accessible': 'All accessible posts', 'fanbox.paidOnly': 'Paid posts only', 'fanbox.priceRange': 'Price range', 'fanbox.feeMin': 'Min JPY', 'fanbox.feeMax': 'Max JPY',
   // ── Navigation ──
   'nav.dashboard': 'Dashboard',
   'nav.downloadDashboard': 'Download Dashboard',

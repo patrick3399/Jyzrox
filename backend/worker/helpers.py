@@ -151,7 +151,9 @@ async def enqueue_download_job(job, job_key: str) -> None:
         _timeout=settings.download_job_timeout,
         url=job.url,
         source=job.source or "",
-        options=None,
+        # Policy must survive retry/recovery; queue payloads are ephemeral but
+        # DownloadJob.options is persisted with the original request.
+        options=getattr(job, "options", None) or {},
         db_job_id=str(job.id),
         total=job.progress.get("total") if job.progress else None,
     )

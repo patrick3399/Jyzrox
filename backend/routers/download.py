@@ -179,8 +179,15 @@ async def _enqueue(
             "warning": None,
         }
 
-    job_id = uuid.uuid4()
     source = detect_source(url)
+    if source == "fanbox":
+        from plugins.builtin.fanbox.policy import normalized_fanbox_options
+
+        try:
+            options = normalized_fanbox_options(options)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
+    job_id = uuid.uuid4()
     initial_progress = {"total": total} if total is not None else {}
 
     await _check_source_enabled(source)
@@ -189,7 +196,13 @@ async def _enqueue(
     # 1. Persist DB record first so the worker always finds a matching row.
     try:
         job = DownloadJob(
-            id=job_id, url=url, source=source, status="queued", progress=initial_progress or {}, user_id=user_id
+            id=job_id,
+            url=url,
+            source=source,
+            status="queued",
+            progress=initial_progress or {},
+            options=options or {},
+            user_id=user_id,
         )
         db.add(job)
         await db.commit()
@@ -840,6 +853,7 @@ def _j(j: DownloadJob, gallery: Gallery | None = None) -> dict:
         "source": j.source,
         "status": j.status,
         "progress": j.progress,
+        "options": j.options or {},
         "error": j.error,
         "created_at": j.created_at.isoformat() if j.created_at else None,
         "finished_at": j.finished_at.isoformat() if j.finished_at else None,

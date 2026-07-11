@@ -176,6 +176,7 @@ export interface DownloadJob {
   gallery_source?: string
   gallery_source_id?: string
   subscription_id?: number | null
+  options?: Record<string, unknown>
   progress: {
     percent?: number
     downloaded?: number
@@ -634,6 +635,7 @@ export interface Subscription {
   created_at: string | null
   last_job_id: string | null
   group_id: number | null
+  download_options?: Record<string, unknown>
   gallery_id?: number | null
   gallery_source?: string | null
   gallery_source_id?: string | null

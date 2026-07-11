@@ -852,6 +852,9 @@ export default function SubscriptionsPage() {
   const [autoDownload, setAutoDownload] = useState(true)
   const [cronExpr, setCronExpr] = useState('0 */2 * * *')
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null)
+  const [fanboxSubscriptionContent, setFanboxSubscriptionContent] = useState<'free_only' | 'accessible' | 'paid_only' | 'price_range'>('accessible')
+  const [fanboxSubscriptionFeeMin, setFanboxSubscriptionFeeMin] = useState('')
+  const [fanboxSubscriptionFeeMax, setFanboxSubscriptionFeeMax] = useState('')
   const [checkingId, setCheckingId] = useState<number | null>(null)
   const [isDeletingAll, setIsDeletingAll] = useState(false)
   const [batchUrls, setBatchUrls] = useState('')
@@ -878,6 +881,15 @@ export default function SubscriptionsPage() {
         auto_download: autoDownload,
         cron_expr: cronExpr,
         group_id: selectedGroupId,
+        ...(url.includes('fanbox.cc') ? {
+          download_options: {
+            fanbox: {
+              content: fanboxSubscriptionContent,
+              ...(fanboxSubscriptionFeeMin ? { fee_min: Number(fanboxSubscriptionFeeMin) } : {}),
+              ...(fanboxSubscriptionFeeMax ? { fee_max: Number(fanboxSubscriptionFeeMax) } : {}),
+            },
+          },
+        } : {}),
       })
       if (result?.duplicate) {
         toast.info(t('subscriptions.duplicateUpdated'))
@@ -889,6 +901,9 @@ export default function SubscriptionsPage() {
       setAutoDownload(true)
       setCronExpr('0 */2 * * *')
       setSelectedGroupId(null)
+      setFanboxSubscriptionContent('accessible')
+      setFanboxSubscriptionFeeMin('')
+      setFanboxSubscriptionFeeMax('')
       setShowAdd(false)
       mutate()
     } catch (err) {
@@ -1199,6 +1214,21 @@ export default function SubscriptionsPage() {
               autoFocus
             />
           </div>
+          {url.includes('fanbox.cc') && (
+            <div className="flex flex-wrap items-center gap-2">
+              <label className="text-xs text-vault-text-muted">{t('fanbox.contentPolicy')}</label>
+              <select value={fanboxSubscriptionContent} onChange={(e) => setFanboxSubscriptionContent(e.target.value as 'free_only' | 'accessible' | 'paid_only' | 'price_range')} className="px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text">
+                <option value="free_only">{t('fanbox.freeOnly')}</option>
+                <option value="accessible">{t('fanbox.accessible')}</option>
+                <option value="paid_only">{t('fanbox.paidOnly')}</option>
+                <option value="price_range">{t('fanbox.priceRange')}</option>
+              </select>
+              {fanboxSubscriptionContent === 'price_range' && <>
+                <input type="number" min="0" value={fanboxSubscriptionFeeMin} onChange={(e) => setFanboxSubscriptionFeeMin(e.target.value)} placeholder={t('fanbox.feeMin')} className="w-24 px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text" />
+                <input type="number" min="0" value={fanboxSubscriptionFeeMax} onChange={(e) => setFanboxSubscriptionFeeMax(e.target.value)} placeholder={t('fanbox.feeMax')} className="w-24 px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text" />
+              </>}
+            </div>
+          )}
           <div>
             <label className="text-xs text-vault-text-muted block mb-1">
               {t('subscriptions.name')}
