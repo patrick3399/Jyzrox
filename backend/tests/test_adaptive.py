@@ -177,11 +177,20 @@ async def test_get_state_returns_default_when_no_redis_key(mock_redis):
     from core.adaptive import AdaptiveEngine, AdaptiveState
 
     mock_redis.get = AsyncMock(return_value=None)
-    with patch("core.redis_client.get_redis", return_value=mock_redis):
+    mock_session = AsyncMock()
+    mock_session.get = AsyncMock(return_value=None)
+    mock_ctx = AsyncMock()
+    mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+    mock_ctx.__aexit__ = AsyncMock(return_value=False)
+    with (
+        patch("core.redis_client.get_redis", return_value=mock_redis),
+        patch("core.database.AsyncSessionLocal", return_value=mock_ctx),
+    ):
         engine = AdaptiveEngine()
         state = await engine.get_state("unknown_source")
     assert isinstance(state, AdaptiveState)
     assert state.credential_warning is False
+    mock_session.get.assert_awaited_once()
 
 
 @pytest.mark.asyncio

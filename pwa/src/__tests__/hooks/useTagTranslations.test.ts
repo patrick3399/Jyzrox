@@ -41,6 +41,19 @@ vi.mock('@/lib/api', () => ({
   },
 }))
 
+// ── React hook stubs ─────────────────────────────────────────────────
+// These unit tests inspect SWR arguments by invoking the hook directly.
+// Keep state/effect deterministic without requiring a React render tree.
+
+vi.mock('react', async () => {
+  const actual = await vi.importActual<typeof import('react')>('react')
+  return {
+    ...actual,
+    useState: <T,>(initial: T | (() => T)) => [typeof initial === 'function' ? (initial as () => T)() : initial, vi.fn()],
+    useEffect: vi.fn(),
+  }
+})
+
 // ── swr mock ─────────────────────────────────────────────────────────
 
 interface SwrCall {

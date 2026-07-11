@@ -5,7 +5,7 @@
  *   useDownloadJobs      — passes key ['download/jobs', params] to useSWR
  *   useDownloadJobs      — configured with refreshInterval: 3000
  *   useDownloadJobs      — fetcher calls api.download.getJobs with the params
- *   useEnqueueDownload   — trigger() calls api.download.enqueue with the given URL
+ *   useEnqueueDownload   — trigger() forwards URL and optional download options to api.download.enqueue
  *   useCancelJob         — trigger() calls api.download.cancelJob with the job ID
  *   useClearFinishedJobs — trigger() calls api.download.clearFinishedJobs
  *   useDownloadStats     — passes key "download/stats" and refreshInterval: 5000
@@ -199,11 +199,18 @@ describe('useEnqueueDownload', () => {
     expect(key).toBe('download/enqueue')
   })
 
-  it('should call api.download.enqueue with the URL when trigger is invoked', async () => {
+  it('should preserve the API argument shape when no download options are supplied', async () => {
     const { trigger } = useEnqueueDownload()
     await trigger({ url: 'https://example.com/gallery/1' })
     expect(mockEnqueue).toHaveBeenCalledOnce()
-    expect(mockEnqueue).toHaveBeenCalledWith('https://example.com/gallery/1')
+    expect(mockEnqueue).toHaveBeenCalledWith('https://example.com/gallery/1', undefined, undefined)
+  })
+
+  it('should forward download options when trigger is invoked', async () => {
+    const { trigger } = useEnqueueDownload()
+    const options = { archive: true }
+    await trigger({ url: 'https://example.com/gallery/1', options })
+    expect(mockEnqueue).toHaveBeenCalledWith('https://example.com/gallery/1', undefined, options)
   })
 })
 
