@@ -1,5 +1,6 @@
 """Training Data Export (Kohya format)."""
 
+import asyncio
 import json
 import os
 import re
@@ -105,49 +106,54 @@ async def export_kohya(
     if total_size > _MAX_ZIP_SIZE:
         raise HTTPException(status_code=413, detail="Gallery too large to export (max 2 GB)")
 
-    # Create Zip in memory
-    zip_buffer = BytesIO()
-    excluded_files: list[dict] = []
-    used_arcnames: set[str] = set()
-    with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
-        for i, img in enumerate(images):
-            file_path = _file_path(img)
-            if not file_path:
-                continue
+    # Build the ZIP in a worker thread: the compression loop is fully
+    # synchronous and can chew through gigabytes of source data (AIT-002)
+    def _build_zip() -> BytesIO:
+        zip_buffer = BytesIO()
+        excluded_files: list[dict] = []
+        used_arcnames: set[str] = set()
+        with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
+            for i, img in enumerate(images):
+                file_path = _file_path(img)
+                if not file_path:
+                    continue
 
-            raw_name = img.filename if img.filename else f"image_{i}"
+                raw_name = img.filename if img.filename else f"image_{i}"
 
-            ext = ((img.blob.extension if img.blob else None) or os.path.splitext(raw_name)[1]).lower()
-            if ext not in _TRAINABLE_EXTS:
-                excluded_files.append({"filename": raw_name, "reason": "unsupported_extension"})
-                continue
+                ext = ((img.blob.extension if img.blob else None) or os.path.splitext(raw_name)[1]).lower()
+                if ext not in _TRAINABLE_EXTS:
+                    excluded_files.append({"filename": raw_name, "reason": "unsupported_extension"})
+                    continue
 
-            basename = _SAFE_ARCNAME.sub("_", os.path.basename(raw_name)) or f"image_{i}"
-            page = img.page_num if img.page_num is not None else i + 1
-            arcname = f"{page:04d}_{basename}"
-            if arcname in used_arcnames:
-                arcname = f"{page:04d}_{i}_{basename}"
-            used_arcnames.add(arcname)
+                basename = _SAFE_ARCNAME.sub("_", os.path.basename(raw_name)) or f"image_{i}"
+                page = img.page_num if img.page_num is not None else i + 1
+                arcname = f"{page:04d}_{basename}"
+                if arcname in used_arcnames:
+                    arcname = f"{page:04d}_{i}_{basename}"
+                used_arcnames.add(arcname)
 
-            # Add image file to zip
-            zip_file.write(str(file_path), arcname=arcname)
+                # Add image file to zip
+                zip_file.write(str(file_path), arcname=arcname)
 
-            # Combine gallery tags and specific image tags
-            all_tags = set(gallery_tags)
-            if img.tags_array:
-                all_tags.update(img.tags_array)
+                # Combine gallery tags and specific image tags
+                all_tags = set(gallery_tags)
+                if img.tags_array:
+                    all_tags.update(img.tags_array)
 
-            # Create tag text file
-            base, _ = os.path.splitext(arcname)
-            txt_filename = base + ".txt"
-            tag_string = ", ".join(_caption_tags(all_tags, excluded, underscores_to_spaces))
+                # Create tag text file
+                base, _ = os.path.splitext(arcname)
+                txt_filename = base + ".txt"
+                tag_string = ", ".join(_caption_tags(all_tags, excluded, underscores_to_spaces))
 
-            zip_file.writestr(txt_filename, tag_string)
+                zip_file.writestr(txt_filename, tag_string)
 
-        if excluded_files:
-            zip_file.writestr("manifest.json", json.dumps({"excluded": excluded_files}, indent=2))
+            if excluded_files:
+                zip_file.writestr("manifest.json", json.dumps({"excluded": excluded_files}, indent=2))
 
-    zip_buffer.seek(0)
+        zip_buffer.seek(0)
+        return zip_buffer
+
+    zip_buffer = await asyncio.to_thread(_build_zip)
 
     return StreamingResponse(
         iter([zip_buffer.getvalue()]),

@@ -475,6 +475,57 @@ class TestExportArcnameCollision:
 
 
 # ---------------------------------------------------------------------------
+# Regression: AIT-002 — ZIP build must not block the event loop
+# ---------------------------------------------------------------------------
+
+
+class TestExportZipOffEventLoop:
+    """The synchronous in-memory ZIP build must run in a worker thread, not
+    on the event loop — AIT-002."""
+
+    async def test_export_zip_build_runs_off_event_loop_thread(self, client, db_session, db_session_factory):
+        """zipfile.ZipFile construction must happen on a different thread than
+        the event loop.
+
+        Before the fix, the whole ZIP (up to 2 GB of source data) was built
+        inline in the async handler, stalling every other request.
+        """
+        import threading
+
+        gid = await _insert_gallery(db_session, title="Thread Gallery")
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+            tmp_path = f.name
+
+        build_threads: list[int] = []
+        real_zipfile = zipfile.ZipFile
+
+        class SpyZipFile(real_zipfile):
+            def __init__(self, *args, **kwargs):
+                build_threads.append(threading.get_ident())
+                super().__init__(*args, **kwargs)
+
+        try:
+            await _insert_image(db_session, gid, page_num=1, filename="001.jpg", file_path=tmp_path)
+
+            with (
+                patch("routers.export.async_session", db_session_factory),
+                patch("zipfile.ZipFile", SpyZipFile),
+            ):
+                resp = await client.get(f"/api/export/kohya/{gid}")
+
+            assert resp.status_code == 200
+            assert build_threads, "ZIP build was never invoked"
+            loop_thread = threading.get_ident()
+            assert all(t != loop_thread for t in build_threads), (
+                "ZIP must be built in a worker thread, not on the event loop"
+            )
+        finally:
+            os.unlink(tmp_path)
+
+
+# ---------------------------------------------------------------------------
 # Regression: edge case #129 — export ZIP arcname path traversal
 # ---------------------------------------------------------------------------
 
