@@ -9,6 +9,7 @@ from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import GalleryTag, Image, ImageTag, Tag
 from services.cas import resolve_blob_path
+from services.settings_store import get_float_setting, get_toggle
 from worker.constants import _IMAGE_EXTS, logger
 
 
@@ -105,9 +106,13 @@ async def _aggregate_to_gallery(session, gallery_id: int, threshold: float) -> i
 
 async def tag_job(ctx: dict, gallery_id: int) -> dict:
     """AI tagging via WD14 — tags all images in a gallery via remote tagger service."""
-    if not settings.tag_model_enabled:
-        logger.info("[tag] gallery_id=%d skipped (TAG_MODEL_ENABLED=false)", gallery_id)
-        return {"status": "skipped", "reason": "TAG_MODEL_ENABLED=false"}
+    # Runtime (Redis) toggle wins; env TAG_MODEL_ENABLED is only the default (AIT-005)
+    if not await get_toggle("setting:ai_tagging_enabled", settings.tag_model_enabled):
+        logger.info("[tag] gallery_id=%d skipped (ai_tagging_enabled=false)", gallery_id)
+        return {"status": "skipped", "reason": "ai_tagging_enabled=false"}
+
+    general_threshold = await get_float_setting("setting:tag_general_threshold", settings.tag_general_threshold)
+    character_threshold = await get_float_setting("setting:tag_character_threshold", settings.tag_character_threshold)
 
     logger.info("[tag] gallery_id=%d", gallery_id)
 
@@ -142,8 +147,8 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
                     results = await _predict_remote(
                         client,
                         str(src),
-                        settings.tag_general_threshold,
-                        settings.tag_character_threshold,
+                        general_threshold,
+                        character_threshold,
                     )
                 except Exception as exc:
                     logger.warning("[tag] image %d failed: %s", img.id, exc)
@@ -212,7 +217,7 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
                 tagged += 1
 
             # Aggregate AI tags to gallery level
-            count = await _aggregate_to_gallery(session, gallery_id, settings.tag_general_threshold)
+            count = await _aggregate_to_gallery(session, gallery_id, general_threshold)
             from worker.tag_helpers import rebuild_gallery_tags_array
 
             await rebuild_gallery_tags_array(session, gallery_id)

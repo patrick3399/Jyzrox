@@ -574,6 +574,12 @@ async def get_feature_toggles(_: dict = Depends(require_auth)):
         "external_api_enabled": await _get_toggle("setting:external_api_enabled", app_settings.external_api_enabled),
         "novel_enabled": await _get_toggle("setting:novel_enabled", app_settings.novel_enabled),
         "ai_tagging_enabled": await _get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled),
+        "tag_general_threshold": await _get_float_setting(
+            "setting:tag_general_threshold", app_settings.tag_general_threshold
+        ),
+        "tag_character_threshold": await _get_float_setting(
+            "setting:tag_character_threshold", app_settings.tag_character_threshold
+        ),
         "tag_translation_enabled": await _get_toggle("setting:tag_translation_enabled", True),
         "download_eh_enabled": await _get_toggle("setting:download_eh_enabled", app_settings.download_eh_enabled),
         "download_pixiv_enabled": await _get_toggle(
@@ -612,6 +618,8 @@ async def patch_feature_toggle(
         "external_api_enabled": "setting:external_api_enabled",
         "novel_enabled": "setting:novel_enabled",
         "ai_tagging_enabled": "setting:ai_tagging_enabled",
+        "tag_general_threshold": "setting:tag_general_threshold",
+        "tag_character_threshold": "setting:tag_character_threshold",
         "tag_translation_enabled": "setting:tag_translation_enabled",
         "download_eh_enabled": "setting:download_eh_enabled",
         "download_pixiv_enabled": "setting:download_pixiv_enabled",
@@ -646,6 +654,15 @@ async def patch_feature_toggle(
             raise HTTPException(status_code=400, detail="value required for dedup_opencv_threshold")
         await get_redis().set("setting:dedup_opencv_threshold", str(req.value))
         return {"feature": feature, "value": req.value}
+
+    if feature in ("tag_general_threshold", "tag_character_threshold"):
+        if req.value is None:
+            raise HTTPException(status_code=400, detail=f"value required for {feature}")
+        val = float(req.value)
+        if not (0.0 < val <= 1.0):
+            raise HTTPException(status_code=400, detail=f"{feature} must be in (0, 1]")
+        await get_redis().set(redis_key, str(val))
+        return {"feature": feature, "value": val}
 
     if feature == "retry_max_retries":
         if req.value is None:

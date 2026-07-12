@@ -11,12 +11,27 @@ Strategy:
 - Mock `worker.tagging.resolve_blob_path` to control file-existence checks.
 """
 
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, contextmanager
 from unittest.mock import AsyncMock, MagicMock, patch
 
 # ---------------------------------------------------------------------------
 # Helpers
 # ---------------------------------------------------------------------------
+
+
+@contextmanager
+def _patch_runtime_settings(enabled: bool = True):
+    """Patch the Redis-backed runtime settings reads (AIT-005) so tag_job
+    tests don't touch Redis; thresholds pass through their env defaults."""
+    with (
+        patch("worker.tagging.get_toggle", new_callable=AsyncMock, return_value=enabled),
+        patch(
+            "worker.tagging.get_float_setting",
+            new_callable=AsyncMock,
+            side_effect=lambda key, default: default,
+        ),
+    ):
+        yield
 
 
 def _mock_settings(tag_model_enabled: bool = True) -> MagicMock:
@@ -115,15 +130,15 @@ class TestTaggingJob:
     """Tests for worker.tagging.tag_job."""
 
     async def test_tag_model_enabled_false_returns_skipped(self):
-        """When TAG_MODEL_ENABLED=false, job must return status='skipped'."""
+        """When ai tagging is disabled (env default, no Redis override), job must return status='skipped'."""
         from worker.tagging import tag_job
 
         mock_s = _mock_settings(tag_model_enabled=False)
-        with patch("worker.tagging.settings", mock_s):
+        with patch("worker.tagging.settings", mock_s), _patch_runtime_settings(enabled=False):
             result = await tag_job({}, gallery_id=1)
 
         assert result["status"] == "skipped"
-        assert "TAG_MODEL_ENABLED" in result["reason"]
+        assert "ai_tagging_enabled" in result["reason"]
 
     async def test_tagger_unavailable_raises_for_retry(self):
         """When tagger health check fails, job must raise RuntimeError so SAQ retries — edge case #211.
@@ -140,6 +155,7 @@ class TestTaggingJob:
 
         with (
             patch("worker.tagging.settings", mock_s),
+            _patch_runtime_settings(),
             patch("worker.tagging.httpx.AsyncClient") as mock_cls,
         ):
             mock_cls.return_value.__aenter__ = AsyncMock(return_value=unavail_client)
@@ -165,6 +181,7 @@ class TestTaggingJob:
 
         with (
             patch("worker.tagging.settings", mock_s),
+            _patch_runtime_settings(),
             patch("worker.tagging.AsyncSessionLocal", fake_db),
             patch("worker.tagging.resolve_blob_path", return_value=fake_image_path),
             patch("worker.tagging.httpx.AsyncClient") as mock_cls,
@@ -194,6 +211,7 @@ class TestTaggingJob:
 
         with (
             patch("worker.tagging.settings", mock_s),
+            _patch_runtime_settings(),
             patch("worker.tagging.AsyncSessionLocal", fake_db),
             patch("worker.tagging.resolve_blob_path", return_value=fake_video_path),
             patch("worker.tagging.httpx.AsyncClient") as mock_cls,
@@ -245,6 +263,7 @@ class TestTaggingJob:
 
         with (
             patch("worker.tagging.settings", mock_s),
+            _patch_runtime_settings(),
             patch("worker.tagging.AsyncSessionLocal", fake_db),
             patch("worker.tagging.resolve_blob_path", return_value=fake_path),
             patch("worker.tagging.httpx.AsyncClient") as mock_cls,
@@ -278,6 +297,7 @@ class TestTaggingJob:
 
         with (
             patch("worker.tagging.settings", mock_s),
+            _patch_runtime_settings(),
             patch("worker.tagging.AsyncSessionLocal", fake_db),
             patch("worker.tagging.resolve_blob_path", return_value=fake_path),
             patch("worker.tagging.httpx.AsyncClient") as mock_cls,
@@ -304,6 +324,7 @@ class TestTaggingJob:
 
         with (
             patch("worker.tagging.settings", mock_s),
+            _patch_runtime_settings(),
             patch("worker.tagging.AsyncSessionLocal", fake_db),
             patch("worker.tagging.httpx.AsyncClient") as mock_cls,
         ):
@@ -332,6 +353,7 @@ class TestTaggingJob:
 
         with (
             patch("worker.tagging.settings", mock_s),
+            _patch_runtime_settings(),
             patch("worker.tagging.AsyncSessionLocal", fake_db),
             patch("worker.tagging.resolve_blob_path", return_value=missing_path),
             patch("worker.tagging.httpx.AsyncClient") as mock_cls,
@@ -345,6 +367,102 @@ class TestTaggingJob:
 
 
 # ---------------------------------------------------------------------------
+# Regression: AIT-005 — Redis runtime settings must actually drive tag_job
+# ---------------------------------------------------------------------------
+
+
+class TestAiTaggingRuntimeSettings:
+    """setting:ai_tagging_enabled and the thresholds are runtime (Redis)
+    settings; before the fix tag_job only read env vars, so the admin UI
+    toggle was dead — AIT-005."""
+
+    async def test_redis_toggle_off_skips_tag_job_even_when_env_enabled(self):
+        """Turning the UI toggle off must stop tag_job even if TAG_MODEL_ENABLED=true."""
+        from worker.tagging import tag_job
+
+        mock_s = _mock_settings(tag_model_enabled=True)
+        with (
+            patch("worker.tagging.settings", mock_s),
+            patch("worker.tagging.get_toggle", new_callable=AsyncMock, return_value=False) as mock_toggle,
+        ):
+            result = await tag_job({}, gallery_id=1)
+
+        assert result["status"] == "skipped"
+        assert "ai_tagging_enabled" in result["reason"]
+        mock_toggle.assert_awaited_once_with("setting:ai_tagging_enabled", True)
+
+    async def test_redis_toggle_on_runs_tag_job_even_when_env_disabled(self, tmp_path):
+        """Turning the UI toggle on must run tag_job even if TAG_MODEL_ENABLED=false."""
+        from worker.tagging import tag_job
+
+        fake_path = tmp_path / "img.jpg"
+        fake_path.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        blob = _make_mock_blob()
+        img = _make_mock_image(img_id=1, gallery_id=1, blob=blob)
+        fake_db = _make_session_factory_from_mock(_make_mock_session(images=[img]))
+
+        mock_s = _mock_settings(tag_model_enabled=False)
+        avail_client = _mock_http_client(available=True)
+
+        with (
+            patch("worker.tagging.settings", mock_s),
+            patch("worker.tagging.get_toggle", new_callable=AsyncMock, return_value=True),
+            patch("worker.tagging.get_float_setting", new_callable=AsyncMock, side_effect=lambda key, default: default),
+            patch("worker.tagging.AsyncSessionLocal", fake_db),
+            patch("worker.tagging.resolve_blob_path", return_value=fake_path),
+            patch("worker.tagging.httpx.AsyncClient") as mock_cls,
+        ):
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=avail_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await tag_job({}, gallery_id=1)
+
+        assert result["status"] == "done"
+        assert result["tagged"] >= 1
+
+    async def test_tag_job_uses_runtime_thresholds_from_redis(self, tmp_path):
+        """Thresholds must come from the Redis runtime settings, not env-only
+        config, so admins can tune them without restarting the worker."""
+        from worker.tagging import tag_job
+
+        fake_path = tmp_path / "img.jpg"
+        fake_path.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        blob = _make_mock_blob()
+        img = _make_mock_image(img_id=1, gallery_id=1, blob=blob)
+        fake_db = _make_session_factory_from_mock(_make_mock_session(images=[img]))
+
+        mock_s = _mock_settings(tag_model_enabled=True)
+        avail_client = _mock_http_client(available=True)
+
+        runtime_thresholds = {
+            "setting:tag_general_threshold": 0.7,
+            "setting:tag_character_threshold": 0.9,
+        }
+
+        with (
+            patch("worker.tagging.settings", mock_s),
+            patch("worker.tagging.get_toggle", new_callable=AsyncMock, return_value=True),
+            patch(
+                "worker.tagging.get_float_setting",
+                new_callable=AsyncMock,
+                side_effect=lambda key, default: runtime_thresholds.get(key, default),
+            ),
+            patch("worker.tagging.AsyncSessionLocal", fake_db),
+            patch("worker.tagging.resolve_blob_path", return_value=fake_path),
+            patch("worker.tagging.httpx.AsyncClient") as mock_cls,
+        ):
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=avail_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await tag_job({}, gallery_id=1)
+
+        assert result["status"] == "done"
+        predict_payload = avail_client.post.await_args.kwargs["json"]
+        assert predict_payload["general_threshold"] == 0.7
+        assert predict_payload["character_threshold"] == 0.9
+
+
+# ---------------------------------------------------------------------------
 # Regression: edge case #211 — tagger transient outage must raise, not skip
 # ---------------------------------------------------------------------------
 
@@ -353,11 +471,11 @@ class TestTaggerUnavailableRaisesForRetry:
     """tag_job must raise RuntimeError on transient outage so SAQ retries — edge case #211."""
 
     async def test_enabled_false_still_returns_skipped(self):
-        """TAG_MODEL_ENABLED=false is a permanent skip, not a transient error."""
+        """ai tagging disabled is a permanent skip, not a transient error."""
         from worker.tagging import tag_job
 
         mock_s = _mock_settings(tag_model_enabled=False)
-        with patch("worker.tagging.settings", mock_s):
+        with patch("worker.tagging.settings", mock_s), _patch_runtime_settings(enabled=False):
             result = await tag_job({}, gallery_id=99)
 
         assert result["status"] == "skipped"

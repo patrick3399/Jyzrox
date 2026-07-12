@@ -602,6 +602,52 @@ class TestFeatureTogglesNumeric:
             )
         assert resp.status_code == 400
 
+    async def test_patch_tag_general_threshold_sets_runtime_value(self, client, mock_redis):
+        """AIT-005: tag_general_threshold must be runtime-adjustable via PATCH."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/tag_general_threshold",
+                json={"value": 0.5},
+            )
+        assert resp.status_code == 200
+        data = resp.json()
+        assert data["feature"] == "tag_general_threshold"
+        assert data["value"] == 0.5
+        mock_redis.set.assert_awaited_with("setting:tag_general_threshold", "0.5")
+
+    async def test_patch_tag_character_threshold_sets_runtime_value(self, client, mock_redis):
+        """AIT-005: tag_character_threshold must be runtime-adjustable via PATCH."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.patch(
+                "/api/settings/features/tag_character_threshold",
+                json={"value": 0.9},
+            )
+        assert resp.status_code == 200
+        assert resp.json()["value"] == 0.9
+
+    async def test_patch_tag_threshold_out_of_range_returns_400(self, client, mock_redis):
+        """Tag thresholds outside (0, 1] must be rejected."""
+        mock_redis.set = AsyncMock(return_value=True)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            for bad in (0, -0.1, 1.5):
+                resp = await client.patch(
+                    "/api/settings/features/tag_general_threshold",
+                    json={"value": bad},
+                )
+                assert resp.status_code == 400, f"value {bad} must be rejected"
+
+    async def test_get_features_includes_tag_thresholds(self, client, mock_redis):
+        """AIT-005: GET features must expose the runtime tag thresholds."""
+        mock_redis.get = AsyncMock(return_value=None)
+        with patch("routers.settings.get_redis", return_value=mock_redis):
+            resp = await client.get("/api/settings/features")
+        assert resp.status_code == 200
+        data = resp.json()
+        assert "tag_general_threshold" in data
+        assert "tag_character_threshold" in data
+
 
 # ---------------------------------------------------------------------------
 # Site Credential Endpoint Tests
