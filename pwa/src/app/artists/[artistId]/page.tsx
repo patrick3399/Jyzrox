@@ -165,8 +165,8 @@ export default function ArtistDetailPage() {
           disabled={isFollowing || isUnfollowing}
           className={`flex items-center gap-2 px-4 py-2 rounded-lg text-sm font-medium transition-colors shrink-0 ${
             isFollowed
-              ? 'bg-vault-accent text-indigo-300 hover:bg-red-500/20 hover:text-red-400'
-              : 'bg-indigo-600 text-white hover:bg-indigo-500'
+              ? 'bg-vault-accent/20 text-vault-accent hover:bg-red-500/20 hover:text-red-400'
+              : 'bg-vault-accent text-vault-accent-fg hover:bg-vault-accent-hover'
           }`}
         >
           <Heart size={14} className={isFollowed ? 'fill-current' : ''} />

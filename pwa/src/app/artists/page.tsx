@@ -142,7 +142,7 @@ function ArtistsPageInner() {
           >
             {t('artists.viewFollowed')}
             {followedTotal ? (
-              <span className="ml-2 px-1.5 py-0.5 text-xs rounded-full bg-indigo-500/20 text-indigo-300">
+              <span className="ml-2 px-1.5 py-0.5 text-xs rounded-full bg-vault-accent/20 text-vault-accent">
                 {followedTotal}
               </span>
             ) : null}

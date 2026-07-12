@@ -110,7 +110,7 @@ function CollectionDetailInner() {
               ) : (
                 <>
                   <h1
-                    className="text-2xl font-bold text-vault-text cursor-pointer hover:text-indigo-400 transition-colors truncate"
+                    className="text-2xl font-bold text-vault-text cursor-pointer hover:text-vault-accent transition-colors truncate"
                     onClick={handleStartEditName}
                     title={t('collections.edit')}
                   >

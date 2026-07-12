@@ -227,7 +227,7 @@ function JobRow({
           )}
           <div className="flex flex-wrap items-center gap-3 text-xs text-vault-text-muted">
             {job.subscription_id && (
-              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-indigo-500/15 text-indigo-400 text-[11px] font-medium">
+              <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-vault-accent/15 text-vault-accent text-[11px] font-medium">
                 <RefreshCw className="w-3 h-3" />
                 {t('queue.subscription')}
               </span>

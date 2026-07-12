@@ -2,7 +2,7 @@ import { useState, useEffect, useMemo, useCallback, type MouseEvent } from 'reac
 import { usePathname } from 'next/navigation'
 import { useTheme } from 'next-themes'
 import useSWR from 'swr'
-import { Sun, Moon, Monitor } from 'lucide-react'
+import { Sun, Moon, MoonStar, Monitor, Palette } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { useProfile } from '@/hooks/useProfile'
 import { t } from '@/lib/i18n'
@@ -21,7 +21,8 @@ const THEME_CYCLE = ['light', 'dark', 'amoled', 'system'] as const
 const THEME_ICON: Record<string, typeof Sun> = {
   light: Sun,
   dark: Moon,
-  amoled: Moon,
+  amoled: MoonStar,
+  custom: Palette,
   system: Monitor,
 }
 
@@ -29,6 +30,7 @@ const THEME_LABEL: Record<string, () => string> = {
   light: () => t('common.light'),
   dark: () => t('common.dark'),
   amoled: () => t('common.amoled'),
+  custom: () => t('settings.themeCustom'),
   system: () => t('common.system'),
 }
 

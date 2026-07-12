@@ -6,6 +6,7 @@ import { t } from '@/lib/i18n'
 import { BottomTabConfig } from '@/components/BottomTabConfig'
 import { SidebarConfig } from '@/components/SidebarConfig'
 import { DashboardLinksConfig } from '@/components/DashboardLinksConfig'
+import { ThemeSection } from '@/components/settings/ThemeSection'
 import { useProfile } from '@/hooks/useProfile'
 
 export default function AppearanceSettingsPage() {
@@ -20,6 +21,7 @@ export default function AppearanceSettingsPage() {
       </h1>
 
       <div className="space-y-3">
+        <ThemeSection />
         {/* Bottom Tab */}
         <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
           <div className="px-5 pt-4">

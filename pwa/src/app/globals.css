@@ -19,6 +19,8 @@
   --color-vault-text-muted: var(--color-text-muted);
   --color-vault-accent: var(--color-accent);
   --color-vault-input: var(--color-input);
+  --color-vault-accent-hover: var(--color-accent-hover);
+  --color-vault-accent-fg: var(--color-accent-fg);
 }
 
 :root {
@@ -29,9 +31,11 @@
   --color-border-hover: #c8c8c8;
   --color-text: #171717;
   --color-text-secondary: #737373;
-  --color-text-muted: #a3a3a3;
+  --color-text-muted: #767676;
   --color-accent: #6366f1;
   --color-input: #f5f5f5;
+  --color-accent-hover: color-mix(in srgb, var(--color-accent) 85%, white);
+  --color-accent-fg: #ffffff;
 }
 
 .dark {
@@ -42,7 +46,7 @@
   --color-border-hover: #444444;
   --color-text: #e5e5e5;
   --color-text-secondary: #a3a3a3;
-  --color-text-muted: #737373;
+  --color-text-muted: #8a8a8a;
   --color-accent: #6366f1;
   --color-input: #1a1a1a;
 }
@@ -55,7 +59,7 @@
   --color-border-hover: #333333;
   --color-text: #e5e5e5;
   --color-text-secondary: #a3a3a3;
-  --color-text-muted: #737373;
+  --color-text-muted: #8a8a8a;
   --color-accent: #6366f1;
   --color-input: #0a0a0a;
 }
@@ -370,5 +374,17 @@ html {
 @media (hover: none) {
   .novel-block-pencil {
     display: none !important;
+  }
+}
+
+/* ── Reduced motion ─────────────────────────────────────────────────── */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.01ms !important;
+    scroll-behavior: auto !important;
   }
 }

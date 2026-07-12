@@ -70,7 +70,7 @@ function ShareTargetContent() {
         {/* Header */}
         <div className="flex items-center gap-3 mb-6">
           <div className="p-2 rounded-lg bg-vault-accent">
-            <Share2 className="w-5 h-5 text-indigo-400" />
+            <Share2 className="w-5 h-5 text-vault-accent" />
           </div>
           <div>
             <h1 className="text-lg font-semibold text-white">{t('share.title')}</h1>
@@ -85,7 +85,7 @@ function ShareTargetContent() {
               {/* Source badge */}
               <div className="flex items-center gap-2">
                 <span className="text-xs text-vault-text-muted">{t('share.source')}:</span>
-                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-vault-accent text-indigo-300">
+                <span className="text-xs font-medium px-2 py-0.5 rounded-full bg-vault-accent/20 text-vault-accent">
                   {source}
                 </span>
               </div>
@@ -101,7 +101,7 @@ function ShareTargetContent() {
                 <button
                   onClick={handleDownload}
                   disabled={downloading}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-indigo-600 hover:bg-indigo-500 disabled:opacity-60 disabled:cursor-not-allowed text-white font-medium text-sm transition-colors"
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-3 rounded-lg bg-vault-accent hover:bg-vault-accent-hover disabled:opacity-60 disabled:cursor-not-allowed text-vault-accent-fg font-medium text-sm transition-colors"
                 >
                   <Download className="w-4 h-4" />
                   {downloading ? t('share.downloading') : t('share.download')}
