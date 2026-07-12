@@ -73,6 +73,10 @@ services:
     stop_grace_period: 30s
     environment:
       <<: *backend-env
+      # Cap glibc per-thread arenas like the worker: the api memory floor
+      # ratchets up and never returns to the OS (STAB-011); bursty request
+      # allocations fragment arenas the same way heavy worker jobs did.
+      MALLOC_ARENA_MAX: ${MALLOC_ARENA_MAX:-2}
     env_file: "${JYZROX_ENV_FILE:-.env}"
     volumes:
       - app_data:/data
