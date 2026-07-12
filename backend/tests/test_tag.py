@@ -1079,6 +1079,81 @@ class TestRetagEndpoints:
         assert resp.status_code == 400
         assert "not enabled" in resp.json()["detail"]
 
+    async def test_clear_ai_removes_ai_tags_but_preserves_manual_and_metadata(self, client, db_session):
+        """POST /api/tags/clear-ai/{id} must delete gallery_tags rows with
+        source='ai', all image_tags rows, and AI entries in image tags_array,
+        while keeping manual/metadata gallery tags and non-AI image tags — AIT-006.
+        """
+        import json as _json
+        from unittest.mock import AsyncMock, patch
+
+        gid = await _insert_gallery(db_session, source_id="clear_ai_endpoint")
+        tid_ai = await _insert_tag(db_session, "general", "ai_only")
+        tid_manual = await _insert_tag(db_session, "general", "manual_kept")
+        tid_meta = await _insert_tag(db_session, "artist", "meta_kept")
+        for tid, source in ((tid_ai, "ai"), (tid_manual, "manual"), (tid_meta, "metadata")):
+            await db_session.execute(
+                text("INSERT INTO gallery_tags (gallery_id, tag_id, confidence, source) VALUES (:g, :t, 0.9, :s)"),
+                {"g": gid, "t": tid, "s": source},
+            )
+        await db_session.execute(
+            text(
+                "INSERT OR IGNORE INTO blobs (sha256, file_size, extension, storage) VALUES ('sha_clear_ai', 1, '.jpg', 'cas')"
+            )
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO images (gallery_id, page_num, filename, blob_sha256, tags_array)"
+                " VALUES (:g, 1, '001.jpg', 'sha_clear_ai', :tags)"
+            ),
+            {"g": gid, "tags": '["general:ai_only", "custom:kept"]'},
+        )
+        img_id = (await db_session.execute(text("SELECT id FROM images WHERE gallery_id = :g"), {"g": gid})).scalar()
+        await db_session.execute(
+            text("INSERT INTO image_tags (image_id, tag_id, confidence) VALUES (:i, :t, 0.9)"),
+            {"i": img_id, "t": tid_ai},
+        )
+        await db_session.commit()
+
+        with patch("worker.tag_helpers.rebuild_gallery_tags_array", new=AsyncMock(return_value=[])):
+            resp = await client.post(f"/api/tags/clear-ai/{gid}")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "ok"
+
+        remaining = (
+            await db_session.execute(
+                text(
+                    "SELECT t.name, gt.source FROM gallery_tags gt"
+                    " JOIN tags t ON t.id = gt.tag_id WHERE gt.gallery_id = :g"
+                ),
+                {"g": gid},
+            )
+        ).all()
+        assert {r.source for r in remaining} == {"manual", "metadata"}
+        assert "ai_only" not in {r.name for r in remaining}
+
+        it_count = (
+            await db_session.execute(text("SELECT COUNT(*) FROM image_tags WHERE image_id = :i"), {"i": img_id})
+        ).scalar()
+        assert it_count == 0
+
+        tags_array = (
+            await db_session.execute(text("SELECT tags_array FROM images WHERE id = :i"), {"i": img_id})
+        ).scalar()
+        assert _json.loads(tags_array) == ["custom:kept"]
+
+    async def test_clear_ai_nonexistent_gallery_returns_404(self, client):
+        """clear-ai on a missing gallery should 404."""
+        resp = await client.post("/api/tags/clear-ai/99999")
+        assert resp.status_code == 404
+
+    async def test_clear_ai_requires_admin(self, make_client):
+        """Non-admin users should get 403 for clear-ai."""
+        async with make_client(user_id=1, role="viewer") as ac:
+            resp = await ac.post("/api/tags/clear-ai/1")
+        assert resp.status_code == 403
+
     async def test_retag_requires_admin(self, make_client):
         """Non-admin users should get 403."""
         async with make_client(user_id=1, role="viewer") as ac:

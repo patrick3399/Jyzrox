@@ -485,6 +485,8 @@ class TestTaggingJobEmitsEvent:
         mock_emit = AsyncMock()
         with (
             patch("worker.tagging.settings") as mock_settings,
+            patch("worker.tagging.get_toggle", AsyncMock(return_value=True)),
+            patch("worker.tagging.get_float_setting", AsyncMock(side_effect=lambda key, default: default)),
             patch("worker.tagging._tagger_available", AsyncMock(return_value=False)),
             patch("core.events.emit_safe", mock_emit),
         ):
@@ -501,6 +503,7 @@ class TestTaggingJobEmitsEvent:
         mock_emit = AsyncMock()
         with (
             patch("worker.tagging.settings") as mock_settings,
+            patch("worker.tagging.get_toggle", AsyncMock(return_value=False)),
             patch("core.events.emit_safe", mock_emit),
         ):
             mock_settings.tag_model_enabled = False
@@ -532,10 +535,12 @@ class TestTaggingJobEmitsEvent:
         mock_emit = AsyncMock()
         with (
             patch("worker.tagging.settings") as mock_settings,
+            patch("worker.tagging.get_toggle", AsyncMock(return_value=True)),
+            patch("worker.tagging.get_float_setting", AsyncMock(side_effect=lambda key, default: default)),
             patch("worker.tagging._tagger_available", AsyncMock(return_value=True)),
             patch("worker.tagging.AsyncSessionLocal", return_value=session),
             patch("worker.tagging._aggregate_to_gallery", AsyncMock(return_value=0)),
-            patch("worker.tag_helpers.rebuild_gallery_tags_array", AsyncMock()),
+            patch("worker.tagging.rebuild_gallery_tags_array", AsyncMock()),
             patch("core.events.emit_safe", mock_emit),
         ):
             mock_settings.tag_model_enabled = True
@@ -574,10 +579,12 @@ class TestTaggingJobEmitsEvent:
         result = None
         with (
             patch("worker.tagging.settings") as mock_settings,
+            patch("worker.tagging.get_toggle", AsyncMock(return_value=True)),
+            patch("worker.tagging.get_float_setting", AsyncMock(side_effect=lambda key, default: default)),
             patch("worker.tagging._tagger_available", AsyncMock(return_value=True)),
             patch("worker.tagging.AsyncSessionLocal", return_value=session),
             patch("worker.tagging._aggregate_to_gallery", AsyncMock(return_value=0)),
-            patch("worker.tag_helpers.rebuild_gallery_tags_array", AsyncMock()),
+            patch("worker.tagging.rebuild_gallery_tags_array", AsyncMock()),
             patch("core.events.emit_safe", AsyncMock(side_effect=RuntimeError("bus error"))),
         ):
             mock_settings.tag_model_enabled = True

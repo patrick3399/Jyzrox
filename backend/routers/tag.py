@@ -776,6 +776,31 @@ async def retag_gallery(
     return {"status": "enqueued", "gallery_id": gallery_id}
 
 
+@router.post("/clear-ai/{gallery_id}")
+async def clear_gallery_ai_tags(
+    gallery_id: int,
+    auth: dict = Depends(_admin),
+    db: AsyncSession = Depends(get_db),
+):
+    """Remove all AI-derived tags from a gallery, keeping manual/metadata tags (AIT-006)."""
+    from worker.tag_helpers import clear_ai_tags, rebuild_gallery_tags_array
+
+    gallery = await db.get(Gallery, gallery_id)
+    if not gallery:
+        raise HTTPException(status_code=404, detail="Gallery not found")
+
+    removed = await clear_ai_tags(db, gallery_id)
+    await rebuild_gallery_tags_array(db, gallery_id)
+    await db.commit()
+
+    from core.events import EventType, emit_safe
+
+    await emit_safe(
+        EventType.TAGS_UPDATED, actor_user_id=auth["user_id"], resource_type="gallery", resource_id=gallery_id
+    )
+    return {"status": "ok", "removed": removed}
+
+
 @router.post("/retag-all")
 async def retag_all_galleries(
     request: Request,

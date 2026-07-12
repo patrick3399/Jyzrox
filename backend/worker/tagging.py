@@ -11,6 +11,7 @@ from db.models import GalleryTag, Image, ImageTag, Tag
 from services.cas import resolve_blob_path
 from services.settings_store import get_float_setting, get_toggle
 from worker.constants import _IMAGE_EXTS, logger
+from worker.tag_helpers import clear_ai_tags, rebuild_gallery_tags_array
 
 
 async def _tagger_available(client: httpx.AsyncClient) -> bool:
@@ -135,6 +136,10 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
                 .all()
             )
 
+            # Retire stale AI tags first so threshold/model changes shrink the
+            # tag set instead of only ever growing it (AIT-006)
+            await clear_ai_tags(session, gallery_id)
+
             for img in images:
                 blob = img.blob
                 if not blob:
@@ -218,8 +223,6 @@ async def tag_job(ctx: dict, gallery_id: int) -> dict:
 
             # Aggregate AI tags to gallery level
             count = await _aggregate_to_gallery(session, gallery_id, general_threshold)
-            from worker.tag_helpers import rebuild_gallery_tags_array
-
             await rebuild_gallery_tags_array(session, gallery_id)
             logger.info("[tag] gallery_id=%d: %d tags aggregated to gallery", gallery_id, count)
 

@@ -463,6 +463,47 @@ class TestAiTaggingRuntimeSettings:
 
 
 # ---------------------------------------------------------------------------
+# Regression: AIT-006 — retag must clear stale AI tags before writing
+# ---------------------------------------------------------------------------
+
+
+class TestRetagClearsStaleAiTags:
+    """Retag only ever added tags: raising the threshold or switching models
+    left stale low-confidence AI tags in place forever — AIT-006."""
+
+    async def test_retag_clears_stale_ai_tags_before_writing(self, tmp_path):
+        """tag_job must clear the gallery's AI-derived tags before upserting
+        fresh predictions."""
+        from worker.tagging import tag_job
+
+        fake_path = tmp_path / "img.jpg"
+        fake_path.write_bytes(b"\xff\xd8\xff" + b"\x00" * 100)
+
+        blob = _make_mock_blob()
+        img = _make_mock_image(img_id=1, gallery_id=7, blob=blob)
+        fake_db = _make_session_factory_from_mock(_make_mock_session(images=[img]))
+
+        mock_s = _mock_settings(tag_model_enabled=True)
+        avail_client = _mock_http_client(available=True)
+
+        with (
+            patch("worker.tagging.settings", mock_s),
+            _patch_runtime_settings(),
+            patch("worker.tagging.clear_ai_tags", new_callable=AsyncMock) as mock_clear,
+            patch("worker.tagging.AsyncSessionLocal", fake_db),
+            patch("worker.tagging.resolve_blob_path", return_value=fake_path),
+            patch("worker.tagging.httpx.AsyncClient") as mock_cls,
+        ):
+            mock_cls.return_value.__aenter__ = AsyncMock(return_value=avail_client)
+            mock_cls.return_value.__aexit__ = AsyncMock(return_value=False)
+            result = await tag_job({}, gallery_id=7)
+
+        assert result["status"] == "done"
+        mock_clear.assert_awaited_once()
+        assert mock_clear.await_args.args[1] == 7
+
+
+# ---------------------------------------------------------------------------
 # Regression: edge case #211 — tagger transient outage must raise, not skip
 # ---------------------------------------------------------------------------
 
