@@ -224,6 +224,110 @@ class TestExportKohya:
 
 
 # ---------------------------------------------------------------------------
+# Regression: AIT-001 — Kohya caption format must follow trainer conventions
+# ---------------------------------------------------------------------------
+
+
+class TestExportCaptionFormat:
+    """Caption .txt files must strip namespaces, filter non-trainable
+    namespaces, and be deterministically sorted — AIT-001."""
+
+    async def _export_caption(self, client, db_session, db_session_factory, gallery_tags, image_tags, query=""):
+        """Insert a one-image gallery and return the caption .txt content."""
+        gid = await _insert_gallery(db_session, title=f"Caption {gallery_tags}", tags_array=gallery_tags)
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+            tmp_path = f.name
+
+        try:
+            await _insert_image(
+                db_session,
+                gid,
+                page_num=1,
+                filename="page_001.jpg",
+                file_path=tmp_path,
+                tags_array=image_tags,
+            )
+            with patch("routers.export.async_session", db_session_factory):
+                resp = await client.get(f"/api/export/kohya/{gid}{query}")
+
+            assert resp.status_code == 200
+            buf = io.BytesIO(resp.content)
+            with zipfile.ZipFile(buf) as zf:
+                txt_names = [n for n in zf.namelist() if n.endswith(".txt")]
+                assert len(txt_names) == 1
+                return zf.read(txt_names[0]).decode()
+        finally:
+            os.unlink(tmp_path)
+
+    async def test_caption_strips_namespace_prefix_and_sorts_stably(self, client, db_session, db_session_factory):
+        """'namespace:name' tags must be written as bare names, sorted alphabetically.
+
+        Before the fix, raw 'general:1girl' strings were joined in set() iteration
+        order, producing captions trainers cannot use.
+        """
+        caption = await self._export_caption(
+            client,
+            db_session,
+            db_session_factory,
+            gallery_tags='["general:zebra", "character:alice"]',
+            image_tags='["artist:bob"]',
+        )
+        assert caption == "alice, bob, zebra"
+
+    async def test_caption_excludes_rating_language_metadata_namespaces_by_default(
+        self, client, db_session, db_session_factory
+    ):
+        """rating:/language:/metadata: tags are not trainable concepts and must be
+        excluded from captions by default."""
+        caption = await self._export_caption(
+            client,
+            db_session,
+            db_session_factory,
+            gallery_tags='["rating:questionable", "language:japanese", "metadata:translated", "general:1girl"]',
+            image_tags="[]",
+        )
+        assert caption == "1girl"
+
+    async def test_caption_exclude_namespaces_override_keeps_all(self, client, db_session, db_session_factory):
+        """Passing an empty exclude_namespaces query param disables filtering."""
+        caption = await self._export_caption(
+            client,
+            db_session,
+            db_session_factory,
+            gallery_tags='["rating:safe", "general:1girl"]',
+            image_tags="[]",
+            query="?exclude_namespaces=",
+        )
+        assert caption == "1girl, safe"
+
+    async def test_caption_underscores_to_spaces_option(self, client, db_session, db_session_factory):
+        """underscores_to_spaces=true converts booru underscores to spaces."""
+        caption = await self._export_caption(
+            client,
+            db_session,
+            db_session_factory,
+            gallery_tags='["general:long_hair"]',
+            image_tags="[]",
+            query="?underscores_to_spaces=true",
+        )
+        assert caption == "long hair"
+
+    async def test_caption_bare_tags_without_namespace_are_kept(self, client, db_session, db_session_factory):
+        """Tags without a ':' separator pass through unchanged (deduplicated with
+        stripped namespaced twins)."""
+        caption = await self._export_caption(
+            client,
+            db_session,
+            db_session_factory,
+            gallery_tags='["1girl", "general:1girl"]',
+            image_tags="[]",
+        )
+        assert caption == "1girl"
+
+
+# ---------------------------------------------------------------------------
 # Regression: edge case #129 — export ZIP arcname path traversal
 # ---------------------------------------------------------------------------
 

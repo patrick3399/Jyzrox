@@ -162,6 +162,44 @@ def _patched_array_result(self, dialect, coltype):
 
 SA_ARRAY.result_processor = _patched_array_result
 
+# postgresql.ARRAY overrides bind/result_processor, so the base-class patch
+# above never fires for models using it (e.g. Gallery.tags_array) — patch it too
+from sqlalchemy.dialects.postgresql import ARRAY as PG_ARRAY
+
+_original_pg_array_bind = PG_ARRAY.bind_processor
+
+
+def _patched_pg_array_bind(self, dialect):
+    if dialect.name != "postgresql":
+
+        def process(value):
+            if value is not None:
+                return _json.dumps(value) if not isinstance(value, str) else value
+            return value
+
+        return process
+    return _original_pg_array_bind(self, dialect)
+
+
+PG_ARRAY.bind_processor = _patched_pg_array_bind
+
+_original_pg_array_result = PG_ARRAY.result_processor
+
+
+def _patched_pg_array_result(self, dialect, coltype):
+    if dialect.name != "postgresql":
+
+        def process(value):
+            if value is not None and isinstance(value, str):
+                return _json.loads(value)
+            return value
+
+        return process
+    return _original_pg_array_result(self, dialect, coltype)
+
+
+PG_ARRAY.result_processor = _patched_pg_array_result
+
 # JSONB → store as JSON text in SQLite
 from sqlalchemy.dialects.postgresql import JSONB as PG_JSONB
 

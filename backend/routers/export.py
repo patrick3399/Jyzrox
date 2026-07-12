@@ -17,14 +17,49 @@ from services.cas import resolve_blob_path
 
 _SAFE_ARCNAME = re.compile(r"[^\w.\-]")
 
+# Namespaces that are not trainable concepts and pollute captions
+_DEFAULT_EXCLUDED_NAMESPACES = "rating,language,metadata"
+
 router = APIRouter(tags=["export"])
 
 _member = require_role("member")
 
 
+def _caption_tags(
+    tags: set[str],
+    excluded_namespaces: frozenset[str],
+    underscores_to_spaces: bool,
+) -> list[str]:
+    """Normalize raw 'namespace:name' tag strings into trainer caption tags.
+
+    Strips namespace prefixes, drops excluded namespaces, optionally converts
+    booru underscores to spaces, and returns a deterministically sorted list.
+    """
+    out: set[str] = set()
+    for raw in tags:
+        ns, sep, name = raw.partition(":")
+        if not sep:
+            ns, name = "", raw
+        if ns in excluded_namespaces:
+            continue
+        tag = name.strip()
+        if not tag:
+            continue
+        if underscores_to_spaces:
+            tag = tag.replace("_", " ")
+        out.add(tag)
+    return sorted(out)
+
+
 @router.get("/kohya/{gallery_id}")
-async def export_kohya(gallery_id: int, auth: dict = Depends(_member)):
+async def export_kohya(
+    gallery_id: int,
+    exclude_namespaces: str = _DEFAULT_EXCLUDED_NAMESPACES,
+    underscores_to_spaces: bool = False,
+    auth: dict = Depends(_member),
+):
     """Generates a zip file containing images and corresponding .txt files with tags."""
+    excluded = frozenset(ns.strip() for ns in exclude_namespaces.split(",") if ns.strip())
 
     async with async_session() as session:
         # Get Gallery with access control
@@ -88,7 +123,7 @@ async def export_kohya(gallery_id: int, auth: dict = Depends(_member)):
             # Create tag text file
             base, _ = os.path.splitext(arcname)
             txt_filename = base + ".txt"
-            tag_string = ", ".join(all_tags)
+            tag_string = ", ".join(_caption_tags(all_tags, excluded, underscores_to_spaces))
 
             zip_file.writestr(txt_filename, tag_string)
 
