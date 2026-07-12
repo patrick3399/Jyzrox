@@ -1,5 +1,6 @@
 """Training Data Export (Kohya format)."""
 
+import json
 import os
 import re
 import zipfile
@@ -19,6 +20,9 @@ _SAFE_ARCNAME = re.compile(r"[^\w.\-]")
 
 # Namespaces that are not trainable concepts and pollute captions
 _DEFAULT_EXCLUDED_NAMESPACES = "rating,language,metadata"
+
+# Formats kohya_ss / ai-toolkit / OneTrainer accept as training images
+_TRAINABLE_EXTS = {".jpg", ".jpeg", ".png", ".webp"}
 
 router = APIRouter(tags=["export"])
 
@@ -103,6 +107,7 @@ async def export_kohya(
 
     # Create Zip in memory
     zip_buffer = BytesIO()
+    excluded_files: list[dict] = []
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for i, img in enumerate(images):
             file_path = _file_path(img)
@@ -110,6 +115,12 @@ async def export_kohya(
                 continue
 
             raw_name = img.filename if img.filename else f"image_{i}"
+
+            ext = ((img.blob.extension if img.blob else None) or os.path.splitext(raw_name)[1]).lower()
+            if ext not in _TRAINABLE_EXTS:
+                excluded_files.append({"filename": raw_name, "reason": "unsupported_extension"})
+                continue
+
             arcname = _SAFE_ARCNAME.sub("_", os.path.basename(raw_name)) or f"image_{i}"
 
             # Add image file to zip
@@ -126,6 +137,9 @@ async def export_kohya(
             tag_string = ", ".join(_caption_tags(all_tags, excluded, underscores_to_spaces))
 
             zip_file.writestr(txt_filename, tag_string)
+
+        if excluded_files:
+            zip_file.writestr("manifest.json", json.dumps({"excluded": excluded_files}, indent=2))
 
     zip_buffer.seek(0)
 

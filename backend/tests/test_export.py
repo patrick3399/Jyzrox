@@ -328,6 +328,78 @@ class TestExportCaptionFormat:
 
 
 # ---------------------------------------------------------------------------
+# Regression: AIT-003 — export must exclude non-trainable file formats
+# ---------------------------------------------------------------------------
+
+
+class TestExportExtensionFilter:
+    """Only trainer-usable image formats (jpg/png/webp) may enter the ZIP;
+    everything else is excluded and recorded in manifest.json — AIT-003."""
+
+    async def test_export_excludes_gif_and_records_manifest(self, client, db_session, db_session_factory):
+        """A .gif page must not enter the ZIP (trainers reject it) and must be
+        listed in manifest.json instead.
+
+        Before the fix, gif/video/avif/heic files were zipped as-is.
+        """
+        import json
+
+        gid = await _insert_gallery(db_session, title="Ext Filter Gallery", tags_array='["general:1girl"]')
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+            jpg_path = f.name
+        with tempfile.NamedTemporaryFile(suffix=".gif", delete=False) as f:
+            f.write(b"GIF89a" + b"\x00" * 100)
+            gif_path = f.name
+
+        try:
+            await _insert_image(db_session, gid, page_num=1, filename="001.jpg", file_path=jpg_path)
+            await _insert_image(db_session, gid, page_num=2, filename="002.gif", file_path=gif_path)
+
+            with patch("routers.export.async_session", db_session_factory):
+                resp = await client.get(f"/api/export/kohya/{gid}")
+
+            assert resp.status_code == 200
+            buf = io.BytesIO(resp.content)
+            with zipfile.ZipFile(buf) as zf:
+                names = zf.namelist()
+                assert any(n.endswith("001.jpg") for n in names)
+                assert not any(n.endswith("002.gif") for n in names), "gif must be excluded from export"
+                assert not any(n.endswith("002.txt") for n in names), "excluded image must not get a caption"
+                assert "manifest.json" in names
+                manifest = json.loads(zf.read("manifest.json"))
+                excluded = manifest["excluded"]
+                assert len(excluded) == 1
+                assert excluded[0]["filename"] == "002.gif"
+                assert excluded[0]["reason"] == "unsupported_extension"
+        finally:
+            os.unlink(jpg_path)
+            os.unlink(gif_path)
+
+    async def test_export_all_trainable_formats_has_no_manifest(self, client, db_session, db_session_factory):
+        """When every page is a trainable format, no manifest.json is emitted."""
+        gid = await _insert_gallery(db_session, title="Clean Ext Gallery")
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+            tmp_path = f.name
+
+        try:
+            await _insert_image(db_session, gid, page_num=1, filename="001.jpg", file_path=tmp_path)
+
+            with patch("routers.export.async_session", db_session_factory):
+                resp = await client.get(f"/api/export/kohya/{gid}")
+
+            assert resp.status_code == 200
+            buf = io.BytesIO(resp.content)
+            with zipfile.ZipFile(buf) as zf:
+                assert "manifest.json" not in zf.namelist()
+        finally:
+            os.unlink(tmp_path)
+
+
+# ---------------------------------------------------------------------------
 # Regression: edge case #129 — export ZIP arcname path traversal
 # ---------------------------------------------------------------------------
 
