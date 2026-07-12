@@ -19,6 +19,7 @@ from core.auth import require_auth, require_role
 from core.database import async_session, get_db
 from core.utils import escape_like
 from db.models import BlockedTag, Gallery, GalleryTag, Tag, TagAlias, TagImplication, TagTranslation
+from services.settings_store import get_toggle
 
 _s2twp = OpenCC("s2twp")
 
@@ -764,8 +765,8 @@ async def retag_gallery(
     """Enqueue AI tagging job for all images in a gallery."""
     from core.config import settings as app_settings
 
-    if not app_settings.tag_model_enabled:
-        raise HTTPException(status_code=400, detail="AI tagging is not enabled (TAG_MODEL_ENABLED=false)")
+    if not await get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled):
+        raise HTTPException(status_code=400, detail="AI tagging is not enabled")
 
     # Verify gallery exists
     gallery = await db.get(Gallery, gallery_id)
@@ -788,8 +789,8 @@ async def retag_all_galleries(
     """
     from core.config import settings as app_settings
 
-    if not app_settings.tag_model_enabled:
-        raise HTTPException(status_code=400, detail="AI tagging is not enabled (TAG_MODEL_ENABLED=false)")
+    if not await get_toggle("setting:ai_tagging_enabled", app_settings.tag_model_enabled):
+        raise HTTPException(status_code=400, detail="AI tagging is not enabled")
     enqueued = 0
     CHUNK = 1000
     offset = 0

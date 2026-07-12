@@ -14,6 +14,8 @@ Notes on SQLite compatibility:
   GET/DELETE all use standard SQLAlchemy SELECT/DELETE and work fine.
 """
 
+from contextlib import contextmanager
+
 import pytest
 from sqlalchemy import text
 
@@ -968,6 +970,16 @@ class TestAutocompleteTranslation:
 # ---------------------------------------------------------------------------
 
 
+@contextmanager
+def _env_passthrough_toggle():
+    """Patch routers.tag.get_toggle so the env default (monkeypatched
+    settings.tag_model_enabled) drives the gate, without touching Redis."""
+    from unittest.mock import AsyncMock, patch
+
+    with patch("routers.tag.get_toggle", new=AsyncMock(side_effect=lambda key, default: default)):
+        yield
+
+
 class TestRetagEndpoints:
     """POST /api/tags/retag/{gallery_id} and POST /api/tags/retag-all"""
 
@@ -977,16 +989,18 @@ class TestRetagEndpoints:
 
         monkeypatch.setattr(settings, "tag_model_enabled", True)
 
-        resp = await client.post("/api/tags/retag/99999")
+        with _env_passthrough_toggle():
+            resp = await client.post("/api/tags/retag/99999")
         assert resp.status_code == 404
 
     async def test_retag_gallery_tag_model_disabled(self, client, monkeypatch):
-        """When TAG_MODEL_ENABLED is false, retag should return 400."""
+        """When ai tagging is disabled (env default, no Redis override), retag should return 400."""
         from core.config import settings
 
         monkeypatch.setattr(settings, "tag_model_enabled", False)
 
-        resp = await client.post("/api/tags/retag/1")
+        with _env_passthrough_toggle():
+            resp = await client.post("/api/tags/retag/1")
         assert resp.status_code == 400
         assert "not enabled" in resp.json()["detail"]
 
@@ -998,19 +1012,21 @@ class TestRetagEndpoints:
 
         gid = await _insert_gallery(db_session, source_id="retag_test")
 
-        resp = await client.post(f"/api/tags/retag/{gid}")
+        with _env_passthrough_toggle():
+            resp = await client.post(f"/api/tags/retag/{gid}")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "enqueued"
         assert data["gallery_id"] == gid
 
     async def test_retag_all_tag_model_disabled(self, client, monkeypatch):
-        """retag-all when tag model is disabled should return 400."""
+        """retag-all when ai tagging is disabled should return 400."""
         from core.config import settings
 
         monkeypatch.setattr(settings, "tag_model_enabled", False)
 
-        resp = await client.post("/api/tags/retag-all")
+        with _env_passthrough_toggle():
+            resp = await client.post("/api/tags/retag-all")
         assert resp.status_code == 400
 
     async def test_retag_all_enqueues_jobs_for_all_galleries(self, client, db_session, monkeypatch):
@@ -1022,11 +1038,46 @@ class TestRetagEndpoints:
         for i in range(3):
             await _insert_gallery(db_session, source_id=f"retag_all_{i}")
 
-        resp = await client.post("/api/tags/retag-all")
+        with _env_passthrough_toggle():
+            resp = await client.post("/api/tags/retag-all")
         assert resp.status_code == 200
         data = resp.json()
         assert data["status"] == "enqueued"
         assert data["total"] >= 3
+
+    async def test_retag_honors_runtime_toggle_over_env(self, client, db_session, monkeypatch):
+        """AIT-005: turning the ai_tagging_enabled UI toggle on must allow retag
+        even when the TAG_MODEL_ENABLED env default is false.
+
+        Before the fix, the retag endpoints only read the env var, so the
+        admin toggle had no effect on them.
+        """
+        from unittest.mock import AsyncMock, patch
+
+        from core.config import settings
+
+        monkeypatch.setattr(settings, "tag_model_enabled", False)
+        gid = await _insert_gallery(db_session, source_id="retag_runtime_toggle")
+
+        with patch("routers.tag.get_toggle", new=AsyncMock(return_value=True)):
+            resp = await client.post(f"/api/tags/retag/{gid}")
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "enqueued"
+
+    async def test_retag_all_honors_runtime_toggle_off_over_env(self, client, monkeypatch):
+        """AIT-005: toggle off must block retag-all even when env says enabled."""
+        from unittest.mock import AsyncMock, patch
+
+        from core.config import settings
+
+        monkeypatch.setattr(settings, "tag_model_enabled", True)
+
+        with patch("routers.tag.get_toggle", new=AsyncMock(return_value=False)):
+            resp = await client.post("/api/tags/retag-all")
+
+        assert resp.status_code == 400
+        assert "not enabled" in resp.json()["detail"]
 
     async def test_retag_requires_admin(self, make_client):
         """Non-admin users should get 403."""
