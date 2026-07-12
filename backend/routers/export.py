@@ -81,7 +81,7 @@ async def export_kohya(
                 await session.execute(
                     select(Image)
                     .where(Image.gallery_id == gallery_id)
-                    .order_by(Image.page_num.desc())
+                    .order_by(Image.page_num.asc())
                     .options(selectinload(Image.blob))
                 )
             )
@@ -108,6 +108,7 @@ async def export_kohya(
     # Create Zip in memory
     zip_buffer = BytesIO()
     excluded_files: list[dict] = []
+    used_arcnames: set[str] = set()
     with zipfile.ZipFile(zip_buffer, "w", zipfile.ZIP_DEFLATED) as zip_file:
         for i, img in enumerate(images):
             file_path = _file_path(img)
@@ -121,7 +122,12 @@ async def export_kohya(
                 excluded_files.append({"filename": raw_name, "reason": "unsupported_extension"})
                 continue
 
-            arcname = _SAFE_ARCNAME.sub("_", os.path.basename(raw_name)) or f"image_{i}"
+            basename = _SAFE_ARCNAME.sub("_", os.path.basename(raw_name)) or f"image_{i}"
+            page = img.page_num if img.page_num is not None else i + 1
+            arcname = f"{page:04d}_{basename}"
+            if arcname in used_arcnames:
+                arcname = f"{page:04d}_{i}_{basename}"
+            used_arcnames.add(arcname)
 
             # Add image file to zip
             zip_file.write(str(file_path), arcname=arcname)

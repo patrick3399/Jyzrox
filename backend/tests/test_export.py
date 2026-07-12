@@ -158,10 +158,11 @@ class TestExportKohya:
             with zipfile.ZipFile(buf) as zf:
                 names = zf.namelist()
                 # Should contain the image and its companion .txt tag file
-                assert "page_001.jpg" in names
-                assert "page_001.txt" in names
+                # (arcnames carry a page_num prefix since AIT-004)
+                assert "0001_page_001.jpg" in names
+                assert "0001_page_001.txt" in names
                 # Tag file should contain the tag strings
-                tag_content = zf.read("page_001.txt").decode()
+                tag_content = zf.read("0001_page_001.txt").decode()
                 assert len(tag_content) > 0
         finally:
             os.unlink(tmp_path)
@@ -395,6 +396,80 @@ class TestExportExtensionFilter:
             buf = io.BytesIO(resp.content)
             with zipfile.ZipFile(buf) as zf:
                 assert "manifest.json" not in zf.namelist()
+        finally:
+            os.unlink(tmp_path)
+
+
+# ---------------------------------------------------------------------------
+# Regression: AIT-004 — arcname collisions and page ordering
+# ---------------------------------------------------------------------------
+
+
+class TestExportArcnameCollision:
+    """Two images with the same basename must not collide in the ZIP, and
+    pages must be exported in ascending page order — AIT-004."""
+
+    async def test_export_same_basename_images_do_not_collide(self, client, db_session, db_session_factory):
+        """Two pages whose filenames sanitize to the same basename must both
+        appear in the ZIP with distinct arcnames and distinct caption files.
+
+        Before the fix, the second zipfile.write() reused the same arcname,
+        producing a ZIP with duplicate entries and clobbered .txt captions.
+        """
+        gid = await _insert_gallery(db_session, title="Collision Gallery", tags_array='["general:1girl"]')
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+            path_a = f.name
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(b"\xff\xd8\xff\xe0" + b"\x11" * 100)
+            path_b = f.name
+
+        try:
+            # Different source dirs, same basename after os.path.basename()
+            await _insert_image(db_session, gid, page_num=1, filename="a/image.jpg", file_path=path_a)
+            await _insert_image(db_session, gid, page_num=2, filename="b/image.jpg", file_path=path_b)
+
+            with patch("routers.export.async_session", db_session_factory):
+                resp = await client.get(f"/api/export/kohya/{gid}")
+
+            assert resp.status_code == 200
+            buf = io.BytesIO(resp.content)
+            with zipfile.ZipFile(buf) as zf:
+                names = zf.namelist()
+                jpg_names = [n for n in names if n.endswith(".jpg")]
+                txt_names = [n for n in names if n.endswith(".txt")]
+                assert len(jpg_names) == 2, f"both same-basename pages must be exported, got {jpg_names}"
+                assert len(set(jpg_names)) == 2, "image arcnames must be unique"
+                assert len(txt_names) == 2, "each page must keep its own caption file"
+                assert len(set(txt_names)) == 2, "caption arcnames must be unique"
+        finally:
+            os.unlink(path_a)
+            os.unlink(path_b)
+
+    async def test_export_pages_ordered_ascending(self, client, db_session, db_session_factory):
+        """ZIP entries must follow ascending page_num (the query previously
+        ordered page_num.desc(), reversing the training set order)."""
+        gid = await _insert_gallery(db_session, title="Order Gallery")
+
+        with tempfile.NamedTemporaryFile(suffix=".jpg", delete=False) as f:
+            f.write(b"\xff\xd8\xff\xe0" + b"\x00" * 100)
+            tmp_path = f.name
+
+        try:
+            await _insert_image(db_session, gid, page_num=2, filename="p2.jpg", file_path=tmp_path)
+            await _insert_image(db_session, gid, page_num=1, filename="p1.jpg", file_path=tmp_path)
+
+            with patch("routers.export.async_session", db_session_factory):
+                resp = await client.get(f"/api/export/kohya/{gid}")
+
+            assert resp.status_code == 200
+            buf = io.BytesIO(resp.content)
+            with zipfile.ZipFile(buf) as zf:
+                jpg_names = [n for n in zf.namelist() if n.endswith(".jpg")]
+                page1_idx = next(i for i, n in enumerate(jpg_names) if "p1" in n)
+                page2_idx = next(i for i, n in enumerate(jpg_names) if "p2" in n)
+                assert page1_idx < page2_idx, f"page 1 must precede page 2, got {jpg_names}"
         finally:
             os.unlink(tmp_path)
 
