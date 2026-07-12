@@ -299,11 +299,11 @@ function EhGalleryDetail() {
       setFavSaving(true)
       try {
         await api.eh.addFavorite(gallery.gid, gallery.token, favcat)
-        toast.success(`Added to Favorites ${favcat}`)
+        toast.success(t('browse.addedToFavorites', { favcat: String(favcat) }))
         setIsFavorited(true)
         setShowFavPicker(false)
       } catch (err) {
-        toast.error(err instanceof Error ? err.message : 'Failed to add favorite')
+        toast.error(err instanceof Error ? err.message : t('browse.addFavoriteFailed'))
       } finally {
         setFavSaving(false)
       }
@@ -316,11 +316,11 @@ function EhGalleryDetail() {
     setFavSaving(true)
     try {
       await api.eh.removeFavorite(gallery.gid, gallery.token)
-      toast.success('Removed from favorites')
+      toast.success(t('browse.removedFromFavorites'))
       setIsFavorited(false)
       setShowFavPicker(false)
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed to remove favorite')
+      toast.error(err instanceof Error ? err.message : t('browse.removeFavoriteFailed'))
     } finally {
       setFavSaving(false)
     }
@@ -397,9 +397,9 @@ function EhGalleryDetail() {
     try {
       const url = `https://e-hentai.org/g/${gallery.gid}/${gallery.token}/`
       const res = await api.download.enqueue(url, 'ehentai')
-      toast.success(`Added to queue (job: ${res.job_id})`)
+      toast.success(t('browse.queuedJob', { jobId: res.job_id }))
     } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Failed')
+      toast.error(err instanceof Error ? err.message : t('browse.queueFailed'))
     }
   }, [gallery])
 

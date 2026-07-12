@@ -3,6 +3,9 @@
  *
  * Test 1: All t() call sites reference keys that exist in en.ts
  * Test 2: (informational) Detect unused keys in en.ts
+ * Test 3: Every locale file has full key parity with en.ts
+ * Test 4: No orphan keys in locale files
+ * Test 5: {param} placeholders match en.ts in every translation
  *
  * File scanning uses Node.js fs/path — no mocking required.
  * Only string-literal keys are checked; dynamic / template-literal
@@ -163,58 +166,37 @@ describe('i18n key consistency', () => {
     expect(unused.length).toBeGreaterThanOrEqual(0)
   })
 
-  it('all locale files contain every key from en.ts (informational)', () => {
-    const locales: Record<string, Record<string, string>> = {
-      'zh-TW': zhTW,
-      'zh-CN': zhCN,
-      ja,
-      ko,
-    }
+  const locales: Record<string, Record<string, string>> = {
+    'zh-TW': zhTW,
+    'zh-CN': zhCN,
+    ja,
+    ko,
+  }
 
-    const missing: { locale: string; keys: string[] }[] = []
-
+  it('all locale files contain every key from en.ts', () => {
+    // Locales were fully caught up with en.ts; keep them that way.
+    // When adding a key to en.ts, add its translation to every locale file.
     for (const [locale, dict] of Object.entries(locales)) {
       const missingKeys = Object.keys(en).filter((key) => !(key in dict))
-      if (missingKeys.length > 0) {
-        missing.push({ locale, keys: missingKeys })
-      }
+      expect(missingKeys, `${locale} is missing keys from en.ts`).toEqual([])
     }
-
-    if (missing.length > 0) {
-      const lines = missing.map(
-        ({ locale, keys }) =>
-          `  ${locale}: ${keys.length} missing keys\n${keys.map((k) => `    - ${k}`).join('\n')}`,
-      )
-      console.log(`[i18n] Locale files missing keys from en.ts:\n${lines.join('\n')}`)
-    }
-
-    // Soft assertion: warn but do not fail. Non-English locales may legitimately
-    // lag behind en.ts; t() falls back to English so missing keys don't break
-    // the app. Promote to expect.fail() once locale files are caught up.
-    expect(missing.length).toBeGreaterThanOrEqual(0)
   })
 
-  it('keeps completed high-traffic translation groups complete in every locale', () => {
-    const protectedPrefixes = [
-      'admin.queue.',
-      'adminEvents.',
-      'artists.',
-      'collections.',
-      'import.recent.',
-    ]
-    const locales: Record<string, Record<string, string>> = {
-      'zh-TW': zhTW,
-      'zh-CN': zhCN,
-      ja,
-      ko,
+  it('locale files have no orphan keys absent from en.ts', () => {
+    for (const [locale, dict] of Object.entries(locales)) {
+      const orphanKeys = Object.keys(dict).filter((key) => !(key in en))
+      expect(orphanKeys, `${locale} has keys that do not exist in en.ts`).toEqual([])
     }
-    const protectedKeys = Object.keys(en).filter((key) =>
-      protectedPrefixes.some((prefix) => key.startsWith(prefix)),
-    )
+  })
 
-    for (const [locale, dictionary] of Object.entries(locales)) {
-      const missing = protectedKeys.filter((key) => !(key in dictionary))
-      expect(missing, `${locale} is missing protected i18n keys`).toEqual([])
+  it('translations use the same {param} placeholders as en.ts', () => {
+    const params = (value: string) => (value.match(/\{[a-zA-Z0-9_]+\}/g) ?? []).sort().join(',')
+
+    for (const [locale, dict] of Object.entries(locales)) {
+      const mismatched = Object.entries(dict)
+        .filter(([key, value]) => key in en && params(value) !== params(en[key]))
+        .map(([key]) => `${key} (en: "${params(en[key])}" vs ${locale}: "${params(dict[key])}")`)
+      expect(mismatched, `${locale} has placeholder mismatches against en.ts`).toEqual([])
     }
   })
 })

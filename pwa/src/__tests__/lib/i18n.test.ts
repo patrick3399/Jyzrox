@@ -7,7 +7,7 @@
  *   - formatDate, formatNumber, formatBytes utilities
  */
 
-import { describe, it, expect, beforeEach } from 'vitest'
+import { describe, it, expect, beforeEach, vi } from 'vitest'
 import {
   t,
   setLocale,
@@ -17,6 +17,11 @@ import {
   formatBytes,
   resolveLocale,
 } from '../../lib/i18n'
+
+// Stub out the ja dictionary so fallback behavior can be tested: real locale
+// files have full key parity with en.ts (enforced by i18n-keys.test.ts), so no
+// genuine key gap exists to exercise the en fallback path.
+vi.mock('../../lib/i18n/ja', () => ({ default: {} }))
 
 // ---------------------------------------------------------------------------
 // Reset locale before each test to prevent cross-test pollution
@@ -39,7 +44,7 @@ describe('t() key lookup', () => {
   })
 
   it('test_t_keyMissingFromCurrentLocale_fallsBackToEnglish', () => {
-    // 'settingsCategory.general' exists in en.ts but not in ja.ts
+    // ja is mocked as an empty dictionary above, so every key misses ja
     setLocale('ja')
     expect(t('settingsCategory.general')).toBe('General')
   })

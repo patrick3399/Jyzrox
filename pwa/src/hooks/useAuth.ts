@@ -4,6 +4,7 @@ import { useCallback } from 'react'
 import { mutate } from 'swr'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { t } from '@/lib/i18n'
 
 export function useAuth() {
   const router = useRouter()
@@ -21,7 +22,7 @@ export function useAuth() {
     try {
       await api.auth.logout()
     } catch {
-      toast.error('Logout failed. Please try again.')
+      toast.error(t('login.logoutFailed'))
       return
     }
     await mutate(() => true, undefined, { revalidate: false })
