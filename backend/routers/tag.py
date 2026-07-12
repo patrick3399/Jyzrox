@@ -24,6 +24,7 @@ from db.models import BlockedTag, Gallery, GalleryTag, ImageTag, Tag, TagAlias, 
 from services.settings_store import get_toggle
 
 _s2twp = OpenCC("s2twp")
+_t2s = OpenCC("t2s")
 
 router = APIRouter(tags=["tags"])
 
@@ -479,6 +480,66 @@ async def get_translations(
         result = {k: _s2twp.convert(v) for k, v in result.items()}
 
     return result
+
+
+@router.get("/translations/browse")
+async def browse_translations(
+    q: str | None = Query(default=None, description="Contains-search over name and translation"),
+    namespace: str | None = Query(default=None, description="Exact namespace filter"),
+    language: str = Query(default="zh"),
+    limit: int = Query(default=50, ge=1, le=200),
+    offset: int = Query(default=0, ge=0),
+    _: dict = Depends(require_auth),
+):
+    """
+    Browse/search the full tag_translations table with pagination.
+
+    Unlike GET /translations (batch lookup for a known tag list), this
+    endpoint supports free-text search (name and translation) plus
+    namespace/language filters over the entire table.
+    """
+    db_language = "zh" if language == "zh-TW" else language
+
+    filters = [TagTranslation.language == db_language]
+    if namespace:
+        filters.append(TagTranslation.namespace == namespace)
+    if q:
+        safe_q = escape_like(q)
+        q_filters = [
+            TagTranslation.name.ilike(f"%{safe_q}%", escape="\\"),
+            TagTranslation.translation.ilike(f"%{safe_q}%", escape="\\"),
+        ]
+        if language == "zh-TW":
+            # DB stores simplified Chinese — also match a t2s-converted q
+            # against translation so traditional-input searches still hit.
+            safe_q_simplified = escape_like(_t2s.convert(q))
+            q_filters.append(TagTranslation.translation.ilike(f"%{safe_q_simplified}%", escape="\\"))
+        filters.append(or_(*q_filters))
+
+    async with async_session() as session:
+        count_query = select(func.count()).select_from(TagTranslation).where(*filters)
+        total = (await session.execute(count_query)).scalar()
+
+        data_query = (
+            select(TagTranslation)
+            .where(*filters)
+            .order_by(TagTranslation.namespace, TagTranslation.name)
+            .limit(limit)
+            .offset(offset)
+        )
+        rows = (await session.execute(data_query)).scalars().all()
+
+    items = [
+        {
+            "namespace": r.namespace,
+            "name": r.name,
+            "language": language,
+            "translation": _s2twp.convert(r.translation) if language == "zh-TW" else r.translation,
+        }
+        for r in rows
+    ]
+
+    return {"total": total, "items": items}
 
 
 @router.post("/translations")
