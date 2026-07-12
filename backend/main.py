@@ -1,3 +1,5 @@
+import asyncio
+import contextlib
 import logging
 import os
 from contextlib import asynccontextmanager
@@ -107,8 +109,14 @@ async def lifespan(app: FastAPI):
         prefix = _BROWSE_PREFIX_MAP.get(sid, f"/api/browse/{sid}")
         app.include_router(router, prefix=prefix)
         logger.info("Mounted browse router: %s → %s", sid, prefix)
+    from services.memory_watch import memory_watch_loop
+
+    memory_watch_task = asyncio.create_task(memory_watch_loop())
     yield
     logger.info("Shutting down...")
+    memory_watch_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await memory_watch_task
     await site_config_service.stop_listener()
     await close_queue()
     from services.eh_client import shutdown_shared_clients as _shutdown_eh_clients

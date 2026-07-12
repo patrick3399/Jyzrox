@@ -60,8 +60,13 @@ class Settings(BaseSettings):
     backup_pg_dump_timeout: int = 3600
     # Disk space
     disk_min_free_gb: float = 2.0
-    # Worker container memory alert threshold (percent of the cgroup limit)
+    # Container memory alert threshold (percent of the cgroup limit); used by
+    # the worker memory_monitor cron and the api memory watch (STAB-011)
     memory_alert_pct: float = 85.0
+    # api self-sampling cadence (services/memory_watch.py); floor is 30s
+    memory_watch_interval_sec: int = 300
+    # Log top Python allocation sites each api memory sample (diagnosis only)
+    api_tracemalloc: bool = False
 
     # gallery-dl config (bind-mounted)
     gallery_dl_config: str = "/app/config/gallery-dl.json"
