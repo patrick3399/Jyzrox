@@ -57,7 +57,9 @@ async def _enqueue_fanbox_posts(ctx: dict, sub, *, force_full_scan: bool) -> dic
     except Exception as exc:
         logger.warning("[subscription] Fanbox discovery failed for sub=%d: %s", sub.id, exc)
         async with AsyncSessionLocal() as session:
-            await session.execute(update(Subscription).where(Subscription.id == sub.id).values(last_status="failed", last_error=str(exc)))
+            await session.execute(
+                update(Subscription).where(Subscription.id == sub.id).values(last_status="failed", last_error=str(exc))
+            )
             await session.commit()
         return {"status": "failed", "error": str(exc)}
 
@@ -67,27 +69,43 @@ async def _enqueue_fanbox_posts(ctx: dict, sub, *, force_full_scan: bool) -> dic
         for work in works:
             active = (
                 await session.execute(
-                    select(DownloadJob.id).where(
+                    select(DownloadJob.id)
+                    .where(
                         DownloadJob.url == work.url,
                         DownloadJob.user_id == sub.user_id,
                         DownloadJob.status.in_(["queued", "running", "paused"]),
-                    ).limit(1)
+                    )
+                    .limit(1)
                 )
             ).scalar_one_or_none()
             if active:
                 continue
             job_id = uuid.uuid4()
-            session.add(DownloadJob(
-                id=job_id, url=work.url, source="fanbox", status="queued", progress={},
-                options=options, user_id=sub.user_id, subscription_id=sub.id,
-            ))
+            session.add(
+                DownloadJob(
+                    id=job_id,
+                    url=work.url,
+                    source="fanbox",
+                    status="queued",
+                    progress={},
+                    options=options,
+                    user_id=sub.user_id,
+                    subscription_id=sub.id,
+                )
+            )
             enqueued.append((job_id, work))
         await session.commit()
 
     for job_id, work in enqueued:
         await core.queue.enqueue(
-            "download_job", _job_id=str(job_id), _timeout=settings.download_job_timeout,
-            url=work.url, source="fanbox", options=options, db_job_id=str(job_id), total=None,
+            "download_job",
+            _job_id=str(job_id),
+            _timeout=settings.download_job_timeout,
+            url=work.url,
+            source="fanbox",
+            options=options,
+            db_job_id=str(job_id),
+            total=None,
         )
 
     now = datetime.now(UTC)
@@ -108,11 +126,17 @@ async def _enqueue_fanbox_posts(ctx: dict, sub, *, force_full_scan: bool) -> dic
         await session.execute(update(Subscription).where(Subscription.id == sub.id).values(**values))
         await session.commit()
 
-    await publish_job_event({
-        "type": "subscription_checked", "sub_id": sub.id, "status": "ok",
-        "job_id": str(enqueued[-1][0]) if enqueued else None, "user_id": sub.user_id,
-        "discovered": len(works), "enqueued": len(enqueued),
-    })
+    await publish_job_event(
+        {
+            "type": "subscription_checked",
+            "sub_id": sub.id,
+            "status": "ok",
+            "job_id": str(enqueued[-1][0]) if enqueued else None,
+            "user_id": sub.user_id,
+            "discovered": len(works),
+            "enqueued": len(enqueued),
+        }
+    )
     return {"status": "ok", "job_id": str(enqueued[-1][0]) if enqueued else None, "enqueued": len(enqueued)}
 
 

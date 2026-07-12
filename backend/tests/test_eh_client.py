@@ -14,10 +14,17 @@ Strategy:
   _download_image_bytes on the instance.
 """
 
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock
 
 import httpx
 import pytest
+
+
+def _http_mock(client: Any) -> AsyncMock:
+    assert client._http is not None
+    return cast(AsyncMock, client._http)
+
 
 # ---------------------------------------------------------------------------
 # _check_auth
@@ -399,7 +406,7 @@ class TestGetShowkey:
             + "return nl('mynlparam');"
             + "</body></html>"
         )
-        client._http.get = AsyncMock(return_value=self._mock_page(html))
+        _http_mock(client).get = AsyncMock(return_value=self._mock_page(html))
 
         showkey, nl_param = await client.get_showkey(100, 1, "ptoken12345")
         assert showkey == "abc123def456"
@@ -409,7 +416,7 @@ class TestGetShowkey:
         """When the page has no nl() call, nl_param should be None."""
         client = self._client()
         html = "<html><body>" + "x" * 300 + 'var showkey="xyz789";' + "</body></html>"
-        client._http.get = AsyncMock(return_value=self._mock_page(html))
+        _http_mock(client).get = AsyncMock(return_value=self._mock_page(html))
 
         showkey, nl_param = await client.get_showkey(100, 1, "ptoken12345")
         assert showkey == "xyz789"
@@ -419,7 +426,7 @@ class TestGetShowkey:
         """Page without showkey variable should raise ValueError."""
         client = self._client()
         html = "<html><body>" + "x" * 300 + "no showkey here</body></html>"
-        client._http.get = AsyncMock(return_value=self._mock_page(html))
+        _http_mock(client).get = AsyncMock(return_value=self._mock_page(html))
 
         with pytest.raises(ValueError, match="showkey"):
             await client.get_showkey(100, 1, "ptoken12345")
@@ -453,7 +460,7 @@ class TestGetImageUrlViaApi:
             "i6": "",
             "i7": "",
         }
-        client._http.post = AsyncMock(return_value=self._mock_api_response(data))
+        _http_mock(client).post = AsyncMock(return_value=self._mock_api_response(data))
 
         result = await client.get_image_url_via_api("showkey", 100, 1, "imgkey")
         assert result.image_url == "https://h.example.com/img.jpg"
@@ -468,7 +475,7 @@ class TestGetImageUrlViaApi:
             ),
             "i7": "",
         }
-        client._http.post = AsyncMock(return_value=self._mock_api_response(data))
+        _http_mock(client).post = AsyncMock(return_value=self._mock_api_response(data))
 
         result = await client.get_image_url_via_api("showkey", 100, 1, "imgkey")
         assert result.nl_param == "my-nl-param"
@@ -481,7 +488,7 @@ class TestGetImageUrlViaApi:
             "i6": "",
             "i7": '<a href="https://full.example.com/fullimgdata.jpg">Download original</a>',
         }
-        client._http.post = AsyncMock(return_value=self._mock_api_response(data))
+        _http_mock(client).post = AsyncMock(return_value=self._mock_api_response(data))
 
         result = await client.get_image_url_via_api("showkey", 100, 1, "imgkey")
         assert result.origin_url is not None
@@ -490,7 +497,7 @@ class TestGetImageUrlViaApi:
     async def test_api_error_field_raises_value_error(self):
         client = self._client()
         data = {"error": "invalid showkey"}
-        client._http.post = AsyncMock(return_value=self._mock_api_response(data))
+        _http_mock(client).post = AsyncMock(return_value=self._mock_api_response(data))
 
         with pytest.raises(ValueError, match="showpage API error"):
             await client.get_image_url_via_api("showkey", 100, 1, "imgkey")
@@ -498,7 +505,7 @@ class TestGetImageUrlViaApi:
     async def test_missing_image_url_in_i3_raises(self):
         client = self._client()
         data = {"i3": "no img tag here", "i6": "", "i7": ""}
-        client._http.post = AsyncMock(return_value=self._mock_api_response(data))
+        _http_mock(client).post = AsyncMock(return_value=self._mock_api_response(data))
 
         with pytest.raises(ValueError, match="Image URL not found"):
             await client.get_image_url_via_api("showkey", 100, 1, "imgkey")

@@ -163,6 +163,10 @@ def _startup_patches(redis_mock, session, mock_enqueue=None, mock_emit=None):
     mock_site_config = MagicMock()
     mock_site_config.start_listener = AsyncMock()
 
+    def _discard_background_task(coro):
+        coro.close()
+        return MagicMock()
+
     with (
         # startup() first asserts the DB is at the schema head via asyncpg; the
         # test DB is SQLite, so bypass the guard (its own tests cover it).
@@ -181,7 +185,7 @@ def _startup_patches(redis_mock, session, mock_enqueue=None, mock_emit=None):
         patch("worker.compute_job_key", side_effect=lambda jid, rc: f"retry:{jid}:{rc}" if rc > 0 else str(jid)),
         patch("core.events.emit_safe", mock_emit),
         patch("worker._watcher") as mock_watcher,
-        patch("worker.asyncio.ensure_future"),
+        patch("worker.asyncio.ensure_future", side_effect=_discard_background_task),
         patch("worker.asyncio.get_running_loop", return_value=MagicMock()),
         patch("worker.get_all_library_paths", new_callable=AsyncMock, return_value=[]),
         patch("glob.glob", return_value=[]),

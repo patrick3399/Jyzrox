@@ -28,7 +28,9 @@ from tests.helpers import make_mock_site_config_svc
 def mock_redis_global():
     """Prevent any code path from calling get_redis() on an uninitialised client."""
     mock_redis = AsyncMock()
-    mock_redis.pipeline.return_value = AsyncMock(execute=AsyncMock(return_value=[]))
+    pipeline = MagicMock()
+    pipeline.execute = AsyncMock(return_value=[])
+    mock_redis.pipeline = MagicMock(return_value=pipeline)
     mock_redis.get = AsyncMock(return_value=None)
     mock_redis.set = AsyncMock(return_value=True)
     mock_redis.delete = AsyncMock(return_value=1)
@@ -1630,12 +1632,9 @@ class TestRetryJobDiskLow:
         redis.get = _redis_get
         redis.set = AsyncMock()
         redis.delete = AsyncMock()
-        redis.pipeline = MagicMock(
-            return_value=AsyncMock(
-                __aenter__=AsyncMock(return_value=AsyncMock(execute=AsyncMock())),
-                execute=AsyncMock(),
-            )
-        )
+        pipeline = MagicMock()
+        pipeline.execute = AsyncMock()
+        redis.pipeline = MagicMock(return_value=pipeline)
         ctx = {"redis": redis}
 
         result = await retry_failed_downloads_job(ctx)

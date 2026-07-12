@@ -32,8 +32,8 @@ class User(Base):
     email: Mapped[str | None] = mapped_column(Text, unique=True)
     password_hash: Mapped[str] = mapped_column(Text, nullable=False)
     role: Mapped[str] = mapped_column(Text, default="viewer")
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    last_login_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_login_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     avatar_style: Mapped[str] = mapped_column(Text, default="gravatar")
     # NULL means follow the language preferences of the current browser/device.
     locale: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -46,7 +46,7 @@ class NovelReadProgress(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     file_path: Mapped[str] = mapped_column(Text, primary_key=True)
     position: Mapped[str] = mapped_column(Text, nullable=False)
-    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 # ── Novel knowledge index (Phase 1 Track A; derived, rebuildable from the tree) ──
@@ -64,7 +64,7 @@ class NovelNote(Base):
     frontmatter: Mapped[dict] = mapped_column(
         JSONB().with_variant(JSON, "sqlite"), nullable=False, server_default=text("'{}'::jsonb")
     )
-    indexed_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    indexed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class NovelLink(Base):
@@ -95,15 +95,15 @@ class Gallery(Base):
     category: Mapped[str | None] = mapped_column(Text)
     language: Mapped[str | None] = mapped_column(Text)
     pages: Mapped[int | None] = mapped_column(Integer)
-    posted_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
-    added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    posted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     rating: Mapped[int] = mapped_column(SmallInteger, default=0)
     favorited: Mapped[bool] = mapped_column(Boolean, default=False)
     uploader: Mapped[str | None] = mapped_column(Text)
     download_status: Mapped[str] = mapped_column(Text, default="proxy_only")
     import_mode: Mapped[str | None] = mapped_column(Text)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
-    last_scanned_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    last_scanned_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     library_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     artist_id: Mapped[str | None] = mapped_column(Text, nullable=True, index=True)
     visibility: Mapped[str] = mapped_column(Text, default="public", server_default="public")
@@ -139,7 +139,7 @@ class Blob(Base):
     storage: Mapped[str] = mapped_column(Text, default="cas")
     external_path: Mapped[str | None] = mapped_column(Text)
     ref_count: Mapped[int] = mapped_column(Integer, default=0)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
     thumbhash: Mapped[str | None] = mapped_column(Text, nullable=True)
 
 
@@ -235,12 +235,12 @@ class DownloadJob(Base):
     # and for explaining why a URL was filtered a particular way.
     options: Mapped[dict] = mapped_column(JSONB, default=dict)
     error: Mapped[str | None] = mapped_column(Text)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    finished_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     user_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="SET NULL"))
     retry_count: Mapped[int] = mapped_column(SmallInteger, default=0)
     max_retries: Mapped[int] = mapped_column(SmallInteger, default=3)
-    next_retry_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    next_retry_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     gallery_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"), nullable=True
     )
@@ -257,7 +257,7 @@ class ReadProgress(Base):
         BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
     )
     last_page: Mapped[int] = mapped_column(Integer, default=0)
-    last_read_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     gallery: Mapped[Gallery] = relationship(back_populates="read_progress")
 
@@ -268,8 +268,8 @@ class Credential(Base):
     source: Mapped[str] = mapped_column(Text, primary_key=True)
     credential_type: Mapped[str] = mapped_column(Text, nullable=False)
     value_encrypted: Mapped[bytes | None] = mapped_column(LargeBinary)
-    expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
-    last_verified: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    last_verified: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class ApiToken(Base):
@@ -279,9 +279,9 @@ class ApiToken(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str | None] = mapped_column(Text)
     token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    last_used_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
-    expires_at: Mapped[DateTime | None] = mapped_column(DateTime(timezone=True))
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    last_used_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
 
 class BrowseHistory(Base):
@@ -296,7 +296,7 @@ class BrowseHistory(Base):
     thumb: Mapped[str | None] = mapped_column(Text)
     gid: Mapped[int | None] = mapped_column(BigInteger)
     token: Mapped[str | None] = mapped_column(Text)
-    viewed_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    viewed_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SavedSearch(Base):
@@ -307,7 +307,7 @@ class SavedSearch(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     query: Mapped[str] = mapped_column(Text, default="")
     params: Mapped[dict] = mapped_column(JSONB, default=dict)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class TagTranslation(Base):
@@ -340,7 +340,7 @@ class LibraryPath(Base):
     import_mode: Mapped[str] = mapped_column(Text, default="link", server_default="link", nullable=False)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
     monitor: Mapped[bool] = mapped_column(Boolean, default=True, nullable=False)
-    added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class PluginConfig(Base):
@@ -349,7 +349,7 @@ class PluginConfig(Base):
     source_id: Mapped[str] = mapped_column(Text, primary_key=True)
     enabled: Mapped[bool] = mapped_column(Boolean, default=True)
     config_json: Mapped[dict] = mapped_column(JSONB, default=dict)
-    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SubscriptionGroup(Base):
@@ -412,8 +412,8 @@ class Collection(Base):
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text)
     cover_gallery_id: Mapped[int | None] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"))
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     cover_gallery: Mapped[Gallery | None] = relationship()
     collection_galleries: Mapped[list[CollectionGallery]] = relationship(
@@ -431,7 +431,7 @@ class CollectionGallery(Base):
         BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
     )
     position: Mapped[int] = mapped_column(Integer, default=0)
-    added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     collection: Mapped[Collection] = relationship(back_populates="collection_galleries")
     gallery: Mapped[Gallery] = relationship()
@@ -444,7 +444,7 @@ class ExcludedBlob(Base):
         BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
     )
     blob_sha256: Mapped[str] = mapped_column(Text, primary_key=True)
-    excluded_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    excluded_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class BlobRelationship(Base):
@@ -461,8 +461,8 @@ class BlobRelationship(Base):
     diff_score: Mapped[float | None] = mapped_column(Float)
     diff_type: Mapped[str | None] = mapped_column(Text)
     tier: Mapped[int] = mapped_column(SmallInteger, nullable=False, default=1)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
-    updated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     blob_a: Mapped[Blob] = _rel(foreign_keys="[BlobRelationship.sha_a]")
     blob_b: Mapped[Blob] = _rel(foreign_keys="[BlobRelationship.sha_b]")
@@ -474,14 +474,14 @@ class UserFavorite(Base):
     gallery_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
     )
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class UserImageFavorite(Base):
     __tablename__ = "user_image_favorites"
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
     image_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True)
-    created_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class UserRating(Base):
@@ -491,7 +491,7 @@ class UserRating(Base):
         BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
     )
     rating: Mapped[int] = mapped_column(SmallInteger, nullable=False)
-    rated_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    rated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class UserReadingList(Base):
@@ -500,7 +500,7 @@ class UserReadingList(Base):
     gallery_id: Mapped[int] = mapped_column(
         BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
     )
-    added_at: Mapped[DateTime] = mapped_column(DateTime(timezone=True), server_default=func.now())
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
 
 class SiteConfig(Base):
@@ -510,6 +510,6 @@ class SiteConfig(Base):
     overrides: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     adaptive: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
     auto_probe: Mapped[dict | None] = mapped_column(JSONB)
-    updated_at: Mapped[DateTime | None] = mapped_column(
+    updated_at: Mapped[datetime | None] = mapped_column(
         DateTime(timezone=True), server_default=func.now(), onupdate=func.now()
     )

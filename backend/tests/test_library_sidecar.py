@@ -54,9 +54,7 @@ class TestSidecarPayloadFromGallery:
     def test_payload_tolerates_empty_optional_fields(self):
         from services.library_sidecar import sidecar_payload_from_gallery
 
-        payload = sidecar_payload_from_gallery(
-            _gallery(title=None, tags_array=None, posted_at=None, uploader=None)
-        )
+        payload = sidecar_payload_from_gallery(_gallery(title=None, tags_array=None, posted_at=None, uploader=None))
 
         assert payload["title"] is None
         assert payload["tags"] == []

@@ -214,7 +214,7 @@ async def system_storage(_: dict = Depends(_admin)):
     usage_tasks: list = []
     valid_mounts: list[tuple[str, str]] = []
     for (label, path), stat in zip(mount_list, stat_results, strict=False):
-        if isinstance(stat, Exception):
+        if isinstance(stat, BaseException):
             continue
         if stat.st_dev in seen_devs:
             continue
@@ -226,7 +226,7 @@ async def system_storage(_: dict = Depends(_admin)):
 
     mounts = []
     for (label, path), usage in zip(valid_mounts, usage_results, strict=False):
-        if isinstance(usage, Exception):
+        if isinstance(usage, BaseException):
             continue
         percent = round(usage.used / usage.total * 100, 1) if usage.total else 0.0
         mounts.append(

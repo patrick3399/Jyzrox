@@ -42,10 +42,14 @@ def test_media_selection_honors_media_policy():
         },
     }
     assert _media_urls(post, FanboxDownloadPolicy()) == [
-        "https://cdn.test/cover.jpg", "https://cdn.test/image.png", "https://cdn.test/movie.mp4",
+        "https://cdn.test/cover.jpg",
+        "https://cdn.test/image.png",
+        "https://cdn.test/movie.mp4",
     ]
     assert _media_urls(post, FanboxDownloadPolicy(include_videos=False, include_files=True)) == [
-        "https://cdn.test/cover.jpg", "https://cdn.test/image.png", "https://cdn.test/source.zip",
+        "https://cdn.test/cover.jpg",
+        "https://cdn.test/image.png",
+        "https://cdn.test/source.zip",
     ]
 
 
@@ -78,11 +82,18 @@ class _Client:
 
     async def get(self, url, **kwargs):
         if "post.info" in url:
-            return _Response(payload={"body": {
-                "id": "42", "title": "Paid post", "feeRequired": 500,
-                "creatorId": "artist", "publishedDatetime": "2026-07-11T00:00:00+00:00",
-                "body": {"images": [{"originalUrl": "https://cdn.test/42.jpg"}]},
-            }})
+            return _Response(
+                payload={
+                    "body": {
+                        "id": "42",
+                        "title": "Paid post",
+                        "feeRequired": 500,
+                        "creatorId": "artist",
+                        "publishedDatetime": "2026-07-11T00:00:00+00:00",
+                        "body": {"images": [{"originalUrl": "https://cdn.test/42.jpg"}]},
+                    }
+                }
+            )
         return _Response()
 
 
@@ -99,10 +110,14 @@ class _DiscoveryClient:
     async def get(self, url, **kwargs):
         if "paginateCreator" in url:
             return _Response(payload={"body": ["https://api.fanbox.cc/page/1"]})
-        return _Response(payload={"body": [
-            {"id": "paid", "title": "Paid", "feeRequired": 500, "publishedDatetime": "2026-07-11T00:00:00Z"},
-            {"id": "free", "title": "Free", "feeRequired": 0, "publishedDatetime": "2026-07-10T00:00:00Z"},
-        ]})
+        return _Response(
+            payload={
+                "body": [
+                    {"id": "paid", "title": "Paid", "feeRequired": 500, "publishedDatetime": "2026-07-11T00:00:00Z"},
+                    {"id": "free", "title": "Free", "feeRequired": 0, "publishedDatetime": "2026-07-10T00:00:00Z"},
+                ]
+            }
+        )
 
 
 @pytest.mark.asyncio
@@ -113,7 +128,10 @@ async def test_paid_post_is_filtered_before_media_request(monkeypatch, tmp_path:
     options = {"fanbox": {"content": "free_only"}, "diagnostic_ctx": {}}
 
     result = await plugin.download(
-        "https://www.fanbox.cc/@artist/posts/42", tmp_path, on_file=callback, options=options,
+        "https://www.fanbox.cc/@artist/posts/42",
+        tmp_path,
+        on_file=callback,
+        options=options,
     )
 
     assert result.status == "done"
@@ -129,7 +147,10 @@ async def test_accessible_post_writes_import_metadata(monkeypatch, tmp_path: Pat
     callback = AsyncMock()
 
     result = await plugin.download(
-        "https://artist.fanbox.cc/posts/42", tmp_path, on_file=callback, options={"fanbox": {"content": "accessible"}},
+        "https://artist.fanbox.cc/posts/42",
+        tmp_path,
+        on_file=callback,
+        options={"fanbox": {"content": "accessible"}},
     )
 
     assert result.downloaded == 1

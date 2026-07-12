@@ -9,6 +9,7 @@ engine, so blocked-tag filtering is fully testable with DB data.
 Auth requirement for every endpoint is verified with `unauthed_client`.
 """
 
+from typing import Any, cast
 from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import text
@@ -438,6 +439,18 @@ def _build_eh_client(cookies: dict | None = None, use_ex: bool = False):
     return client
 
 
+def _http_mock(client: Any) -> AsyncMock:
+    """Return the HTTP mock attached by _build_eh_client()."""
+    assert client._http is not None
+    return cast(AsyncMock, client._http)
+
+
+def _image_http_mock(client: Any) -> AsyncMock:
+    """Return the image HTTP mock attached by _build_eh_client()."""
+    assert client._img_http is not None
+    return cast(AsyncMock, client._img_http)
+
+
 # ---------------------------------------------------------------------------
 # TestGalleryMetadataParsing
 # ---------------------------------------------------------------------------
@@ -515,8 +528,8 @@ class TestGalleryMetadataParsing:
                 }
             ]
         }
-        client._http.post = AsyncMock(return_value=_make_http_response(200, text="", content=b""))
-        client._http.post.return_value.json = MagicMock(return_value=api_response)
+        _http_mock(client).post = AsyncMock(return_value=_make_http_response(200, text="", content=b""))
+        _http_mock(client).post.return_value.json = MagicMock(return_value=api_response)
 
         result = await client.get_gallery_metadata(12345, "abcdef1234")
 
@@ -548,8 +561,8 @@ class TestGalleryMetadataParsing:
                 }
             ]
         }
-        client._http.post = AsyncMock(return_value=_make_http_response(200))
-        client._http.post.return_value.json = MagicMock(return_value=api_response)
+        _http_mock(client).post = AsyncMock(return_value=_make_http_response(200))
+        _http_mock(client).post.return_value.json = MagicMock(return_value=api_response)
 
         with pytest.raises(ValueError, match="expunged"):
             await client.get_gallery_metadata(777, "expungedtok")
@@ -561,8 +574,8 @@ class TestGalleryMetadataParsing:
         client = _build_eh_client()
 
         api_response = {"gmetadata": []}
-        client._http.post = AsyncMock(return_value=_make_http_response(200))
-        client._http.post.return_value.json = MagicMock(return_value=api_response)
+        _http_mock(client).post = AsyncMock(return_value=_make_http_response(200))
+        _http_mock(client).post.return_value.json = MagicMock(return_value=api_response)
 
         with pytest.raises(ValueError, match="not found"):
             await client.get_gallery_metadata(9999, "notfound123")
@@ -601,11 +614,11 @@ class TestImageTokenParsing:
             f'<a href="/s/{i:010x}/99999-{i}"><div style="width:100px;height:140px;background:transparent url(https://ehgt.org/p/{i:03d}.jpg) 0px 0 no-repeat"></div></a>'
             for i in range(1, 6)
         )
-        client._http.get = AsyncMock(return_value=_make_http_response(200, text=html))
+        _http_mock(client).get = AsyncMock(return_value=_make_http_response(200, text=html))
 
         token_map, preview_map = await client.get_image_tokens(99999, "tok9999abcd", 5)
 
-        assert client._http.get.call_count == 1
+        assert _http_mock(client).get.call_count == 1
         assert len(token_map) == 5
 
     async def test_get_image_tokens_multiple_detail_pages(self):
@@ -619,7 +632,7 @@ class TestImageTokenParsing:
         )
         html_p1 = '<a href="/s/0000000015/11111-21"><div style="width:100px;height:140px;background:transparent url(https://ehgt.org/p/021.jpg) 0px 0 no-repeat"></div></a>'
 
-        client._http.get = AsyncMock(
+        _http_mock(client).get = AsyncMock(
             side_effect=[
                 _make_http_response(200, text=html_p0),
                 _make_http_response(200, text=html_p1),
@@ -629,7 +642,7 @@ class TestImageTokenParsing:
         with patch("asyncio.sleep", new_callable=AsyncMock):
             token_map, _ = await client.get_image_tokens(11111, "tok1111abcd", 21)
 
-        assert client._http.get.call_count == 2
+        assert _http_mock(client).get.call_count == 2
         assert 21 in token_map
 
     async def test_get_image_tokens_empty_gallery(self):
@@ -638,7 +651,7 @@ class TestImageTokenParsing:
 
         token_map, preview_map = await client.get_image_tokens(22222, "emptytok123", 0)
 
-        client._http.get.assert_not_called()
+        _http_mock(client).get.assert_not_called()
         assert token_map == {}
         assert preview_map == {}
 
@@ -727,12 +740,14 @@ class TestCookieHandling:
     async def test_check_cookies_returns_true_when_credits_present(self):
         """check_cookies should return True if 'Credits' appears in home.php."""
         client = _build_eh_client({"ipb_member_id": "123456", "ipb_pass_hash": "abcdef"}, use_ex=True)
-        client._http.get = AsyncMock(return_value=_make_http_response(200, text="<html>1,234 Credits available</html>"))
+        _http_mock(client).get = AsyncMock(
+            return_value=_make_http_response(200, text="<html>1,234 Credits available</html>")
+        )
 
         result = await client.check_cookies()
 
         assert result is True
-        headers = client._http.get.call_args.kwargs["headers"]
+        headers = _http_mock(client).get.call_args.kwargs["headers"]
         assert "ipb_member_id=123456" in headers["Cookie"]
         assert "ipb_pass_hash=abcdef" in headers["Cookie"]
         assert "nw=1" in headers["Cookie"]
@@ -742,7 +757,7 @@ class TestCookieHandling:
         import httpx
 
         client = _build_eh_client()
-        client._http.get = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
+        _http_mock(client).get = AsyncMock(side_effect=httpx.TimeoutException("timed out"))
 
         result = await client.check_cookies()
 
@@ -771,11 +786,11 @@ class TestCookieHandling:
         try:
             resp = await client._http_get("https://exhentai.org/home.php")
         finally:
-            await client._http.aclose()
+            await _http_mock(client).aclose()
 
         assert resp.status_code == 200
         assert seen_cookie_headers == ["ipb_member_id=123456; ipb_pass_hash=abcdef; nw=1"]
-        assert dict(client._http.cookies) == {}
+        assert dict(_http_mock(client).cookies) == {}
 
 
 # ---------------------------------------------------------------------------
@@ -792,7 +807,7 @@ class TestErrorResponses:
 
         client = _build_eh_client()
         resp_404 = _make_http_response(404)
-        client._http.get = AsyncMock(return_value=resp_404)
+        _http_mock(client).get = AsyncMock(return_value=resp_404)
 
         with pytest.raises(ValueError, match="not found"):
             await client.get_previews(99999, "deadbeef12")
@@ -803,7 +818,7 @@ class TestErrorResponses:
 
         client = _build_eh_client()
         resp_404 = _make_http_response(404)
-        client._http.get = AsyncMock(return_value=resp_404)
+        _http_mock(client).get = AsyncMock(return_value=resp_404)
 
         with pytest.raises(ValueError, match="not found"):
             await client.get_image_tokens(33333, "deadbeef56", 5)
@@ -815,7 +830,7 @@ class TestErrorResponses:
         client = _build_eh_client()
         resp = _make_http_response(200)
         resp.json = MagicMock(return_value={"error": "gallery not found"})
-        client._http.post = AsyncMock(return_value=resp)
+        _http_mock(client).post = AsyncMock(return_value=resp)
 
         with pytest.raises(ValueError, match="E-H API error"):
             await client._api({"method": "gdata", "gidlist": [[1, "tok"]], "namespace": 1})
@@ -843,10 +858,10 @@ class TestArchiveDownload:
         }
         api_resp = _make_http_response(200)
         api_resp.json = MagicMock(return_value=showpage_resp)
-        client._http.post = AsyncMock(return_value=api_resp)
+        _http_mock(client).post = AsyncMock(return_value=api_resp)
 
         img_resp = _make_http_response(200, content=png_bytes)
-        client._img_http.get = AsyncMock(return_value=img_resp)
+        _image_http_mock(client).get = AsyncMock(return_value=img_resp)
 
         image_data, media_type, ext = await client.download_image_with_retry(
             showkey="testshowkey1", gid=12345, page=1, imgkey="abcdef1234"
@@ -860,7 +875,7 @@ class TestArchiveDownload:
         """Image downloads should keep ExHentai cookies after shared client refactor."""
         client = _build_eh_client({"ipb_member_id": "123456", "ipb_pass_hash": "abcdef"}, use_ex=True)
         jpg_bytes = b"\xff\xd8\xff\xe0" + b"\x00" * 200
-        client._img_http.get = AsyncMock(return_value=_make_http_response(200, content=jpg_bytes))
+        _image_http_mock(client).get = AsyncMock(return_value=_make_http_response(200, content=jpg_bytes))
 
         image_data, media_type, ext = await client._download_image_bytes(
             "https://exhentai.org/fullimg/example.jpg",
@@ -872,7 +887,7 @@ class TestArchiveDownload:
         assert image_data == jpg_bytes
         assert media_type == "image/jpeg"
         assert ext == "jpg"
-        headers = client._img_http.get.call_args.kwargs["headers"]
+        headers = _image_http_mock(client).get.call_args.kwargs["headers"]
         assert "ipb_member_id=123456" in headers["Cookie"]
         assert "ipb_pass_hash=abcdef" in headers["Cookie"]
         assert "nw=1" in headers["Cookie"]
@@ -891,7 +906,7 @@ class TestArchiveDownload:
         }
         api_resp = _make_http_response(200)
         api_resp.json = MagicMock(return_value=showpage_resp)
-        client._http.post = AsyncMock(return_value=api_resp)
+        _http_mock(client).post = AsyncMock(return_value=api_resp)
 
         with pytest.raises(Image509Error, match="509"):
             await client.download_image_with_retry(showkey="testshowkey2", gid=12345, page=1, imgkey="abcdef1234")

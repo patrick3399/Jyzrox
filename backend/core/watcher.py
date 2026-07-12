@@ -2,14 +2,21 @@
 
 import logging
 import threading
+from os import fsdecode
 from pathlib import Path
 
 from watchdog.events import FileSystemEventHandler
 from watchdog.observers import Observer
+from watchdog.observers.api import BaseObserver
 
 logger = logging.getLogger(__name__)
 
 _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
+
+
+def _event_path(path: str | bytes) -> Path:
+    """Return a text path for watchdog events, which may use bytes paths."""
+    return Path(fsdecode(path))
 
 
 class _LibraryHandler(FileSystemEventHandler):
@@ -72,26 +79,26 @@ class _LibraryHandler(FileSystemEventHandler):
         if event.is_directory:
             self._schedule("discover", "auto_discover_job")
         else:
-            ext = Path(event.src_path).suffix.lower()
+            ext = _event_path(event.src_path).suffix.lower()
             if ext in _SUPPORTED_EXTS:
-                parent = str(Path(event.src_path).parent)
+                parent = str(_event_path(event.src_path).parent)
                 self._schedule(f"rescan:{parent}", "rescan_by_path_job", parent)
 
     def on_deleted(self, event):
         if not event.is_directory:
-            ext = Path(event.src_path).suffix.lower()
+            ext = _event_path(event.src_path).suffix.lower()
             if ext in _SUPPORTED_EXTS:
-                parent = str(Path(event.src_path).parent)
+                parent = str(_event_path(event.src_path).parent)
                 self._schedule(f"rescan:{parent}", "rescan_by_path_job", parent)
 
     def on_moved(self, event):
         if event.is_directory:
             self._schedule("discover", "auto_discover_job")
         else:
-            old_ext = Path(event.src_path).suffix.lower()
-            new_ext = Path(event.dest_path).suffix.lower()
-            old_parent = str(Path(event.src_path).parent)
-            new_parent = str(Path(event.dest_path).parent)
+            old_ext = _event_path(event.src_path).suffix.lower()
+            new_ext = _event_path(event.dest_path).suffix.lower()
+            old_parent = str(_event_path(event.src_path).parent)
+            new_parent = str(_event_path(event.dest_path).parent)
             if old_ext in _SUPPORTED_EXTS:
                 self._schedule(f"rescan:{old_parent}", "rescan_by_path_job", old_parent)
             if new_parent != old_parent and new_ext in _SUPPORTED_EXTS:
@@ -100,9 +107,9 @@ class _LibraryHandler(FileSystemEventHandler):
     def on_modified(self, event):
         # Only care about file modifications (e.g., image replaced in-place)
         if not event.is_directory:
-            ext = Path(event.src_path).suffix.lower()
+            ext = _event_path(event.src_path).suffix.lower()
             if ext in _SUPPORTED_EXTS:
-                parent = str(Path(event.src_path).parent)
+                parent = str(_event_path(event.src_path).parent)
                 self._schedule(f"rescan:{parent}", "rescan_by_path_job", parent)
 
 
@@ -110,7 +117,7 @@ class LibraryWatcher:
     """Manages watchdog Observer for library directories."""
 
     def __init__(self):
-        self._observer: Observer | None = None
+        self._observer: BaseObserver | None = None
         self._paths: list[str] = []
         self._handler: _LibraryHandler | None = None
 
@@ -136,7 +143,7 @@ class LibraryWatcher:
                     "[watcher] inotify limit hit, falling back to polling (interval=%ds)",
                     settings.watcher_polling_interval,
                 )
-                if self._observer.is_alive():
+                if self._observer is not None and self._observer.is_alive():
                     self._observer.stop()
                 use_polling = True
                 self._paths = []
@@ -153,8 +160,11 @@ class LibraryWatcher:
                     logger.info("[watcher] Monitoring (polling): %s", p)
 
         if self._paths:
-            self._observer.daemon = True
-            self._observer.start()
+            observer = self._observer
+            if observer is None:
+                raise RuntimeError("Watcher has paths but no observer")
+            observer.daemon = True
+            observer.start()
             watcher_instance = self
             logger.info(
                 "[watcher] Started monitoring %d paths (polling=%s)",

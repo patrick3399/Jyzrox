@@ -10,6 +10,7 @@ from datetime import UTC, datetime
 from itertools import combinations
 from pathlib import Path
 from typing import Literal
+from typing import cast as typing_cast
 from urllib.parse import unquote
 
 from fastapi import APIRouter, Depends, HTTPException, Query
@@ -17,11 +18,14 @@ from pydantic import BaseModel, Field
 from sqlalchemy import ARRAY, Text, and_, asc, cast, desc, exists, func, not_, or_, select, tuple_
 from sqlalchemy import case as sql_case
 from sqlalchemy import delete as sa_delete
+from sqlalchemy import update as sa_update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.engine import CursorResult
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import literal as sql_literal
 from sqlalchemy.sql import text as sql_text
+from sqlalchemy.sql.elements import ColumnElement
 
 from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import get_db
@@ -89,7 +93,7 @@ def _artist_display_name(artist_id: str | None, uploader: str | None) -> str:
 
 def _trash_filter(auth: dict):
     """Return WHERE clause for trash visibility: soft-deleted galleries the user can see."""
-    filters = [Gallery.deleted_at.is_not(None)]
+    filters: list[ColumnElement[bool]] = [Gallery.deleted_at.is_not(None)]
     if auth.get("role") != "admin":
         filters.append(
             or_(
@@ -245,7 +249,7 @@ async def list_gallery_sources(
                 .scalars()
                 .all()
             )
-            for mode in sorted(modes):
+            for mode in sorted(mode for mode in modes if mode is not None):
                 sources.append({"value": f"local:{mode}", "label": f"local:{mode}"})
             if not modes:
                 sources.append({"value": "local", "label": "local"})
@@ -1150,7 +1154,7 @@ async def list_gallery_files(
             .options(selectinload(Image.blob))
         )
         db_images = (await db.execute(img_stmt)).scalars().all()
-        img_map = {img.filename: img for img in db_images}
+        img_map = {img.filename: img for img in db_images if img.filename is not None}
 
     files = []
     for f in sorted(raw_files, key=lambda x: x["filename"]):
@@ -1240,7 +1244,7 @@ async def batch_galleries(
             )
         )
         await db.commit()
-        return {"status": "ok", "affected": result.rowcount}
+        return {"status": "ok", "affected": typing_cast(CursorResult, result).rowcount}
 
     elif body.action == "add_to_reading_list":
         for gid in gallery_ids:
@@ -1264,7 +1268,7 @@ async def batch_galleries(
             )
         )
         await db.commit()
-        return {"status": "ok", "affected": result.rowcount}
+        return {"status": "ok", "affected": typing_cast(CursorResult, result).rowcount}
 
     elif body.action == "rate":
         for gid in gallery_ids:
@@ -1392,7 +1396,7 @@ async def batch_galleries(
         for tid in tag_ids:
             count_result = await db.execute(select(func.count()).where(GalleryTag.tag_id == tid))
             actual_count = count_result.scalar_one()
-            await db.execute(Tag.__table__.update().where(Tag.id == tid).values(count=actual_count))
+            await db.execute(sa_update(Tag).where(Tag.id == tid).values(count=actual_count))
 
         await db.commit()
         return {"status": "ok", "affected": len(gallery_ids)}
@@ -1421,13 +1425,13 @@ async def batch_galleries(
                 GalleryTag.source == "manual",
             )
         )
-        removed = del_result.rowcount
+        removed = typing_cast(CursorResult, del_result).rowcount
 
         # Recalculate counts for affected tags
         for tid in tag_ids:
             count_result = await db.execute(select(func.count()).where(GalleryTag.tag_id == tid))
             actual_count = count_result.scalar_one()
-            await db.execute(Tag.__table__.update().where(Tag.id == tid).values(count=actual_count))
+            await db.execute(sa_update(Tag).where(Tag.id == tid).values(count=actual_count))
 
         # Rebuild tags_array for each gallery
         for gid in gallery_ids:
@@ -1587,7 +1591,7 @@ async def empty_trash(
     if not galleries:
         return {"status": "ok", "affected": 0}
 
-    result = await _hard_delete_galleries(db, galleries)
+    result = await _hard_delete_galleries(db, list(galleries))
     return {"status": "ok", **result}
 
 

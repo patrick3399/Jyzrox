@@ -152,9 +152,9 @@ class TestGetCredential:
         from services.credential import encrypt
 
         plaintext = "future-cookie"
-        # utcnow() + 1 day is unambiguously in the future when the service
-        # re-attaches UTC, regardless of the machine's local timezone.
-        naive_future = datetime.utcnow() + timedelta(days=1)
+        # Strip timezone information from an explicit UTC timestamp so the
+        # service exercises its naive-datetime compatibility path.
+        naive_future = (datetime.now(UTC) + timedelta(days=1)).replace(tzinfo=None)
         assert naive_future.tzinfo is None  # confirm it is naive
 
         cred = _make_mock_cred(
@@ -173,14 +173,14 @@ class TestGetCredential:
     async def test_get_credential_naive_datetime_past_returns_none(self):
         """Naive datetime in the past should be treated as UTC and result in None.
 
-        Uses utcnow() so the naive value is genuinely behind UTC regardless of
-        the local timezone of the machine running the tests.
+        Uses an explicit UTC timestamp so the naive value is genuinely behind
+        UTC regardless of the local timezone of the machine running the tests.
         """
         from services.credential import encrypt
 
-        # utcnow() gives a naive datetime whose value equals UTC; subtract 2 h
-        # so it is unambiguously in the past when the service re-attaches UTC tz.
-        naive_past = datetime.utcnow() - timedelta(hours=2)
+        # Remove the timezone after subtracting two hours so the service must
+        # re-attach UTC before comparing the expiry.
+        naive_past = (datetime.now(UTC) - timedelta(hours=2)).replace(tzinfo=None)
         assert naive_past.tzinfo is None  # confirm it is naive
 
         cred = _make_mock_cred(

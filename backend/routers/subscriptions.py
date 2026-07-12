@@ -379,7 +379,9 @@ async def update_subscription(
         # than trusting a caller-supplied source identifier.
         async with async_session() as session:
             source = (
-                await session.execute(select(Subscription.source).where(Subscription.id == sub_id, Subscription.user_id == user_id))
+                await session.execute(
+                    select(Subscription.source).where(Subscription.id == sub_id, Subscription.user_id == user_id)
+                )
             ).scalar_one_or_none()
         if source == "fanbox":
             from plugins.builtin.fanbox.policy import normalized_fanbox_options

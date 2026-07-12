@@ -221,6 +221,16 @@ class EhClient:
 
     # ── Internal ─────────────────────────────────────────────────────
 
+    def _http_client_or_raise(self) -> httpx.AsyncClient:
+        if self._http is None:
+            raise RuntimeError("EhClient must be used as an async context manager")
+        return self._http
+
+    def _image_client_or_raise(self) -> httpx.AsyncClient:
+        if self._img_http is None:
+            raise RuntimeError("EhClient must be used as an async context manager")
+        return self._img_http
+
     def _cookie_header(self) -> str:
         return "; ".join(f"{name}={value}" for name, value in self._cookies.items() if value is not None)
 
@@ -240,24 +250,27 @@ class EhClient:
 
     async def _http_get(self, url: str, **kwargs) -> httpx.Response:
         kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
+        client = self._http_client_or_raise()
         try:
-            return await self._http.get(url, **kwargs)
+            return await client.get(url, **kwargs)
         finally:
-            self._clear_client_cookie_jar(self._http)
+            self._clear_client_cookie_jar(client)
 
     async def _http_post(self, url: str, **kwargs) -> httpx.Response:
         kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
+        client = self._http_client_or_raise()
         try:
-            return await self._http.post(url, **kwargs)
+            return await client.post(url, **kwargs)
         finally:
-            self._clear_client_cookie_jar(self._http)
+            self._clear_client_cookie_jar(client)
 
     async def _img_get(self, url: str, **kwargs) -> httpx.Response:
         kwargs["headers"] = self._with_cookie_header(kwargs.pop("headers", None))
+        client = self._image_client_or_raise()
         try:
-            return await self._img_http.get(url, **kwargs)
+            return await client.get(url, **kwargs)
         finally:
-            self._clear_client_cookie_jar(self._img_http)
+            self._clear_client_cookie_jar(client)
 
     async def _api(self, payload: dict) -> dict:
         api_url = f"{self.base_url}/api.php" if self.base_url == EX_BASE_URL else EH_API_URL
@@ -621,7 +634,7 @@ class EhClient:
         img_tag = soup.find("img", id="img")
         if not img_tag or not img_tag.get("src"):
             raise ValueError(f"Image src not found for {gid}-{page}")
-        return img_tag["src"]
+        return str(img_tag["src"])
 
     async def get_showkey(self, gid: int, page: int, image_page_token: str) -> tuple[str, str | None]:
         """Fetch image page HTML, extract showkey + nl param.
@@ -828,7 +841,7 @@ class EhClient:
         unext = soup.find(id="unext")
         if unext and unext.name == "a":
             has_next = True
-            href = unext.get("href", "")
+            href = str(unext.get("href", ""))
             m = re.search(r"[?&]next=([^&]+)", href)
             if m:
                 out_next_cursor = m.group(1)
@@ -836,7 +849,7 @@ class EhClient:
         uprev = soup.find(id="uprev")
         if uprev and uprev.name == "a":
             has_prev = True
-            href = uprev.get("href", "")
+            href = str(uprev.get("href", ""))
             m = re.search(r"[?&]prev=([^&]+)", href)
             if m:
                 out_prev_cursor = m.group(1)
@@ -848,7 +861,7 @@ class EhClient:
         # </div>
         categories: list[dict] = []
         for div in soup.select(".fp"):
-            onclick = div.get("onclick", "")
+            onclick = str(div.get("onclick", ""))
             idx_match = re.search(r"favcat=(\d+)", onclick)
             if not idx_match:
                 continue
@@ -863,7 +876,7 @@ class EhClient:
             i_div = div.find(class_="i")
             name = ""
             if i_div and i_div.get("title"):
-                name = i_div["title"]
+                name = str(i_div["title"])
             else:
                 texts = list(div.stripped_strings)
                 name = texts[-1] if len(texts) > 1 else f"Favorites {idx}"

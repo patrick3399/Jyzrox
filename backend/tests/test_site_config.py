@@ -197,6 +197,7 @@ async def test_update_invalidates_cache():
         mock_session.get = AsyncMock(return_value=None)
         mock_session.add = MagicMock()
         mock_session.commit = AsyncMock()
+        mock_session.expunge = MagicMock()
         mock_ctx = AsyncMock()
         mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
         mock_ctx.__aexit__ = AsyncMock(return_value=False)

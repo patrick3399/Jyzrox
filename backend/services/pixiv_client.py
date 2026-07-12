@@ -70,14 +70,27 @@ class PixivClient:
         self._img_http: httpx.AsyncClient | None = None
 
     async def __aenter__(self) -> PixivClient:
-        self._api = AppPixivAPI()
-        self._api.additional_headers = {"Accept-Language": "en"}
+        api = AppPixivAPI()
+        api.additional_headers["Accept-Language"] = "en"
+        self._api = api
         await self._ensure_token()
         self._img_http = _get_shared_img_http()
         return self
 
     async def __aexit__(self, *_) -> None:
         pass  # shared client managed externally
+
+    def _api_or_raise(self) -> AppPixivAPI:
+        """Return the initialized pixivpy client."""
+        if self._api is None:
+            raise RuntimeError("PixivClient must be used as an async context manager")
+        return self._api
+
+    def _image_client_or_raise(self) -> httpx.AsyncClient:
+        """Return the initialized shared image client."""
+        if self._img_http is None:
+            raise RuntimeError("PixivClient must be used as an async context manager")
+        return self._img_http
 
     # ── Token management ─────────────────────────────────────────────
 
@@ -87,7 +100,7 @@ class PixivClient:
         cached = await r.get(_TOKEN_KEY)
         if cached:
             access_token = cached.decode() if isinstance(cached, bytes) else cached
-            await asyncio.to_thread(self._api.set_auth, access_token, self.refresh_token)
+            await asyncio.to_thread(self._api_or_raise().set_auth, access_token, self.refresh_token)
             return
 
         # Acquire a Redis lock to prevent concurrent refreshes
@@ -100,7 +113,7 @@ class PixivClient:
                 cached = await r.get(_TOKEN_KEY)
                 if cached:
                     access_token = cached.decode() if isinstance(cached, bytes) else cached
-                    await asyncio.to_thread(self._api.set_auth, access_token, self.refresh_token)
+                    await asyncio.to_thread(self._api_or_raise().set_auth, access_token, self.refresh_token)
                     return
             raise PermissionError("Pixiv token refresh timed out waiting for lock")
 
@@ -113,7 +126,7 @@ class PixivClient:
         """Call pixivpy3 auth and cache the resulting access token."""
         r = get_redis()
         try:
-            token_response = await asyncio.to_thread(self._api.auth, refresh_token=self.refresh_token)
+            token_response = await asyncio.to_thread(self._api_or_raise().auth, refresh_token=self.refresh_token)
         except Exception as exc:
             raise PermissionError(f"Pixiv token invalid or expired: {exc}") from exc
 
@@ -329,12 +342,12 @@ class PixivClient:
         if duration:
             kwargs["duration"] = duration
 
-        result = await self._call(self._api.search_illust, **kwargs)
+        result = await self._call(self._api_or_raise().search_illust, **kwargs)
         return self._normalize_illust_list(result)
 
     async def illust_detail(self, illust_id: int) -> dict:
         """Get illustration detail. Returns normalized illust dict."""
-        result = await self._call(self._api.illust_detail, illust_id)
+        result = await self._call(self._api_or_raise().illust_detail, illust_id)
         if not isinstance(result, dict) and hasattr(result, "__dict__"):
             result = result.__dict__
         illust = result.get("illust")
@@ -344,7 +357,7 @@ class PixivClient:
 
     async def user_detail(self, user_id: int) -> dict:
         """Get user profile info. Returns normalized user dict."""
-        result = await self._call(self._api.user_detail, user_id)
+        result = await self._call(self._api_or_raise().user_detail, user_id)
         return self._normalize_user(result)
 
     async def user_illusts(
@@ -354,7 +367,7 @@ class PixivClient:
         offset: int = 0,
     ) -> dict:
         """Get user illustrations. Returns {illusts, next_offset}."""
-        result = await self._call(self._api.user_illusts, user_id, type=type, offset=offset)
+        result = await self._call(self._api_or_raise().user_illusts, user_id, type=type, offset=offset)
         return self._normalize_illust_list(result)
 
     async def user_bookmarks(
@@ -364,10 +377,10 @@ class PixivClient:
         offset: int = 0,
     ) -> dict:
         """Get user bookmarks. Returns {illusts, next_offset}."""
-        kwargs = {"restrict": restrict}
+        kwargs: dict[str, object] = {"restrict": restrict}
         if offset > 0:
             kwargs["max_bookmark_id"] = offset
-        result = await self._call(self._api.user_bookmarks_illust, user_id, **kwargs)
+        result = await self._call(self._api_or_raise().user_bookmarks_illust, user_id, **kwargs)
         return self._normalize_illust_list(result)
 
     async def illust_follow(
@@ -376,7 +389,7 @@ class PixivClient:
         offset: int = 0,
     ) -> dict:
         """Get following feed (new works from followed artists). Returns {illusts, next_offset}."""
-        result = await self._call(self._api.illust_follow, restrict=restrict, offset=offset)
+        result = await self._call(self._api_or_raise().illust_follow, restrict=restrict, offset=offset)
         return self._normalize_illust_list(result)
 
     async def user_following(
@@ -386,7 +399,7 @@ class PixivClient:
         offset: int = 0,
     ) -> dict:
         """Get user following list. Returns {user_previews, next_offset}."""
-        result = await self._call(self._api.user_following, user_id, restrict=restrict, offset=offset)
+        result = await self._call(self._api_or_raise().user_following, user_id, restrict=restrict, offset=offset)
         if not isinstance(result, dict) and hasattr(result, "__dict__"):
             result = result.__dict__
 
@@ -421,7 +434,7 @@ class PixivClient:
 
     async def illust_bookmark_detail(self, illust_id: int) -> dict:
         """Get bookmark detail for an illust. Returns {is_bookmarked, restrict}."""
-        result = await self._call(self._api.illust_bookmark_detail, illust_id=illust_id)
+        result = await self._call(self._api_or_raise().illust_bookmark_detail, illust_id=illust_id)
         if not isinstance(result, dict) and hasattr(result, "__dict__"):
             result = result.__dict__
         detail = result.get("bookmark_detail") or {}
@@ -434,7 +447,7 @@ class PixivClient:
 
     async def illust_bookmark_add(self, illust_id: int, restrict: str = "public") -> None:
         """Add bookmark for an illust."""
-        await self._call(self._api.illust_bookmark_add, illust_id=illust_id, restrict=restrict)
+        await self._call(self._api_or_raise().illust_bookmark_add, illust_id=illust_id, restrict=restrict)
 
     async def illust_ranking(
         self,
@@ -446,27 +459,27 @@ class PixivClient:
         kwargs: dict = {"mode": mode, "offset": offset}
         if date:
             kwargs["date"] = date
-        result = await self._call(self._api.illust_ranking, **kwargs)
+        result = await self._call(self._api_or_raise().illust_ranking, **kwargs)
         return self._normalize_illust_list(result)
 
     async def illust_bookmark_delete(self, illust_id: int) -> None:
         """Delete bookmark for an illust."""
-        await self._call(self._api.illust_bookmark_delete, illust_id=illust_id)
+        await self._call(self._api_or_raise().illust_bookmark_delete, illust_id=illust_id)
 
     async def user_follow_add(self, user_id: int, restrict: str = "public") -> None:
         """Follow a user on Pixiv."""
-        await self._call(self._api.user_follow_add, user_id=user_id, restrict=restrict)
+        await self._call(self._api_or_raise().user_follow_add, user_id=user_id, restrict=restrict)
 
     async def user_follow_delete(self, user_id: int) -> None:
         """Unfollow a user on Pixiv."""
-        await self._call(self._api.user_follow_delete, user_id=user_id)
+        await self._call(self._api_or_raise().user_follow_delete, user_id=user_id)
 
     async def download_image(self, url: str) -> tuple[bytes, str]:
         """
         Proxy-download a pximg.net image via httpx with Referer header.
         Returns (bytes, media_type).
         """
-        resp = await self._img_http.get(url)
+        resp = await self._image_client_or_raise().get(url)
         resp.raise_for_status()
         content_type = resp.headers.get("content-type", "image/jpeg").split(";")[0].strip()
         return resp.content, content_type

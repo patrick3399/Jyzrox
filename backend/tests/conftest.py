@@ -16,7 +16,7 @@ import os
 import sys
 import types as _types
 from contextlib import ExitStack, asynccontextmanager
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 
@@ -759,6 +759,9 @@ def db_session_factory(db_engine):
 def mock_redis():
     """AsyncMock Redis with common methods pre-configured."""
     redis = AsyncMock()
+    pipeline = MagicMock()
+    pipeline.execute = AsyncMock(return_value=[])
+    redis.pipeline = MagicMock(return_value=pipeline)
     redis.get = AsyncMock(return_value=None)
     redis.set = AsyncMock(return_value=True)
     redis.setex = AsyncMock(return_value=True)
