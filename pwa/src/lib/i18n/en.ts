@@ -1,5 +1,11 @@
 const en: Record<string, string> = {
-  'fanbox.contentPolicy': 'Fanbox content', 'fanbox.freeOnly': 'Free posts only', 'fanbox.accessible': 'All accessible posts', 'fanbox.paidOnly': 'Paid posts only', 'fanbox.priceRange': 'Price range', 'fanbox.feeMin': 'Min JPY', 'fanbox.feeMax': 'Max JPY',
+  'fanbox.contentPolicy': 'Fanbox content',
+  'fanbox.freeOnly': 'Free posts only',
+  'fanbox.accessible': 'All accessible posts',
+  'fanbox.paidOnly': 'Paid posts only',
+  'fanbox.priceRange': 'Price range',
+  'fanbox.feeMin': 'Min JPY',
+  'fanbox.feeMax': 'Max JPY',
   // ── Navigation ──
   'nav.dashboard': 'Dashboard',
   'nav.downloadDashboard': 'Download Dashboard',
@@ -198,6 +204,8 @@ const en: Record<string, string> = {
   'tags.impliedBy': 'implied by',
   'tags.targetTagId': 'Target tag ID',
   'tags.aliasNamePlaceholder': 'alias name',
+  'tags.tabBrowse': 'Browse',
+  'tags.tabHealth': 'Health',
 
   // ── Settings Categories ──
   'settingsCategory.general': 'General',
@@ -821,6 +829,34 @@ const en: Record<string, string> = {
   'tags.translationSaved': 'Translation saved',
   'tags.translationFailed': 'Failed to save translation',
   'tags.translationLanguage': 'Language',
+
+  // ── Tag Health Report ──
+  'tags.health.title': 'Tag Health Report',
+  'tags.health.orphans': 'Orphaned Tags',
+  'tags.health.orphansTotal': '{total} orphaned tags total',
+  'tags.health.orphansEmpty': 'No orphaned tags',
+  'tags.health.duplicates': 'Duplicate Tags',
+  'tags.health.duplicatesEmpty': 'No duplicate tags',
+  'tags.health.cycles': 'Implication Cycles',
+  'tags.health.cyclesEmpty': 'No implication cycles',
+  'tags.health.ignored': 'Ignored Items',
+  'tags.health.ignoredEmpty': 'No ignored items',
+  'tags.health.delete': 'Delete',
+  'tags.health.deleteSuccess': 'Tag deleted',
+  'tags.health.deleteFailed': 'Failed to delete tag',
+  'tags.health.ignore': 'Ignore',
+  'tags.health.ignoreSuccess': 'Item ignored',
+  'tags.health.ignoreFailed': 'Failed to ignore item',
+  'tags.health.unignore': 'Restore',
+  'tags.health.unignoreSuccess': 'Item restored',
+  'tags.health.unignoreFailed': 'Failed to restore item',
+  'tags.health.canonical': 'canonical',
+  'tags.health.setAlias': 'Set as alias',
+  'tags.health.aliasSuccess': 'Alias created — only affects future imports',
+  'tags.health.aliasFailed': 'Failed to create alias',
+  'tags.health.breakLink': 'Break link',
+  'tags.health.cycleBreakSuccess': 'Implication removed',
+  'tags.health.cycleBreakFailed': 'Failed to remove implication',
 
   // ── Settings extra ──
   'settings.aiTaggingDesc': 'Auto-tag all galleries using the WD14 model',

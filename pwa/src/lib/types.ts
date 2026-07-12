@@ -239,6 +239,32 @@ export interface TagImplication {
   consequent: string // "namespace:name"
 }
 
+// ── Tag Health Report ───────────────────────────────────────────────
+
+export interface TagHealthDuplicateGroup {
+  key: string
+  tags: TagItem[]
+}
+
+export interface TagHealthCycleNode {
+  id: number
+  namespace: string
+  name: string
+}
+
+export interface TagHealthCycle {
+  key: string
+  path: TagHealthCycleNode[]
+}
+
+export interface TagHealthReport {
+  orphans: TagItem[]
+  orphans_total: number
+  duplicates: TagHealthDuplicateGroup[]
+  implication_cycles: TagHealthCycle[]
+  ignored_count: number
+}
+
 // ── Settings ──────────────────────────────────────────────────────────
 
 export interface CredentialStatus {

@@ -24,6 +24,7 @@ import type {
   TagAlias,
   TagImplication,
   TagItem,
+  TagHealthReport,
   EhComment,
   BrowseHistoryItem,
   SavedSearch,
@@ -128,7 +129,8 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     // Source-specific 403s (e.g. eh_access_denied / eh_bandwidth_exceeded) carry
     // a recognized error code and must surface as a normal error instead of
     // hijacking the whole page with a generic "Access Denied" message.
-    const hasSourceErrorCode = typeof raw === 'object' && raw !== null && typeof raw.code === 'string'
+    const hasSourceErrorCode =
+      typeof raw === 'object' && raw !== null && typeof raw.code === 'string'
     if (res.status === 403 && !hasSourceErrorCode && typeof window !== 'undefined') {
       const p = window.location.pathname
       if (p !== '/forbidden' && !isRedirecting) {
@@ -283,7 +285,10 @@ const eh = {
   /** Proxy an EH CDN thumbnail through our server */
   thumbProxyUrl: (url: string): string => `/api/eh/thumb-proxy?url=${encodeURIComponent(url)}`,
 
-  getFavorites: (params: { favcat?: string; q?: string; next?: string; prev?: string } = {}, init?: RequestInit) =>
+  getFavorites: (
+    params: { favcat?: string; q?: string; next?: string; prev?: string } = {},
+    init?: RequestInit,
+  ) =>
     apiFetch<EhFavoritesResult>(`/api/eh/favorites${qs(params as Record<string, unknown>)}`, init),
 
   addFavorite: (gid: number, token: string, favcat?: number, note?: string) =>
@@ -305,29 +310,48 @@ const eh = {
     apiFetch<{ comments: EhComment[] }>(`/api/eh/gallery/${gid}/${token}/comments`, init),
 
   /** Paginated image token fetch — avoids loading all tokens upfront for large galleries */
-  getImagesPaginated: (gid: number, token: string, startPage: number = 0, count: number = 20, init?: RequestInit) =>
+  getImagesPaginated: (
+    gid: number,
+    token: string,
+    startPage: number = 0,
+    count: number = 20,
+    init?: RequestInit,
+  ) =>
     apiFetch<{
       images: Array<{ page: number; token: string }>
       previews: Record<string, string>
       has_more: boolean
       total: number
-    }>(`/api/eh/gallery/${gid}/${token}/images-paginated?start_page=${startPage}&count=${count}`, init),
+    }>(
+      `/api/eh/gallery/${gid}/${token}/images-paginated?start_page=${startPage}&count=${count}`,
+      init,
+    ),
 }
 
 // ── Library ───────────────────────────────────────────────────────────
 
 const library = {
-  getSources: (init?: RequestInit) => apiFetch<{ value: string; label: string }[]>('/api/library/galleries/sources', init),
+  getSources: (init?: RequestInit) =>
+    apiFetch<{ value: string; label: string }[]>('/api/library/galleries/sources', init),
 
-  getCategories: (init?: RequestInit) => apiFetch<{ categories: string[] }>('/api/library/galleries/categories', init),
+  getCategories: (init?: RequestInit) =>
+    apiFetch<{ categories: string[] }>('/api/library/galleries/categories', init),
 
   getGalleries: (params: GallerySearchParams = {}, init?: RequestInit) =>
-    apiFetch<GalleryListResponse>(`/api/library/galleries${qs(params as Record<string, unknown>)}`, init),
+    apiFetch<GalleryListResponse>(
+      `/api/library/galleries${qs(params as Record<string, unknown>)}`,
+      init,
+    ),
 
   getGallery: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<Gallery>(galleryApiPath(source, sourceId), init),
 
-  getImages: (source: string, sourceId: string, opts?: { page?: number; limit?: number }, init?: RequestInit) => {
+  getImages: (
+    source: string,
+    sourceId: string,
+    opts?: { page?: number; limit?: number },
+    init?: RequestInit,
+  ) => {
     const params = new URLSearchParams()
     if (opts?.page) params.set('page', String(opts.page))
     if (opts?.limit) params.set('limit', String(opts.limit))
@@ -339,10 +363,7 @@ const library = {
       page?: number
       has_next?: boolean
       favorited_image_ids?: number[]
-    }>(
-      `${galleryApiPath(source, sourceId, '/images')}${qs ? `?${qs}` : ''}`,
-      init,
-    )
+    }>(`${galleryApiPath(source, sourceId, '/images')}${qs ? `?${qs}` : ''}`, init)
   },
 
   updateGallery: (
@@ -448,7 +469,13 @@ const library = {
     ),
 
   listFiles: (
-    params: { q?: string; source?: string; import_mode?: string; page?: number; limit?: number } = {},
+    params: {
+      q?: string
+      source?: string
+      import_mode?: string
+      page?: number
+      limit?: number
+    } = {},
     init?: RequestInit,
   ) =>
     apiFetch<{ directories: LibraryDirectory[]; total: number; page: number }>(
@@ -483,10 +510,13 @@ const library = {
     }),
 
   restoreImage: (imageId: number, init?: RequestInit) =>
-    apiFetch<{ status: string; remaining_pages: number }>(`/api/library/images/${imageId}/restore`, {
-      method: 'POST',
-      ...init,
-    }),
+    apiFetch<{ status: string; remaining_pages: number }>(
+      `/api/library/images/${imageId}/restore`,
+      {
+        method: 'POST',
+        ...init,
+      },
+    ),
 
   hideImagesBatch: (source: string, sourceId: string, imageIds: number[], init?: RequestInit) =>
     apiFetch<{ status: string; hidden: number; remaining_pages: number }>(
@@ -520,10 +550,16 @@ const library = {
     ),
 
   favoriteImage: (imageId: number, init?: RequestInit) =>
-    apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, { method: 'POST', ...init }),
+    apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, {
+      method: 'POST',
+      ...init,
+    }),
 
   unfavoriteImage: (imageId: number, init?: RequestInit) =>
-    apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, { method: 'DELETE', ...init }),
+    apiFetch<{ status: string }>(`/api/library/images/${imageId}/favorite`, {
+      method: 'DELETE',
+      ...init,
+    }),
 
   browseImages: (
     params: {
@@ -633,7 +669,8 @@ const library = {
       phash: string
       distance: number
     }>
-  }> => apiFetch(`/api/library/images/${imageId}/similar?threshold=${threshold}&limit=${limit}`, init),
+  }> =>
+    apiFetch(`/api/library/images/${imageId}/similar?threshold=${threshold}&limit=${limit}`, init),
 }
 
 // ── Download ──────────────────────────────────────────────────────────
@@ -1044,6 +1081,24 @@ const tags = {
       method: 'POST',
       body: JSON.stringify({ translations }),
     }),
+
+  health: (limit?: number) => apiFetch<TagHealthReport>(`/api/tags/health${qs({ limit })}`),
+
+  healthIgnore: (key: string) =>
+    apiFetch<{ status: string }>('/api/tags/health/ignore', {
+      method: 'POST',
+      body: JSON.stringify({ key }),
+    }),
+
+  healthUnignore: (key: string) =>
+    apiFetch<{ status: string }>(`/api/tags/health/ignore${qs({ key })}`, {
+      method: 'DELETE',
+    }),
+
+  healthIgnored: () => apiFetch<{ keys: string[] }>('/api/tags/health/ignored'),
+
+  deleteTag: (tagId: number) =>
+    apiFetch<{ status: string }>(`/api/tags/${tagId}`, { method: 'DELETE' }),
 }
 
 // ── API Tokens ───────────────────────────────────────────────────────
@@ -1257,7 +1312,8 @@ const pixiv = {
     )
   },
 
-  getIllust: (id: number, init?: RequestInit) => apiFetch<PixivIllust>(`/api/pixiv/illust/${id}`, init),
+  getIllust: (id: number, init?: RequestInit) =>
+    apiFetch<PixivIllust>(`/api/pixiv/illust/${id}`, init),
 
   getIllustPages: (id: number, init?: RequestInit) =>
     apiFetch<{ pages: Array<{ page_num: number; url: string }>; page_count: number }>(
@@ -1265,7 +1321,8 @@ const pixiv = {
       init,
     ),
 
-  getUser: (id: number, init?: RequestInit) => apiFetch<PixivUserResult>(`/api/pixiv/user/${id}`, init),
+  getUser: (id: number, init?: RequestInit) =>
+    apiFetch<PixivUserResult>(`/api/pixiv/user/${id}`, init),
 
   getUserIllusts: (id: number, offset = 0, init?: RequestInit) =>
     apiFetch<PixivSearchResult>(`/api/pixiv/user/${id}/illusts?offset=${offset}`, init),
@@ -1305,7 +1362,10 @@ const pixiv = {
   unfollowUser: (id: number, init?: RequestInit) =>
     apiFetch<{ ok: boolean }>(`/api/pixiv/user/${id}/follow`, { method: 'DELETE', ...init }),
 
-  ranking: (params: { mode?: string; content?: string; date?: string; page?: number } = {}, init?: RequestInit) => {
+  ranking: (
+    params: { mode?: string; content?: string; date?: string; page?: number } = {},
+    init?: RequestInit,
+  ) => {
     const p = new URLSearchParams()
     if (params.mode) p.set('mode', params.mode)
     if (params.content) p.set('content', params.content)
@@ -1439,9 +1499,12 @@ const backups = {
     }),
 
   delete: (backupId: string) =>
-    apiFetch<{ status: string; deleted: string[] }>(`/api/admin/backups/${encodeURIComponent(backupId)}`, {
-      method: 'DELETE',
-    }),
+    apiFetch<{ status: string; deleted: string[] }>(
+      `/api/admin/backups/${encodeURIComponent(backupId)}`,
+      {
+        method: 'DELETE',
+      },
+    ),
 }
 
 // ── Subscriptions ────────────────────────────────────────────────────
@@ -1497,10 +1560,9 @@ const subscriptions = {
     }),
 
   backfill: (id: number) =>
-    apiFetch<{ status: string; mode?: string }>(
-      `/api/subscriptions/${id}/backfill`,
-      { method: 'POST' },
-    ),
+    apiFetch<{ status: string; mode?: string }>(`/api/subscriptions/${id}/backfill`, {
+      method: 'POST',
+    }),
 
   jobs: (id: number, limit = 10) =>
     apiFetch<{ jobs: DownloadJob[] }>(`/api/subscriptions/${id}/jobs${qs({ limit })}`),
@@ -1834,7 +1896,12 @@ export interface NovelRepoStatus {
 }
 export type NovelWriteResult =
   | { ok: true; head: string; pushed: boolean }
-  | { ok: false; status: number; conflict?: { current: string; current_sha: string }; message?: string }
+  | {
+      ok: false
+      status: number
+      conflict?: { current: string; current_sha: string }
+      message?: string
+    }
 
 export interface NovelGraphNode {
   id: string
@@ -1898,9 +1965,18 @@ const novels = {
     }
     const errBody = await res.json().catch(() => ({}))
     const detail = (errBody as { detail?: unknown })?.detail
-    if (res.status === 409 && typeof detail === 'object' && detail !== null && 'current' in detail) {
+    if (
+      res.status === 409 &&
+      typeof detail === 'object' &&
+      detail !== null &&
+      'current' in detail
+    ) {
       const d = detail as { current: string; current_sha: string }
-      return { ok: false, status: 409, conflict: { current: d.current, current_sha: d.current_sha } }
+      return {
+        ok: false,
+        status: 409,
+        conflict: { current: d.current, current_sha: d.current_sha },
+      }
     }
     // create=true against an existing path → {error: "file exists"}.
     const detailError =
@@ -1945,8 +2021,7 @@ const novels = {
       method: 'PUT',
       body: JSON.stringify({ position }),
     }),
-  getPrefs: () =>
-    apiFetch<{ preferences: Record<string, unknown> }>('/api/novels/preferences'),
+  getPrefs: () => apiFetch<{ preferences: Record<string, unknown> }>('/api/novels/preferences'),
   putPrefs: (prefs: Record<string, unknown>) =>
     apiFetch<{ ok: boolean }>('/api/novels/preferences', {
       method: 'PUT',
@@ -1958,7 +2033,8 @@ const novels = {
     apiFetch<{ notes: NovelNoteSummary[] }>(`/api/novels/notes${qs(params)}`),
   appearances: (path: string) =>
     apiFetch<{ appearances: NovelAppearance[] }>(`/api/novels/notes/appearances${qs({ path })}`),
-  reindex: () => apiFetch<{ stats: Record<string, number> }>('/api/novels/reindex', { method: 'POST' }),
+  reindex: () =>
+    apiFetch<{ stats: Record<string, number> }>('/api/novels/reindex', { method: 'POST' }),
 }
 
 // ── Exported API ──────────────────────────────────────────────────────
