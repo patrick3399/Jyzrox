@@ -25,6 +25,7 @@ import type {
   TagImplication,
   TagItem,
   TagHealthReport,
+  TagTranslationBrowseResponse,
   EhComment,
   BrowseHistoryItem,
   SavedSearch,
@@ -1033,6 +1034,19 @@ const tags = {
   getTranslations: (tags: string[], language = 'zh') =>
     apiFetch<Record<string, string>>(
       `/api/tags/translations${qs({ tags: tags.join(','), language })}`,
+    ),
+
+  translationsBrowse: (
+    params: {
+      q?: string
+      namespace?: string
+      language?: string
+      limit?: number
+      offset?: number
+    } = {},
+  ) =>
+    apiFetch<TagTranslationBrowseResponse>(
+      `/api/tags/translations/browse${qs(params as Record<string, unknown>)}`,
     ),
 
   listBlocked: () => apiFetch<BlockedTag[]>('/api/tags/blocked'),

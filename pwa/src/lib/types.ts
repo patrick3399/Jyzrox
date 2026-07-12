@@ -465,6 +465,20 @@ export interface TagListResponse {
   has_next?: boolean
 }
 
+/** Row in the tag translations browse table. */
+export interface TagTranslationBrowseItem {
+  namespace: string
+  name: string
+  language: string
+  translation: string
+}
+
+/** Response for GET /api/tags/translations/browse (offset pagination). */
+export interface TagTranslationBrowseResponse {
+  total: number
+  items: TagTranslationBrowseItem[]
+}
+
 // ── Plugin System ────────────────────────────────────────────────────
 
 export interface FieldDef {

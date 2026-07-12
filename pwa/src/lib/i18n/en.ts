@@ -205,6 +205,7 @@ const en: Record<string, string> = {
   'tags.targetTagId': 'Target tag ID',
   'tags.aliasNamePlaceholder': 'alias name',
   'tags.tabBrowse': 'Browse',
+  'tags.tabTranslations': 'Translations',
   'tags.tabHealth': 'Health',
 
   // ── Settings Categories ──
@@ -829,6 +830,12 @@ const en: Record<string, string> = {
   'tags.translationSaved': 'Translation saved',
   'tags.translationFailed': 'Failed to save translation',
   'tags.translationLanguage': 'Language',
+
+  // ── Tag Translations Browse ──
+  'tags.translationsBrowseSearchPlaceholder': 'Search name or translation...',
+  'tags.translationsBrowseTranslationHeader': 'Translation',
+  'tags.translationsBrowseEmpty': 'No translations found',
+  'tags.translationsBrowseTotal': '{total} translations',
 
   // ── Tag Health Report ──
   'tags.health.title': 'Tag Health Report',

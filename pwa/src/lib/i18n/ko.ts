@@ -416,6 +416,7 @@ const ko: Record<string, string> = {
   'tags.targetTagId': '대상 태그 ID',
   'tags.aliasNamePlaceholder': '별칭 이름',
   'tags.tabBrowse': '찾아보기',
+  'tags.tabTranslations': '번역',
   'tags.tabHealth': '상태',
   'tags.selectTag': '태그를 선택하여 상세 보기',
   'tags.translations': '태그 번역',
@@ -426,6 +427,12 @@ const ko: Record<string, string> = {
   'tags.translationSaved': '번역 저장됨',
   'tags.translationFailed': '번역 저장 실패',
   'tags.translationLanguage': '언어',
+
+  // ── Tag Translations Browse ──
+  'tags.translationsBrowseSearchPlaceholder': '이름 또는 번역으로 검색...',
+  'tags.translationsBrowseTranslationHeader': '번역',
+  'tags.translationsBrowseEmpty': '번역을 찾을 수 없습니다',
+  'tags.translationsBrowseTotal': '번역 {total}개',
 
   // ── Tag Health Report ──
   'tags.health.title': '태그 상태 보고서',

@@ -301,6 +301,7 @@ const ja: Record<string, string> = {
   'tags.targetTagId': 'ターゲットタグID',
   'tags.aliasNamePlaceholder': 'エイリアス名',
   'tags.tabBrowse': '閲覧',
+  'tags.tabTranslations': '翻訳',
   'tags.tabHealth': 'ヘルス',
 
   // ── Settings ──
@@ -909,6 +910,12 @@ const ja: Record<string, string> = {
   'tags.translationSaved': '翻訳を保存しました',
   'tags.translationFailed': '翻訳の保存に失敗しました',
   'tags.translationLanguage': '言語',
+
+  // ── Tag Translations Browse ──
+  'tags.translationsBrowseSearchPlaceholder': '名前または翻訳で検索...',
+  'tags.translationsBrowseTranslationHeader': '翻訳',
+  'tags.translationsBrowseEmpty': '翻訳が見つかりません',
+  'tags.translationsBrowseTotal': '{total} 件の翻訳',
 
   // ── Tag Health Report ──
   'tags.health.title': 'タグ健全性レポート',

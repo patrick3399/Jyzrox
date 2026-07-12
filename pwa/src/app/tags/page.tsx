@@ -9,11 +9,12 @@ import { t } from '@/lib/i18n'
 import type { TagItem } from '@/lib/types'
 import { useProfile } from '@/hooks/useProfile'
 import TagHealthPanel from '@/components/TagHealthPanel'
+import TagTranslationsPanel from '@/components/TagTranslationsPanel'
 
 export default function TagsPage() {
   const { data: profile } = useProfile()
   const isAdmin = profile?.role === 'admin'
-  const [tab, setTab] = useState<'browse' | 'health'>('browse')
+  const [tab, setTab] = useState<'browse' | 'translations' | 'health'>('browse')
   const [search, setSearch] = useState('')
   const [nsFilter, setNsFilter] = useState('')
   const [page, setPage] = useState(0)
@@ -171,15 +172,22 @@ export default function TagsPage() {
     <>
       <h1 className="text-2xl font-bold mb-6">{t('tags.title')}</h1>
 
-      {isAdmin && (
-        <div className="mb-6 flex bg-vault-input border border-vault-border rounded overflow-hidden w-fit">
-          <button
-            type="button"
-            onClick={() => setTab('browse')}
-            className={`px-4 py-2 text-sm transition-colors ${tab === 'browse' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-          >
-            {t('tags.tabBrowse')}
-          </button>
+      <div className="mb-6 flex bg-vault-input border border-vault-border rounded overflow-hidden w-fit">
+        <button
+          type="button"
+          onClick={() => setTab('browse')}
+          className={`px-4 py-2 text-sm transition-colors ${tab === 'browse' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
+        >
+          {t('tags.tabBrowse')}
+        </button>
+        <button
+          type="button"
+          onClick={() => setTab('translations')}
+          className={`px-4 py-2 text-sm transition-colors ${tab === 'translations' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
+        >
+          {t('tags.tabTranslations')}
+        </button>
+        {isAdmin && (
           <button
             type="button"
             onClick={() => setTab('health')}
@@ -187,11 +195,13 @@ export default function TagsPage() {
           >
             {t('tags.tabHealth')}
           </button>
-        </div>
-      )}
+        )}
+      </div>
 
       {isAdmin && tab === 'health' ? (
         <TagHealthPanel />
+      ) : tab === 'translations' ? (
+        <TagTranslationsPanel isAdmin={isAdmin} />
       ) : (
         <>
           {/* Filters */}

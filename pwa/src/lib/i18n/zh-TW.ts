@@ -354,6 +354,7 @@ const zhTW: Record<string, string> = {
   'tags.targetTagId': '目標標籤 ID',
   'tags.aliasNamePlaceholder': '別名名稱',
   'tags.tabBrowse': '瀏覽',
+  'tags.tabTranslations': '翻譯',
   'tags.tabHealth': '健康度',
 
   // ── Tags (extra) ──
@@ -364,6 +365,12 @@ const zhTW: Record<string, string> = {
   'tags.translationLanguage': '語言',
   'tags.translationPlaceholder': '輸入翻譯...',
   'tags.translationSaved': '翻譯已儲存',
+
+  // ── Tag Translations Browse ──
+  'tags.translationsBrowseSearchPlaceholder': '依名稱或翻譯搜尋...',
+  'tags.translationsBrowseTranslationHeader': '翻譯',
+  'tags.translationsBrowseEmpty': '找不到翻譯',
+  'tags.translationsBrowseTotal': '共 {total} 筆翻譯',
 
   // ── Tag Health Report ──
   'tags.health.title': '標籤健康度報告',

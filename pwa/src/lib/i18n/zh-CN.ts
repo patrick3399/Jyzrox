@@ -300,6 +300,7 @@ const zhCN: Record<string, string> = {
   'tags.targetTagId': '目标标签 ID',
   'tags.aliasNamePlaceholder': '别名名称',
   'tags.tabBrowse': '浏览',
+  'tags.tabTranslations': '翻译',
   'tags.tabHealth': '健康度',
 
   // ── Settings ──
@@ -928,6 +929,12 @@ const zhCN: Record<string, string> = {
   'tags.translationSaved': '翻译已保存',
   'tags.translationFailed': '保存翻译失败',
   'tags.translationLanguage': '语言',
+
+  // ── Tag Translations Browse ──
+  'tags.translationsBrowseSearchPlaceholder': '按名称或翻译搜索...',
+  'tags.translationsBrowseTranslationHeader': '翻译',
+  'tags.translationsBrowseEmpty': '未找到翻译',
+  'tags.translationsBrowseTotal': '共 {total} 条翻译',
 
   // ── Tag Health Report ──
   'tags.health.title': '标签健康度报告',

@@ -78,6 +78,7 @@ vi.mock('@/lib/api', () => ({
       createImplication: vi.fn(),
       deleteImplication: (...args: unknown[]) => mockDeleteImplication(...args),
       getTranslations: vi.fn().mockResolvedValue({}),
+      translationsBrowse: vi.fn().mockResolvedValue({ total: 0, items: [] }),
       upsertTranslation: vi.fn(),
       health: vi.fn(),
       healthIgnore: (...args: unknown[]) => mockHealthIgnore(...args),
@@ -209,12 +210,13 @@ describe('TagsPage health tab visibility', () => {
     mockDeleteTag.mockResolvedValue({ status: 'ok' })
   })
 
-  it('does not show the Health tab for non-admin users', () => {
+  it('shows Browse and Translations tabs but hides Health for non-admin users', () => {
     h.profileRole = 'viewer'
     render(<TagsPage />)
 
     expect(screen.queryByText('tags.tabHealth')).not.toBeInTheDocument()
-    expect(screen.queryByText('tags.tabBrowse')).not.toBeInTheDocument()
+    expect(screen.getByText('tags.tabBrowse')).toBeInTheDocument()
+    expect(screen.getByText('tags.tabTranslations')).toBeInTheDocument()
   })
 
   it('shows the Health tab for admin users', () => {
@@ -223,5 +225,6 @@ describe('TagsPage health tab visibility', () => {
 
     expect(screen.getByText('tags.tabHealth')).toBeInTheDocument()
     expect(screen.getByText('tags.tabBrowse')).toBeInTheDocument()
+    expect(screen.getByText('tags.tabTranslations')).toBeInTheDocument()
   })
 })
