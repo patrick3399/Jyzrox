@@ -39,6 +39,7 @@ const SEARCH_GALLERY = {
 
 vi.mock('@/hooks/useSubscriptions', () => ({
   useCreateSubscription: () => ({ trigger: vi.fn(), isMutating: false }),
+  useSubscriptions: () => ({ data: { subscriptions: [] }, mutate: vi.fn() }),
 }))
 
 vi.mock('swr', () => ({

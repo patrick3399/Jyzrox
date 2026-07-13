@@ -14,7 +14,7 @@ import {
   applyEhAutocompleteSuggestion,
   getEhAutocompleteFragment,
 } from '@/lib/ehSearchAutocomplete'
-import { useCreateSubscription } from '@/hooks/useSubscriptions'
+import { useCreateSubscription, useSubscriptions } from '@/hooks/useSubscriptions'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
@@ -454,6 +454,12 @@ function BrowsePage() {
   const [subAutoDownload, setSubAutoDownload] = useState(true)
   const [subCron, setSubCron] = useState('0 */2 * * *')
   const { trigger: createSub, isMutating: subCreating } = useCreateSubscription()
+  const { data: watchedData, mutate: refreshWatched } = useSubscriptions({
+    source: 'ehentai',
+    enabled: true,
+    limit: 50,
+  })
+  const watchedSearches = watchedData?.subscriptions ?? []
 
   // Saved searches state
   const [savedSearches, setSavedSearches] = useState<SavedSearch[]>([])
@@ -766,12 +772,28 @@ function BrowsePage() {
         cron_expr: subCron,
       })
       toast.success(t('browse.subscribeSuccess'))
+      void refreshWatched()
       setShowSubscribe(false)
       setSubName('')
     } catch {
       toast.error(t('browse.subscribeFailed'))
     }
   }
+
+  const openWatchedSearch = useCallback(
+    (url: string) => {
+      try {
+        const value = new URL(url).searchParams.get('f_search') || ''
+        if (!value) return
+        setInputValue(value)
+        actions.setTab('search')
+        commitSearch(value)
+      } catch {
+        toast.error(t('common.invalidUrl'))
+      }
+    },
+    [actions, commitSearch],
+  )
 
   const openRandomLoadedGallery = useCallback(() => {
     if (items.length === 0) return
@@ -1312,6 +1334,25 @@ function BrowsePage() {
               {t('browse.favoritesTab')}
             </button>
           )}
+        </div>
+      )}
+
+      {watchedSearches.length > 0 && (
+        <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
+          <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-vault-text-muted">
+            Watched
+          </span>
+          {watchedSearches.map((subscription) => (
+            <button
+              key={subscription.id}
+              type="button"
+              onClick={() => openWatchedSearch(subscription.url)}
+              className="shrink-0 max-w-56 truncate rounded-full border border-vault-border bg-vault-card px-3 py-1 text-xs text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
+              title={subscription.name || subscription.url}
+            >
+              {subscription.name || subscription.url}
+            </button>
+          ))}
         </div>
       )}
 
