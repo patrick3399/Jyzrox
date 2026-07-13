@@ -33,6 +33,7 @@ import {
   Bookmark,
   BookmarkCheck,
   Rss,
+  Shuffle,
 } from 'lucide-react'
 import type { EhBrowseGalleryStatus, EhGallery, SavedSearch, TagItem } from '@/lib/types'
 
@@ -772,6 +773,12 @@ function BrowsePage() {
     }
   }
 
+  const openRandomLoadedGallery = useCallback(() => {
+    if (items.length === 0) return
+    const gallery = items[Math.floor(Math.random() * items.length)]
+    navigateToGallery(gallery)
+  }, [items, navigateToGallery])
+
   // ── Keyboard grid navigation ────────────────────────────
   const { focusedIndex } = useGridKeyboard({
     totalItems: items.length,
@@ -1214,6 +1221,17 @@ function BrowsePage() {
             )}
           </div>
         )}
+
+        <button
+          type="button"
+          onClick={openRandomLoadedGallery}
+          disabled={items.length === 0}
+          title="Open a random loaded result"
+          aria-label="Open a random loaded result"
+          className="p-2.5 rounded-lg border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-border-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
+        >
+          <Shuffle size={16} />
+        </button>
 
         {/* View toggle */}
         <div className="flex border border-vault-border rounded-lg overflow-hidden shrink-0">
