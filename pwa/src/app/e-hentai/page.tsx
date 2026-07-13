@@ -483,7 +483,10 @@ function BrowsePage() {
     () => api.tags.autocomplete(autocompleteFragment?.query ?? '', 10),
     { keepPreviousData: false },
   )
-  const autocompleteSuggestions = Array.isArray(autocompleteData) ? autocompleteData : []
+  const autocompleteSuggestions = useMemo(
+    () => (Array.isArray(autocompleteData) ? autocompleteData : []),
+    [autocompleteData],
+  )
 
   // Mobile search expand
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
