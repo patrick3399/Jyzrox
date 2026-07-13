@@ -796,7 +796,7 @@ function BrowsePage() {
         actions.setTab('search')
         commitSearch(value)
       } catch {
-        toast.error(t('common.invalidUrl'))
+        toast.error(t('browse.failedLoadResults'))
       }
     },
     [actions, commitSearch],
@@ -821,7 +821,7 @@ function BrowsePage() {
       actions.showExternalResults(result.galleries, result.total)
       setShowImageSearch(false)
       setImageSearchFile(null)
-      toast.success(`${result.total.toLocaleString()} image search results`)
+      toast.success(t('browse.imageSearchResults', { count: result.total.toLocaleString() }))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('browse.failedLoadResults'))
     } finally {
@@ -942,8 +942,8 @@ function BrowsePage() {
         <button
           type="button"
           onClick={() => setShowImageSearch(true)}
-          title="Search EH by JPEG image"
-          aria-label="Search EH by JPEG image"
+          title={t('browse.searchByImage')}
+          aria-label={t('browse.searchByImage')}
           className="p-2.5 rounded-lg border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-border-hover transition-colors"
         >
           <Camera size={16} />
@@ -1286,8 +1286,8 @@ function BrowsePage() {
           type="button"
           onClick={openRandomLoadedGallery}
           disabled={items.length === 0}
-          title="Open a random loaded result"
-          aria-label="Open a random loaded result"
+          title={t('browse.openRandom')}
+          aria-label={t('browse.openRandom')}
           className="p-2.5 rounded-lg border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-border-hover transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
         >
           <Shuffle size={16} />
@@ -1316,11 +1316,11 @@ function BrowsePage() {
         <div
           role="dialog"
           aria-modal="true"
-          aria-label="EH image search"
+          aria-label={t('browse.searchByImage')}
           className="rounded-lg border border-vault-border bg-vault-card p-4 space-y-3"
         >
           <div className="flex items-center justify-between">
-            <h2 className="text-sm font-semibold text-vault-text">Search EH by image</h2>
+            <h2 className="text-sm font-semibold text-vault-text">{t('browse.searchByImage')}</h2>
             <button
               type="button"
               onClick={() => setShowImageSearch(false)}
@@ -1336,9 +1336,7 @@ function BrowsePage() {
             onChange={(event) => setImageSearchFile(event.target.files?.[0] ?? null)}
             className="block w-full text-xs text-vault-text-secondary file:mr-3 file:rounded file:border-0 file:bg-vault-input file:px-3 file:py-2 file:text-vault-text"
           />
-          <p className="text-xs text-vault-text-muted">
-            EH requires the original JPEG bytes; the image will not be recompressed.
-          </p>
+          <p className="text-xs text-vault-text-muted">{t('browse.imageOriginalJpeg')}</p>
           <div className="flex flex-wrap gap-4 text-xs text-vault-text-secondary">
             <label className="flex items-center gap-1.5">
               <input
@@ -1346,7 +1344,7 @@ function BrowsePage() {
                 checked={imageSearchSimilar}
                 onChange={(event) => setImageSearchSimilar(event.target.checked)}
               />
-              Similarity scan
+              {t('browse.similarityScan')}
             </label>
             <label className="flex items-center gap-1.5">
               <input
@@ -1354,7 +1352,7 @@ function BrowsePage() {
                 checked={imageSearchCovers}
                 onChange={(event) => setImageSearchCovers(event.target.checked)}
               />
-              Search covers only
+              {t('browse.coversOnly')}
             </label>
             <label className="flex items-center gap-1.5">
               <input
@@ -1362,7 +1360,7 @@ function BrowsePage() {
                 checked={imageSearchExpunged}
                 onChange={(event) => setImageSearchExpunged(event.target.checked)}
               />
-              Include expunged
+              {t('browse.includeExpunged')}
             </label>
           </div>
           <button
@@ -1371,7 +1369,7 @@ function BrowsePage() {
             disabled={!imageSearchFile || imageSearchLoading}
             className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
           >
-            {imageSearchLoading ? t('common.loading') : t('common.search')}
+            {imageSearchLoading ? t('common.loading') : t('browse.search')}
           </button>
         </div>
       )}
@@ -1442,7 +1440,7 @@ function BrowsePage() {
       {watchedSearches.length > 0 && (
         <div className="flex items-center gap-2 overflow-x-auto pb-1 scrollbar-hide">
           <span className="shrink-0 text-[11px] font-semibold uppercase tracking-wide text-vault-text-muted">
-            Watched
+            {t('browse.watched')}
           </span>
           {watchedSearches.map((subscription) => (
             <button
@@ -1519,14 +1517,20 @@ function BrowsePage() {
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { bit: EH_ADVANCED_SEARCH_BITS.name, label: 'Name' },
-                      { bit: EH_ADVANCED_SEARCH_BITS.tags, label: 'Tags' },
-                      { bit: EH_ADVANCED_SEARCH_BITS.description, label: 'Description' },
+                      { bit: EH_ADVANCED_SEARCH_BITS.name, label: 'browse.searchName' },
+                      { bit: EH_ADVANCED_SEARCH_BITS.tags, label: 'browse.searchTags' },
+                      {
+                        bit: EH_ADVANCED_SEARCH_BITS.description,
+                        label: 'browse.searchDescription',
+                      },
                       {
                         bit: EH_ADVANCED_SEARCH_BITS.torrentFilenames,
-                        label: 'Torrent Filenames',
+                        label: 'browse.torrentFilenames',
                       },
-                      { bit: EH_ADVANCED_SEARCH_BITS.onlyTorrents, label: 'Only Torrents' },
+                      {
+                        bit: EH_ADVANCED_SEARCH_BITS.onlyTorrents,
+                        label: 'browse.onlyTorrents',
+                      },
                     ].map(({ bit, label }) => (
                       <label
                         key={bit}
@@ -1538,7 +1542,7 @@ function BrowsePage() {
                           onChange={() => actions.setFilter({ advSearch: filters.advSearch ^ bit })}
                           className="rounded border-vault-border"
                         />
-                        {label}
+                        {t(label)}
                       </label>
                     ))}
                   </div>
@@ -1551,20 +1555,29 @@ function BrowsePage() {
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { bit: EH_ADVANCED_SEARCH_BITS.lowPowerTags, label: 'Low-Power Tags' },
-                      { bit: EH_ADVANCED_SEARCH_BITS.downvotedTags, label: 'Downvoted Tags' },
-                      { bit: EH_ADVANCED_SEARCH_BITS.showExpunged, label: 'Show Expunged' },
+                      {
+                        bit: EH_ADVANCED_SEARCH_BITS.lowPowerTags,
+                        label: 'browse.lowPowerTags',
+                      },
+                      {
+                        bit: EH_ADVANCED_SEARCH_BITS.downvotedTags,
+                        label: 'browse.downvotedTags',
+                      },
+                      {
+                        bit: EH_ADVANCED_SEARCH_BITS.showExpunged,
+                        label: 'browse.showExpunged',
+                      },
                       {
                         bit: EH_ADVANCED_SEARCH_BITS.disableLanguageFilter,
-                        label: 'Disable Language Filter',
+                        label: 'browse.disableLanguageFilter',
                       },
                       {
                         bit: EH_ADVANCED_SEARCH_BITS.disableUploaderFilter,
-                        label: 'Disable Uploader Filter',
+                        label: 'browse.disableUploaderFilter',
                       },
                       {
                         bit: EH_ADVANCED_SEARCH_BITS.disableTagFilter,
-                        label: 'Disable Tag Filter',
+                        label: 'browse.disableTagFilter',
                       },
                     ].map(({ bit, label }) => (
                       <label
@@ -1577,7 +1590,7 @@ function BrowsePage() {
                           onChange={() => actions.setFilter({ advSearch: filters.advSearch ^ bit })}
                           className="rounded border-vault-border"
                         />
-                        {label}
+                        {t(label)}
                       </label>
                     ))}
                   </div>
@@ -1586,13 +1599,13 @@ function BrowsePage() {
                 {/* Language + Min Rating + Page Range */}
                 <div className="flex flex-wrap gap-4">
                   <div>
-                    <p className="text-xs text-vault-text-muted mb-1">Language</p>
+                    <p className="text-xs text-vault-text-muted mb-1">{t('browse.language')}</p>
                     <select
                       value={filters.language}
                       onChange={(e) => actions.setFilter({ language: e.target.value })}
                       className="bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
                     >
-                      <option value="">Any language</option>
+                      <option value="">{t('browse.anyLanguage')}</option>
                       <option value="english">English</option>
                       <option value="chinese">Chinese</option>
                       <option value="japanese">Japanese</option>

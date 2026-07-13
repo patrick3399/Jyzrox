@@ -626,7 +626,8 @@ function EhGalleryDetail() {
                 rel="noreferrer"
                 className="px-4 py-2.5 bg-vault-card border border-vault-border hover:border-vault-border-hover rounded-lg text-vault-text-secondary text-sm font-medium transition-colors"
               >
-                Torrents{gallery.torrent_count ? ` (${gallery.torrent_count})` : ''}
+                {t('browse.torrents')}
+                {gallery.torrent_count ? ` (${gallery.torrent_count})` : ''}
               </a>
               <a
                 href={`https://e-hentai.org/archiver.php?gid=${gallery.gid}&token=${gallery.token}`}
@@ -634,7 +635,7 @@ function EhGalleryDetail() {
                 rel="noreferrer"
                 className="px-4 py-2.5 bg-vault-card border border-vault-border hover:border-vault-border-hover rounded-lg text-vault-text-secondary text-sm font-medium transition-colors"
               >
-                Archive
+                {t('browse.archive')}
               </a>
               <a
                 href={`https://e-hentai.org/g/${gallery.gid}/${gallery.token}/`}
@@ -642,7 +643,7 @@ function EhGalleryDetail() {
                 rel="noreferrer"
                 className="px-4 py-2.5 bg-vault-card border border-vault-border hover:border-vault-border-hover rounded-lg text-vault-text-secondary text-sm font-medium transition-colors"
               >
-                Source ↗
+                {t('browse.sourceLink')} ↗
               </a>
               {/* Favorite button with picker */}
               <div className="relative" ref={favRef}>
@@ -663,7 +664,7 @@ function EhGalleryDetail() {
                     <textarea
                       value={favoriteNote}
                       onChange={(event) => setFavoriteNote(event.target.value.slice(0, 250))}
-                      placeholder="Favorite note"
+                      placeholder={t('browse.favoriteNote')}
                       rows={2}
                       className="m-2 mb-1 w-[calc(100%-1rem)] resize-none rounded border border-vault-border bg-vault-input px-2 py-1.5 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
                     />
@@ -704,7 +705,7 @@ function EhGalleryDetail() {
           <div className="rounded-lg border border-vault-border bg-vault-card p-3 text-sm space-y-2">
             {parentRelationship && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-vault-text-muted">Parent:</span>
+                <span className="text-vault-text-muted">{t('browse.parentGallery')}:</span>
                 <button
                   type="button"
                   onClick={() =>
@@ -718,7 +719,7 @@ function EhGalleryDetail() {
             )}
             {newerVersions.length > 0 && (
               <div className="flex flex-wrap items-center gap-2">
-                <span className="text-vault-text-muted">Newer versions:</span>
+                <span className="text-vault-text-muted">{t('browse.newerVersions')}:</span>
                 {newerVersions.map((version) => (
                   <button
                     key={`${version.gid}-${version.token}`}
