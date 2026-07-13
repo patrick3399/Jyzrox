@@ -1,7 +1,7 @@
 'use client'
 
-import { use } from 'react'
-import { useSearchParams } from 'next/navigation'
+import { use, useEffect } from 'react'
+import { useRouter, useSearchParams } from 'next/navigation'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 import Reader from '@/components/Reader'
@@ -13,19 +13,37 @@ import type { GalleryImage } from '@/lib/types'
 export default function PixivReaderPage({ params }: { params: Promise<{ id: string }> }) {
   useLocale()
   const { id } = use(params)
+  const router = useRouter()
+  const isAuthorCollection = id.startsWith('user:')
   const illustId = parseInt(id, 10)
   const searchParams = useSearchParams()
   const initialPage = Math.max(1, parseInt(searchParams.get('page') ?? '1', 10) || 1)
 
+  useEffect(() => {
+    if (!isAuthorCollection) return
+    const query = searchParams.toString()
+    router.replace(
+      `/reader/gallery/pixiv/${encodeURIComponent(id)}${query ? `?${query}` : ''}`,
+    )
+  }, [id, isAuthorCollection, router, searchParams])
+
   const { data: pagesData, error: pagesError } = useSWR(
-    isNaN(illustId) ? null : `/api/pixiv/illust/${illustId}/pages`,
+    isNaN(illustId) || isAuthorCollection ? null : `/api/pixiv/illust/${illustId}/pages`,
     () => api.pixiv.getIllustPages(illustId),
   )
 
   const { data: illust, error: illustError } = useSWR(
-    isNaN(illustId) ? null : `/api/pixiv/illust/${illustId}`,
+    isNaN(illustId) || isAuthorCollection ? null : `/api/pixiv/illust/${illustId}`,
     () => api.pixiv.getIllust(illustId),
   )
+
+  if (isAuthorCollection) {
+    return (
+      <div className="flex h-screen w-full items-center justify-center bg-black text-white">
+        <div className="h-8 w-8 animate-spin rounded-full border-2 border-white/20 border-t-white" />
+      </div>
+    )
+  }
 
   if (isNaN(illustId)) {
     return (
