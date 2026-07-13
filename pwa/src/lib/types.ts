@@ -408,6 +408,19 @@ export interface WsMessage {
   data?: Record<string, unknown>
   // Log entry payload
   log?: unknown
+  // gdl_upgrade fields (gallery-dl upgrade/rollback outcome):
+  old_version?: string | null
+  new_version?: string | null
+  error?: string | null
+  rollback?: boolean
+}
+
+export interface GdlUpgradeEvent {
+  status: 'ok' | 'failed' | 'rejected'
+  old_version: string | null
+  new_version: string | null
+  error: string | null
+  rollback: boolean
 }
 
 export interface LogEntry {

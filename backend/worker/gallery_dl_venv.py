@@ -25,6 +25,10 @@ VENV_BASE = Path("/opt/gallery-dl")
 VENV_ACTIVE = VENV_BASE / "active"
 GDL_BIN = VENV_ACTIVE / "bin" / "gallery-dl"
 
+# Pinned baseline for the initial venv. Kept intentionally below the latest
+# PyPI release so the admin online-upgrade path always has a gap to exercise.
+INITIAL_GDL_VERSION = "1.32.1"
+
 _VERSION_DIR_RE = re.compile(r"^v\d+$")
 
 _gdl_bin_cache: str | None = None
@@ -172,10 +176,14 @@ async def ensure_venv() -> None:
         logger.error("[gallery-dl venv] venv creation failed: %s", stderr)
         raise RuntimeError(f"Failed to create venv: {stderr}")
 
-    # Install gallery-dl
+    # Install gallery-dl (pinned baseline). This is a freshly created venv, so
+    # its pip console script carries a correct self-referential shebang.
     pip_bin = str(v1 / "bin" / "pip")
-    logger.info("[gallery-dl venv] Installing gallery-dl into %s", v1)
-    rc, _, stderr = await _run([pip_bin, "install", "--upgrade", "gallery-dl", "psycopg[binary]"], timeout=120)
+    logger.info("[gallery-dl venv] Installing gallery-dl==%s into %s", INITIAL_GDL_VERSION, v1)
+    rc, _, stderr = await _run(
+        [pip_bin, "install", "--upgrade", f"gallery-dl=={INITIAL_GDL_VERSION}", "psycopg[binary]"],
+        timeout=120,
+    )
     if rc != 0:
         logger.error("[gallery-dl venv] pip install failed: %s", stderr)
         await asyncio.to_thread(shutil.rmtree, v1, True)
@@ -194,13 +202,11 @@ async def ensure_venv() -> None:
 async def get_current_version() -> str | None:
     """Return the currently active gallery-dl version.
 
-    Reads version directly from the active venv's package metadata via
-    ``pip show``.  This avoids two cross-process pitfalls:
-
-    * ``_gdl_bin_cache`` is per-process — the API process never sees the
-      cache invalidation that the worker process performs after an upgrade.
-    * The gallery-dl entry-point script's shebang may point to a stale
-      Python path when the venv is a copytree of an older directory.
+    Reads the version directly from the active venv's ``dist-info`` metadata
+    rather than executing the binary.  This avoids a cross-process pitfall:
+    ``_gdl_bin_cache`` is per-process, so the API process never sees the cache
+    invalidation the worker performs after an upgrade — reading metadata is
+    always accurate regardless of which process asks.
 
     Falls back to running the system ``gallery-dl --version`` if the venv
     does not exist.
@@ -239,12 +245,30 @@ async def _cleanup_new_dir(new_dir: Path) -> None:
     await asyncio.to_thread(shutil.rmtree, new_dir, True)
 
 
+async def _fail(status: str, error: str, requested_version: str | None = None) -> dict:
+    """Emit a failure event and return the SAQ job result dict.
+
+    Emitting on every failure/rejection (not just success) is what lets the
+    admin UI surface the outcome instead of silently keeping the old version.
+    """
+    from core.events import EventType, emit_safe
+
+    await emit_safe(
+        EventType.SYSTEM_GDL_UPGRADE_FAILED,
+        resource_type="gallery_dl",
+        status=status,
+        error=error,
+        requested_version=requested_version,
+    )
+    return {"status": status, "error": error}
+
+
 async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: ARG001
     """SAQ job: upgrade gallery-dl to a specific version (or latest).
 
     Steps:
     1. Check no downloads are running
-    2. Create new venv dir (copytree from current)
+    2. Create a fresh, isolated venv dir (never clone the current one)
     3. pip install gallery-dl==version (or latest)
     4. Verify with --version
     5. Atomic symlink swap
@@ -255,39 +279,42 @@ async def upgrade_job(ctx: dict, version: str | None = None) -> dict:  # noqa: A
     # 1. Check for running downloads
     running = await _check_running_downloads()
     if running > 0:
-        return {"status": "rejected", "error": f"{running} download(s) still running"}
+        return await _fail("rejected", f"{running} download(s) still running", version)
 
-    current_dir = _current_version_dir()
     old_version = await get_current_version()
 
-    # 2. Create new venv directory
+    # 2. Create a fresh venv directory.
+    #    NEVER shutil.copytree the current venv: venv entry-point scripts (pip,
+    #    gallery-dl) embed an absolute-path shebang pointing at the SOURCE dir.
+    #    Cloning leaves those shebangs dangling — the cloned pip installs into
+    #    the wrong dir, and the cloned gallery-dl breaks the moment
+    #    _cleanup_old_versions() removes the source dir (silent: get_current_
+    #    version() reads dist-info without executing the binary).
     new_dir = _next_version_dir()
     logger.info("[gallery-dl venv] Upgrading: creating %s", new_dir)
 
     try:
-        if current_dir:
-            await asyncio.to_thread(shutil.copytree, current_dir, new_dir, symlinks=True)
-        else:
-            rc, _, stderr = await _run(_venv_create_cmd(new_dir), timeout=30)
-            if rc != 0:
-                await _cleanup_new_dir(new_dir)
-                return {"status": "failed", "error": f"venv creation failed: {stderr}"}
-
-        # 3. pip install
-        pip_bin = str(new_dir / "bin" / "pip")
-        pkg = f"gallery-dl=={version}" if version else "gallery-dl"
-        logger.info("[gallery-dl venv] Installing %s", pkg)
-        rc, _, stderr = await _run([pip_bin, "install", "--upgrade", pkg, "psycopg[binary]"], timeout=120)
+        rc, _, stderr = await _run(_venv_create_cmd(new_dir), timeout=30)
         if rc != 0:
             await _cleanup_new_dir(new_dir)
-            return {"status": "failed", "error": f"pip install failed: {stderr}"}
+            return await _fail("failed", f"venv creation failed: {stderr}", version)
+
+        # 3. pip install — invoke pip via the new venv's own python so the
+        #    install always targets new_dir, independent of any shebang.
+        py_bin = str(new_dir / "bin" / "python")
+        pkg = f"gallery-dl=={version}" if version else "gallery-dl"
+        logger.info("[gallery-dl venv] Installing %s", pkg)
+        rc, _, stderr = await _run([py_bin, "-m", "pip", "install", "--upgrade", pkg, "psycopg[binary]"], timeout=120)
+        if rc != 0:
+            await _cleanup_new_dir(new_dir)
+            return await _fail("failed", f"pip install failed: {stderr}", version)
 
         # 4. Verify
         new_bin = str(new_dir / "bin" / "gallery-dl")
         new_version = await _get_version(new_bin)
         if not new_version:
             await _cleanup_new_dir(new_dir)
-            return {"status": "failed", "error": "gallery-dl --version failed after install"}
+            return await _fail("failed", "gallery-dl --version failed after install", version)
     except Exception:
         await _cleanup_new_dir(new_dir)
         raise
@@ -326,14 +353,14 @@ async def rollback_job(ctx: dict) -> dict:  # noqa: ARG001
     # Check for running downloads
     running = await _check_running_downloads()
     if running > 0:
-        return {"status": "rejected", "error": f"{running} download(s) still running"}
+        return await _fail("rejected", f"{running} download(s) still running")
 
     prev_dir = _previous_version_dir()
     if prev_dir is None:
-        return {"status": "failed", "error": "No previous version to rollback to"}
+        return await _fail("failed", "No previous version to rollback to")
 
     if not (prev_dir / "bin" / "gallery-dl").exists():
-        return {"status": "failed", "error": f"Previous version {prev_dir.name} is corrupt"}
+        return await _fail("failed", f"Previous version {prev_dir.name} is corrupt")
 
     old_version = await get_current_version()
     current_dir = _current_version_dir()

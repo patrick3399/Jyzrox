@@ -67,6 +67,7 @@ class EventType(StrEnum):
     EHTAG_SYNC_COMPLETED = "ehtag.sync_completed"
     RECONCILIATION_COMPLETED = "reconciliation.completed"
     SYSTEM_GDL_UPGRADED = "system.gdl_upgraded"
+    SYSTEM_GDL_UPGRADE_FAILED = "system.gdl_upgrade_failed"
     SYSTEM_WORKER_RECOVERED = "system.worker_recovered"
 
     # System alerts

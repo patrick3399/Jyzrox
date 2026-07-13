@@ -66,6 +66,7 @@ import {
   useWsAlerts,
   useWsEvents,
   useWsLogs,
+  useWsGdlUpgrade,
 } from '@/lib/ws'
 
 // ── Setup ─────────────────────────────────────────────────────────────
@@ -366,6 +367,49 @@ describe('focused hooks — granular context isolation', () => {
     })
 
     expect(result.current.lastEvent?.type).toBe('gallery.updated')
+  })
+
+  it('test_useWsGdlUpgrade_outsideProvider_returnsNull', () => {
+    const { result } = renderHook(() => useWsGdlUpgrade())
+    expect(result.current.lastGdlUpgrade).toBeNull()
+  })
+
+  it('test_useWsGdlUpgrade_onmessageGdlUpgrade_setsLastGdlUpgrade', async () => {
+    const { result } = renderHook(() => useWsGdlUpgrade(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({
+        data: JSON.stringify({
+          type: 'gdl_upgrade',
+          status: 'failed',
+          old_version: '1.32.1',
+          new_version: null,
+          error: 'pip install failed: boom',
+          rollback: false,
+        }),
+      })
+    })
+
+    expect(result.current.lastGdlUpgrade).toEqual({
+      status: 'failed',
+      old_version: '1.32.1',
+      new_version: null,
+      error: 'pip install failed: boom',
+      rollback: false,
+    })
+  })
+
+  it('test_useWsGdlUpgrade_onmessageGdlUpgrade_doesNotSetLastEvent', async () => {
+    const { result } = renderHook(() => useWs(), { wrapper })
+
+    await act(async () => {
+      mockWsInstance?.onmessage?.({
+        data: JSON.stringify({ type: 'gdl_upgrade', status: 'ok', new_version: '1.32.6' }),
+      })
+    })
+
+    expect(result.current.lastGdlUpgrade?.status).toBe('ok')
+    expect(result.current.lastEvent).toBeNull()
   })
 
   it('test_useWsLogs_onmessageLogEntry_setsLastLogEntry', async () => {

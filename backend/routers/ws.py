@@ -90,6 +90,20 @@ def _event_to_ws_message(event_data: dict) -> str:
                 "job_id": data.get("job_id", ""),
             }
         )
+    elif event_type in ("system.gdl_upgraded", "system.gdl_upgrade_failed"):
+        # Structured message so the admin UI can refresh the version live and
+        # surface failures — the generic system.* branch below would flatten
+        # these into an empty alert, dropping the version/error payload.
+        return json.dumps(
+            {
+                "type": "gdl_upgrade",
+                "status": "ok" if event_type == "system.gdl_upgraded" else data.get("status", "failed"),
+                "old_version": data.get("old_version"),
+                "new_version": data.get("new_version"),
+                "error": data.get("error"),
+                "rollback": data.get("rollback", False),
+            }
+        )
     elif event_type.startswith("system."):
         return json.dumps(
             {

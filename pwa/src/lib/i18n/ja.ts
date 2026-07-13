@@ -456,6 +456,13 @@ const ja: Record<string, string> = {
   'settings.galleryDlRollbackQueued': 'ロールバックジョブをキューに追加しました',
   'settings.galleryDlRunningWarning':
     'ダウンロード実行中はアップグレードとロールバックが拒否されます。',
+  'settings.galleryDlUpgradeSuccess': 'gallery-dl は現在 {version} です',
+  'settings.galleryDlRollbackSuccess': 'gallery-dl {version} にロールバックしました',
+  'settings.galleryDlUpgradeFailed': 'アップグレード失敗: {error}',
+  'settings.galleryDlUpgradeRejected': 'アップグレード拒否: {error}',
+  'settings.galleryDlLastFailed': '前回の試行が失敗しました: {error}',
+  'settings.galleryDlLastRejected': '前回の試行が拒否されました: {error}',
+  'settings.galleryDlDismiss': '閉じる',
   'settings.rateLimiting': 'レート制限',
   'settings.rateLimitDesc': 'ログインとAPIエンドポイントを保護',
   'settings.refresh': '更新',

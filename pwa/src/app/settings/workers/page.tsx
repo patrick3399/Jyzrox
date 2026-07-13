@@ -8,12 +8,15 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { t } from '@/lib/i18n'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { useWsGdlUpgrade } from '@/lib/ws'
+import type { GdlUpgradeEvent } from '@/lib/types'
 
-function GalleryDlSection() {
+export function GalleryDlSection() {
   const [version, setVersion] = useState<{ current: string | null; latest: string | null } | null>(
     null,
   )
   const [operating, setOperating] = useState(false)
+  const [lastResult, setLastResult] = useState<GdlUpgradeEvent | null>(null)
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   const fetchVersion = useCallback(async () => {
@@ -30,21 +33,57 @@ function GalleryDlSection() {
     return () => clearTimeout(timerRef.current)
   }, [fetchVersion])
 
+  // React to the gallery-dl upgrade/rollback outcome pushed over WebSocket.
+  // This is what makes the panel refresh live (no blind timer) and surfaces
+  // failures that the enqueue call itself cannot report.
+  const { lastGdlUpgrade } = useWsGdlUpgrade()
+  const seenRef = useRef<GdlUpgradeEvent | null | undefined>(undefined)
+  useEffect(() => {
+    // Adopt whatever event already exists at mount without reacting to it,
+    // so a stale outcome from a previous visit doesn't fire a toast.
+    if (seenRef.current === undefined) {
+      seenRef.current = lastGdlUpgrade
+      return
+    }
+    if (!lastGdlUpgrade || lastGdlUpgrade === seenRef.current) return
+    seenRef.current = lastGdlUpgrade
+
+    clearTimeout(timerRef.current)
+    setOperating(false)
+
+    const ev = lastGdlUpgrade
+    if (ev.status === 'ok') {
+      setLastResult(null)
+      void fetchVersion()
+      toast.success(
+        ev.rollback
+          ? t('settings.galleryDlRollbackSuccess', { version: ev.new_version ?? '' })
+          : t('settings.galleryDlUpgradeSuccess', { version: ev.new_version ?? '' }),
+      )
+    } else {
+      setLastResult(ev)
+      const err = ev.error ?? t('common.error')
+      toast.error(
+        ev.status === 'rejected'
+          ? t('settings.galleryDlUpgradeRejected', { error: err })
+          : t('settings.galleryDlUpgradeFailed', { error: err }),
+      )
+    }
+  }, [lastGdlUpgrade, fetchVersion])
+
   const upToDate =
     version?.current != null && version?.latest != null && version.current === version.latest
 
-  const runJob = async (action: () => Promise<unknown>, successMsg: string) => {
+  const runJob = async (action: () => Promise<unknown>, queuedMsg: string) => {
     setOperating(true)
+    setLastResult(null)
     try {
       await action()
-      toast.success(successMsg)
-      timerRef.current = setTimeout(async () => {
-        try {
-          await fetchVersion()
-        } finally {
-          setOperating(false)
-        }
-      }, 5000)
+      toast.info(queuedMsg)
+      // Wait for the WS outcome event to confirm success/failure; this fallback
+      // only re-enables the button if the event never arrives (e.g. worker down).
+      clearTimeout(timerRef.current)
+      timerRef.current = setTimeout(() => setOperating(false), 90000)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('common.error'))
       setOperating(false)
@@ -79,6 +118,22 @@ function GalleryDlSection() {
       </div>
 
       {upToDate && <p className="text-sm text-green-400 mb-4">{t('settings.galleryDlUpToDate')}</p>}
+
+      {lastResult && lastResult.status !== 'ok' && (
+        <div className="flex items-start justify-between gap-3 mb-4 px-3 py-2 rounded border border-red-700/50 bg-red-900/20">
+          <span className="text-sm text-red-400">
+            {lastResult.status === 'rejected'
+              ? t('settings.galleryDlLastRejected', { error: lastResult.error ?? '' })
+              : t('settings.galleryDlLastFailed', { error: lastResult.error ?? '' })}
+          </span>
+          <button
+            onClick={() => setLastResult(null)}
+            className="text-xs text-red-400/70 hover:text-red-400 shrink-0"
+          >
+            {t('settings.galleryDlDismiss')}
+          </button>
+        </div>
+      )}
 
       <div className="flex flex-wrap gap-3 mb-3">
         <button

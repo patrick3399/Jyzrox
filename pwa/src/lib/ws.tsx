@@ -1,6 +1,6 @@
 'use client'
 import { createContext, useCallback, useContext, useEffect, useRef, useState } from 'react'
-import type { WsMessage, LogEntry } from './types'
+import type { WsMessage, LogEntry, GdlUpgradeEvent } from './types'
 
 export interface JobUpdateEvent {
   job_id: string
@@ -39,6 +39,10 @@ interface WsLogContextValue {
   lastLogEntry: LogEntry | null
 }
 
+interface WsGdlContextValue {
+  lastGdlUpgrade: GdlUpgradeEvent | null
+}
+
 // ── Granular contexts ──────────────────────────────────────────────────
 
 const WsConnectionContext = createContext<WsConnectionContextValue>({
@@ -63,6 +67,10 @@ const WsLogContext = createContext<WsLogContextValue>({
   lastLogEntry: null,
 })
 
+const WsGdlContext = createContext<WsGdlContextValue>({
+  lastGdlUpgrade: null,
+})
+
 // ── Composite type (backward compat) ──────────────────────────────────
 
 interface WsContextValue
@@ -70,7 +78,8 @@ interface WsContextValue
     WsJobContextValue,
     WsAlertContextValue,
     WsEventContextValue,
-    WsLogContextValue {}
+    WsLogContextValue,
+    WsGdlContextValue {}
 
 // ── Provider ──────────────────────────────────────────────────────────
 
@@ -81,6 +90,7 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
   const [lastSubCheck, setLastSubCheck] = useState<SubCheckEvent | null>(null)
   const [lastEvent, setLastEvent] = useState<WsMessage | null>(null)
   const [lastLogEntry, setLastLogEntry] = useState<LogEntry | null>(null)
+  const [lastGdlUpgrade, setLastGdlUpgrade] = useState<GdlUpgradeEvent | null>(null)
   const wsRef = useRef<WebSocket | null>(null)
   const reconnectTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const mountedRef = useRef(true)
@@ -114,6 +124,14 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
           })
         } else if (msg.type === 'log_entry' && msg.log) {
           setLastLogEntry(msg.log as LogEntry)
+        } else if (msg.type === 'gdl_upgrade') {
+          setLastGdlUpgrade({
+            status: (msg.status as GdlUpgradeEvent['status']) ?? 'failed',
+            old_version: msg.old_version ?? null,
+            new_version: msg.new_version ?? null,
+            error: msg.error ?? null,
+            rollback: msg.rollback ?? false,
+          })
         } else if (msg.type !== 'ping') {
           // New event types from EventBus — store in lastEvent
           setLastEvent(msg)
@@ -157,7 +175,9 @@ export function WsProvider({ children }: { children: React.ReactNode }) {
       <WsJobContext value={{ lastJobUpdate, lastSubCheck }}>
         <WsAlertContext value={{ alerts, dismissAlert }}>
           <WsEventContext value={{ lastEvent }}>
-            <WsLogContext value={{ lastLogEntry }}>{children}</WsLogContext>
+            <WsLogContext value={{ lastLogEntry }}>
+              <WsGdlContext value={{ lastGdlUpgrade }}>{children}</WsGdlContext>
+            </WsLogContext>
           </WsEventContext>
         </WsAlertContext>
       </WsJobContext>
@@ -187,6 +207,10 @@ export function useWsLogs(): WsLogContextValue {
   return useContext(WsLogContext)
 }
 
+export function useWsGdlUpgrade(): WsGdlContextValue {
+  return useContext(WsGdlContext)
+}
+
 // ── Backward-compatible composite hook ────────────────────────────────
 
 export function useWs(): WsContextValue {
@@ -195,12 +219,14 @@ export function useWs(): WsContextValue {
   const alerts = useContext(WsAlertContext)
   const events = useContext(WsEventContext)
   const logs = useContext(WsLogContext)
+  const gdl = useContext(WsGdlContext)
   return {
     ...connection,
     ...jobs,
     ...alerts,
     ...events,
     ...logs,
+    ...gdl,
   }
 }
 

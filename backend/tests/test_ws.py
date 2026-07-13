@@ -611,6 +611,94 @@ class TestPubsubListener:
 
 
 # ---------------------------------------------------------------------------
+# Unit tests for _event_to_ws_message — gallery-dl upgrade translation
+# ---------------------------------------------------------------------------
+
+
+class TestGdlUpgradeTranslation:
+    """gallery-dl upgrade events must reach the client as a structured
+    ``gdl_upgrade`` message — NOT be flattened into an empty ``alert`` by the
+    generic ``system.*`` branch (which drops the version/error payload).
+    """
+
+    def test_gdl_upgraded_success_becomes_structured_message(self):
+        from routers.ws import _event_to_ws_message
+
+        msg = json.loads(
+            _event_to_ws_message(
+                {
+                    "event_type": "system.gdl_upgraded",
+                    "resource_type": "gallery_dl",
+                    "data": {"old_version": "1.32.1", "new_version": "1.32.6"},
+                }
+            )
+        )
+        assert msg["type"] == "gdl_upgrade"
+        assert msg["status"] == "ok"
+        assert msg["old_version"] == "1.32.1"
+        assert msg["new_version"] == "1.32.6"
+
+    def test_gdl_upgraded_rollback_flag_preserved(self):
+        from routers.ws import _event_to_ws_message
+
+        msg = json.loads(
+            _event_to_ws_message(
+                {
+                    "event_type": "system.gdl_upgraded",
+                    "resource_type": "gallery_dl",
+                    "data": {"old_version": "1.32.6", "new_version": "1.32.1", "rollback": True},
+                }
+            )
+        )
+        assert msg["type"] == "gdl_upgrade"
+        assert msg["status"] == "ok"
+        assert msg["rollback"] is True
+
+    def test_gdl_upgrade_failed_carries_status_and_error(self):
+        from routers.ws import _event_to_ws_message
+
+        msg = json.loads(
+            _event_to_ws_message(
+                {
+                    "event_type": "system.gdl_upgrade_failed",
+                    "resource_type": "gallery_dl",
+                    "data": {"status": "failed", "error": "pip install failed: boom"},
+                }
+            )
+        )
+        assert msg["type"] == "gdl_upgrade"
+        assert msg["status"] == "failed"
+        assert "boom" in msg["error"]
+
+    def test_gdl_upgrade_rejected_status_preserved(self):
+        from routers.ws import _event_to_ws_message
+
+        msg = json.loads(
+            _event_to_ws_message(
+                {
+                    "event_type": "system.gdl_upgrade_failed",
+                    "resource_type": "gallery_dl",
+                    "data": {"status": "rejected", "error": "3 download(s) still running"},
+                }
+            )
+        )
+        assert msg["type"] == "gdl_upgrade"
+        assert msg["status"] == "rejected"
+
+    def test_other_system_events_still_become_alerts(self):
+        """Non-gdl system events must keep their existing alert translation."""
+        from routers.ws import _event_to_ws_message
+
+        msg = json.loads(
+            _event_to_ws_message(
+                {"event_type": "system.disk_low", "data": {"message": "disk almost full"}}
+            )
+        )
+        assert msg["type"] == "alert"
+        assert msg["message"] == "disk almost full"
+
+
+# ---------------------------------------------------------------------------
 # Unit tests for _ping_loop
 # ---------------------------------------------------------------------------
 

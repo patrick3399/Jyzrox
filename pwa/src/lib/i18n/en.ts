@@ -334,6 +334,13 @@ const en: Record<string, string> = {
   'settings.galleryDlRollbackQueued': 'Rollback job queued',
   'settings.galleryDlRunningWarning':
     'Upgrade and rollback will be rejected if downloads are currently running.',
+  'settings.galleryDlUpgradeSuccess': 'gallery-dl is now {version}',
+  'settings.galleryDlRollbackSuccess': 'Rolled back to gallery-dl {version}',
+  'settings.galleryDlUpgradeFailed': 'Upgrade failed: {error}',
+  'settings.galleryDlUpgradeRejected': 'Upgrade rejected: {error}',
+  'settings.galleryDlLastFailed': 'Last attempt failed: {error}',
+  'settings.galleryDlLastRejected': 'Last attempt rejected: {error}',
+  'settings.galleryDlDismiss': 'Dismiss',
   'settings.rateLimiting': 'Rate Limiting',
   'settings.rateLimitDesc': 'Protect login and API endpoints',
   'settings.refresh': 'Refresh',

@@ -579,6 +579,13 @@ const zhTW: Record<string, string> = {
   'settings.galleryDlUpgradeQueued': '升級任務已排入佇列',
   'settings.galleryDlRollbackQueued': '回退任務已排入佇列',
   'settings.galleryDlRunningWarning': '若目前有下載進行中，升級和回退將被拒絕。',
+  'settings.galleryDlUpgradeSuccess': 'gallery-dl 現在是 {version}',
+  'settings.galleryDlRollbackSuccess': '已回退到 gallery-dl {version}',
+  'settings.galleryDlUpgradeFailed': '升級失敗：{error}',
+  'settings.galleryDlUpgradeRejected': '升級被拒絕：{error}',
+  'settings.galleryDlLastFailed': '上次嘗試失敗：{error}',
+  'settings.galleryDlLastRejected': '上次嘗試被拒絕：{error}',
+  'settings.galleryDlDismiss': '關閉',
   'settings.galleryUpdateCheckDays': '圖庫中繼資料自動檢查',
   'settings.galleryUpdateCheckDaysDesc':
     '-1 = 永不，0 = 每次，N = 超過 N 天才檢查（僅 EH 與 Pixiv）',

@@ -11,7 +11,7 @@ Regression tests covering:
 """
 
 from pathlib import Path
-from unittest.mock import patch
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -193,3 +193,152 @@ async def test_ensure_venv_recreates_active_without_gallery_dl_binary(tmp_path):
 
     assert calls[0] == [venv_mod.sys.executable, "-m", "venv", str(v1)]
     assert "--system-site-packages" not in calls[0]
+
+
+# ---------------------------------------------------------------------------
+# Regression: upgrade must build a fresh venv, never clone (stale-shebang bug)
+# ---------------------------------------------------------------------------
+
+
+def _make_fake_venv(target: Path, version: str) -> None:
+    """Fabricate a minimal venv whose entry-point scripts carry a shebang
+    pointing at *their own* interpreter — mimicking what ``python -m venv`` +
+    pip produce for a fresh venv.
+    """
+    bindir = target / "bin"
+    bindir.mkdir(parents=True, exist_ok=True)
+    (bindir / "python").write_text("")  # stand-in interpreter
+    for script in ("gallery-dl", "pip"):
+        (bindir / script).write_text(f"#!{bindir / 'python'}\n")
+    _create_dist_info(target / "lib" / "python3.14" / "site-packages", version)
+
+
+@pytest.mark.asyncio
+async def test_upgrade_does_not_clone_venv_so_active_entrypoint_survives_cleanup(tmp_path):
+    """Two upgrades + cleanup must leave the active gallery-dl runnable.
+
+    Regression for the copytree bug: cloning a venv copies entry-point scripts
+    whose shebang is an absolute path to the SOURCE venv dir. Once
+    ``_cleanup_old_versions()`` deletes that source dir (keeps only current +
+    one previous), every cloned gallery-dl script points at a missing
+    interpreter and gallery-dl stops working — silently, because
+    ``get_current_version()`` reads dist-info without executing the binary.
+    """
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    fake_active = fake_base / "active"
+
+    # Initial v1 venv (correct self-referential shebang) + active -> v1.
+    _make_fake_venv(fake_base / "v1", "1.32.1")
+    fake_active.symlink_to("v1")
+
+    async def fake_run(cmd, timeout=300):
+        # python -m venv <target>: fabricate a fresh, self-consistent venv.
+        if cmd[1:3] == ["-m", "venv"]:
+            _make_fake_venv(Path(cmd[3]), "1.32.6")
+            return (0, "", "")
+        if "--version" in cmd:
+            return (0, "1.32.6\n", "")
+        return (0, "", "")  # pip install etc.
+
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_run", side_effect=fake_run),
+        patch.object(venv_mod, "_check_running_downloads", new_callable=AsyncMock, return_value=0),
+        patch("core.events.emit_safe", new_callable=AsyncMock),
+    ):
+        r1 = await venv_mod.upgrade_job({})
+        r2 = await venv_mod.upgrade_job({})
+
+    assert r1["status"] == "ok"
+    assert r2["status"] == "ok"
+
+    # v1 has been cleaned up (only current + one previous are kept).
+    assert not (fake_base / "v1").exists()
+
+    # The active gallery-dl entry script's shebang must point at an interpreter
+    # that still exists — otherwise gallery-dl is silently unrunnable.
+    shebang = (fake_active / "bin" / "gallery-dl").read_text().splitlines()[0]
+    assert shebang.startswith("#!")
+    interpreter = Path(shebang[2:].strip())
+    assert interpreter.exists(), f"active gallery-dl shebang points at missing interpreter: {interpreter}"
+
+
+# ---------------------------------------------------------------------------
+# Regression: upgrade failures must emit an event (no longer silent)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_upgrade_job_install_failure_emits_upgrade_failed_event(tmp_path):
+    """A failed upgrade must emit SYSTEM_GDL_UPGRADE_FAILED so the UI can react.
+
+    Previously upgrade_job returned {"status": "failed"} without emitting any
+    event, leaving the admin UI with no signal — the panel just silently kept
+    the old version.
+    """
+    from core.events import EventType
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    fake_active = fake_base / "active"
+    _make_fake_venv(fake_base / "v1", "1.32.1")
+    fake_active.symlink_to("v1")
+
+    async def fake_run(cmd, timeout=300):
+        if cmd[1:3] == ["-m", "venv"]:
+            _make_fake_venv(Path(cmd[3]), "1.32.1")
+            return (0, "", "")
+        if "install" in cmd:
+            return (1, "", "network unreachable")  # pip install fails
+        if "--version" in cmd:
+            return (0, "1.32.1\n", "")
+        return (0, "", "")
+
+    emit = AsyncMock()
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_run", side_effect=fake_run),
+        patch.object(venv_mod, "_check_running_downloads", new_callable=AsyncMock, return_value=0),
+        patch("core.events.emit_safe", emit),
+    ):
+        result = await venv_mod.upgrade_job({}, version="1.99.0")
+
+    assert result["status"] == "failed"
+    assert emit.await_count == 1
+    assert emit.await_args.args[0] == EventType.SYSTEM_GDL_UPGRADE_FAILED
+    kwargs = emit.await_args.kwargs
+    assert kwargs["status"] == "failed"
+    assert "pip install failed" in kwargs["error"]
+    assert kwargs["requested_version"] == "1.99.0"
+
+
+@pytest.mark.asyncio
+async def test_upgrade_job_rejected_when_downloads_running_emits_event(tmp_path):
+    """A rejected upgrade (downloads running) must also emit a failure event,
+    distinctly flagged as ``rejected`` so the UI can show an actionable reason.
+    """
+    from core.events import EventType
+    from worker import gallery_dl_venv as venv_mod
+
+    fake_base = tmp_path / "gallery-dl"
+    fake_active = fake_base / "active"
+    _make_fake_venv(fake_base / "v1", "1.32.1")
+    fake_active.symlink_to("v1")
+
+    emit = AsyncMock()
+    with (
+        patch.object(venv_mod, "VENV_BASE", fake_base),
+        patch.object(venv_mod, "VENV_ACTIVE", fake_active),
+        patch.object(venv_mod, "_check_running_downloads", new_callable=AsyncMock, return_value=3),
+        patch("core.events.emit_safe", emit),
+    ):
+        result = await venv_mod.upgrade_job({})
+
+    assert result["status"] == "rejected"
+    assert emit.await_count == 1
+    assert emit.await_args.args[0] == EventType.SYSTEM_GDL_UPGRADE_FAILED
+    assert emit.await_args.kwargs["status"] == "rejected"
