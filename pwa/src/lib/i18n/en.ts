@@ -994,6 +994,8 @@ const en: Record<string, string> = {
   'subscriptions.urlPlaceholder': 'https://www.pixiv.net/users/12345 or https://x.com/username',
   'subscriptions.name': 'Name',
   'subscriptions.namePlaceholder': 'Optional display name',
+  'subscriptions.editName': 'Click to rename',
+  'subscriptions.nameUpdated': 'Name updated',
   'subscriptions.autoDownload': 'Auto Download',
   'subscriptions.cronExpr': 'Check Interval',
   'subscriptions.add': 'Add',

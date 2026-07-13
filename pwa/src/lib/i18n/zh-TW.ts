@@ -1404,6 +1404,8 @@ const zhTW: Record<string, string> = {
   'subscriptions.cronExpr': '檢查間隔',
   'subscriptions.name': '名稱',
   'subscriptions.namePlaceholder': '選填顯示名稱',
+  'subscriptions.editName': '點擊以重新命名',
+  'subscriptions.nameUpdated': '名稱已更新',
   'subscriptions.url': 'URL',
   'subscriptions.urlPlaceholder': 'https://www.pixiv.net/users/12345 或 https://x.com/username',
   'subscriptions.searchPlaceholder': '搜尋訂閱...',

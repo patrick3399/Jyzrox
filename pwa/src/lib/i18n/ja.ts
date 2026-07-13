@@ -1183,6 +1183,8 @@ const ja: Record<string, string> = {
   'subscriptions.urlPlaceholder': 'https://www.pixiv.net/users/12345 or https://x.com/username',
   'subscriptions.name': '名前',
   'subscriptions.namePlaceholder': '任意の表示名',
+  'subscriptions.editName': 'クリックして名前を変更',
+  'subscriptions.nameUpdated': '名前を更新しました',
   'subscriptions.autoDownload': '自動ダウンロード',
   'subscriptions.cronExpr': '確認間隔',
   'subscriptions.add': '追加',

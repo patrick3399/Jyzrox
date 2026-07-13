@@ -1494,6 +1494,8 @@ const ko: Record<string, string> = {
   'subscriptions.urlPlaceholder': 'https://www.pixiv.net/users/12345 또는 https://x.com/username',
   'subscriptions.name': '이름',
   'subscriptions.namePlaceholder': '선택적 표시 이름',
+  'subscriptions.editName': '클릭하여 이름 변경',
+  'subscriptions.nameUpdated': '이름이 업데이트됨',
   'subscriptions.autoDownload': '자동 다운로드',
   'subscriptions.cronExpr': '확인 주기',
   'subscriptions.add': '추가',

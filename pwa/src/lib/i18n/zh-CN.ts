@@ -1568,6 +1568,8 @@ const zhCN: Record<string, string> = {
   'subscriptions.cronExpr': '检查间隔',
   'subscriptions.name': '名称',
   'subscriptions.namePlaceholder': '可选显示名称',
+  'subscriptions.editName': '点击以重命名',
+  'subscriptions.nameUpdated': '名称已更新',
   'subscriptions.url': 'URL',
   'subscriptions.urlPlaceholder': 'https://www.pixiv.net/users/12345 或 https://x.com/username',
   'subscriptions.searchPlaceholder': '搜索订阅...',

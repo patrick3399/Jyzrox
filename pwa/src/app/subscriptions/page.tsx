@@ -202,7 +202,7 @@ function subscriptionGalleryHref(sub: Subscription, latestJob: DownloadJob | nul
   return `/library/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`
 }
 
-function SubscriptionCard({
+export function SubscriptionCard({
   sub,
   latestJob,
   groups,
@@ -212,6 +212,7 @@ function SubscriptionCard({
   onDelete,
   onAutoDownloadToggle,
   onMoveToGroup,
+  onRename,
   checkingId,
 }: {
   sub: Subscription
@@ -223,9 +224,12 @@ function SubscriptionCard({
   onDelete: (sub: Subscription) => void
   onAutoDownloadToggle: (sub: Subscription) => void
   onMoveToGroup: (sub: Subscription, groupId: number | null) => void
+  onRename: (sub: Subscription, name: string) => void
   checkingId: number | null
 }) {
   const [showMoveMenu, setShowMoveMenu] = useState(false)
+  const [editingName, setEditingName] = useState(false)
+  const [nameValue, setNameValue] = useState('')
   const moveMenuRef = useRef<HTMLDivElement | null>(null)
   const galleryHref = subscriptionGalleryHref(sub, latestJob)
 
@@ -246,9 +250,35 @@ function SubscriptionCard({
       <div className="flex items-start justify-between gap-2">
         <div className="flex-1 min-w-0">
           <div className="flex flex-wrap items-center gap-1.5 mb-1">
-            <span className="text-sm font-medium text-vault-text break-all">
-              {sub.name || sub.url}
-            </span>
+            {editingName ? (
+              <input
+                autoFocus
+                value={nameValue}
+                placeholder={t('subscriptions.namePlaceholder')}
+                onChange={(e) => setNameValue(e.target.value)}
+                onBlur={() => {
+                  const next = nameValue.trim()
+                  if (next !== (sub.name ?? '')) onRename(sub, next)
+                  setEditingName(false)
+                }}
+                onKeyDown={(e) => {
+                  if (e.key === 'Enter') e.currentTarget.blur()
+                  if (e.key === 'Escape') setEditingName(false)
+                }}
+                className="text-sm font-medium text-vault-text bg-vault-input border border-vault-border rounded px-1.5 py-0.5 min-w-0 flex-1 focus:outline-none focus:border-vault-accent"
+              />
+            ) : (
+              <span
+                onClick={() => {
+                  setNameValue(sub.name ?? '')
+                  setEditingName(true)
+                }}
+                className="text-sm font-medium text-vault-text break-all cursor-pointer hover:text-vault-accent transition-colors"
+                title={t('subscriptions.editName')}
+              >
+                {sub.name || sub.url}
+              </span>
+            )}
             {sourceBadge(sub.source)}
             {!sub.enabled && (
               <span className="text-[10px] px-1.5 py-0.5 rounded bg-vault-border text-vault-text-muted shrink-0">
@@ -568,6 +598,7 @@ function GroupCard({
   onDeleteSub,
   onAutoDownloadToggle,
   onMoveToGroup,
+  onRenameSub,
   checkingId,
   defaultExpanded,
 }: {
@@ -585,6 +616,7 @@ function GroupCard({
   onDeleteSub: (sub: Subscription) => void
   onAutoDownloadToggle: (sub: Subscription) => void
   onMoveToGroup: (sub: Subscription, groupId: number | null) => void
+  onRenameSub: (sub: Subscription, name: string) => void
   checkingId: number | null
   defaultExpanded: boolean
 }) {
@@ -707,6 +739,7 @@ function GroupCard({
                 onDelete={onDeleteSub}
                 onAutoDownloadToggle={onAutoDownloadToggle}
                 onMoveToGroup={onMoveToGroup}
+                onRename={onRenameSub}
                 checkingId={checkingId}
               />
             ))
@@ -973,6 +1006,16 @@ export default function SubscriptionsPage() {
   const handleAutoDownloadToggle = async (sub: Subscription) => {
     try {
       await updateSub({ id: sub.id, data: { auto_download: !sub.auto_download } })
+      mutate()
+    } catch {
+      toast.error(t('subscriptions.updateFailed'))
+    }
+  }
+
+  const handleRename = async (sub: Subscription, name: string) => {
+    try {
+      await updateSub({ id: sub.id, data: { name } })
+      toast.success(t('subscriptions.nameUpdated'))
       mutate()
     } catch {
       toast.error(t('subscriptions.updateFailed'))
@@ -1457,6 +1500,7 @@ export default function SubscriptionsPage() {
               onDeleteSub={handleDelete}
               onAutoDownloadToggle={handleAutoDownloadToggle}
               onMoveToGroup={handleMoveToGroup}
+              onRenameSub={handleRename}
               checkingId={checkingId}
               defaultExpanded={true}
             />
@@ -1479,6 +1523,7 @@ export default function SubscriptionsPage() {
               onDeleteSub={handleDelete}
               onAutoDownloadToggle={handleAutoDownloadToggle}
               onMoveToGroup={handleMoveToGroup}
+              onRenameSub={handleRename}
               checkingId={checkingId}
               defaultExpanded={groups.length === 0}
             />
