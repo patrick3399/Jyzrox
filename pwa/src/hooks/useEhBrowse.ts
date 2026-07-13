@@ -1,6 +1,14 @@
 'use client'
 
-import { useReducer, useRef, useCallback, useMemo, useEffect, useLayoutEffect, useState } from 'react'
+import {
+  useReducer,
+  useRef,
+  useCallback,
+  useMemo,
+  useEffect,
+  useLayoutEffect,
+  useState,
+} from 'react'
 import { useRouter, useSearchParams } from 'next/navigation'
 import {
   reducer,
@@ -63,7 +71,12 @@ export function useEhBrowse() {
     async (
       plan: FetchPlan,
       signal: AbortSignal,
-    ): Promise<{ galleries: EhGallery[]; cursor: Cursor; hasMore: boolean; total: number | null }> => {
+    ): Promise<{
+      galleries: EhGallery[]
+      cursor: Cursor
+      hasMore: boolean
+      total: number | null
+    }> => {
       if (plan.kind === 'search') {
         const res = await api.eh.search(plan.args, { signal })
         return {
@@ -194,8 +207,9 @@ export function useEhBrowse() {
       setTab: (tab: Tab) => dispatchIdentityChange({ type: 'SET_TAB', tab }),
       commitQuery: (query: string) =>
         dispatchIdentityChange({ type: 'SET_TAB', tab: 'search' }, { type: 'COMMIT_QUERY', query }),
-      setFilter: (patch: Partial<Filters>) =>
-        dispatchIdentityChange({ type: 'SET_FILTER', patch }),
+      setFilter: (patch: Partial<Filters>) => dispatchIdentityChange({ type: 'SET_FILTER', patch }),
+      applyIdentity: (identity: Pick<EhBrowseState, 'tab' | 'query' | 'filters'>) =>
+        dispatchIdentityChange({ type: 'APPLY_IDENTITY', identity }),
       setScroll: (scrollY: number) => dispatch({ type: 'SET_SCROLL', scrollY }),
       reset: () => dispatch({ type: 'RESET' }),
     }),

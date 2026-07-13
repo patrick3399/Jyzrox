@@ -10,6 +10,8 @@ import {
   parseSnapshot,
   parseUrlToIdentity,
   identityToUrlParams,
+  parseEhSavedSearch,
+  serializeEhSavedSearchParams,
 } from '@/lib/ehBrowseState'
 
 describe('ehBrowseState — queryKey & identity reset', () => {
@@ -45,6 +47,34 @@ describe('ehBrowseState — queryKey & identity reset', () => {
 
   it('ALL_CATS has all 10 categories', () => {
     expect(ALL_CATS).toHaveLength(10)
+  })
+})
+
+describe('ehBrowseState — saved search identity', () => {
+  it('round-trips the full EH filter identity', () => {
+    let state = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
+    state = reducer(state, { type: 'COMMIT_QUERY', query: 'artist:foo' })
+    state = reducer(state, {
+      type: 'SET_FILTER',
+      patch: {
+        selectedCats: ['manga'],
+        advancedOpen: true,
+        advSearch: EH_ADVANCED_SEARCH_BITS.showExpunged,
+        minRating: 4,
+        pageFrom: 20,
+        pageTo: 80,
+      },
+    })
+
+    const restored = parseEhSavedSearch(state.query, serializeEhSavedSearchParams(state))
+    expect(restored).toEqual({ tab: state.tab, query: state.query, filters: state.filters })
+  })
+
+  it('keeps old query-only saved searches compatible', () => {
+    const restored = parseEhSavedSearch('language:chinese', {})
+    expect(restored.tab).toBe('search')
+    expect(restored.query).toBe('language:chinese')
+    expect(restored.filters).toEqual(initialState.filters)
   })
 })
 

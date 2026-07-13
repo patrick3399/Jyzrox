@@ -3,7 +3,12 @@
 import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { useEhBrowse } from '@/hooks/useEhBrowse'
-import { EH_ADVANCED_SEARCH_BITS, queryKey } from '@/lib/ehBrowseState'
+import {
+  EH_ADVANCED_SEARCH_BITS,
+  parseEhSavedSearch,
+  queryKey,
+  serializeEhSavedSearchParams,
+} from '@/lib/ehBrowseState'
 import { getEhGalleryLanguage } from '@/lib/ehGalleryLanguage'
 import {
   applyEhAutocompleteSuggestion,
@@ -631,7 +636,11 @@ function BrowsePage() {
   const handleSaveSearch = useCallback(async () => {
     const name = saveSearchName.trim() || query || 'Search'
     try {
-      await api.savedSearches.create({ name, query, params: {} })
+      await api.savedSearches.create({
+        name,
+        query,
+        params: serializeEhSavedSearchParams(state),
+      })
       toast.success(t('browse.saveSearchSaved'))
       setSaveSearchName('')
       setShowSaveInput(false)
@@ -639,7 +648,7 @@ function BrowsePage() {
     } catch {
       toast.error(t('browse.saveSearchFailed'))
     }
-  }, [saveSearchName, query, refreshSavedSearches])
+  }, [saveSearchName, query, refreshSavedSearches, state])
 
   const handleDeleteSavedSearch = useCallback(
     async (id: number, e: React.MouseEvent) => {
@@ -657,11 +666,12 @@ function BrowsePage() {
 
   const handleLoadSavedSearch = useCallback(
     (s: SavedSearch) => {
-      setInputValue(s.query)
-      commitSearch(s.query)
+      const identity = parseEhSavedSearch(s.query, s.params)
+      setInputValue(identity.query)
+      actions.applyIdentity(identity)
       setShowSavedSearches(false)
     },
-    [commitSearch],
+    [actions],
   )
 
   const handleSubscribe = async () => {

@@ -118,6 +118,10 @@ export type Action =
   | { type: 'COMMIT_QUERY'; query: string }
   | { type: 'SET_FILTER'; patch: Partial<Filters> }
   | {
+      type: 'APPLY_IDENTITY'
+      identity: Pick<EhBrowseState, 'tab' | 'query' | 'filters'>
+    }
+  | {
       type: 'SEED'
       items: EhGallery[]
       total: number | null
@@ -146,6 +150,8 @@ export function reducer(state: EhBrowseState, action: Action): EhBrowseState {
         ...state,
         filters: { ...state.filters, ...action.patch },
       })
+    case 'APPLY_IDENTITY':
+      return withIdentityReset(state, { ...state, ...action.identity })
     case 'LOAD_START':
       return { ...state, status: action.seeding ? 'seeding' : 'loading', error: null }
     case 'SEED':
@@ -360,4 +366,24 @@ export function parseUrlToIdentity(
       toplistTl: sp.get('tl') ? Number(sp.get('tl')) : 11,
     },
   }
+}
+
+export function serializeEhSavedSearchParams(state: EhBrowseState): Record<string, unknown> {
+  return {
+    source: 'ehentai',
+    version: 1,
+    identity: identityToUrlParams(state).toString(),
+  }
+}
+
+export function parseEhSavedSearch(
+  query: string,
+  params: Record<string, unknown>,
+): Pick<EhBrowseState, 'tab' | 'query' | 'filters'> {
+  if (params.source === 'ehentai' && typeof params.identity === 'string') {
+    const searchParams = new URLSearchParams(params.identity)
+    searchParams.set('q', query)
+    return parseUrlToIdentity(searchParams)
+  }
+  return parseUrlToIdentity(new URLSearchParams(query ? { q: query } : { tab: 'search' }))
 }
