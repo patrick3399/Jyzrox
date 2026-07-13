@@ -363,11 +363,14 @@ class PixivClient:
     async def user_illusts(
         self,
         user_id: int,
-        type: str = "illust",
+        type: str | None = "illust",
         offset: int = 0,
     ) -> dict:
         """Get user illustrations. Returns {illusts, next_offset}."""
-        result = await self._call(self._api_or_raise().user_illusts, user_id, type=type, offset=offset)
+        kwargs: dict[str, object] = {"offset": offset}
+        if type is not None:
+            kwargs["type"] = type
+        result = await self._call(self._api_or_raise().user_illusts, user_id, **kwargs)
         return self._normalize_illust_list(result)
 
     async def user_bookmarks(

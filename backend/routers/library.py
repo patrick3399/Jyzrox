@@ -45,6 +45,7 @@ from db.models import (
     BlockedTag,
     ExcludedBlob,
     Gallery,
+    GallerySourceItem,
     GalleryTag,
     Image,
     ReadProgress,
@@ -1605,7 +1606,21 @@ async def get_gallery(
     g = await _get_or_404_by_source(db, source, source_id, auth)
     cover_thumb = await _single_cover_thumb(db, g.id, g.source or "")
     is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], g.id)
-    return _g(g, cover_thumb=cover_thumb, is_favorited=is_fav, my_rating=my_rating, in_reading_list=in_rl)
+    data = _g(g, cover_thumb=cover_thumb, is_favorited=is_fav, my_rating=my_rating, in_reading_list=in_rl)
+    if g.source == "pixiv" and str(g.source_id).startswith("user:"):
+        items = (
+            (
+                await db.execute(
+                    select(GallerySourceItem)
+                    .where(GallerySourceItem.gallery_id == g.id)
+                    .order_by(GallerySourceItem.source_position.asc())
+                )
+            )
+            .scalars()
+            .all()
+        )
+        data["source_items"] = [_source_item_dict(item) for item in items]
+    return data
 
 
 @router.get("/galleries/{source}/{source_id}/images")
@@ -1652,9 +1667,10 @@ async def get_gallery_images(
         images = (await db.execute(stmt)).scalars().all()
 
         fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images])
+        image_data = await _images_with_source_items(db, images)
         return {
             "gallery_id": gallery_id,
-            "images": [_i(img) for img in images],
+            "images": image_data,
             "total": total,
             "page": p,
             "has_next": (p * limit) < total,
@@ -1664,7 +1680,11 @@ async def get_gallery_images(
     # Default: return all images (backward compatible for Reader)
     images = (await db.execute(stmt)).scalars().all()
     fav_ids = await _get_image_favorite_set(db, auth["user_id"], [img.id for img in images])
-    return {"gallery_id": gallery_id, "images": [_i(img) for img in images], "favorited_image_ids": sorted(fav_ids)}
+    return {
+        "gallery_id": gallery_id,
+        "images": await _images_with_source_items(db, images),
+        "favorited_image_ids": sorted(fav_ids),
+    }
 
 
 @router.get("/galleries/{source}/{source_id}/hidden")
@@ -2199,10 +2219,11 @@ async def get_progress(
     gallery_id = g.id
     prog = await db.get(ReadProgress, (auth["user_id"], gallery_id))
     if not prog:
-        return {"gallery_id": gallery_id, "last_page": 0, "last_read_at": None}
+        return {"gallery_id": gallery_id, "last_page": 0, "last_image_id": None, "last_read_at": None}
     return {
         "gallery_id": gallery_id,
         "last_page": prog.last_page,
+        "last_image_id": prog.last_image_id,
         "last_read_at": prog.last_read_at.isoformat() if prog.last_read_at else None,
     }
 
@@ -2222,12 +2243,27 @@ async def save_progress(
     g = await _get_or_404_by_source(db, source, source_id, auth)
     gallery_id = g.id
     now = datetime.now(UTC)
+    last_image_id = (
+        await db.execute(
+            select(Image.id).where(
+                Image.gallery_id == gallery_id,
+                Image.page_num == body.last_page,
+                Image.visibility == "active",
+            )
+        )
+    ).scalar_one_or_none()
     stmt = (
         pg_insert(ReadProgress)
-        .values(user_id=auth["user_id"], gallery_id=gallery_id, last_page=body.last_page, last_read_at=now)
+        .values(
+            user_id=auth["user_id"],
+            gallery_id=gallery_id,
+            last_page=body.last_page,
+            last_image_id=last_image_id,
+            last_read_at=now,
+        )
         .on_conflict_do_update(
             index_elements=["user_id", "gallery_id"],
-            set_={"last_page": body.last_page, "last_read_at": now},
+            set_={"last_page": body.last_page, "last_image_id": last_image_id, "last_read_at": now},
         )
     )
     await db.execute(stmt)
@@ -2724,3 +2760,35 @@ def _i(img: Image) -> dict:
         "source_seen_at": img.source_seen_at.isoformat() if img.source_seen_at else None,
         "hidden_at": img.hidden_at.isoformat() if img.hidden_at else None,
     }
+
+
+def _source_item_dict(item: GallerySourceItem) -> dict:
+    return {
+        "id": item.id,
+        "source_item_id": item.source_item_id,
+        "source_item_url": item.source_item_url,
+        "title": item.title,
+        "published_at": item.published_at.isoformat() if item.published_at else None,
+        "page_count": item.page_count,
+        "position": item.source_position,
+        "status": item.status,
+        "metadata": item.metadata_json or {},
+    }
+
+
+async def _images_with_source_items(db: AsyncSession, images: list[Image]) -> list[dict]:
+    row_ids = {img.source_item_row_id for img in images if img.source_item_row_id}
+    item_map = {}
+    if row_ids:
+        items = (await db.execute(select(GallerySourceItem).where(GallerySourceItem.id.in_(row_ids)))).scalars().all()
+        item_map = {item.id: item for item in items}
+    result = []
+    for image in images:
+        data = _i(image)
+        item = item_map.get(image.source_item_row_id)
+        if item:
+            match = _re.search(r":p(\d+)$", image.source_item_id or "")
+            data["source_work"] = _source_item_dict(item)
+            data["source_work_page"] = int(match.group(1)) if match else None
+        result.append(data)
+    return result

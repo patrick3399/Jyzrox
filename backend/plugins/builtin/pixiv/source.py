@@ -62,6 +62,11 @@ class PixivSourcePlugin(SourcePlugin):
     async def can_handle(self, url: str) -> bool:
         return "pixiv.net" in url
 
+    @staticmethod
+    def user_match(url: str):
+        """Return the canonical user URL match for collection subscriptions."""
+        return _PIXIV_USER_RE.search(url)
+
     async def resolve_metadata(
         self,
         url: str,

@@ -84,6 +84,12 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
 
   const [isFollowing, setIsFollowing] = useState(false)
   const [followLoading, setFollowLoading] = useState(false)
+  const [collectionLoading, setCollectionLoading] = useState(false)
+  const { data: collection, mutate: mutateCollection } = useSWR(
+    validId ? `/api/pixiv/user/${userId}/collection` : null,
+    (_, { signal }: { signal?: AbortSignal } = {}) => api.pixiv.getUserCollection(userId, { signal }),
+    { refreshInterval: (data) => (data?.job_id ? 3000 : 0) },
+  )
 
   const [activeTab, setActiveTab] = useState<'works' | 'bookmarks'>('works')
   const [bookmarkOffset, setBookmarkOffset] = useState(0)
@@ -115,6 +121,40 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
       toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
     } finally {
       setFollowLoading(false)
+    }
+  }
+
+  const handleCollectionSync = async (fullReconcile = false) => {
+    if (collectionLoading) return
+    if (!collection?.gallery_id) {
+      const count = (userResult?.user.total_illusts ?? 0) + (userResult?.user.total_manga ?? 0)
+      if (!confirm(t('pixiv.collectionConfirm', { count: String(count) }))) return
+    } else if (fullReconcile && !confirm(t('pixiv.collectionReconcileConfirm'))) {
+      return
+    }
+    setCollectionLoading(true)
+    try {
+      await api.pixiv.syncUserCollection(userId, fullReconcile)
+      toast.success(t('pixiv.collectionQueued'))
+      await mutateCollection()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
+    } finally {
+      setCollectionLoading(false)
+    }
+  }
+
+  const handleToggleSubscription = async () => {
+    if (collectionLoading) return
+    setCollectionLoading(true)
+    try {
+      if (collection?.subscribed) await api.pixiv.unsubscribeUserCollection(userId)
+      else await api.pixiv.subscribeUserCollection(userId)
+      await mutateCollection()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('common.failedToSave'))
+    } finally {
+      setCollectionLoading(false)
     }
   }
 
@@ -210,8 +250,8 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
                   {followLoading
                     ? t('pixiv.loading')
                     : isFollowing
-                      ? t('pixiv.unfollow')
-                      : t('pixiv.follow')}
+                      ? t('pixiv.unfollowOnPixiv')
+                      : t('pixiv.followOnPixiv')}
                 </button>
                 <a
                   href={`https://www.pixiv.net/users/${user.id}`}
@@ -245,6 +285,51 @@ export default function UserProfilePage({ params }: { params: Promise<{ id: stri
             {user.comment && (
               <p className="text-sm text-vault-text leading-relaxed">{user.comment}</p>
             )}
+            <div className="flex flex-wrap gap-2 pt-2 border-t border-vault-border">
+              <button
+                onClick={() => handleCollectionSync(false)}
+                disabled={collectionLoading || Boolean(collection?.job_id)}
+                className="px-3 py-1.5 rounded-lg text-sm bg-vault-accent text-white disabled:opacity-50"
+              >
+                {collection?.job_id
+                  ? t('pixiv.collectionSyncing')
+                  : collection?.gallery_id
+                    ? t('pixiv.collectionSync')
+                    : t('pixiv.collectionCreate')}
+              </button>
+              {collection?.gallery_id && (
+                <>
+                  <Link
+                    href={`/library/pixiv/${encodeURIComponent(collection.gallery_source_id || '')}`}
+                    className="px-3 py-1.5 rounded-lg text-sm border border-vault-border text-vault-text"
+                  >
+                    {t('pixiv.collectionOpen')}
+                  </Link>
+                  <button
+                    onClick={() => handleCollectionSync(true)}
+                    disabled={collectionLoading || Boolean(collection.job_id)}
+                    className="px-3 py-1.5 rounded-lg text-sm border border-vault-border text-vault-text disabled:opacity-50"
+                  >
+                    {t('pixiv.collectionReconcile')}
+                  </button>
+                </>
+              )}
+              <button
+                onClick={handleToggleSubscription}
+                disabled={collectionLoading}
+                className="px-3 py-1.5 rounded-lg text-sm border border-vault-border text-vault-text disabled:opacity-50"
+              >
+                {collection?.subscribed
+                  ? t('pixiv.collectionUnsubscribe')
+                  : t('pixiv.collectionSubscribe')}
+              </button>
+              {collection && collection.work_count > 0 && (
+                <span className="self-center text-xs text-vault-text-secondary">
+                  {t('pixiv.collectionWorks', { count: String(collection.work_count) })}
+                  {collection.missing_count > 0 && ` · ${t('pixiv.collectionMissing', { count: String(collection.missing_count) })}`}
+                </span>
+              )}
+            </div>
           </div>
         </div>
       </div>

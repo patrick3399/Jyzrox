@@ -35,6 +35,7 @@ import type {
   PixivIllust,
   PixivSearchResult,
   PixivUserResult,
+  PixivCollectionState,
   PixivUserPreview,
   FollowedArtist,
   ArtistSummary,
@@ -1337,6 +1338,27 @@ const pixiv = {
 
   getUser: (id: number, init?: RequestInit) =>
     apiFetch<PixivUserResult>(`/api/pixiv/user/${id}`, init),
+
+  getUserCollection: (id: number, init?: RequestInit) =>
+    apiFetch<PixivCollectionState>(`/api/pixiv/user/${id}/collection`, init),
+
+  syncUserCollection: (id: number, fullReconcile = false, init?: RequestInit) =>
+    apiFetch<{ status: string; job_id: string }>(
+      `/api/pixiv/user/${id}/collection/sync?full_reconcile=${fullReconcile}`,
+      { method: 'POST', ...init },
+    ),
+
+  subscribeUserCollection: (id: number, init?: RequestInit) =>
+    apiFetch<{ status: string; subscription_id: number }>(
+      `/api/pixiv/user/${id}/collection/subscription`,
+      { method: 'POST', ...init },
+    ),
+
+  unsubscribeUserCollection: (id: number, init?: RequestInit) =>
+    apiFetch<{ status: string }>(`/api/pixiv/user/${id}/collection/subscription`, {
+      method: 'DELETE',
+      ...init,
+    }),
 
   getUserIllusts: (id: number, offset = 0, init?: RequestInit) =>
     apiFetch<PixivSearchResult>(`/api/pixiv/user/${id}/illusts?offset=${offset}`, init),

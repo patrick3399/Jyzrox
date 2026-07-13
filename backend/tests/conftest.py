@@ -445,6 +445,22 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS gallery_source_items (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        source_item_id TEXT NOT NULL,
+        source_item_url TEXT,
+        title TEXT,
+        published_at TIMESTAMP,
+        page_count INTEGER DEFAULT 0,
+        source_position INTEGER,
+        source_seen_at TIMESTAMP,
+        status TEXT DEFAULT 'active',
+        metadata_json TEXT DEFAULT '{}',
+        UNIQUE (gallery_id, source_item_id)
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS images (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
@@ -459,7 +475,8 @@ _SQLITE_SCHEMA = [
         source_position INTEGER,
         source_seen_at TIMESTAMP,
         hidden_at TIMESTAMP,
-        replaced_by_image_id INTEGER REFERENCES images(id)
+        replaced_by_image_id INTEGER REFERENCES images(id),
+        source_item_row_id INTEGER REFERENCES gallery_source_items(id)
     )
     """,
     """
@@ -486,6 +503,7 @@ _SQLITE_SCHEMA = [
         user_id INTEGER NOT NULL,
         gallery_id INTEGER NOT NULL REFERENCES galleries(id),
         last_page INTEGER DEFAULT 0,
+        last_image_id INTEGER REFERENCES images(id),
         last_read_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (user_id, gallery_id)
     )

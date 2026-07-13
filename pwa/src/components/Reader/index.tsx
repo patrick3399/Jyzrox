@@ -2201,6 +2201,7 @@ export default function Reader({
     : undefined
   const canFavoriteContextImg =
     !isProxyMode && contextMenuImg?.id != null && contextMenuImg?.file_path != null
+  const currentSourceWork = rawImages.find((image) => image.page_num === state.currentPage)?.source_work
 
   return (
     <div ref={containerRef} className="reader-container flex flex-col bg-black">
@@ -2228,6 +2229,20 @@ export default function Reader({
           onPageSelect={setPageWithPrefetch}
         />
       </div>
+
+      {currentSourceWork && state.showOverlay && (
+        <a
+          href={currentSourceWork.source_item_url || undefined}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={`absolute top-16 left-1/2 z-20 max-w-[80vw] -translate-x-1/2 rounded-lg bg-black/75 px-3 py-1.5 text-center text-xs text-white backdrop-blur ${
+            currentSourceWork.status === 'source_missing' ? 'text-amber-300' : ''
+          }`}
+        >
+          {currentSourceWork.title || currentSourceWork.source_item_id}
+          {currentSourceWork.status === 'source_missing' && ` · ${t('pixiv.collectionSourceMissing')}`}
+        </a>
+      )}
 
       {/* Main content — absolute inset-0 gives children a definite height so h-full resolves
           correctly on iOS Safari even during CSS transitions on sibling overlay elements. */}

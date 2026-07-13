@@ -145,6 +145,26 @@ async def enqueue_download_job(job, job_key: str) -> None:
     import core.queue
     from core.config import settings
 
+    raw_options = getattr(job, "options", None)
+    options = raw_options if isinstance(raw_options, dict) else {}
+    if options.get("pixiv_collection") is True:
+        from plugins.builtin.pixiv.source import PixivSourcePlugin
+
+        match = PixivSourcePlugin.user_match(job.url)
+        if not match or job.user_id is None:
+            raise ValueError(f"Invalid persisted Pixiv collection job: {job.id}")
+        await core.queue.enqueue(
+            "pixiv_collection_job",
+            _job_id=job_key,
+            _timeout=settings.download_job_timeout,
+            user_id=int(match.group(1)),
+            owner_user_id=job.user_id,
+            db_job_id=str(job.id),
+            full_reconcile=bool(options.get("full_reconcile")),
+            subscription_id=job.subscription_id,
+        )
+        return
+
     await core.queue.enqueue(
         "download_job",
         _job_id=job_key,
@@ -153,7 +173,7 @@ async def enqueue_download_job(job, job_key: str) -> None:
         source=job.source or "",
         # Policy must survive retry/recovery; queue payloads are ephemeral but
         # DownloadJob.options is persisted with the original request.
-        options=getattr(job, "options", None) or {},
+        options=options,
         db_job_id=str(job.id),
         total=job.progress.get("total") if job.progress else None,
     )

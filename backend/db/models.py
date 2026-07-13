@@ -162,6 +162,9 @@ class Image(Base):
     replaced_by_image_id: Mapped[int | None] = mapped_column(
         BigInteger, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
     )
+    source_item_row_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("gallery_source_items.id", ondelete="SET NULL"), nullable=True
+    )
 
     gallery: Mapped[Gallery] = relationship(back_populates="images")
     blob: Mapped[Blob] = relationship()
@@ -257,9 +260,32 @@ class ReadProgress(Base):
         BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
     )
     last_page: Mapped[int] = mapped_column(Integer, default=0)
+    last_image_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+    )
     last_read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     gallery: Mapped[Gallery] = relationship(back_populates="read_progress")
+
+
+class GallerySourceItem(Base):
+    """A source-native work/chapter contained inside one gallery."""
+
+    __tablename__ = "gallery_source_items"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False)
+    source_item_id: Mapped[str] = mapped_column(Text, nullable=False)
+    source_item_url: Mapped[str | None] = mapped_column(Text)
+    title: Mapped[str | None] = mapped_column(Text)
+    published_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    page_count: Mapped[int] = mapped_column(Integer, default=0)
+    source_position: Mapped[int | None] = mapped_column(Integer)
+    source_seen_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    status: Mapped[str] = mapped_column(Text, default="active", server_default="active", nullable=False)
+    metadata_json: Mapped[dict] = mapped_column(JSONB, default=dict, server_default="{}")
+
+    __table_args__ = (UniqueConstraint("gallery_id", "source_item_id", name="uq_gallery_source_item"),)
 
 
 class Credential(Base):

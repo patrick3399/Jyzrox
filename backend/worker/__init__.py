@@ -39,6 +39,7 @@ from worker.importer import (
 from worker.memory import after_process_hook
 from worker.novel_index import novel_index_job
 from worker.novel_sync import novel_sync_job
+from worker.pixiv_collection import pixiv_collection_job
 from worker.reconciliation import reconciliation_job
 from worker.retry import retry_failed_downloads_job
 from worker.scan import (
@@ -824,6 +825,7 @@ def build_workers() -> tuple:
         queues[QUEUE_INTERACTIVE],
         functions=[
             download_job,
+            pixiv_collection_job,
             import_job,
             batch_import_job,
             rescan_library_job,
@@ -894,6 +896,7 @@ build_worker = build_workers
 
 __all__ = [
     "download_job",
+    "pixiv_collection_job",
     "import_job",
     "local_import_job",
     "batch_import_job",

@@ -290,16 +290,34 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
             )
             await session.commit()
 
-        await core.queue.enqueue(
-            "download_job",
-            _job_id=str(job_id),
-            _timeout=settings.download_job_timeout,
-            url=sub.url,
-            source=sub.source or "gallery_dl",
-            options=options,
-            db_job_id=str(job_id),
-            total=None,
-        )
+        is_pixiv_collection = source == "pixiv" and bool(options.get("pixiv_collection"))
+        if is_pixiv_collection:
+            from plugins.builtin.pixiv.source import PixivSourcePlugin
+
+            match = PixivSourcePlugin.user_match(sub.url)
+            if not match:
+                raise ValueError(f"Invalid Pixiv author subscription URL: {sub.url}")
+            await core.queue.enqueue(
+                "pixiv_collection_job",
+                _job_id=str(job_id),
+                _timeout=settings.download_job_timeout,
+                user_id=int(match.group(1)),
+                owner_user_id=sub.user_id,
+                db_job_id=str(job_id),
+                full_reconcile=False,
+                subscription_id=sub.id,
+            )
+        else:
+            await core.queue.enqueue(
+                "download_job",
+                _job_id=str(job_id),
+                _timeout=settings.download_job_timeout,
+                url=sub.url,
+                source=sub.source or "gallery_dl",
+                options=options,
+                db_job_id=str(job_id),
+                total=None,
+            )
 
         # Update subscription state after a successful enqueue.
         now = datetime.now(UTC)

@@ -61,6 +61,18 @@ export interface GalleryImage {
   source_position?: number | null
   source_seen_at?: string | null
   hidden_at?: string | null
+  source_work?: {
+    id: number
+    source_item_id: string
+    source_item_url: string | null
+    title: string | null
+    published_at: string | null
+    page_count: number
+    position: number | null
+    status: 'active' | 'source_missing'
+    metadata: Record<string, unknown>
+  }
+  source_work_page?: number | null
 }
 
 export interface BrowseImage {
@@ -596,6 +608,17 @@ export interface PixivUserResult {
   user: PixivUserDetail
   recent_illusts: PixivIllust[]
   next_offset: number | null
+}
+
+export interface PixivCollectionState {
+  gallery_id: number | null
+  gallery_source_id: string | null
+  subscribed: boolean
+  subscription_id: number | null
+  job_id: string | null
+  job_status: string | null
+  work_count: number
+  missing_count: number
 }
 
 export interface PixivUserPreview {
