@@ -52,6 +52,20 @@ export const ALL_CATS_MASK = Object.values(CATEGORY_BITMASK).reduce((a, b) => a 
 export const EH_PAGE_SIZE = 25
 export const SNAPSHOT_CAP = 300
 
+export const EH_ADVANCED_SEARCH_BITS = {
+  name: 0x1,
+  tags: 0x2,
+  description: 0x4,
+  torrentFilenames: 0x8,
+  onlyTorrents: 0x10,
+  lowPowerTags: 0x20,
+  downvotedTags: 0x40,
+  showExpunged: 0x80,
+  disableLanguageFilter: 0x100,
+  disableUploaderFilter: 0x200,
+  disableTagFilter: 0x400,
+} as const
+
 export const initialFilters: Filters = {
   selectedCats: [],
   advancedOpen: false,
@@ -254,9 +268,7 @@ function parseStore(raw: string | null): Snapshot[] {
   try {
     const parsed = JSON.parse(raw) as SnapshotStore
     if (!parsed || !Array.isArray(parsed.snaps)) return []
-    return parsed.snaps.filter(
-      (x) => x && typeof x.queryKey === 'string' && Array.isArray(x.items),
-    )
+    return parsed.snaps.filter((x) => x && typeof x.queryKey === 'string' && Array.isArray(x.items))
   } catch {
     return []
   }

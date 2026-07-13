@@ -3,7 +3,7 @@
 import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'react'
 import { useRouter } from 'next/navigation'
 import { useEhBrowse } from '@/hooks/useEhBrowse'
-import { queryKey } from '@/lib/ehBrowseState'
+import { EH_ADVANCED_SEARCH_BITS, queryKey } from '@/lib/ehBrowseState'
 import { useCreateSubscription } from '@/hooks/useSubscriptions'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
@@ -581,8 +581,7 @@ function BrowsePage() {
   })
 
   const catAllActive = filters.selectedCats.length === 0
-  const endLabel =
-    tab === 'favorites' ? t('browse.noMoreFavorites') : t('browse.noMoreResults')
+  const endLabel = tab === 'favorites' ? t('browse.noMoreFavorites') : t('browse.noMoreResults')
 
   // ── Render ─────────────────────────────────────────────
 
@@ -1140,11 +1139,14 @@ function BrowsePage() {
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { bit: 0x1, label: 'Name' },
-                      { bit: 0x2, label: 'Tags' },
-                      { bit: 0x4, label: 'Description' },
-                      { bit: 0x8, label: 'Torrent Filenames' },
-                      { bit: 0x10, label: 'Only Torrents' },
+                      { bit: EH_ADVANCED_SEARCH_BITS.name, label: 'Name' },
+                      { bit: EH_ADVANCED_SEARCH_BITS.tags, label: 'Tags' },
+                      { bit: EH_ADVANCED_SEARCH_BITS.description, label: 'Description' },
+                      {
+                        bit: EH_ADVANCED_SEARCH_BITS.torrentFilenames,
+                        label: 'Torrent Filenames',
+                      },
+                      { bit: EH_ADVANCED_SEARCH_BITS.onlyTorrents, label: 'Only Torrents' },
                     ].map(({ bit, label }) => (
                       <label
                         key={bit}
@@ -1169,10 +1171,21 @@ function BrowsePage() {
                   </p>
                   <div className="flex flex-wrap gap-2">
                     {[
-                      { bit: 0x20, label: 'Show Expunged' },
-                      { bit: 0x100, label: 'Disable Language Filter' },
-                      { bit: 0x200, label: 'Disable Uploader Filter' },
-                      { bit: 0x400, label: 'Disable Tag Filter' },
+                      { bit: EH_ADVANCED_SEARCH_BITS.lowPowerTags, label: 'Low-Power Tags' },
+                      { bit: EH_ADVANCED_SEARCH_BITS.downvotedTags, label: 'Downvoted Tags' },
+                      { bit: EH_ADVANCED_SEARCH_BITS.showExpunged, label: 'Show Expunged' },
+                      {
+                        bit: EH_ADVANCED_SEARCH_BITS.disableLanguageFilter,
+                        label: 'Disable Language Filter',
+                      },
+                      {
+                        bit: EH_ADVANCED_SEARCH_BITS.disableUploaderFilter,
+                        label: 'Disable Uploader Filter',
+                      },
+                      {
+                        bit: EH_ADVANCED_SEARCH_BITS.disableTagFilter,
+                        label: 'Disable Tag Filter',
+                      },
                     ].map(({ bit, label }) => (
                       <label
                         key={bit}
@@ -1197,7 +1210,9 @@ function BrowsePage() {
                     <select
                       value={filters.minRating ?? ''}
                       onChange={(e) =>
-                        actions.setFilter({ minRating: e.target.value ? Number(e.target.value) : null })
+                        actions.setFilter({
+                          minRating: e.target.value ? Number(e.target.value) : null,
+                        })
                       }
                       className="bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
                     >
@@ -1215,7 +1230,9 @@ function BrowsePage() {
                         type="number"
                         value={filters.pageFrom ?? ''}
                         onChange={(e) =>
-                          actions.setFilter({ pageFrom: e.target.value ? Number(e.target.value) : null })
+                          actions.setFilter({
+                            pageFrom: e.target.value ? Number(e.target.value) : null,
+                          })
                         }
                         placeholder={t('browse.pageFrom')}
                         className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
@@ -1225,7 +1242,9 @@ function BrowsePage() {
                         type="number"
                         value={filters.pageTo ?? ''}
                         onChange={(e) =>
-                          actions.setFilter({ pageTo: e.target.value ? Number(e.target.value) : null })
+                          actions.setFilter({
+                            pageTo: e.target.value ? Number(e.target.value) : null,
+                          })
                         }
                         placeholder={t('browse.pageTo')}
                         className="w-20 bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
@@ -1330,8 +1349,7 @@ function BrowsePage() {
             <div className="flex items-center justify-between text-xs text-vault-text-muted">
               <span>
                 {total.toLocaleString()} {t('browse.favorited')}
-                {filters.favSearch &&
-                  ` ${t('browse.matchingQuery', { query: filters.favSearch })}`}
+                {filters.favSearch && ` ${t('browse.matchingQuery', { query: filters.favSearch })}`}
               </span>
             </div>
           )}

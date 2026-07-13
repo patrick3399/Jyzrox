@@ -5,6 +5,7 @@ import {
   queryKey,
   ALL_CATS,
   buildParams,
+  EH_ADVANCED_SEARCH_BITS,
   serializeSnapshot,
   parseSnapshot,
   parseUrlToIdentity,
@@ -81,6 +82,12 @@ describe('ehBrowseState — SEED/APPEND', () => {
 })
 
 describe('ehBrowseState — buildParams', () => {
+  it('uses the EH flag assignments for low-power, downvoted, and expunged results', () => {
+    expect(EH_ADVANCED_SEARCH_BITS.lowPowerTags).toBe(0x20)
+    expect(EH_ADVANCED_SEARCH_BITS.downvotedTags).toBe(0x40)
+    expect(EH_ADVANCED_SEARCH_BITS.showExpunged).toBe(0x80)
+  })
+
   it('search: all categories selected → no f_cats filter', () => {
     let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
     s = reducer(s, { type: 'COMMIT_QUERY', query: 'foo' })
