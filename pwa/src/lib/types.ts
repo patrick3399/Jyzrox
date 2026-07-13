@@ -142,7 +142,9 @@ export interface EhGallery {
   uploader: string
   posted_at: number // Unix timestamp
   pages: number
+  filesize?: number
   rating: number
+  torrent_count?: number
   tags: string[]
   expunged: boolean
 }

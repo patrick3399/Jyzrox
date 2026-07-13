@@ -516,6 +516,14 @@ function EhGalleryDetail() {
   const thumbSrc = gallery.thumb
     ? `/api/eh/thumb-proxy?url=${encodeURIComponent(gallery.thumb)}`
     : ''
+  const gallerySize = gallery.filesize
+    ? new Intl.NumberFormat(undefined, {
+        style: 'unit',
+        unit: gallery.filesize >= 1024 ** 3 ? 'gigabyte' : 'megabyte',
+        unitDisplay: 'short',
+        maximumFractionDigits: 1,
+      }).format(gallery.filesize / (gallery.filesize >= 1024 ** 3 ? 1024 ** 3 : 1024 ** 2))
+    : null
 
   return (
     <>
@@ -558,6 +566,16 @@ function EhGalleryDetail() {
               <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
                 {gallery.pages} pages
               </span>
+              {gallerySize && (
+                <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
+                  {gallerySize}
+                </span>
+              )}
+              {(gallery.torrent_count ?? 0) > 0 && (
+                <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
+                  {gallery.torrent_count} torrents
+                </span>
+              )}
               {gallery.uploader && (
                 <button
                   type="button"

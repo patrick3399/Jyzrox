@@ -168,7 +168,9 @@ def _parse_gmetadata(g: dict) -> dict:
         "uploader": g.get("uploader", ""),
         "posted_at": int(g.get("posted", 0)),
         "pages": int(g.get("filecount", 0)),
+        "filesize": int(g.get("filesize", 0)),
         "rating": float(g.get("rating", 0)),
+        "torrent_count": int(g.get("torrentcount", 0)),
         "tags": g.get("tags", []),
         "expunged": bool(g.get("expunged", False)),
     }

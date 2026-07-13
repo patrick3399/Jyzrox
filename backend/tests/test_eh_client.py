@@ -147,7 +147,9 @@ class TestParseGmetadata:
             "uploader": "testuser",
             "posted": "1700000000",
             "filecount": "42",
+            "filesize": "1073741824",
             "rating": "4.5",
+            "torrentcount": "3",
             "tags": ["artist:tester", "female:solo"],
             "expunged": False,
         }
@@ -168,7 +170,9 @@ class TestParseGmetadata:
             "uploader",
             "posted_at",
             "pages",
+            "filesize",
             "rating",
+            "torrent_count",
             "tags",
             "expunged",
         }
@@ -180,7 +184,9 @@ class TestParseGmetadata:
         result = _parse_gmetadata(self._raw())
         assert result["gid"] == 123
         assert result["pages"] == 42
+        assert result["filesize"] == 1073741824
         assert result["rating"] == 4.5
+        assert result["torrent_count"] == 3
         assert result["posted_at"] == 1700000000
         assert result["expunged"] is False
 
@@ -192,7 +198,9 @@ class TestParseGmetadata:
         result = _parse_gmetadata(minimal)
         assert result["title"] == ""
         assert result["pages"] == 0
+        assert result["filesize"] == 0
         assert result["rating"] == 0.0
+        assert result["torrent_count"] == 0
         assert result["tags"] == []
         assert result["expunged"] is False
 
