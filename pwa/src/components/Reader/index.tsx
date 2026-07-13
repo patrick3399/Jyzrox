@@ -103,6 +103,12 @@ interface ReaderImgProps {
   onError?: () => void
 }
 
+// Transient load errors are expected in EH proxy mode: a direct page jump
+// races the paginated pToken fetch, so /api/eh/image-proxy 404s until the
+// token lands in Redis (seconds later). Auto-retry with backoff before
+// latching the terminal failure UI.
+const AUTO_RETRY_DELAYS_MS = [1000, 2000, 3000, 5000, 8000]
+
 export function ReaderImg({
   image,
   className,
@@ -114,24 +120,34 @@ export function ReaderImg({
   onLoad,
   onError,
 }: ReaderImgProps) {
-  const [errored, setErrored] = useState(false)
-  const [reloadKey, setReloadKey] = useState(0)
+  const [failed, setFailed] = useState(false)
+  const [retryWait, setRetryWait] = useState(false)
+  const [attempt, setAttempt] = useState(0)
+  const [autoRetriesUsed, setAutoRetriesUsed] = useState(0)
   const [loaded, setLoaded] = useState(false)
+  const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  // Reset error/reload/loaded state whenever the underlying image changes.
+  // Reset error/retry/loaded state whenever the underlying image changes.
   const url = image.url
   useEffect(() => {
-    setErrored(false)
-    setReloadKey(0)
+    clearTimeout(retryTimerRef.current)
+    retryTimerRef.current = undefined
+    setFailed(false)
+    setRetryWait(false)
+    setAttempt(0)
+    setAutoRetriesUsed(0)
     setLoaded(false)
   }, [url])
+
+  // Cancel any pending auto-retry on unmount.
+  useEffect(() => () => clearTimeout(retryTimerRef.current), [])
 
   // Decode the thumbhash (if any) into a data URL for the blur-up placeholder.
   const hashes = useMemo(() => (image.thumbhash ? [image.thumbhash] : []), [image.thumbhash])
   const thumbhashUrls = useThumbhash(hashes)
   const placeholderUrl = image.thumbhash ? thumbhashUrls.get(image.thumbhash) ?? null : null
 
-  if (errored) {
+  if (failed) {
     return (
       <div
         className={`flex flex-col items-center justify-center gap-2 bg-black/50 ${className ?? ''}`}
@@ -143,8 +159,9 @@ export function ReaderImg({
         <p className="text-xs text-white/60">{t('reader.imageLoadFailed')}</p>
         <button
           onClick={() => {
-            setErrored(false)
-            setReloadKey((k) => k + 1)
+            setFailed(false)
+            setAutoRetriesUsed(0)
+            setAttempt((a) => a + 1)
           }}
           className="rounded bg-white/10 px-3 py-1 text-xs text-white hover:bg-white/20"
         >
@@ -154,9 +171,24 @@ export function ReaderImg({
     )
   }
 
+  // Waiting for an auto-retry: show a quiet loading placeholder instead of
+  // the browser's broken-image icon (the parent spinner keeps spinning —
+  // onError is only propagated once retries are exhausted).
+  if (retryWait) {
+    return (
+      <div
+        role="status"
+        aria-label={t('common.loading')}
+        className={`flex items-center justify-center bg-black/50 ${className ?? ''}`}
+        style={{ minHeight: '200px', minWidth: '200px', ...style }}
+      >
+        <div className="h-6 w-6 animate-spin rounded-full border-2 border-white/20 border-t-white/60" />
+      </div>
+    )
+  }
+
   // Cache-buster forces a real network re-request on retry.
-  const src =
-    reloadKey > 0 && url ? `${url}${url.includes('?') ? '&' : '?'}_r=${reloadKey}` : url ?? ''
+  const src = attempt > 0 && url ? `${url}${url.includes('?') ? '&' : '?'}_r=${attempt}` : url ?? ''
 
   // Show the blurred placeholder as the element's background until the real image loads.
   const showPlaceholder = !loaded && placeholderUrl != null
@@ -189,8 +221,18 @@ export function ReaderImg({
         onLoad?.()
       }}
       onError={() => {
-        setErrored(true)
-        onError?.()
+        if (autoRetriesUsed < AUTO_RETRY_DELAYS_MS.length) {
+          const delay = AUTO_RETRY_DELAYS_MS[autoRetriesUsed]
+          setAutoRetriesUsed(autoRetriesUsed + 1)
+          setRetryWait(true)
+          retryTimerRef.current = setTimeout(() => {
+            setAttempt((a) => a + 1)
+            setRetryWait(false)
+          }, delay)
+        } else {
+          setFailed(true)
+          onError?.()
+        }
       }}
     />
   )
