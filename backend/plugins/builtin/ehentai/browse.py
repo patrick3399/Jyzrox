@@ -933,6 +933,29 @@ async def image_proxy(
 # ── Favorites ─────────────────────────────────────────────────────────
 
 
+@_browse_router.get("/favorites/{gid}/{token}")
+async def get_favorite_state(
+    request: Request,
+    gid: int,
+    token: str,
+    _: dict = Depends(require_auth),
+):
+    """Return the authenticated user's EH cloud favorite state."""
+    cred_json = await get_credential("ehentai")
+    if not cred_json:
+        raise api_error(400, "eh_not_configured", _locale(request))
+
+    client = await _make_client()
+    async with client:
+        try:
+            return await client.get_favorite_state(gid, token)
+        except PermissionError:
+            raise api_error(401, "eh_cookie_invalid", _locale(request))
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            logger.error("Failed to read favorite state for %s/%s: %s", gid, token, e)
+            raise HTTPException(status_code=502, detail=str(e))
+
+
 @_browse_router.get("/favorites")
 async def get_favorites(
     request: Request,

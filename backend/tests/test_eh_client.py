@@ -87,6 +87,47 @@ class TestCheckAuth:
         client._check_auth(html, self._resp())
 
 
+class TestFavoriteState:
+    async def test_parses_existing_category_and_note(self):
+        from services.eh_client import EhClient
+
+        client = EhClient(cookies={})
+        response = MagicMock(spec=httpx.Response)
+        response.text = """
+            <html><body><form>
+              <input type="radio" name="favcat" value="2" checked>
+              <input type="radio" name="favcat" value="favdel">
+              <textarea name="favnote">Keep this one</textarea>
+            </form></body></html>
+        """
+        response.headers = {}
+        response.raise_for_status = MagicMock()
+        client._http_get = AsyncMock(return_value=response)
+
+        result = await client.get_favorite_state(123, "token")
+
+        assert result == {"is_favorited": True, "category": 2, "note": "Keep this one"}
+
+    async def test_reports_not_favorited_without_delete_option(self):
+        from services.eh_client import EhClient
+
+        client = EhClient(cookies={})
+        response = MagicMock(spec=httpx.Response)
+        response.text = """
+            <html><body><form>
+              <input type="radio" name="favcat" value="0" checked>
+              <textarea name="favnote"></textarea>
+            </form></body></html>
+        """
+        response.headers = {}
+        response.raise_for_status = MagicMock()
+        client._http_get = AsyncMock(return_value=response)
+
+        result = await client.get_favorite_state(123, "token")
+
+        assert result == {"is_favorited": False, "category": None, "note": ""}
+
+
 # ---------------------------------------------------------------------------
 # _parse_gmetadata
 # ---------------------------------------------------------------------------

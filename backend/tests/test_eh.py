@@ -87,6 +87,7 @@ def _make_eh_client_mock(search_result=None, gallery_meta=None, comments=None):
     mock.get_previews = AsyncMock(return_value={1: "https://ehgt.org/p/001.jpg"})
     mock.get_image_tokens = AsyncMock(return_value=({"1": "pt_abc"}, {1: "https://ehgt.org/p/001.jpg"}))
     mock.get_favorites = AsyncMock(return_value={"galleries": [], "total": 0})
+    mock.get_favorite_state = AsyncMock(return_value={"is_favorited": True, "category": 2, "note": "Keep"})
     mock.add_favorite = AsyncMock(return_value=None)
     mock.remove_favorite = AsyncMock(return_value=None)
     mock.__aenter__ = AsyncMock(return_value=mock)
@@ -128,6 +129,24 @@ class TestEhBrowseStatus:
     async def test_rejects_non_numeric_ids(self, client):
         resp = await client.get("/api/eh/browse-status", params={"gids": "11111,nope"})
         assert resp.status_code == 422
+
+
+class TestEhFavoriteState:
+    async def test_returns_authenticated_cloud_state(self, client):
+        eh_mock = _make_eh_client_mock()
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch(
+                "plugins.builtin.ehentai.browse.get_credential",
+                new_callable=AsyncMock,
+                return_value='{"ipb_member_id":"1","ipb_pass_hash":"hash"}',
+            ),
+        ):
+            resp = await client.get("/api/eh/favorites/12345/abcdef")
+
+        assert resp.status_code == 200
+        assert resp.json() == {"is_favorited": True, "category": 2, "note": "Keep"}
+        eh_mock.get_favorite_state.assert_awaited_once_with(12345, "abcdef")
 
 
 # ---------------------------------------------------------------------------

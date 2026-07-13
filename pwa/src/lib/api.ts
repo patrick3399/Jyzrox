@@ -11,6 +11,7 @@ import type {
   EhGallery,
   EhSearchResult,
   EhFavoritesResult,
+  EhFavoriteState,
   EhImageMap,
   EhSearchParams,
   DownloadJob,
@@ -299,6 +300,9 @@ const eh = {
     init?: RequestInit,
   ) =>
     apiFetch<EhFavoritesResult>(`/api/eh/favorites${qs(params as Record<string, unknown>)}`, init),
+
+  getFavoriteState: (gid: number, token: string, init?: RequestInit) =>
+    apiFetch<EhFavoriteState>(`/api/eh/favorites/${gid}/${token}`, init),
 
   addFavorite: (gid: number, token: string, favcat?: number, note?: string) =>
     apiFetch<{ status: string }>(`/api/eh/favorites/${gid}/${token}${qs({ favcat, note })}`, {

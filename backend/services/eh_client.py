@@ -945,6 +945,28 @@ class EhClient:
         resp.raise_for_status()
         return True
 
+    async def get_favorite_state(self, gid: int, token: str) -> dict:
+        """Read cloud favorite category and note from the gallery popup."""
+        url = f"{self.base_url}/gallerypopups.php?gid={gid}&t={token}&act=addfav"
+        resp = await self._http_get(url)
+        resp.raise_for_status()
+        self._check_auth(resp.text, resp)
+
+        soup = BeautifulSoup(resp.text, "lxml")
+        delete_option = soup.select_one('input[name="favcat"][value="favdel"]')
+        selected = soup.select_one('input[name="favcat"][value][checked]')
+        category: int | None = None
+        if delete_option is not None and selected is not None:
+            value = str(selected.get("value", ""))
+            if value.isdigit():
+                category = int(value)
+        note_field = soup.select_one('textarea[name="favnote"]')
+        return {
+            "is_favorited": delete_option is not None,
+            "category": category,
+            "note": note_field.get_text() if note_field is not None else "",
+        }
+
     async def remove_favorite(self, gid: int, token: str) -> bool:
         """Remove gallery from cloud favorites."""
         url = f"{self.base_url}/gallerypopups.php?gid={gid}&t={token}&act=addfav"

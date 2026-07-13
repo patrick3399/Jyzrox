@@ -179,6 +179,12 @@ export interface EhFavoritesResult {
   categories: EhFavCategory[]
 }
 
+export interface EhFavoriteState {
+  is_favorited: boolean
+  category: number | null
+  note: string
+}
+
 export interface EhImageMap {
   gid: number
   images: Record<string, string> // { "1": "image_page_token", ... }

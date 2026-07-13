@@ -12,6 +12,7 @@ import DOMPurify from 'dompurify'
 import { BackButton, smartBack } from '@/components/BackButton'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { TagSearchPopover } from '@/components/TagSearchPopover'
+import useSWR from 'swr'
 
 // ── Preview grid with scaled sprite offsets ─────────────────────────────
 
@@ -246,7 +247,20 @@ function EhGalleryDetail() {
   const [showFavPicker, setShowFavPicker] = useState(false)
   const [favSaving, setFavSaving] = useState(false)
   const [isFavorited, setIsFavorited] = useState(() => searchParams.get('fav') === '1')
+  const [favoriteCategory, setFavoriteCategory] = useState<number | null>(null)
+  const [favoriteNote, setFavoriteNote] = useState('')
   const favRef = useRef<HTMLDivElement>(null)
+  const { data: favoriteState, mutate: mutateFavoriteState } = useSWR(
+    Number.isFinite(gid) && token ? ['eh/favorite-state', gid, token] : null,
+    () => api.eh.getFavoriteState(gid, token),
+  )
+
+  useEffect(() => {
+    if (!favoriteState) return
+    setIsFavorited(favoriteState.is_favorited)
+    setFavoriteCategory(favoriteState.category)
+    setFavoriteNote(favoriteState.note)
+  }, [favoriteState])
 
   // Tag popover state
   const [tagPopover, setTagPopover] = useState<{
@@ -298,9 +312,14 @@ function EhGalleryDetail() {
       if (!gallery) return
       setFavSaving(true)
       try {
-        await api.eh.addFavorite(gallery.gid, gallery.token, favcat)
+        await api.eh.addFavorite(gallery.gid, gallery.token, favcat, favoriteNote)
         toast.success(t('browse.addedToFavorites', { favcat: String(favcat) }))
         setIsFavorited(true)
+        setFavoriteCategory(favcat)
+        void mutateFavoriteState(
+          { is_favorited: true, category: favcat, note: favoriteNote },
+          false,
+        )
         setShowFavPicker(false)
       } catch (err) {
         toast.error(err instanceof Error ? err.message : t('browse.addFavoriteFailed'))
@@ -308,7 +327,7 @@ function EhGalleryDetail() {
         setFavSaving(false)
       }
     },
-    [gallery],
+    [favoriteNote, gallery, mutateFavoriteState],
   )
 
   const handleRemoveFavorite = useCallback(async () => {
@@ -318,13 +337,16 @@ function EhGalleryDetail() {
       await api.eh.removeFavorite(gallery.gid, gallery.token)
       toast.success(t('browse.removedFromFavorites'))
       setIsFavorited(false)
+      setFavoriteCategory(null)
+      setFavoriteNote('')
+      void mutateFavoriteState({ is_favorited: false, category: null, note: '' }, false)
       setShowFavPicker(false)
     } catch (err) {
       toast.error(err instanceof Error ? err.message : t('browse.removeFavoriteFailed'))
     } finally {
       setFavSaving(false)
     }
-  }, [gallery])
+  }, [gallery, mutateFavoriteState])
 
   // Group tags by namespace
   const tagGroups = useMemo(() => {
@@ -590,12 +612,19 @@ function EhGalleryDetail() {
                 </button>
                 {showFavPicker && (
                   <div className="absolute top-full left-0 mt-1 z-50 bg-vault-card border border-vault-border rounded-lg shadow-xl overflow-hidden min-w-[180px]">
+                    <textarea
+                      value={favoriteNote}
+                      onChange={(event) => setFavoriteNote(event.target.value.slice(0, 250))}
+                      placeholder="Favorite note"
+                      rows={2}
+                      className="m-2 mb-1 w-[calc(100%-1rem)] resize-none rounded border border-vault-border bg-vault-input px-2 py-1.5 text-xs text-vault-text placeholder-vault-text-muted focus:outline-none focus:border-vault-accent"
+                    />
                     {FAV_NAMES.map((name, i) => (
                       <button
                         key={i}
                         onClick={() => handleAddFavorite(i)}
                         disabled={favSaving}
-                        className="w-full flex items-center gap-2 px-3 py-2 text-left text-sm text-vault-text hover:bg-vault-card-hover transition-colors"
+                        className={`w-full flex items-center gap-2 px-3 py-2 text-left text-sm hover:bg-vault-card-hover transition-colors ${favoriteCategory === i ? 'text-vault-accent' : 'text-vault-text'}`}
                       >
                         <span
                           className="w-3 h-3 rounded-full shrink-0"
