@@ -77,4 +77,10 @@ describe('readerHref', () => {
   it('test_readerHref_pageZero_isFalsyNoSuffix', () => {
     expect(readerHref('pixiv', '123', 0)).toBe('/reader/pixiv/123')
   })
+
+  it('routes Pixiv author collections around the numeric artwork reader', () => {
+    expect(readerHref('pixiv', 'user:1960050', 2)).toBe(
+      '/reader/gallery/pixiv/user%3A1960050?page=2',
+    )
+  })
 })
