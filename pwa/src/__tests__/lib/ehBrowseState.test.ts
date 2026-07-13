@@ -228,6 +228,28 @@ describe('ehBrowseState — URL identity', () => {
     expect(parsed.tab).toBe('popular')
     expect(parsed.query).toBe('')
   })
+  // Regression: the Latest tab (search + empty query) MUST serialize to a
+  // non-empty URL. It shares a bare URL with the popular default otherwise, and
+  // useEhBrowse's "externally-cleared URL → reset to popular" effect (keyed on
+  // searchParams.toString() === '') fires when navigating Popular → Latest,
+  // bouncing the user straight back to Popular.
+  it('latest tab (search + empty query) does not serialize to a bare URL', () => {
+    const s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
+    expect(s.query).toBe('')
+    const str = identityToUrlParams(s).toString()
+    expect(str).not.toBe('')
+    const parsed = parseUrlToIdentity(new URLSearchParams(str))
+    expect(parsed.tab).toBe('search')
+    expect(parsed.query).toBe('')
+  })
+  it('search tab WITH a query stays bare of the redundant tab marker', () => {
+    let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
+    s = reducer(s, { type: 'COMMIT_QUERY', query: 'naruto' })
+    const str = identityToUrlParams(s).toString()
+    // q= alone already implies the search tab; no need for tab=search.
+    expect(str).not.toMatch(/tab=/)
+    expect(str).toMatch(/q=naruto/)
+  })
   it('URL params never contain view fields', () => {
     let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
     s = reducer(s, {

@@ -298,7 +298,11 @@ const CATEGORY_KEYS = new Set(ALL_CATS)
 export function identityToUrlParams(s: EhBrowseState): URLSearchParams {
   const p = new URLSearchParams()
   if (s.query) p.set('q', s.query)
-  if (s.tab !== 'search') p.set('tab', s.tab)
+  // The Latest tab is `search` + empty query. `q=` alone implies the search tab,
+  // so a query search omits `tab`; but with no query we MUST still mark the tab,
+  // otherwise it serializes to a bare URL — indistinguishable from the popular
+  // home default, which useEhBrowse treats as an external "reset to popular".
+  if (s.tab !== 'search' || !s.query) p.set('tab', s.tab)
   const f = s.filters
   if (f.advancedOpen) p.set('adv_open', '1')
   if (f.selectedCats.length > 0 && f.selectedCats.length < ALL_CATS.length) {
