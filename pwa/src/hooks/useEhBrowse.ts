@@ -210,6 +210,13 @@ export function useEhBrowse() {
       setFilter: (patch: Partial<Filters>) => dispatchIdentityChange({ type: 'SET_FILTER', patch }),
       applyIdentity: (identity: Pick<EhBrowseState, 'tab' | 'query' | 'filters'>) =>
         dispatchIdentityChange({ type: 'APPLY_IDENTITY', identity }),
+      showExternalResults: (items: EhGallery[], total: number) => {
+        dispatchIdentityChange(
+          { type: 'SET_TAB', tab: 'search' },
+          { type: 'COMMIT_QUERY', query: '' },
+        )
+        dispatch({ type: 'SEED', items, total, cursor: null, hasMore: false })
+      },
       setScroll: (scrollY: number) => dispatch({ type: 'SET_SCROLL', scrollY }),
       reset: () => dispatch({ type: 'RESET' }),
     }),

@@ -393,6 +393,41 @@ class EhClient:
         galleries = await self._gdata(gid_list)
         return {"galleries": galleries, "total": total, "page": page, "next_gid": next_cursor, "has_prev": has_prev}
 
+    async def image_search(
+        self,
+        image: bytes,
+        filename: str,
+        *,
+        similar: bool = True,
+        covers: bool = False,
+        expunged: bool = False,
+    ) -> dict:
+        """Search EH using the original JPEG bytes without recompression."""
+        upload_url = (
+            "https://upld.exhentai.org/upld/image_lookup.php"
+            if self._is_ex
+            else "https://upld.e-hentai.org/image_lookup.php"
+        )
+        data = {"f_sfile": "File Search"}
+        if similar:
+            data["fs_similar"] = "on"
+        if covers:
+            data["fs_covers"] = "on"
+        if expunged:
+            data["fs_exp"] = "on"
+        resp = await self._http_post(
+            upload_url,
+            data=data,
+            files={"sfile": (filename, image, "image/jpeg")},
+            headers={"Referer": f"{self.base_url}/", "Origin": self.base_url},
+            follow_redirects=True,
+        )
+        resp.raise_for_status()
+        self._check_auth(resp.text, resp)
+        matches = list(dict.fromkeys((int(g), t) for g, t in _GALLERY_URL_RE.findall(resp.text)))
+        galleries = await self._gdata([[gid, token] for gid, token in matches]) if matches else []
+        return {"galleries": galleries, "total": len(galleries), "page": 0, "next_gid": None, "has_prev": False}
+
     async def _gdata(self, gid_list: list[list]) -> list[dict]:
         """Batch-fetch gallery metadata via gdata API (max 25 per call)."""
         results: list[dict] = []

@@ -211,6 +211,32 @@ class TestParseGmetadata:
         assert result["expunged"] is True
 
 
+class TestImageSearch:
+    async def test_posts_original_jpeg_and_parses_gallery_results(self):
+        from services.eh_client import EhClient
+
+        client = EhClient(cookies={})
+        response = MagicMock(spec=httpx.Response)
+        response.text = '<html><a href="https://e-hentai.org/g/12345/abcdef1234/">Result</a></html>'
+        response.headers = {}
+        response.raise_for_status = MagicMock()
+        client._http_post = AsyncMock(return_value=response)
+        client._gdata = AsyncMock(return_value=[{"gid": 12345, "token": "abcdef1234"}])
+        jpeg = b"\xff\xd8\xff" + b"original-bytes"
+
+        result = await client.image_search(jpeg, "source.jpg", similar=True, covers=True)
+
+        assert result["galleries"] == [{"gid": 12345, "token": "abcdef1234"}]
+        kwargs = client._http_post.await_args.kwargs
+        assert kwargs["files"]["sfile"] == ("source.jpg", jpeg, "image/jpeg")
+        assert kwargs["data"] == {
+            "f_sfile": "File Search",
+            "fs_similar": "on",
+            "fs_covers": "on",
+        }
+        client._gdata.assert_awaited_once_with([[12345, "abcdef1234"]])
+
+
 # ---------------------------------------------------------------------------
 # _detect_media_type
 # ---------------------------------------------------------------------------

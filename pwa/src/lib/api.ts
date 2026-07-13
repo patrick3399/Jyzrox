@@ -101,6 +101,9 @@ async function apiFetch<T>(path: string, options: RequestInit = {}): Promise<T> 
     'Content-Type': 'application/json',
     'Accept-Language': getLocale(),
   }
+  if (typeof FormData !== 'undefined' && options.body instanceof FormData) {
+    delete headers['Content-Type']
+  }
 
   const method = (options.method || 'GET').toUpperCase()
   if (method !== 'GET' && method !== 'HEAD') {
@@ -272,6 +275,15 @@ const auth = {
 const eh = {
   search: (params: EhSearchParams = {}, init?: RequestInit) =>
     apiFetch<EhSearchResult>(`/api/eh/search${qs(params as Record<string, unknown>)}`, init),
+
+  imageSearch: (image: File, options: { similar: boolean; covers: boolean; expunged: boolean }) => {
+    const body = new FormData()
+    body.append('image', image)
+    body.append('similar', String(options.similar))
+    body.append('covers', String(options.covers))
+    body.append('expunged', String(options.expunged))
+    return apiFetch<EhSearchResult>('/api/eh/image-search', { method: 'POST', body })
+  },
 
   getBrowseStatus: (gids: number[], init?: RequestInit) =>
     apiFetch<{ statuses: Record<string, EhBrowseGalleryStatus> }>(

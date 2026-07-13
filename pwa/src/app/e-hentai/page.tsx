@@ -34,6 +34,7 @@ import {
   BookmarkCheck,
   Rss,
   Shuffle,
+  Camera,
 } from 'lucide-react'
 import type { EhBrowseGalleryStatus, EhGallery, SavedSearch, TagItem } from '@/lib/types'
 
@@ -488,6 +489,12 @@ function BrowsePage() {
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
   const mobileInputRef = useRef<HTMLInputElement>(null)
   const mobileSavedSearchesRef = useRef<HTMLDivElement>(null)
+  const [showImageSearch, setShowImageSearch] = useState(false)
+  const [imageSearchFile, setImageSearchFile] = useState<File | null>(null)
+  const [imageSearchSimilar, setImageSearchSimilar] = useState(true)
+  const [imageSearchCovers, setImageSearchCovers] = useState(false)
+  const [imageSearchExpunged, setImageSearchExpunged] = useState(false)
+  const [imageSearchLoading, setImageSearchLoading] = useState(false)
 
   // EH credentials (for favorites tab)
   const { data: credData, isLoading: credLoading } = useSWR('settings/credentials/eh', () =>
@@ -801,6 +808,27 @@ function BrowsePage() {
     navigateToGallery(gallery)
   }, [items, navigateToGallery])
 
+  const submitImageSearch = useCallback(async () => {
+    if (!imageSearchFile) return
+    setImageSearchLoading(true)
+    try {
+      const result = await api.eh.imageSearch(imageSearchFile, {
+        similar: imageSearchSimilar,
+        covers: imageSearchCovers,
+        expunged: imageSearchExpunged,
+      })
+      setInputValue('')
+      actions.showExternalResults(result.galleries, result.total)
+      setShowImageSearch(false)
+      setImageSearchFile(null)
+      toast.success(`${result.total.toLocaleString()} image search results`)
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('browse.failedLoadResults'))
+    } finally {
+      setImageSearchLoading(false)
+    }
+  }, [actions, imageSearchCovers, imageSearchExpunged, imageSearchFile, imageSearchSimilar])
+
   // ── Keyboard grid navigation ────────────────────────────
   const { focusedIndex } = useGridKeyboard({
     totalItems: items.length,
@@ -911,6 +939,16 @@ function BrowsePage() {
       {/* Desktop + mobile compact row */}
       <div className={`flex gap-2 ${mobileSearchOpen ? 'hidden sm:flex' : ''}`}>
         {/* Mobile search icon button */}
+        <button
+          type="button"
+          onClick={() => setShowImageSearch(true)}
+          title="Search EH by JPEG image"
+          aria-label="Search EH by JPEG image"
+          className="p-2.5 rounded-lg border border-vault-border text-vault-text-muted hover:text-vault-text hover:border-vault-border-hover transition-colors"
+        >
+          <Camera size={16} />
+        </button>
+
         <button
           onClick={() => setMobileSearchOpen(true)}
           className="sm:hidden p-2.5 bg-vault-card border border-vault-border rounded-lg text-vault-text-secondary hover:text-vault-text transition-colors shrink-0"
@@ -1273,6 +1311,70 @@ function BrowsePage() {
           </button>
         </div>
       </div>
+
+      {showImageSearch && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-label="EH image search"
+          className="rounded-lg border border-vault-border bg-vault-card p-4 space-y-3"
+        >
+          <div className="flex items-center justify-between">
+            <h2 className="text-sm font-semibold text-vault-text">Search EH by image</h2>
+            <button
+              type="button"
+              onClick={() => setShowImageSearch(false)}
+              className="text-vault-text-muted hover:text-vault-text"
+              aria-label={t('common.close')}
+            >
+              <XIcon size={16} />
+            </button>
+          </div>
+          <input
+            type="file"
+            accept="image/jpeg,.jpg,.jpeg"
+            onChange={(event) => setImageSearchFile(event.target.files?.[0] ?? null)}
+            className="block w-full text-xs text-vault-text-secondary file:mr-3 file:rounded file:border-0 file:bg-vault-input file:px-3 file:py-2 file:text-vault-text"
+          />
+          <p className="text-xs text-vault-text-muted">
+            EH requires the original JPEG bytes; the image will not be recompressed.
+          </p>
+          <div className="flex flex-wrap gap-4 text-xs text-vault-text-secondary">
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={imageSearchSimilar}
+                onChange={(event) => setImageSearchSimilar(event.target.checked)}
+              />
+              Similarity scan
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={imageSearchCovers}
+                onChange={(event) => setImageSearchCovers(event.target.checked)}
+              />
+              Search covers only
+            </label>
+            <label className="flex items-center gap-1.5">
+              <input
+                type="checkbox"
+                checked={imageSearchExpunged}
+                onChange={(event) => setImageSearchExpunged(event.target.checked)}
+              />
+              Include expunged
+            </label>
+          </div>
+          <button
+            type="button"
+            onClick={submitImageSearch}
+            disabled={!imageSearchFile || imageSearchLoading}
+            className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+          >
+            {imageSearchLoading ? t('common.loading') : t('common.search')}
+          </button>
+        </div>
+      )}
 
       {/* ── Search mode: clear header (replaces tabs) ── */}
       {query && (

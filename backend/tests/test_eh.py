@@ -80,6 +80,7 @@ def _make_eh_client_mock(search_result=None, gallery_meta=None, comments=None):
     """Return an async context-manager mock for EhClient."""
     mock = AsyncMock()
     mock.search = AsyncMock(return_value=search_result or _FAKE_SEARCH_RESULT)
+    mock.image_search = AsyncMock(return_value=search_result or _FAKE_SEARCH_RESULT)
     mock.get_gallery_metadata = AsyncMock(return_value=gallery_meta or _FAKE_GALLERY_META)
     mock.get_comments = AsyncMock(return_value=comments or [])
     mock.get_popular = AsyncMock(return_value={"galleries": [], "total": 0})
@@ -147,6 +148,41 @@ class TestEhFavoriteState:
         assert resp.status_code == 200
         assert resp.json() == {"is_favorited": True, "category": 2, "note": "Keep"}
         eh_mock.get_favorite_state.assert_awaited_once_with(12345, "abcdef")
+
+
+class TestEhImageSearch:
+    async def test_accepts_original_jpeg_upload(self, client):
+        eh_mock = _make_eh_client_mock()
+        jpeg = b"\xff\xd8\xff" + b"original"
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch(
+                "plugins.builtin.ehentai.browse._get_blocked_tags",
+                new_callable=AsyncMock,
+                return_value=set(),
+            ),
+        ):
+            resp = await client.post(
+                "/api/eh/image-search",
+                files={"image": ("source.jpg", jpeg, "image/jpeg")},
+                data={"similar": "true", "covers": "true", "expunged": "false"},
+            )
+
+        assert resp.status_code == 200
+        eh_mock.image_search.assert_awaited_once_with(
+            jpeg,
+            "source.jpg",
+            similar=True,
+            covers=True,
+            expunged=False,
+        )
+
+    async def test_rejects_non_jpeg_upload(self, client):
+        resp = await client.post(
+            "/api/eh/image-search",
+            files={"image": ("source.png", b"\x89PNG\r\n\x1a\n", "image/png")},
+        )
+        assert resp.status_code == 422
 
 
 # ---------------------------------------------------------------------------

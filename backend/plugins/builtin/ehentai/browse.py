@@ -12,7 +12,7 @@ import logging
 from urllib.parse import urlparse
 
 import httpx
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Query, Request, Response, UploadFile
 from fastapi.responses import JSONResponse
 from sqlalchemy import and_, select
 
@@ -384,6 +384,50 @@ async def search(
     if blocked and result.get("galleries"):
         result["galleries"] = _filter_blocked(result["galleries"], blocked)
 
+    return result
+
+
+@_browse_router.post("/image-search")
+async def image_search(
+    request: Request,
+    image: UploadFile = File(...),
+    similar: bool = Form(default=True),
+    covers: bool = Form(default=False),
+    expunged: bool = Form(default=False),
+    auth: dict = Depends(require_auth),
+):
+    """Reverse-search EH with an unchanged JPEG upload."""
+    content = await image.read(10 * 1024 * 1024 + 1)
+    if len(content) > 10 * 1024 * 1024:
+        raise HTTPException(status_code=413, detail="Image must be 10 MB or smaller")
+    if not content.startswith(b"\xff\xd8\xff"):
+        raise HTTPException(status_code=422, detail="EH image search requires a JPEG file")
+
+    client = await _make_client()
+    async with client:
+        try:
+            result = await client.image_search(
+                content,
+                image.filename or "search.jpg",
+                similar=similar,
+                covers=covers,
+                expunged=expunged,
+            )
+        except PermissionError as e:
+            detail = str(e)
+            await push_system_alert(detail)
+            if "509" in detail:
+                raise api_error(403, "eh_bandwidth_exceeded", _locale(request))
+            if "Sad Panda" in detail:
+                raise api_error(403, "eh_access_denied", _locale(request))
+            raise api_error(401, "eh_cookie_invalid", _locale(request))
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            logger.error("EH image search failed: %s", e)
+            raise HTTPException(status_code=502, detail=str(e))
+
+    blocked = await _get_blocked_tags(auth["user_id"])
+    if blocked and result.get("galleries"):
+        result["galleries"] = _filter_blocked(result["galleries"], blocked)
     return result
 
 
