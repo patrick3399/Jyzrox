@@ -4,6 +4,7 @@ import { useState, useRef, useCallback, useEffect, useMemo, Suspense } from 'rea
 import { useRouter } from 'next/navigation'
 import { useEhBrowse } from '@/hooks/useEhBrowse'
 import { EH_ADVANCED_SEARCH_BITS, queryKey } from '@/lib/ehBrowseState'
+import { getEhGalleryLanguage } from '@/lib/ehGalleryLanguage'
 import { useCreateSubscription } from '@/hooks/useSubscriptions'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
@@ -119,6 +120,7 @@ function formatDate(unix: number) {
 
 function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => void }) {
   const { color, label } = getCategoryMeta(gallery.category)
+  const language = getEhGalleryLanguage(gallery)
   const thumbSrc = gallery.thumb
     ? `/api/eh/thumb-proxy?url=${encodeURIComponent(gallery.thumb)}`
     : ''
@@ -168,6 +170,12 @@ function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
             {label}
           </span>
 
+          {language && (
+            <span className="text-[11px] font-bold px-1.5 py-0.5 rounded bg-cyan-900/80 text-cyan-100 border border-cyan-600/70">
+              {language}
+            </span>
+          )}
+
           {/* Stars */}
           <RatingStars rating={gallery.rating} readonly />
 
@@ -184,6 +192,7 @@ function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
 
 function GridCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => void }) {
   const { color, label } = getCategoryMeta(gallery.category)
+  const language = getEhGalleryLanguage(gallery)
   const thumbSrc = gallery.thumb
     ? `/api/eh/thumb-proxy?url=${encodeURIComponent(gallery.thumb)}`
     : ''
@@ -227,6 +236,12 @@ function GridCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
       <span className="absolute top-1.5 right-1.5 text-[10px] text-white/80 bg-black/50 px-1 py-0.5 rounded">
         {gallery.pages}P
       </span>
+
+      {language && (
+        <span className="absolute top-8 right-1.5 text-[10px] font-bold text-cyan-100 bg-cyan-900/80 border border-cyan-500/70 px-1 py-0.5 rounded shadow-md">
+          {language}
+        </span>
+      )}
 
       {/* Title overlay (bottom) */}
       <div className="absolute bottom-0 left-0 right-0 p-2">
