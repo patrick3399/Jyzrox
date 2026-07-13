@@ -12,6 +12,7 @@ import type {
   EhSearchResult,
   EhFavoritesResult,
   EhFavoriteState,
+  EhGalleryRelationships,
   EhImageMap,
   EhSearchParams,
   DownloadJob,
@@ -293,6 +294,9 @@ const eh = {
 
   getGallery: (gid: number, token: string, init?: RequestInit) =>
     apiFetch<EhGallery>(`/api/eh/gallery/${gid}/${token}`, init),
+
+  getGalleryRelationships: (gid: number, token: string, init?: RequestInit) =>
+    apiFetch<EhGalleryRelationships>(`/api/eh/gallery/${gid}/${token}/relationships`, init),
 
   getImages: (gid: number, token: string, init?: RequestInit) =>
     apiFetch<EhImageMap>(`/api/eh/gallery/${gid}/${token}/images`, init),

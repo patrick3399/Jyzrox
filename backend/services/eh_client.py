@@ -455,6 +455,44 @@ class EhClient:
             )
         return meta
 
+    async def get_gallery_relationships(self, gid: int, token: str) -> dict:
+        """Scrape parent and newer-version gallery links from a detail page."""
+        resp = await self._http_get(f"{self.base_url}/g/{gid}/{token}/")
+        resp.raise_for_status()
+        self._check_auth(resp.text, resp)
+        soup = BeautifulSoup(resp.text, "lxml")
+
+        def gallery_link(anchor) -> dict | None:
+            if anchor is None:
+                return None
+            match = _GALLERY_URL_RE.search(str(anchor.get("href", "")))
+            if not match:
+                return None
+            related_gid, related_token = int(match.group(1)), match.group(2)
+            if related_gid == gid:
+                return None
+            return {
+                "gid": related_gid,
+                "token": related_token,
+                "title": anchor.get_text(" ", strip=True),
+            }
+
+        parent = None
+        for row in soup.select("#gdd tr"):
+            cells = row.find_all("td", recursive=False)
+            if len(cells) >= 2 and cells[0].get_text(" ", strip=True).lower().startswith("parent"):
+                parent = gallery_link(cells[1].find("a"))
+                break
+
+        newer: list[dict] = []
+        seen: set[int] = set()
+        for anchor in soup.select('#gnd a[href*="/g/"]'):
+            related = gallery_link(anchor)
+            if related and related["gid"] not in seen:
+                seen.add(related["gid"])
+                newer.append(related)
+        return {"parent": parent, "newer_versions": newer}
+
     def _parse_detail_html(self, html: str, gid: int = 0) -> tuple[dict[int, str], dict[int, str]]:
         """Parse a single gallery detail page HTML for pTokens + preview thumbnails."""
         token_map: dict[int, str] = {}

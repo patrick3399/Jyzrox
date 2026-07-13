@@ -601,6 +601,38 @@ async def get_gallery(
     )
 
 
+@_browse_router.get("/gallery/{gid}/{token}/relationships")
+async def get_gallery_relationships(
+    request: Request,
+    gid: int,
+    token: str,
+    _: dict = Depends(require_auth),
+):
+    """Get parent and newer-version links from the EH detail page."""
+    cache_key = f"eh:relationships:{gid}:{token}"
+    cached = await cache.get_json(cache_key)
+    if cached:
+        return cached
+
+    client = await _make_client()
+    async with client:
+        try:
+            result = await client.get_gallery_relationships(gid, token)
+        except PermissionError as e:
+            detail = str(e)
+            await push_system_alert(detail)
+            if "509" in detail:
+                raise api_error(403, "eh_bandwidth_exceeded", _locale(request))
+            if "Sad Panda" in detail:
+                raise api_error(403, "eh_access_denied", _locale(request))
+            raise api_error(401, "eh_cookie_invalid", _locale(request))
+        except (httpx.HTTPError, httpx.TimeoutException, ValueError) as e:
+            raise HTTPException(status_code=502, detail=str(e))
+
+    await cache.set_json(cache_key, result, 3600)
+    return result
+
+
 # ── Preview thumbnails (lightweight — single page scrape) ────────────
 
 

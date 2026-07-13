@@ -237,6 +237,33 @@ class TestImageSearch:
         client._gdata.assert_awaited_once_with([[12345, "abcdef1234"]])
 
 
+class TestGalleryRelationships:
+    async def test_parses_parent_and_newer_versions(self):
+        from services.eh_client import EhClient
+
+        client = EhClient(cookies={})
+        response = MagicMock(spec=httpx.Response)
+        response.text = """
+          <html><table id="gdd"><tr><td>Parent:</td><td>
+            <a href="https://e-hentai.org/g/100/abcdef1234/">Parent edition</a>
+          </td></tr></table>
+          <div id="gnd">
+            <a href="https://e-hentai.org/g/300/123456789a/">New edition</a>
+            <a href="https://e-hentai.org/g/300/123456789a/">Duplicate</a>
+          </div></html>
+        """
+        response.headers = {}
+        response.raise_for_status = MagicMock()
+        client._http_get = AsyncMock(return_value=response)
+
+        result = await client.get_gallery_relationships(200, "currenttok")
+
+        assert result == {
+            "parent": {"gid": 100, "token": "abcdef1234", "title": "Parent edition"},
+            "newer_versions": [{"gid": 300, "token": "123456789a", "title": "New edition"}],
+        }
+
+
 # ---------------------------------------------------------------------------
 # _detect_media_type
 # ---------------------------------------------------------------------------

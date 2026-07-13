@@ -187,6 +187,17 @@ export interface EhFavoriteState {
   note: string
 }
 
+export interface EhGalleryRelationship {
+  gid: number
+  token: string
+  title: string
+}
+
+export interface EhGalleryRelationships {
+  parent: EhGalleryRelationship | null
+  newer_versions: EhGalleryRelationship[]
+}
+
 export interface EhImageMap {
   gid: number
   images: Record<string, string> // { "1": "image_page_token", ... }

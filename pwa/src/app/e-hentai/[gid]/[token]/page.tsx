@@ -232,6 +232,10 @@ function EhGalleryDetail() {
 
   const { data: gallery, error: galleryError } = useEhGallery(gid, token)
   const { data: previewData } = useEhGalleryPreviews(gid, token)
+  const { data: relationships } = useSWR(
+    Number.isFinite(gid) && token ? ['eh/gallery-relationships', gid, token] : null,
+    () => api.eh.getGalleryRelationships(gid, token),
+  )
 
   // Comments state
   const [showComments, setShowComments] = useState(false)
@@ -524,6 +528,8 @@ function EhGalleryDetail() {
         maximumFractionDigits: 1,
       }).format(gallery.filesize / (gallery.filesize >= 1024 ** 3 ? 1024 ** 3 : 1024 ** 2))
     : null
+  const parentRelationship = relationships?.parent ?? null
+  const newerVersions = relationships?.newer_versions ?? []
 
   return (
     <>
@@ -693,6 +699,40 @@ function EhGalleryDetail() {
             </div>
           </div>
         </div>
+
+        {(parentRelationship || newerVersions.length > 0) && (
+          <div className="rounded-lg border border-vault-border bg-vault-card p-3 text-sm space-y-2">
+            {parentRelationship && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-vault-text-muted">Parent:</span>
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push(`/e-hentai/${parentRelationship.gid}/${parentRelationship.token}`)
+                  }
+                  className="text-vault-accent hover:underline"
+                >
+                  {parentRelationship.title || `Gallery ${parentRelationship.gid}`}
+                </button>
+              </div>
+            )}
+            {newerVersions.length > 0 && (
+              <div className="flex flex-wrap items-center gap-2">
+                <span className="text-vault-text-muted">Newer versions:</span>
+                {newerVersions.map((version) => (
+                  <button
+                    key={`${version.gid}-${version.token}`}
+                    type="button"
+                    onClick={() => router.push(`/e-hentai/${version.gid}/${version.token}`)}
+                    className="text-vault-accent hover:underline"
+                  >
+                    {version.title || `Gallery ${version.gid}`}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* ── Tags section (grouped by namespace) ── */}
         <div className="space-y-3">
