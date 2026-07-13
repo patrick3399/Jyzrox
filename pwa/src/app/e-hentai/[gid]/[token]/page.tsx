@@ -601,7 +601,7 @@ function EhGalleryDetail() {
             </div>
 
             {/* Action buttons */}
-            <div className="flex gap-3 pt-1">
+            <div className="flex flex-wrap gap-3 pt-1">
               <button
                 onClick={() => handleRead(1)}
                 className="px-6 py-2.5 bg-vault-accent hover:bg-vault-accent/90 rounded-lg text-white text-sm font-medium transition-colors"
@@ -614,6 +614,30 @@ function EhGalleryDetail() {
               >
                 {t('browse.download')}
               </button>
+              <a
+                href={`https://e-hentai.org/gallerytorrents.php?gid=${gallery.gid}&t=${gallery.token}`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2.5 bg-vault-card border border-vault-border hover:border-vault-border-hover rounded-lg text-vault-text-secondary text-sm font-medium transition-colors"
+              >
+                Torrents{gallery.torrent_count ? ` (${gallery.torrent_count})` : ''}
+              </a>
+              <a
+                href={`https://e-hentai.org/archiver.php?gid=${gallery.gid}&token=${gallery.token}`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2.5 bg-vault-card border border-vault-border hover:border-vault-border-hover rounded-lg text-vault-text-secondary text-sm font-medium transition-colors"
+              >
+                Archive
+              </a>
+              <a
+                href={`https://e-hentai.org/g/${gallery.gid}/${gallery.token}/`}
+                target="_blank"
+                rel="noreferrer"
+                className="px-4 py-2.5 bg-vault-card border border-vault-border hover:border-vault-border-hover rounded-lg text-vault-text-secondary text-sm font-medium transition-colors"
+              >
+                Source ↗
+              </a>
               {/* Favorite button with picker */}
               <div className="relative" ref={favRef}>
                 <button
