@@ -5,6 +5,10 @@ import { useRouter } from 'next/navigation'
 import { useEhBrowse } from '@/hooks/useEhBrowse'
 import { EH_ADVANCED_SEARCH_BITS, queryKey } from '@/lib/ehBrowseState'
 import { getEhGalleryLanguage } from '@/lib/ehGalleryLanguage'
+import {
+  applyEhAutocompleteSuggestion,
+  getEhAutocompleteFragment,
+} from '@/lib/ehSearchAutocomplete'
 import { useCreateSubscription } from '@/hooks/useSubscriptions'
 import useSWR from 'swr'
 import { api } from '@/lib/api'
@@ -25,7 +29,7 @@ import {
   BookmarkCheck,
   Rss,
 } from 'lucide-react'
-import type { EhGallery, SavedSearch } from '@/lib/types'
+import type { EhGallery, SavedSearch, TagItem } from '@/lib/types'
 
 // ── IntersectionObserver-based lazy image ──────────────────────────────
 
@@ -37,6 +41,50 @@ function LazyImage({ src, alt, className }: { src: string; alt: string; classNam
   }
 
   return <img src={src} alt={alt} className={className} onError={() => setError(true)} />
+}
+
+function SearchAutocompleteDropdown({
+  suggestions,
+  highlightedIndex,
+  onSelect,
+  onHighlight,
+}: {
+  suggestions: TagItem[]
+  highlightedIndex: number
+  onSelect: (tag: TagItem) => void
+  onHighlight: (index: number) => void
+}) {
+  if (suggestions.length === 0) return null
+  return (
+    <ul className="absolute left-0 right-0 top-full mt-1 z-40 bg-vault-card border border-vault-border rounded-lg shadow-xl overflow-hidden max-h-[min(360px,55vh)] overflow-y-auto">
+      {suggestions.map((tag, index) => (
+        <li key={`${tag.namespace}:${tag.name}`}>
+          <button
+            type="button"
+            onMouseDown={(event) => {
+              event.preventDefault()
+              onSelect(tag)
+            }}
+            onMouseEnter={() => onHighlight(index)}
+            className={`w-full flex items-center justify-between gap-3 px-3 py-2 text-left text-sm transition-colors ${
+              highlightedIndex === index
+                ? 'bg-vault-accent/10 text-vault-accent'
+                : 'text-vault-text hover:bg-vault-card-hover'
+            }`}
+          >
+            <span className="min-w-0 truncate">
+              <span className="text-vault-text-muted text-xs">{tag.namespace}:</span>
+              <span className="font-medium">{tag.name}</span>
+              {tag.translation && (
+                <span className="text-vault-text-muted text-xs ml-1">({tag.translation})</span>
+              )}
+            </span>
+            <span className="text-xs text-vault-text-muted shrink-0">{tag.count}</span>
+          </button>
+        </li>
+      ))}
+    </ul>
+  )
 }
 
 // ── Search history (localStorage) ─────────────────────────────────────
@@ -350,7 +398,18 @@ function BrowsePage() {
   // Search history
   const [showHistory, setShowHistory] = useState(false)
   const [history, setHistory] = useState<string[]>([])
+  const [autocompleteHighlight, setAutocompleteHighlight] = useState(-1)
   const searchBoxRef = useRef<HTMLDivElement>(null)
+
+  const autocompleteFragment = useMemo(() => getEhAutocompleteFragment(inputValue), [inputValue])
+  const { data: autocompleteData } = useSWR<TagItem[]>(
+    autocompleteFragment && inputValue.trim()
+      ? ['tags/autocomplete', autocompleteFragment.query]
+      : null,
+    () => api.tags.autocomplete(autocompleteFragment?.query ?? '', 10),
+    { keepPreviousData: false },
+  )
+  const autocompleteSuggestions = Array.isArray(autocompleteData) ? autocompleteData : []
 
   // Mobile search expand
   const [mobileSearchOpen, setMobileSearchOpen] = useState(false)
@@ -450,6 +509,8 @@ function BrowsePage() {
   const handleInputChange = useCallback(
     (value: string) => {
       setInputValue(value)
+      setAutocompleteHighlight(-1)
+      if (value.trim()) setShowHistory(false)
       if (debounceRef.current) clearTimeout(debounceRef.current)
       debounceRef.current = setTimeout(() => commitSearch(value), 600)
     },
@@ -458,14 +519,50 @@ function BrowsePage() {
 
   const handleKeyDown = useCallback(
     (e: React.KeyboardEvent<HTMLInputElement>) => {
-      if (e.key === 'Enter') {
+      if (e.key === 'ArrowDown' && autocompleteSuggestions.length > 0) {
+        e.preventDefault()
+        setAutocompleteHighlight((index) => Math.min(index + 1, autocompleteSuggestions.length - 1))
+      } else if (e.key === 'ArrowUp' && autocompleteSuggestions.length > 0) {
+        e.preventDefault()
+        setAutocompleteHighlight((index) => Math.max(index - 1, -1))
+      } else if (
+        e.key === 'Enter' &&
+        autocompleteFragment &&
+        autocompleteHighlight >= 0 &&
+        autocompleteSuggestions[autocompleteHighlight]
+      ) {
+        e.preventDefault()
+        handleInputChange(
+          applyEhAutocompleteSuggestion(
+            inputValue,
+            autocompleteFragment,
+            autocompleteSuggestions[autocompleteHighlight],
+          ),
+        )
+      } else if (e.key === 'Enter') {
         if (debounceRef.current) clearTimeout(debounceRef.current)
         commitSearch(inputValue)
       } else if (e.key === 'Escape') {
         setShowHistory(false)
+        setAutocompleteHighlight(-1)
       }
     },
-    [inputValue, commitSearch],
+    [
+      inputValue,
+      commitSearch,
+      handleInputChange,
+      autocompleteFragment,
+      autocompleteHighlight,
+      autocompleteSuggestions,
+    ],
+  )
+
+  const handleAutocompleteSelect = useCallback(
+    (tag: TagItem) => {
+      if (!autocompleteFragment) return
+      handleInputChange(applyEhAutocompleteSuggestion(inputValue, autocompleteFragment, tag))
+    },
+    [autocompleteFragment, handleInputChange, inputValue],
   )
 
   const handleHistorySelect = useCallback(
@@ -631,7 +728,7 @@ function BrowsePage() {
             />
 
             {/* History dropdown */}
-            {showHistory && history.length > 0 && (
+            {showHistory && autocompleteSuggestions.length === 0 && history.length > 0 && (
               <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-vault-card border border-vault-border rounded-lg shadow-xl overflow-hidden max-h-[min(320px,50vh)]">
                 <div className="flex items-center justify-between px-3 py-1.5 border-b border-vault-border">
                   <span className="text-[11px] text-vault-text-muted uppercase tracking-wide">
@@ -669,6 +766,14 @@ function BrowsePage() {
                   </button>
                 ))}
               </div>
+            )}
+            {autocompleteFragment && (
+              <SearchAutocompleteDropdown
+                suggestions={autocompleteSuggestions}
+                highlightedIndex={autocompleteHighlight}
+                onSelect={handleAutocompleteSelect}
+                onHighlight={setAutocompleteHighlight}
+              />
             )}
           </div>
           <button
@@ -799,7 +904,7 @@ function BrowsePage() {
           />
 
           {/* History dropdown */}
-          {showHistory && history.length > 0 && (
+          {showHistory && autocompleteSuggestions.length === 0 && history.length > 0 && (
             <div className="absolute left-0 right-0 top-full mt-1 z-30 bg-vault-card border border-vault-border rounded-lg shadow-xl overflow-hidden max-h-[min(320px,50vh)]">
               <div className="flex items-center justify-between px-3 py-1.5 border-b border-vault-border">
                 <span className="text-[11px] text-vault-text-muted uppercase tracking-wide">
@@ -834,6 +939,14 @@ function BrowsePage() {
                 </button>
               ))}
             </div>
+          )}
+          {autocompleteFragment && (
+            <SearchAutocompleteDropdown
+              suggestions={autocompleteSuggestions}
+              highlightedIndex={autocompleteHighlight}
+              onSelect={handleAutocompleteSelect}
+              onHighlight={setAutocompleteHighlight}
+            />
           )}
         </div>
 
