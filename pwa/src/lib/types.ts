@@ -871,6 +871,7 @@ export interface EhSearchParams {
   min_rating?: number
   page_from?: number
   page_to?: number
+  language?: string
 }
 
 export interface JobListParams {

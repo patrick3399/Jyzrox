@@ -63,6 +63,7 @@ describe('ehBrowseState — saved search identity', () => {
         minRating: 4,
         pageFrom: 20,
         pageTo: 80,
+        language: 'chinese',
       },
     })
 

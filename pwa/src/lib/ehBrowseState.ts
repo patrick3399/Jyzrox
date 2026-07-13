@@ -15,6 +15,7 @@ export type Filters = {
   minRating: number | null
   pageFrom: number | null
   pageTo: number | null
+  language: string
   favCat: string // 'all' | '0'..'9'
   favSearch: string
   toplistTl: number
@@ -73,6 +74,7 @@ export const initialFilters: Filters = {
   minRating: null,
   pageFrom: null,
   pageTo: null,
+  language: '',
   favCat: 'all',
   favSearch: '',
   toplistTl: 11,
@@ -232,7 +234,11 @@ export function buildParams(s: EhBrowseState): FetchPlan {
       const f = s.filters
       const advanced =
         f.advancedOpen &&
-        (f.advSearch !== 0 || f.minRating !== null || f.pageFrom !== null || f.pageTo !== null)
+        (f.advSearch !== 0 ||
+          f.minRating !== null ||
+          f.pageFrom !== null ||
+          f.pageTo !== null ||
+          !!f.language)
       return {
         kind: 'search',
         args: {
@@ -246,6 +252,7 @@ export function buildParams(s: EhBrowseState): FetchPlan {
                 min_rating: f.minRating ?? undefined,
                 page_from: f.pageFrom ?? undefined,
                 page_to: f.pageTo ?? undefined,
+                language: f.language || undefined,
               }
             : {}),
         },
@@ -330,6 +337,7 @@ export function identityToUrlParams(s: EhBrowseState): URLSearchParams {
   if (f.minRating !== null) p.set('minrating', String(f.minRating))
   if (f.pageFrom !== null) p.set('pfrom', String(f.pageFrom))
   if (f.pageTo !== null) p.set('pto', String(f.pageTo))
+  if (f.language) p.set('language', f.language)
   if (s.tab === 'favorites' && f.favCat !== 'all') p.set('favcat', f.favCat)
   if (s.tab === 'favorites' && f.favSearch) p.set('favsearch', f.favSearch)
   if (s.tab === 'toplist' && f.toplistTl !== 11) p.set('tl', String(f.toplistTl))
@@ -361,6 +369,7 @@ export function parseUrlToIdentity(
       minRating: num(sp.get('minrating')),
       pageFrom: num(sp.get('pfrom')),
       pageTo: num(sp.get('pto')),
+      language: sp.get('language') || '',
       favCat: sp.get('favcat') || 'all',
       favSearch: sp.get('favsearch') || '',
       toplistTl: sp.get('tl') ? Number(sp.get('tl')) : 11,

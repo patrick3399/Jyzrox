@@ -1383,8 +1383,26 @@ function BrowsePage() {
                   </div>
                 </div>
 
-                {/* Min Rating + Page Range */}
+                {/* Language + Min Rating + Page Range */}
                 <div className="flex flex-wrap gap-4">
+                  <div>
+                    <p className="text-xs text-vault-text-muted mb-1">Language</p>
+                    <select
+                      value={filters.language}
+                      onChange={(e) => actions.setFilter({ language: e.target.value })}
+                      className="bg-vault-input border border-vault-border rounded px-2 py-1.5 text-sm text-vault-text focus:outline-none"
+                    >
+                      <option value="">Any language</option>
+                      <option value="english">English</option>
+                      <option value="chinese">Chinese</option>
+                      <option value="japanese">Japanese</option>
+                      <option value="korean">Korean</option>
+                      <option value="spanish">Spanish</option>
+                      <option value="french">French</option>
+                      <option value="german">German</option>
+                      <option value="russian">Russian</option>
+                    </select>
+                  </div>
                   <div>
                     <p className="text-xs text-vault-text-muted mb-1">{t('browse.minRating')}</p>
                     <select
@@ -1441,6 +1459,7 @@ function BrowsePage() {
                       minRating: null,
                       pageFrom: null,
                       pageTo: null,
+                      language: '',
                       selectedCats: [],
                     })
                   }
