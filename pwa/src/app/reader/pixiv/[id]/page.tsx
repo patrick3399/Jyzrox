@@ -32,11 +32,6 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
     () => api.pixiv.getIllustPages(illustId),
   )
 
-  const { data: illust, error: illustError } = useSWR(
-    isNaN(illustId) || isAuthorCollection ? null : `/api/pixiv/illust/${illustId}`,
-    () => api.pixiv.getIllust(illustId),
-  )
-
   if (isAuthorCollection) {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-black text-white">
@@ -56,7 +51,7 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
     )
   }
 
-  const error = pagesError || illustError
+  const error = pagesError
 
   if (error) {
     return (
@@ -97,13 +92,11 @@ export default function PixivReaderPage({ params }: { params: Promise<{ id: stri
     duration: null,
   }))
 
-  const title = illust?.title ?? `Pixiv #${illustId}`
-
   return (
     <ErrorBoundary>
       <Reader
         source="pixiv"
-        sourceId={title}
+        sourceId={String(illustId)}
         downloadStatus="complete"
         images={images}
         totalPages={pagesData.page_count}

@@ -389,6 +389,37 @@ export function useProgressSave(
 ) {
   const timerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const retryRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const currentPageRef = useRef(currentPage)
+
+  useEffect(() => {
+    currentPageRef.current = currentPage
+  }, [currentPage])
+
+  useEffect(() => {
+    if (!source || !sourceId || !enabled) return
+
+    const flushProgress = () => {
+      clearTimeout(timerRef.current)
+      clearTimeout(retryRef.current)
+      void api.library
+        .saveProgress(source, sourceId, currentPageRef.current, { keepalive: true })
+        .catch((err) => {
+          // Browsers may still reject background requests while suspending a PWA.
+          // The next foreground page change will retry through the normal path.
+          console.warn('[Reader] Failed to flush progress while leaving the page:', err)
+        })
+    }
+    const onVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') flushProgress()
+    }
+
+    window.addEventListener('pagehide', flushProgress)
+    document.addEventListener('visibilitychange', onVisibilityChange)
+    return () => {
+      window.removeEventListener('pagehide', flushProgress)
+      document.removeEventListener('visibilitychange', onVisibilityChange)
+    }
+  }, [source, sourceId, enabled])
 
   useEffect(() => {
     // Skip progress save for proxy-only browsing or when disabled

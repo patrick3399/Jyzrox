@@ -46,6 +46,14 @@ describe('structural-nav-audit — Pixiv saveScroll call sites pass data', () =>
   })
 })
 
+describe('structural-nav-audit — Pixiv reader progress identity', () => {
+  it('test_pixiv_reader_usesIllustIdForProgress', () => {
+    const page = src('app/reader/pixiv/[id]/page.tsx')
+    expect(page).toContain('sourceId={String(illustId)}')
+    expect(page).not.toContain('sourceId={title}')
+  })
+})
+
 describe('structural-nav-audit — Library saveScroll passes data', () => {
   it('test_library_noZeroArgSaveScrollCalls', () => {
     const page = src('app/library/page.tsx')
