@@ -34,7 +34,7 @@ import {
   BookmarkCheck,
   Rss,
 } from 'lucide-react'
-import type { EhGallery, SavedSearch, TagItem } from '@/lib/types'
+import type { EhBrowseGalleryStatus, EhGallery, SavedSearch, TagItem } from '@/lib/types'
 
 // ── IntersectionObserver-based lazy image ──────────────────────────────
 
@@ -171,7 +171,15 @@ function formatDate(unix: number) {
 
 // ── List-mode card (EhViewer style) ────────────────────────────────────
 
-function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => void }) {
+function ListCard({
+  gallery,
+  status,
+  onClick,
+}: {
+  gallery: EhGallery
+  status?: EhBrowseGalleryStatus
+  onClick: () => void
+}) {
   const { color, label } = getCategoryMeta(gallery.category)
   const language = getEhGalleryLanguage(gallery)
   const thumbSrc = gallery.thumb
@@ -233,7 +241,19 @@ function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
           <RatingStars rating={gallery.rating} readonly />
 
           {/* Meta */}
-          <span className="text-xs text-vault-text-muted ml-auto">{gallery.pages}P</span>
+          {status?.is_local_favorite && (
+            <span className="text-xs text-pink-400" title={t('common.favorite')}>
+              ♥
+            </span>
+          )}
+          {status?.downloaded && (
+            <span className="text-xs text-green-400" title={t('browse.download')}>
+              ↓
+            </span>
+          )}
+          <span className="text-xs text-vault-text-muted ml-auto">
+            {status?.last_page ? `${status.last_page}/${gallery.pages}P` : `${gallery.pages}P`}
+          </span>
           <span className="text-xs text-vault-text-muted">{formatDate(gallery.posted_at)}</span>
         </div>
       </div>
@@ -243,7 +263,15 @@ function ListCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
 
 // ── Grid-mode card (EhViewer tile style) ────────────────────────────────
 
-function GridCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => void }) {
+function GridCard({
+  gallery,
+  status,
+  onClick,
+}: {
+  gallery: EhGallery
+  status?: EhBrowseGalleryStatus
+  onClick: () => void
+}) {
   const { color, label } = getCategoryMeta(gallery.category)
   const language = getEhGalleryLanguage(gallery)
   const thumbSrc = gallery.thumb
@@ -287,7 +315,7 @@ function GridCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
 
       {/* Pages (top-right) */}
       <span className="absolute top-1.5 right-1.5 text-[10px] text-white/80 bg-black/50 px-1 py-0.5 rounded">
-        {gallery.pages}P
+        {status?.last_page ? `${status.last_page}/${gallery.pages}P` : `${gallery.pages}P`}
       </span>
 
       {language && (
@@ -303,6 +331,10 @@ function GridCard({ gallery, onClick }: { gallery: EhGallery; onClick: () => voi
         </p>
         <div className="flex items-center justify-between mt-1">
           <RatingStars rating={gallery.rating} readonly />
+          <span className="flex items-center gap-1 text-[11px]">
+            {status?.is_local_favorite && <span className="text-pink-400">♥</span>}
+            {status?.downloaded && <span className="text-green-400">↓</span>}
+          </span>
         </div>
       </div>
     </article>
@@ -429,6 +461,16 @@ function BrowsePage() {
 
   // ── Data derivations ──
   const { tab, query, filters, items, total } = state
+  const browseStatusGids = useMemo(
+    () => Array.from(new Set(items.map((gallery) => gallery.gid))),
+    [items],
+  )
+  const { data: browseStatusData } = useSWR(
+    browseStatusGids.length > 0 ? ['eh/browse-status', browseStatusGids.join(',')] : null,
+    () => api.eh.getBrowseStatus(browseStatusGids),
+    { keepPreviousData: true },
+  )
+  const browseStatuses = browseStatusData?.statuses ?? {}
   const isSearchView = tab === 'search' || !!query
   const seeding = state.status === 'seeding'
   const loading = state.status === 'seeding' || state.status === 'loading'
@@ -1549,6 +1591,7 @@ function BrowsePage() {
                 <ListCard
                   key={`${g.gid}-${g.token}`}
                   gallery={g}
+                  status={browseStatuses[String(g.gid)]}
                   onClick={() => navigateToGallery(g)}
                 />
               ))}
@@ -1565,6 +1608,7 @@ function BrowsePage() {
                 <GridCard
                   key={`${g.gid}-${g.token}`}
                   gallery={g}
+                  status={browseStatuses[String(g.gid)]}
                   onClick={() => navigateToGallery(g)}
                 />
               )}

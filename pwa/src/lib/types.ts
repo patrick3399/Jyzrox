@@ -155,6 +155,14 @@ export interface EhSearchResult {
   has_prev?: boolean // whether previous page exists
 }
 
+export interface EhBrowseGalleryStatus {
+  gallery_id: number
+  download_status: string
+  downloaded: boolean
+  last_page: number
+  is_local_favorite: boolean
+}
+
 export interface EhFavCategory {
   index: number
   name: string

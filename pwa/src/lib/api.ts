@@ -7,6 +7,7 @@ import type {
   GalleryListResponse,
   GallerySearchParams,
   TagListResponse,
+  EhBrowseGalleryStatus,
   EhGallery,
   EhSearchResult,
   EhFavoritesResult,
@@ -270,6 +271,12 @@ const auth = {
 const eh = {
   search: (params: EhSearchParams = {}, init?: RequestInit) =>
     apiFetch<EhSearchResult>(`/api/eh/search${qs(params as Record<string, unknown>)}`, init),
+
+  getBrowseStatus: (gids: number[], init?: RequestInit) =>
+    apiFetch<{ statuses: Record<string, EhBrowseGalleryStatus> }>(
+      `/api/eh/browse-status${qs({ gids: gids.join(',') })}`,
+      init,
+    ),
 
   getGallery: (gid: number, token: string, init?: RequestInit) =>
     apiFetch<EhGallery>(`/api/eh/gallery/${gid}/${token}`, init),

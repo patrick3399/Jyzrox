@@ -14,16 +14,16 @@ from urllib.parse import urlparse
 import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import JSONResponse
-from sqlalchemy import select
+from sqlalchemy import and_, select
 
-from core.auth import require_auth
+from core.auth import gallery_access_filter, require_auth
 from core.config import settings as app_settings
 from core.database import async_session
 from core.errors import api_error, parse_accept_language
 from core.rate_limit import _is_private, check_rate_limit, get_client_ip
 from core.redis_client import eh_semaphore, get_redis
 from core.version import __version__
-from db.models import BlockedTag
+from db.models import BlockedTag, Gallery, ReadProgress, UserFavorite
 from plugins.base import BrowsePlugin
 from plugins.models import (
     BrowseSchema,
@@ -253,6 +253,62 @@ async def _make_client() -> EhClient:
 
 
 # ── Search ───────────────────────────────────────────────────────────
+
+
+@_browse_router.get("/browse-status")
+async def get_browse_status(
+    gids: str = Query(default="", max_length=4096),
+    auth: dict = Depends(require_auth),
+):
+    """Batch local-library state for EH browse cards."""
+    raw_ids = [part.strip() for part in gids.split(",") if part.strip()]
+    if any(not part.isdigit() for part in raw_ids):
+        raise HTTPException(status_code=422, detail="gids must be comma-separated numeric gallery IDs")
+    unique_ids = list(dict.fromkeys(raw_ids))
+    if len(unique_ids) > 300:
+        raise HTTPException(status_code=422, detail="At most 300 gallery IDs may be requested")
+    if not unique_ids:
+        return {"statuses": {}}
+
+    user_id = auth["user_id"]
+    async with async_session() as session:
+        rows = (
+            await session.execute(
+                select(
+                    Gallery.id,
+                    Gallery.source_id,
+                    Gallery.download_status,
+                    ReadProgress.last_page,
+                    UserFavorite.gallery_id.label("favorite_gallery_id"),
+                )
+                .outerjoin(
+                    ReadProgress,
+                    and_(ReadProgress.gallery_id == Gallery.id, ReadProgress.user_id == user_id),
+                )
+                .outerjoin(
+                    UserFavorite,
+                    and_(UserFavorite.gallery_id == Gallery.id, UserFavorite.user_id == user_id),
+                )
+                .where(
+                    Gallery.source == "ehentai",
+                    Gallery.source_id.in_(unique_ids),
+                    gallery_access_filter(auth),
+                )
+            )
+        ).all()
+
+    return {
+        "statuses": {
+            row.source_id: {
+                "gallery_id": row.id,
+                "download_status": row.download_status,
+                "downloaded": row.download_status in {"complete", "completed", "partial"},
+                "last_page": row.last_page or 0,
+                "is_local_favorite": row.favorite_gallery_id is not None,
+            }
+            for row in rows
+        }
+    }
 
 
 @_browse_router.get("/search")

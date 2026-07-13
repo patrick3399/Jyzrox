@@ -94,6 +94,42 @@ def _make_eh_client_mock(search_result=None, gallery_meta=None, comments=None):
     return mock
 
 
+class TestEhBrowseStatus:
+    """GET /api/eh/browse-status"""
+
+    async def test_returns_batched_download_progress_and_favorite_state(self, client, db_session):
+        await _insert_user(db_session)
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries "
+                "(id, source, source_id, title, pages, download_status, tags_array) "
+                "VALUES (501, 'ehentai', '11111', 'Downloaded EH', 30, 'complete', '[]')"
+            )
+        )
+        await db_session.execute(text("INSERT INTO read_progress (user_id, gallery_id, last_page) VALUES (1, 501, 12)"))
+        await db_session.execute(text("INSERT INTO user_favorites (user_id, gallery_id) VALUES (1, 501)"))
+        await db_session.commit()
+
+        resp = await client.get("/api/eh/browse-status", params={"gids": "11111,22222"})
+
+        assert resp.status_code == 200
+        assert resp.json() == {
+            "statuses": {
+                "11111": {
+                    "gallery_id": 501,
+                    "download_status": "complete",
+                    "downloaded": True,
+                    "last_page": 12,
+                    "is_local_favorite": True,
+                }
+            }
+        }
+
+    async def test_rejects_non_numeric_ids(self, client):
+        resp = await client.get("/api/eh/browse-status", params={"gids": "11111,nope"})
+        assert resp.status_code == 422
+
+
 # ---------------------------------------------------------------------------
 # Search
 # ---------------------------------------------------------------------------
