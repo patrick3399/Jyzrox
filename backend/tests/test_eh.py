@@ -1110,11 +1110,95 @@ class TestEhImageProxy:
         with (
             patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
             patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
         ):
             resp = await client.get("/api/eh/image-proxy/12345/1")
 
         assert resp.status_code == 404
         assert "images" in resp.json()["detail"].lower()
+
+    async def test_image_proxy_missing_ptoken_fetches_detail_page_on_demand(self, client):
+        """pToken absent from imagelist but gallery cache present → proxy fetches the
+        containing EH detail page itself (EhViewer getPTokenFromInternet pattern)
+        instead of returning 404 during a distant page jump."""
+        gallery_cache = _FAKE_GALLERY_META.copy()  # token="abcdef", pages=30
+        fake_jpeg = b"\xff\xd8\xff" + b"\x00" * 10
+
+        eh_mock = _make_eh_client_mock()
+        eh_mock.base_url = "https://exhentai.org"
+        eh_mock._http_get = AsyncMock(return_value=_make_http_response(200, text="<html>detail page</html>"))
+        eh_mock._check_auth = MagicMock(return_value=None)
+        eh_mock._parse_detail_html = MagicMock(return_value=({25: "tok025"}, {25: "https://ehgt.org/p/025.jpg"}))
+        eh_mock.get_image_url = AsyncMock(return_value="https://example.org/fullimg/25.jpg")
+        eh_mock.fetch_image_bytes = AsyncMock(return_value=(fake_jpeg, "image/jpeg"))
+
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value={"1": "tok001"}),
+            patch("services.cache.set_imagelist_cache", new_callable=AsyncMock) as set_imagelist,
+            patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=gallery_cache),
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.set_json", new_callable=AsyncMock) as set_json,
+            patch("services.cache.set_proxied_image", new_callable=AsyncMock),
+        ):
+            resp = await client.get("/api/eh/image-proxy/12345/25")
+
+        assert resp.status_code == 200
+        assert resp.content == fake_jpeg
+        # page 25 lives on detail page (25-1)//20 = 1
+        eh_mock._http_get.assert_awaited_once_with("https://exhentai.org/g/12345/abcdef/?p=1")
+        eh_mock.get_image_url.assert_awaited_once_with("tok025", 12345, 25)
+        # fetched tokens must be written back to the per-detail-page cache…
+        set_json.assert_awaited_once()
+        assert set_json.await_args is not None
+        assert set_json.await_args.args[0] == "eh:imgpage:12345:1"
+        assert set_json.await_args.args[1]["tokens"] == {"25": "tok025"}
+        # …and merged into imagelist:{gid} so later pages resolve without refetch
+        set_imagelist.assert_awaited_once_with(12345, {"1": "tok001", "25": "tok025"})
+
+    async def test_image_proxy_missing_ptoken_without_gallery_cache_returns_404(self, client):
+        """No pToken and no gallery cache (so no gallery token to fetch with) → 404, no EH request."""
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client") as make_client,
+            patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value={"1": "tok001"}),
+            patch("services.cache.get_json", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_gallery_cache", new_callable=AsyncMock, return_value=None),
+        ):
+            resp = await client.get("/api/eh/image-proxy/12345/25")
+
+        assert resp.status_code == 404
+        make_client.assert_not_called()
+
+    async def test_image_proxy_imgpage_cache_hit_resolves_token_without_detail_fetch(self, client):
+        """eh:imgpage:{gid}:{dp} cache hit → pToken resolved from it, no EH detail-page request."""
+        fake_jpeg = b"\xff\xd8\xff" + b"\x00" * 10
+
+        eh_mock = _make_eh_client_mock()
+        eh_mock._http_get = AsyncMock(side_effect=AssertionError("detail page must not be fetched"))
+        eh_mock.get_image_url = AsyncMock(return_value="https://example.org/fullimg/25.jpg")
+        eh_mock.fetch_image_bytes = AsyncMock(return_value=(fake_jpeg, "image/jpeg"))
+
+        with (
+            patch("plugins.builtin.ehentai.browse._make_client", return_value=eh_mock),
+            patch("services.cache.get_proxied_image", new_callable=AsyncMock, return_value=None),
+            patch("services.cache.get_imagelist_cache", new_callable=AsyncMock, return_value={"1": "tok001"}),
+            patch(
+                "services.cache.get_json",
+                new_callable=AsyncMock,
+                return_value={"tokens": {"25": "tok025"}, "previews": {}},
+            ) as get_json,
+            patch("services.cache.set_proxied_image", new_callable=AsyncMock),
+        ):
+            resp = await client.get("/api/eh/image-proxy/12345/25")
+
+        assert resp.status_code == 200
+        assert resp.content == fake_jpeg
+        get_json.assert_awaited_once_with("eh:imgpage:12345:1")
+        eh_mock._http_get.assert_not_awaited()
+        eh_mock.get_image_url.assert_awaited_once_with("tok025", 12345, 25)
 
 
 # ---------------------------------------------------------------------------

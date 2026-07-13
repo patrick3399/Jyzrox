@@ -41,6 +41,9 @@ from services.eh_client import EhClient
 
 logger = logging.getLogger(__name__)
 
+# EH gallery detail pages list 20 image thumbnails each.
+THUMBS_PER_DETAIL = 20
+
 # ---------------------------------------------------------------------------
 # EhBrowsePlugin class
 # ---------------------------------------------------------------------------
@@ -598,6 +601,29 @@ async def get_gallery_images(
 # ── Paginated image token list ───────────────────────────────────────
 
 
+async def _fetch_detail_page_tokens(
+    client: EhClient, gid: int, gallery_token: str, dp: int
+) -> tuple[dict[str, str], dict[str, str]]:
+    """
+    Fetch one EH gallery detail page and parse its pTokens/previews.
+
+    Writes the result to the per-detail-page cache ``eh:imgpage:{gid}:{dp}``
+    (TTL 24 h) and returns ``(tokens, previews)`` keyed by str page number.
+    Raises PermissionError / httpx.HTTPError / ValueError like other client
+    calls; callers map those to HTTP responses.
+    """
+    url_html = f"{client.base_url}/g/{gid}/{gallery_token}/?p={dp}"
+    resp = await client._http_get(url_html)
+    resp.raise_for_status()
+    client._check_auth(resp.text, resp)
+
+    page_tokens, page_previews = client._parse_detail_html(resp.text)
+    str_tokens = {str(k): v for k, v in page_tokens.items()}
+    str_prevs = {str(k): v for k, v in page_previews.items()}
+    await cache.set_json(f"eh:imgpage:{gid}:{dp}", {"tokens": str_tokens, "previews": str_prevs}, 86400)
+    return str_tokens, str_prevs
+
+
 @_browse_router.get("/gallery/{gid}/{token}/images-paginated")
 async def get_gallery_images_paginated(
     gid: int,
@@ -616,8 +642,6 @@ async def get_gallery_images_paginated(
     Cache key: ``eh:imgpage:{gid}:{detail_page}`` (per EH detail page, TTL 24 h).
     Returns: {gid, images: [{page, token}], previews: {page: url}, has_more, total}
     """
-    THUMBS_PER_DETAIL = 20
-
     # Resolve total page count — gallery cache first.
     gallery = await cache.get_gallery_cache(gid)
     if not gallery:
@@ -674,19 +698,7 @@ async def get_gallery_images_paginated(
                     if i > 0:
                         await asyncio.sleep(0.3)
 
-                    url_html = f"{client.base_url}/g/{gid}/{token}/?p={dp}"
-                    resp = await client._http_get(url_html)
-                    resp.raise_for_status()
-                    client._check_auth(resp.text, resp)
-
-                    page_tokens, page_previews = client._parse_detail_html(resp.text)
-
-                    str_tokens = {str(k): v for k, v in page_tokens.items()}
-                    str_prevs = {str(k): v for k, v in page_previews.items()}
-
-                    ck = f"eh:imgpage:{gid}:{dp}"
-                    await cache.set_json(ck, {"tokens": str_tokens, "previews": str_prevs}, 86400)
-
+                    str_tokens, str_prevs = await _fetch_detail_page_tokens(client, gid, token, dp)
                     token_map.update(str_tokens)
                     preview_map.update(str_prevs)
 
@@ -740,6 +752,59 @@ async def get_gallery_images_paginated(
 # ── Image proxy ──────────────────────────────────────────────────────
 
 
+async def _resolve_ptoken_on_demand(gid: int, page: int) -> str | None:
+    """
+    Resolve a single missing pToken (EhViewer ``getPTokenFromInternet`` pattern).
+
+    A distant page jump can hit /image-proxy before the frontend's sequential
+    prefetch has populated ``imagelist:{gid}``.  Instead of failing, locate the
+    EH detail page that lists ``page``, reuse the ``eh:imgpage:{gid}:{dp}``
+    cache when possible, and otherwise fetch that one detail page under the
+    global EH semaphore.  Returns None when the token cannot be resolved
+    (notably when the gallery cache — and thus the gallery token — is absent).
+    """
+    if page < 1:
+        return None
+    dp = (page - 1) // THUMBS_PER_DETAIL
+
+    cached_dp = await cache.get_json(f"eh:imgpage:{gid}:{dp}")
+    if cached_dp:
+        return cached_dp.get("tokens", {}).get(str(page))
+
+    gallery = await cache.get_gallery_cache(gid)
+    gallery_token = (gallery or {}).get("token")
+    if not gallery_token:
+        return None
+
+    client = await _make_client()
+    async with client:
+        try:
+            async with eh_semaphore.acquire():
+                tokens, _ = await _fetch_detail_page_tokens(client, gid, gallery_token, dp)
+        except TimeoutError:
+            raise HTTPException(status_code=503, detail="EH semaphore timeout")
+        except PermissionError as e:
+            detail = str(e)
+            await push_system_alert(detail)
+            if "509" in detail:
+                raise api_error(403, "eh_bandwidth_exceeded", "en")
+            if "Sad Panda" in detail:
+                raise api_error(403, "eh_access_denied", "en")
+            raise api_error(401, "eh_cookie_invalid", "en")
+        except httpx.HTTPError as e:
+            logger.error("On-demand pToken fetch failed for %s p=%s dp=%s: %s", gid, page, dp, e)
+            raise HTTPException(status_code=502, detail=f"EH request failed: {e}")
+        except ValueError as e:
+            raise HTTPException(status_code=503, detail=str(e))
+
+    # Merge into imagelist:{gid} so neighbouring pages resolve without refetch.
+    existing = await cache.get_imagelist_cache(gid) or {}
+    existing.update(tokens)
+    await cache.set_imagelist_cache(gid, existing)
+
+    return tokens.get(str(page))
+
+
 @_browse_router.get("/image-proxy/{gid}/{page}")
 async def image_proxy(
     request: Request,
@@ -752,7 +817,8 @@ async def image_proxy(
 
     Flow:
       1. Check Redis cache (TTL 24h) — return if hit
-      2. Look up image page token from imagelist cache
+      2. Look up image page token from imagelist cache; on miss, fetch the
+         containing detail page on demand (see _resolve_ptoken_on_demand)
       3. Acquire global EH semaphore (max EH_MAX_CONCURRENCY)
       4. Fetch image page HTML → extract image URL
       5. Fetch image bytes → cache → return
@@ -771,16 +837,16 @@ async def image_proxy(
             headers={"Cache-Control": "private, max-age=86400"},  # 24h
         )
 
-    # 2. Resolve image page token
-    token_map = await cache.get_imagelist_cache(gid)
-    if not token_map:
-        raise HTTPException(
-            status_code=404,
-            detail="Image token list not in cache. Call /api/eh/gallery/{gid}/{token}/images first.",
-        )
+    # 2. Resolve image page token — imagelist cache first, then on-demand fetch
+    token_map = await cache.get_imagelist_cache(gid) or {}
     image_page_token = token_map.get(str(page))
     if not image_page_token:
-        raise HTTPException(status_code=404, detail=f"Page {page} not in gallery {gid}")
+        image_page_token = await _resolve_ptoken_on_demand(gid, page)
+    if not image_page_token:
+        raise HTTPException(
+            status_code=404,
+            detail=f"Page {page} of gallery {gid} not in cache. Call /api/eh/gallery/{{gid}}/{{token}}/images first.",
+        )
 
     # 3–5. Fetch under semaphore
     client = await _make_client()
