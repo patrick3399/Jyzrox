@@ -384,13 +384,10 @@ function EhGalleryDetail() {
     return thumbs
   }, [previewData, extraPreviews, gallery])
 
-  const handleTagClick = useCallback(
-    (ns: string, name: string, anchorEl: HTMLElement) => {
-      const query = name.includes(' ') ? `${ns}:"${name}"` : `${ns}:${name}`
-      setTagPopover({ anchor: anchorEl, tag: query })
-    },
-    [],
-  )
+  const handleTagClick = useCallback((ns: string, name: string, anchorEl: HTMLElement) => {
+    const query = name.includes(' ') ? `${ns}:"${name}"` : `${ns}:${name}`
+    setTagPopover({ anchor: anchorEl, tag: query })
+  }, [])
 
   const handleDownload = useCallback(async () => {
     if (!gallery) return
@@ -540,9 +537,18 @@ function EhGalleryDetail() {
                 {gallery.pages} pages
               </span>
               {gallery.uploader && (
-                <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
+                <button
+                  type="button"
+                  onClick={() =>
+                    router.push(
+                      `/e-hentai?q=${encodeURIComponent(`uploader:${gallery.uploader.includes(' ') ? `"${gallery.uploader}"` : gallery.uploader}`)}`,
+                    )
+                  }
+                  className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary hover:border-vault-accent hover:text-vault-accent transition-colors"
+                  title={`Search uploader:${gallery.uploader}`}
+                >
                   {gallery.uploader}
-                </span>
+                </button>
               )}
               <span className="px-2 py-1 rounded bg-vault-card border border-vault-border text-vault-text-secondary">
                 {formatDate(gallery.posted_at)}

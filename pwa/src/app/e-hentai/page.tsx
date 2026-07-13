@@ -175,10 +175,12 @@ function ListCard({
   gallery,
   status,
   onClick,
+  onUploaderClick,
 }: {
   gallery: EhGallery
   status?: EhBrowseGalleryStatus
   onClick: () => void
+  onUploaderClick: () => void
 }) {
   const { color, label } = getCategoryMeta(gallery.category)
   const language = getEhGalleryLanguage(gallery)
@@ -219,7 +221,19 @@ function ListCard({
         )}
 
         {/* Uploader */}
-        <p className="text-xs text-vault-text-muted">{gallery.uploader}</p>
+        {gallery.uploader && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              onUploaderClick()
+            }}
+            className="w-fit text-xs text-vault-text-muted hover:text-vault-accent transition-colors"
+            title={`Search uploader:${gallery.uploader}`}
+          >
+            {gallery.uploader}
+          </button>
+        )}
 
         {/* Bottom row */}
         <div className="flex flex-wrap items-center gap-x-3 gap-y-1 mt-auto">
@@ -267,10 +281,12 @@ function GridCard({
   gallery,
   status,
   onClick,
+  onUploaderClick,
 }: {
   gallery: EhGallery
   status?: EhBrowseGalleryStatus
   onClick: () => void
+  onUploaderClick: () => void
 }) {
   const { color, label } = getCategoryMeta(gallery.category)
   const language = getEhGalleryLanguage(gallery)
@@ -329,6 +345,19 @@ function GridCard({
         <p className="text-[11px] text-white font-medium line-clamp-2 leading-snug">
           {gallery.title || gallery.title_jpn}
         </p>
+        {gallery.uploader && (
+          <button
+            type="button"
+            onClick={(event) => {
+              event.stopPropagation()
+              onUploaderClick()
+            }}
+            className="block max-w-full truncate text-[10px] text-white/60 hover:text-vault-accent"
+            title={`Search uploader:${gallery.uploader}`}
+          >
+            {gallery.uploader}
+          </button>
+        )}
         <div className="flex items-center justify-between mt-1">
           <RatingStars rating={gallery.rating} readonly />
           <span className="flex items-center gap-1 text-[11px]">
@@ -673,6 +702,16 @@ function BrowsePage() {
       router.push(`/e-hentai/${g.gid}/${g.token}${fav}`)
     },
     [router, tab],
+  )
+
+  const searchUploader = useCallback(
+    (uploader: string) => {
+      const value = `uploader:${uploader.includes(' ') ? `"${uploader}"` : uploader}`
+      setInputValue(value)
+      actions.setTab('search')
+      commitSearch(value)
+    },
+    [actions, commitSearch],
   )
 
   const handleSaveSearch = useCallback(async () => {
@@ -1612,6 +1651,7 @@ function BrowsePage() {
                   gallery={g}
                   status={browseStatuses[String(g.gid)]}
                   onClick={() => navigateToGallery(g)}
+                  onUploaderClick={() => searchUploader(g.uploader)}
                 />
               ))}
             </div>
@@ -1629,6 +1669,7 @@ function BrowsePage() {
                   gallery={g}
                   status={browseStatuses[String(g.gid)]}
                   onClick={() => navigateToGallery(g)}
+                  onUploaderClick={() => searchUploader(g.uploader)}
                 />
               )}
               onLoadMore={state.hasMore && state.status !== 'error' ? loadMore : undefined}
