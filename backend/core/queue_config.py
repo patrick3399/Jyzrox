@@ -62,6 +62,7 @@ JOB_QUEUE_ROUTING: dict[str, str] = {
     "local_import_job": QUEUE_INGEST,
     "cover_thumbnail_job": QUEUE_INGEST,
     "auto_discover_job": QUEUE_INGEST,
+    "explorer_folder_stats_job": QUEUE_INGEST,
     # everything else → QUEUE_INTERACTIVE (default)
 }
 

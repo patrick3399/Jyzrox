@@ -1877,12 +1877,25 @@ async def update_gallery(
                     UserReadingList.gallery_id == gallery_id,
                 )
             )
-    if patch.title is not None:
-        g.title = patch.title
-    if patch.title_jpn is not None:
-        g.title_jpn = patch.title_jpn
-    if patch.category is not None:
-        g.category = patch.category
+    manual_changes = {
+        field_name: ("set", value)
+        for field_name, value in {
+            "title": patch.title,
+            "title_jpn": patch.title_jpn,
+            "category": patch.category,
+        }.items()
+        if value is not None
+    }
+    if manual_changes:
+        from services.workbench_metadata import apply_manual_scalar_changes
+
+        await apply_manual_scalar_changes(
+            db,
+            [g],
+            manual_changes,
+            actor_user_id=auth["user_id"],
+            operation_id=None,
+        )
     await db.commit()
     from core.events import EventType, emit_safe
 
@@ -2548,47 +2561,41 @@ async def _check_update_ehentai(g, db: AsyncSession, auth: dict) -> dict:
     except Exception:
         return {"status": "error", "reason": "fetch_failed"}
 
-    old = {
-        "title": g.title,
-        "title_jpn": g.title_jpn,
-        "category": g.category,
-        "uploader": g.uploader,
-        "pages": g.pages,
-        "rating": g.rating,
-        "tags_array": list(g.tags_array or []),
+    old_pages = g.pages
+
+    from services.workbench_metadata import apply_source_scalar_metadata, apply_source_tags
+
+    scalar_values = {
+        "title": meta.get("title"),
+        "title_jpn": meta.get("title_jpn"),
+        "category": meta.get("category"),
+        "uploader": meta.get("uploader"),
+        "pages": meta.get("pages"),
+        "rating": int(round(meta["rating"])) if meta.get("rating") is not None else None,
     }
+    changed_fields, pending_source_changes = await apply_source_scalar_metadata(db, g, scalar_values)
+    tags_changed = False
+    if meta.get("tags") is not None:
+        tags_changed = await apply_source_tags(db, g, meta["tags"])
 
-    if meta.get("title") is not None:
-        g.title = meta["title"]
-    if meta.get("title_jpn") is not None:
-        g.title_jpn = meta["title_jpn"]
-    if meta.get("category") is not None:
-        g.category = meta["category"]
-    if meta.get("uploader") is not None:
-        g.uploader = meta["uploader"]
-    if meta.get("pages") is not None:
-        g.pages = meta["pages"]
-    if meta.get("rating") is not None:
-        g.rating = int(round(meta["rating"]))
-    if meta.get("tags"):
-        g.tags_array = meta["tags"]
-
-    changed_fields = [
-        f for f in ("title", "title_jpn", "category", "uploader", "pages", "rating") if getattr(g, f) != old[f]
-    ]
-    if list(g.tags_array or []) != old["tags_array"]:
+    if tags_changed:
         changed_fields.append("tags")
 
-    pages_diff = {"old": old["pages"], "new": g.pages} if "pages" in changed_fields else None
+    pages_diff = {"old": old_pages, "new": g.pages} if "pages" in changed_fields else None
 
     g.metadata_updated_at = func.now()
     await db.commit()
     await db.refresh(g)
 
-    if not changed_fields:
+    if not changed_fields and not pending_source_changes:
         return {"status": "unchanged"}
 
-    return await _build_updated_response(g, db, auth, changed_fields, pages_diff)
+    if not changed_fields:
+        return {"status": "source_diff", "pending_source_changes": pending_source_changes}
+
+    return await _build_updated_response(
+        g, db, auth, changed_fields, pages_diff, pending_source_changes=pending_source_changes
+    )
 
 
 async def _check_update_pixiv(g, db: AsyncSession, auth: dict) -> dict:
@@ -2614,25 +2621,34 @@ async def _check_update_pixiv(g, db: AsyncSession, auth: dict) -> dict:
     old_pages = g.pages
     new_pages = detail.get("page_count", 1)
 
-    pages_diff = None
-    changed_fields = []
-    if new_pages != old_pages:
-        g.pages = new_pages
-        changed_fields.append("pages")
-        pages_diff = {"old": old_pages, "new": new_pages}
+    from services.workbench_metadata import apply_source_scalar_metadata
+
+    changed_fields, pending_source_changes = await apply_source_scalar_metadata(db, g, {"pages": new_pages})
+    pages_diff = {"old": old_pages, "new": g.pages} if "pages" in changed_fields else None
 
     g.metadata_updated_at = func.now()
     await db.commit()
     await db.refresh(g)
 
-    if not changed_fields:
+    if not changed_fields and not pending_source_changes:
         return {"status": "unchanged"}
 
-    return await _build_updated_response(g, db, auth, changed_fields, pages_diff)
+    if not changed_fields:
+        return {"status": "source_diff", "pending_source_changes": pending_source_changes}
+
+    return await _build_updated_response(
+        g, db, auth, changed_fields, pages_diff, pending_source_changes=pending_source_changes
+    )
 
 
 async def _build_updated_response(
-    g, db: AsyncSession, auth: dict, changed_fields: list, pages_diff: dict | None
+    g,
+    db: AsyncSession,
+    auth: dict,
+    changed_fields: list,
+    pages_diff: dict | None,
+    *,
+    pending_source_changes: dict | None = None,
 ) -> dict:
     cover_thumb = await _single_cover_thumb(db, g.id, g.source or "")
     is_fav, my_rating, in_rl = await _user_gallery_state(db, auth["user_id"], g.id)
@@ -2641,6 +2657,7 @@ async def _build_updated_response(
         "gallery": _g(g, cover_thumb, is_fav, my_rating, in_reading_list=in_rl),
         "changed_fields": changed_fields,
         "pages_diff": pages_diff,
+        "pending_source_changes": pending_source_changes or {},
     }
 
 

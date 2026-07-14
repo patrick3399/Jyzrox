@@ -1,293 +1,473 @@
-/**
- * Regression tests: Explorer page handles API errors without crashing.
- *
- * Bug: when useSWR returned an error, the explorer page would propagate the
- * error up and trigger the nearest ErrorBoundary rather than rendering an
- * inline error UI with a retry button. The fix adds a dedicated error branch
- * in the render function that displays the error message and a retry button.
- */
+import { beforeEach, describe, expect, it, vi } from 'vitest'
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react'
 
-import { describe, it, expect, vi, beforeEach } from 'vitest'
-import { render, screen, fireEvent } from '@testing-library/react'
 import { api } from '@/lib/api'
 
-// ── Mock next/navigation ──────────────────────────────────────────────
+const replace = vi.fn()
+const push = vi.fn()
+let currentParams = ''
 
 vi.mock('next/navigation', () => ({
-  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
-  useSearchParams: () => new URLSearchParams(),
-  usePathname: () => '/explorer',
+  useRouter: () => ({ push, replace }),
+  useSearchParams: () => new URLSearchParams(currentParams),
 }))
-
-// ── Mock @/lib/i18n: return the key so assertions are stable ─────────
 
 vi.mock('@/lib/i18n', () => ({
   t: (key: string) => key,
+  formatBytes: (value: number) => `${value} B`,
 }))
-
-// ── Mock @/lib/api to avoid import-time side effects ─────────────────
 
 vi.mock('@/lib/api', () => ({
   api: {
-    library: {
-      sourceStats: vi.fn(),
-      listFiles: vi.fn(),
-      listGalleryFiles: vi.fn(),
-      batchGalleries: vi.fn(),
-      deleteImage: vi.fn(),
-      deleteGallery: vi.fn(),
+    explorer: {
+      roots: vi.fn(),
+      query: vi.fn(),
+      createSelection: vi.fn(),
+      bulkMetadata: vi.fn(),
+      deleteSelection: vi.fn(),
+      bulkAction: vi.fn(),
+      mergePreview: vi.fn(),
+      merge: vi.fn(),
+      metadataHistory: vi.fn(),
+      physicalEntries: vi.fn(),
+      physicalPreviewUrl: vi.fn(),
+      refreshPhysicalSize: vi.fn(),
+      importPhysicalFolder: vi.fn(),
     },
+    library: { listGalleryFiles: vi.fn() },
+    collections: { list: vi.fn() },
   },
 }))
 
-// ── Mock sonner (toast) ───────────────────────────────────────────────
+vi.mock('sonner', () => ({ toast: { success: vi.fn(), error: vi.fn() } }))
+vi.mock('@/components/Skeleton', () => ({ SkeletonGrid: () => <div data-testid="skeleton-grid" /> }))
 
-vi.mock('sonner', () => ({
-  toast: { success: vi.fn(), error: vi.fn() },
-}))
-
-// ── Mock @/components/Skeleton ────────────────────────────────────────
-
-vi.mock('@/components/Skeleton', () => ({
-  SkeletonGrid: () => <div data-testid="skeleton-grid" />,
-}))
-
-// ── SWR mock with per-test-controlled responses ───────────────────────
-
-const mockMutate = vi.fn()
-let swrResponses: Record<string, unknown> = {}
+const mutate = vi.fn()
+let swrResponses: Record<string, Record<string, unknown>> = {}
 
 vi.mock('swr', () => ({
-  default: (key: unknown, fetcher?: () => unknown) => {
-    // The explorer page uses array keys like ['explorer-dirs', ...].
-    // Match on the first element of the array.
-    const keyStr = Array.isArray(key) ? String(key[0]) : key === null ? '__null__' : String(key)
-    if (key !== null && (keyStr === 'explorer-dirs' || keyStr === 'explorer-source-stats') && fetcher)
-      void fetcher()
-    return (
-      (swrResponses[keyStr] as object) ?? {
-        data: undefined,
-        error: undefined,
-        isLoading: true,
-        mutate: mockMutate,
-      }
-    )
+  default: (key: unknown) => {
+    const name = Array.isArray(key) ? String(key[0]) : key === null ? '__null__' : String(key)
+    return swrResponses[name] ?? { data: undefined, error: undefined, isLoading: false, mutate }
   },
 }))
 
-// ── Tests ─────────────────────────────────────────────────────────────
+const roots = {
+  virtual: {
+    sources: [
+      { id: 'local', label: 'Local', gallery_count: 2, logical_bytes: 300, unique_cas_bytes: 200 },
+    ],
+    collections: { count: 0, items: [] },
+    artists: { count: 0, items: [] },
+    saved_searches: { count: 0, items: [] },
+    smart_views: { missing_metadata: 1, empty_galleries: 0, duplicate_pairs: 0, trash: true },
+  },
+  physical: [],
+}
 
-describe('ExplorerPage', () => {
+const galleries = {
+  total: 2,
+  offset: 0,
+  limit: 60,
+  items: [
+    {
+      id: 1,
+      source: 'local',
+      source_id: 'one',
+      title: 'Gallery One',
+      title_jpn: null,
+      category: 'Manga',
+      language: 'English',
+      artist_id: null,
+      uploader: null,
+      visibility: 'public',
+      pages: 2,
+      cover_thumb: null,
+      logical_bytes: 200,
+      unique_cas_bytes: 200,
+      is_favorited: false,
+      my_rating: null,
+      in_reading_list: false,
+      deleted_at: null,
+    },
+    {
+      id: 2,
+      source: 'local',
+      source_id: 'two',
+      title: 'Gallery Two',
+      title_jpn: null,
+      category: 'Manga',
+      language: null,
+      artist_id: null,
+      uploader: null,
+      visibility: 'public',
+      pages: 1,
+      cover_thumb: null,
+      logical_bytes: 100,
+      unique_cas_bytes: 100,
+      is_favorited: false,
+      my_rating: null,
+      in_reading_list: false,
+      deleted_at: null,
+    },
+  ],
+}
+
+const galleryFiles = {
+  gallery_id: 1,
+  source: 'local',
+  source_id: 'one',
+  title: 'Gallery One',
+  category: 'Manga',
+  total_files: 2,
+  files: [
+    {
+      filename: '001.webp',
+      page_num: 1,
+      width: 1200,
+      height: 1800,
+      file_size: 2000,
+      media_type: 'image/webp',
+      thumb_path: '/thumbs/001.webp',
+      file_path: null,
+      is_symlink: false,
+      is_broken: false,
+      symlink_target: null,
+    },
+    {
+      filename: '002.mp4',
+      page_num: 2,
+      width: 1920,
+      height: 1080,
+      file_size: 3000,
+      media_type: 'video/mp4',
+      thumb_path: '/thumbs/002.webp',
+      file_path: null,
+      is_symlink: false,
+      is_broken: false,
+      symlink_target: null,
+    },
+  ],
+}
+
+describe('ExplorerWorkbench', () => {
   beforeEach(() => {
     vi.clearAllMocks()
-    swrResponses = {}
-  })
-
-  it('test_explorer_renders_empty_state_with_no_data', async () => {
-    swrResponses = {
-      'explorer-source-stats': {
-        data: { stats: [] },
-        error: undefined,
-        isLoading: false,
-        mutate: mockMutate,
-      },
-    }
-
-    const { default: ExplorerPage } = await import('@/app/explorer/page')
-    render(<ExplorerPage />)
-
-    // With empty directories the SourceView shows the noSources message.
-    // No ErrorBoundary should be triggered.
-    expect(screen.getByText('explorer.noSources')).toBeDefined()
-    expect(screen.queryByText('common.errorOccurred')).toBeNull()
-  })
-
-  it('test_explorer_shows_error_ui_on_api_failure', async () => {
-    swrResponses = {
-      'explorer-source-stats': {
-        data: undefined,
-        error: new Error('Network error'),
-        isLoading: false,
-        mutate: mockMutate,
-      },
-    }
-
-    const { default: ExplorerPage } = await import('@/app/explorer/page')
-    render(<ExplorerPage />)
-
-    // The inline error UI should display the error message and a retry button.
-    expect(screen.getByText('Network error')).toBeDefined()
-    expect(screen.getByText('common.retry')).toBeDefined()
-  })
-
-  it('test_explorer_retry_button_refetches_on_error', async () => {
-    swrResponses = {
-      'explorer-source-stats': {
-        data: undefined,
-        error: new Error('Network error'),
-        isLoading: false,
-        mutate: mockMutate,
-      },
-    }
-
-    const { default: ExplorerPage } = await import('@/app/explorer/page')
-    render(<ExplorerPage />)
-
-    const retryButton = screen.getByText('common.retry')
-    fireEvent.click(retryButton)
-
-    // Clicking retry should call the SWR mutate function to re-fetch.
-    expect(mockMutate).toHaveBeenCalledTimes(1)
-  })
-
-  it('test_explorer_displays_local_link_and_copy_source_groups', async () => {
-    swrResponses = {
-      'explorer-source-stats': {
-        data: {
-          stats: [
-            { source: 'local', import_mode: 'link', gallery_count: 1, file_count: 2, disk_size: 200 },
-            { source: 'local', import_mode: 'copy', gallery_count: 1, file_count: 3, disk_size: 300 },
-          ],
-        },
-        error: undefined,
-        isLoading: false,
-        mutate: mockMutate,
-      },
-    }
-
-    const { default: ExplorerPage } = await import('@/app/explorer/page')
-    render(<ExplorerPage />)
-
-    expect(screen.getByText('explorer.externalFolders')).toBeDefined()
-    expect(screen.getByText('explorer.jyzroxImport')).toBeDefined()
-  })
-
-  it('test_explorer_groups_local_galleries_without_artist_under_uncategorized', async () => {
-    swrResponses = {
-      'explorer-source-stats': {
-        data: {
-          stats: [
-            { source: 'local', import_mode: 'link', gallery_count: 1, file_count: 2, disk_size: 200 },
-          ],
-        },
-        error: undefined,
-        isLoading: false,
-        mutate: mockMutate,
-      },
-      'explorer-dirs': {
-        data: {
-          directories: [
-            {
-              gallery_id: 1,
-              source_id: 'linked',
-              title: 'Linked Gallery',
-              category: null,
-              file_count: 2,
-              rating: 0,
-              favorited: false,
-              is_favorited: false,
-              my_rating: 0,
-              source: 'local',
-              import_mode: 'link',
-              artist_id: null,
-              uploader: null,
-              disk_size: 200,
-            },
-          ],
-          total: 1,
-          page: 0,
-        },
-        error: undefined,
-        isLoading: false,
-        mutate: mockMutate,
-      },
-    }
-
-    const { default: ExplorerPage } = await import('@/app/explorer/page')
-    render(<ExplorerPage />)
-
-    fireEvent.doubleClick(screen.getByText('explorer.externalFolders'))
-
-    expect(screen.getByText('explorer.uncategorizedArtist')).toBeDefined()
-    expect(screen.getByText('Linked Gallery')).toBeDefined()
-  })
-
-  it('test_explorer_queries_local_link_with_import_mode_filter', async () => {
-    swrResponses = {
-      'explorer-source-stats': {
-        data: {
-          stats: [
-            { source: 'local', import_mode: 'link', gallery_count: 1, file_count: 2, disk_size: 200 },
-          ],
-        },
-        error: undefined,
-        isLoading: false,
-        mutate: mockMutate,
-      },
-      'explorer-dirs': {
-        data: {
-          directories: [
-            {
-              gallery_id: 1,
-              source_id: 'linked',
-              title: 'Linked Gallery',
-              category: null,
-              file_count: 2,
-              rating: 0,
-              favorited: false,
-              is_favorited: false,
-              my_rating: 0,
-              source: 'local',
-              import_mode: 'link',
-              disk_size: 200,
-            },
-          ],
-          total: 1,
-          page: 0,
-        },
-        error: undefined,
-        isLoading: false,
-        mutate: mockMutate,
-      },
-    }
-
-    const { default: ExplorerPage } = await import('@/app/explorer/page')
-    render(<ExplorerPage />)
-
-    fireEvent.doubleClick(screen.getByText('explorer.externalFolders'))
-
-    expect(api.library.listFiles).toHaveBeenLastCalledWith({
-      q: undefined,
-      source: 'local',
-      import_mode: 'link',
-      page: 0,
-      limit: 50,
+    currentParams = ''
+    localStorage.clear()
+    Object.defineProperty(window, 'matchMedia', {
+      configurable: true,
+      value: vi.fn(() => ({
+        matches: false,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+      })),
     })
+    swrResponses = {
+      'explorer-roots': { data: roots, error: undefined, isLoading: false, mutate },
+    }
   })
 
-  it('test_explorer_root_shows_source_whose_galleries_are_beyond_first_page', async () => {
-    // Regression: the root view used to group ONE page (newest 50) of
-    // /api/library/files, so a source with only old galleries (e.g. weibo)
-    // disappeared from the source list. The root must render every source
-    // returned by the whole-library stats endpoint instead.
-    swrResponses = {
-      'explorer-source-stats': {
-        data: {
-          stats: [
-            { source: 'pixiv', import_mode: null, gallery_count: 60, file_count: 600, disk_size: 6000 },
-            { source: 'weibo', import_mode: null, gallery_count: 1, file_count: 9, disk_size: 900 },
-          ],
-        },
-        error: undefined,
-        isLoading: false,
-        mutate: mockMutate,
-      },
-    }
-
+  it('renders the Workbench root and source capacity', async () => {
     const { default: ExplorerPage } = await import('@/app/explorer/page')
     render(<ExplorerPage />)
 
-    expect(screen.getByText('Pixiv')).toBeDefined()
-    expect(screen.getByText('weibo')).toBeDefined()
+    expect(screen.getByText('explorer.workbench')).toBeDefined()
+    expect(screen.getAllByText('Local').length).toBeGreaterThan(0)
+    expect(screen.getAllByText('300 B').length).toBeGreaterThan(0)
+  })
+
+  it('bounds the mobile content pane so its gallery area can scroll', async () => {
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    expect(screen.getByRole('main').className).toContain('h-[calc(100dvh-7rem-var(--sab)-var(--sat)/2)]')
+    const contentPane = document.querySelector('[data-explorer-content-pane]')
+    expect(contentPane?.className).toContain('h-full')
+    expect(contentPane?.parentElement?.className).toContain('overflow-hidden')
+  })
+
+  it('renders Gallery files as compact full-width rows in list view', async () => {
+    currentParams = 'kind=gallery&id=1&source=local&sourceId=one&label=Gallery%20One'
+    swrResponses['explorer-gallery-files'] = { data: galleryFiles, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    expect(document.querySelectorAll('[data-explorer-file-view="grid"]')).toHaveLength(2)
+    fireEvent.click(screen.getByLabelText('explorer.listView'))
+
+    const rows = document.querySelectorAll<HTMLElement>('[data-explorer-file-view="list"]')
+    expect(rows).toHaveLength(2)
+    expect(rows[0].className).toContain('w-full')
+    expect(screen.getByText('#1 · 1200 × 1800 · 2000 B')).toBeDefined()
+    expect(rows[0].querySelector('img')?.className).toContain('object-contain')
+    expect(replace).toHaveBeenCalledWith(expect.stringContaining('view=list'))
+  })
+
+  it('renders a URL-persisted list view on the first frame after returning from Reader', async () => {
+    currentParams = 'kind=gallery&id=1&source=local&sourceId=one&label=Gallery%20One&view=list'
+    swrResponses['explorer-gallery-files'] = { data: galleryFiles, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    expect(document.querySelectorAll('[data-explorer-file-view="list"]')).toHaveLength(2)
+    expect(document.querySelector('[data-explorer-file-view="grid"]')).toBeNull()
+  })
+
+  it('opens a Gallery file with one tap on coarse pointers', async () => {
+    currentParams = 'kind=gallery&id=1&source=local&sourceId=one&label=Gallery%20One'
+    swrResponses['explorer-gallery-files'] = { data: galleryFiles, error: undefined, isLoading: false, mutate }
+    vi.mocked(window.matchMedia).mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList)
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    await waitFor(() => expect(window.matchMedia).toHaveBeenCalled())
+
+    fireEvent.click(document.querySelectorAll<HTMLElement>('[data-explorer-file-view="grid"]')[0])
+    expect(push).toHaveBeenCalledWith(expect.stringContaining('/reader/'))
+  })
+
+  it('renders the empty inspector without requesting metadata history', async () => {
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    expect(screen.getByText('explorer.inspectorEmpty')).toBeDefined()
+    expect(api.explorer.metadataHistory).not.toHaveBeenCalled()
+  })
+
+  it('shows an inline error and retries the failed roots request', async () => {
+    swrResponses['explorer-roots'] = {
+      data: undefined,
+      error: new Error('Network error'),
+      isLoading: false,
+      mutate,
+    }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    expect(screen.getByText('Network error')).toBeDefined()
+    fireEvent.click(screen.getByText('common.retry'))
+    expect(mutate).toHaveBeenCalled()
+  })
+
+  it('desktop single click selects and double click enters a folder', async () => {
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    const localCards = screen.getAllByText('Local')
+    const contentCardLabel = localCards[localCards.length - 1]
+
+    fireEvent.click(contentCardLabel)
+    expect(screen.getByText('explorer.selectedCount')).toBeDefined()
+
+    fireEvent.doubleClick(contentCardLabel)
+    expect(replace).toHaveBeenCalledWith(expect.stringContaining('kind=source'))
+  })
+
+  it('coarse pointer body tap enters a folder without starting selection', async () => {
+    vi.mocked(window.matchMedia).mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList)
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    await waitFor(() => expect(window.matchMedia).toHaveBeenCalled())
+    const localCards = screen.getAllByText('Local')
+
+    fireEvent.click(localCards[localCards.length - 1])
+    await waitFor(() => expect(replace).toHaveBeenCalledWith(expect.stringContaining('kind=source')))
+    expect(screen.queryByText('explorer.selectedCount')).toBeNull()
+  })
+
+  it('coarse pointer icon tap starts selection without entering the folder', async () => {
+    vi.mocked(window.matchMedia).mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList)
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    await waitFor(() => expect(window.matchMedia).toHaveBeenCalled())
+
+    fireEvent.click(screen.getByLabelText('explorer.toggleSelection'))
+    expect(screen.getByText('explorer.selectedCount')).toBeDefined()
+    expect(replace).not.toHaveBeenCalledWith(expect.stringContaining('kind=source'))
+  })
+
+  it('supports Gallery multi-selection from the item icon in mobile list view', async () => {
+    currentParams = 'kind=source&id=local&label=Local&view=list'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    vi.mocked(window.matchMedia).mockReturnValue({
+      matches: true,
+      addEventListener: vi.fn(),
+      removeEventListener: vi.fn(),
+    } as unknown as MediaQueryList)
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    await waitFor(() => expect(window.matchMedia).toHaveBeenCalled())
+
+    fireEvent.click(screen.getAllByLabelText('explorer.toggleSelection')[0])
+    expect(screen.getByText('explorer.selectedCount')).toBeDefined()
+    expect(replace).not.toHaveBeenCalledWith(expect.stringContaining('kind=gallery'))
+  })
+
+  it('persists the column layout per device', async () => {
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.click(screen.getByLabelText('explorer.columnLayout'))
+    expect(localStorage.getItem('explorer_layout_mode:desktop')).toBe('finder')
+  })
+
+  it('materializes a query-wide selection', async () => {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    vi.mocked(api.explorer.createSelection).mockResolvedValue({
+      selection_token: 'token-1',
+      count: 2,
+      expires_in: 1800,
+    })
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.click(screen.getByText('explorer.selectAllResults'))
+    await waitFor(() => expect(api.explorer.createSelection).toHaveBeenCalled())
+    expect(screen.getByText('explorer.selectedCount')).toBeDefined()
+    expect(screen.getAllByLabelText('explorer.toggleSelection')).toHaveLength(2)
+  })
+
+  it('moves content focus with arrows and opens the focused Gallery with Enter', async () => {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    await waitFor(() => expect(document.activeElement?.textContent).toContain('Gallery One'))
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    await waitFor(() => expect(document.activeElement?.textContent).toContain('Gallery Two'))
+    fireEvent.keyDown(window, { key: 'Enter' })
+    expect(replace).toHaveBeenCalledWith(expect.stringContaining('kind=gallery'))
+  })
+
+  it('toggles and extends keyboard selection independently from focus', async () => {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    fireEvent.keyDown(window, { key: ' ' })
+    expect(screen.getByText('explorer.selectedCount')).toBeDefined()
+    fireEvent.keyDown(window, { key: 'ArrowRight', shiftKey: true })
+    expect(screen.getAllByLabelText('explorer.toggleSelection')).toHaveLength(2)
+    expect(screen.getAllByText('explorer.selectedCount').length).toBeGreaterThan(0)
+  })
+
+  it('supports search, query-wide select all, and metadata keyboard shortcuts', async () => {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    vi.mocked(api.explorer.createSelection).mockResolvedValue({
+      selection_token: 'keyboard-token',
+      count: 2,
+      expires_in: 1800,
+    })
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.keyDown(window, { key: '/' })
+    const search = screen.getByPlaceholderText('explorer.searchPlaceholder')
+    expect(document.activeElement).toBe(search)
+    fireEvent.blur(search)
+    fireEvent.keyDown(window, { key: 'a', ctrlKey: true })
+    await waitFor(() => expect(api.explorer.createSelection).toHaveBeenCalled())
+    await waitFor(() => expect(screen.getByText('explorer.selectedCount')).toBeDefined())
+    fireEvent.keyDown(window, { key: 'F2' })
+    await waitFor(() => expect(screen.getByRole('dialog', { name: 'explorer.editMetadata' })).toBeDefined())
+  })
+
+  it('moves focus within the navigation pane with ArrowDown', async () => {
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    const navigation = screen.getByRole('navigation', { name: 'explorer.libraryTree' })
+    const buttons = within(navigation).getAllByRole('button')
+    buttons[0].focus()
+
+    fireEvent.keyDown(buttons[0], { key: 'ArrowDown' })
+    expect(document.activeElement).toBe(buttons[1])
+  })
+
+  it('moves between column navigation sections and items with Left and Right', async () => {
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    fireEvent.click(screen.getByLabelText('explorer.columnLayout'))
+
+    const navigation = screen.getByRole('navigation', { name: 'explorer.finderColumns' })
+    const sections = navigation.querySelector<HTMLElement>('[data-explorer-nav-pane="sections"]')
+    const items = navigation.querySelector<HTMLElement>('[data-explorer-nav-pane="items"]')
+    const sectionButton = within(sections!).getAllByRole('button')[0]
+    sectionButton.focus()
+
+    fireEvent.keyDown(sectionButton, { key: 'ArrowRight' })
+    await waitFor(() => expect(document.activeElement).toBe(within(items!).getAllByRole('button')[0]))
+    fireEvent.keyDown(document.activeElement!, { key: 'ArrowLeft' })
+    expect(document.activeElement).toBe(sectionButton)
+  })
+
+  it('cycles navigation, content, and inspector panes with F6', async () => {
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+    const navigation = screen.getByRole('navigation', { name: 'explorer.libraryTree' })
+    const navigationButton = within(navigation).getAllByRole('button')[0]
+    navigationButton.focus()
+
+    fireEvent.keyDown(navigationButton, { key: 'F6' })
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-explorer-item][tabindex="0"]')))
+    fireEvent.keyDown(document.activeElement!, { key: 'F6' })
+    await waitFor(() => expect(document.activeElement).toBe(document.querySelector('[data-explorer-inspector]')))
+    fireEvent.keyDown(document.activeElement!, { key: 'F6' })
+    expect(document.activeElement?.closest('[data-explorer-navigation]')).toBe(navigation)
+  })
+
+  it('opens the shortcut reference with question mark', async () => {
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.keyDown(window, { key: '?' })
+    expect(screen.getByRole('dialog', { name: 'explorer.keyboardShortcuts' })).toBeDefined()
+    expect(screen.getByText('Shift + ↑ ↓ ← →')).toBeDefined()
+  })
+
+  it('moves selected Galleries to Trash with the Delete shortcut', async () => {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    vi.spyOn(window, 'confirm').mockReturnValue(true)
+    vi.mocked(api.explorer.deleteSelection).mockResolvedValue({
+      operation_id: 'delete-op',
+      status: 'completed',
+      affected: 1,
+      skipped_active_downloads: [],
+    })
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.keyDown(window, { key: 'ArrowRight' })
+    fireEvent.keyDown(window, { key: ' ' })
+    await waitFor(() => expect(screen.getByText('explorer.selectedCount')).toBeDefined())
+    fireEvent.keyDown(window, { key: 'Delete' })
+    await waitFor(() => expect(api.explorer.deleteSelection).toHaveBeenCalledWith({ gallery_ids: [1] }))
+  })
+
+  it('returns to the Workbench root with Backspace', async () => {
+    currentParams = 'kind=source&id=local&label=Local'
+    swrResponses['explorer-query'] = { data: galleries, error: undefined, isLoading: false, mutate }
+    const { default: ExplorerPage } = await import('@/app/explorer/page')
+    render(<ExplorerPage />)
+
+    fireEvent.keyDown(window, { key: 'Backspace' })
+    expect(replace).toHaveBeenCalledWith('/explorer?view=grid')
   })
 })

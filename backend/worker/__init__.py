@@ -23,6 +23,7 @@ from worker.dedup_tier2 import dedup_tier2_job
 from worker.dedup_tier3 import dedup_tier3_job
 from worker.download import download_job
 from worker.ehtag_sync import ehtag_sync_job
+from worker.explorer_stats import explorer_folder_stats_job
 from worker.gallery_dl_venv import ensure_venv
 from worker.gallery_dl_venv import rollback_job as gdl_rollback_job
 from worker.gallery_dl_venv import upgrade_job as gdl_upgrade_job
@@ -870,6 +871,7 @@ def build_workers() -> tuple:
             local_import_job,
             cover_thumbnail_job,
             auto_discover_job,
+            explorer_folder_stats_job,
         ],
         concurrency=concurrency[QUEUE_INGEST],
         startup=_ingest_startup,

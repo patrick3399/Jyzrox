@@ -120,6 +120,74 @@ class Gallery(Base):
     read_progress: Mapped[list[ReadProgress]] = relationship(back_populates="gallery", cascade="all, delete-orphan")
 
 
+class GalleryMetadataFieldState(Base):
+    """Ownership and source-refresh state for an editable gallery field."""
+
+    __tablename__ = "gallery_metadata_field_states"
+
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
+    )
+    field_name: Mapped[str] = mapped_column(Text, primary_key=True)
+    origin: Mapped[str] = mapped_column(Text, nullable=False, default="source", server_default="source")
+    locked: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default=text("false"))
+    source_value: Mapped[object | None] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
+    updated_by_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), onupdate=func.now(), nullable=False
+    )
+
+
+class GalleryMetadataChange(Base):
+    """Append-only scalar metadata history used by the Workbench inspector."""
+
+    __tablename__ = "gallery_metadata_changes"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    field_name: Mapped[str] = mapped_column(Text, nullable=False)
+    old_value: Mapped[object | None] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
+    new_value: Mapped[object | None] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
+    origin: Mapped[str] = mapped_column(Text, nullable=False)
+    actor_user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True
+    )
+    operation_id: Mapped[uuid.UUID | None] = mapped_column(
+        UUID(as_uuid=True), ForeignKey("workbench_operations.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), server_default=func.now(), nullable=False, index=True
+    )
+
+
+class WorkbenchOperation(Base):
+    """Durable status and summary for bulk edits and destructive operations."""
+
+    __tablename__ = "workbench_operations"
+
+    id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("uuidv7()"))
+    user_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True
+    )
+    kind: Mapped[str] = mapped_column(Text, nullable=False)
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="queued", server_default="queued")
+    selection_count: Mapped[int] = mapped_column(Integer, nullable=False, default=0, server_default="0")
+    progress: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    params: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    error: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
 class Blob(Base):
     __tablename__ = "blobs"
 

@@ -509,6 +509,46 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS workbench_operations (
+        id TEXT PRIMARY KEY,
+        user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        kind TEXT NOT NULL,
+        status TEXT NOT NULL DEFAULT 'queued',
+        selection_count INTEGER NOT NULL DEFAULT 0,
+        progress TEXT NOT NULL DEFAULT '{}',
+        params TEXT NOT NULL DEFAULT '{}',
+        error TEXT,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        started_at TIMESTAMP,
+        finished_at TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS gallery_metadata_field_states (
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        field_name TEXT NOT NULL,
+        origin TEXT NOT NULL DEFAULT 'source',
+        locked BOOLEAN NOT NULL DEFAULT 0,
+        source_value TEXT,
+        updated_by_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (gallery_id, field_name)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS gallery_metadata_changes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        field_name TEXT NOT NULL,
+        old_value TEXT,
+        new_value TEXT,
+        origin TEXT NOT NULL,
+        actor_user_id INTEGER REFERENCES users(id) ON DELETE SET NULL,
+        operation_id TEXT REFERENCES workbench_operations(id) ON DELETE SET NULL,
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS blocked_tags (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         user_id INTEGER NOT NULL REFERENCES users(id),
@@ -886,6 +926,7 @@ async def client(db_session, db_session_factory, mock_redis):
         patch("routers.settings.get_redis", return_value=mock_redis),
         patch("services.settings_store.get_redis", return_value=mock_redis),
         patch("routers.import_router.get_redis", return_value=mock_redis),
+        patch("routers.explorer.get_redis", return_value=mock_redis),
         patch("routers.users.get_redis", return_value=mock_redis),
         patch("routers.system.get_redis", return_value=mock_redis),
         patch("routers.scheduled_tasks.get_redis", return_value=mock_redis),

@@ -139,6 +139,52 @@ CREATE TABLE IF NOT EXISTS read_progress (
     PRIMARY KEY (user_id, gallery_id)
 );
 
+CREATE TABLE IF NOT EXISTS workbench_operations (
+    id              UUID PRIMARY KEY DEFAULT uuidv7(),
+    user_id         BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    kind            TEXT NOT NULL,
+    status          TEXT NOT NULL DEFAULT 'queued'
+                    CHECK (status IN ('queued', 'running', 'completed', 'failed', 'cancelled')),
+    selection_count INT NOT NULL DEFAULT 0,
+    progress        JSONB NOT NULL DEFAULT '{}',
+    params          JSONB NOT NULL DEFAULT '{}',
+    error           TEXT,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    started_at      TIMESTAMPTZ,
+    finished_at     TIMESTAMPTZ
+);
+
+CREATE TABLE IF NOT EXISTS gallery_metadata_field_states (
+    gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    field_name      TEXT NOT NULL,
+    origin          TEXT NOT NULL DEFAULT 'source'
+                    CHECK (origin IN ('source', 'import', 'manual', 'merge')),
+    locked          BOOLEAN NOT NULL DEFAULT false,
+    source_value    JSONB,
+    updated_by_user_id BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    updated_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (gallery_id, field_name)
+);
+
+CREATE TABLE IF NOT EXISTS gallery_metadata_changes (
+    id              BIGSERIAL PRIMARY KEY,
+    gallery_id      BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    field_name      TEXT NOT NULL,
+    old_value       JSONB,
+    new_value       JSONB,
+    origin          TEXT NOT NULL CHECK (origin IN ('source', 'import', 'manual', 'merge')),
+    actor_user_id   BIGINT REFERENCES users(id) ON DELETE SET NULL,
+    operation_id    UUID REFERENCES workbench_operations(id) ON DELETE SET NULL,
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE INDEX IF NOT EXISTS ix_workbench_operations_user_id
+  ON workbench_operations (user_id);
+CREATE INDEX IF NOT EXISTS ix_gallery_metadata_changes_gallery_created
+  ON gallery_metadata_changes (gallery_id, created_at DESC);
+CREATE INDEX IF NOT EXISTS ix_gallery_metadata_changes_operation_id
+  ON gallery_metadata_changes (operation_id);
+
 CREATE TABLE IF NOT EXISTS credentials (
     source          TEXT PRIMARY KEY,
     credential_type TEXT NOT NULL,
