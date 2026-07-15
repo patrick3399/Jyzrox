@@ -21,6 +21,8 @@ import type { Gallery } from '@/lib/types'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
 import { useScrollRestore } from '@/hooks/useScrollRestore'
 import { useCollections } from '@/hooks/useCollections'
+import { useAddDatasetMembers, useDatasets } from '@/hooks/useDatasets'
+import { useProfile } from '@/hooks/useProfile'
 import { useUnifiedSearch } from '@/hooks/useUnifiedSearch'
 import { LibraryGalleryCard } from '@/components/GalleryCard'
 import { GalleryListCard } from '@/components/GalleryListCard'
@@ -126,6 +128,10 @@ function LibraryContent() {
   }, [])
 
   const { data: collectionsData } = useCollections()
+  const { data: profile } = useProfile()
+  const canManageDatasets = profile?.role === 'member' || profile?.role === 'admin'
+  const { data: datasetsData } = useDatasets(canManageDatasets)
+  const { trigger: addDatasetMembers } = useAddDatasetMembers()
 
   // Derive sort from parsed filters (default 'added_at')
   const sortValue = parsed.sort ?? 'added_at'
@@ -738,6 +744,37 @@ function LibraryContent() {
                 {collectionsData.collections.map((c) => (
                   <option key={c.id} value={c.id}>
                     {c.name}
+                  </option>
+                ))}
+              </select>
+            )}
+            {datasetsData && datasetsData.datasets.length > 0 && (
+              <select
+                defaultValue=""
+                onChange={async (event) => {
+                  const datasetId = Number(event.target.value)
+                  if (!datasetId) return
+                  try {
+                    const result = await addDatasetMembers({
+                      id: datasetId,
+                      selection: { gallery_ids: [...selectedIds] },
+                    })
+                    toast.success(t('datasets.membersAdded', { count: String(result.added) }))
+                    setSelectedIds(new Set())
+                    setSelectMode(false)
+                  } catch {
+                    toast.error(t('datasets.addFailed'))
+                  }
+                  event.target.value = ''
+                }}
+                className="px-2 py-1.5 bg-vault-input border border-vault-border rounded text-vault-text text-sm"
+              >
+                <option value="" disabled>
+                  {t('datasets.addToDataset')}
+                </option>
+                {datasetsData.datasets.map((dataset) => (
+                  <option key={dataset.id} value={dataset.id}>
+                    {dataset.name}
                   </option>
                 ))}
               </select>

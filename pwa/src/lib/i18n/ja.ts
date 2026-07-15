@@ -2143,6 +2143,8 @@ const ja: Record<string, string> = {
     '空白区切りのタグは AND 条件です。- を付けると除外できます。1 回のクエリで最大 5,000 枚追加します。',
   'datasets.tagQueryTruncated':
     'タグクエリが 5,000 枚を超えました。条件を絞って残りを追加してください。',
+  'datasets.addToDataset': 'データセットに追加',
+  'datasets.addFailed': 'データセットへの追加に失敗しました',
 }
 
 export default ja

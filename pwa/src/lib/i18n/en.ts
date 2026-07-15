@@ -2158,6 +2158,8 @@ const en: Record<string, string> = {
     'Space-separated tags use AND; prefix a tag with - to exclude it. Up to 5,000 images are added per query.',
   'datasets.tagQueryTruncated':
     'The tag query matched more than 5,000 images. Refine it before adding the remainder.',
+  'datasets.addToDataset': 'Add to Dataset',
+  'datasets.addFailed': 'Failed to add images to dataset',
 }
 
 export default en

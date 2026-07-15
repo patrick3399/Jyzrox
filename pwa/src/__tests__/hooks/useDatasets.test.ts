@@ -69,6 +69,11 @@ describe('dataset hooks', () => {
     expect(apiMocks.get).toHaveBeenCalledWith(8, { state: 'excluded', page: 2, limit: 48 })
   })
 
+  it('disables dataset listing for roles that cannot manage datasets', () => {
+    useDatasets(false)
+    expect(swrCalls[0].key).toBeNull()
+  })
+
   it('disables detail fetching without an ID', () => {
     useDataset(null)
     expect(swrCalls[0].key).toBeNull()

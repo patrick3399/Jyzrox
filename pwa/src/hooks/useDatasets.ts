@@ -3,8 +3,8 @@ import useSWRMutation from 'swr/mutation'
 import { api } from '@/lib/api'
 import type { DatasetSelection } from '@/lib/types'
 
-export function useDatasets() {
-  return useSWR('datasets', () => api.datasets.list())
+export function useDatasets(enabled = true) {
+  return useSWR(enabled ? 'datasets' : null, () => api.datasets.list())
 }
 
 export function useDataset(

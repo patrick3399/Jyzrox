@@ -2097,6 +2097,8 @@ const zhTW: Record<string, string> = {
   'datasets.tagQueryHint':
     '以空格分隔的標籤採 AND；在標籤前加 - 可排除。每次查詢最多加入 5,000 張圖片。',
   'datasets.tagQueryTruncated': '標籤查詢符合超過 5,000 張圖片，請縮小條件後再加入其餘圖片。',
+  'datasets.addToDataset': '加入資料集',
+  'datasets.addFailed': '加入資料集失敗',
 }
 
 export default zhTW

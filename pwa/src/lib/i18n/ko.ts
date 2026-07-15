@@ -2122,6 +2122,8 @@ const ko: Record<string, string> = {
     '공백으로 구분한 태그는 AND 조건이며 - 접두사로 제외합니다. 쿼리당 최대 5,000개 이미지를 추가합니다.',
   'datasets.tagQueryTruncated':
     '태그 쿼리가 5,000개를 초과했습니다. 조건을 좁혀 나머지를 추가하세요.',
+  'datasets.addToDataset': '데이터셋에 추가',
+  'datasets.addFailed': '데이터셋에 이미지를 추가하지 못했습니다',
 }
 
 export default ko

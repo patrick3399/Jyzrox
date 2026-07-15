@@ -62,6 +62,15 @@ describe('structural-nav-audit — Library saveScroll passes data', () => {
   })
 })
 
+describe('structural-nav-audit — Library Dataset selection', () => {
+  it('wires selected galleries to the Dataset membership API', () => {
+    const page = src('app/library/page.tsx')
+    expect(page).toContain('useAddDatasetMembers')
+    expect(page).toContain('selection: { gallery_ids: [...selectedIds] }')
+    expect(page).toContain("t('datasets.addToDataset')")
+  })
+})
+
 describe('structural-nav-audit — E-hentai browse state architecture', () => {
   // The e-hentai browse page runs on a single reducer (lib/ehBrowseState.ts) driven
   // by useEhBrowse (hooks/useEhBrowse.ts). These assertions pin the memory/restore

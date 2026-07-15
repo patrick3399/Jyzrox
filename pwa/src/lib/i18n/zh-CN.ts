@@ -2096,6 +2096,8 @@ const zhCN: Record<string, string> = {
   'datasets.tagQueryHint':
     '空格分隔的标签使用 AND；在标签前加 - 可排除。每次查询最多添加 5,000 张图片。',
   'datasets.tagQueryTruncated': '标签查询匹配超过 5,000 张图片，请缩小条件后再添加其余图片。',
+  'datasets.addToDataset': '添加到数据集',
+  'datasets.addFailed': '添加到数据集失败',
 }
 
 export default zhCN
