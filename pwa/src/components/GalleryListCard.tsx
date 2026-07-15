@@ -19,6 +19,7 @@ import { useLongPress } from '@/hooks/useLongPress'
 import { getSourceStyle, getEventPosition } from '@/lib/galleryUtils'
 import { galleryHref, readerHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
+import { AppImage } from '@/components/AppImage'
 
 // ── Props ─────────────────────────────────────────────────────────────
 
@@ -153,11 +154,12 @@ export function GalleryListCard({
         {/* Thumbnail */}
         <div className="shrink-0 w-[88px] h-[118px] rounded overflow-hidden bg-vault-input">
           {thumbUrl ? (
-            <img
+            <AppImage
               src={thumbUrl}
               alt={gallery.title}
               className="w-full h-full object-cover"
               loading="lazy"
+              fallbackClassName="w-full h-full bg-vault-input"
             />
           ) : (
             <div className="w-full h-full flex items-center justify-center bg-vault-input">

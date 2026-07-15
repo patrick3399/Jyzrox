@@ -52,7 +52,11 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
       }
       if (e.key === 'ArrowUp' || e.key === 'Escape') {
         e.preventDefault()
-        if (history.length > 1) { router.back() } else { router.push('/pixiv') }
+        if (history.length > 1) {
+          router.back()
+        } else {
+          router.push('/pixiv')
+        }
       }
     }
     window.addEventListener('keydown', handler)
@@ -243,7 +247,8 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
               </p>
               <div className="flex flex-wrap gap-1.5">
                 {illust.tags.map((tag) => (
-                  <span
+                  <button
+                    type="button"
                     key={tag.name}
                     className="px-2 py-0.5 rounded-full bg-vault-input text-xs text-vault-text border border-vault-border cursor-pointer hover:brightness-125 transition-all"
                     title={tag.translated_name ?? undefined}
@@ -253,15 +258,6 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
                         tag: `general:${tag.name}`,
                       })
                     }
-                    role="button"
-                    tabIndex={0}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter')
-                        setPixivTagPopover({
-                          anchor: e.currentTarget as HTMLElement,
-                          tag: `general:${tag.name}`,
-                        })
-                    }}
                   >
                     {tag.name}
                     {tag.translated_name && (
@@ -269,7 +265,7 @@ export default function IllustDetailPage({ params }: { params: Promise<{ id: str
                         ({tag.translated_name})
                       </span>
                     )}
-                  </span>
+                  </button>
                 ))}
               </div>
               {pixivTagPopover && (

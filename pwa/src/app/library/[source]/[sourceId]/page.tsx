@@ -9,6 +9,8 @@ import { useLibraryGallery, useInfiniteGalleryImages, useUpdateGallery } from '@
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { api } from '@/lib/api'
 import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
+import { GalleryTagSection } from '@/components/library/GalleryTagSection'
+import { AppImage } from '@/components/AppImage'
 import type { GalleryImage } from '@/lib/types'
 import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
 import { useLongPress } from '@/hooks/useLongPress'
@@ -16,23 +18,10 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { t, formatDate } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
-import { TagAutocomplete } from '@/components/TagAutocomplete'
-import { Pencil, Heart, Bookmark, BookmarkCheck } from 'lucide-react'
+import { Heart, Bookmark, BookmarkCheck } from 'lucide-react'
 import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
-import { SauceNaoModal } from '@/components/SauceNaoModal'
-import { TagSearchPopover } from '@/components/TagSearchPopover'
+import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { VirtualGrid } from '@/components/VirtualGrid'
-
-const TAG_NAMESPACE_COLORS: Record<string, string> = {
-  character: 'bg-purple-900/40 border-purple-700/50 text-purple-300',
-  artist: 'bg-orange-900/40 border-orange-700/50 text-orange-300',
-  parody: 'bg-blue-900/40 border-blue-700/50 text-blue-300',
-  group: 'bg-yellow-900/40 border-yellow-700/50 text-yellow-300',
-  language: 'bg-teal-900/40 border-teal-700/50 text-teal-300',
-  male: 'bg-cyan-900/40 border-cyan-700/50 text-cyan-300',
-  female: 'bg-pink-900/40 border-pink-700/50 text-pink-300',
-  general: 'bg-vault-input border-vault-border text-vault-text-secondary',
-}
 
 function getSourceLink(sourceUrl: string, source: string): { href: string; external: boolean } {
   if (source === 'ehentai') {
@@ -46,7 +35,10 @@ function getSourceLink(sourceUrl: string, source: string): { href: string; exter
   return { href: sourceUrl, external: true }
 }
 
-function getArtistDisplayName(gallery: { artist_id?: string | null; artist_name?: string | null }): string {
+function getArtistDisplayName(gallery: {
+  artist_id?: string | null
+  artist_name?: string | null
+}): string {
   if (gallery.artist_name?.trim()) return gallery.artist_name.trim()
   const artistId = gallery.artist_id?.trim()
   if (!artistId) return ''
@@ -62,24 +54,6 @@ function formatSearchFilterValue(value: string): string {
 function artistSearchHref(artistId: string): string {
   return `/library?q=${encodeURIComponent(`artist_id:${formatSearchFilterValue(artistId)}`)}`
 }
-
-function getTagColor(tag: string): string {
-  const ns = tag.split(':')[0]
-  return TAG_NAMESPACE_COLORS[ns] ?? TAG_NAMESPACE_COLORS.general
-}
-
-function groupTagsByNamespace(tags: string[]): Record<string, string[]> {
-  const groups: Record<string, string[]> = {}
-  for (const tag of tags) {
-    const [ns, ...rest] = tag.split(':')
-    const namespace = rest.length > 0 ? ns : 'general'
-    const value = rest.length > 0 ? rest.join(':') : tag
-    if (!groups[namespace]) groups[namespace] = []
-    groups[namespace].push(value)
-  }
-  return groups
-}
-
 const DOWNLOAD_STATUS_LABELS: Record<string, { labelKey: string; className: string }> = {
   complete: {
     labelKey: 'library.statusComplete',
@@ -138,14 +112,6 @@ export default function GalleryDetailPage() {
   const [tagData, setTagData] = useState<
     Array<{ namespace: string; name: string; confidence: number; source: string }>
   >([])
-  const [confidenceThreshold, setConfidenceThreshold] = useState(0.35)
-  const [editingTags, setEditingTags] = useState(false)
-  const [tagPopover, setTagPopover] = useState<{
-    anchor: HTMLElement
-    tag: string
-    source: string
-  } | null>(null)
-
   const images = imagesData?.images ?? []
 
   // Image multi-select & exclusion state
@@ -342,7 +308,11 @@ export default function GalleryDetailPage() {
       }
       if (e.key === 'ArrowUp' || e.key === 'Escape') {
         e.preventDefault()
-        if (history.length > 1) { router.back() } else { router.push('/library') }
+        if (history.length > 1) {
+          router.back()
+        } else {
+          router.push('/library')
+        }
       }
     }
     window.addEventListener('keydown', handler)
@@ -493,7 +463,9 @@ export default function GalleryDetailPage() {
   }
 
   const invertSelection = () => {
-    setSelectedIds((prev) => new Set(images.filter((img) => !prev.has(img.id)).map((img) => img.id)))
+    setSelectedIds(
+      (prev) => new Set(images.filter((img) => !prev.has(img.id)).map((img) => img.id)),
+    )
   }
 
   const exitSelectMode = () => {
@@ -702,14 +674,6 @@ export default function GalleryDetailPage() {
     }
   }, [imageMenu, source, sourceId, mutateGallery, mutateImages, fetchExcluded, fetchHidden])
 
-  const manualTagSet = useMemo(
-    () =>
-      new Set(
-        tagData.filter((td) => td.source === 'manual').map((td) => `${td.namespace}:${td.name}`),
-      ),
-    [tagData],
-  )
-
   if (galleryLoading) {
     return (
       <div className="min-h-screen bg-vault-bg flex items-center justify-center">
@@ -737,10 +701,6 @@ export default function GalleryDetailPage() {
 
   if (!gallery) return null
 
-  const tagGroups = groupTagsByNamespace(gallery.tags_array)
-  const aiTags = tagData.filter(
-    (tag) => tag.source === 'ai' && tag.confidence >= confidenceThreshold,
-  )
   const statusInfo =
     DOWNLOAD_STATUS_LABELS[gallery.download_status] ?? DOWNLOAD_STATUS_LABELS.proxy_only
   const artistDisplayName = getArtistDisplayName(gallery)
@@ -756,7 +716,7 @@ export default function GalleryDetailPage() {
           {/* Thumbnail preview from first image */}
           <div className="shrink-0">
             {images[0]?.thumb_path ? (
-              <img
+              <AppImage
                 src={images[0].thumb_path}
                 alt={gallery.title}
                 className="w-40 h-56 object-cover rounded"
@@ -1060,190 +1020,13 @@ export default function GalleryDetailPage() {
         </div>
       )}
 
-      {/* Tags */}
-      <div className="bg-vault-card border border-vault-border rounded-xl p-5 mb-5">
-        <div className="flex items-center justify-between mb-3">
-          <h2 className="text-sm font-semibold text-vault-text-secondary uppercase tracking-wide">
-            {t('common.tags')}
-          </h2>
-          <button
-            onClick={() => setEditingTags(!editingTags)}
-            className={`flex items-center gap-1 px-2 py-1 rounded text-xs font-medium border transition-colors ${
-              editingTags
-                ? 'bg-vault-accent/20 border-vault-accent text-vault-accent'
-                : 'bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text'
-            }`}
-          >
-            <Pencil size={12} />
-            {editingTags ? t('library.doneEditingTags') : t('library.editTags')}
-          </button>
-        </div>
-        {editingTags && (
-          <div className="mb-3">
-            <TagAutocomplete
-              onSelect={(tag) => handleUpdateTag(tag, 'add')}
-              clearOnSelect={true}
-              placeholder={t('library.addTagPlaceholder')}
-            />
-          </div>
-        )}
-        {Object.keys(tagGroups).length === 0 ? (
-          <p className="text-sm text-vault-text-muted">{t('library.noTags')}</p>
-        ) : (
-          <div className="space-y-2">
-            {Object.entries(tagGroups).map(([namespace, values]) => (
-              <div key={namespace} className="flex flex-wrap gap-1 items-start">
-                <span className="text-xs text-vault-text-muted w-20 shrink-0 pt-0.5 capitalize">
-                  {namespace}:
-                </span>
-                <div className="flex flex-wrap gap-1">
-                  {values.map((value) => {
-                    const fullTag = namespace === 'general' ? value : `${namespace}:${value}`
-                    const translation = tagTranslations?.[fullTag]
-                    const isManual = manualTagSet.has(fullTag)
-                    return (
-                      <span
-                        key={value}
-                        role="button"
-                        tabIndex={0}
-                        className={`inline-flex items-center gap-1 px-2 py-0.5 rounded border text-xs cursor-pointer hover:brightness-125 ${getTagColor(fullTag)}`}
-                        title={translation ? `${namespace}:${value}` : undefined}
-                        onClick={(e) => {
-                          if (editingTags) return
-                          const src = gallery?.source ?? ''
-                          if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
-                            const bare = fullTag.includes(':')
-                              ? fullTag.split(':').slice(1).join(':')
-                              : fullTag
-                            router.push(`/library?q=${encodeURIComponent(bare)}`)
-                          } else {
-                            setTagPopover({ anchor: e.currentTarget, tag: fullTag, source: src })
-                          }
-                        }}
-                        onKeyDown={(e) => {
-                          if (e.key === 'Enter' || e.key === ' ') {
-                            e.preventDefault()
-                            const src = gallery?.source ?? ''
-                            if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
-                              const bare = fullTag.includes(':')
-                                ? fullTag.split(':').slice(1).join(':')
-                                : fullTag
-                              router.push(`/library?q=${encodeURIComponent(bare)}`)
-                            } else {
-                              setTagPopover({
-                                anchor: e.currentTarget,
-                                tag: fullTag,
-                                source: src,
-                              })
-                            }
-                          }
-                        }}
-                      >
-                        {translation || value}
-                        {editingTags && isManual && (
-                          <button
-                            type="button"
-                            onClick={(e) => {
-                              e.stopPropagation()
-                              handleUpdateTag(fullTag, 'remove')
-                            }}
-                            className="ml-0.5 opacity-60 hover:opacity-100 leading-none"
-                            aria-label={t('common.removeTag', { tag: fullTag })}
-                          >
-                            ×
-                          </button>
-                        )}
-                      </span>
-                    )
-                  })}
-                </div>
-              </div>
-            ))}
-          </div>
-        )}
-
-        {/* AI Tags (if any) */}
-        {tagData.some((t) => t.source === 'ai') && (
-          <div className="mt-4 pt-4 border-t border-vault-border">
-            <div className="flex items-center justify-between mb-3">
-              <h3 className="text-xs font-semibold text-vault-text-secondary uppercase tracking-wide">
-                {t('library.aiTags')}
-              </h3>
-              <div className="flex items-center gap-2">
-                <label className="text-xs text-vault-text-muted">
-                  {t('library.confidence')}: {Math.round(confidenceThreshold * 100)}%
-                </label>
-                <input
-                  type="range"
-                  min="0"
-                  max="100"
-                  value={Math.round(confidenceThreshold * 100)}
-                  onChange={(e) => setConfidenceThreshold(Number(e.target.value) / 100)}
-                  className="w-24 h-1.5 accent-purple-500"
-                />
-              </div>
-            </div>
-            {aiTags.length > 0 ? (
-              <div className="flex flex-wrap gap-1">
-                {aiTags.map((tag) => {
-                  const aiFullTag =
-                    tag.namespace === 'general' ? tag.name : `${tag.namespace}:${tag.name}`
-                  return (
-                    <span
-                      key={`${tag.namespace}:${tag.name}`}
-                      role="button"
-                      tabIndex={0}
-                      className="inline-flex items-center gap-1 px-2 py-0.5 rounded border bg-purple-900/30 border-purple-700/40 text-purple-300 text-xs cursor-pointer hover:brightness-125"
-                      title={`${Math.round(tag.confidence * 100)}% confidence`}
-                      onClick={(e) => {
-                        const src = gallery?.source ?? ''
-                        if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
-                          router.push(`/library?q=${encodeURIComponent(tag.name)}`)
-                        } else {
-                          setTagPopover({ anchor: e.currentTarget, tag: aiFullTag, source: src })
-                        }
-                      }}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter' || e.key === ' ') {
-                          e.preventDefault()
-                          const src = gallery?.source ?? ''
-                          if (src === 'local' || (src !== 'ehentai' && src !== 'pixiv')) {
-                            router.push(`/library?q=${encodeURIComponent(tag.name)}`)
-                          } else {
-                            setTagPopover({
-                              anchor: e.currentTarget,
-                              tag: aiFullTag,
-                              source: src,
-                            })
-                          }
-                        }
-                      }}
-                    >
-                      {tag.namespace !== 'general' && (
-                        <span className="text-purple-400/60">{tag.namespace}:</span>
-                      )}
-                      {tag.name}
-                      <span className="text-purple-400/50 text-[10px]">
-                        {Math.round(tag.confidence * 100)}%
-                      </span>
-                    </span>
-                  )
-                })}
-              </div>
-            ) : (
-              <p className="text-xs text-vault-text-muted">{t('library.noAiTagsAboveThreshold')}</p>
-            )}
-          </div>
-        )}
-        {tagPopover && (
-          <TagSearchPopover
-            tag={tagPopover.tag}
-            gallerySource={tagPopover.source}
-            anchorEl={tagPopover.anchor}
-            onClose={() => setTagPopover(null)}
-          />
-        )}
-      </div>
+      <GalleryTagSection
+        source={gallery.source}
+        tags={gallery.tags_array}
+        translations={tagTranslations}
+        tagData={tagData}
+        onUpdateTag={handleUpdateTag}
+      />
 
       {/* Image Thumbnails */}
       <div className="bg-vault-card border border-vault-border rounded-xl p-5">
@@ -1299,7 +1082,9 @@ export default function GalleryDetailPage() {
                   >
                     {showExcluded
                       ? t('library.hideExcluded')
-                      : t('library.showExcluded', { count: hiddenImages.length + excludedBlobs.length })}
+                      : t('library.showExcluded', {
+                          count: hiddenImages.length + excludedBlobs.length,
+                        })}
                   </button>
                 )}
               </>
@@ -1352,7 +1137,7 @@ export default function GalleryDetailPage() {
                       }`}
                     >
                       {image.thumb_path ? (
-                        <img
+                        <AppImage
                           src={image.thumb_path}
                           alt={`Page ${image.page_num}`}
                           loading={idx < 20 ? undefined : 'lazy'}
@@ -1408,7 +1193,7 @@ export default function GalleryDetailPage() {
                     className="group relative cursor-pointer select-none [-webkit-touch-callout:none]"
                   >
                     {image.thumb_path ? (
-                      <img
+                      <AppImage
                         src={image.thumb_path}
                         alt={`Page ${image.page_num}`}
                         loading={idx < 20 ? undefined : 'lazy'}
@@ -1462,7 +1247,11 @@ export default function GalleryDetailPage() {
                 >
                   <div className="flex items-center gap-3 min-w-0 mr-3">
                     {image.thumb_path && (
-                      <img src={image.thumb_path} alt="" className="h-12 w-9 object-cover rounded border border-vault-border" />
+                      <AppImage
+                        src={image.thumb_path}
+                        alt=""
+                        className="h-12 w-9 object-cover rounded border border-vault-border"
+                      />
                     )}
                     <div className="flex flex-col min-w-0">
                       <span className="text-xs text-vault-text-muted truncate">
@@ -1540,7 +1329,7 @@ export default function GalleryDetailPage() {
       )}
 
       {saucenaoImageId && (
-        <SauceNaoModal imageId={saucenaoImageId} onClose={() => setSaucenaoImageId(null)} />
+        <LazySauceNaoModal imageId={saucenaoImageId} onClose={() => setSaucenaoImageId(null)} />
       )}
     </div>
   )

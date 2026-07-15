@@ -14,7 +14,7 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { estimateLibraryGridRowHeight } from '@/app/library/page'
+import { estimateLibraryGridRowHeight } from '@/lib/libraryLayout'
 
 // Measured info block: p-2.5 (20) + 2-line title (~39) + gap-1.5 (6)
 // + rating/pages row (~20) = ~85px. The reserve must be at least this.

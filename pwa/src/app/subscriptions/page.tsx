@@ -1,28 +1,9 @@
 'use client'
 
-import { useState, useEffect, useMemo, useRef } from 'react'
-import {
-  Rss,
-  Plus,
-  X,
-  Trash2,
-  ExternalLink,
-  Download,
-  ScanSearch,
-  CheckCircle,
-  AlertCircle,
-  List,
-  Search,
-  FolderOpen,
-  ChevronDown,
-  ChevronRight,
-  Play,
-  Pause,
-  Settings2,
-  Users,
-} from 'lucide-react'
+import { useState, useEffect, useMemo } from 'react'
+import dynamic from 'next/dynamic'
+import { Rss, Plus, X, Trash2, List, Search, FolderOpen } from 'lucide-react'
 import { toast } from 'sonner'
-import Link from 'next/link'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useWsJobs } from '@/lib/ws'
@@ -48,709 +29,15 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { api } from '@/lib/api'
 import type { Subscription, SubscriptionGroup, DownloadJob } from '@/lib/types'
 import useSWR from 'swr'
+import { GroupCard } from '@/components/subscriptions/GroupCard'
+import { CRON_PRESETS } from '@/components/subscriptions/constants'
+
+const GroupModal = dynamic(
+  () => import('@/components/subscriptions/GroupModal').then((module) => module.GroupModal),
+  { ssr: false },
+)
 
 // ── Constants ────────────────────────────────────────────────────────
-
-const SOURCE_COLORS: Record<string, string> = {
-  pixiv: 'bg-blue-500/20 text-blue-400',
-  twitter: 'bg-sky-500/20 text-sky-400',
-  ehentai: 'bg-purple-500/20 text-purple-400',
-  weibo: 'bg-red-500/20 text-red-300',
-}
-
-const CRON_PRESETS = [
-  { label: '2h', value: '0 */2 * * *' },
-  { label: '6h', value: '0 */6 * * *' },
-  { label: '1d', value: '0 0 * * *' },
-  { label: '3d', value: '0 0 */3 * *' },
-  { label: '1w', value: '0 0 * * 1' },
-]
-
-// ── Helper functions ─────────────────────────────────────────────────
-
-function sourceBadge(source: string | null) {
-  const cls = SOURCE_COLORS[source || ''] || 'bg-vault-border text-vault-text-muted'
-  const label = source
-    ? source === 'pixiv'
-      ? 'Pixiv'
-      : source === 'twitter'
-        ? 'Twitter'
-        : source === 'ehentai'
-          ? 'E-Hentai'
-          : source === 'weibo'
-            ? 'Weibo'
-            : source
-    : t('subscriptions.sourceOther')
-  return <span className={`text-[10px] px-1.5 py-0.5 rounded font-medium ${cls}`}>{label}</span>
-}
-
-function timeAgo(iso: string | null): string {
-  if (!iso) return t('settings.tasks.never')
-  const diff = Date.now() - new Date(iso).getTime()
-  const mins = Math.floor(diff / 60000)
-  if (mins < 1) return t('history.justNow')
-  if (mins < 60) return t('history.minutesAgo', { n: String(mins) })
-  const hours = Math.floor(mins / 60)
-  if (hours < 24) return t('history.hoursAgo', { n: String(hours) })
-  const days = Math.floor(hours / 24)
-  return t('history.daysAgo', { n: String(days) })
-}
-
-function groupStatusBadge(status: string) {
-  if (status === 'running') {
-    return (
-      <span className="flex items-center gap-1 text-[10px] px-1.5 py-0.5 rounded bg-blue-500/20 text-blue-400">
-        <span className="w-1.5 h-1.5 rounded-full bg-blue-400 animate-pulse" />
-        {t('subscriptions.statusRunning')}
-      </span>
-    )
-  }
-  if (status === 'paused') {
-    return (
-      <span className="text-[10px] px-1.5 py-0.5 rounded bg-yellow-500/20 text-yellow-400">
-        {t('subscriptions.statusPaused')}
-      </span>
-    )
-  }
-  return (
-    <span className="text-[10px] px-1.5 py-0.5 rounded bg-emerald-500/20 text-emerald-400">
-      {t('subscriptions.statusIdle')}
-    </span>
-  )
-}
-
-// ── Sub-components ───────────────────────────────────────────────────
-
-function JobStatusBadge({ job, galleryHref }: { job: DownloadJob; galleryHref: string | null }) {
-  if (job.status === 'running') {
-    const downloaded = job.progress?.downloaded ?? 0
-    const total = job.progress?.total
-    const pct = total ? Math.min(100, Math.round((downloaded / total) * 100)) : 0
-    const title = job.progress?.title
-    return (
-      <div className="mt-2">
-        {title && galleryHref && (
-          <Link
-            href={galleryHref}
-            className="text-[10px] text-vault-accent hover:underline truncate block mb-1"
-          >
-            {title}
-          </Link>
-        )}
-        <div className="flex items-center gap-2">
-          <div className="flex-1 h-1.5 bg-vault-border rounded-full overflow-hidden">
-            {total ? (
-              <div
-                className="h-full bg-blue-500 rounded-full transition-all duration-300"
-                style={{ width: `${pct}%` }}
-              />
-            ) : (
-              <div className="h-full bg-blue-500/30 rounded-full overflow-hidden relative">
-                <div className="absolute inset-0 bg-gradient-to-r from-transparent via-blue-500/60 to-transparent animate-[shimmer_1.5s_infinite]" />
-              </div>
-            )}
-          </div>
-          <span className="text-[10px] text-vault-text-muted whitespace-nowrap">
-            {downloaded}
-            {total ? ` / ${total}` : ''} {t('queue.files')}
-          </span>
-        </div>
-      </div>
-    )
-  }
-  if (job.status === 'done') {
-    return (
-      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
-        <CheckCircle size={12} className="text-green-400" />
-        <span className="text-green-400">{t('subscriptions.downloadComplete')}</span>
-        {galleryHref && (
-          <Link
-            href={galleryHref}
-            className="text-vault-accent hover:underline ml-1"
-          >
-            {t('subscriptions.viewGallery')}
-          </Link>
-        )}
-      </div>
-    )
-  }
-  if (job.status === 'failed') {
-    return (
-      <div className="mt-1.5 flex items-center gap-1.5 text-[10px]">
-        <AlertCircle size={12} className="text-red-400" />
-        <span className="text-red-400 truncate" title={job.error || undefined}>
-          {job.error || t('subscriptions.downloadFailed')}
-        </span>
-      </div>
-    )
-  }
-  if (job.status === 'queued') {
-    return (
-      <div className="mt-1.5 flex items-center gap-1.5 text-[10px] text-vault-text-muted">
-        <Download size={10} />
-        <span>{t('subscriptions.queued')}</span>
-      </div>
-    )
-  }
-  return null
-}
-
-function subscriptionGalleryHref(sub: Subscription, latestJob: DownloadJob | null): string | null {
-  const source = latestJob?.gallery_source ?? sub.gallery_source
-  const sourceId = latestJob?.gallery_source_id ?? sub.gallery_source_id
-  if (!source || !sourceId) return null
-  return `/library/${encodeURIComponent(source)}/${encodeURIComponent(sourceId)}`
-}
-
-export function SubscriptionCard({
-  sub,
-  latestJob,
-  groups,
-  onToggle,
-  onCheck,
-  onBackfill,
-  onDelete,
-  onAutoDownloadToggle,
-  onMoveToGroup,
-  onRename,
-  checkingId,
-}: {
-  sub: Subscription
-  latestJob: DownloadJob | null
-  groups: SubscriptionGroup[]
-  onToggle: (sub: Subscription) => void
-  onCheck: (sub: Subscription) => void
-  onBackfill: (sub: Subscription) => void
-  onDelete: (sub: Subscription) => void
-  onAutoDownloadToggle: (sub: Subscription) => void
-  onMoveToGroup: (sub: Subscription, groupId: number | null) => void
-  onRename: (sub: Subscription, name: string) => void
-  checkingId: number | null
-}) {
-  const [showMoveMenu, setShowMoveMenu] = useState(false)
-  const [editingName, setEditingName] = useState(false)
-  const [nameValue, setNameValue] = useState('')
-  const moveMenuRef = useRef<HTMLDivElement | null>(null)
-  const galleryHref = subscriptionGalleryHref(sub, latestJob)
-
-  useEffect(() => {
-    if (!showMoveMenu) return
-    function handleClick(e: MouseEvent) {
-      if (moveMenuRef.current && !moveMenuRef.current.contains(e.target as Node)) {
-        setShowMoveMenu(false)
-      }
-    }
-    document.addEventListener('mousedown', handleClick)
-    return () => document.removeEventListener('mousedown', handleClick)
-  }, [showMoveMenu])
-
-  return (
-    <div className="bg-vault-bg border border-vault-border/50 rounded-lg p-3 overflow-hidden">
-      {/* Top row: name + badges on left, toggle on right */}
-      <div className="flex items-start justify-between gap-2">
-        <div className="flex-1 min-w-0">
-          <div className="flex flex-wrap items-center gap-1.5 mb-1">
-            {editingName ? (
-              <input
-                autoFocus
-                value={nameValue}
-                placeholder={t('subscriptions.namePlaceholder')}
-                onChange={(e) => setNameValue(e.target.value)}
-                onBlur={() => {
-                  const next = nameValue.trim()
-                  if (next !== (sub.name ?? '')) onRename(sub, next)
-                  setEditingName(false)
-                }}
-                onKeyDown={(e) => {
-                  if (e.key === 'Enter') e.currentTarget.blur()
-                  if (e.key === 'Escape') setEditingName(false)
-                }}
-                className="text-sm font-medium text-vault-text bg-vault-input border border-vault-border rounded px-1.5 py-0.5 min-w-0 flex-1 focus:outline-none focus:border-vault-accent"
-              />
-            ) : (
-              <span
-                onClick={() => {
-                  setNameValue(sub.name ?? '')
-                  setEditingName(true)
-                }}
-                className="text-sm font-medium text-vault-text break-all cursor-pointer hover:text-vault-accent transition-colors"
-                title={t('subscriptions.editName')}
-              >
-                {sub.name || sub.url}
-              </span>
-            )}
-            {sourceBadge(sub.source)}
-            {!sub.enabled && (
-              <span className="text-[10px] px-1.5 py-0.5 rounded bg-vault-border text-vault-text-muted shrink-0">
-                {t('subscriptions.disabled')}
-              </span>
-            )}
-          </div>
-          {sub.name && <p className="text-xs text-vault-text-muted truncate mb-1">{sub.url}</p>}
-        </div>
-
-        <button
-          onClick={() => onToggle(sub)}
-          className={`relative w-9 h-5 rounded-full transition-colors shrink-0 mt-0.5 ${sub.enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
-        >
-          <span
-            className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${sub.enabled ? 'translate-x-4' : ''}`}
-          />
-        </button>
-      </div>
-
-      <div className="flex flex-wrap items-center gap-3 text-[10px] text-vault-text-muted">
-        <button
-          onClick={() => onAutoDownloadToggle(sub)}
-          className={`px-1.5 py-0.5 rounded transition-colors ${sub.auto_download ? 'bg-emerald-500/20 text-emerald-400' : 'bg-red-500/15 text-red-400/70'}`}
-          title={
-            sub.auto_download
-              ? t('subscriptions.autoDownloadOn')
-              : t('subscriptions.autoDownloadOff')
-          }
-        >
-          {t('subscriptions.autoDownload')}
-        </button>
-        {sub.last_checked_at && (
-          <span
-            className={
-              sub.last_status === 'ok'
-                ? 'text-emerald-400'
-                : sub.last_status === 'failed'
-                  ? 'text-red-400'
-                  : undefined
-            }
-          >
-            {t('subscriptions.lastChecked')}: {timeAgo(sub.last_checked_at)}
-          </span>
-        )}
-      </div>
-      {sub.last_error && !latestJob && (
-        <p className="text-[10px] text-red-400 mt-1 truncate" title={sub.last_error}>
-          {sub.last_error}
-        </p>
-      )}
-      {latestJob && <JobStatusBadge job={latestJob} galleryHref={galleryHref} />}
-      {galleryHref && (!latestJob || !['running', 'done'].includes(latestJob.status)) && (
-        <Link
-          href={galleryHref}
-          className="mt-1.5 inline-block text-[10px] text-vault-accent hover:underline"
-        >
-          {t('subscriptions.viewGallery')}
-        </Link>
-      )}
-
-      {/* Bottom action row */}
-      <div className="flex items-center gap-0.5 mt-2 pt-2 border-t border-vault-border/50">
-        <button
-          onClick={() => onCheck(sub)}
-          disabled={checkingId === sub.id}
-          className="p-1.5 rounded text-vault-text-muted hover:text-emerald-400 transition-colors disabled:opacity-60"
-          title={t('subscriptions.downloadNow')}
-          aria-label={t('subscriptions.downloadNow')}
-        >
-          <Download size={14} className={checkingId === sub.id ? 'animate-pulse' : ''} />
-        </button>
-        <button
-          onClick={() => onBackfill(sub)}
-          disabled={checkingId === sub.id}
-          className="p-1.5 rounded text-vault-text-muted hover:text-amber-400 transition-colors disabled:opacity-60"
-          title={t('subscriptions.backfill')}
-          aria-label={t('subscriptions.backfillTitle')}
-        >
-          <ScanSearch size={14} />
-        </button>
-        <a
-          href={sub.url}
-          target="_blank"
-          rel="noopener noreferrer"
-          className="p-1.5 rounded text-vault-text-muted hover:text-vault-text transition-colors"
-        >
-          <ExternalLink size={14} />
-        </a>
-        <button
-          onClick={() => {
-            navigator.clipboard.writeText(
-              `${window.location.origin}/api/rss/subscriptions/${sub.id}?token=YOUR_API_TOKEN`,
-            )
-            toast.success(t('rss.copied'))
-          }}
-          className="p-1.5 rounded text-vault-text-muted hover:text-orange-400 transition-colors"
-          title={t('rss.subscriptionFeed')}
-        >
-          <Rss size={14} />
-        </button>
-
-        {/* Move to group dropdown */}
-        {groups.length > 0 && (
-          <div className="relative" ref={moveMenuRef}>
-            <button
-              onClick={() => setShowMoveMenu(!showMoveMenu)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
-              title={t('subscriptions.moveTo')}
-            >
-              <Users size={14} />
-            </button>
-            {showMoveMenu && (
-              <div className="absolute left-0 bottom-full mb-1 z-20 bg-vault-card border border-vault-border rounded-lg shadow-lg py-1 min-w-[140px]">
-                <button
-                  onClick={() => {
-                    onMoveToGroup(sub, null)
-                    setShowMoveMenu(false)
-                  }}
-                  className={`w-full text-left px-3 py-1.5 text-xs hover:bg-vault-bg transition-colors ${sub.group_id === null ? 'text-vault-accent' : 'text-vault-text-muted'}`}
-                >
-                  {t('subscriptions.noGroup')}
-                </button>
-                {groups.map((g) => (
-                  <button
-                    key={g.id}
-                    onClick={() => {
-                      onMoveToGroup(sub, g.id)
-                      setShowMoveMenu(false)
-                    }}
-                    className={`w-full text-left px-3 py-1.5 text-xs hover:bg-vault-bg transition-colors truncate ${sub.group_id === g.id ? 'text-vault-accent' : 'text-vault-text-muted'}`}
-                  >
-                    {g.name}
-                  </button>
-                ))}
-              </div>
-            )}
-          </div>
-        )}
-
-        <button
-          onClick={() => onDelete(sub)}
-          className="p-1.5 rounded text-vault-text-muted hover:text-red-400 transition-colors ml-auto"
-        >
-          <Trash2 size={14} />
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// ── Group modal ──────────────────────────────────────────────────────
-
-function GroupModal({
-  group,
-  onClose,
-  onSave,
-}: {
-  group: SubscriptionGroup | null
-  onClose: () => void
-  onSave: (data: {
-    name: string
-    schedule: string
-    concurrency: number
-    priority: number
-    enabled: boolean
-  }) => Promise<void>
-}) {
-  const [name, setName] = useState(group?.name ?? '')
-  const [schedule, setSchedule] = useState(group?.schedule ?? '0 */2 * * *')
-  const [concurrency, setConcurrency] = useState(group?.concurrency ?? 2)
-  const [priority, setPriority] = useState(group?.priority ?? 0)
-  const [enabled, setEnabled] = useState(group?.enabled ?? true)
-  const [saving, setSaving] = useState(false)
-
-  const handleSubmit = async (e: React.FormEvent) => {
-    e.preventDefault()
-    if (!name.trim()) return
-    setSaving(true)
-    try {
-      await onSave({ name: name.trim(), schedule, concurrency, priority, enabled })
-      onClose()
-    } finally {
-      setSaving(false)
-    }
-  }
-
-  return (
-    <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/60">
-      <div className="bg-vault-card border border-vault-border rounded-xl w-full max-w-md shadow-xl">
-        <div className="flex items-center justify-between p-4 border-b border-vault-border">
-          <h2 className="text-sm font-semibold text-vault-text">
-            {group ? t('subscriptions.groupEdit') : t('subscriptions.groupNew')}
-          </h2>
-          <button onClick={onClose} className="text-vault-text-muted hover:text-vault-text">
-            <X size={16} />
-          </button>
-        </div>
-        <form onSubmit={handleSubmit} className="p-4 space-y-3">
-          <div>
-            <label className="text-xs text-vault-text-muted block mb-1">
-              {t('subscriptions.groupName')}
-            </label>
-            <input
-              type="text"
-              value={name}
-              onChange={(e) => setName(e.target.value)}
-              placeholder={t('subscriptions.groupNamePlaceholder')}
-              className="w-full px-3 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text placeholder-vault-text-muted"
-              autoFocus
-              disabled={group?.is_system}
-            />
-          </div>
-          <div>
-            <label className="text-xs text-vault-text-muted block mb-1">
-              {t('subscriptions.groupSchedule')}
-            </label>
-            <div className="flex flex-wrap items-center gap-1.5">
-              <input
-                type="text"
-                value={schedule}
-                onChange={(e) => setSchedule(e.target.value)}
-                className="w-32 px-2 py-1.5 bg-vault-input border border-vault-border rounded-lg text-xs font-mono text-vault-text"
-              />
-              {CRON_PRESETS.map((p) => (
-                <button
-                  key={p.value}
-                  type="button"
-                  onClick={() => setSchedule(p.value)}
-                  className={`px-1.5 py-0.5 rounded text-[10px] transition-colors ${
-                    schedule === p.value
-                      ? 'bg-vault-accent/20 text-vault-accent'
-                      : 'bg-vault-bg border border-vault-border text-vault-text-muted hover:text-vault-text'
-                  }`}
-                >
-                  {p.label}
-                </button>
-              ))}
-            </div>
-          </div>
-          <div className="flex items-center gap-4">
-            <div className="flex-1">
-              <label className="text-xs text-vault-text-muted block mb-1">
-                {t('subscriptions.groupConcurrency')}
-              </label>
-              <input
-                type="number"
-                min={1}
-                max={10}
-                value={concurrency}
-                onChange={(e) => setConcurrency(Number(e.target.value))}
-                className="w-full px-3 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text"
-              />
-            </div>
-            <div className="flex-1">
-              <label className="text-xs text-vault-text-muted block mb-1">
-                {t('subscriptions.groupPriority')}
-              </label>
-              <input
-                type="number"
-                value={priority}
-                onChange={(e) => setPriority(Number(e.target.value))}
-                className="w-full px-3 py-2 bg-vault-input border border-vault-border rounded-lg text-sm text-vault-text"
-              />
-            </div>
-          </div>
-          <div className="flex items-center gap-2">
-            <label className="text-xs text-vault-text-muted">
-              {t('subscriptions.groupEnabled')}
-            </label>
-            <button
-              type="button"
-              onClick={() => setEnabled(!enabled)}
-              className={`relative w-9 h-5 rounded-full transition-colors ${enabled ? 'bg-vault-accent' : 'bg-vault-border'}`}
-            >
-              <span
-                className={`absolute top-0.5 left-0.5 w-4 h-4 bg-white rounded-full transition-transform shadow ${enabled ? 'translate-x-4' : ''}`}
-              />
-            </button>
-          </div>
-          <div className="flex justify-end gap-2 pt-2">
-            <button
-              type="button"
-              onClick={onClose}
-              className="px-3 py-1.5 rounded-lg text-xs text-vault-text-muted bg-vault-input border border-vault-border hover:text-vault-text transition-colors"
-            >
-              {t('common.cancel')}
-            </button>
-            <button
-              type="submit"
-              disabled={saving || !name.trim()}
-              className="px-4 py-1.5 rounded-lg text-xs font-medium bg-vault-accent text-white hover:bg-vault-accent/90 transition-colors disabled:opacity-50"
-            >
-              {saving ? t('settings.saving') : t('common.save')}
-            </button>
-          </div>
-        </form>
-      </div>
-    </div>
-  )
-}
-
-// ── Group card ───────────────────────────────────────────────────────
-
-function GroupCard({
-  group,
-  subs,
-  jobsData,
-  groups,
-  onEdit,
-  onRun,
-  onPauseResume,
-  onDelete,
-  onToggleSub,
-  onCheckSub,
-  onBackfillSub,
-  onDeleteSub,
-  onAutoDownloadToggle,
-  onMoveToGroup,
-  onRenameSub,
-  checkingId,
-  defaultExpanded,
-}: {
-  group: SubscriptionGroup | null // null = ungrouped section
-  subs: Subscription[]
-  jobsData: Record<number, DownloadJob>
-  groups: SubscriptionGroup[]
-  onEdit: (group: SubscriptionGroup) => void
-  onRun: (group: SubscriptionGroup) => void
-  onPauseResume: (group: SubscriptionGroup) => void
-  onDelete: (group: SubscriptionGroup) => void
-  onToggleSub: (sub: Subscription) => void
-  onCheckSub: (sub: Subscription) => void
-  onBackfillSub: (sub: Subscription) => void
-  onDeleteSub: (sub: Subscription) => void
-  onAutoDownloadToggle: (sub: Subscription) => void
-  onMoveToGroup: (sub: Subscription, groupId: number | null) => void
-  onRenameSub: (sub: Subscription, name: string) => void
-  checkingId: number | null
-  defaultExpanded: boolean
-}) {
-  const [expanded, setExpanded] = useState(defaultExpanded)
-
-  const isUngrouped = group === null
-
-  return (
-    <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
-      {/* Group header */}
-      <div
-        className="flex items-center gap-2 px-4 py-3 cursor-pointer select-none hover:bg-vault-bg/50 transition-colors"
-        onClick={() => setExpanded(!expanded)}
-      >
-        <span className="text-vault-text-muted shrink-0">
-          {expanded ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
-        </span>
-        <FolderOpen
-          size={16}
-          className={isUngrouped ? 'text-vault-text-muted' : 'text-vault-accent'}
-        />
-        <span className="flex-1 font-medium text-sm text-vault-text truncate">
-          {isUngrouped ? t('subscriptions.ungrouped') : group.name}
-        </span>
-
-        {/* Group meta */}
-        <div className="flex items-center gap-2 shrink-0">
-          <span className="text-[10px] text-vault-text-muted hidden sm:block">
-            {t('subscriptions.groupSubCount', { count: String(subs.length) })}
-          </span>
-
-          {!isUngrouped && (
-            <>
-              {group.is_system && (
-                <span className="text-[10px] px-1.5 py-0.5 rounded bg-vault-border text-vault-text-muted">
-                  {t('subscriptions.groupSystemTag')}
-                </span>
-              )}
-              {groupStatusBadge(group.status)}
-              {group.last_run_at && (
-                <span className="text-[10px] text-vault-text-muted hidden md:block">
-                  {t('subscriptions.groupLastRun')}: {timeAgo(group.last_run_at)}
-                </span>
-              )}
-            </>
-          )}
-        </div>
-
-        {/* Group actions — stop propagation so clicking them doesn't toggle accordion */}
-        {!isUngrouped && (
-          <div className="flex items-center gap-0.5 shrink-0" onClick={(e) => e.stopPropagation()}>
-            <button
-              onClick={() => onRun(group)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-emerald-400 transition-colors"
-              title={t('subscriptions.groupRunNow')}
-            >
-              <Play size={13} />
-            </button>
-            <button
-              onClick={() => onPauseResume(group)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-yellow-400 transition-colors"
-              title={
-                group.status === 'paused'
-                  ? t('subscriptions.groupResume')
-                  : t('subscriptions.groupPause')
-              }
-            >
-              <Pause size={13} />
-            </button>
-            <button
-              onClick={() => onEdit(group)}
-              className="p-1.5 rounded text-vault-text-muted hover:text-vault-accent transition-colors"
-              title={t('subscriptions.groupEdit')}
-            >
-              <Settings2 size={13} />
-            </button>
-            {!group.is_system && (
-              <button
-                onClick={() => onDelete(group)}
-                className="p-1.5 rounded text-vault-text-muted hover:text-red-400 transition-colors"
-                title={t('subscriptions.groupDelete')}
-              >
-                <Trash2 size={13} />
-              </button>
-            )}
-          </div>
-        )}
-      </div>
-
-      {/* Group schedule info */}
-      {!isUngrouped && expanded && (
-        <div className="px-4 pb-2 flex flex-wrap gap-3 text-[10px] text-vault-text-muted border-b border-vault-border/50">
-          <span className="font-mono">{group.schedule}</span>
-          <span>
-            {t('subscriptions.groupConcurrency')}: {group.concurrency}
-          </span>
-          <span>
-            {t('subscriptions.groupPriority')}: {group.priority}
-          </span>
-        </div>
-      )}
-
-      {/* Subscriptions inside group */}
-      {expanded && (
-        <div className="p-3 space-y-2">
-          {subs.length === 0 ? (
-            <p className="text-xs text-vault-text-muted text-center py-4">
-              {t('subscriptions.noSubscriptions')}
-            </p>
-          ) : (
-            subs.map((sub) => (
-              <SubscriptionCard
-                key={sub.id}
-                sub={sub}
-                latestJob={jobsData[sub.id] ?? null}
-                groups={groups}
-                onToggle={onToggleSub}
-                onCheck={onCheckSub}
-                onBackfill={onBackfillSub}
-                onDelete={onDeleteSub}
-                onAutoDownloadToggle={onAutoDownloadToggle}
-                onMoveToGroup={onMoveToGroup}
-                onRename={onRenameSub}
-                checkingId={checkingId}
-              />
-            ))
-          )}
-        </div>
-      )}
-    </div>
-  )
-}
-
-// ── Page ─────────────────────────────────────────────────────────────
 
 export default function SubscriptionsPage() {
   useLocale()
@@ -885,7 +172,9 @@ export default function SubscriptionsPage() {
   const [autoDownload, setAutoDownload] = useState(true)
   const [cronExpr, setCronExpr] = useState('0 */2 * * *')
   const [selectedGroupId, setSelectedGroupId] = useState<number | null>(null)
-  const [fanboxSubscriptionContent, setFanboxSubscriptionContent] = useState<'free_only' | 'accessible' | 'paid_only' | 'price_range'>('accessible')
+  const [fanboxSubscriptionContent, setFanboxSubscriptionContent] = useState<
+    'free_only' | 'accessible' | 'paid_only' | 'price_range'
+  >('accessible')
   const [fanboxSubscriptionFeeMin, setFanboxSubscriptionFeeMin] = useState('')
   const [fanboxSubscriptionFeeMax, setFanboxSubscriptionFeeMax] = useState('')
   const [checkingId, setCheckingId] = useState<number | null>(null)
@@ -914,15 +203,21 @@ export default function SubscriptionsPage() {
         auto_download: autoDownload,
         cron_expr: cronExpr,
         group_id: selectedGroupId,
-        ...(url.includes('fanbox.cc') ? {
-          download_options: {
-            fanbox: {
-              content: fanboxSubscriptionContent,
-              ...(fanboxSubscriptionFeeMin ? { fee_min: Number(fanboxSubscriptionFeeMin) } : {}),
-              ...(fanboxSubscriptionFeeMax ? { fee_max: Number(fanboxSubscriptionFeeMax) } : {}),
-            },
-          },
-        } : {}),
+        ...(url.includes('fanbox.cc')
+          ? {
+              download_options: {
+                fanbox: {
+                  content: fanboxSubscriptionContent,
+                  ...(fanboxSubscriptionFeeMin
+                    ? { fee_min: Number(fanboxSubscriptionFeeMin) }
+                    : {}),
+                  ...(fanboxSubscriptionFeeMax
+                    ? { fee_max: Number(fanboxSubscriptionFeeMax) }
+                    : {}),
+                },
+              },
+            }
+          : {}),
       })
       if (result?.duplicate) {
         toast.info(t('subscriptions.duplicateUpdated'))
@@ -1260,16 +555,40 @@ export default function SubscriptionsPage() {
           {url.includes('fanbox.cc') && (
             <div className="flex flex-wrap items-center gap-2">
               <label className="text-xs text-vault-text-muted">{t('fanbox.contentPolicy')}</label>
-              <select value={fanboxSubscriptionContent} onChange={(e) => setFanboxSubscriptionContent(e.target.value as 'free_only' | 'accessible' | 'paid_only' | 'price_range')} className="px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text">
+              <select
+                value={fanboxSubscriptionContent}
+                onChange={(e) =>
+                  setFanboxSubscriptionContent(
+                    e.target.value as 'free_only' | 'accessible' | 'paid_only' | 'price_range',
+                  )
+                }
+                className="px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text"
+              >
                 <option value="free_only">{t('fanbox.freeOnly')}</option>
                 <option value="accessible">{t('fanbox.accessible')}</option>
                 <option value="paid_only">{t('fanbox.paidOnly')}</option>
                 <option value="price_range">{t('fanbox.priceRange')}</option>
               </select>
-              {fanboxSubscriptionContent === 'price_range' && <>
-                <input type="number" min="0" value={fanboxSubscriptionFeeMin} onChange={(e) => setFanboxSubscriptionFeeMin(e.target.value)} placeholder={t('fanbox.feeMin')} className="w-24 px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text" />
-                <input type="number" min="0" value={fanboxSubscriptionFeeMax} onChange={(e) => setFanboxSubscriptionFeeMax(e.target.value)} placeholder={t('fanbox.feeMax')} className="w-24 px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text" />
-              </>}
+              {fanboxSubscriptionContent === 'price_range' && (
+                <>
+                  <input
+                    type="number"
+                    min="0"
+                    value={fanboxSubscriptionFeeMin}
+                    onChange={(e) => setFanboxSubscriptionFeeMin(e.target.value)}
+                    placeholder={t('fanbox.feeMin')}
+                    className="w-24 px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text"
+                  />
+                  <input
+                    type="number"
+                    min="0"
+                    value={fanboxSubscriptionFeeMax}
+                    onChange={(e) => setFanboxSubscriptionFeeMax(e.target.value)}
+                    placeholder={t('fanbox.feeMax')}
+                    className="w-24 px-2 py-1 bg-vault-input border border-vault-border rounded text-xs text-vault-text"
+                  />
+                </>
+              )}
             </div>
           )}
           <div>

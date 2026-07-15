@@ -14,7 +14,7 @@ import { hasRole } from '@/lib/pageRegistry'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { BackButton } from '@/components/BackButton'
-import { NovelCreateDialog } from '@/components/novels/NovelCreateDialog'
+import { LazyNovelCreateDialog } from '@/components/LazyDialogs'
 import { WorkCategorySection } from '@/components/novels/WorkCategorySection'
 
 export default function NovelWorkPage() {
@@ -86,7 +86,7 @@ export default function NovelWorkPage() {
         ))}
 
       {showCreate && (
-        <NovelCreateDialog
+        <LazyNovelCreateDialog
           mode="chapter"
           work={work}
           onClose={() => setShowCreate(false)}

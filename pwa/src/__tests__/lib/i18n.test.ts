@@ -7,7 +7,7 @@
  *   - formatDate, formatNumber, formatBytes utilities
  */
 
-import { describe, it, expect, beforeEach, vi } from 'vitest'
+import { describe, it, expect, beforeAll, beforeEach, vi } from 'vitest'
 import {
   t,
   setLocale,
@@ -16,12 +16,17 @@ import {
   formatNumber,
   formatBytes,
   resolveLocale,
+  loadLocale,
 } from '../../lib/i18n'
 
 // Stub out the ja dictionary so fallback behavior can be tested: real locale
 // files have full key parity with en.ts (enforced by i18n-keys.test.ts), so no
 // genuine key gap exists to exercise the en fallback path.
 vi.mock('../../lib/i18n/ja', () => ({ default: {} }))
+
+beforeAll(async () => {
+  await Promise.all([loadLocale('zh-TW'), loadLocale('ja')])
+})
 
 // ---------------------------------------------------------------------------
 // Reset locale before each test to prevent cross-test pollution

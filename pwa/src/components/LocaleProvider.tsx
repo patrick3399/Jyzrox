@@ -3,6 +3,7 @@
 import { createContext, useContext, useState, useEffect, useCallback } from 'react'
 import {
   detectBrowserLocale,
+  loadLocale,
   setLocale as setI18nLocale,
   SUPPORTED_LOCALES,
   type Locale,
@@ -26,19 +27,47 @@ function detectLocale(): Locale {
   return detectBrowserLocale()
 }
 
-export function LocaleProvider({ children, initialLocale }: { children: React.ReactNode; initialLocale?: Locale }) {
+export function LocaleProvider({
+  children,
+  initialLocale,
+}: {
+  children: React.ReactNode
+  initialLocale?: Locale
+}) {
   const [locale, setLocaleState] = useState<Locale>(() => initialLocale ?? detectLocale())
   const [isAutomatic, setIsAutomatic] = useState(true)
+  const [, setDictionaryVersion] = useState(0)
 
   useEffect(() => {
-    setI18nLocale(locale)
+    let active = true
+    void loadLocale(locale)
+      .then(() => {
+        if (!active) return
+        setI18nLocale(locale)
+        setDictionaryVersion((version) => version + 1)
+      })
+      .catch(() => {
+        if (!active) return
+        setI18nLocale('en')
+        setLocaleState('en')
+      })
+    return () => {
+      active = false
+    }
   }, [locale])
 
   const setLocale = useCallback((newLocale: Locale | null) => {
     const automatic = newLocale === null
     const nextLocale = newLocale ?? detectBrowserLocale()
-    setI18nLocale(nextLocale)
-    setLocaleState(nextLocale)
+    void loadLocale(nextLocale)
+      .then(() => {
+        setI18nLocale(nextLocale)
+        setLocaleState(nextLocale)
+      })
+      .catch(() => {
+        setI18nLocale('en')
+        setLocaleState('en')
+      })
     setIsAutomatic(automatic)
     if (automatic) localStorage.removeItem(OVERRIDE_STORAGE_KEY)
     else localStorage.setItem(OVERRIDE_STORAGE_KEY, newLocale)
@@ -54,15 +83,29 @@ export function LocaleProvider({ children, initialLocale }: { children: React.Re
         if (profile.locale && SUPPORTED_LOCALES.includes(profile.locale as Locale)) {
           const serverLocale = profile.locale as Locale
           if (serverLocale !== locale) {
-            setI18nLocale(serverLocale)
-            setLocaleState(serverLocale)
+            void loadLocale(serverLocale)
+              .then(() => {
+                setI18nLocale(serverLocale)
+                setLocaleState(serverLocale)
+              })
+              .catch(() => {
+                setI18nLocale('en')
+                setLocaleState('en')
+              })
           }
           setIsAutomatic(false)
           localStorage.setItem(OVERRIDE_STORAGE_KEY, serverLocale)
         } else {
           const automaticLocale = detectBrowserLocale()
-          setI18nLocale(automaticLocale)
-          setLocaleState(automaticLocale)
+          void loadLocale(automaticLocale)
+            .then(() => {
+              setI18nLocale(automaticLocale)
+              setLocaleState(automaticLocale)
+            })
+            .catch(() => {
+              setI18nLocale('en')
+              setLocaleState('en')
+            })
           setIsAutomatic(true)
           localStorage.removeItem(OVERRIDE_STORAGE_KEY)
         }

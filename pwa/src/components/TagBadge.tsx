@@ -57,19 +57,23 @@ export function TagBadge({
     ${variantStyles}
   `
 
-  const clickableClasses = onClick ? 'cursor-pointer hover:brightness-125' : ''
-
   return (
-    <span
-      className={`${baseClasses} ${clickableClasses}`}
-      onClick={onClick}
-      title={translation || undefined}
-      role={onClick ? 'button' : undefined}
-      tabIndex={onClick ? 0 : undefined}
-      onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
-    >
-      {colonIndex !== -1 && <span className="opacity-60">{namespace}:</span>}
-      <span className={isExclude ? 'line-through' : ''}>{name}</span>
+    <span className={baseClasses} title={translation || undefined}>
+      {onClick ? (
+        <button
+          type="button"
+          onClick={onClick}
+          className="inline-flex items-center gap-1 cursor-pointer hover:brightness-125"
+        >
+          {colonIndex !== -1 && <span className="opacity-60">{namespace}:</span>}
+          <span className={isExclude ? 'line-through' : ''}>{name}</span>
+        </button>
+      ) : (
+        <>
+          {colonIndex !== -1 && <span className="opacity-60">{namespace}:</span>}
+          <span className={isExclude ? 'line-through' : ''}>{name}</span>
+        </>
+      )}
       {onRemove && (
         <button
           type="button"

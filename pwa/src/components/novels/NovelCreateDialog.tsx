@@ -68,6 +68,7 @@ export function NovelCreateDialog({
     >
       <div
         role="dialog"
+        aria-modal="true"
         aria-label={mode === 'work' ? t('novels.newWork') : t('novels.newChapter')}
         className="mx-4 w-full max-w-sm rounded-xl border border-vault-border bg-vault-card"
         onClick={(e) => e.stopPropagation()}

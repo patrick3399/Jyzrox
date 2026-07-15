@@ -10,7 +10,7 @@ import { useLongPress } from '@/hooks/useLongPress'
 import { JustifiedGrid } from '@/components/JustifiedGrid'
 import { TimelineScrubber } from '@/components/TimelineScrubber'
 import { ImageContextMenu } from '@/components/Reader/ImageContextMenu'
-import { SauceNaoModal } from '@/components/SauceNaoModal'
+import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { t } from '@/lib/i18n'
 import { api } from '@/lib/api'
 import { toast } from 'sonner'
@@ -555,7 +555,7 @@ function ImageBrowserInner() {
       )}
 
       {saucenaoImageId && (
-        <SauceNaoModal imageId={saucenaoImageId} onClose={() => setSaucenaoImageId(null)} />
+        <LazySauceNaoModal imageId={saucenaoImageId} onClose={() => setSaucenaoImageId(null)} />
       )}
     </div>
   )

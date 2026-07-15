@@ -6,13 +6,7 @@ import { api } from '@/lib/api'
 import type { SauceNaoResult } from '@/lib/api'
 import { t } from '@/lib/i18n'
 
-export function SauceNaoModal({
-  imageId,
-  onClose,
-}: {
-  imageId: number
-  onClose: () => void
-}) {
+export function SauceNaoModal({ imageId, onClose }: { imageId: number; onClose: () => void }) {
   const [results, setResults] = useState<SauceNaoResult[] | null>(null)
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -63,6 +57,9 @@ export function SauceNaoModal({
       onClick={onClose}
     >
       <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="saucenao-dialog-title"
         className="bg-vault-card border border-vault-border rounded-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col"
         onClick={(e) => e.stopPropagation()}
       >
@@ -70,9 +67,12 @@ export function SauceNaoModal({
         <div className="flex items-center justify-between px-4 py-3 border-b border-vault-border">
           <div className="flex items-center gap-2">
             <Search size={14} className="text-vault-accent" />
-            <h3 className="text-sm font-semibold text-vault-text">{t('saucenao.title')}</h3>
+            <h3 id="saucenao-dialog-title" className="text-sm font-semibold text-vault-text">
+              {t('saucenao.title')}
+            </h3>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="text-vault-text-muted hover:text-vault-text transition-colors"
           >
@@ -144,13 +144,9 @@ function ResultItem({ result }: { result: SauceNaoResult }) {
           </span>
         </div>
 
-        {result.title && (
-          <p className="text-sm text-vault-text truncate">{result.title}</p>
-        )}
+        {result.title && <p className="text-sm text-vault-text truncate">{result.title}</p>}
 
-        {result.author && (
-          <p className="text-xs text-vault-text-muted truncate">{result.author}</p>
-        )}
+        {result.author && <p className="text-xs text-vault-text-muted truncate">{result.author}</p>}
 
         <p className="text-xs text-vault-text-muted truncate mt-0.5">{result.source_name}</p>
       </div>

@@ -14,7 +14,7 @@ import { hasRole } from '@/lib/pageRegistry'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { EmptyState } from '@/components/EmptyState'
 import { RepoStatusBar } from '@/components/novels/RepoStatusBar'
-import { NovelCreateDialog } from '@/components/novels/NovelCreateDialog'
+import { LazyNovelCreateDialog } from '@/components/LazyDialogs'
 
 export default function NovelsPage() {
   useLocale()
@@ -104,7 +104,7 @@ export default function NovelsPage() {
       )}
 
       {showCreate && (
-        <NovelCreateDialog
+        <LazyNovelCreateDialog
           mode="work"
           onClose={() => setShowCreate(false)}
           onCreated={(work, chapter, path) => {

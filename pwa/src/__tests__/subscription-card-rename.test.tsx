@@ -10,7 +10,7 @@
 import { describe, it, expect, vi } from 'vitest'
 import { render, screen, fireEvent } from '@testing-library/react'
 import type { Subscription } from '@/lib/types'
-import { SubscriptionCard } from '@/app/subscriptions/page'
+import { SubscriptionCard } from '@/components/subscriptions/SubscriptionCard'
 
 // next/link renders a plain anchor in tests
 vi.mock('next/link', () => ({

@@ -184,18 +184,31 @@ function EditorPanel({ site, probeResult, onClose, onSaved }: EditorPanelProps) 
   return (
     <div className="fixed inset-0 z-50 flex justify-end">
       {/* Backdrop */}
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+        aria-label={t('admin.sites.close')}
+      />
       {/* Panel */}
-      <div className="relative w-full max-w-2xl bg-vault-bg border-l border-vault-border flex flex-col overflow-hidden shadow-2xl">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="site-editor-dialog-title"
+        className="relative w-full max-w-2xl bg-vault-bg border-l border-vault-border flex flex-col overflow-hidden shadow-2xl"
+      >
         {/* Header */}
         <div className="flex items-center justify-between px-6 py-4 border-b border-vault-border shrink-0">
           <div>
-            <h2 className="text-vault-text font-semibold text-lg">{t('admin.sites.editor')}</h2>
+            <h2 id="site-editor-dialog-title" className="text-vault-text font-semibold text-lg">
+              {t('admin.sites.editor')}
+            </h2>
             <p className="text-vault-text-secondary text-sm mt-0.5">
               {site.name} — {site.domain}
             </p>
           </div>
           <button
+            type="button"
             onClick={onClose}
             className="p-2 rounded-lg text-vault-text-secondary hover:text-vault-text hover:bg-vault-card transition-colors"
             aria-label={t('admin.sites.close')}
@@ -473,11 +486,24 @@ function ProbeDialog({ onClose, onProbeSuccess }: ProbeDialogProps) {
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
-      <div className="absolute inset-0 bg-black/50 backdrop-blur-sm" onClick={onClose} />
-      <div className="relative w-full max-w-md bg-vault-bg border border-vault-border rounded-xl shadow-2xl p-6">
+      <button
+        type="button"
+        className="absolute inset-0 bg-black/50 backdrop-blur-sm"
+        onClick={onClose}
+        aria-label={t('admin.sites.close')}
+      />
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="site-probe-dialog-title"
+        className="relative w-full max-w-md bg-vault-bg border border-vault-border rounded-xl shadow-2xl p-6"
+      >
         <div className="flex items-center justify-between mb-4">
-          <h3 className="text-vault-text font-semibold">{t('admin.sites.probeUrl')}</h3>
+          <h3 id="site-probe-dialog-title" className="text-vault-text font-semibold">
+            {t('admin.sites.probeUrl')}
+          </h3>
           <button
+            type="button"
             onClick={onClose}
             className="p-1.5 rounded text-vault-text-secondary hover:text-vault-text transition-colors"
             aria-label={t('admin.sites.close')}

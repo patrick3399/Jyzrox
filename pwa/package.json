@@ -4,7 +4,7 @@
   "private": true,
   "scripts": {
     "dev": "next dev --turbopack --port 3000",
-    "build": "node scripts/build-sw.js && next build",
+    "build": "node scripts/build-sw.js && next build --webpack",
     "start": "next start --port 3000",
     "test": "vitest run",
     "test:related": "vitest related --run",

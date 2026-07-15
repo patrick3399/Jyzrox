@@ -17,6 +17,7 @@ import { useLongPress } from '@/hooks/useLongPress'
 import { getSourceStyle, getEventPosition } from '@/lib/galleryUtils'
 import { galleryHref, readerHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
+import { AppImage } from './AppImage'
 
 // ── Category colours ──────────────────────────────────────────────────
 
@@ -108,13 +109,14 @@ export function EhGalleryCard({ gallery, onClick }: EhCardProps) {
       >
         {/* Thumbnail */}
         <div className="relative aspect-[3/4] bg-vault-bg overflow-hidden">
-          <img
+          <AppImage
             src={
               gallery.thumb ? `/api/eh/thumb-proxy?url=${encodeURIComponent(gallery.thumb)}` : ''
             }
             alt={gallery.title}
             className="w-full h-full object-cover"
             loading="lazy"
+            fallbackClassName="w-full h-full bg-vault-input"
           />
           {/* Category badge */}
           <span
@@ -297,11 +299,12 @@ export function LibraryGalleryCard({
         {/* Thumbnail or gradient placeholder */}
         <div className="relative aspect-[3/4] overflow-hidden">
           {thumbUrl ? (
-            <img
+            <AppImage
               src={thumbUrl}
               alt={gallery.title}
               className="w-full h-full object-cover"
               loading="lazy"
+              fallbackClassName="w-full h-full bg-vault-input"
             />
           ) : (
             <div

@@ -23,49 +23,93 @@ function openShareQueueDB() {
   });
 }
 
-async function queueShareRequest(url) {
+async function queueShareRequest(body, headers) {
   const db = await openShareQueueDB();
   const tx = db.transaction(SHARE_QUEUE_STORE, 'readwrite');
-  tx.objectStore(SHARE_QUEUE_STORE).add({ url, timestamp: Date.now() });
+  tx.objectStore(SHARE_QUEUE_STORE).add({ body, headers, timestamp: Date.now() });
   return new Promise((resolve) => { tx.oncomplete = resolve; });
 }
 
 async function replayShareQueue() {
   const db = await openShareQueueDB();
-  const tx = db.transaction(SHARE_QUEUE_STORE, 'readwrite');
+  const tx = db.transaction(SHARE_QUEUE_STORE, 'readonly');
   const store = tx.objectStore(SHARE_QUEUE_STORE);
-  const items = await new Promise((resolve) => {
-    const req = store.getAll();
-    req.onsuccess = () => resolve(req.result);
-  });
+  const [keys, items] = await Promise.all([
+    new Promise((resolve, reject) => {
+      const req = store.getAllKeys();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    }),
+    new Promise((resolve, reject) => {
+      const req = store.getAll();
+      req.onsuccess = () => resolve(req.result);
+      req.onerror = () => reject(req.error);
+    }),
+  ]);
 
-  for (const item of items) {
+  for (let index = 0; index < items.length; index += 1) {
+    const item = items[index];
+    const body = item.body || (item.url ? { url: item.url } : null);
+    if (!body) continue;
+    let response;
     try {
-      await fetch('/api/download/', {
+      response = await fetch('/api/download/', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: item.headers || { 'Content-Type': 'application/json' },
         credentials: 'include',
-        body: JSON.stringify({ url: item.url }),
+        body: JSON.stringify(body),
       });
-    } catch (e) {
-      // Still offline, stop trying
+    } catch (_) {
       return;
     }
-  }
 
-  // Clear all successfully replayed items
-  const clearTx = db.transaction(SHARE_QUEUE_STORE, 'readwrite');
-  clearTx.objectStore(SHARE_QUEUE_STORE).clear();
+    // fetch() only rejects on network errors. Retain the item unless the API
+    // explicitly accepts it, including authentication and server failures.
+    if (!response.ok) return;
+
+    await new Promise((resolve, reject) => {
+      const deleteTx = db.transaction(SHARE_QUEUE_STORE, 'readwrite');
+      const req = deleteTx.objectStore(SHARE_QUEUE_STORE).delete(keys[index]);
+      req.onsuccess = () => resolve();
+      req.onerror = () => reject(req.error);
+    });
+  }
 }
 
-// Listen for online event to replay queue
-self.addEventListener('online', () => {
-  replayShareQueue();
+async function registerShareQueueSync() {
+  if (!self.registration.sync) return;
+  try {
+    await self.registration.sync.register('jyzrox-share-queue');
+  } catch (_) {
+    // Background Sync is optional; clients also request replay when online.
+  }
+}
+
+function queueHeaders(request) {
+  const headers = { 'Content-Type': 'application/json' };
+  const csrfToken = request.headers.get('X-CSRF-Token');
+  const language = request.headers.get('Accept-Language');
+  if (csrfToken) headers['X-CSRF-Token'] = csrfToken;
+  if (language) headers['Accept-Language'] = language;
+  return headers;
+}
+
+self.addEventListener('sync', (event) => {
+  if (event.tag === 'jyzrox-share-queue') {
+    event.waitUntil(replayShareQueue());
+  }
+});
+
+self.addEventListener('online', (event) => {
+  event.waitUntil?.(replayShareQueue());
 });
 
 self.addEventListener('message', (event) => {
   if (event.data?.type === 'SW_CACHE_CONFIG') {
     cacheConfig = { ...cacheConfig, ...event.data.config };
+  }
+  if (event.data?.type === 'SW_REPLAY_QUEUE') {
+    event.waitUntil(replayShareQueue());
   }
 });
 
@@ -152,18 +196,27 @@ self.addEventListener('activate', (event) => {
 });
 
 self.addEventListener('fetch', (event) => {
-  // Intercept POST requests to /api/download/ to support offline queuing
-  if (event.request.method === 'POST' && event.request.url.includes('/api/download/')) {
+  const requestUrl = new URL(event.request.url);
+
+  // Only the exact enqueue endpoint is safe to replay. Never queue cancel,
+  // retry, quick-download, or other state-changing download routes.
+  if (
+    event.request.method === 'POST' &&
+    requestUrl.origin === self.location.origin &&
+    requestUrl.pathname === '/api/download/'
+  ) {
     event.respondWith(
       fetch(event.request.clone()).catch(async () => {
         try {
           const body = await event.request.json();
           if (body.url) {
-            await queueShareRequest(body.url);
+            await queueShareRequest(body, queueHeaders(event.request));
+            await registerShareQueueSync();
             return new Response(JSON.stringify({
               job_id: 'offline-' + Date.now(),
               status: 'queued-offline',
             }), {
+              status: 202,
               headers: { 'Content-Type': 'application/json' },
             });
           }
@@ -178,8 +231,14 @@ self.addEventListener('fetch', (event) => {
 
   if (event.request.method !== 'GET') return;
 
-  const requestUrl = new URL(event.request.url);
   if (requestUrl.origin !== self.location.origin) return;
+
+  // Authenticated API data is user-specific and must never enter a page cache
+  // or be served stale while offline.
+  if (requestUrl.pathname.startsWith('/api/')) {
+    event.respondWith(fetch(event.request));
+    return;
+  }
 
   // Cache-first for images/media if possible, otherwise network-first
   if (event.request.url.includes('/media/') || event.request.url.includes('/thumbs/')) {
@@ -201,8 +260,9 @@ self.addEventListener('fetch', (event) => {
         });
       })
     );
-  } else {
-    // Network first for other requests; fall back to cache or offline page
+  } else if (event.request.mode === 'navigate') {
+    // Network first for document navigations; fall back to the last rendered
+    // page or the static offline document.
     event.respondWith(
       caches.open(PAGE_CACHE_NAME).then((cache) => {
         return fetch(event.request)
@@ -219,10 +279,7 @@ self.addEventListener('fetch', (event) => {
               if (!isExpired(cached, cacheConfig.pageCacheTTLHours)) return cached;
               cache.delete(event.request);
             }
-            if (event.request.mode === 'navigate') {
-              return caches.match(OFFLINE_URL);
-            }
-            return new Response('', { status: 503 });
+            return caches.match(OFFLINE_URL);
           });
       })
     );

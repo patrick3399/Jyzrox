@@ -13,22 +13,25 @@
  */
 
 import en from './en'
-import zhTW from './zh-TW'
-import zhCN from './zh-CN'
-import ja from './ja'
-import ko from './ko'
 
 export const SUPPORTED_LOCALES = ['en', 'zh-TW', 'zh-CN', 'ja', 'ko'] as const
 export type Locale = (typeof SUPPORTED_LOCALES)[number]
 export const DEFAULT_LOCALE: Locale = 'en'
 
-const locales: Record<string, Record<string, string>> = {
+type Dictionary = Record<string, string>
+
+const locales: Partial<Record<Locale, Dictionary>> = {
   en,
-  'zh-TW': zhTW,
-  'zh-CN': zhCN,
-  ja,
-  ko,
 }
+
+const localeLoaders: Record<Exclude<Locale, 'en'>, () => Promise<{ default: Dictionary }>> = {
+  'zh-TW': () => import('./zh-TW'),
+  'zh-CN': () => import('./zh-CN'),
+  ja: () => import('./ja'),
+  ko: () => import('./ko'),
+}
+
+const pendingLocales = new Map<Locale, Promise<void>>()
 
 let currentLocale: Locale = DEFAULT_LOCALE
 
@@ -52,7 +55,8 @@ export function resolveLocale(preferences?: string | readonly string[] | null): 
   for (const candidate of candidates) {
     const language = candidate.toLowerCase()
     if (language === 'zh-cn' || language.startsWith('zh-hans')) return 'zh-CN'
-    if (language === 'zh-tw' || language === 'zh-hk' || language.startsWith('zh-hant')) return 'zh-TW'
+    if (language === 'zh-tw' || language === 'zh-hk' || language.startsWith('zh-hant'))
+      return 'zh-TW'
     if (language.startsWith('zh')) return 'zh-TW'
     if (language.startsWith('ja')) return 'ja'
     if (language.startsWith('ko')) return 'ko'
@@ -67,6 +71,20 @@ export function detectBrowserLocale(): Locale {
   return resolveLocale(navigator.languages?.length ? navigator.languages : navigator.language)
 }
 
+export async function loadLocale(locale: Locale): Promise<void> {
+  if (locales[locale]) return
+  const existing = pendingLocales.get(locale)
+  if (existing) return existing
+  if (locale === 'en') return
+
+  const pending = localeLoaders[locale]().then((module) => {
+    locales[locale] = module.default
+    pendingLocales.delete(locale)
+  })
+  pendingLocales.set(locale, pending)
+  return pending
+}
+
 export function setLocale(locale: Locale) {
   if (locales[locale]) currentLocale = locale
 }
@@ -76,7 +94,7 @@ export function getLocale(): Locale {
 }
 
 export function t(key: string, params?: Record<string, string | number>): string {
-  let value = locales[currentLocale]?.[key] ?? locales['en']?.[key] ?? key
+  let value = locales[currentLocale]?.[key] ?? en[key] ?? key
 
   // Plural support: "singular|plural" format
   if (params && 'count' in params && value.includes('|')) {

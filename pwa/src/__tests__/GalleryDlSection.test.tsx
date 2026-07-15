@@ -39,7 +39,7 @@ vi.mock('@/lib/ws', () => ({
   useWsGdlUpgrade: () => ({ lastGdlUpgrade: h.lastGdlUpgrade }),
 }))
 
-import { GalleryDlSection } from '@/app/settings/workers/page'
+import { GalleryDlSection } from '@/components/settings/GalleryDlSection'
 import { toast } from 'sonner'
 
 beforeEach(() => {

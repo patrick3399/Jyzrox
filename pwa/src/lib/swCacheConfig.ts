@@ -35,3 +35,10 @@ export function sendConfigToSW(config: SWCacheConfig): void {
     reg.active?.postMessage({ type: 'SW_CACHE_CONFIG', config })
   })
 }
+
+export function replayOfflineQueue(): void {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+  navigator.serviceWorker.ready.then((registration) => {
+    registration.active?.postMessage({ type: 'SW_REPLAY_QUEUE' })
+  })
+}
