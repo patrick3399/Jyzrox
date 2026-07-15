@@ -3,7 +3,7 @@ Unit tests for worker/reconciliation.py.
 
 Covers:
 - Cron gate not reached → skipped result
-- Empty / non-existent library path → completes with zero counts
+- Missing library path or suspiciously empty root → aborts without mutation
 - Broken symlinks removed from filesystem
 - Empty gallery directories removed from DB
 - Orphan galleries (in DB but not on disk) cleaned
@@ -191,8 +191,8 @@ class TestReconciliationJob:
         assert result["status"] == "skipped"
         assert result["reason"] == "interval_not_reached"
 
-    async def test_nonexistent_library_path_returns_done_with_zero_counts(self, tmp_path):
-        """If data_library_path does not exist, returns done with all-zero stats."""
+    async def test_nonexistent_library_path_aborts_with_zero_counts(self, tmp_path):
+        """If data_library_path does not exist, abort without touching DB data."""
         from worker.reconciliation import reconciliation_job
 
         ctx = _make_ctx()
@@ -208,7 +208,8 @@ class TestReconciliationJob:
         ):
             result = await reconciliation_job(ctx)
 
-        assert result["status"] == "done"
+        assert result["status"] == "aborted"
+        assert result["reason"] == "library_root_missing"
         assert result["removed_images"] == 0
         assert result["removed_galleries"] == 0
         assert result["orphan_blobs_cleaned"] == 0
@@ -382,8 +383,70 @@ class TestReconciliationJob:
         ):
             result = await reconciliation_job(ctx)
 
+        assert result["status"] == "aborted"
+        assert result["reason"] == "library_root_empty_with_db_galleries"
+        assert result["removed_galleries"] == 0
+
+    async def test_missing_gallery_directory_is_rebuilt_from_database(self, tmp_path):
+        """A partial library-tree loss rebuilds derived links instead of deleting DB rows."""
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        existing_dir = lib_base / "src_a" / "existing"
+        existing_dir.mkdir(parents=True)
+        (existing_dir / "keep.jpg").write_bytes(b"image")
+        (existing_dir / "info.json").write_text("{}", encoding="utf-8")
+
+        mock_settings = MagicMock()
+        mock_settings.data_library_path = str(lib_base)
+        mock_settings.data_cas_path = str(tmp_path / "cas")
+
+        existing_gallery = MagicMock(id=1, source="src_a", source_id="existing", import_mode="copy", deleted_at=None)
+        missing_gallery = MagicMock(
+            id=2,
+            source="src_a",
+            source_id="missing",
+            import_mode="link",
+            deleted_at=None,
+        )
+        missing_gallery.category = None
+        missing_gallery.language = None
+        missing_gallery.uploader = None
+        missing_gallery.artist_id = None
+        missing_gallery.pages = 1
+        missing_gallery.source_url = None
+        missing_gallery.tags_array = []
+        missing_gallery.posted_at = None
+        blob = MagicMock()
+        image_row = MagicMock(gallery_id=2, filename="page.jpg", Blob=blob)
+
+        execute_returns = [
+            _make_result_with_rows([existing_gallery]),  # Phase 1 gallery lookup
+            _make_result_with_rows([]),  # Phase 1 image lookup
+            _make_result_with_rows([_orphan_row(1, "src_a", "existing", "copy"), _orphan_row(2, "src_a", "missing")]),
+            _make_result_with_rows([missing_gallery]),  # Phase 2 full galleries
+            _make_result_with_rows([image_row]),  # Phase 2 images/blob metadata
+            _make_result_with_rows([]),  # Phase 3 blob GC
+        ]
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+        symlink_spy = AsyncMock()
+        sidecar_spy = AsyncMock(return_value=True)
+
+        with (
+            patch("worker.reconciliation._cron_should_run", new_callable=AsyncMock, return_value=True),
+            patch("worker.reconciliation._cron_record", new_callable=AsyncMock),
+            patch("worker.reconciliation.settings", mock_settings),
+            patch("worker.reconciliation.AsyncSessionLocal", return_value=session),
+            patch("worker.reconciliation.create_library_symlink", symlink_spy),
+            patch("worker.reconciliation.write_gallery_sidecar", sidecar_spy),
+        ):
+            result = await reconciliation_job(_make_ctx())
+
         assert result["status"] == "done"
         assert result["removed_galleries"] == 0
+        assert result["repaired_galleries"] == 1
+        symlink_spy.assert_awaited_once_with("src_a", "missing", "page.jpg", blob)
+        sidecar_spy.assert_awaited_once()
 
     async def test_orphan_blobs_deleted_from_cas_and_db(self, tmp_path):
         """Blobs with ref_count<=0 and actual_refs==0 should have CAS files deleted."""
@@ -593,6 +656,7 @@ class TestReconciliationJob:
         session = _make_session_ctx(
             execute_side_effects=[
                 _make_result_with_rows([]),  # Phase 1 Gallery query
+                _make_result_with_rows([]),  # Phase 1 sanitized fallback
                 _make_result_with_rows([]),  # Phase 1 Images query
                 _make_result_with_rows([]),  # Phase 2
                 _make_result_with_rows([]),  # Phase 3
@@ -606,7 +670,6 @@ class TestReconciliationJob:
             patch("os.scandir", side_effect=_scandir_side_effect),
             # os.unlink raises OSError — should be swallowed
             patch("os.unlink", side_effect=OSError("permission denied")),
-            patch("pathlib.Path.exists", return_value=False),
             patch("worker.reconciliation.AsyncSessionLocal", return_value=session),
             patch("worker.reconciliation.cas_path", return_value=MagicMock(exists=MagicMock(return_value=False))),
             patch("worker.reconciliation.thumb_dir", return_value=MagicMock(exists=MagicMock(return_value=False))),

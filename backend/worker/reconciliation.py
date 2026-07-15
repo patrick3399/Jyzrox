@@ -107,15 +107,17 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
         "removed_galleries": 0,
         "orphan_blobs_cleaned": 0,
         "repaired_links": 0,
+        "repaired_galleries": 0,
         "sidecars_written": 0,
         "cas_orphans_removed": 0,
     }
 
     lib_base = Path(settings.data_library_path)
     if not lib_base.exists():
-        logger.info("[reconcile] library path does not exist, nothing to do")
-        await _cron_record(ctx, "reconciliation", "ok")
-        return {"status": "done", **stats}
+        reason = "library_root_missing"
+        logger.error("[reconcile] Aborting because library root is missing: %s", lib_base)
+        await _cron_record(ctx, "reconciliation", "aborted", reason)
+        return {"status": "aborted", "reason": reason, **stats}
 
     # ── Phase 1: Scan filesystem once, batch-query DB, reconcile in chunks ──
 
@@ -310,35 +312,57 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
         total_orphans = len(orphan_gallery_ids)
         logger.info("[reconcile] Phase 2: %d orphan galleries found", total_orphans)
 
+        if total_fs == 0 and db_gallery_rows:
+            reason = "library_root_empty_with_db_galleries"
+            logger.error(
+                "[reconcile] Aborting destructive phases: library root is empty but DB contains %d galleries",
+                len(db_gallery_rows),
+            )
+            await _cron_record(ctx, "reconciliation", "aborted", reason)
+            return {"status": "aborted", "reason": reason, **stats}
+
         processed_p2 = 0
         for chunk_start in range(0, total_orphans, _CHUNK):
             chunk_ids = orphan_gallery_ids[chunk_start : chunk_start + _CHUNK]
 
-            # Batch-fetch blob shas for images in these galleries
-            orphan_rows = (
-                await session.execute(select(Image.id, Image.blob_sha256).where(Image.gallery_id.in_(chunk_ids)))
-            ).all()
-
-            if orphan_rows:
-                orphan_img_ids = [r.id for r in orphan_rows]
-                orphan_shas = [r.blob_sha256 for r in orphan_rows]
-                await session.execute(
-                    text("UPDATE blobs SET ref_count = ref_count - 1 WHERE sha256 = ANY(:shas)"),
-                    {"shas": orphan_shas},
-                )
-                await session.execute(
-                    text("DELETE FROM images WHERE id = ANY(:ids)"),
-                    {"ids": orphan_img_ids},
-                )
-                stats["removed_images"] += len(orphan_img_ids)
-
-            await session.execute(
-                text("DELETE FROM galleries WHERE id = ANY(:ids)"),
-                {"ids": chunk_ids},
+            orphan_galleries = (
+                (await session.execute(select(Gallery).where(Gallery.id.in_(chunk_ids)))).scalars().all()
             )
-            stats["removed_galleries"] += len(chunk_ids)
+            orphan_rows = (
+                await session.execute(
+                    select(Image.gallery_id, Image.filename, Blob)
+                    .join(Blob, Blob.sha256 == Image.blob_sha256)
+                    .where(Image.gallery_id.in_(chunk_ids))
+                )
+            ).all()
+            rows_by_gallery: dict[int, list] = {}
+            for row in orphan_rows:
+                rows_by_gallery.setdefault(row.gallery_id, []).append(row)
 
-            await session.commit()
+            # Missing library directories are repairable derived state. Rebuild
+            # them from DB/blob metadata instead of deleting the source of truth.
+            for gallery in orphan_galleries:
+                for row in rows_by_gallery.get(gallery.id, []):
+                    if not row.filename:
+                        continue
+                    try:
+                        await create_library_symlink(gallery.source, gallery.source_id, row.filename, row.Blob)
+                        stats["repaired_links"] += 1
+                    except Exception as exc:
+                        logger.warning(
+                            "[reconcile] failed to rebuild gallery=%d file=%s: %s",
+                            gallery.id,
+                            row.filename,
+                            exc,
+                        )
+                if await write_gallery_sidecar(
+                    gallery.source,
+                    gallery.source_id,
+                    sidecar_payload_from_gallery(gallery),
+                ):
+                    stats["sidecars_written"] += 1
+                    stats["repaired_galleries"] += 1
+
             processed_p2 += len(chunk_ids)
             await r.setex(
                 "reconcile:progress",
@@ -346,7 +370,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                 json.dumps({"phase": 2, "processed": processed_p2, "total": total_orphans}),
             )
 
-        logger.info("[reconcile] Phase 2 done: removed %d orphan galleries", stats["removed_galleries"])
+        logger.info("[reconcile] Phase 2 done: repaired %d orphan galleries", stats["repaired_galleries"])
 
     # ── Phase 3: Blob GC — single batch query with actual ref counts ──
 

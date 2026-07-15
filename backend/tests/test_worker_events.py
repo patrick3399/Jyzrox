@@ -360,8 +360,8 @@ class TestReconciliationJobEmitsEvent:
         assert result["status"] == "skipped"
         mock_emit.assert_not_awaited()
 
-    async def test_reconciliation_emit_failure_does_not_break_job(self):
-        """If emit raises, reconciliation_job still returns its normal result."""
+    async def test_reconciliation_missing_root_aborts_without_emitting(self):
+        """A missing library root aborts before a completion event is emitted."""
         from worker.reconciliation import reconciliation_job
 
         redis = _make_redis()
@@ -372,12 +372,13 @@ class TestReconciliationJobEmitsEvent:
             patch("worker.reconciliation._cron_should_run", AsyncMock(return_value=True)),
             patch("worker.reconciliation._cron_record", AsyncMock()),
             patch("worker.reconciliation.Path.exists", return_value=False),
-            patch("core.events.emit", side_effect=RuntimeError("Redis down")),
+            patch("core.events.emit", new_callable=AsyncMock) as mock_emit,
         ):
             result = await reconciliation_job(ctx)
 
-        # Library path does not exist → returns early with done status
-        assert result["status"] == "done"
+        assert result["status"] == "aborted"
+        assert result["reason"] == "library_root_missing"
+        mock_emit.assert_not_awaited()
 
 
 # ---------------------------------------------------------------------------
