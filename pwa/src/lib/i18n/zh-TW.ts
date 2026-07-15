@@ -2099,6 +2099,26 @@ const zhTW: Record<string, string> = {
   'datasets.tagQueryTruncated': '標籤查詢符合超過 5,000 張圖片，請縮小條件後再加入其餘圖片。',
   'datasets.addToDataset': '加入資料集',
   'datasets.addFailed': '加入資料集失敗',
+  'datasets.filters': '過濾器',
+  'datasets.filtersTitle': '自動過濾器',
+  'datasets.filtersHint':
+    '套用前可先預覽。手動排除永遠保留；清空數值後套用只會還原自動排除的圖片。',
+  'datasets.minWidth': '最小寬度（px）',
+  'datasets.minHeight': '最小高度（px）',
+  'datasets.maxAspectRatio': '最大長寬比',
+  'datasets.previewFilters': '預覽',
+  'datasets.applyFilters': '套用過濾器',
+  'datasets.clearFilters': '清空數值',
+  'datasets.filtersApplied': '已套用過濾器；變更 {count} 筆成員狀態',
+  'datasets.previewAutoExcluded': '自動排除 {count} 張',
+  'datasets.previewRemaining': '保留 {count} 張',
+  'datasets.previewRestored': '將還原 {count} 張',
+  'datasets.previewResolution': '解析度不足 {count} 張',
+  'datasets.previewAspectRatio': '極端長寬比 {count} 張',
+  'datasets.previewUnknown': '缺少尺寸 {count} 張',
+  'datasets.exclusionManual': '手動排除',
+  'datasets.exclusionMinResolution': '低於最小解析度',
+  'datasets.exclusionAspectRatio': '極端長寬比',
 }
 
 export default zhTW

@@ -2145,6 +2145,26 @@ const ja: Record<string, string> = {
     'タグクエリが 5,000 枚を超えました。条件を絞って残りを追加してください。',
   'datasets.addToDataset': 'データセットに追加',
   'datasets.addFailed': 'データセットへの追加に失敗しました',
+  'datasets.filters': 'フィルター',
+  'datasets.filtersTitle': '自動フィルター',
+  'datasets.filtersHint':
+    '適用前にプレビューできます。手動除外は保持され、値を消して適用すると自動除外のみ復元します。',
+  'datasets.minWidth': '最小幅（px）',
+  'datasets.minHeight': '最小高さ（px）',
+  'datasets.maxAspectRatio': '最大アスペクト比',
+  'datasets.previewFilters': 'プレビュー',
+  'datasets.applyFilters': 'フィルターを適用',
+  'datasets.clearFilters': '値をクリア',
+  'datasets.filtersApplied': 'フィルターを適用し、{count} 件を変更しました',
+  'datasets.previewAutoExcluded': '{count} 枚を自動除外',
+  'datasets.previewRemaining': '{count} 枚を保持',
+  'datasets.previewRestored': '{count} 枚を復元予定',
+  'datasets.previewResolution': '解像度不足 {count} 枚',
+  'datasets.previewAspectRatio': '極端な比率 {count} 枚',
+  'datasets.previewUnknown': 'サイズ不明 {count} 枚',
+  'datasets.exclusionManual': '手動除外',
+  'datasets.exclusionMinResolution': '最小解像度未満',
+  'datasets.exclusionAspectRatio': '極端なアスペクト比',
 }
 
 export default ja

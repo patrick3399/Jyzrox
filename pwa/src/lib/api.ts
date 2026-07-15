@@ -47,6 +47,8 @@ import type {
   Collection,
   Dataset,
   DatasetDetail,
+  DatasetFilterConfig,
+  DatasetFilterReport,
   DatasetSelection,
   LibraryFile,
   ScheduledTask,
@@ -1771,6 +1773,18 @@ const datasets = {
   excludeImage: (id: number, imageId: number) =>
     apiFetch<{ status: string; state: 'excluded' }>(`/api/datasets/${id}/images/${imageId}`, {
       method: 'DELETE',
+    }),
+
+  previewFilters: (id: number, filters: DatasetFilterConfig) =>
+    apiFetch<DatasetFilterReport>(`/api/datasets/${id}/filters/preview`, {
+      method: 'POST',
+      body: JSON.stringify(filters),
+    }),
+
+  applyFilters: (id: number, filters: DatasetFilterConfig) =>
+    apiFetch<DatasetFilterReport & { changed: number }>(`/api/datasets/${id}/filters/apply`, {
+      method: 'POST',
+      body: JSON.stringify(filters),
     }),
 }
 

@@ -39,6 +39,7 @@ async def _gallery_with_images(
     active: int = 2,
     hidden: int = 0,
     tags: list[str] | None = None,
+    dimensions: list[tuple[int | None, int | None]] | None = None,
 ) -> tuple[Gallery, list[Image]]:
     gallery = Gallery(
         source="local",
@@ -61,12 +62,13 @@ async def _gallery_with_images(
     images = []
     for index in range(active + hidden):
         sha = f"dataset-{source_id}-{index}"
+        width, height = dimensions[index] if dimensions is not None else (1024 + index, 1024)
         blob = Blob(
             sha256=sha,
             file_size=100,
             extension=".jpg",
-            width=1024 + index,
-            height=1024,
+            width=width,
+            height=height,
         )
         db.add(blob)
         await db.flush()
@@ -268,10 +270,76 @@ async def test_exclude_and_reinclude_dataset_image_is_durable(db_session, make_c
     assert excluded.status_code == 200
     assert excluded_view.json()["excluded_count"] == 1
     assert excluded_view.json()["images"][0]["state"] == "excluded"
+    assert excluded_view.json()["images"][0]["exclusion_reason"] == "manual"
     assert reincluded.json()["added"] == 1
     assert included_view.json()["member_count"] == 1
     assert included_view.json()["images"][0]["source"] == "manual"
     assert included_view.json()["images"][0]["thumb_url"].endswith(f"/{images[0].blob_sha256}/thumb_160.webp")
+
+
+async def test_dataset_filters_preview_apply_and_relax_preserve_manual_exclusions(db_session, make_client):
+    await _user(db_session, 1)
+    _, images = await _gallery_with_images(
+        db_session,
+        owner_id=1,
+        source_id="automatic-filters",
+        active=4,
+        dimensions=[(512, 512), (2048, 2048), (5000, 1200), (None, None)],
+    )
+
+    with patch("routers.datasets.emit_safe", new_callable=AsyncMock):
+        async with make_client(user_id=1) as ac:
+            created = await ac.post(
+                "/api/datasets/",
+                json={"name": "Filtered", "image_ids": [image.id for image in images]},
+            )
+            dataset_id = created.json()["id"]
+            preview = await ac.post(
+                f"/api/datasets/{dataset_id}/filters/preview",
+                json={"min_width": 1024, "min_height": 1024, "max_aspect_ratio": 4},
+            )
+            before_apply = await ac.get(f"/api/datasets/{dataset_id}")
+            applied = await ac.post(
+                f"/api/datasets/{dataset_id}/filters/apply",
+                json={"min_width": 1024, "min_height": 1024, "max_aspect_ratio": 4},
+            )
+            excluded = await ac.get(f"/api/datasets/{dataset_id}?state=excluded")
+            await ac.delete(f"/api/datasets/{dataset_id}/images/{images[1].id}")
+            relaxed = await ac.post(f"/api/datasets/{dataset_id}/filters/apply", json={})
+            final_excluded = await ac.get(f"/api/datasets/{dataset_id}?state=excluded")
+            final_included = await ac.get(f"/api/datasets/{dataset_id}")
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json() == {
+        "status": "ok",
+        "filters": {"min_width": 1024, "min_height": 1024, "max_aspect_ratio": 4.0},
+        "total": 4,
+        "auto_excluded": 2,
+        "newly_excluded": 2,
+        "would_restore": 0,
+        "manual_excluded": 0,
+        "remaining": 2,
+        "unknown_dimensions": 1,
+        "reasons": {"min_resolution": 1, "aspect_ratio": 1},
+    }
+    assert before_apply.json()["member_count"] == 4
+    assert applied.json()["changed"] == 2
+    assert {image["exclusion_reason"] for image in excluded.json()["images"]} == {
+        "min_resolution",
+        "aspect_ratio",
+    }
+    assert relaxed.json()["would_restore"] == 2
+    assert relaxed.json()["manual_excluded"] == 1
+    assert relaxed.json()["changed"] == 2
+    assert final_excluded.json()["total"] == 1
+    assert final_excluded.json()["images"][0]["id"] == images[1].id
+    assert final_excluded.json()["images"][0]["exclusion_reason"] == "manual"
+    assert final_included.json()["member_count"] == 3
+    assert final_included.json()["selection_spec"]["filters"] == {
+        "min_width": None,
+        "min_height": None,
+        "max_aspect_ratio": None,
+    }
 
 
 async def test_dataset_is_private_to_owner(db_session, make_client):

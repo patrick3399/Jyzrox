@@ -2,7 +2,7 @@
 
 import { Suspense, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { Check, ImageOff, Pencil, Plus, RotateCcw, X } from 'lucide-react'
+import { Check, ImageOff, Pencil, Plus, RotateCcw, SlidersHorizontal, X } from 'lucide-react'
 import { toast } from 'sonner'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -10,14 +10,28 @@ import { Pagination } from '@/components/Pagination'
 import { useLocale } from '@/components/LocaleProvider'
 import {
   useAddDatasetMembers,
+  useApplyDatasetFilters,
   useDataset,
   useExcludeDatasetImage,
+  usePreviewDatasetFilters,
   useUpdateDataset,
 } from '@/hooks/useDatasets'
 import { parseDatasetIds } from '@/lib/datasets'
 import { t } from '@/lib/i18n'
+import type { DatasetFilterConfig, DatasetFilterReport } from '@/lib/types'
 
 const PAGE_LIMIT = 48
+
+function optionalNumber(value: string): number | null {
+  return value.trim() ? Number(value) : null
+}
+
+function exclusionReasonLabel(reason: string): string {
+  if (reason === 'manual') return t('datasets.exclusionManual')
+  if (reason === 'min_resolution') return t('datasets.exclusionMinResolution')
+  if (reason === 'aspect_ratio') return t('datasets.exclusionAspectRatio')
+  return reason
+}
 
 function DatasetDetailInner() {
   useLocale()
@@ -33,6 +47,8 @@ function DatasetDetailInner() {
   const { trigger: update } = useUpdateDataset()
   const { trigger: addMembers } = useAddDatasetMembers()
   const { trigger: excludeImage } = useExcludeDatasetImage()
+  const { trigger: previewFilters } = usePreviewDatasetFilters()
+  const { trigger: applyFilters } = useApplyDatasetFilters()
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
@@ -41,6 +57,11 @@ function DatasetDetailInner() {
   const [collectionIds, setCollectionIds] = useState('')
   const [imageIds, setImageIds] = useState('')
   const [tagQuery, setTagQuery] = useState('')
+  const [showFilters, setShowFilters] = useState(false)
+  const [minWidth, setMinWidth] = useState('')
+  const [minHeight, setMinHeight] = useState('')
+  const [maxAspectRatio, setMaxAspectRatio] = useState('')
+  const [filterPreview, setFilterPreview] = useState<DatasetFilterReport | null>(null)
   const [busy, setBusy] = useState(false)
 
   const startEditing = () => {
@@ -108,6 +129,46 @@ function DatasetDetailInner() {
     }
   }
 
+  const openFilters = () => {
+    const filters = data?.selection_spec.filters
+    setMinWidth(filters?.min_width == null ? '' : String(filters.min_width))
+    setMinHeight(filters?.min_height == null ? '' : String(filters.min_height))
+    setMaxAspectRatio(filters?.max_aspect_ratio == null ? '' : String(filters.max_aspect_ratio))
+    setFilterPreview(null)
+    setShowFilters(true)
+  }
+
+  const filterConfig = (): DatasetFilterConfig => ({
+    min_width: optionalNumber(minWidth),
+    min_height: optionalNumber(minHeight),
+    max_aspect_ratio: optionalNumber(maxAspectRatio),
+  })
+
+  const handlePreviewFilters = async () => {
+    setBusy(true)
+    try {
+      setFilterPreview(await previewFilters({ id, filters: filterConfig() }))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('common.error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleApplyFilters = async () => {
+    setBusy(true)
+    try {
+      const result = await applyFilters({ id, filters: filterConfig() })
+      setFilterPreview(result)
+      await mutate()
+      toast.success(t('datasets.filtersApplied', { count: String(result.changed) }))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('common.error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-4">
@@ -165,13 +226,22 @@ function DatasetDetailInner() {
             </div>
           )}
         </div>
-        <button
-          onClick={() => setShowAdd((value) => !value)}
-          className="flex shrink-0 items-center gap-1.5 rounded-lg bg-vault-accent px-3 py-2 text-sm font-medium text-vault-accent-fg"
-        >
-          <Plus size={16} />
-          {t('datasets.addMembers')}
-        </button>
+        <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <button
+            onClick={openFilters}
+            className="flex items-center gap-1.5 rounded-lg border border-vault-border bg-vault-card px-3 py-2 text-sm font-medium text-vault-text transition-colors hover:border-vault-accent/50"
+          >
+            <SlidersHorizontal size={16} />
+            {t('datasets.filters')}
+          </button>
+          <button
+            onClick={() => setShowAdd((value) => !value)}
+            className="flex items-center gap-1.5 rounded-lg bg-vault-accent px-3 py-2 text-sm font-medium text-vault-accent-fg"
+          >
+            <Plus size={16} />
+            {t('datasets.addMembers')}
+          </button>
+        </div>
       </div>
 
       {showAdd && (
@@ -219,6 +289,124 @@ function DatasetDetailInner() {
               className="rounded-lg border border-vault-border px-4 py-2 text-sm text-vault-text-secondary"
             >
               {t('common.cancel')}
+            </button>
+          </div>
+        </section>
+      )}
+
+      {showFilters && (
+        <section className="space-y-4 rounded-xl border border-vault-border bg-vault-card p-4">
+          <div className="flex items-start justify-between gap-3">
+            <div>
+              <h2 className="font-semibold text-vault-text">{t('datasets.filtersTitle')}</h2>
+              <p className="mt-1 text-sm text-vault-text-secondary">{t('datasets.filtersHint')}</p>
+            </div>
+            <button
+              onClick={() => setShowFilters(false)}
+              className="rounded p-1 text-vault-text-secondary hover:text-vault-text"
+              aria-label={t('common.close')}
+            >
+              <X size={16} />
+            </button>
+          </div>
+          <div className="grid gap-3 sm:grid-cols-3">
+            <label className="space-y-1 text-sm text-vault-text-secondary">
+              <span>{t('datasets.minWidth')}</span>
+              <input
+                type="number"
+                min="1"
+                value={minWidth}
+                onChange={(event) => {
+                  setMinWidth(event.target.value)
+                  setFilterPreview(null)
+                }}
+                className="w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text outline-none focus:ring-1 focus:ring-vault-accent"
+                placeholder="1024"
+              />
+            </label>
+            <label className="space-y-1 text-sm text-vault-text-secondary">
+              <span>{t('datasets.minHeight')}</span>
+              <input
+                type="number"
+                min="1"
+                value={minHeight}
+                onChange={(event) => {
+                  setMinHeight(event.target.value)
+                  setFilterPreview(null)
+                }}
+                className="w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text outline-none focus:ring-1 focus:ring-vault-accent"
+                placeholder="1024"
+              />
+            </label>
+            <label className="space-y-1 text-sm text-vault-text-secondary">
+              <span>{t('datasets.maxAspectRatio')}</span>
+              <input
+                type="number"
+                min="1.01"
+                max="100"
+                step="0.1"
+                value={maxAspectRatio}
+                onChange={(event) => {
+                  setMaxAspectRatio(event.target.value)
+                  setFilterPreview(null)
+                }}
+                className="w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text outline-none focus:ring-1 focus:ring-vault-accent"
+                placeholder="4"
+              />
+            </label>
+          </div>
+          {filterPreview && (
+            <div className="grid gap-2 rounded-lg bg-vault-bg p-3 text-sm sm:grid-cols-3">
+              <span className="text-vault-text">
+                {t('datasets.previewAutoExcluded', { count: String(filterPreview.auto_excluded) })}
+              </span>
+              <span className="text-vault-text">
+                {t('datasets.previewRemaining', { count: String(filterPreview.remaining) })}
+              </span>
+              <span className="text-vault-text-secondary">
+                {t('datasets.previewRestored', { count: String(filterPreview.would_restore) })}
+              </span>
+              <span className="text-vault-text-secondary">
+                {t('datasets.previewResolution', {
+                  count: String(filterPreview.reasons.min_resolution),
+                })}
+              </span>
+              <span className="text-vault-text-secondary">
+                {t('datasets.previewAspectRatio', {
+                  count: String(filterPreview.reasons.aspect_ratio),
+                })}
+              </span>
+              <span className="text-vault-text-secondary">
+                {t('datasets.previewUnknown', { count: String(filterPreview.unknown_dimensions) })}
+              </span>
+            </div>
+          )}
+          <div className="flex flex-wrap gap-2">
+            <button
+              onClick={handlePreviewFilters}
+              disabled={busy}
+              className="rounded-lg border border-vault-accent px-4 py-2 text-sm font-medium text-vault-accent disabled:opacity-50"
+            >
+              {t('datasets.previewFilters')}
+            </button>
+            <button
+              onClick={handleApplyFilters}
+              disabled={busy}
+              className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-vault-accent-fg disabled:opacity-50"
+            >
+              {busy ? t('common.loading') : t('datasets.applyFilters')}
+            </button>
+            <button
+              onClick={() => {
+                setMinWidth('')
+                setMinHeight('')
+                setMaxAspectRatio('')
+                setFilterPreview(null)
+              }}
+              disabled={busy}
+              className="rounded-lg border border-vault-border px-4 py-2 text-sm text-vault-text-secondary disabled:opacity-50"
+            >
+              {t('datasets.clearFilters')}
             </button>
           </div>
         </section>
@@ -290,6 +478,11 @@ function DatasetDetailInner() {
                 <p className="truncate text-vault-text-secondary">
                   #{image.page_num} · {image.source}
                 </p>
+                {image.exclusion_reason && (
+                  <p className="truncate text-red-400">
+                    {exclusionReasonLabel(image.exclusion_reason)}
+                  </p>
+                )}
               </div>
             </article>
           ))}

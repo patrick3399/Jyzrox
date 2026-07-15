@@ -2124,6 +2124,26 @@ const ko: Record<string, string> = {
     '태그 쿼리가 5,000개를 초과했습니다. 조건을 좁혀 나머지를 추가하세요.',
   'datasets.addToDataset': '데이터셋에 추가',
   'datasets.addFailed': '데이터셋에 이미지를 추가하지 못했습니다',
+  'datasets.filters': '필터',
+  'datasets.filtersTitle': '자동 필터',
+  'datasets.filtersHint':
+    '적용 전에 미리 볼 수 있습니다. 수동 제외는 유지되며 값을 비우고 적용하면 자동 제외만 복원합니다.',
+  'datasets.minWidth': '최소 너비(px)',
+  'datasets.minHeight': '최소 높이(px)',
+  'datasets.maxAspectRatio': '최대 종횡비',
+  'datasets.previewFilters': '미리 보기',
+  'datasets.applyFilters': '필터 적용',
+  'datasets.clearFilters': '값 지우기',
+  'datasets.filtersApplied': '필터 적용 완료; {count}개 멤버십 변경',
+  'datasets.previewAutoExcluded': '{count}개 자동 제외',
+  'datasets.previewRemaining': '{count}개 유지',
+  'datasets.previewRestored': '{count}개 복원 예정',
+  'datasets.previewResolution': '해상도 부족 {count}개',
+  'datasets.previewAspectRatio': '극단 종횡비 {count}개',
+  'datasets.previewUnknown': '크기 정보 없음 {count}개',
+  'datasets.exclusionManual': '수동 제외',
+  'datasets.exclusionMinResolution': '최소 해상도 미만',
+  'datasets.exclusionAspectRatio': '극단 종횡비',
 }
 
 export default ko

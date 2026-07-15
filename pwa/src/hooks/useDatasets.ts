@@ -1,7 +1,7 @@
 import useSWR from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { api } from '@/lib/api'
-import type { DatasetSelection } from '@/lib/types'
+import type { DatasetFilterConfig, DatasetSelection } from '@/lib/types'
 
 export function useDatasets(enabled = true) {
   return useSWR(enabled ? 'datasets' : null, () => api.datasets.list())
@@ -55,5 +55,21 @@ export function useExcludeDatasetImage() {
     'datasets',
     (_key: unknown, { arg }: { arg: { id: number; imageId: number } }) =>
       api.datasets.excludeImage(arg.id, arg.imageId),
+  )
+}
+
+export function usePreviewDatasetFilters() {
+  return useSWRMutation(
+    'datasets',
+    (_key: unknown, { arg }: { arg: { id: number; filters: DatasetFilterConfig } }) =>
+      api.datasets.previewFilters(arg.id, arg.filters),
+  )
+}
+
+export function useApplyDatasetFilters() {
+  return useSWRMutation(
+    'datasets',
+    (_key: unknown, { arg }: { arg: { id: number; filters: DatasetFilterConfig } }) =>
+      api.datasets.applyFilters(arg.id, arg.filters),
   )
 }

@@ -751,6 +751,7 @@ _SQLITE_SCHEMA = [
         image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
         state TEXT NOT NULL DEFAULT 'included',
         source TEXT NOT NULL DEFAULT 'manual',
+        exclusion_reason TEXT,
         added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (dataset_id, image_id),

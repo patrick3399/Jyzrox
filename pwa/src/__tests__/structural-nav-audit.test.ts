@@ -71,6 +71,16 @@ describe('structural-nav-audit — Library Dataset selection', () => {
   })
 })
 
+describe('structural-nav-audit — Dataset automatic filters', () => {
+  it('wires preview, apply, and exclusion provenance into the review page', () => {
+    const page = src('app/datasets/[id]/page.tsx')
+    expect(page).toContain('usePreviewDatasetFilters')
+    expect(page).toContain('useApplyDatasetFilters')
+    expect(page).toContain('image.exclusion_reason')
+    expect(page).toContain("t('datasets.previewFilters')")
+  })
+})
+
 describe('structural-nav-audit — E-hentai browse state architecture', () => {
   // The e-hentai browse page runs on a single reducer (lib/ehBrowseState.ts) driven
   // by useEhBrowse (hooks/useEhBrowse.ts). These assertions pin the memory/restore

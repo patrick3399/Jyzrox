@@ -71,6 +71,12 @@ class DatasetPatch(BaseModel):
         return value
 
 
+class DatasetFilterConfig(BaseModel):
+    min_width: int | None = Field(default=None, ge=1, le=100000)
+    min_height: int | None = Field(default=None, ge=1, le=100000)
+    max_aspect_ratio: float | None = Field(default=None, gt=1.0, le=100.0)
+
+
 def _unique_ids(values: list[int]) -> list[int]:
     return list(dict.fromkeys(values))
 
@@ -141,10 +147,12 @@ async def _include_images(
         elif row.state != "included":
             row.state = "included"
             row.source = source
+            row.exclusion_reason = None
             row.updated_at = now
             added += 1
         elif row.source != source:
             row.source = source
+            row.exclusion_reason = None
             row.updated_at = now
     return added, denied
 
@@ -356,6 +364,87 @@ def _serialize_dataset(dataset: Dataset, member_count: int, gallery_count: int, 
     }
 
 
+_AUTO_EXCLUSION_REASONS = frozenset({"min_resolution", "aspect_ratio"})
+
+
+async def _dataset_filter_rows(db: AsyncSession, dataset_id: int, auth: dict) -> list:
+    return list(
+        (
+            await db.execute(
+                select(DatasetImage, Blob)
+                .join(Image, Image.id == DatasetImage.image_id)
+                .join(Gallery, Gallery.id == Image.gallery_id)
+                .join(Blob, Blob.sha256 == Image.blob_sha256)
+                .where(
+                    DatasetImage.dataset_id == dataset_id,
+                    Image.visibility == "active",
+                    gallery_access_filter(auth),
+                )
+                .order_by(Image.id)
+            )
+        ).all()
+    )
+
+
+def _filter_reason(blob: Blob, config: DatasetFilterConfig) -> tuple[str | None, bool]:
+    width = blob.width
+    height = blob.height
+    if config.min_width is None and config.min_height is None and config.max_aspect_ratio is None:
+        return None, False
+    if config.min_width is not None and width is None:
+        return None, True
+    if config.min_height is not None and height is None:
+        return None, True
+    if (config.min_width is not None and width is not None and width < config.min_width) or (
+        config.min_height is not None and height is not None and height < config.min_height
+    ):
+        return "min_resolution", False
+    if config.max_aspect_ratio is not None:
+        if width is None or height is None or width <= 0 or height <= 0:
+            return None, True
+        aspect_ratio = max(width / height, height / width)
+        if aspect_ratio > config.max_aspect_ratio:
+            return "aspect_ratio", False
+    return None, False
+
+
+def _evaluate_filters(rows: list, config: DatasetFilterConfig) -> tuple[list[tuple[DatasetImage, str | None]], dict]:
+    decisions: list[tuple[DatasetImage, str | None]] = []
+    reason_counts = {"min_resolution": 0, "aspect_ratio": 0}
+    manual_excluded = 0
+    unknown_dimensions = 0
+    newly_excluded = 0
+    would_restore = 0
+
+    for member, blob in rows:
+        is_auto_excluded = member.exclusion_reason in _AUTO_EXCLUSION_REASONS
+        if member.state == "excluded" and not is_auto_excluded:
+            manual_excluded += 1
+            continue
+        reason, dimensions_unknown = _filter_reason(blob, config)
+        if dimensions_unknown:
+            unknown_dimensions += 1
+        if reason is not None:
+            reason_counts[reason] += 1
+            if member.state == "included":
+                newly_excluded += 1
+        elif is_auto_excluded:
+            would_restore += 1
+        decisions.append((member, reason))
+
+    auto_excluded = sum(reason_counts.values())
+    return decisions, {
+        "total": len(rows),
+        "auto_excluded": auto_excluded,
+        "newly_excluded": newly_excluded,
+        "would_restore": would_restore,
+        "manual_excluded": manual_excluded,
+        "remaining": len(rows) - manual_excluded - auto_excluded,
+        "unknown_dimensions": unknown_dimensions,
+        "reasons": reason_counts,
+    }
+
+
 @router.get("/")
 async def list_datasets(
     auth: dict = Depends(_member),
@@ -456,6 +545,7 @@ async def get_dataset(
             "thumb_url": thumb_url(blob.sha256),
             "state": member.state,
             "source": member.source,
+            "exclusion_reason": member.exclusion_reason,
         }
         for member, image, gallery, blob in rows
     ]
@@ -492,6 +582,53 @@ async def update_dataset(
         action="updated",
     )
     return {"status": "ok"}
+
+
+@router.post("/{dataset_id}/filters/preview")
+async def preview_dataset_filters(
+    dataset_id: int,
+    body: DatasetFilterConfig,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    await _owned_dataset(db, dataset_id, auth["user_id"])
+    _, report = _evaluate_filters(await _dataset_filter_rows(db, dataset_id, auth), body)
+    return {"status": "ok", "filters": body.model_dump(), **report}
+
+
+@router.post("/{dataset_id}/filters/apply")
+async def apply_dataset_filters(
+    dataset_id: int,
+    body: DatasetFilterConfig,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    dataset = await _owned_dataset(db, dataset_id, auth["user_id"])
+    decisions, report = _evaluate_filters(await _dataset_filter_rows(db, dataset_id, auth), body)
+    now = datetime.now(UTC)
+    changed = 0
+    for member, reason in decisions:
+        next_state = "excluded" if reason is not None else "included"
+        if member.state != next_state or member.exclusion_reason != reason:
+            member.state = next_state
+            member.exclusion_reason = reason
+            member.updated_at = now
+            changed += 1
+    spec = dict(dataset.selection_spec or {})
+    spec["filters"] = body.model_dump()
+    dataset.selection_spec = spec
+    dataset.updated_at = now
+    await db.commit()
+    await emit_safe(
+        EventType.DATASET_UPDATED,
+        actor_user_id=auth["user_id"],
+        resource_type="dataset",
+        resource_id=dataset_id,
+        action="filters_applied",
+        changed=changed,
+        auto_excluded=report["auto_excluded"],
+    )
+    return {"status": "ok", "filters": body.model_dump(), "changed": changed, **report}
 
 
 @router.post("/{dataset_id}/members")
@@ -534,6 +671,7 @@ async def exclude_dataset_image(
     if member is None:
         raise HTTPException(status_code=404, detail="Image is not in dataset")
     member.state = "excluded"
+    member.exclusion_reason = "manual"
     member.updated_at = datetime.now(UTC)
     dataset.updated_at = datetime.now(UTC)
     await db.commit()

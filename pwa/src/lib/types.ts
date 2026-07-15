@@ -517,11 +517,38 @@ export interface DatasetSelection {
   tag_query_limit?: number
 }
 
+export interface DatasetFilterConfig {
+  min_width: number | null
+  min_height: number | null
+  max_aspect_ratio: number | null
+}
+
+export interface DatasetSelectionSpec extends DatasetSelection {
+  filters?: DatasetFilterConfig
+}
+
+export interface DatasetFilterReport {
+  status: 'ok'
+  filters: DatasetFilterConfig
+  total: number
+  auto_excluded: number
+  newly_excluded: number
+  would_restore: number
+  manual_excluded: number
+  remaining: number
+  unknown_dimensions: number
+  reasons: {
+    min_resolution: number
+    aspect_ratio: number
+  }
+  changed?: number
+}
+
 export interface Dataset {
   id: number
   name: string
   description: string | null
-  selection_spec: DatasetSelection
+  selection_spec: DatasetSelectionSpec
   member_count: number
   gallery_count: number
   excluded_count: number
@@ -540,6 +567,7 @@ export interface DatasetImage {
   thumb_url: string
   state: 'included' | 'excluded'
   source: 'gallery' | 'collection' | 'manual' | 'tag_query'
+  exclusion_reason: 'manual' | 'min_resolution' | 'aspect_ratio' | string | null
 }
 
 export interface DatasetDetail extends Dataset {

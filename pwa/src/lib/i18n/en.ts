@@ -2160,6 +2160,26 @@ const en: Record<string, string> = {
     'The tag query matched more than 5,000 images. Refine it before adding the remainder.',
   'datasets.addToDataset': 'Add to Dataset',
   'datasets.addFailed': 'Failed to add images to dataset',
+  'datasets.filters': 'Filters',
+  'datasets.filtersTitle': 'Automatic Filters',
+  'datasets.filtersHint':
+    'Preview before applying. Manual exclusions are always preserved; clearing and applying restores only automatically excluded images.',
+  'datasets.minWidth': 'Minimum width (px)',
+  'datasets.minHeight': 'Minimum height (px)',
+  'datasets.maxAspectRatio': 'Maximum aspect ratio',
+  'datasets.previewFilters': 'Preview',
+  'datasets.applyFilters': 'Apply Filters',
+  'datasets.clearFilters': 'Clear Values',
+  'datasets.filtersApplied': 'Filters applied; {count} memberships changed',
+  'datasets.previewAutoExcluded': '{count} automatically excluded',
+  'datasets.previewRemaining': '{count} remaining',
+  'datasets.previewRestored': '{count} would be restored',
+  'datasets.previewResolution': '{count} below resolution',
+  'datasets.previewAspectRatio': '{count} extreme aspect ratio',
+  'datasets.previewUnknown': '{count} missing dimensions',
+  'datasets.exclusionManual': 'Manually excluded',
+  'datasets.exclusionMinResolution': 'Below minimum resolution',
+  'datasets.exclusionAspectRatio': 'Extreme aspect ratio',
 }
 
 export default en

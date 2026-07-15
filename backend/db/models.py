@@ -546,9 +546,7 @@ class Dataset(Base):
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
-    dataset_images: Mapped[list[DatasetImage]] = relationship(
-        back_populates="dataset", cascade="all, delete-orphan"
-    )
+    dataset_images: Mapped[list[DatasetImage]] = relationship(back_populates="dataset", cascade="all, delete-orphan")
 
 
 class DatasetImage(Base):
@@ -556,14 +554,11 @@ class DatasetImage(Base):
 
     __tablename__ = "dataset_images"
 
-    dataset_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True
-    )
-    image_id: Mapped[int] = mapped_column(
-        BigInteger, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True
-    )
+    dataset_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True)
+    image_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True)
     state: Mapped[str] = mapped_column(Text, nullable=False, default="included", server_default="included")
     source: Mapped[str] = mapped_column(Text, nullable=False, default="manual", server_default="manual")
+    exclusion_reason: Mapped[str | None] = mapped_column(Text, nullable=True)
     added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
     updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 

@@ -444,6 +444,7 @@ CREATE TABLE IF NOT EXISTS dataset_images (
     image_id    BIGINT NOT NULL REFERENCES images(id) ON DELETE CASCADE,
     state       TEXT NOT NULL DEFAULT 'included',
     source      TEXT NOT NULL DEFAULT 'manual',
+    exclusion_reason TEXT,
     added_at    TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at  TIMESTAMPTZ NOT NULL DEFAULT now(),
     PRIMARY KEY (dataset_id, image_id),

@@ -2098,6 +2098,26 @@ const zhCN: Record<string, string> = {
   'datasets.tagQueryTruncated': '标签查询匹配超过 5,000 张图片，请缩小条件后再添加其余图片。',
   'datasets.addToDataset': '添加到数据集',
   'datasets.addFailed': '添加到数据集失败',
+  'datasets.filters': '过滤器',
+  'datasets.filtersTitle': '自动过滤器',
+  'datasets.filtersHint':
+    '应用前可先预览。手动排除始终保留；清空数值后应用只会恢复自动排除的图片。',
+  'datasets.minWidth': '最小宽度（px）',
+  'datasets.minHeight': '最小高度（px）',
+  'datasets.maxAspectRatio': '最大宽高比',
+  'datasets.previewFilters': '预览',
+  'datasets.applyFilters': '应用过滤器',
+  'datasets.clearFilters': '清空数值',
+  'datasets.filtersApplied': '已应用过滤器；更改 {count} 个成员状态',
+  'datasets.previewAutoExcluded': '自动排除 {count} 张',
+  'datasets.previewRemaining': '保留 {count} 张',
+  'datasets.previewRestored': '将恢复 {count} 张',
+  'datasets.previewResolution': '分辨率不足 {count} 张',
+  'datasets.previewAspectRatio': '极端宽高比 {count} 张',
+  'datasets.previewUnknown': '缺少尺寸 {count} 张',
+  'datasets.exclusionManual': '手动排除',
+  'datasets.exclusionMinResolution': '低于最小分辨率',
+  'datasets.exclusionAspectRatio': '极端宽高比',
 }
 
 export default zhCN

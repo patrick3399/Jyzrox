@@ -8,6 +8,8 @@ const apiMocks = vi.hoisted(() => ({
   delete: vi.fn(),
   addMembers: vi.fn(),
   excludeImage: vi.fn(),
+  previewFilters: vi.fn(),
+  applyFilters: vi.fn(),
 }))
 
 vi.mock('@/lib/api', () => ({ api: { datasets: apiMocks } }))
@@ -41,11 +43,13 @@ vi.mock('swr/mutation', () => ({
 
 import {
   useAddDatasetMembers,
+  useApplyDatasetFilters,
   useCreateDataset,
   useDataset,
   useDatasets,
   useDeleteDataset,
   useExcludeDatasetImage,
+  usePreviewDatasetFilters,
   useUpdateDataset,
 } from '@/hooks/useDatasets'
 
@@ -85,18 +89,38 @@ describe('dataset hooks', () => {
     const remove = useDeleteDataset().trigger
     const add = useAddDatasetMembers().trigger
     const exclude = useExcludeDatasetImage().trigger
+    const preview = usePreviewDatasetFilters().trigger
+    const apply = useApplyDatasetFilters().trigger
 
     await create({ name: 'Set', gallery_ids: [1] })
     await update({ id: 2, data: { name: 'Renamed' } })
     await remove(2)
     await add({ id: 2, selection: { image_ids: [9] } })
     await exclude({ id: 2, imageId: 9 })
+    await preview({
+      id: 2,
+      filters: { min_width: 1024, min_height: 1024, max_aspect_ratio: 4 },
+    })
+    await apply({
+      id: 2,
+      filters: { min_width: null, min_height: null, max_aspect_ratio: null },
+    })
 
     expect(apiMocks.create).toHaveBeenCalledWith({ name: 'Set', gallery_ids: [1] })
     expect(apiMocks.update).toHaveBeenCalledWith(2, { name: 'Renamed' })
     expect(apiMocks.delete).toHaveBeenCalledWith(2)
     expect(apiMocks.addMembers).toHaveBeenCalledWith(2, { image_ids: [9] })
     expect(apiMocks.excludeImage).toHaveBeenCalledWith(2, 9)
+    expect(apiMocks.previewFilters).toHaveBeenCalledWith(2, {
+      min_width: 1024,
+      min_height: 1024,
+      max_aspect_ratio: 4,
+    })
+    expect(apiMocks.applyFilters).toHaveBeenCalledWith(2, {
+      min_width: null,
+      min_height: null,
+      max_aspect_ratio: null,
+    })
     expect(mutationCalls.every((call) => call.key === 'datasets')).toBe(true)
   })
 })
