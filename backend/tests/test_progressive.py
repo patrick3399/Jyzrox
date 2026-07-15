@@ -458,6 +458,35 @@ class TestProgressiveImporterAbort:
 class TestProgressiveImporterFinalize:
     """Tests for ProgressiveImporter.finalize()."""
 
+    async def test_finalize_never_rmtrees_shared_gallery_root_wiping_concurrent_galleries(self, tmp_path):
+        """finalize() must refuse to rmtree the shared gallery root, even when a
+        caller passes it as dest_dir.
+
+        Regression: a gallery-dl job whose dest_dir resolved to the /data/gallery
+        root ran rmtree(root) in finalize(), deleting the staging dir of an EH
+        gallery downloading concurrently under /data/gallery/ehentai/<gid>/
+        (EH gid 3746208 incident — 262 pages lost, then ENOENT on metadata.json).
+        """
+        from worker.progressive import ProgressiveImporter
+
+        root = tmp_path / "gallery"
+        root.mkdir()
+        # A concurrently-downloading EH gallery staging under the same root.
+        victim = root / "ehentai" / "3746208"
+        victim.mkdir(parents=True)
+        (victim / "0001.webp").write_bytes(b"webp-data")
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        # skipped_trashed takes the early rmtree branch — no DB needed.
+        importer.skipped_trashed = True
+
+        with patch("worker.progressive.settings") as mock_settings:
+            mock_settings.data_gallery_path = str(root)
+            await importer.finalize(root)
+
+        assert root.exists(), "finalize must not delete the shared gallery root"
+        assert (victim / "0001.webp").exists(), "concurrent gallery's staged file must survive"
+
     async def test_finalize_sets_complete_status(self, db_session, db_session_factory, tmp_path):
         """finalize(partial=False) must set download_status='complete' and correct pages count."""
         from worker.progressive import ProgressiveImporter

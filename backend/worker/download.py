@@ -140,7 +140,7 @@ async def download_job(
     # ── 3. Output directory ─────────────────────────────────────────
     downloader = plugin_registry.get_downloader(source_id)
     if downloader:
-        target_dir = downloader.resolve_output_dir(url, Path(settings.data_gallery_path))
+        target_dir = downloader.resolve_output_dir(url, Path(settings.data_gallery_path), db_job_id)
     else:
         target_dir = Path(settings.data_gallery_path) / (db_job_id or "local_test")
 

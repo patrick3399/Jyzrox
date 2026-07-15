@@ -238,7 +238,7 @@ class PixivSourcePlugin(SourcePlugin):
 
     # ── Downloadable protocol methods ─────────────────────────────────
 
-    def resolve_output_dir(self, url: str, base_path: Path) -> Path:
+    def resolve_output_dir(self, url: str, base_path: Path, job_id: str | None = None) -> Path:
         """Determine output directory for Pixiv download."""
         art_match = _PIXIV_ART_RE.search(url)
         user_match = _PIXIV_USER_RE.search(url)

@@ -291,7 +291,7 @@ class EhSourcePlugin(SourcePlugin):
     # Downloadable protocol methods
     # ------------------------------------------------------------------
 
-    def resolve_output_dir(self, url: str, base_path: Path) -> Path:
+    def resolve_output_dir(self, url: str, base_path: Path, job_id: str | None = None) -> Path:
         """Determine output directory for an EH gallery download."""
         m = _EH_URL_RE.search(url)
         if m:

@@ -135,13 +135,32 @@ class TestGalleryDlCanHandle:
         result = await plugin.resolve_metadata("https://example.com/x", credentials=None)
         assert result is None
 
-    def test_resolve_output_dir_returns_base_path(self, tmp_path):
-        """resolve_output_dir ignores the URL and returns the base_path directly."""
+    def test_resolve_output_dir_is_isolated_subdir_not_shared_root(self, tmp_path):
+        """resolve_output_dir must return a dedicated subdir, never the shared gallery
+        root.
+
+        Regression: returning the root (``base_path``) means finalize()/cleanup()
+        rmtree of the download dir wipes the entire /data/gallery tree — deleting
+        the staging dirs of any concurrently downloading gallery (e.g. an EH
+        gallery under /data/gallery/ehentai/<gid>/). See EH gid 3746208 incident.
+        """
         from plugins.builtin.gallery_dl.source import GalleryDlPlugin
 
         plugin = GalleryDlPlugin()
         out = plugin.resolve_output_dir("https://example.com/anything", tmp_path)
-        assert out == tmp_path
+        assert out != tmp_path, "gallery-dl must not stage into the shared gallery root"
+        assert tmp_path in out.parents, "output dir must live under the gallery root"
+
+    def test_resolve_output_dir_is_per_job_unique(self, tmp_path):
+        """Concurrent gallery-dl jobs must not share a staging dir, or one job's
+        finalize rmtree destroys the other job's in-flight files."""
+        from plugins.builtin.gallery_dl.source import GalleryDlPlugin
+
+        plugin = GalleryDlPlugin()
+        a = plugin.resolve_output_dir("https://example.com/a", tmp_path, "job-a")
+        b = plugin.resolve_output_dir("https://example.com/b", tmp_path, "job-b")
+        assert a != b, "distinct jobs must get distinct staging dirs"
+        assert tmp_path in a.parents and tmp_path in b.parents
 
     def test_requires_credentials_returns_false(self):
         """gallery-dl doesn't strictly require credentials."""

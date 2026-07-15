@@ -1039,9 +1039,16 @@ class GalleryDlPlugin(SourcePlugin):
             error_urls=error_urls,
         )
 
-    def resolve_output_dir(self, url: str, base_path: Path) -> Path:
-        """gallery-dl uses a generic directory — no URL-specific routing."""
-        return base_path
+    def resolve_output_dir(self, url: str, base_path: Path, job_id: str | None = None) -> Path:
+        """Return a per-job staging dir under ``base_path``.
+
+        gallery-dl does no URL-specific routing, but it must NOT stage into the
+        shared gallery root: finalize()/cleanup() rmtree the download dir, and
+        rmtree of the root wipes every concurrently-downloading gallery's staging
+        dir (e.g. an EH gallery under ``base_path/ehentai/<gid>/``). A per-job
+        subdir keeps each download's rmtree isolated.
+        """
+        return base_path / "gallery_dl" / (job_id or "default")
 
     def requires_credentials(self) -> bool:
         """gallery-dl doesn't strictly require credentials (works without them for many sites)."""

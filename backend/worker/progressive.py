@@ -12,6 +12,7 @@ from sqlalchemy.orm import selectinload
 from sqlalchemy.sql import select
 
 import core.queue
+from core.config import settings
 from core.database import AsyncSessionLocal
 from core.social_order import reorder_social_gallery_images
 from db.models import Blob, ExcludedBlob, Gallery, Image
@@ -41,6 +42,31 @@ def _page_num_from_name(file_path: Path) -> int | None:
     if not matches:
         return None
     return int(matches[-1].lstrip("0") or "0") or 1
+
+
+def _rmtree_staging_dir(dest_dir: Path) -> None:
+    """Remove a per-download staging dir, refusing to delete the shared gallery root.
+
+    A download whose ``dest_dir`` resolves to (or above) ``settings.data_gallery_path``
+    would, via ``rmtree``, wipe every concurrently-downloading gallery's staging dir
+    under the same root. Guard against that class of bug regardless of caller (e.g. a
+    plugin whose ``resolve_output_dir`` mistakenly returns the root).
+    """
+    import shutil
+
+    root = Path(settings.data_gallery_path).resolve()
+    try:
+        target = dest_dir.resolve()
+    except OSError:
+        target = dest_dir
+    if target == root or target in root.parents:
+        logger.error("[progressive] refusing to rmtree shared gallery root %s (dest_dir=%s)", root, dest_dir)
+        return
+    try:
+        if dest_dir.exists():
+            shutil.rmtree(str(dest_dir), ignore_errors=True)
+    except Exception as exc:
+        logger.warning("[progressive] failed to remove temp dir %s: %s", dest_dir, exc)
 
 
 class ProgressiveImporter:
@@ -611,13 +637,7 @@ class ProgressiveImporter:
         # Audit #8: trashed gallery — nothing was imported, so do not mutate the
         # gallery row or enqueue cover/thumbnail/tag jobs. Just drop the temp dir.
         if self.skipped_trashed:
-            try:
-                import shutil
-
-                if dest_dir.exists():
-                    shutil.rmtree(str(dest_dir), ignore_errors=True)
-            except Exception as exc:
-                logger.warning("[progressive] failed to remove temp dir %s: %s", dest_dir, exc)
+            _rmtree_staging_dir(dest_dir)
             return None
 
         if not self.gallery_id:
@@ -645,13 +665,7 @@ class ProgressiveImporter:
                 # Disaster-recovery sidecar (best-effort)
                 await write_gallery_sidecar(sidecar_source, sidecar_source_id, sidecar_payload)
 
-        try:
-            import shutil
-
-            if dest_dir.exists():
-                shutil.rmtree(str(dest_dir), ignore_errors=True)
-        except Exception as exc:
-            logger.warning("[progressive] failed to remove temp dir %s: %s", dest_dir, exc)
+        _rmtree_staging_dir(dest_dir)
 
         skip_parts = []
         if self._skip_duplicate:

@@ -210,7 +210,7 @@ class FanboxSourcePlugin(SourcePlugin):
         # Free posts remain useful without a logged-in account.
         return False
 
-    def resolve_output_dir(self, url: str, base_path: Path) -> Path:
+    def resolve_output_dir(self, url: str, base_path: Path, job_id: str | None = None) -> Path:
         match = _POST_RE.search(url)
         return base_path / "fanbox" / (match.group(1) if match else "unknown")
 
