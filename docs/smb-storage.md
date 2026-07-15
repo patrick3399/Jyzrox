@@ -1,6 +1,6 @@
 # NAS / Network Storage Mounting Guide
 
-Jyzrox reads local galleries via bind mounts. If your galleries are stored on a NAS or network storage device, you must first mount the share on the **host machine**, then let Docker containers access it through the `./mnt` bind mount.
+Jyzrox can read local galleries through host bind mounts. **The default Compose stack currently does not mount `/mnt` or any NAS path**, so SMB/NAS storage is not enabled out of the box. If needed, mount the share on the **host machine** and explicitly expose it to the required containers through `docker-compose.override.yml`.
 
 ## Overview
 
@@ -11,7 +11,7 @@ NAS / Network Drive
        ▼
 Host   /mnt/nas-share      ← You mount here
        │
-       │  Docker bind mount  (./mnt:/mnt:ro)
+       │  Explicit override bind mount
        ▼
 Container /mnt/nas-share    ← Jyzrox reads from here
        │
@@ -20,7 +20,7 @@ Container /mnt/nas-share    ← Jyzrox reads from here
 Jyzrox UI → Settings → Library Path → /mnt/nas-share
 ```
 
-Four services (`nginx`, `api`, `worker`, `tagger`) all mount `./mnt:/mnt:ro`. As long as the host's `/mnt/nas-share` is properly mounted, all four containers can access it simultaneously.
+This mount is currently unused by the default deployment. Add it only to the services that need it (normally `api` and `worker`; add `nginx` for direct external-media serving, and `tagger` only when AI tagging reads those files).
 
 ---
 
@@ -154,18 +154,7 @@ journalctl -u $(systemd-escape --path /mnt/nas-share).mount --since "5 min ago"
 
 ### Step 6: Integrate with Jyzrox
 
-There are two ways to expose the mounted path to Jyzrox containers. Choose one.
-
-**Method A: Symlink (recommended, no compose changes needed)**
-
-```bash
-# Run from the Jyzrox project directory
-ln -s /mnt/nas-share ./mnt/nas-share
-```
-
-The containers can then access it via `/mnt/nas-share`.
-
-**Method B: docker-compose.override.yml**
+Expose the mounted path through `docker-compose.override.yml`:
 
 Add extra volume mounts for the services that need access in `docker-compose.override.yml`:
 
@@ -182,7 +171,7 @@ services:
       - /mnt/nas-share:/mnt/nas:ro
 ```
 
-> ⚠️ If you have `tagger` enabled, add the corresponding volume to the `tagger` service as well, otherwise AI tagging cannot read images from the NAS.
+> Add the corresponding mount to `nginx` only when external media must be served directly, and to `tagger` only when AI tagging reads files from this NAS.
 
 Restart services:
 
@@ -190,7 +179,7 @@ Restart services:
 docker compose up -d
 ```
 
-Then in the Jyzrox UI: **Settings → Library → Add Path** → enter `/mnt/nas-share` (or `/mnt/nas`, depending on your chosen method).
+Then in the Jyzrox UI: **Settings → Library → Add Path** → enter the container path, for example `/mnt/nas`.
 
 ### Step 7: Verify disconnection recovery
 
