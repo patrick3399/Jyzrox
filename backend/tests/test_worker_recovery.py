@@ -187,7 +187,7 @@ def _startup_patches(redis_mock, session, mock_enqueue=None, mock_emit=None):
         patch("worker._watcher") as mock_watcher,
         patch("worker.asyncio.ensure_future", side_effect=_discard_background_task),
         patch("worker.asyncio.get_running_loop", return_value=MagicMock()),
-        patch("worker.get_all_library_paths", new_callable=AsyncMock, return_value=[]),
+        patch("worker.get_monitored_library_paths", new_callable=AsyncMock, return_value=[]),
         patch("glob.glob", return_value=[]),
         patch("core.queue.enqueue", new_callable=AsyncMock),
     ):

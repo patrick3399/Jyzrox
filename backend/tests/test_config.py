@@ -5,6 +5,7 @@ Covers:
 - Settings default field values
 - Environment variable overrides (via monkeypatch)
 - get_all_library_paths(): env-only, deduplication, and DB merge
+- get_monitored_library_paths(): enabled and per-library monitor filtering
 """
 
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -295,3 +296,34 @@ class TestGetAllLibraryPaths:
             paths = await get_all_library_paths()
 
         assert paths == ["/path/safe"]
+
+
+class TestGetMonitoredLibraryPaths:
+    """Unit tests for watcher-specific library path selection."""
+
+    async def test_db_query_requires_enabled_and_monitor_flags(self):
+        from core.config import Settings, get_monitored_library_paths
+
+        mock_settings = Settings(
+            database_url="sqlite+aiosqlite:///:memory:",
+            credential_encrypt_key="test-key-0123456789abcdef01234567",
+            extra_library_paths="/mnt/env-library",
+        )
+        mock_session = AsyncMock()
+        mock_result = MagicMock()
+        mock_result.scalars.return_value = ["/mnt/monitored", "/mnt/env-library"]
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_ctx = AsyncMock()
+        mock_ctx.__aenter__ = AsyncMock(return_value=mock_session)
+        mock_ctx.__aexit__ = AsyncMock(return_value=False)
+
+        with (
+            patch("core.config.settings", mock_settings),
+            patch("core.database.async_session", MagicMock(return_value=mock_ctx)),
+        ):
+            paths = await get_monitored_library_paths()
+
+        statement = str(mock_session.execute.await_args.args[0])
+        assert "library_paths.enabled = true" in statement
+        assert "library_paths.monitor = true" in statement
+        assert paths == ["/mnt/env-library", "/mnt/monitored"]

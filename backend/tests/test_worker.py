@@ -350,7 +350,7 @@ class TestToggleWatcherJob:
         mock_watcher.start = MagicMock()
 
         with (
-            patch("worker.get_all_library_paths", new=AsyncMock(return_value=["/lib/path1"])),
+            patch("worker.get_monitored_library_paths", new=AsyncMock(return_value=["/lib/path1"])),
             patch("worker._watcher", mock_watcher),
         ):
             from worker import toggle_watcher_job
@@ -360,6 +360,21 @@ class TestToggleWatcherJob:
 
         assert result["status"] == "started"
         mock_watcher.start.assert_called_once()
+
+        enqueue_callback = mock_watcher.start.call_args.args[1]
+        with (
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+            patch("worker.asyncio.run_coroutine_threadsafe") as mock_submit,
+        ):
+            enqueue_callback("rescan_by_path_job", "/lib/path1/gallery")
+
+        mock_enqueue.assert_called_once_with(
+            "rescan_by_path_job",
+            dir_path="/lib/path1/gallery",
+            watcher_origin=True,
+        )
+        queued_coro = mock_submit.call_args.args[0]
+        queued_coro.close()
 
     async def test_stop_watcher_calls_watcher_stop(self):
         """toggle_watcher_job(enabled=False) must stop the watcher and return status='stopped'."""
@@ -392,7 +407,7 @@ class TestToggleWatcherJob:
         mock_watcher.is_running = False
 
         with (
-            patch("worker.get_all_library_paths", new=AsyncMock(return_value=[])),
+            patch("worker.get_monitored_library_paths", new=AsyncMock(return_value=[])),
             patch("worker._watcher", mock_watcher),
         ):
             from worker import toggle_watcher_job

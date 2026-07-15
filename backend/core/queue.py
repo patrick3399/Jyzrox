@@ -11,6 +11,8 @@ from core.queue_config import ALL_QUEUES, JOB_QUEUE_ROUTING, QUEUE_INTERACTIVE
 
 logger = logging.getLogger(__name__)
 
+DEFAULT_JOB_TIMEOUT = 3600
+
 _queues: dict[str, Queue] = {}
 
 
@@ -64,14 +66,28 @@ async def enqueue(
 
     Routing is defined in core.queue_config.JOB_QUEUE_ROUTING.
     Jobs not listed there go to the interactive queue.
+
+    SAQ defaults jobs to a 10-second timeout when none is provided. That is
+    too short for normal application work, so callers inherit a conservative
+    one-hour timeout unless they explicitly select a different limit.
     """
+    return await _enqueue_routed(job_name, _job_id=_job_id, _timeout=_timeout, **kwargs)
+
+
+async def _enqueue_routed(
+    job_name: str,
+    *,
+    _job_id: str | None = None,
+    _timeout: int | None = None,
+    **kwargs: Any,
+) -> Any:
+    """Build and submit a routed SAQ job; kept separate for focused tests."""
     queue_name = JOB_QUEUE_ROUTING.get(job_name, QUEUE_INTERACTIVE)
     q = get_queue(queue_name)
     enqueue_kwargs: dict[str, Any] = {}
     if _job_id is not None:
         enqueue_kwargs["key"] = _job_id
-    if _timeout is not None:
-        enqueue_kwargs["timeout"] = _timeout
+    enqueue_kwargs["timeout"] = _timeout if _timeout is not None else DEFAULT_JOB_TIMEOUT
     if kwargs:
         enqueue_kwargs["kwargs"] = kwargs
     return await q.enqueue(job_name, **enqueue_kwargs)

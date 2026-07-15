@@ -10,7 +10,7 @@ from sqlalchemy import text, update
 from sqlalchemy.sql import select
 
 import core.queue
-from core.config import get_all_library_paths, settings
+from core.config import get_all_library_paths, get_monitored_library_paths, settings
 from core.database import AsyncSessionLocal
 from core.local_patterns import (
     DEFAULT_IMPORT_MODE,
@@ -73,12 +73,13 @@ def _has_thumb_160(blob: Blob) -> bool:
     return (thumb_dir(blob.sha256) / "thumb_160.webp").exists()
 
 
-async def _get_library_specs(session) -> list[_LibrarySpec]:
+async def _get_library_specs(session, *, monitored_only: bool = False) -> list[_LibrarySpec]:
+    filters = [LibraryPath.enabled == True]  # noqa: E712
+    if monitored_only:
+        filters.append(LibraryPath.monitor == True)  # noqa: E712
     rows = (
         (
-            await session.execute(
-                select(LibraryPath).where(LibraryPath.enabled == True)  # noqa: E712
-            )
+            await session.execute(select(LibraryPath).where(*filters))
         )
         .scalars()
         .all()
@@ -93,11 +94,22 @@ async def _get_library_specs(session) -> list[_LibrarySpec]:
     ]
     seen = {spec.path for spec in specs}
 
-    for path in await get_all_library_paths():
+    path_loader = get_monitored_library_paths if monitored_only else get_all_library_paths
+    for path in await path_loader():
         if path not in seen:
             specs.append(_LibrarySpec(path=path))
             seen.add(path)
     return specs
+
+
+async def _watcher_work_enabled(ctx: dict, watcher_origin: bool) -> bool:
+    """Check whether a queued watcher-originated job should still start."""
+    if not watcher_origin:
+        return True
+    enabled = await ctx["redis"].get("watcher:enabled")
+    if enabled is None:
+        return settings.library_monitor_enabled
+    return enabled not in (b"0", "0")
 
 
 def _media_count(filenames: list[str]) -> int:
@@ -669,14 +681,17 @@ async def rescan_gallery_job(ctx: dict, gallery_id: int) -> dict:
     }
 
 
-async def auto_discover_job(ctx: dict) -> dict:
+async def auto_discover_job(ctx: dict, watcher_origin: bool = False) -> dict:
     """Scan all library paths recursively and auto-create galleries for undiscovered directories containing media files."""
+    if not await _watcher_work_enabled(ctx, watcher_origin):
+        logger.info("[auto_discover] Skipping queued watcher job because monitoring is disabled")
+        return {"status": "skipped", "reason": "watcher_disabled", "discovered": 0}
     logger.info("[auto_discover] Starting auto-discovery")
 
     discovered = 0
     import_requests: list[_ImportRequest] = []
     async with AsyncSessionLocal() as session:
-        specs = await _get_library_specs(session)
+        specs = await _get_library_specs(session, monitored_only=watcher_origin)
 
         for spec in specs:
             lib_dir = Path(spec.path)
@@ -746,8 +761,11 @@ async def auto_discover_job(ctx: dict) -> dict:
     return {"discovered": discovered}
 
 
-async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
+async def rescan_by_path_job(ctx: dict, dir_path: str, watcher_origin: bool = False) -> dict:
     """Rescan the gallery whose files reside in dir_path."""
+    if not await _watcher_work_enabled(ctx, watcher_origin):
+        logger.info("[rescan_by_path] Skipping queued watcher job because monitoring is disabled")
+        return {"status": "skipped", "reason": "watcher_disabled", "path": dir_path}
     # In CAS mode, /data/library/{gallery_id}/ is the gallery directory.
     lib_base = Path(settings.data_library_path)
     dir_p = Path(dir_path)
@@ -762,7 +780,7 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
         return await rescan_gallery_job(ctx, gallery_id)
 
     async with AsyncSessionLocal() as session:
-        specs = await _get_library_specs(session)
+        specs = await _get_library_specs(session, monitored_only=watcher_origin)
         matching_specs = [
             spec
             for spec in specs
@@ -825,7 +843,10 @@ async def rescan_by_path_job(ctx: dict, dir_path: str) -> dict:
         return await rescan_gallery_job(ctx, gallery_id)
 
     # No existing gallery found — might be a new directory, trigger auto-discover
-    await core.queue.enqueue("auto_discover_job")
+    if watcher_origin:
+        await core.queue.enqueue("auto_discover_job", watcher_origin=True)
+    else:
+        await core.queue.enqueue("auto_discover_job")
     return {"status": "no_gallery_found", "path": dir_path}
 
 

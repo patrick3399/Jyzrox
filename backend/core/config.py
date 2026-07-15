@@ -145,3 +145,40 @@ async def get_all_library_paths() -> list[str]:
         pass  # DB might not be ready during startup
 
     return paths
+
+
+async def get_monitored_library_paths() -> list[str]:
+    """Return enabled library paths that opted into real-time monitoring.
+
+    Environment-provided paths have no per-path monitor flag and therefore
+    remain monitored when the global watcher is enabled. Database paths must
+    have both ``enabled`` and ``monitor`` set.
+    """
+    paths: list[str] = []
+
+    if settings.extra_library_paths:
+        for p in settings.extra_library_paths.split(","):
+            p = p.strip()
+            if p and p not in paths:
+                paths.append(p)
+
+    try:
+        from sqlalchemy import select
+
+        from core.database import async_session
+        from db.models import LibraryPath
+
+        async with async_session() as session:
+            result = await session.execute(
+                select(LibraryPath.path).where(
+                    LibraryPath.enabled == True,  # noqa: E712
+                    LibraryPath.monitor == True,  # noqa: E712
+                )
+            )
+            for row in result.scalars():
+                if row not in paths:
+                    paths.append(row)
+    except Exception:
+        pass
+
+    return paths

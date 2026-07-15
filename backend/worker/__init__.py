@@ -12,7 +12,7 @@ from datetime import UTC
 
 from saq import CronJob
 
-from core.config import get_all_library_paths, settings
+from core.config import get_monitored_library_paths, settings
 from core.redis_client import close_redis
 from core.scheduled_task_catalog import CATALOG
 from core.watcher import LibraryWatcher
@@ -450,7 +450,7 @@ async def startup(ctx: dict) -> None:
         watcher_should_start = watcher_enabled_raw not in (b"0", "0")
 
     if watcher_should_start:
-        paths = await get_all_library_paths()
+        paths = await get_monitored_library_paths()
         loop = asyncio.get_running_loop()
 
         def enqueue_sync(job_name: str, *args):
@@ -458,6 +458,7 @@ async def startup(ctx: dict) -> None:
 
             # Watcher passes: ("auto_discover_job",) or ("rescan_by_path_job", path)
             kwargs = {"dir_path": args[0]} if args else {}
+            kwargs["watcher_origin"] = True
             asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
         _watcher.start(paths, enqueue_sync)
@@ -509,7 +510,7 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
             logger.info("[toggle_watcher] Already running — no-op")
             return {"status": "already_running"}
 
-        paths = await get_all_library_paths()
+        paths = await get_monitored_library_paths()
         if not paths:
             logger.warning("[toggle_watcher] No library paths configured — cannot start watcher")
             await r.set("watcher:status", json.dumps({"running": False, "paths": []}))
@@ -522,6 +523,7 @@ async def toggle_watcher_job(ctx: dict, enabled: bool) -> dict:
 
             # Watcher passes: ("auto_discover_job",) or ("rescan_by_path_job", path)
             kwargs = {"dir_path": args[0]} if args else {}
+            kwargs["watcher_origin"] = True
             asyncio.run_coroutine_threadsafe(core.queue.enqueue(job_name, **kwargs), loop)
 
         _watcher.start(paths, enqueue_sync)

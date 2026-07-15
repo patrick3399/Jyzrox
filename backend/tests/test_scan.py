@@ -755,6 +755,19 @@ class TestRescanGalleryJob:
 class TestAutoDiscoverJob:
     """Tests for auto_discover_job(ctx)."""
 
+    async def test_queued_watcher_job_skips_after_monitor_disabled(self):
+        """Disabling monitoring must stop an already queued watcher discovery job."""
+        from worker.scan import auto_discover_job
+
+        redis = AsyncMock()
+        redis.get = AsyncMock(return_value=b"0")
+
+        with patch("worker.scan.AsyncSessionLocal") as session_factory:
+            result = await auto_discover_job({"redis": redis}, watcher_origin=True)
+
+        assert result == {"status": "skipped", "reason": "watcher_disabled", "discovered": 0}
+        session_factory.assert_not_called()
+
     async def test_empty_library_paths_returns_zero_discovered(self):
         """No library paths configured → discovered=0 without errors."""
         from worker.scan import auto_discover_job
