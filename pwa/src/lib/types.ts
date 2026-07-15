@@ -513,6 +513,8 @@ export interface DatasetSelection {
   gallery_ids?: number[]
   collection_ids?: number[]
   image_ids?: number[]
+  tag_query?: string
+  tag_query_limit?: number
 }
 
 export interface Dataset {
@@ -537,7 +539,7 @@ export interface DatasetImage {
   height: number | null
   thumb_url: string
   state: 'included' | 'excluded'
-  source: 'gallery' | 'collection' | 'manual'
+  source: 'gallery' | 'collection' | 'manual' | 'tag_query'
 }
 
 export interface DatasetDetail extends Dataset {

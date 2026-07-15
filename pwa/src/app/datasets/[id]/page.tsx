@@ -40,6 +40,7 @@ function DatasetDetailInner() {
   const [galleryIds, setGalleryIds] = useState('')
   const [collectionIds, setCollectionIds] = useState('')
   const [imageIds, setImageIds] = useState('')
+  const [tagQuery, setTagQuery] = useState('')
   const [busy, setBusy] = useState(false)
 
   const startEditing = () => {
@@ -72,16 +73,19 @@ function DatasetDetailInner() {
           gallery_ids: parseDatasetIds(galleryIds),
           collection_ids: parseDatasetIds(collectionIds),
           image_ids: parseDatasetIds(imageIds),
+          tag_query: tagQuery.trim() || undefined,
         },
       })
       setGalleryIds('')
       setCollectionIds('')
       setImageIds('')
+      setTagQuery('')
       setShowAdd(false)
       setState('included')
       setPage(0)
       await mutate()
       toast.success(t('datasets.membersAdded', { count: String(result.added) }))
+      if (result.tag_query_truncated) toast.warning(t('datasets.tagQueryTruncated'))
     } catch (error) {
       toast.error(error instanceof Error ? error.message : t('common.error'))
     } finally {
@@ -191,10 +195,20 @@ function DatasetDetailInner() {
               </label>
             ))}
           </div>
+          <label className="block space-y-1 text-sm text-vault-text-secondary">
+            <span>{t('datasets.tagQuery')}</span>
+            <input
+              value={tagQuery}
+              onChange={(event) => setTagQuery(event.target.value)}
+              className="w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text outline-none focus:ring-1 focus:ring-vault-accent"
+              placeholder={t('datasets.tagQueryPlaceholder')}
+            />
+            <span className="block text-xs">{t('datasets.tagQueryHint')}</span>
+          </label>
           <div className="flex gap-2">
             <button
               onClick={handleAdd}
-              disabled={busy || !(galleryIds || collectionIds || imageIds)}
+              disabled={busy || !(galleryIds || collectionIds || imageIds || tagQuery)}
               className="rounded-lg bg-vault-accent px-4 py-2 text-sm font-medium text-vault-accent-fg disabled:opacity-50"
             >
               {busy ? t('common.loading') : t('datasets.addMembers')}

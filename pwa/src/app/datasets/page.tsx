@@ -22,6 +22,7 @@ function DatasetsPageInner() {
   const [galleryIds, setGalleryIds] = useState('')
   const [collectionIds, setCollectionIds] = useState('')
   const [imageIds, setImageIds] = useState('')
+  const [tagQuery, setTagQuery] = useState('')
   const [busy, setBusy] = useState(false)
 
   const resetForm = () => {
@@ -30,6 +31,7 @@ function DatasetsPageInner() {
     setGalleryIds('')
     setCollectionIds('')
     setImageIds('')
+    setTagQuery('')
     setShowCreate(false)
   }
 
@@ -43,9 +45,11 @@ function DatasetsPageInner() {
         gallery_ids: parseDatasetIds(galleryIds),
         collection_ids: parseDatasetIds(collectionIds),
         image_ids: parseDatasetIds(imageIds),
+        tag_query: tagQuery.trim() || undefined,
       })
       await mutate()
       toast.success(t('datasets.created'))
+      if (created.tag_query_truncated) toast.warning(t('datasets.tagQueryTruncated'))
       resetForm()
       router.push(`/datasets/${created.id}`)
     } catch (error) {
@@ -124,6 +128,16 @@ function DatasetsPageInner() {
               </label>
             ))}
           </div>
+          <label className="block space-y-1 text-sm text-vault-text-secondary">
+            <span>{t('datasets.tagQuery')}</span>
+            <input
+              value={tagQuery}
+              onChange={(event) => setTagQuery(event.target.value)}
+              className="w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text outline-none focus:ring-1 focus:ring-vault-accent"
+              placeholder={t('datasets.tagQueryPlaceholder')}
+            />
+            <span className="block text-xs">{t('datasets.tagQueryHint')}</span>
+          </label>
           <div className="flex gap-2">
             <button
               onClick={handleCreate}

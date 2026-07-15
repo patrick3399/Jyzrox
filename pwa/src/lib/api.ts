@@ -1746,7 +1746,7 @@ const datasets = {
   ) => apiFetch<DatasetDetail>(`/api/datasets/${id}${qs(params as Record<string, unknown>)}`),
 
   create: (data: { name: string; description?: string } & DatasetSelection) =>
-    apiFetch<Dataset & { added: number }>('/api/datasets/', {
+    apiFetch<Dataset & { added: number; tag_query_truncated: boolean }>('/api/datasets/', {
       method: 'POST',
       body: JSON.stringify(data),
     }),
@@ -1760,10 +1760,13 @@ const datasets = {
   delete: (id: number) => apiFetch<{ status: string }>(`/api/datasets/${id}`, { method: 'DELETE' }),
 
   addMembers: (id: number, selection: DatasetSelection) =>
-    apiFetch<{ status: string; added: number }>(`/api/datasets/${id}/members`, {
-      method: 'POST',
-      body: JSON.stringify(selection),
-    }),
+    apiFetch<{ status: string; added: number; tag_query_truncated: boolean }>(
+      `/api/datasets/${id}/members`,
+      {
+        method: 'POST',
+        body: JSON.stringify(selection),
+      },
+    ),
 
   excludeImage: (id: number, imageId: number) =>
     apiFetch<{ status: string; state: 'excluded' }>(`/api/datasets/${id}/images/${imageId}`, {

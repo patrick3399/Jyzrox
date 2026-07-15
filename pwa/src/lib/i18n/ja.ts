@@ -2137,6 +2137,12 @@ const ja: Record<string, string> = {
   'datasets.noExcludedImages': '除外された画像はありません。',
   'datasets.excludeImage': '画像を除外',
   'datasets.restoreImage': '画像を復元',
+  'datasets.tagQuery': 'タグクエリ',
+  'datasets.tagQueryPlaceholder': 'character:alice general:portrait -general:sketch',
+  'datasets.tagQueryHint':
+    '空白区切りのタグは AND 条件です。- を付けると除外できます。1 回のクエリで最大 5,000 枚追加します。',
+  'datasets.tagQueryTruncated':
+    'タグクエリが 5,000 枚を超えました。条件を絞って残りを追加してください。',
 }
 
 export default ja

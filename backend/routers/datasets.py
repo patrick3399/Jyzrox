@@ -5,13 +5,23 @@ from typing import Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select
+from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from core.auth import gallery_access_filter, require_role
 from core.database import get_db
 from core.events import EventType, emit_safe
-from db.models import Blob, Collection, CollectionGallery, Dataset, DatasetImage, Gallery, Image
+from db.models import (
+    Blob,
+    Collection,
+    CollectionGallery,
+    Dataset,
+    DatasetImage,
+    Gallery,
+    GalleryTag,
+    Image,
+    Tag,
+)
 from services.cas import thumb_url
 
 router = APIRouter(tags=["datasets"])
@@ -22,6 +32,15 @@ class DatasetSelection(BaseModel):
     gallery_ids: list[int] = Field(default_factory=list, max_length=500)
     collection_ids: list[int] = Field(default_factory=list, max_length=100)
     image_ids: list[int] = Field(default_factory=list, max_length=2000)
+    tag_query: str | None = Field(default=None, max_length=500)
+    tag_query_limit: int = Field(default=5000, ge=1, le=5000)
+
+    @field_validator("tag_query")
+    @classmethod
+    def validate_tag_query(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
 
 
 class DatasetCreate(DatasetSelection):
@@ -201,12 +220,68 @@ async def _collection_gallery_ids(
     return list(dict.fromkeys(gallery_ids)), denied
 
 
+def _parse_tag_query(value: str) -> tuple[list[str], list[str]]:
+    tokens = list(dict.fromkeys(value.split()))[:20]
+    included = [token for token in tokens if not token.startswith("-")]
+    excluded = [token[1:] for token in tokens if token.startswith("-") and len(token) > 1]
+    return included, excluded
+
+
+async def _tag_query_image_ids(
+    db: AsyncSession,
+    auth: dict,
+    query: str | None,
+    limit: int,
+) -> tuple[list[int], bool]:
+    if not query:
+        return [], False
+    included, excluded = _parse_tag_query(query)
+    if not included and not excluded:
+        return [], False
+    stmt = (
+        select(Image.id)
+        .join(Gallery, Gallery.id == Image.gallery_id)
+        .where(Image.visibility == "active", gallery_access_filter(auth))
+        .order_by(Image.id)
+        .limit(limit + 1)
+    )
+    for token in included:
+        namespace, separator, name = token.partition(":")
+        tag_filter = Tag.name == name if separator else Tag.name == namespace
+        if separator:
+            tag_filter = tag_filter & (Tag.namespace == namespace)
+        stmt = stmt.where(
+            exists(
+                select(GalleryTag.gallery_id)
+                .join(Tag, Tag.id == GalleryTag.tag_id)
+                .where(GalleryTag.gallery_id == Gallery.id, tag_filter)
+            )
+        )
+    for token in excluded:
+        namespace, separator, name = token.partition(":")
+        tag_filter = Tag.name == name if separator else Tag.name == namespace
+        if separator:
+            tag_filter = tag_filter & (Tag.namespace == namespace)
+        stmt = stmt.where(
+            ~exists(
+                select(GalleryTag.gallery_id)
+                .join(Tag, Tag.id == GalleryTag.tag_id)
+                .where(GalleryTag.gallery_id == Gallery.id, tag_filter)
+            )
+        )
+    image_ids = list((await db.execute(stmt)).scalars().all())
+    return image_ids[:limit], len(image_ids) > limit
+
+
 def _merge_selection_spec(dataset: Dataset, selection: DatasetSelection) -> None:
     spec = dict(dataset.selection_spec or {})
     for key in ("gallery_ids", "collection_ids", "image_ids"):
         incoming = getattr(selection, key)
         if incoming:
             spec[key] = _unique_ids([*(spec.get(key) or []), *incoming])
+    if selection.tag_query:
+        spec["tag_query"] = selection.tag_query
+        spec["tag_query_limit"] = selection.tag_query_limit
     dataset.selection_spec = spec
 
 
@@ -219,6 +294,13 @@ async def _apply_selection(
     gallery_ids = _unique_ids(selection.gallery_ids)
     collection_gallery_ids, denied_collections = await _collection_gallery_ids(db, auth, selection.collection_ids)
 
+    tag_query_images, tag_query_truncated = await _tag_query_image_ids(
+        db,
+        auth,
+        selection.tag_query,
+        selection.tag_query_limit,
+    )
+    tag_query_added, _ = await _include_images(db, dataset, auth, tag_query_images, source="tag_query")
     collection_images, _ = await _gallery_image_ids(db, auth, collection_gallery_ids)
     collection_added, _ = await _include_images(db, dataset, auth, collection_images, source="collection")
     gallery_images, denied_galleries = await _gallery_image_ids(db, auth, gallery_ids)
@@ -233,7 +315,8 @@ async def _apply_selection(
     _merge_selection_spec(dataset, selection)
     dataset.updated_at = datetime.now(UTC)
     return {
-        "added": collection_added + gallery_added + image_added,
+        "added": tag_query_added + collection_added + gallery_added + image_added,
+        "tag_query_truncated": tag_query_truncated,
         "denied": {
             "gallery_ids": denied_galleries,
             "collection_ids": denied_collections,

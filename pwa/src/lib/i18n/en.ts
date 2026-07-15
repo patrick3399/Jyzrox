@@ -2152,6 +2152,12 @@ const en: Record<string, string> = {
   'datasets.noExcludedImages': 'No excluded images.',
   'datasets.excludeImage': 'Exclude image',
   'datasets.restoreImage': 'Restore image',
+  'datasets.tagQuery': 'Tag query',
+  'datasets.tagQueryPlaceholder': 'character:alice general:portrait -general:sketch',
+  'datasets.tagQueryHint':
+    'Space-separated tags use AND; prefix a tag with - to exclude it. Up to 5,000 images are added per query.',
+  'datasets.tagQueryTruncated':
+    'The tag query matched more than 5,000 images. Refine it before adding the remainder.',
 }
 
 export default en

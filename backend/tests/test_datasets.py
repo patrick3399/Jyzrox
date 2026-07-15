@@ -11,7 +11,9 @@ from db.models import (
     Dataset,
     DatasetImage,
     Gallery,
+    GalleryTag,
     Image,
+    Tag,
     User,
 )
 
@@ -36,6 +38,7 @@ async def _gallery_with_images(
     visibility: str = "private",
     active: int = 2,
     hidden: int = 0,
+    tags: list[str] | None = None,
 ) -> tuple[Gallery, list[Image]]:
     gallery = Gallery(
         source="local",
@@ -43,9 +46,18 @@ async def _gallery_with_images(
         title=source_id,
         created_by_user_id=owner_id,
         visibility=visibility,
+        tags_array=tags or [],
     )
     db.add(gallery)
     await db.flush()
+    for value in tags or []:
+        namespace, name = value.split(":", 1)
+        tag = (await db.execute(select(Tag).where(Tag.namespace == namespace, Tag.name == name))).scalar_one_or_none()
+        if tag is None:
+            tag = Tag(namespace=namespace, name=name)
+            db.add(tag)
+            await db.flush()
+        db.add(GalleryTag(gallery_id=gallery.id, tag_id=tag.id, source="metadata"))
     images = []
     for index in range(active + hidden):
         sha = f"dataset-{source_id}-{index}"
@@ -179,6 +191,55 @@ async def test_create_dataset_from_collection_preserves_provenance(db_session, m
         )
     ).scalar_one()
     assert member.source == "collection"
+
+
+async def test_create_dataset_from_bounded_tag_query_respects_access(db_session, make_client):
+    await _user(db_session, 1)
+    await _user(db_session, 2)
+    _, visible_images = await _gallery_with_images(
+        db_session,
+        owner_id=1,
+        source_id="tag-query-visible",
+        active=2,
+        tags=["character:alice", "general:portrait"],
+    )
+    await _gallery_with_images(
+        db_session,
+        owner_id=1,
+        source_id="tag-query-excluded",
+        active=1,
+        tags=["character:alice", "general:sketch"],
+    )
+    await _gallery_with_images(
+        db_session,
+        owner_id=2,
+        source_id="tag-query-private",
+        visibility="private",
+        active=1,
+        tags=["character:alice"],
+    )
+
+    async with make_client(user_id=1) as ac:
+        response = await ac.post(
+            "/api/datasets/",
+            json={
+                "name": "Tag query",
+                "tag_query": "character:alice -general:sketch",
+                "tag_query_limit": 1,
+            },
+        )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["member_count"] == 1
+    assert body["tag_query_truncated"] is True
+    assert body["selection_spec"] == {
+        "tag_query": "character:alice -general:sketch",
+        "tag_query_limit": 1,
+    }
+    member = (await db_session.execute(select(DatasetImage).where(DatasetImage.dataset_id == body["id"]))).scalar_one()
+    assert member.image_id == visible_images[0].id
+    assert member.source == "tag_query"
 
 
 async def test_exclude_and_reinclude_dataset_image_is_durable(db_session, make_client):

@@ -2116,6 +2116,12 @@ const ko: Record<string, string> = {
   'datasets.noExcludedImages': '제외된 이미지가 없습니다.',
   'datasets.excludeImage': '이미지 제외',
   'datasets.restoreImage': '이미지 복원',
+  'datasets.tagQuery': '태그 쿼리',
+  'datasets.tagQueryPlaceholder': 'character:alice general:portrait -general:sketch',
+  'datasets.tagQueryHint':
+    '공백으로 구분한 태그는 AND 조건이며 - 접두사로 제외합니다. 쿼리당 최대 5,000개 이미지를 추가합니다.',
+  'datasets.tagQueryTruncated':
+    '태그 쿼리가 5,000개를 초과했습니다. 조건을 좁혀 나머지를 추가하세요.',
 }
 
 export default ko

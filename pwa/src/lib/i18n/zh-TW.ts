@@ -2092,6 +2092,11 @@ const zhTW: Record<string, string> = {
   'datasets.noExcludedImages': '沒有排除的圖片。',
   'datasets.excludeImage': '排除圖片',
   'datasets.restoreImage': '還原圖片',
+  'datasets.tagQuery': '標籤查詢',
+  'datasets.tagQueryPlaceholder': 'character:alice general:portrait -general:sketch',
+  'datasets.tagQueryHint':
+    '以空格分隔的標籤採 AND；在標籤前加 - 可排除。每次查詢最多加入 5,000 張圖片。',
+  'datasets.tagQueryTruncated': '標籤查詢符合超過 5,000 張圖片，請縮小條件後再加入其餘圖片。',
 }
 
 export default zhTW
