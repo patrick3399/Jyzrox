@@ -45,6 +45,9 @@ import type {
   ArtistImageItem,
   ArtistDetail,
   Collection,
+  Dataset,
+  DatasetDetail,
+  DatasetSelection,
   LibraryFile,
   ScheduledTask,
   Subscription,
@@ -832,7 +835,11 @@ const explorer = {
       source_ids: number[]
       scalar_conflicts: Record<string, Array<{ gallery_id: number; value: unknown }>>
       images: { add: number; exact_sha_skipped: number; similar_kept_for_review: number }
-      result: { source_routes: '404'; sources_moved_to_trash: number; restore_reverses_merge: false }
+      result: {
+        source_routes: '404'
+        sources_moved_to_trash: number
+        restore_reverses_merge: false
+      }
     }>('/api/explorer/merge/preview', { method: 'POST', body: JSON.stringify(body) }),
   merge: (body: {
     gallery_ids: number[]
@@ -1728,6 +1735,42 @@ const collections = {
     }),
 }
 
+// ── AI training datasets ────────────────────────────────────────────
+
+const datasets = {
+  list: () => apiFetch<{ datasets: Dataset[] }>('/api/datasets/'),
+
+  get: (
+    id: number,
+    params: { state?: 'included' | 'excluded'; page?: number; limit?: number } = {},
+  ) => apiFetch<DatasetDetail>(`/api/datasets/${id}${qs(params as Record<string, unknown>)}`),
+
+  create: (data: { name: string; description?: string } & DatasetSelection) =>
+    apiFetch<Dataset & { added: number }>('/api/datasets/', {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  update: (id: number, patch: { name?: string; description?: string | null }) =>
+    apiFetch<{ status: string }>(`/api/datasets/${id}`, {
+      method: 'PATCH',
+      body: JSON.stringify(patch),
+    }),
+
+  delete: (id: number) => apiFetch<{ status: string }>(`/api/datasets/${id}`, { method: 'DELETE' }),
+
+  addMembers: (id: number, selection: DatasetSelection) =>
+    apiFetch<{ status: string; added: number }>(`/api/datasets/${id}/members`, {
+      method: 'POST',
+      body: JSON.stringify(selection),
+    }),
+
+  excludeImage: (id: number, imageId: number) =>
+    apiFetch<{ status: string; state: 'excluded' }>(`/api/datasets/${id}/images/${imageId}`, {
+      method: 'DELETE',
+    }),
+}
+
 // ── Scheduled Tasks / Backups ────────────────────────────────────────
 
 const scheduledTasks = {
@@ -2312,6 +2355,7 @@ export const api = {
   pixiv,
   artists,
   collections,
+  datasets,
   scheduledTasks,
   backups,
   subscriptions,

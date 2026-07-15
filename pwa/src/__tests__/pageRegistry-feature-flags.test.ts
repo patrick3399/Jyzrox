@@ -27,3 +27,15 @@ describe('pageRegistry — feature-flag gating', () => {
     expect(passesFeatureFlag(dashboard, { novel_enabled: false })).toBe(true)
   })
 })
+
+describe('pageRegistry — training datasets', () => {
+  it('exposes datasets to members through the sidebar and dashboard', () => {
+    const datasets = PAGE_REGISTRY.find((page) => page.href === '/datasets')
+    expect(datasets).toMatchObject({
+      labelKey: 'nav.datasets',
+      sidebar: true,
+      dashboard: true,
+      minRole: 'member',
+    })
+  })
+})

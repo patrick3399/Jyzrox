@@ -210,6 +210,7 @@ async def test_exclude_and_reinclude_dataset_image_is_durable(db_session, make_c
     assert reincluded.json()["added"] == 1
     assert included_view.json()["member_count"] == 1
     assert included_view.json()["images"][0]["source"] == "manual"
+    assert included_view.json()["images"][0]["thumb_url"].endswith(f"/{images[0].blob_sha256}/thumb_160.webp")
 
 
 async def test_dataset_is_private_to_owner(db_session, make_client):

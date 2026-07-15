@@ -27,6 +27,7 @@ import {
   Activity,
   ListTodo,
   FolderHeart,
+  Database,
 } from 'lucide-react'
 import type { UserRole } from '@/lib/types'
 
@@ -135,6 +136,16 @@ export const PAGE_REGISTRY: PageDef[] = [
     dashboard: true,
     sidebar: true,
     minRole: 'viewer' as const,
+  },
+  {
+    href: '/datasets',
+    labelKey: 'nav.datasets',
+    descKey: 'dashboard.quickLinks.datasetsDesc',
+    icon: Database,
+    nav: false,
+    dashboard: true,
+    sidebar: true,
+    minRole: 'member',
   },
   {
     href: '/novels',

@@ -509,6 +509,45 @@ export interface Collection {
   updated_at: string | null
 }
 
+export interface DatasetSelection {
+  gallery_ids?: number[]
+  collection_ids?: number[]
+  image_ids?: number[]
+}
+
+export interface Dataset {
+  id: number
+  name: string
+  description: string | null
+  selection_spec: DatasetSelection
+  member_count: number
+  gallery_count: number
+  excluded_count: number
+  created_at: string | null
+  updated_at: string | null
+}
+
+export interface DatasetImage {
+  id: number
+  gallery_id: number
+  gallery_title: string
+  page_num: number
+  filename: string
+  width: number | null
+  height: number | null
+  thumb_url: string
+  state: 'included' | 'excluded'
+  source: 'gallery' | 'collection' | 'manual'
+}
+
+export interface DatasetDetail extends Dataset {
+  images: DatasetImage[]
+  state: 'included' | 'excluded'
+  page: number
+  has_next: boolean
+  total: number
+}
+
 /** Page-based tag list response */
 export interface TagListResponse {
   tags: TagItem[]

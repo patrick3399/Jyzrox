@@ -12,6 +12,7 @@ from core.auth import gallery_access_filter, require_role
 from core.database import get_db
 from core.events import EventType, emit_safe
 from db.models import Blob, Collection, CollectionGallery, Dataset, DatasetImage, Gallery, Image
+from services.cas import thumb_url
 
 router = APIRouter(tags=["datasets"])
 _member = require_role("member")
@@ -369,6 +370,7 @@ async def get_dataset(
             "filename": image.filename,
             "width": blob.width,
             "height": blob.height,
+            "thumb_url": thumb_url(blob.sha256),
             "state": member.state,
             "source": member.source,
         }
