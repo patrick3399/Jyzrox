@@ -14,6 +14,13 @@ type LocaleContextType = {
   locale: Locale
   setLocale: (locale: Locale | null) => void
   isAutomatic: boolean
+  /**
+   * Bumped whenever a lazily-loaded dictionary finishes loading. It MUST stay in
+   * the context value: React Compiler memoizes the value object on its fields,
+   * so without a changing field the post-load re-render is elided and every
+   * useLocale() consumer keeps rendering the pre-load (English fallback) strings.
+   */
+  dictionaryVersion: number
 }
 
 const LocaleContext = createContext<LocaleContextType | undefined>(undefined)
@@ -36,7 +43,7 @@ export function LocaleProvider({
 }) {
   const [locale, setLocaleState] = useState<Locale>(() => initialLocale ?? detectLocale())
   const [isAutomatic, setIsAutomatic] = useState(true)
-  const [, setDictionaryVersion] = useState(0)
+  const [dictionaryVersion, setDictionaryVersion] = useState(0)
 
   useEffect(() => {
     let active = true
@@ -117,7 +124,11 @@ export function LocaleProvider({
     document.documentElement.lang = locale
   }, [locale])
 
-  return <LocaleContext value={{ locale, setLocale, isAutomatic }}>{children}</LocaleContext>
+  return (
+    <LocaleContext value={{ locale, setLocale, isAutomatic, dictionaryVersion }}>
+      {children}
+    </LocaleContext>
+  )
 }
 
 export function useLocale() {

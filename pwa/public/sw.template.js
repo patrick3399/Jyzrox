@@ -30,7 +30,23 @@ async function queueShareRequest(body, headers) {
   return new Promise((resolve) => { tx.oncomplete = resolve; });
 }
 
+// Reconnecting fires several replay triggers at once (client `online` →
+// SW_REPLAY_QUEUE message, the SW's own `online` event, and the `sync` event).
+// Without this guard they run concurrently, each reading the same not-yet-
+// deleted queue snapshot and POSTing every item again — duplicate downloads.
+let replayInProgress = false;
+
 async function replayShareQueue() {
+  if (replayInProgress) return;
+  replayInProgress = true;
+  try {
+    await drainShareQueue();
+  } finally {
+    replayInProgress = false;
+  }
+}
+
+async function drainShareQueue() {
   const db = await openShareQueueDB();
   const tx = db.transaction(SHARE_QUEUE_STORE, 'readonly');
   const store = tx.objectStore(SHARE_QUEUE_STORE);
@@ -63,9 +79,19 @@ async function replayShareQueue() {
       return;
     }
 
-    // fetch() only rejects on network errors. Retain the item unless the API
-    // explicitly accepts it, including authentication and server failures.
-    if (!response.ok) return;
+    // fetch() only rejects on network errors. On an unsuccessful response,
+    // keep the item and stop only for transient failures (auth expiry, rate
+    // limiting, timeouts, server errors) so a later replay can succeed. A
+    // permanent client rejection (e.g. 400/422 for an unsupported URL) would
+    // otherwise wedge the queue forever, so drop that poison item and continue.
+    if (!response.ok) {
+      const transient =
+        response.status === 401 ||
+        response.status === 408 ||
+        response.status === 429 ||
+        response.status >= 500;
+      if (transient) return;
+    }
 
     await new Promise((resolve, reject) => {
       const deleteTx = db.transaction(SHARE_QUEUE_STORE, 'readwrite');
@@ -254,6 +280,24 @@ self.addEventListener('fetch', (event) => {
               const stamped = wrapResponseWithTimestamp(response.clone());
               cache.put(event.request, stamped);
               enforceMediaCacheLimit();
+            }
+            return response;
+          });
+        });
+      })
+    );
+  } else if (requestUrl.pathname.startsWith('/_next/static/')) {
+    // Immutable, content-hashed build assets (JS/CSS chunks). Cache-first so
+    // the app shell can still hydrate offline — without these a cached page
+    // renders blank. Stored in the build-versioned static cache, which is
+    // purged on the next activate, so stale chunks never linger.
+    event.respondWith(
+      caches.open(CACHE_NAME).then((cache) => {
+        return cache.match(event.request).then((cached) => {
+          if (cached) return cached;
+          return fetch(event.request).then((response) => {
+            if (response.status >= 200 && response.status < 300) {
+              cache.put(event.request, response.clone());
             }
             return response;
           });

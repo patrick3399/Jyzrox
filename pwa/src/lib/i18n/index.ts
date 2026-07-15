@@ -77,10 +77,16 @@ export async function loadLocale(locale: Locale): Promise<void> {
   if (existing) return existing
   if (locale === 'en') return
 
-  const pending = localeLoaders[locale]().then((module) => {
-    locales[locale] = module.default
-    pendingLocales.delete(locale)
-  })
+  const pending = localeLoaders[locale]()
+    .then((module) => {
+      locales[locale] = module.default
+    })
+    .finally(() => {
+      // Always clear the in-flight entry — including on a failed import — so a
+      // transient chunk-load error does not permanently cache a rejected
+      // promise and block every later retry until a full reload.
+      pendingLocales.delete(locale)
+    })
   pendingLocales.set(locale, pending)
   return pending
 }

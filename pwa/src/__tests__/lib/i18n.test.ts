@@ -24,6 +24,15 @@ import {
 // genuine key gap exists to exercise the en fallback path.
 vi.mock('../../lib/i18n/ja', () => ({ default: {} }))
 
+// F4 regression: a failed locale chunk import must not permanently poison the
+// in-flight cache. `koLoad.fail` flips to simulate a transient chunk-load error
+// followed by a successful retry.
+const koLoad = vi.hoisted(() => ({ fail: true }))
+vi.mock('../../lib/i18n/ko', () => {
+  if (koLoad.fail) throw new Error('simulated chunk load failure')
+  return { default: { 'test.f4RetryKey': 'ko-loaded' } }
+})
+
 beforeAll(async () => {
   await Promise.all([loadLocale('zh-TW'), loadLocale('ja')])
 })
@@ -52,6 +61,27 @@ describe('t() key lookup', () => {
     // ja is mocked as an empty dictionary above, so every key misses ja
     setLocale('ja')
     expect(t('settingsCategory.general')).toBe('General')
+  })
+})
+
+// ---------------------------------------------------------------------------
+// loadLocale() — failure recovery (F4 regression)
+// ---------------------------------------------------------------------------
+
+describe('loadLocale() failure recovery', () => {
+  it('test_loadLocale_afterFailedChunkImport_allowsSuccessfulRetry', async () => {
+    // First attempt fails (transient chunk-load error).
+    koLoad.fail = true
+    await expect(loadLocale('ko')).rejects.toThrow()
+
+    // Before the fix, the rejected promise stayed cached in pendingLocales, so
+    // every later loadLocale('ko') returned that same rejection — retry was
+    // impossible without a full reload. The finally-clear must allow re-import.
+    koLoad.fail = false
+    await expect(loadLocale('ko')).resolves.toBeUndefined()
+
+    setLocale('ko')
+    expect(t('test.f4RetryKey')).toBe('ko-loaded')
   })
 })
 
