@@ -46,6 +46,9 @@ class EventType(StrEnum):
     # Collection
     COLLECTION_UPDATED = "collection.updated"
 
+    # AI datasets
+    DATASET_UPDATED = "dataset.updated"
+
     # Tags
     TAGS_UPDATED = "tags.updated"
 

@@ -531,6 +531,46 @@ class CollectionGallery(Base):
     gallery: Mapped[Gallery] = relationship()
 
 
+class Dataset(Base):
+    """A user-owned, persistent image selection for model training/export."""
+
+    __tablename__ = "datasets"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    selection_spec: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    dataset_images: Mapped[list[DatasetImage]] = relationship(
+        back_populates="dataset", cascade="all, delete-orphan"
+    )
+
+
+class DatasetImage(Base):
+    """Durable image membership, including explicit exclusions."""
+
+    __tablename__ = "dataset_images"
+
+    dataset_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("datasets.id", ondelete="CASCADE"), primary_key=True
+    )
+    image_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True
+    )
+    state: Mapped[str] = mapped_column(Text, nullable=False, default="included", server_default="included")
+    source: Mapped[str] = mapped_column(Text, nullable=False, default="manual", server_default="manual")
+    added_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+    dataset: Mapped[Dataset] = relationship(back_populates="dataset_images")
+    image: Mapped[Image] = relationship()
+
+
 class ExcludedBlob(Base):
     __tablename__ = "excluded_blobs"
 

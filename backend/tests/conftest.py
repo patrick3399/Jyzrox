@@ -735,6 +735,29 @@ _SQLITE_SCHEMA = [
     )
     """,
     """
+    CREATE TABLE IF NOT EXISTS datasets (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        name TEXT NOT NULL,
+        description TEXT,
+        selection_spec TEXT NOT NULL DEFAULT '{}',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS dataset_images (
+        dataset_id INTEGER NOT NULL REFERENCES datasets(id) ON DELETE CASCADE,
+        image_id INTEGER NOT NULL REFERENCES images(id) ON DELETE CASCADE,
+        state TEXT NOT NULL DEFAULT 'included',
+        source TEXT NOT NULL DEFAULT 'manual',
+        added_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (dataset_id, image_id),
+        CHECK (state IN ('included', 'excluded'))
+    )
+    """,
+    """
     CREATE TABLE IF NOT EXISTS excluded_blobs (
         gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
         blob_sha256 TEXT NOT NULL,

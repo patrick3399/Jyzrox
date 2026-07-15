@@ -1,0 +1,277 @@
+"""Regression tests for persistent AI training datasets."""
+
+from unittest.mock import AsyncMock, patch
+
+from sqlalchemy import select
+
+from db.models import (
+    Blob,
+    Collection,
+    CollectionGallery,
+    Dataset,
+    DatasetImage,
+    Gallery,
+    Image,
+    User,
+)
+
+
+async def _user(db, user_id: int, role: str = "member") -> User:
+    user = User(
+        id=user_id,
+        username=f"dataset-user-{user_id}",
+        password_hash="test",
+        role=role,
+    )
+    db.add(user)
+    await db.flush()
+    return user
+
+
+async def _gallery_with_images(
+    db,
+    *,
+    owner_id: int,
+    source_id: str,
+    visibility: str = "private",
+    active: int = 2,
+    hidden: int = 0,
+) -> tuple[Gallery, list[Image]]:
+    gallery = Gallery(
+        source="local",
+        source_id=source_id,
+        title=source_id,
+        created_by_user_id=owner_id,
+        visibility=visibility,
+    )
+    db.add(gallery)
+    await db.flush()
+    images = []
+    for index in range(active + hidden):
+        sha = f"dataset-{source_id}-{index}"
+        blob = Blob(
+            sha256=sha,
+            file_size=100,
+            extension=".jpg",
+            width=1024 + index,
+            height=1024,
+        )
+        db.add(blob)
+        await db.flush()
+        image = Image(
+            gallery_id=gallery.id,
+            page_num=index + 1,
+            filename=f"{index + 1}.jpg",
+            blob_sha256=sha,
+            visibility="active" if index < active else "hidden",
+        )
+        db.add(image)
+        images.append(image)
+    await db.commit()
+    return gallery, images
+
+
+async def test_dataset_endpoints_require_auth(unauthed_client):
+    response = await unauthed_client.get("/api/datasets/")
+    assert response.status_code == 401
+
+
+async def test_dataset_endpoints_require_member_role(db_session, make_client):
+    await _user(db_session, 1, role="viewer")
+    await db_session.commit()
+
+    async with make_client(user_id=1, role="viewer") as ac:
+        response = await ac.get("/api/datasets/")
+
+    assert response.status_code == 403
+
+
+async def test_create_dataset_from_gallery_includes_only_active_images(db_session, make_client):
+    await _user(db_session, 1)
+    gallery, images = await _gallery_with_images(
+        db_session,
+        owner_id=1,
+        source_id="gallery-selection",
+        active=2,
+        hidden=1,
+    )
+
+    with patch("routers.datasets.emit_safe", new_callable=AsyncMock) as emit:
+        async with make_client(user_id=1) as ac:
+            response = await ac.post(
+                "/api/datasets/",
+                json={"name": "Portrait LoRA", "gallery_ids": [gallery.id]},
+            )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["member_count"] == 2
+    assert body["gallery_count"] == 1
+    assert body["excluded_count"] == 0
+    assert body["selection_spec"] == {"gallery_ids": [gallery.id]}
+    members = (
+        (await db_session.execute(select(DatasetImage).where(DatasetImage.dataset_id == body["id"]))).scalars().all()
+    )
+    assert {member.image_id for member in members} == {images[0].id, images[1].id}
+    assert {member.source for member in members} == {"gallery"}
+    emit.assert_awaited_once()
+
+
+async def test_create_dataset_reports_inaccessible_gallery_and_image(db_session, make_client):
+    await _user(db_session, 1)
+    await _user(db_session, 2)
+    private_gallery, images = await _gallery_with_images(
+        db_session,
+        owner_id=2,
+        source_id="other-users-private-gallery",
+        visibility="private",
+        active=1,
+    )
+
+    async with make_client(user_id=1) as ac:
+        response = await ac.post(
+            "/api/datasets/",
+            json={
+                "name": "No leaks",
+                "gallery_ids": [private_gallery.id],
+                "image_ids": [images[0].id],
+            },
+        )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    assert body["member_count"] == 0
+    assert body["denied"] == {
+        "gallery_ids": [private_gallery.id],
+        "collection_ids": [],
+        "image_ids": [images[0].id],
+    }
+
+
+async def test_create_dataset_from_collection_preserves_provenance(db_session, make_client):
+    await _user(db_session, 1)
+    gallery, images = await _gallery_with_images(
+        db_session,
+        owner_id=1,
+        source_id="collection-gallery",
+        active=1,
+    )
+    collection = Collection(user_id=1, name="Training candidates")
+    db_session.add(collection)
+    await db_session.flush()
+    db_session.add(CollectionGallery(collection_id=collection.id, gallery_id=gallery.id))
+    await db_session.commit()
+
+    async with make_client(user_id=1) as ac:
+        response = await ac.post(
+            "/api/datasets/",
+            json={"name": "From collection", "collection_ids": [collection.id]},
+        )
+
+    assert response.status_code == 201, response.text
+    body = response.json()
+    member = (
+        await db_session.execute(
+            select(DatasetImage).where(
+                DatasetImage.dataset_id == body["id"],
+                DatasetImage.image_id == images[0].id,
+            )
+        )
+    ).scalar_one()
+    assert member.source == "collection"
+
+
+async def test_exclude_and_reinclude_dataset_image_is_durable(db_session, make_client):
+    await _user(db_session, 1)
+    _, images = await _gallery_with_images(
+        db_session,
+        owner_id=1,
+        source_id="exclude-image",
+        active=1,
+    )
+
+    async with make_client(user_id=1) as ac:
+        created = await ac.post(
+            "/api/datasets/",
+            json={"name": "Reviewable", "image_ids": [images[0].id]},
+        )
+        dataset_id = created.json()["id"]
+        excluded = await ac.delete(f"/api/datasets/{dataset_id}/images/{images[0].id}")
+        excluded_view = await ac.get(f"/api/datasets/{dataset_id}?state=excluded")
+        reincluded = await ac.post(
+            f"/api/datasets/{dataset_id}/members",
+            json={"image_ids": [images[0].id]},
+        )
+        included_view = await ac.get(f"/api/datasets/{dataset_id}")
+
+    assert excluded.status_code == 200
+    assert excluded_view.json()["excluded_count"] == 1
+    assert excluded_view.json()["images"][0]["state"] == "excluded"
+    assert reincluded.json()["added"] == 1
+    assert included_view.json()["member_count"] == 1
+    assert included_view.json()["images"][0]["source"] == "manual"
+
+
+async def test_dataset_is_private_to_owner(db_session, make_client):
+    await _user(db_session, 1)
+    await _user(db_session, 2)
+    dataset = Dataset(user_id=1, name="Owner only", selection_spec={})
+    db_session.add(dataset)
+    await db_session.commit()
+
+    async with make_client(user_id=2) as ac:
+        response = await ac.get(f"/api/datasets/{dataset.id}")
+
+    assert response.status_code == 404
+
+
+async def test_list_and_update_dataset_metadata(db_session, make_client):
+    await _user(db_session, 1)
+
+    async with make_client(user_id=1) as ac:
+        invalid = await ac.post("/api/datasets/", json={"name": "   "})
+        created = await ac.post(
+            "/api/datasets/",
+            json={"name": "Initial", "description": "first"},
+        )
+        dataset_id = created.json()["id"]
+        updated = await ac.patch(
+            f"/api/datasets/{dataset_id}",
+            json={"name": "Renamed", "description": None},
+        )
+        listing = await ac.get("/api/datasets/")
+
+    assert invalid.status_code == 422
+    assert updated.status_code == 200
+    assert listing.status_code == 200
+    datasets = listing.json()["datasets"]
+    assert len(datasets) == 1
+    assert datasets[0]["id"] == dataset_id
+    assert datasets[0]["name"] == "Renamed"
+    assert datasets[0]["description"] is None
+    assert datasets[0]["member_count"] == 0
+
+
+async def test_delete_dataset_cascades_members(db_session, make_client):
+    await _user(db_session, 1)
+    _, images = await _gallery_with_images(
+        db_session,
+        owner_id=1,
+        source_id="delete-dataset",
+        active=1,
+    )
+
+    async with make_client(user_id=1) as ac:
+        created = await ac.post(
+            "/api/datasets/",
+            json={"name": "Disposable", "image_ids": [images[0].id]},
+        )
+        dataset_id = created.json()["id"]
+        deleted = await ac.delete(f"/api/datasets/{dataset_id}")
+
+    assert deleted.status_code == 200
+    assert await db_session.get(Dataset, dataset_id) is None
+    members = (
+        (await db_session.execute(select(DatasetImage).where(DatasetImage.dataset_id == dataset_id))).scalars().all()
+    )
+    assert members == []
