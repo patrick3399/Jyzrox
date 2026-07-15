@@ -485,8 +485,9 @@ async def shutdown(ctx: dict) -> None:
             await log_level_task
         except asyncio.CancelledError:
             pass
-    r = ctx["redis"]
-    await r.delete("watcher:status")
+    r = ctx.get("redis")
+    if r is not None:
+        await r.delete("watcher:status")
     await close_redis()
 
 

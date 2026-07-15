@@ -30,3 +30,16 @@ async def test_worker_startup_aborts_when_db_not_at_head():
     with patch("core.schema_guard.assert_db_at_head", AsyncMock(side_effect=RuntimeError("stale schema"))):
         with pytest.raises(RuntimeError, match="stale schema"):
             await worker.startup({})
+
+
+@pytest.mark.asyncio
+async def test_worker_shutdown_tolerates_startup_failure_before_redis():
+    import worker
+
+    with (
+        patch.object(worker._watcher, "stop"),
+        patch.object(worker, "close_redis", new_callable=AsyncMock) as close_redis,
+    ):
+        await worker.shutdown({})
+
+    close_redis.assert_awaited_once_with()
