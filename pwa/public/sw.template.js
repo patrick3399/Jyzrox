@@ -137,6 +137,14 @@ self.addEventListener('message', (event) => {
   if (event.data?.type === 'SW_REPLAY_QUEUE') {
     event.waitUntil(replayShareQueue());
   }
+  if (event.data?.type === 'SW_CLEAR_USER_CACHES') {
+    // Logout: cached media/pages contain private user content and must not
+    // outlive the session (BR-003). The static asset cache is content-neutral
+    // and survives so the login page still hydrates offline.
+    event.waitUntil(
+      Promise.all([caches.delete(MEDIA_CACHE_NAME), caches.delete(PAGE_CACHE_NAME)])
+    );
+  }
 });
 
 function wrapResponseWithTimestamp(response) {

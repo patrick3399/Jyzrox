@@ -5,6 +5,7 @@ import { mutate } from 'swr'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
+import { clearSWUserCaches } from '@/lib/swCacheConfig'
 
 export function useAuth() {
   const router = useRouter()
@@ -26,6 +27,8 @@ export function useAuth() {
       return
     }
     await mutate(() => true, undefined, { revalidate: false })
+    // Cached media/pages hold private content — drop them with the session.
+    clearSWUserCaches()
     router.push('/login')
     router.refresh()
   }, [router])

@@ -36,6 +36,13 @@ export function sendConfigToSW(config: SWCacheConfig): void {
   })
 }
 
+export function clearSWUserCaches(): void {
+  if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
+  navigator.serviceWorker.ready.then((reg) => {
+    reg.active?.postMessage({ type: 'SW_CLEAR_USER_CACHES' })
+  })
+}
+
 export function replayOfflineQueue(): void {
   if (typeof navigator === 'undefined' || !('serviceWorker' in navigator)) return
   navigator.serviceWorker.ready.then((registration) => {

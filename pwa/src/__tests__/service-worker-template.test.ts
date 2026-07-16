@@ -60,6 +60,18 @@ describe('service worker request safety', () => {
     expect(source.slice(setTrue, reset)).toContain('finally')
   })
 
+  it('clears user content caches on SW_CLEAR_USER_CACHES message', () => {
+    // Regression (BR-003): media/page caches (72h TTL) survived logout, so a
+    // logged-out device could still read previously cached private media.
+    const handler = source.indexOf("event.data?.type === 'SW_CLEAR_USER_CACHES'")
+    expect(handler).toBeGreaterThan(-1)
+
+    const mediaDelete = source.indexOf('caches.delete(MEDIA_CACHE_NAME)', handler)
+    const pageDelete = source.indexOf('caches.delete(PAGE_CACHE_NAME)', handler)
+    expect(mediaDelete).toBeGreaterThan(handler)
+    expect(pageDelete).toBeGreaterThan(handler)
+  })
+
   it('caches immutable build assets so the app shell can hydrate offline', () => {
     // Regression: narrowing the fetch handler to only `mode === 'navigate'`
     // left /_next/static/* chunks uncached, so offline navigations served a
