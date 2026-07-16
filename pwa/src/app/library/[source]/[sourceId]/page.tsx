@@ -8,6 +8,8 @@ import useSWR from 'swr'
 import { useLibraryGallery, useInfiniteGalleryImages, useUpdateGallery } from '@/hooks/useGalleries'
 import { useTagTranslations } from '@/hooks/useTagTranslations'
 import { api } from '@/lib/api'
+import { useWsConnection, useWsJobs } from '@/lib/ws'
+import { pollingRefreshInterval } from '@/lib/wsPolling'
 import { decodeRouteSegment, readerHref } from '@/lib/galleryRoutes'
 import { GalleryTagSection } from '@/components/library/GalleryTagSection'
 import { AppImage } from '@/components/AppImage'
@@ -78,6 +80,8 @@ export default function GalleryDetailPage() {
   const router = useRouter()
   const source = decodeRouteSegment(params?.source)
   const sourceId = decodeRouteSegment(params?.sourceId)
+  const { connected } = useWsConnection()
+  const { lastJobUpdate } = useWsJobs()
 
   const {
     data: gallery,
@@ -337,20 +341,40 @@ export default function GalleryDetailPage() {
   }, [gallery?.source, gallery?.source_id, router, selectMode])
 
   const isDownloading = gallery?.download_status === 'downloading'
+  // Fallback poll — only runs when WS is down. While connected, the effect
+  // below reacts to WS job-progress events instead (see wsInvalidation.tsx
+  // module docstring for why download.* can't drive this via lastEvent).
   useEffect(() => {
-    if (!isDownloading) return
+    if (!isDownloading || connected) return
     const interval = setInterval(() => {
       mutateGallery()
       mutateImages()
     }, 5000)
     return () => clearInterval(interval)
-  }, [isDownloading, mutateGallery, mutateImages])
+  }, [isDownloading, connected, mutateGallery, mutateImages])
 
-  const { data: activeJob } = useSWR(
+  // WS-driven refresh while downloading: progressive import sets
+  // progress.gallery_id on job_update events (see worker/download.py) so a
+  // matching update means new pages may have arrived for this gallery.
+  useEffect(() => {
+    if (!isDownloading || !gallery || !lastJobUpdate) return
+    const progressGalleryId = lastJobUpdate.progress?.gallery_id
+    if (progressGalleryId !== gallery.id) return
+    mutateGallery()
+    mutateImages()
+  }, [lastJobUpdate, isDownloading, gallery, mutateGallery, mutateImages])
+
+  const { data: activeJob, mutate: mutateActiveJob } = useSWR(
     activeJobId ? ['download/job', activeJobId] : null,
     ([, id]) => api.download.getJob(id),
-    { refreshInterval: 3000, revalidateOnFocus: false },
+    { refreshInterval: pollingRefreshInterval(connected, 3000), revalidateOnFocus: false },
   )
+  // While connected, a matching job_update is a more precise (and instant)
+  // signal than the polling fallback above.
+  useEffect(() => {
+    if (!activeJobId || !lastJobUpdate || lastJobUpdate.job_id !== activeJobId) return
+    mutateActiveJob()
+  }, [lastJobUpdate, activeJobId, mutateActiveJob])
   useEffect(() => {
     if (!activeJob) return
     const terminal = ['done', 'failed', 'cancelled', 'partial']

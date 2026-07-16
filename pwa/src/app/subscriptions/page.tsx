@@ -6,7 +6,8 @@ import { Rss, Plus, X, Trash2, List, Search, FolderOpen } from 'lucide-react'
 import { toast } from 'sonner'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
-import { useWsJobs } from '@/lib/ws'
+import { useWsJobs, useWsConnection } from '@/lib/ws'
+import { pollingRefreshInterval } from '@/lib/wsPolling'
 import {
   useSubscriptions,
   useCreateSubscription,
@@ -61,6 +62,7 @@ export default function SubscriptionsPage() {
   const { trigger: bulkMoveTrigger } = useBulkMove()
 
   const { lastSubCheck, lastJobUpdate } = useWsJobs()
+  const { connected } = useWsConnection()
 
   const groups = groupsData?.groups ?? []
 
@@ -89,7 +91,9 @@ export default function SubscriptionsPage() {
       await Promise.all(promises)
       return results
     },
-    { refreshInterval: 5000 },
+    // Event-driven while connected (lastSubCheck/lastJobUpdate effects below +
+    // wsInvalidation.tsx); poll as a fallback when WS is down.
+    { refreshInterval: pollingRefreshInterval(connected, 5000) },
   )
 
   useEffect(() => {

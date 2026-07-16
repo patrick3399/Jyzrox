@@ -12,6 +12,8 @@ import { EmptyState } from '@/components/EmptyState'
 import type { Gallery, DownloadJob } from '@/lib/types'
 import { loadDashboardConfig, DASHBOARD_LINKS_CONFIG_KEY } from '@/components/DashboardLinksConfig'
 import { passesFeatureFlag } from '@/lib/pageRegistry'
+import { useWsConnection } from '@/lib/ws'
+import { pollingRefreshInterval } from '@/lib/wsPolling'
 
 const DISMISSED_KEY = 'dashboard:dismissed_alerts'
 const COMPACT_LINKS_KEY = 'dashboard_compact_links'
@@ -134,12 +136,15 @@ function GalleryThumb({ gallery }: { gallery: Gallery }) {
 }
 
 export default function Dashboard() {
+  const { connected } = useWsConnection()
+
   const { data: libraryData, isLoading: libraryLoading } = useSWR('dashboard/recent', () =>
     api.library.getGalleries({ limit: 12, sort: 'added_at' }),
   )
 
   const { data: jobsData } = useSWR('dashboard/jobs', () => api.download.getJobs({ limit: 5 }), {
-    refreshInterval: 5000,
+    // Event-driven while connected (see wsInvalidation.tsx); poll as a fallback when WS is down.
+    refreshInterval: pollingRefreshInterval(connected, 5000),
     dedupingInterval: 3000,
     focusThrottleInterval: 10000,
   })
