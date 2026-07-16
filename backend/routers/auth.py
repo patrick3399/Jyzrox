@@ -24,6 +24,9 @@ from core.errors import api_error, parse_accept_language
 from core.rate_limit import check_rate_limit, get_client_ip
 from core.redis_client import get_redis
 from db.models import User
+from services.media_authz import authorize_media_uri
+
+_MEDIA_URI_AUTHZ_PREFIXES = ("/media/libraries/", "/media/image/")
 
 router = APIRouter(tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -251,40 +254,78 @@ async def login(req: LoginRequest, request: Request, response: Response):
 
 @router.get("/check")
 async def check_auth(
+    request: Request,
     vault_session: str | None = Cookie(default=None),
     authorization: str | None = Header(default=None),
 ):
-    """Lightweight session validation for nginx auth_request subrequest."""
+    """Lightweight session validation for nginx auth_request subrequest.
+
+    nginx forwards the original request URI via ``X-Original-URI``. For
+    path-addressed media prefixes (``/media/libraries/``, ``/media/image/``)
+    a valid session alone is not sufficient — the resource must also pass
+    per-gallery / imgproxy-source authorization (see services.media_authz).
+    Callers that don't set X-Original-URI (i.e. anything outside the nginx
+    auth_request flow) are unaffected and keep the pre-existing behavior.
+    """
+    original_uri = request.headers.get("x-original-uri", "")
+
     # Try cookie first — validate session exists AND has valid HMAC
     if vault_session:
+        role: str | None = None
+        user_id_str = ""
         try:
             user_id_str, token = vault_session.split(":", 1)
             session_data = await get_redis().get(f"session:{user_id_str}:{token}")
             if session_data:
                 raw = session_data if isinstance(session_data, str) else session_data.decode()
-                if _verify_session(raw) is not None:
-                    return {"status": "ok"}
+                verified = _verify_session(raw)
+                if verified is not None:
+                    role = "viewer"
+                    try:
+                        meta = json.loads(verified)
+                        if isinstance(meta, dict):
+                            role = meta.get("role", "viewer")
+                    except json.JSONDecodeError, TypeError:
+                        pass
         except ValueError, UnicodeDecodeError:
-            pass
+            role = None
+
+        if role is not None:
+            if original_uri.startswith(_MEDIA_URI_AUTHZ_PREFIXES):
+                try:
+                    user_id = int(user_id_str)
+                except ValueError:
+                    raise HTTPException(status_code=403, detail="Forbidden")
+                if not await authorize_media_uri({"user_id": user_id, "role": role}, original_uri):
+                    raise HTTPException(status_code=403, detail="Forbidden")
+            return {"status": "ok"}
 
     # Fallback to Basic Auth (for OPDS clients)
     if authorization and authorization.lower().startswith("basic "):
         import base64
 
+        user = None
+        valid = False
         try:
             decoded = base64.b64decode(authorization[6:]).decode("utf-8")
             username, password = decoded.split(":", 1)
             async with async_session() as session:
                 result = await session.execute(
-                    text("SELECT id, password_hash FROM users WHERE username = :uname"),
+                    text("SELECT id, password_hash, role FROM users WHERE username = :uname"),
                     {"uname": username},
                 )
                 user = result.fetchone()
             hash_to_check = user.password_hash if user else _DUMMY_HASH
-            if user and await _checkpw_async(password.encode("utf-8"), hash_to_check.encode("utf-8")):
-                return {"status": "ok"}
+            valid = bool(user) and await _checkpw_async(password.encode("utf-8"), hash_to_check.encode("utf-8"))
         except Exception:
-            pass
+            valid = False
+
+        if valid:
+            if original_uri.startswith(_MEDIA_URI_AUTHZ_PREFIXES):
+                basic_auth = {"user_id": user.id, "role": user.role or "viewer"}
+                if not await authorize_media_uri(basic_auth, original_uri):
+                    raise HTTPException(status_code=403, detail="Forbidden")
+            return {"status": "ok"}
 
     raise HTTPException(status_code=401, detail="Not authenticated")
 
@@ -499,9 +540,7 @@ async def update_ui_preferences(req: UiPreferencesPatch, auth: dict = Depends(re
                 merged.pop(key, None)
             else:
                 merged[key] = value
-        await session.execute(
-            update(User).where(User.id == auth["user_id"]).values(ui_preferences=merged)
-        )
+        await session.execute(update(User).where(User.id == auth["user_id"]).values(ui_preferences=merged))
         await session.commit()
     return {"status": "ok", "preferences": merged}
 
