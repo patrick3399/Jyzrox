@@ -31,9 +31,25 @@ describe('AppImage', () => {
     const sources = container.querySelectorAll('source')
     expect(sources).toHaveLength(2)
     expect(sources[0]).toHaveAttribute('type', 'image/avif')
-    expect(sources[0].getAttribute('srcset')).toContain('local:///cas/aa/bb/hash.jpg@avif 320w')
     expect(sources[0]).toHaveAttribute('sizes', '50vw')
     expect(sources[1]).toHaveAttribute('type', 'image/webp')
+
+    const avifSrcSet = sources[0].getAttribute('srcset') ?? ''
+    expect(avifSrcSet).toContain('/media/image/insecure/rs:fit:320:0:0/')
+    expect(avifSrcSet).toContain('.avif 320w')
+    // Regression: the imgproxy source must be base64-encoded so it carries no
+    // `local:///` (or any `//`) that nginx merge_slashes would collapse + 308.
+    expect(avifSrcSet).not.toContain('local:')
+    expect(avifSrcSet).not.toContain('://')
+    expect(avifSrcSet).not.toContain('//')
+
+    // The encoded source round-trips back to the local imgproxy path.
+    const firstVariant = avifSrcSet.split(',')[0].trim().split(' ')[0]
+    const encoded = firstVariant
+      .replace('/media/image/insecure/rs:fit:320:0:0/', '')
+      .replace(/\.avif$/, '')
+    const decoded = atob(encoded.replace(/-/g, '+').replace(/_/g, '/'))
+    expect(decoded).toBe('local:///cas/aa/bb/hash.jpg')
   })
 
   it('leaves remote images unchanged', () => {

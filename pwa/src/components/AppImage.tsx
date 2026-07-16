@@ -11,10 +11,20 @@ type AppImageProps = Omit<ImgHTMLAttributes<HTMLImageElement>, 'src' | 'alt'> & 
 
 const RESPONSIVE_WIDTHS = [320, 640, 960]
 
+// imgproxy's plain source form (`/plain/local:///path`) contains the `local:///`
+// triple slash, which nginx (merge_slashes on, the default) collapses to
+// `local:/` and 308-redirects — breaking imgproxy's source resolution. Encoding
+// the source as URL-safe base64 removes every slash from the source segment, so
+// the request survives nginx untouched.
+function encodeImgproxySource(source: string): string {
+  return btoa(source).replace(/\+/g, '-').replace(/\//g, '_').replace(/=+$/, '')
+}
+
 function imgproxyUrl(src: string, width: number, format: 'avif' | 'webp'): string | null {
   if (!src.startsWith('/media/cas/') && !src.startsWith('/media/thumbs/')) return null
   const localPath = src.slice('/media/'.length)
-  return `/media/image/insecure/rs:fit:${width}:0:0/plain/local:///${localPath}@${format}`
+  const source = encodeImgproxySource(`local:///${localPath}`)
+  return `/media/image/insecure/rs:fit:${width}:0:0/${source}.${format}`
 }
 
 export function responsiveImageSrcSet(
