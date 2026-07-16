@@ -67,10 +67,14 @@ http {
             proxy_set_header X-Original-URI $request_uri;
             proxy_set_header Authorization $http_authorization;
 
-            # Cache auth results per cookie+authorization value for 5 minutes
+            # Cache auth results per cookie+authorization value. 200 is kept
+            # short: it bounds how long a revoked session (logout, role change,
+            # disabled user) can still fetch /media/* (edge case audit #66).
+            # auth/check is a single Redis GET, so the extra subrequest QPS
+            # from the shorter TTL is cheap.
             proxy_cache auth_cache;
             proxy_cache_key $http_cookie$http_authorization;
-            proxy_cache_valid 200 5m;
+            proxy_cache_valid 200 30s;
             proxy_cache_valid 401 403 10s;
         }
 
