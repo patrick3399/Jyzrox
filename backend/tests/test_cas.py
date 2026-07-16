@@ -532,6 +532,76 @@ class TestCreateLibrarySymlink:
 # ---------------------------------------------------------------------------
 
 
+class TestLibraryDirCollisionGuard:
+    """Audit #45 / BR-008: safe_source_id() is not injective — 'a/b' and a
+    literal 'a__b' both sanitize to 'a__b' — so two distinct galleries could
+    silently share one library dir and overwrite each other's symlinks. The
+    dir now carries an ownership marker; a mismatch raises loudly."""
+
+    def test_library_dir_collision_between_distinct_source_ids_raises(self, tmp_path):
+        import pytest
+
+        from services.cas import LibraryDirCollisionError, ensure_library_dir
+
+        with patch("services.cas.settings", _mock_settings(library=str(tmp_path / "library"))):
+            first = ensure_library_dir("ehentai", "a/b")
+            assert first.exists()
+            with pytest.raises(LibraryDirCollisionError):
+                ensure_library_dir("ehentai", "a__b")
+
+    def test_same_gallery_reuse_of_library_dir_does_not_raise(self, tmp_path):
+        from services.cas import ensure_library_dir
+
+        with patch("services.cas.settings", _mock_settings(library=str(tmp_path / "library"))):
+            first = ensure_library_dir("ehentai", "12345")
+            second = ensure_library_dir("ehentai", "12345")
+            assert first == second
+
+    def test_pre_marker_library_dir_is_adopted_not_rejected(self, tmp_path):
+        """Dirs created before the marker existed must be grandfathered in on
+        first touch, not treated as collisions."""
+        from services.cas import OWNER_MARKER_FILENAME, ensure_library_dir
+
+        legacy = tmp_path / "library" / "ehentai" / "999"
+        legacy.mkdir(parents=True)
+        (legacy / "001.jpg").write_bytes(b"x")
+
+        with patch("services.cas.settings", _mock_settings(library=str(tmp_path / "library"))):
+            got = ensure_library_dir("ehentai", "999")
+
+        assert got == legacy
+        assert (legacy / OWNER_MARKER_FILENAME).read_text(encoding="utf-8") == "ehentai:999"
+
+    async def test_create_library_symlink_collision_raises_and_alerts(self, tmp_path):
+        import pytest
+
+        from services.cas import LibraryDirCollisionError, create_library_symlink, ensure_library_dir
+
+        data_root = tmp_path / "data"
+        cas_root = data_root / "cas"
+        library_root = data_root / "library"
+        blob_file = cas_root / SHA[:2] / SHA[2:4] / f"{SHA}.jpg"
+        blob_file.parent.mkdir(parents=True)
+        blob_file.write_bytes(b"image-bytes")
+
+        blob = MagicMock()
+        blob.storage = "cas"
+        blob.external_path = None
+        blob.sha256 = SHA
+        blob.extension = ".jpg"
+
+        alert = AsyncMock()
+        with (
+            patch("services.cas.settings", _mock_settings(cas=str(cas_root), library=str(library_root))),
+            patch("services.cache.push_system_alert", alert),
+        ):
+            ensure_library_dir("ehentai", "a/b")
+            with pytest.raises(LibraryDirCollisionError):
+                await create_library_symlink("ehentai", "a__b", "001.jpg", blob)
+
+        alert.assert_awaited_once()
+
+
 class TestDecrementRefCount:
     """Unit tests for async decrement_ref_count(sha256, session)."""
 

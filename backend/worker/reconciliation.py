@@ -12,7 +12,7 @@ from sqlalchemy.sql import select
 from core.config import settings
 from core.database import AsyncSessionLocal
 from db.models import Blob, Gallery, Image
-from services.cas import cas_path, create_library_symlink, safe_source_id, thumb_dir
+from services.cas import OWNER_MARKER_FILENAME, cas_path, create_library_symlink, safe_source_id, thumb_dir
 from services.library_sidecar import SIDECAR_FILENAME, sidecar_payload_from_gallery, write_gallery_sidecar
 from worker.constants import logger
 from worker.helpers import _cron_record, _cron_should_run
@@ -148,6 +148,10 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                     # an empty dir look valid nor enter the DB/disk diff.
                     has_sidecar = True
                     continue
+                if fe.name == OWNER_MARKER_FILENAME:
+                    # Ownership marker (audit #45), not gallery content: same
+                    # rules as the sidecar — never valid content, never diffed.
+                    continue
                 if fe.is_symlink() and not Path(fe.path).exists():
                     # Broken symlink — remove it silently; absence from disk_files
                     # will cause DB record to be deleted in batch step below.
@@ -270,6 +274,9 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
                     source, sid = key
                     gdir = lib_base / source / sid
                     try:
+                        # The ownership marker (audit #45) must not keep an
+                        # otherwise-empty gallery dir alive.
+                        (gdir / OWNER_MARKER_FILENAME).unlink(missing_ok=True)
                         gdir.rmdir()
                         # Also remove source dir if now empty
                         source_dir = lib_base / source
@@ -325,9 +332,7 @@ async def reconciliation_job(ctx: dict, force: bool = False) -> dict:
         for chunk_start in range(0, total_orphans, _CHUNK):
             chunk_ids = orphan_gallery_ids[chunk_start : chunk_start + _CHUNK]
 
-            orphan_galleries = (
-                (await session.execute(select(Gallery).where(Gallery.id.in_(chunk_ids)))).scalars().all()
-            )
+            orphan_galleries = (await session.execute(select(Gallery).where(Gallery.id.in_(chunk_ids)))).scalars().all()
             orphan_rows = (
                 await session.execute(
                     select(Image.gallery_id, Image.filename, Blob)

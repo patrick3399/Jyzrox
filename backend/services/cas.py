@@ -42,6 +42,43 @@ def library_dir(source: str, source_id: str) -> Path:
     return Path(settings.data_library_path) / source / safe_source_id(source_id)
 
 
+OWNER_MARKER_FILENAME = ".gallery-owner"
+
+
+class LibraryDirCollisionError(RuntimeError):
+    """Two distinct (source, source_id) pairs sanitize to the same library dir (audit #45)."""
+
+
+def ensure_library_dir(source: str, source_id: str) -> Path:
+    """Create or validate the library symlink dir for a gallery.
+
+    safe_source_id() is not injective ('a/b' sanitizes to 'a__b', colliding
+    with a literal 'a__b'), so the dir carries an ownership marker recording
+    the raw (source, source_id). Reuse by a different identity raises instead
+    of silently mixing two galleries' symlinks (audit #45). Dirs created
+    before the marker existed are adopted on first touch.
+    """
+    d = library_dir(source, source_id)
+    owner = f"{source}:{source_id}"
+    marker = d / OWNER_MARKER_FILENAME
+    if d.exists():
+        try:
+            existing = marker.read_text(encoding="utf-8").strip()
+        except OSError:
+            existing = None
+        if existing is not None and existing != owner:
+            raise LibraryDirCollisionError(
+                f"library dir {d} is owned by {existing!r}; refusing to reuse it for {owner!r} "
+                f"(safe_source_id collision, audit #45)"
+            )
+        if existing is None:
+            marker.write_text(owner, encoding="utf-8")
+        return d
+    d.mkdir(parents=True, exist_ok=True)
+    marker.write_text(owner, encoding="utf-8")
+    return d
+
+
 def resolve_blob_path(blob: Blob) -> Path:
     """Return the actual filesystem path for a blob (CAS or external)."""
     if blob.storage == "external" and blob.external_path:
@@ -152,8 +189,13 @@ async def store_blob(
 
 async def create_library_symlink(source: str, source_id: str, filename: str, blob: Blob) -> None:
     """Create a symlink in /data/library/{source}/{safe_source_id}/ pointing to the blob's actual file."""
-    link_dir = library_dir(source, source_id)
-    link_dir.mkdir(parents=True, exist_ok=True)
+    try:
+        link_dir = ensure_library_dir(source, source_id)
+    except LibraryDirCollisionError as exc:
+        from services.cache import push_system_alert
+
+        await push_system_alert(str(exc))
+        raise
 
     target = resolve_blob_path(blob)
     link = link_dir / filename

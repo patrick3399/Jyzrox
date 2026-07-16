@@ -1039,6 +1039,40 @@ class TestSidecarReconciliation:
         assert result["removed_galleries"] == 1, "sidecar-only link dir must still count as empty"
         sidecar_spy.assert_not_awaited()
 
+    async def test_owner_marker_only_dir_still_counts_as_empty_link_gallery(self, tmp_path):
+        """BR-008: a link-mode gallery dir containing ONLY the .gallery-owner
+        ownership marker (audit #45) must still be treated as empty — the
+        marker is bookkeeping, not gallery content — so empty-dir cleanup and
+        DB pruning keep working."""
+        from contextlib import ExitStack
+
+        from services.cas import OWNER_MARKER_FILENAME
+        from worker.reconciliation import reconciliation_job
+
+        lib_base = tmp_path / "library"
+        lib_base.mkdir()
+        mock_settings = MagicMock()
+        mock_settings.data_library_path = str(lib_base)
+
+        gallery = _gallery_entity(5, "local", "gal_1", import_mode="link")
+        execute_returns = [
+            _make_result_with_rows([gallery]),  # Phase 1 raw tuple IN
+            _make_result_with_rows([]),  # Phase 1 images
+            _make_empty_result(),  # DELETE empty link galleries
+            _make_result_with_rows([]),  # Phase 2
+            _make_result_with_rows([]),  # Phase 3
+        ]
+        session = _make_session_ctx(execute_side_effects=execute_returns)
+        sidecar_spy = AsyncMock(return_value=True)
+
+        with ExitStack() as stack:
+            for p in self._patches(mock_settings, self._fs(lib_base, [OWNER_MARKER_FILENAME]), session, sidecar_spy):
+                stack.enter_context(p)
+            result = await reconciliation_job(_make_ctx())
+
+        assert result["status"] == "done"
+        assert result["removed_galleries"] == 1, "marker-only link dir must still count as empty"
+
     async def test_missing_sidecar_backfilled_for_matched_gallery(self, tmp_path):
         """A matched gallery whose dir has files but no info.json must get one."""
         from contextlib import ExitStack
