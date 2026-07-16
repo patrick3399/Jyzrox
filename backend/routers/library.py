@@ -6,7 +6,7 @@ import hmac
 import json
 import logging
 import re as _re
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from itertools import combinations
 from pathlib import Path
 from typing import Literal
@@ -48,6 +48,7 @@ from db.models import (
     GallerySourceItem,
     GalleryTag,
     Image,
+    ReadEvent,
     ReadProgress,
     Tag,
     UserFavorite,
@@ -2221,6 +2222,115 @@ async def restore_images_batch(
 # ── Read progress ────────────────────────────────────────────────────
 
 
+class ReadEventBody(BaseModel):
+    gallery_id: int
+    page_num: int = Field(ge=0)
+    duration_ms: int | None = Field(default=None, ge=0, le=86_400_000)
+
+
+@router.post("/read-events", status_code=201)
+async def create_read_event(
+    body: ReadEventBody,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    gallery = (
+        await db.execute(select(Gallery).where(Gallery.id == body.gallery_id, gallery_access_filter(auth)))
+    ).scalar_one_or_none()
+    if gallery is None:
+        raise HTTPException(status_code=404, detail="Gallery not found")
+    image_id = (
+        await db.execute(
+            select(Image.id).where(
+                Image.gallery_id == gallery.id,
+                Image.page_num == body.page_num,
+                Image.visibility == "active",
+            )
+        )
+    ).scalar_one_or_none()
+    db.add(
+        ReadEvent(
+            user_id=auth["user_id"],
+            gallery_id=gallery.id,
+            image_id=image_id,
+            page_num=body.page_num,
+            duration_ms=body.duration_ms,
+        )
+    )
+    await db.commit()
+    return {"status": "recorded"}
+
+
+@router.get("/stats")
+async def get_reading_stats(
+    days: int = Query(default=30, ge=1, le=365),
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    cutoff = datetime.now(UTC) - timedelta(days=days)
+    trend_rows = (
+        await db.execute(
+            select(
+                func.date(ReadEvent.occurred_at),
+                func.count(ReadEvent.id),
+                func.count(func.distinct(ReadEvent.gallery_id)),
+            )
+            .where(ReadEvent.user_id == auth["user_id"], ReadEvent.occurred_at >= cutoff)
+            .group_by(func.date(ReadEvent.occurred_at))
+            .order_by(func.date(ReadEvent.occurred_at))
+        )
+    ).all()
+    tag_rows = (
+        await db.execute(
+            select(Tag.namespace, Tag.name, func.count(ReadEvent.id).label("reads"))
+            .join(GalleryTag, GalleryTag.tag_id == Tag.id)
+            .join(ReadEvent, ReadEvent.gallery_id == GalleryTag.gallery_id)
+            .join(Gallery, Gallery.id == ReadEvent.gallery_id)
+            .where(
+                ReadEvent.user_id == auth["user_id"],
+                ReadEvent.occurred_at >= cutoff,
+                gallery_access_filter(auth),
+            )
+            .group_by(Tag.id, Tag.namespace, Tag.name)
+            .order_by(desc("reads"))
+            .limit(12)
+        )
+    ).all()
+    unfinished_rows = (
+        await db.execute(
+            select(ReadProgress, Gallery)
+            .join(Gallery, Gallery.id == ReadProgress.gallery_id)
+            .where(
+                ReadProgress.user_id == auth["user_id"],
+                ReadProgress.last_page > 0,
+                ReadProgress.last_page < func.coalesce(Gallery.pages, 0),
+                gallery_access_filter(auth),
+            )
+            .order_by(ReadProgress.last_read_at.desc())
+            .limit(20)
+        )
+    ).all()
+    return {
+        "days": days,
+        "trend": [
+            {"date": str(date), "events": events, "galleries": galleries} for date, events, galleries in trend_rows
+        ],
+        "top_tags": [{"namespace": namespace, "name": name, "reads": reads} for namespace, name, reads in tag_rows],
+        "unfinished": [
+            {
+                "gallery_id": gallery.id,
+                "source": gallery.source,
+                "source_id": gallery.source_id,
+                "title": gallery.title,
+                "last_page": progress.last_page,
+                "pages": gallery.pages,
+                "last_read_at": progress.last_read_at.isoformat(),
+            }
+            for progress, gallery in unfinished_rows
+        ],
+    }
+
+
 @router.get("/galleries/{source}/{source_id}/progress")
 async def get_progress(
     source: str,
@@ -2242,7 +2352,7 @@ async def get_progress(
 
 
 class ProgressBody(BaseModel):
-    last_page: int
+    last_page: int = Field(ge=0)
 
 
 @router.post("/galleries/{source}/{source_id}/progress")
@@ -2256,6 +2366,7 @@ async def save_progress(
     g = await _get_or_404_by_source(db, source, source_id, auth)
     gallery_id = g.id
     now = datetime.now(UTC)
+    previous = await db.get(ReadProgress, (auth["user_id"], gallery_id))
     last_image_id = (
         await db.execute(
             select(Image.id).where(
@@ -2280,6 +2391,15 @@ async def save_progress(
         )
     )
     await db.execute(stmt)
+    if previous is None or previous.last_page != body.last_page:
+        db.add(
+            ReadEvent(
+                user_id=auth["user_id"],
+                gallery_id=gallery_id,
+                image_id=last_image_id,
+                page_num=body.last_page,
+            )
+        )
     await db.commit()
     return {"status": "ok"}
 

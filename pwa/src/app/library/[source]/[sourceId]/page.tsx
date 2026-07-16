@@ -18,7 +18,7 @@ import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { RatingStars } from '@/components/RatingStars'
 import { t, formatDate } from '@/lib/i18n'
 import { BackButton } from '@/components/BackButton'
-import { Heart, Bookmark, BookmarkCheck } from 'lucide-react'
+import { Heart, Bookmark, BookmarkCheck, Sparkles, X, Share2, GitMerge, History } from 'lucide-react'
 import { SimilarImagesPanel } from '@/components/SimilarImagesPanel'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -102,6 +102,18 @@ export default function GalleryDetailPage() {
     revalidateOnFocus: false,
     dedupingInterval: 300000, // 5 min cache
   })
+  const { data: pluginHealth } = useSWR('plugins/health', () => api.plugins.health(), {
+    revalidateOnFocus: false,
+    dedupingInterval: 60000,
+  })
+  const { data: sharingData, mutate: mutateSharing } = useSWR(
+    gallery?.id ? ['gallery-sharing', gallery.id] : null,
+    () => api.galleryManagement.sharing(gallery!.id),
+  )
+  const { data: versionData, mutate: mutateVersions } = useSWR(
+    gallery?.id ? ['gallery-versions', gallery.id] : null,
+    () => api.galleryManagement.versions(gallery!.id),
+  )
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
   const [pagesOutdated, setPagesOutdated] = useState<{ old: number; new: number } | null>(null)
   const updateCheckedRef = useRef<boolean>(false)
@@ -127,6 +139,11 @@ export default function GalleryDetailPage() {
   const [showExcluded, setShowExcluded] = useState(false)
   const [restoringHash, setRestoringHash] = useState<string | null>(null)
   const [restoringImageId, setRestoringImageId] = useState<number | null>(null)
+  const [upscaleOpen, setUpscaleOpen] = useState(false)
+  const [upscaleImageId, setUpscaleImageId] = useState<number | null>(null)
+  const [upscaleModel, setUpscaleModel] = useState('')
+  const [upscaleScale, setUpscaleScale] = useState(2)
+  const [upscaleSubmitting, setUpscaleSubmitting] = useState(false)
 
   // Image context menu state
   const [imageMenu, setImageMenu] = useState<{
@@ -987,10 +1004,202 @@ export default function GalleryDetailPage() {
               >
                 {isRetagging ? t('library.retagging') : t('library.retag')}
               </button>
+              {featureSettings?.swarmui_enabled && (
+                <button
+                  type="button"
+                  onClick={() => {
+                    setUpscaleImageId(images[0]?.id ?? null)
+                    setUpscaleOpen(true)
+                  }}
+                  disabled={images.length === 0 || !pluginHealth?.services.swarmui?.online}
+                  title={
+                    pluginHealth?.services.swarmui?.online
+                      ? t('library.aiUpscale')
+                      : t('library.aiUpscaleOffline')
+                  }
+                  className="flex items-center gap-1.5 rounded border border-purple-600/60 bg-purple-900/30 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/50 disabled:cursor-not-allowed disabled:opacity-50"
+                >
+                  <Sparkles size={16} />
+                  {t('library.aiUpscale')}
+                </button>
+              )}
+              <button
+                type="button"
+                className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
+                onClick={async () => {
+                  if (!gallery) return
+                  try {
+                    const result = await api.galleryManagement.createShare(gallery.id, 168, true)
+                    const absolute = `${window.location.origin}${result.url}`
+                    await navigator.clipboard.writeText(absolute)
+                    toast.success('Share link copied (expires in 7 days, R18 filtered)')
+                    await mutateSharing()
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : String(error))
+                  }
+                }}
+              >
+                <Share2 size={16} /> Share
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
+                onClick={async () => {
+                  if (!gallery) return
+                  const raw = window.prompt('User IDs to grant read access (comma separated)', sharingData?.permissions.map((item) => item.user_id).join(',') ?? '')
+                  if (raw === null) return
+                  const permissions = raw.split(',').map((value) => Number(value.trim())).filter(Number.isInteger).map((user_id) => ({ user_id, can_edit: false }))
+                  const visibility = window.confirm('Use private visibility? Choose Cancel for public visibility.') ? 'private' : 'public'
+                  await api.galleryManagement.updateSharing(gallery.id, { visibility, permissions })
+                  await mutateSharing()
+                  toast.success('Gallery access updated')
+                }}
+              >
+                {sharingData?.visibility === 'private' ? 'Private access' : 'Public access'}
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
+                onClick={async () => {
+                  if (!gallery) return
+                  const value = window.prompt('Gallery ID to link as another version')
+                  const linkedId = Number(value)
+                  if (!Number.isInteger(linkedId)) return
+                  await api.galleryManagement.linkVersion(gallery.id, linkedId)
+                  await mutateVersions()
+                  toast.success('Version linked')
+                }}
+              >
+                <History size={16} /> Link version
+              </button>
+              <button
+                type="button"
+                className="flex items-center gap-1.5 rounded border border-red-700/50 bg-red-900/20 px-4 py-2 text-sm text-red-300 hover:bg-red-900/40"
+                onClick={async () => {
+                  if (!gallery) return
+                  const value = window.prompt('Gallery ID to merge into this gallery')
+                  const sourceGalleryId = Number(value)
+                  if (!Number.isInteger(sourceGalleryId) || !window.confirm('Move all images and user state into this gallery?')) return
+                  await api.galleryManagement.merge(gallery.id, sourceGalleryId)
+                  await Promise.all([mutateGallery(), mutateImages()])
+                  toast.success('Gallery merged')
+                }}
+              >
+                <GitMerge size={16} /> Merge
+              </button>
             </div>
+            {versionData?.versions && versionData.versions.length > 1 && (
+              <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
+                <span className="text-vault-text-muted">Versions:</span>
+                {versionData.versions.map((version) => (
+                  <Link key={version.id} href={`/library/${encodeURIComponent(version.source)}/${encodeURIComponent(version.source_id)}`} className={`rounded border px-2 py-1 ${version.id === gallery.id ? 'border-vault-accent text-vault-accent' : 'border-vault-border text-vault-text-secondary'}`}>
+                    {version.title || `#${version.id}`}
+                  </Link>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>
+
+      {upscaleOpen && (
+        <div
+          role="dialog"
+          aria-modal="true"
+          aria-labelledby="upscale-title"
+          className="fixed inset-0 z-50 flex items-center justify-center bg-black/70 p-4"
+          onMouseDown={(event) => {
+            if (event.target === event.currentTarget && !upscaleSubmitting) setUpscaleOpen(false)
+          }}
+        >
+          <div className="w-full max-w-md rounded-xl border border-vault-border bg-vault-card p-5 shadow-2xl">
+            <div className="mb-4 flex items-center justify-between">
+              <h2 id="upscale-title" className="flex items-center gap-2 text-lg font-semibold">
+                <Sparkles size={18} className="text-purple-300" />
+                {t('library.aiUpscale')}
+              </h2>
+              <button
+                type="button"
+                aria-label={t('common.close')}
+                disabled={upscaleSubmitting}
+                onClick={() => setUpscaleOpen(false)}
+                className="rounded p-1 text-vault-text-muted hover:text-vault-text disabled:opacity-50"
+              >
+                <X size={18} />
+              </button>
+            </div>
+            <div className="space-y-4">
+              <label className="block text-sm text-vault-text-secondary">
+                {t('library.aiUpscaleImage')}
+                <select
+                  value={upscaleImageId ?? ''}
+                  onChange={(event) => setUpscaleImageId(Number(event.target.value))}
+                  className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+                >
+                  {images.map((image) => (
+                    <option key={image.id} value={image.id}>
+                      {image.filename || `${t('library.metaPages')} ${image.page_num}`}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm text-vault-text-secondary">
+                {t('library.aiUpscaleModel')}
+                <select
+                  value={upscaleModel}
+                  onChange={(event) => setUpscaleModel(event.target.value)}
+                  className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+                >
+                  <option value="">{t('library.aiUpscaleDefaultModel')}</option>
+                  {(pluginHealth?.services.swarmui?.models ?? []).map((model) => (
+                    <option key={model} value={model}>
+                      {model}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <label className="block text-sm text-vault-text-secondary">
+                {t('library.aiUpscaleScale')}
+                <select
+                  value={upscaleScale}
+                  onChange={(event) => setUpscaleScale(Number(event.target.value))}
+                  className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+                >
+                  {[1.5, 2, 3, 4].map((scale) => (
+                    <option key={scale} value={scale}>
+                      {scale}×
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <button
+                type="button"
+                disabled={!upscaleImageId || upscaleSubmitting}
+                onClick={async () => {
+                  if (!upscaleImageId) return
+                  setUpscaleSubmitting(true)
+                  try {
+                    await api.processing.processImage(upscaleImageId, {
+                      processor_id: 'swarmui',
+                      model: upscaleModel,
+                      scale: upscaleScale,
+                    })
+                    toast.success(t('library.aiUpscaleQueued'))
+                    setUpscaleOpen(false)
+                  } catch (error) {
+                    toast.error(error instanceof Error ? error.message : t('common.error'))
+                  } finally {
+                    setUpscaleSubmitting(false)
+                  }
+                }}
+                className="w-full rounded-lg bg-purple-600 px-4 py-2.5 text-sm font-semibold text-white hover:bg-purple-500 disabled:opacity-50"
+              >
+                {upscaleSubmitting ? t('common.loading') : t('library.aiUpscaleStart')}
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
 
       {isCheckingUpdate && (
         <p className="text-xs text-vault-text-muted animate-pulse mb-2">
@@ -1037,6 +1246,25 @@ export default function GalleryDetailPage() {
           <div className="flex items-center gap-2">
             {selectMode ? (
               <>
+                <button
+                  onClick={async () => {
+                    const ids = [...selectedIds].slice(0, 6)
+                    if (!ids.length) return
+                    try {
+                      const result = await api.saucenao.batch(ids, true, 80)
+                      const applied = result.results.filter((item) => item.source_applied).length
+                      toast.success(`Source lookup complete: ${applied} galleries updated`)
+                      await mutateGallery()
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : String(error))
+                    }
+                  }}
+                  disabled={selectedIds.size === 0 || selectedIds.size > 6}
+                  title="Select up to 6 images (SauceNAO free-tier window)"
+                  className="px-3 py-1 rounded text-xs font-medium border bg-vault-input border-vault-border text-vault-text-secondary hover:text-vault-text transition-colors disabled:opacity-50"
+                >
+                  Find sources ({selectedIds.size})
+                </button>
                 <button
                   onClick={handleHideSelected}
                   disabled={selectedIds.size === 0 || isHiding}
