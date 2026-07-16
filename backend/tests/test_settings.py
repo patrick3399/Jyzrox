@@ -1543,3 +1543,42 @@ class TestPatchRecoveryStrategy:
                 json={"running": "mark_failed"},
             )
         assert resp.status_code == 403
+
+
+class TestSwarmUiSettings:
+    async def test_get_and_patch_swarmui_url(self, client, db_session, mock_redis):
+        await _insert_user(db_session)
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.set = AsyncMock(return_value=True)
+
+        get_response = await client.get("/api/settings/swarmui")
+        patch_response = await client.patch(
+            "/api/settings/swarmui", json={"url": "http://192.168.10.219:7801/"}
+        )
+
+        assert get_response.status_code == 200
+        assert get_response.json()["url"].startswith("http")
+        assert patch_response.status_code == 200
+        assert patch_response.json() == {"url": "http://192.168.10.219:7801"}
+        mock_redis.set.assert_awaited_with("setting:swarmui_url", "http://192.168.10.219:7801")
+
+    async def test_patch_swarmui_rejects_credentials(self, client, db_session):
+        await _insert_user(db_session)
+        response = await client.patch(
+            "/api/settings/swarmui", json={"url": "http://user:secret@swarm.local:7801"}
+        )
+        assert response.status_code == 422
+
+    async def test_get_and_patch_captioner_url(self, client, db_session, mock_redis):
+        await _insert_user(db_session)
+        mock_redis.get = AsyncMock(return_value=None)
+        mock_redis.set = AsyncMock(return_value=True)
+
+        get_response = await client.get("/api/settings/captioner")
+        patch_response = await client.patch(
+            "/api/settings/captioner", json={"url": "http://captioner:8200/"}
+        )
+
+        assert get_response.status_code == 200
+        assert patch_response.json() == {"url": "http://captioner:8200"}
+        mock_redis.set.assert_awaited_with("setting:captioner_url", "http://captioner:8200")
