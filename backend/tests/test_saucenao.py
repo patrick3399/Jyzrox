@@ -50,9 +50,12 @@ def _make_mock_session(blob=None):
         session.execute = AsyncMock(return_value=result_mock)
     else:
         row_mock = MagicMock()
-        # row.tuple() returns (image, blob)
+        # row.tuple() returns (image, blob, gallery)
         image_mock = MagicMock()
-        row_mock.tuple.return_value = (image_mock, blob)
+        image_mock.id = 1
+        gallery_mock = MagicMock()
+        gallery_mock.id = 10
+        row_mock.tuple.return_value = (image_mock, blob, gallery_mock)
         result_mock = MagicMock()
         result_mock.one_or_none.return_value = row_mock
         session.execute = AsyncMock(return_value=result_mock)
@@ -251,3 +254,30 @@ async def test_saucenao_search_httpx_error_returns_502(client):
 
     assert resp.status_code == 502
     assert resp.json()["detail"] == "saucenao_error"
+
+
+async def test_saucenao_batch_limits_free_tier_window(client):
+    response = await client.post(
+        "/api/saucenao/batch",
+        json={"image_ids": [1, 2, 3, 4, 5, 6, 7]},
+    )
+    assert response.status_code == 400
+
+
+async def test_saucenao_batch_returns_best_matches(client):
+    blob = _make_blob()
+    mock_session = _make_mock_session(blob=blob)
+    path_mock = _make_path_mock(exists=True, size=1024)
+    best = {"similarity": 95.0, "source_url": "https://source.example/work", "title": "Work"}
+    with (
+        patch("routers.saucenao.get_credential", AsyncMock(return_value="api-key")),
+        patch("routers.saucenao.async_session", mock_session),
+        patch("routers.saucenao.resolve_blob_path", return_value=path_mock),
+        patch("routers.saucenao.search_by_image", AsyncMock(return_value=[best])),
+    ):
+        response = await client.post(
+            "/api/saucenao/batch",
+            json={"image_ids": [1], "auto_fill_source": False},
+        )
+    assert response.status_code == 200
+    assert response.json()["results"][0]["best"]["source_url"] == best["source_url"]

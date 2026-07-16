@@ -11,10 +11,42 @@ import { useProfile } from '@/hooks/useProfile'
 import TagHealthPanel from '@/components/TagHealthPanel'
 import TagTranslationsPanel from '@/components/TagTranslationsPanel'
 
+function TagAnomaliesPanel() {
+  const [difference, setDifference] = useState(0.6)
+  const { data, isLoading } = useSWR(['tag-anomalies', difference], () => api.tags.anomalies(difference))
+  if (isLoading) return <p className="text-sm text-vault-text-muted">{t('common.loading')}</p>
+  return (
+    <section className="space-y-4">
+      <div className="flex items-center gap-3">
+        <label className="text-sm text-vault-text-muted">Minimum confidence difference</label>
+        <input type="range" min="0" max="1" step="0.05" value={difference} onChange={(event) => setDifference(Number(event.target.value))} />
+        <span className="font-mono text-sm">{difference.toFixed(2)}</span>
+      </div>
+      <div className="overflow-x-auto rounded-xl border border-vault-border">
+        <table className="w-full text-left text-sm">
+          <thead className="bg-vault-card text-vault-text-muted"><tr><th className="p-3">Gallery</th><th className="p-3">Tag</th><th className="p-3">AI</th><th className="p-3">Metadata</th><th className="p-3">Suggestion</th></tr></thead>
+          <tbody>
+            {(data?.anomalies ?? []).map((item) => (
+              <tr key={`${item.gallery_id}:${item.tag_id}`} className="border-t border-vault-border">
+                <td className="p-3">#{item.gallery_id} {item.gallery_title}</td>
+                <td className="p-3 font-mono">{item.namespace}:{item.name}</td>
+                <td className="p-3">{item.ai_confidence.toFixed(2)}</td>
+                <td className="p-3">{item.metadata_confidence.toFixed(2)}</td>
+                <td className="p-3">{item.suggestion === 'review_ai_only' ? 'Review AI-only tag' : 'Review missing AI match'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {!data?.anomalies.length && <p className="text-sm text-vault-text-muted">No anomalies at this threshold.</p>}
+    </section>
+  )
+}
+
 export default function TagsPage() {
   const { data: profile } = useProfile()
   const isAdmin = profile?.role === 'admin'
-  const [tab, setTab] = useState<'browse' | 'translations' | 'health'>('browse')
+  const [tab, setTab] = useState<'browse' | 'translations' | 'health' | 'anomalies'>('browse')
   const [search, setSearch] = useState('')
   const [nsFilter, setNsFilter] = useState('')
   const [page, setPage] = useState(0)
@@ -188,18 +220,17 @@ export default function TagsPage() {
           {t('tags.tabTranslations')}
         </button>
         {isAdmin && (
-          <button
-            type="button"
-            onClick={() => setTab('health')}
-            className={`px-4 py-2 text-sm transition-colors ${tab === 'health' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}
-          >
-            {t('tags.tabHealth')}
-          </button>
+          <>
+            <button type="button" onClick={() => setTab('health')} className={`px-4 py-2 text-sm transition-colors ${tab === 'health' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}>{t('tags.tabHealth')}</button>
+            <button type="button" onClick={() => setTab('anomalies')} className={`px-4 py-2 text-sm transition-colors ${tab === 'anomalies' ? 'bg-vault-accent text-white' : 'text-vault-text-muted hover:text-vault-text'}`}>Anomalies</button>
+          </>
         )}
       </div>
 
       {isAdmin && tab === 'health' ? (
         <TagHealthPanel />
+      ) : isAdmin && tab === 'anomalies' ? (
+        <TagAnomaliesPanel />
       ) : tab === 'translations' ? (
         <TagTranslationsPanel isAdmin={isAdmin} />
       ) : (
