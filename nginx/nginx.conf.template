@@ -78,6 +78,32 @@ http {
             proxy_cache_valid 401 403 10s;
         }
 
+        # ── Internal auth endpoint for URI-addressed media ────────
+        # /media/libraries/ and /media/image/ carry a path-scoped 403 from
+        # /api/auth/check (X-Original-URI-based gallery/imgproxy-prefix
+        # authorization, see backend/services/media_authz.py). The plain
+        # /_auth cache above keys only on cookie+authorization, so a cached
+        # 200 from one URI (e.g. a gallery the user can read) would be
+        # replayed for any other URI under the same location — including one
+        # that should be 403 (audit #67/#68). Keying on $request_uri as well
+        # keeps each path's decision isolated. $request_uri inside an
+        # auth_request subrequest is still the original request's URI, not
+        # /_auth_media's own, so this is safe to use as a cache key here.
+        location = /_auth_media {
+            internal;
+            proxy_pass http://api/api/auth/check;
+            proxy_pass_request_body off;
+            proxy_set_header Content-Length "";
+            proxy_set_header Cookie $http_cookie;
+            proxy_set_header X-Original-URI $request_uri;
+            proxy_set_header Authorization $http_authorization;
+
+            proxy_cache auth_cache;
+            proxy_cache_key $http_cookie$http_authorization$request_uri;
+            proxy_cache_valid 200 30s;
+            proxy_cache_valid 401 403 10s;
+        }
+
         # ── Media: require auth via subrequest ────────────────────
         location /media/thumbs/ {
             auth_request /_auth;
@@ -98,7 +124,7 @@ http {
         }
 
         location /media/image/ {
-            auth_request /_auth;
+            auth_request /_auth_media;
             proxy_pass http://imgproxy:8080/;
             proxy_cache image_cache;
             proxy_cache_key $uri;
@@ -121,7 +147,7 @@ http {
         }
 
         location /media/libraries/ {
-            auth_request /_auth;
+            auth_request /_auth_media;
             alias /mnt/;
             disable_symlinks on;
             expires 1d;
