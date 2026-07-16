@@ -1,141 +1,190 @@
 'use client'
-import { useState, useCallback } from 'react'
+
+import { useEffect, useMemo, useState } from 'react'
+import Link from 'next/link'
 import useSWR from 'swr'
+import { Download, FolderCog } from 'lucide-react'
 import { api } from '@/lib/api'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
-import { Pagination } from '@/components/Pagination'
 import { t } from '@/lib/i18n'
 
 export default function ExportPage() {
-  const [search, setSearch] = useState('')
-  const [page, setPage] = useState(0)
-  const limit = 20
+  const { data, isLoading } = useSWR('export-datasets', () => api.datasets.list())
+  const [datasetId, setDatasetId] = useState<number | null>(null)
+  const [preset, setPreset] = useState<'kohya' | 'ai_toolkit'>('kohya')
+  const [triggerWord, setTriggerWord] = useState('')
+  const [repeats, setRepeats] = useState(10)
+  const [validationPercent, setValidationPercent] = useState(10)
+  const [resolution, setResolution] = useState('1024')
+  const [precomputeBuckets, setPrecomputeBuckets] = useState(true)
+  const [includeMetadata, setIncludeMetadata] = useState(true)
+  const [exporting, setExporting] = useState(false)
 
-  const { data, isValidating } = useSWR(['export-galleries', search, page], () =>
-    api.library.getGalleries({ q: search || undefined, page, limit, sort: 'added_at' }),
+  useEffect(() => {
+    if (datasetId == null && data?.datasets[0]) setDatasetId(data.datasets[0].id)
+  }, [data, datasetId])
+
+  const selected = useMemo(
+    () => data?.datasets.find((dataset) => dataset.id === datasetId),
+    [data, datasetId],
   )
 
-  const [exporting, setExporting] = useState<number | null>(null)
-
-  const handleExport = useCallback((galleryId: number) => {
-    setExporting(galleryId)
-    // Trigger download via hidden link
-    const url = api.export.kohyaUrl(galleryId)
-    const a = document.createElement('a')
-    a.href = url
-    a.download = `gallery_${galleryId}_kohya.zip`
-    document.body.appendChild(a)
-    a.click()
-    document.body.removeChild(a)
-    setTimeout(() => setExporting(null), 2000)
-  }, [])
+  const handleExport = () => {
+    if (!datasetId) return
+    setExporting(true)
+    const url = api.export.datasetUrl(datasetId, {
+      preset,
+      trigger_word: triggerWord,
+      repeats,
+      validation_percent: validationPercent,
+      resolution: resolution ? Number(resolution) : undefined,
+      precompute_buckets: precomputeBuckets,
+      include_metadata: includeMetadata,
+    })
+    const anchor = document.createElement('a')
+    anchor.href = url
+    anchor.download = ''
+    document.body.appendChild(anchor)
+    anchor.click()
+    anchor.remove()
+    window.setTimeout(() => setExporting(false), 2000)
+  }
 
   return (
-    <div>
-      <h1 className="text-3xl font-bold mb-2">{t('export.title')}</h1>
-      <p className="text-vault-text-secondary mb-6">{t('export.subtitle')}</p>
-
-      {/* Search */}
-      <div className="mb-6">
-        <input
-          type="text"
-          placeholder={t('export.searchPlaceholder')}
-          className="p-3 w-full max-w-md bg-vault-card rounded-lg outline-none focus:ring-2 focus:ring-vault-accent"
-          value={search}
-          onChange={(e) => {
-            setSearch(e.target.value)
-            setPage(0)
-          }}
-        />
+    <div className="max-w-5xl space-y-6">
+      <div>
+        <h1 className="text-3xl font-bold text-vault-text">{t('export.title')}</h1>
+        <p className="mt-2 text-vault-text-secondary">{t('export.datasetSubtitle')}</p>
       </div>
 
-      {/* Gallery list */}
-      <div className="bg-vault-card rounded-xl overflow-hidden max-w-4xl">
-        <table className="w-full text-left">
-          <thead className="bg-vault-card-hover">
-            <tr>
-              <th className="p-3 text-sm">{t('export.columnId')}</th>
-              <th className="p-3 text-sm">{t('export.columnTitle')}</th>
-              <th className="p-3 text-sm">{t('export.columnSource')}</th>
-              <th className="p-3 text-sm">{t('export.columnPages')}</th>
-              <th className="p-3 text-sm">{t('export.columnTags')}</th>
-              <th className="p-3 text-sm">{t('export.columnExport')}</th>
-            </tr>
-          </thead>
-          <tbody>
-            {data?.galleries.map((g) => (
-              <tr key={g.id} className="border-t border-vault-border hover:bg-vault-card-hover">
-                <td className="p-3 text-vault-text-muted text-sm">{g.id}</td>
-                <td className="p-3">
-                  <div className="max-w-xs truncate" title={g.title}>
-                    {g.title || g.title_jpn || t('export.untitled')}
-                  </div>
-                </td>
-                <td className="p-3 text-sm text-vault-text-secondary">{g.source}</td>
-                <td className="p-3 text-sm">{g.pages ?? '?'}</td>
-                <td className="p-3 text-sm text-vault-text-secondary">
-                  {g.tags_array?.length ?? 0}
-                </td>
-                <td className="p-3">
-                  <button
-                    onClick={() => handleExport(g.id)}
-                    disabled={exporting === g.id}
-                    className={`px-4 py-1.5 rounded text-sm font-medium transition-colors ${
-                      exporting === g.id
-                        ? 'bg-green-700 text-green-200'
-                        : g.download_status === 'complete'
-                          ? 'bg-blue-600 hover:bg-blue-500 text-white'
-                          : 'bg-vault-border hover:bg-vault-card-hover text-vault-text'
-                    }`}
-                  >
-                    {exporting === g.id ? t('export.downloading') : t('export.kohyaZip')}
-                  </button>
-                </td>
-              </tr>
-            ))}
-            {data?.galleries.length === 0 && (
-              <tr>
-                <td className="p-4 text-vault-text-muted" colSpan={6}>
-                  {t('common.noResults')}
-                </td>
-              </tr>
-            )}
-            {!data && (
-              <tr>
-                <td className="p-4" colSpan={6}>
-                  <div className="flex justify-center">
-                    <LoadingSpinner />
-                  </div>
-                </td>
-              </tr>
-            )}
-          </tbody>
-        </table>
-      </div>
+      {isLoading ? (
+        <LoadingSpinner />
+      ) : !data?.datasets.length ? (
+        <div className="rounded-xl border border-vault-border bg-vault-card p-8 text-center">
+          <FolderCog className="mx-auto mb-3 text-vault-text-muted" />
+          <p className="text-vault-text">{t('export.noDatasets')}</p>
+          <Link href="/datasets" className="mt-3 inline-block text-sm text-vault-accent hover:underline">
+            {t('export.createDataset')}
+          </Link>
+        </div>
+      ) : (
+        <div className="grid gap-5 lg:grid-cols-[minmax(0,1fr)_minmax(20rem,0.8fr)]">
+          <section className="rounded-xl border border-vault-border bg-vault-card p-5">
+            <h2 className="mb-4 font-semibold text-vault-text">{t('export.chooseDataset')}</h2>
+            <div className="space-y-2">
+              {data.datasets.map((dataset) => (
+                <button
+                  type="button"
+                  key={dataset.id}
+                  onClick={() => setDatasetId(dataset.id)}
+                  className={`w-full rounded-lg border p-3 text-left transition-colors ${
+                    dataset.id === datasetId
+                      ? 'border-vault-accent bg-vault-accent/10'
+                      : 'border-vault-border bg-vault-input hover:border-vault-border-hover'
+                  }`}
+                >
+                  <span className="font-medium text-vault-text">{dataset.name}</span>
+                  <span className="mt-1 block text-xs text-vault-text-muted">
+                    {t('export.datasetStats', {
+                      images: String(dataset.member_count),
+                      excluded: String(dataset.excluded_count),
+                    })}
+                  </span>
+                </button>
+              ))}
+            </div>
+          </section>
 
-      {/* Pagination */}
-      {data?.total !== undefined && (
-        <div className="max-w-4xl">
-          <Pagination
-            page={page}
-            total={data.total}
-            pageSize={limit}
-            onChange={setPage}
-            isLoading={isValidating}
-          />
+          <section className="space-y-4 rounded-xl border border-vault-border bg-vault-card p-5">
+            <h2 className="font-semibold text-vault-text">{t('export.options')}</h2>
+            <label className="block text-sm text-vault-text-secondary">
+              {t('export.preset')}
+              <select
+                value={preset}
+                onChange={(event) => setPreset(event.target.value as 'kohya' | 'ai_toolkit')}
+                className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+              >
+                <option value="kohya">kohya_ss</option>
+                <option value="ai_toolkit">ai-toolkit (FLUX LoRA)</option>
+              </select>
+            </label>
+            <label className="block text-sm text-vault-text-secondary">
+              {t('export.triggerWord')}
+              <input
+                value={triggerWord}
+                onChange={(event) => setTriggerWord(event.target.value)}
+                maxLength={200}
+                className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+                placeholder={selected?.name ?? ''}
+              />
+            </label>
+            <div className="grid grid-cols-2 gap-3">
+              <label className="text-sm text-vault-text-secondary">
+                {t('export.repeats')}
+                <input
+                  type="number"
+                  min={1}
+                  max={100}
+                  value={repeats}
+                  onChange={(event) => setRepeats(Number(event.target.value))}
+                  className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+                />
+              </label>
+              <label className="text-sm text-vault-text-secondary">
+                {t('export.validationPercent')}
+                <input
+                  type="number"
+                  min={0}
+                  max={50}
+                  value={validationPercent}
+                  onChange={(event) => setValidationPercent(Number(event.target.value))}
+                  className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+                />
+              </label>
+            </div>
+            <label className="block text-sm text-vault-text-secondary">
+              {t('export.resolution')}
+              <select
+                value={resolution}
+                onChange={(event) => setResolution(event.target.value)}
+                className="mt-1.5 w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+              >
+                <option value="">{t('export.originalResolution')}</option>
+                {[512, 768, 1024, 1536, 2048].map((value) => (
+                  <option key={value} value={value}>
+                    {value}px
+                  </option>
+                ))}
+              </select>
+            </label>
+            <label className="flex items-center gap-2 text-sm text-vault-text-secondary">
+              <input
+                type="checkbox"
+                checked={precomputeBuckets}
+                onChange={(event) => setPrecomputeBuckets(event.target.checked)}
+              />
+              {t('export.precomputeBuckets')}
+            </label>
+            <label className="flex items-center gap-2 text-sm text-vault-text-secondary">
+              <input
+                type="checkbox"
+                checked={includeMetadata}
+                onChange={(event) => setIncludeMetadata(event.target.checked)}
+              />
+              {t('export.includeMetadata')}
+            </label>
+            <button
+              type="button"
+              onClick={handleExport}
+              disabled={!datasetId || exporting}
+              className="flex w-full items-center justify-center gap-2 rounded-lg bg-vault-accent px-4 py-2.5 font-medium text-white disabled:opacity-50"
+            >
+              <Download size={17} />
+              {exporting ? t('export.downloading') : t('export.downloadDataset')}
+            </button>
+          </section>
         </div>
       )}
-
-      {/* Info box */}
-      <div className="mt-8 max-w-4xl bg-vault-card/50 rounded-lg p-4 text-sm text-vault-text-secondary">
-        <h3 className="font-semibold text-vault-text mb-2">{t('export.kohyaFormat')}</h3>
-        <ul className="list-disc list-inside space-y-1">
-          <li>{t('export.kohyaDesc1')}</li>
-          <li>{t('export.kohyaDesc2')}</li>
-          <li>{t('export.kohyaDesc3')}</li>
-          <li>{t('export.kohyaDesc4')}</li>
-        </ul>
-      </div>
     </div>
   )
 }

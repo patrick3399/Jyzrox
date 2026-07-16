@@ -1,6 +1,6 @@
 """Regression tests for persistent AI training datasets."""
 
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 from sqlalchemy import select
 
@@ -40,6 +40,7 @@ async def _gallery_with_images(
     hidden: int = 0,
     tags: list[str] | None = None,
     dimensions: list[tuple[int | None, int | None]] | None = None,
+    phashes: list[int | None] | None = None,
 ) -> tuple[Gallery, list[Image]]:
     gallery = Gallery(
         source="local",
@@ -69,6 +70,7 @@ async def _gallery_with_images(
             extension=".jpg",
             width=width,
             height=height,
+            phash_int=phashes[index] if phashes is not None else None,
         )
         db.add(blob)
         await db.flush()
@@ -312,7 +314,12 @@ async def test_dataset_filters_preview_apply_and_relax_preserve_manual_exclusion
     assert preview.status_code == 200, preview.text
     assert preview.json() == {
         "status": "ok",
-        "filters": {"min_width": 1024, "min_height": 1024, "max_aspect_ratio": 4.0},
+        "filters": {
+            "min_width": 1024,
+            "min_height": 1024,
+            "max_aspect_ratio": 4.0,
+            "phash_distance": None,
+        },
         "total": 4,
         "auto_excluded": 2,
         "newly_excluded": 2,
@@ -320,7 +327,8 @@ async def test_dataset_filters_preview_apply_and_relax_preserve_manual_exclusion
         "manual_excluded": 0,
         "remaining": 2,
         "unknown_dimensions": 1,
-        "reasons": {"min_resolution": 1, "aspect_ratio": 1},
+        "unknown_phash": 0,
+        "reasons": {"min_resolution": 1, "aspect_ratio": 1, "phash_duplicate": 0},
     }
     assert before_apply.json()["member_count"] == 4
     assert applied.json()["changed"] == 2
@@ -339,7 +347,42 @@ async def test_dataset_filters_preview_apply_and_relax_preserve_manual_exclusion
         "min_width": None,
         "min_height": None,
         "max_aspect_ratio": None,
+        "phash_distance": None,
     }
+
+
+async def test_dataset_phash_filter_keeps_first_and_restores_when_disabled(db_session, make_client):
+    await _user(db_session, 1)
+    _, images = await _gallery_with_images(
+        db_session,
+        owner_id=1,
+        source_id="phash-filter",
+        active=4,
+        phashes=[0b0000, 0b0001, 0b1111, None],
+    )
+
+    with patch("routers.datasets.emit_safe", new_callable=AsyncMock):
+        async with make_client(user_id=1) as ac:
+            created = await ac.post(
+                "/api/datasets/", json={"name": "pHash", "image_ids": [image.id for image in images]}
+            )
+            dataset_id = created.json()["id"]
+            preview = await ac.post(
+                f"/api/datasets/{dataset_id}/filters/preview", json={"phash_distance": 1}
+            )
+            applied = await ac.post(
+                f"/api/datasets/{dataset_id}/filters/apply", json={"phash_distance": 1}
+            )
+            excluded = await ac.get(f"/api/datasets/{dataset_id}?state=excluded")
+            relaxed = await ac.post(f"/api/datasets/{dataset_id}/filters/apply", json={})
+
+    assert preview.status_code == 200, preview.text
+    assert preview.json()["reasons"]["phash_duplicate"] == 1
+    assert preview.json()["unknown_phash"] == 1
+    assert applied.json()["changed"] == 1
+    assert excluded.json()["images"][0]["id"] == images[1].id
+    assert excluded.json()["images"][0]["exclusion_reason"] == "phash_duplicate"
+    assert relaxed.json()["would_restore"] == 1
 
 
 async def test_dataset_is_private_to_owner(db_session, make_client):
@@ -353,6 +396,59 @@ async def test_dataset_is_private_to_owner(db_session, make_client):
         response = await ac.get(f"/api/datasets/{dataset.id}")
 
     assert response.status_code == 404
+
+
+async def test_dataset_caption_review_batch_threshold_and_generation(db_session, make_client):
+    await _user(db_session, 1)
+    _, images = await _gallery_with_images(
+        db_session,
+        owner_id=1,
+        source_id="caption-review",
+        active=2,
+    )
+    queued = MagicMock(key="caption-job")
+
+    async with make_client(user_id=1) as ac:
+        enqueue = ac._transport.app.state.enqueue
+        enqueue.return_value = queued
+        with patch("routers.datasets.emit_safe", new_callable=AsyncMock):
+            created = await ac.post(
+                "/api/datasets/", json={"name": "Captions", "image_ids": [image.id for image in images]}
+            )
+            dataset_id = created.json()["id"]
+            threshold = await ac.patch(f"/api/datasets/{dataset_id}", json={"tag_threshold": 0.7})
+            edited = await ac.patch(
+                f"/api/datasets/{dataset_id}/images/{images[0].id}/caption",
+                json={"caption": "a person in a forest"},
+            )
+            prepended = await ac.post(
+                f"/api/datasets/{dataset_id}/captions/batch",
+                json={"operation": "prepend_trigger", "trigger_word": "alice_token"},
+            )
+            replaced = await ac.post(
+                f"/api/datasets/{dataset_id}/captions/batch",
+                json={"operation": "search_replace", "search": "forest", "replacement": "garden"},
+            )
+            generated = await ac.post(
+                f"/api/datasets/{dataset_id}/captions/generate", json={"engine": "florence2"}
+            )
+            detail = await ac.get(f"/api/datasets/{dataset_id}")
+
+    assert threshold.status_code == 200
+    assert edited.json()["caption"] == "a person in a forest"
+    assert prepended.json()["changed"] == 2
+    assert replaced.json()["changed"] == 1
+    assert generated.status_code == 202
+    assert generated.json()["job_id"] == "caption-job"
+    assert detail.json()["tag_threshold"] == 0.7
+    assert detail.json()["images"][0]["caption"] == "alice_token, a person in a garden"
+    enqueue.assert_awaited_once_with(
+        "caption_job",
+        dataset_id=dataset_id,
+        engine_id="florence2",
+        actor_user_id=1,
+        _timeout=7200,
+    )
 
 
 async def test_list_and_update_dataset_metadata(db_session, make_client):

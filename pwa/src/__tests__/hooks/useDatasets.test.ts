@@ -99,11 +99,16 @@ describe('dataset hooks', () => {
     await exclude({ id: 2, imageId: 9 })
     await preview({
       id: 2,
-      filters: { min_width: 1024, min_height: 1024, max_aspect_ratio: 4 },
+      filters: { min_width: 1024, min_height: 1024, max_aspect_ratio: 4, phash_distance: 6 },
     })
     await apply({
       id: 2,
-      filters: { min_width: null, min_height: null, max_aspect_ratio: null },
+      filters: {
+        min_width: null,
+        min_height: null,
+        max_aspect_ratio: null,
+        phash_distance: null,
+      },
     })
 
     expect(apiMocks.create).toHaveBeenCalledWith({ name: 'Set', gallery_ids: [1] })
@@ -115,11 +120,13 @@ describe('dataset hooks', () => {
       min_width: 1024,
       min_height: 1024,
       max_aspect_ratio: 4,
+      phash_distance: 6,
     })
     expect(apiMocks.applyFilters).toHaveBeenCalledWith(2, {
       min_width: null,
       min_height: null,
       max_aspect_ratio: null,
+      phash_distance: null,
     })
     expect(mutationCalls.every((call) => call.key === 'datasets')).toBe(true)
   })

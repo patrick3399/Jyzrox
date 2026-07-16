@@ -2,7 +2,17 @@
 
 import { Suspense, useState } from 'react'
 import { useParams } from 'next/navigation'
-import { Check, ImageOff, Pencil, Plus, RotateCcw, SlidersHorizontal, X } from 'lucide-react'
+import {
+  Check,
+  ImageOff,
+  MessageSquareText,
+  Pencil,
+  Plus,
+  RotateCcw,
+  SlidersHorizontal,
+  Sparkles,
+  X,
+} from 'lucide-react'
 import { toast } from 'sonner'
 import { BackButton } from '@/components/BackButton'
 import { LoadingSpinner } from '@/components/LoadingSpinner'
@@ -17,6 +27,7 @@ import {
   useUpdateDataset,
 } from '@/hooks/useDatasets'
 import { parseDatasetIds } from '@/lib/datasets'
+import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import type { DatasetFilterConfig, DatasetFilterReport } from '@/lib/types'
 
@@ -30,6 +41,7 @@ function exclusionReasonLabel(reason: string): string {
   if (reason === 'manual') return t('datasets.exclusionManual')
   if (reason === 'min_resolution') return t('datasets.exclusionMinResolution')
   if (reason === 'aspect_ratio') return t('datasets.exclusionAspectRatio')
+  if (reason === 'phash_duplicate') return t('datasets.exclusionPhashDuplicate')
   return reason
 }
 
@@ -52,21 +64,29 @@ function DatasetDetailInner() {
   const [editing, setEditing] = useState(false)
   const [name, setName] = useState('')
   const [description, setDescription] = useState('')
+  const [tagThreshold, setTagThreshold] = useState('0.35')
   const [showAdd, setShowAdd] = useState(false)
   const [galleryIds, setGalleryIds] = useState('')
   const [collectionIds, setCollectionIds] = useState('')
   const [imageIds, setImageIds] = useState('')
   const [tagQuery, setTagQuery] = useState('')
   const [showFilters, setShowFilters] = useState(false)
+  const [showCaptions, setShowCaptions] = useState(false)
+  const [captionEngine, setCaptionEngine] = useState<'florence2' | 'joycaption'>('florence2')
+  const [triggerWord, setTriggerWord] = useState('')
+  const [captionSearch, setCaptionSearch] = useState('')
+  const [captionReplacement, setCaptionReplacement] = useState('')
   const [minWidth, setMinWidth] = useState('')
   const [minHeight, setMinHeight] = useState('')
   const [maxAspectRatio, setMaxAspectRatio] = useState('')
+  const [phashDistance, setPhashDistance] = useState('')
   const [filterPreview, setFilterPreview] = useState<DatasetFilterReport | null>(null)
   const [busy, setBusy] = useState(false)
 
   const startEditing = () => {
     setName(data?.name ?? '')
     setDescription(data?.description ?? '')
+    setTagThreshold(String(data?.tag_threshold ?? 0.35))
     setEditing(true)
   }
 
@@ -74,7 +94,14 @@ function DatasetDetailInner() {
     if (!name.trim()) return
     setBusy(true)
     try {
-      await update({ id, data: { name: name.trim(), description: description.trim() || null } })
+      await update({
+        id,
+        data: {
+          name: name.trim(),
+          description: description.trim() || null,
+          tag_threshold: Math.max(0, Math.min(1, Number(tagThreshold))),
+        },
+      })
       await mutate()
       setEditing(false)
       toast.success(t('datasets.updated'))
@@ -134,6 +161,7 @@ function DatasetDetailInner() {
     setMinWidth(filters?.min_width == null ? '' : String(filters.min_width))
     setMinHeight(filters?.min_height == null ? '' : String(filters.min_height))
     setMaxAspectRatio(filters?.max_aspect_ratio == null ? '' : String(filters.max_aspect_ratio))
+    setPhashDistance(filters?.phash_distance == null ? '' : String(filters.phash_distance))
     setFilterPreview(null)
     setShowFilters(true)
   }
@@ -142,6 +170,7 @@ function DatasetDetailInner() {
     min_width: optionalNumber(minWidth),
     min_height: optionalNumber(minHeight),
     max_aspect_ratio: optionalNumber(maxAspectRatio),
+    phash_distance: optionalNumber(phashDistance),
   })
 
   const handlePreviewFilters = async () => {
@@ -169,6 +198,43 @@ function DatasetDetailInner() {
     }
   }
 
+  const handleGenerateCaptions = async () => {
+    setBusy(true)
+    try {
+      await api.datasets.generateCaptions(id, captionEngine)
+      toast.success(t('datasets.captionsQueued'))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('common.error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
+  const handleCaptionBatch = async (
+    operation: 'prepend_trigger' | 'search_replace',
+  ) => {
+    setBusy(true)
+    try {
+      const result =
+        operation === 'prepend_trigger'
+          ? await api.datasets.batchCaptions(id, {
+              operation,
+              trigger_word: triggerWord,
+            })
+          : await api.datasets.batchCaptions(id, {
+              operation,
+              search: captionSearch,
+              replacement: captionReplacement,
+            })
+      await mutate()
+      toast.success(t('datasets.captionsChanged', { count: String(result.changed) }))
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : t('common.error'))
+    } finally {
+      setBusy(false)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-start gap-4">
@@ -189,6 +255,18 @@ function DatasetDetailInner() {
                 rows={2}
                 placeholder={t('datasets.descriptionPlaceholder')}
               />
+              <label className="block text-sm text-vault-text-secondary">
+                {t('datasets.tagThreshold')}
+                <input
+                  type="number"
+                  min={0}
+                  max={1}
+                  step={0.05}
+                  value={tagThreshold}
+                  onChange={(event) => setTagThreshold(event.target.value)}
+                  className="ml-2 w-24 rounded border border-vault-border bg-vault-input px-2 py-1 text-vault-text"
+                />
+              </label>
               <div className="flex gap-2">
                 <button
                   onClick={saveMetadata}
@@ -227,6 +305,13 @@ function DatasetDetailInner() {
           )}
         </div>
         <div className="flex shrink-0 flex-wrap justify-end gap-2">
+          <button
+            onClick={() => setShowCaptions((value) => !value)}
+            className="flex items-center gap-1.5 rounded-lg border border-vault-border bg-vault-card px-3 py-2 text-sm font-medium text-vault-text transition-colors hover:border-vault-accent/50"
+          >
+            <MessageSquareText size={16} />
+            {t('datasets.captions')}
+          </button>
           <button
             onClick={openFilters}
             className="flex items-center gap-1.5 rounded-lg border border-vault-border bg-vault-card px-3 py-2 text-sm font-medium text-vault-text transition-colors hover:border-vault-accent/50"
@@ -294,6 +379,74 @@ function DatasetDetailInner() {
         </section>
       )}
 
+      {showCaptions && (
+        <section className="space-y-4 rounded-xl border border-vault-border bg-vault-card p-4">
+          <div>
+            <h2 className="font-semibold text-vault-text">{t('datasets.captionReview')}</h2>
+            <p className="mt-1 text-sm text-vault-text-secondary">{t('datasets.captionReviewHint')}</p>
+          </div>
+          <div className="grid gap-3 md:grid-cols-[1fr_auto]">
+            <select
+              value={captionEngine}
+              onChange={(event) =>
+                setCaptionEngine(event.target.value as 'florence2' | 'joycaption')
+              }
+              className="rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+            >
+              <option value="florence2">Florence-2</option>
+              <option value="joycaption">JoyCaption</option>
+            </select>
+            <button
+              type="button"
+              disabled={busy}
+              onClick={handleGenerateCaptions}
+              className="flex items-center justify-center gap-2 rounded-lg bg-purple-600 px-4 py-2 text-sm font-medium text-white disabled:opacity-50"
+            >
+              <Sparkles size={16} />
+              {t('datasets.generateCaptions')}
+            </button>
+          </div>
+          <div className="grid gap-2 md:grid-cols-[1fr_auto]">
+            <input
+              value={triggerWord}
+              onChange={(event) => setTriggerWord(event.target.value)}
+              placeholder={t('datasets.triggerWordPlaceholder')}
+              className="rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+            />
+            <button
+              type="button"
+              disabled={busy || !triggerWord.trim()}
+              onClick={() => handleCaptionBatch('prepend_trigger')}
+              className="rounded-lg border border-vault-accent px-4 py-2 text-sm text-vault-accent disabled:opacity-50"
+            >
+              {t('datasets.prependTrigger')}
+            </button>
+          </div>
+          <div className="grid gap-2 md:grid-cols-[1fr_1fr_auto]">
+            <input
+              value={captionSearch}
+              onChange={(event) => setCaptionSearch(event.target.value)}
+              placeholder={t('datasets.captionSearch')}
+              className="rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+            />
+            <input
+              value={captionReplacement}
+              onChange={(event) => setCaptionReplacement(event.target.value)}
+              placeholder={t('datasets.captionReplacement')}
+              className="rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text"
+            />
+            <button
+              type="button"
+              disabled={busy || !captionSearch}
+              onClick={() => handleCaptionBatch('search_replace')}
+              className="rounded-lg border border-vault-border px-4 py-2 text-sm text-vault-text-secondary disabled:opacity-50"
+            >
+              {t('datasets.replaceCaptions')}
+            </button>
+          </div>
+        </section>
+      )}
+
       {showFilters && (
         <section className="space-y-4 rounded-xl border border-vault-border bg-vault-card p-4">
           <div className="flex items-start justify-between gap-3">
@@ -309,7 +462,7 @@ function DatasetDetailInner() {
               <X size={16} />
             </button>
           </div>
-          <div className="grid gap-3 sm:grid-cols-3">
+          <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
             <label className="space-y-1 text-sm text-vault-text-secondary">
               <span>{t('datasets.minWidth')}</span>
               <input
@@ -354,6 +507,21 @@ function DatasetDetailInner() {
                 placeholder="4"
               />
             </label>
+            <label className="space-y-1 text-sm text-vault-text-secondary">
+              <span>{t('datasets.phashDistance')}</span>
+              <input
+                type="number"
+                min="0"
+                max="64"
+                value={phashDistance}
+                onChange={(event) => {
+                  setPhashDistance(event.target.value)
+                  setFilterPreview(null)
+                }}
+                className="w-full rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-vault-text outline-none focus:ring-1 focus:ring-vault-accent"
+                placeholder="6"
+              />
+            </label>
           </div>
           {filterPreview && (
             <div className="grid gap-2 rounded-lg bg-vault-bg p-3 text-sm sm:grid-cols-3">
@@ -378,6 +546,14 @@ function DatasetDetailInner() {
               </span>
               <span className="text-vault-text-secondary">
                 {t('datasets.previewUnknown', { count: String(filterPreview.unknown_dimensions) })}
+              </span>
+              <span className="text-vault-text-secondary">
+                {t('datasets.previewPhashDuplicate', {
+                  count: String(filterPreview.reasons.phash_duplicate),
+                })}
+              </span>
+              <span className="text-vault-text-secondary">
+                {t('datasets.previewUnknownPhash', { count: String(filterPreview.unknown_phash) })}
               </span>
             </div>
           )}
@@ -448,7 +624,9 @@ function DatasetDetailInner() {
           </p>
         </div>
       ) : (
-        <div className="grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 xl:grid-cols-6">
+        <div
+          className={`grid grid-cols-2 gap-3 sm:grid-cols-3 md:grid-cols-4 ${showCaptions ? 'xl:grid-cols-4' : 'xl:grid-cols-6'}`}
+        >
           {data.images.map((image) => (
             <article
               key={image.id}
@@ -482,6 +660,24 @@ function DatasetDetailInner() {
                   <p className="truncate text-red-400">
                     {exclusionReasonLabel(image.exclusion_reason)}
                   </p>
+                )}
+                {showCaptions && state === 'included' && (
+                  <textarea
+                    defaultValue={image.caption ?? ''}
+                    rows={4}
+                    aria-label={t('datasets.imageCaption')}
+                    onBlur={async (event) => {
+                      const caption = event.currentTarget.value.trim() || null
+                      if (caption === image.caption) return
+                      try {
+                        await api.datasets.updateCaption(id, image.id, caption)
+                        toast.success(t('common.saved'))
+                      } catch (error) {
+                        toast.error(error instanceof Error ? error.message : t('common.error'))
+                      }
+                    }}
+                    className="mt-2 w-full resize-y rounded border border-vault-border bg-vault-input p-2 text-xs text-vault-text"
+                  />
                 )}
               </div>
             </article>

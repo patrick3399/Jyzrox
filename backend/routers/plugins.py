@@ -37,6 +37,7 @@ async def list_plugins(_: dict = Depends(require_auth)):
                 "url_patterns": meta.url_patterns,
                 "credential_schema": [f.model_dump() for f in meta.credential_schema],
                 "has_browse": browser is not None,
+                "has_process": plugin_registry.get_processor(meta.source_id) is not None,
                 "browse_schema": browser.browse_schema().model_dump() if browser else None,
                 "credential_configured": meta.source_id in configured_sources,
                 "credential_flows": credential_flows,
@@ -45,3 +46,14 @@ async def list_plugins(_: dict = Depends(require_auth)):
         )
 
     return {"plugins": plugins}
+
+
+@router.get("/health")
+async def get_plugin_health(_: dict = Depends(require_auth)):
+    """Return health for plugins backed by external processing services."""
+    services = {}
+    for meta in plugin_registry.list_plugins():
+        processor = plugin_registry.get_processor(meta.source_id)
+        if processor is not None:
+            services[meta.source_id] = (await processor.health()).model_dump()
+    return {"services": services}

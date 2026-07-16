@@ -8,6 +8,7 @@ from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import exists, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+import core.queue
 from core.auth import gallery_access_filter, require_role
 from core.database import get_db
 from core.events import EventType, emit_safe
@@ -22,6 +23,7 @@ from db.models import (
     Image,
     Tag,
 )
+from services.caption_engine import caption_engine_registry
 from services.cas import thumb_url
 
 router = APIRouter(tags=["datasets"])
@@ -59,6 +61,7 @@ class DatasetCreate(DatasetSelection):
 class DatasetPatch(BaseModel):
     name: str | None = Field(default=None, min_length=1, max_length=200)
     description: str | None = Field(default=None, max_length=4000)
+    tag_threshold: float | None = Field(default=None, ge=0.0, le=1.0)
 
     @field_validator("name")
     @classmethod
@@ -75,6 +78,29 @@ class DatasetFilterConfig(BaseModel):
     min_width: int | None = Field(default=None, ge=1, le=100000)
     min_height: int | None = Field(default=None, ge=1, le=100000)
     max_aspect_ratio: float | None = Field(default=None, gt=1.0, le=100.0)
+    phash_distance: int | None = Field(default=None, ge=0, le=64)
+
+
+class ImageCaptionPatch(BaseModel):
+    caption: str | None = Field(default=None, max_length=10000)
+
+    @field_validator("caption")
+    @classmethod
+    def normalize_caption(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return value.strip() or None
+
+
+class CaptionBatchRequest(BaseModel):
+    operation: Literal["prepend_trigger", "search_replace"]
+    trigger_word: str | None = Field(default=None, max_length=200)
+    search: str | None = Field(default=None, max_length=1000)
+    replacement: str = Field(default="", max_length=1000)
+
+
+class CaptionGenerateRequest(BaseModel):
+    engine: Literal["florence2", "joycaption"] = "florence2"
 
 
 def _unique_ids(values: list[int]) -> list[int]:
@@ -355,6 +381,7 @@ def _serialize_dataset(dataset: Dataset, member_count: int, gallery_count: int, 
         "id": dataset.id,
         "name": dataset.name,
         "description": dataset.description,
+        "tag_threshold": dataset.tag_threshold,
         "selection_spec": dataset.selection_spec or {},
         "member_count": member_count,
         "gallery_count": gallery_count,
@@ -364,7 +391,7 @@ def _serialize_dataset(dataset: Dataset, member_count: int, gallery_count: int, 
     }
 
 
-_AUTO_EXCLUSION_REASONS = frozenset({"min_resolution", "aspect_ratio"})
+_AUTO_EXCLUSION_REASONS = frozenset({"min_resolution", "aspect_ratio", "phash_duplicate"})
 
 
 async def _dataset_filter_rows(db: AsyncSession, dataset_id: int, auth: dict) -> list:
@@ -408,14 +435,21 @@ def _filter_reason(blob: Blob, config: DatasetFilterConfig) -> tuple[str | None,
     return None, False
 
 
+def _phash_distance(left: int, right: int) -> int:
+    mask = (1 << 64) - 1
+    return ((left & mask) ^ (right & mask)).bit_count()
+
+
 def _evaluate_filters(rows: list, config: DatasetFilterConfig) -> tuple[list[tuple[DatasetImage, str | None]], dict]:
     decisions: list[tuple[DatasetImage, str | None]] = []
-    reason_counts = {"min_resolution": 0, "aspect_ratio": 0}
+    reason_counts = {"min_resolution": 0, "aspect_ratio": 0, "phash_duplicate": 0}
     manual_excluded = 0
     unknown_dimensions = 0
+    unknown_phash = 0
     newly_excluded = 0
     would_restore = 0
 
+    retained_phashes: list[int] = []
     for member, blob in rows:
         is_auto_excluded = member.exclusion_reason in _AUTO_EXCLUSION_REASONS
         if member.state == "excluded" and not is_auto_excluded:
@@ -424,6 +458,13 @@ def _evaluate_filters(rows: list, config: DatasetFilterConfig) -> tuple[list[tup
         reason, dimensions_unknown = _filter_reason(blob, config)
         if dimensions_unknown:
             unknown_dimensions += 1
+        if reason is None and config.phash_distance is not None:
+            if blob.phash_int is None:
+                unknown_phash += 1
+            elif any(_phash_distance(blob.phash_int, previous) <= config.phash_distance for previous in retained_phashes):
+                reason = "phash_duplicate"
+            else:
+                retained_phashes.append(blob.phash_int)
         if reason is not None:
             reason_counts[reason] += 1
             if member.state == "included":
@@ -441,6 +482,7 @@ def _evaluate_filters(rows: list, config: DatasetFilterConfig) -> tuple[list[tup
         "manual_excluded": manual_excluded,
         "remaining": len(rows) - manual_excluded - auto_excluded,
         "unknown_dimensions": unknown_dimensions,
+        "unknown_phash": unknown_phash,
         "reasons": reason_counts,
     }
 
@@ -542,6 +584,7 @@ async def get_dataset(
             "filename": image.filename,
             "width": blob.width,
             "height": blob.height,
+            "caption": image.caption,
             "thumb_url": thumb_url(blob.sha256),
             "state": member.state,
             "source": member.source,
@@ -572,6 +615,8 @@ async def update_dataset(
         dataset.name = body.name.strip()
     if "description" in body.model_fields_set:
         dataset.description = body.description
+    if body.tag_threshold is not None:
+        dataset.tag_threshold = body.tag_threshold
     dataset.updated_at = datetime.now(UTC)
     await db.commit()
     await emit_safe(
@@ -582,6 +627,104 @@ async def update_dataset(
         action="updated",
     )
     return {"status": "ok"}
+
+
+@router.patch("/{dataset_id}/images/{image_id}/caption")
+async def update_image_caption(
+    dataset_id: int,
+    image_id: int,
+    body: ImageCaptionPatch,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    await _owned_dataset(db, dataset_id, auth["user_id"])
+    image = (
+        await db.execute(
+            select(Image)
+            .join(DatasetImage, DatasetImage.image_id == Image.id)
+            .join(Gallery, Gallery.id == Image.gallery_id)
+            .where(
+                DatasetImage.dataset_id == dataset_id,
+                Image.id == image_id,
+                Image.visibility == "active",
+                gallery_access_filter(auth),
+            )
+        )
+    ).scalar_one_or_none()
+    if image is None:
+        raise HTTPException(status_code=404, detail="Dataset image not found")
+    image.caption = body.caption
+    await db.commit()
+    return {"status": "ok", "caption": image.caption}
+
+
+@router.post("/{dataset_id}/captions/batch")
+async def batch_update_captions(
+    dataset_id: int,
+    body: CaptionBatchRequest,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    await _owned_dataset(db, dataset_id, auth["user_id"])
+    images = (
+        (
+            await db.execute(
+                select(Image)
+                .join(DatasetImage, DatasetImage.image_id == Image.id)
+                .join(Gallery, Gallery.id == Image.gallery_id)
+                .where(
+                    DatasetImage.dataset_id == dataset_id,
+                    DatasetImage.state == "included",
+                    Image.visibility == "active",
+                    gallery_access_filter(auth),
+                )
+            )
+        )
+        .scalars()
+        .all()
+    )
+    changed = 0
+    if body.operation == "prepend_trigger":
+        trigger = (body.trigger_word or "").strip()
+        if not trigger:
+            raise HTTPException(status_code=400, detail="trigger_word is required")
+        for image in images:
+            current = (image.caption or "").strip()
+            if current != trigger and not current.startswith(f"{trigger},"):
+                image.caption = f"{trigger}, {current}" if current else trigger
+                changed += 1
+    else:
+        search = body.search or ""
+        if not search:
+            raise HTTPException(status_code=400, detail="search is required")
+        for image in images:
+            current = image.caption or ""
+            updated = current.replace(search, body.replacement)
+            if updated != current:
+                image.caption = updated.strip() or None
+                changed += 1
+    await db.commit()
+    return {"status": "ok", "changed": changed}
+
+
+@router.post("/{dataset_id}/captions/generate", status_code=202)
+async def generate_dataset_captions(
+    dataset_id: int,
+    body: CaptionGenerateRequest,
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    await _owned_dataset(db, dataset_id, auth["user_id"])
+    if caption_engine_registry.get(body.engine) is None:
+        raise HTTPException(status_code=400, detail="Unknown caption engine")
+    job = await core.queue.enqueue(
+        "caption_job",
+        dataset_id=dataset_id,
+        engine_id=body.engine,
+        actor_user_id=auth["user_id"],
+        _timeout=7200,
+    )
+    return {"status": "queued", "job_id": job.key, "engine": body.engine}
 
 
 @router.post("/{dataset_id}/filters/preview")

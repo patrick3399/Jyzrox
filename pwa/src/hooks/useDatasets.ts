@@ -31,7 +31,14 @@ export function useUpdateDataset() {
     'datasets',
     (
       _key: unknown,
-      { arg }: { arg: { id: number; data: { name?: string; description?: string | null } } },
+      {
+        arg,
+      }: {
+        arg: {
+          id: number
+          data: { name?: string; description?: string | null; tag_threshold?: number }
+        }
+      },
     ) => api.datasets.update(arg.id, arg.data),
   )
 }
