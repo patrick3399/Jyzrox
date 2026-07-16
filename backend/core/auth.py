@@ -215,9 +215,9 @@ def gallery_access_filter(auth: dict):
     Import: from core.auth import gallery_access_filter
     Usage: stmt = stmt.where(gallery_access_filter(auth))
     """
-    from sqlalchemy import and_, or_
+    from sqlalchemy import and_, or_, select
 
-    from db.models import Gallery
+    from db.models import Gallery, GalleryPermission
 
     not_deleted = Gallery.deleted_at.is_(None)
 
@@ -230,5 +230,6 @@ def gallery_access_filter(auth: dict):
             Gallery.created_by_user_id == user_id,
             Gallery.created_by_user_id.is_(None),
             Gallery.visibility == "public",
+            Gallery.id.in_(select(GalleryPermission.gallery_id).where(GalleryPermission.user_id == user_id)),
         ),
     )
