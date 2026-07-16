@@ -8,6 +8,7 @@ import { SidebarConfig } from '@/components/SidebarConfig'
 import { DashboardLinksConfig } from '@/components/DashboardLinksConfig'
 import { ThemeSection } from '@/components/settings/ThemeSection'
 import { useProfile } from '@/hooks/useProfile'
+import { DisplayPreferencesSection } from '@/components/settings/DisplayPreferencesSection'
 
 export default function AppearanceSettingsPage() {
   useLocale()
@@ -22,6 +23,7 @@ export default function AppearanceSettingsPage() {
 
       <div className="space-y-3">
         <ThemeSection />
+        <DisplayPreferencesSection />
         {/* Bottom Tab */}
         <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
           <div className="px-5 pt-4">

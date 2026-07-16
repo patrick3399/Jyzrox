@@ -15,6 +15,7 @@ import {
   saveCustomPalette,
   type CustomPalette,
 } from '@/lib/themeOverrides'
+import { persistUiPreferences, type ThemePreference } from '@/lib/uiPreferences'
 
 const PRESET_SWATCHES: Record<string, { bg: string; card: string; text: string }> = {
   light: { bg: '#ffffff', card: '#f5f5f5', text: '#171717' },
@@ -76,12 +77,14 @@ export function ThemeSection() {
   function pickAccent(value: string | null) {
     setAccent(value)
     saveAccent(value)
+    void persistUiPreferences({ accent: value })
   }
 
   function updatePalette(patch: Partial<CustomPalette>) {
     const next = { ...palette, ...patch }
     setPalette(next)
     saveCustomPalette(next)
+    void persistUiPreferences({ custom_palette: next })
   }
 
   return (
@@ -100,7 +103,10 @@ export function ThemeSection() {
                 type="button"
                 role="radio"
                 aria-checked={selected}
-                onClick={() => setTheme(value)}
+                onClick={() => {
+                  setTheme(value)
+                  void persistUiPreferences({ theme: value as ThemePreference })
+                }}
                 className={`flex items-center gap-2 rounded-lg border px-3 py-2 text-sm transition-colors ${
                   selected
                     ? 'border-vault-accent text-vault-text'
@@ -192,6 +198,7 @@ export function ThemeSection() {
                 onClick={() => {
                   setPalette(DEFAULT_CUSTOM_PALETTE)
                   saveCustomPalette(DEFAULT_CUSTOM_PALETTE)
+                  void persistUiPreferences({ custom_palette: DEFAULT_CUSTOM_PALETTE })
                 }}
                 className="flex items-center gap-1 rounded px-2 py-1 text-xs text-vault-text-secondary hover:text-vault-text"
               >

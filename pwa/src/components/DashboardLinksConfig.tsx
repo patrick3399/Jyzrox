@@ -6,6 +6,7 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { PAGE_REGISTRY, type PageDef } from '@/lib/pageRegistry'
 import { useDragReorder } from '@/hooks/useDragReorder'
+import { persistUiPreferences } from '@/lib/uiPreferences'
 
 const ALL_DASHBOARD_LINKS: PageDef[] = PAGE_REGISTRY.filter((p) => p.dashboard)
 
@@ -50,6 +51,7 @@ function saveSelectedHrefs(hrefs: string[]) {
       newValue: JSON.stringify(hrefs),
     }),
   )
+  void persistUiPreferences({ dashboard_links: hrefs })
 }
 
 function loadSelectedHrefs(): string[] {

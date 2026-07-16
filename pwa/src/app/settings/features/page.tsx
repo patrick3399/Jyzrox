@@ -16,10 +16,22 @@ export default function FeaturesSettingsPage() {
   const [features, setFeatures] = useState<Record<string, boolean>>({})
   const [featuresLoading, setFeaturesLoading] = useState(true)
   const [trashRetentionDays, setTrashRetentionDays] = useState(30)
+  const [swarmUiUrl, setSwarmUiUrl] = useState('')
+  const [savingSwarmUi, setSavingSwarmUi] = useState(false)
+  const [captionerUrl, setCaptionerUrl] = useState('')
+  const [savingCaptioner, setSavingCaptioner] = useState(false)
   const trashRetentionDebounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
   useEffect(() => {
     if (authorized) {
+      api.settings
+        .getSwarmUi()
+        .then((data) => setSwarmUiUrl(data.url))
+        .catch(() => {})
+      api.settings
+        .getCaptioner()
+        .then((data) => setCaptionerUrl(data.url))
+        .catch(() => {})
       api.settings
         .getFeatures()
         .then((data) => {
@@ -105,6 +117,88 @@ export default function FeaturesSettingsPage() {
               onChange={(v) => handleToggle('ai_tagging_enabled', v)}
               disabled={featuresLoading}
             />
+            <ToggleRow
+              label={t('settings.swarmUi')}
+              description={t('settings.swarmUiDesc')}
+              checked={features.swarmui_enabled ?? false}
+              onChange={(v) => handleToggle('swarmui_enabled', v)}
+              disabled={featuresLoading}
+            />
+            <div className="py-3">
+              <label htmlFor="swarmui-url" className="text-sm text-vault-text">
+                {t('settings.swarmUiUrl')}
+              </label>
+              <div className="mt-1.5 flex gap-2">
+                <input
+                  id="swarmui-url"
+                  type="url"
+                  value={swarmUiUrl}
+                  onChange={(event) => setSwarmUiUrl(event.target.value)}
+                  placeholder="http://192.168.10.219:7801"
+                  className="min-w-0 flex-1 rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-sm text-vault-text"
+                />
+                <button
+                  type="button"
+                  disabled={savingSwarmUi || !swarmUiUrl.trim()}
+                  onClick={async () => {
+                    setSavingSwarmUi(true)
+                    try {
+                      const saved = await api.settings.setSwarmUi(swarmUiUrl)
+                      setSwarmUiUrl(saved.url)
+                      toast.success(t('common.saved'))
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : t('common.failedToSave'))
+                    } finally {
+                      setSavingSwarmUi(false)
+                    }
+                  }}
+                  className="rounded-lg bg-vault-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {savingSwarmUi ? t('common.loading') : t('common.save')}
+                </button>
+              </div>
+            </div>
+            <ToggleRow
+              label={t('settings.captioner')}
+              description={t('settings.captionerDesc')}
+              checked={features.captioner_enabled ?? false}
+              onChange={(value) => handleToggle('captioner_enabled', value)}
+              disabled={featuresLoading}
+            />
+            <div className="py-3">
+              <label htmlFor="captioner-url" className="text-sm text-vault-text">
+                {t('settings.captionerUrl')}
+              </label>
+              <div className="mt-1.5 flex gap-2">
+                <input
+                  id="captioner-url"
+                  type="url"
+                  value={captionerUrl}
+                  onChange={(event) => setCaptionerUrl(event.target.value)}
+                  placeholder="http://captioner:8200"
+                  className="min-w-0 flex-1 rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-sm text-vault-text"
+                />
+                <button
+                  type="button"
+                  disabled={savingCaptioner || !captionerUrl.trim()}
+                  onClick={async () => {
+                    setSavingCaptioner(true)
+                    try {
+                      const saved = await api.settings.setCaptioner(captionerUrl)
+                      setCaptionerUrl(saved.url)
+                      toast.success(t('common.saved'))
+                    } catch (error) {
+                      toast.error(error instanceof Error ? error.message : t('common.failedToSave'))
+                    } finally {
+                      setSavingCaptioner(false)
+                    }
+                  }}
+                  className="rounded-lg bg-vault-accent px-3 py-2 text-sm font-medium text-white disabled:opacity-50"
+                >
+                  {savingCaptioner ? t('common.loading') : t('common.save')}
+                </button>
+              </div>
+            </div>
             <ToggleRow
               label={t('settings.tagTranslation')}
               description={t('settings.tagTranslationDesc')}

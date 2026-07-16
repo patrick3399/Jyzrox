@@ -8,6 +8,7 @@ test login/setup flows. Redis is mocked, and SQLite is used for the user table.
 import json
 
 import bcrypt
+import pytest
 from sqlalchemy import text
 
 # ---------------------------------------------------------------------------
@@ -368,6 +369,79 @@ class TestUpdateProfile:
         """Unauthenticated PATCH should return 401."""
         resp = await unauthed_client.patch("/api/auth/profile", json={"locale": "en"})
         assert resp.status_code == 401
+
+
+class TestUiPreferences:
+    """GET/PATCH /api/auth/ui-preferences — validated per-user settings."""
+
+    async def test_get_defaults_to_empty_preferences(self, client, db_session):
+        await _create_user(db_session)
+        resp = await client.get("/api/auth/ui-preferences")
+        assert resp.status_code == 200
+        assert resp.json() == {"preferences": {}}
+
+    async def test_patch_persists_supported_preferences(self, client, db_session):
+        user_id = await _create_user(db_session)
+        payload = {
+            "theme": "custom",
+            "accent": "#AABBCC",
+            "custom_palette": {"bg": "#010203", "card": "#111213", "text": "#f0f1f2"},
+            "bottom_tabs": ["/e-hentai", "/pixiv", "/library", "/queue"],
+            "sidebar": {"order": ["/library", "/artists"], "hidden": ["/trash"]},
+            "dashboard_links": ["/library", "/images"],
+            "gallery_grid_density": "compact",
+            "gallery_grid_columns": 6,
+            "font_scale": 1.125,
+        }
+        resp = await client.patch("/api/auth/ui-preferences", json=payload)
+        assert resp.status_code == 200
+        preferences = resp.json()["preferences"]
+        assert preferences["accent"] == "#aabbcc"
+        assert preferences["custom_palette"] == payload["custom_palette"]
+        assert preferences["bottom_tabs"] == payload["bottom_tabs"]
+
+        stored = await db_session.execute(text("SELECT ui_preferences FROM users WHERE id = :id"), {"id": user_id})
+        raw = stored.scalar_one()
+        if isinstance(raw, str):
+            raw = json.loads(raw)
+        assert raw == preferences
+
+    async def test_patch_merges_and_null_removes_fields(self, client, db_session):
+        await _create_user(db_session)
+        first = await client.patch(
+            "/api/auth/ui-preferences", json={"theme": "dark", "gallery_grid_columns": 5}
+        )
+        assert first.status_code == 200
+
+        second = await client.patch(
+            "/api/auth/ui-preferences", json={"theme": None, "font_scale": 1.1}
+        )
+        assert second.status_code == 200
+        assert second.json()["preferences"] == {"gallery_grid_columns": 5, "font_scale": 1.1}
+
+    @pytest.mark.parametrize(
+        "payload",
+        [
+            {"theme": "neon"},
+            {"accent": "red"},
+            {"bottom_tabs": ["/library"]},
+            {"bottom_tabs": ["/library", "/library", "/pixiv", "/queue"]},
+            {"sidebar": {"order": ["https://example.com"], "hidden": []}},
+            {"gallery_grid_density": "tiny"},
+            {"gallery_grid_columns": 13},
+            {"font_scale": 2},
+        ],
+    )
+    async def test_patch_rejects_invalid_preferences(self, client, db_session, payload):
+        await _create_user(db_session)
+        resp = await client.patch("/api/auth/ui-preferences", json=payload)
+        assert resp.status_code == 422
+
+    async def test_preferences_require_authentication(self, unauthed_client):
+        get_resp = await unauthed_client.get("/api/auth/ui-preferences")
+        patch_resp = await unauthed_client.patch("/api/auth/ui-preferences", json={"theme": "dark"})
+        assert get_resp.status_code == 401
+        assert patch_resp.status_code == 401
 
 
 # ---------------------------------------------------------------------------

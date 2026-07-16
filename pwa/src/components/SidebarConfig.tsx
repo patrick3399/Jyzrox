@@ -6,6 +6,7 @@ import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { PAGE_REGISTRY, hasRole, type PageDef } from '@/lib/pageRegistry'
 import { useDragReorder } from '@/hooks/useDragReorder'
+import { persistUiPreferences } from '@/lib/uiPreferences'
 
 export const SIDEBAR_CONFIG_KEY = 'sidebar_nav_order'
 
@@ -63,6 +64,7 @@ export function saveSidebarConfig(config: SidebarNavConfig): void {
   const json = JSON.stringify(config)
   localStorage.setItem(SIDEBAR_CONFIG_KEY, json)
   window.dispatchEvent(new StorageEvent('storage', { key: SIDEBAR_CONFIG_KEY, newValue: json }))
+  void persistUiPreferences({ sidebar: config })
 }
 
 interface SidebarConfigProps {

@@ -44,6 +44,8 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 var ok=function(x){return typeof x==='string'&&/^#[0-9a-fA-F]{6}$/.test(x)};
 var a=localStorage.getItem('vault-accent');
 if(ok(a))document.documentElement.style.setProperty('--color-accent',a);
+var fs=Number(localStorage.getItem('vault_font_scale'));
+if(Number.isFinite(fs)&&fs>=0.8&&fs<=1.3)document.documentElement.style.fontSize=(fs*100)+'%';
 var raw=localStorage.getItem('vault-custom-theme');
 if(raw){var p=JSON.parse(raw);
 if(p&&ok(p.bg)&&ok(p.card)&&ok(p.text)){

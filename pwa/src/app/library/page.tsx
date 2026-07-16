@@ -35,7 +35,12 @@ import { api } from '@/lib/api'
 import { galleryHref } from '@/lib/galleryRoutes'
 import { useSWRConfig } from 'swr'
 import type { SearchGalleryItem, SearchGalleriesResponse } from '@/lib/api'
-import { estimateLibraryGridRowHeight } from '@/lib/libraryLayout'
+import {
+  estimateLibraryGridRowHeight,
+  getLibraryGridColumns,
+  getLibraryGridGap,
+} from '@/lib/libraryLayout'
+import { useDisplayPreferences } from '@/hooks/useDisplayPreferences'
 
 const SORT_OPTIONS = [
   { value: 'added_at', label: () => t('library.dateAdded') },
@@ -100,6 +105,15 @@ function LibraryContent() {
   const [batchTagInput, setBatchTagInput] = useState('')
   const [batchTagList, setBatchTagList] = useState<string[]>([])
   const [syntaxHelpOpen, setSyntaxHelpOpen] = useState(false)
+  const displayPreferences = useDisplayPreferences()
+  const gridColumns = useMemo(
+    () =>
+      getLibraryGridColumns(
+        displayPreferences.gallery_grid_density,
+        displayPreferences.gallery_grid_columns,
+      ),
+    [displayPreferences.gallery_grid_columns, displayPreferences.gallery_grid_density],
+  )
 
   // View mode: 'grid' | 'list', persisted to localStorage
   const [viewMode, setViewMode] = useState<'grid' | 'list'>(() => {
@@ -532,10 +546,10 @@ function LibraryContent() {
       {!isLoading && displayGalleries.length > 0 && (
         <VirtualGrid
           items={displayGalleries}
-          columns={
-            viewMode === 'list' ? { base: 1 } : { base: 4, sm: 5, md: 6, lg: 8, xl: 10, xxl: 12 }
+          columns={viewMode === 'list' ? { base: 1 } : gridColumns}
+          gap={
+            viewMode === 'list' ? 8 : getLibraryGridGap(displayPreferences.gallery_grid_density)
           }
-          gap={viewMode === 'list' ? 8 : 12}
           estimateHeight={viewMode === 'list' ? 150 : estimateLibraryGridRowHeight}
           measureRows={false}
           overscan={viewMode === 'list' ? 8 : 6}

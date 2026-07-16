@@ -14,7 +14,11 @@
  */
 
 import { describe, it, expect } from 'vitest'
-import { estimateLibraryGridRowHeight } from '@/lib/libraryLayout'
+import {
+  estimateLibraryGridRowHeight,
+  getLibraryGridColumns,
+  getLibraryGridGap,
+} from '@/lib/libraryLayout'
 
 // Measured info block: p-2.5 (20) + 2-line title (~39) + gap-1.5 (6)
 // + rating/pages row (~20) = ~85px. The reserve must be at least this.
@@ -47,5 +51,30 @@ describe('estimateLibraryGridRowHeight', () => {
     // clip it back down to 280, which would reintroduce the overlap.
     expect(coverHeight + MIN_INFO_RESERVE).toBeGreaterThan(280)
     expect(est).toBeGreaterThanOrEqual(coverHeight + MIN_INFO_RESERVE)
+  })
+})
+
+describe('library grid preferences', () => {
+  it('uses distinct responsive density presets', () => {
+    expect(getLibraryGridColumns('spacious')).toEqual({
+      base: 2,
+      sm: 3,
+      md: 4,
+      lg: 5,
+      xl: 6,
+      xxl: 7,
+    })
+    expect(getLibraryGridColumns('compact').lg).toBeGreaterThan(
+      getLibraryGridColumns('comfortable').lg ?? 0,
+    )
+    expect(getLibraryGridGap('spacious')).toBe(16)
+    expect(getLibraryGridGap('compact')).toBe(8)
+  })
+
+  it('treats a manual column value as a desktop maximum', () => {
+    const columns = getLibraryGridColumns('comfortable', 9)
+    expect(columns.base).toBe(2)
+    expect(columns.md).toBe(4)
+    expect(columns.xxl).toBe(9)
   })
 })

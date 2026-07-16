@@ -12,8 +12,8 @@ from pathlib import Path
 import bcrypt
 from fastapi import APIRouter, Cookie, Depends, File, Header, HTTPException, Request, Response, UploadFile
 from PIL import Image, ImageOps
-from pydantic import BaseModel
-from sqlalchemy import text
+from pydantic import BaseModel, Field, field_validator
+from sqlalchemy import select, text, update
 from starlette import status
 
 from core.audit import log_audit
@@ -23,6 +23,7 @@ from core.database import async_session
 from core.errors import api_error, parse_accept_language
 from core.rate_limit import check_rate_limit, get_client_ip
 from core.redis_client import get_redis
+from db.models import User
 
 router = APIRouter(tags=["auth"])
 logger = logging.getLogger(__name__)
@@ -50,6 +51,81 @@ class UpdateProfileRequest(BaseModel):
     email: str | None = None
     avatar_style: str | None = None
     locale: str | None = None
+
+
+class CustomPalettePreference(BaseModel):
+    bg: str
+    card: str
+    text: str
+
+    @field_validator("bg", "card", "text")
+    @classmethod
+    def validate_color(cls, value: str) -> str:
+        if len(value) != 7 or not value.startswith("#"):
+            raise ValueError("color must use #rrggbb format")
+        try:
+            int(value[1:], 16)
+        except ValueError as exc:
+            raise ValueError("color must use #rrggbb format") from exc
+        return value.lower()
+
+
+class SidebarPreference(BaseModel):
+    order: list[str] = Field(min_length=1, max_length=100)
+    hidden: list[str] = Field(default_factory=list, max_length=100)
+
+    @field_validator("order", "hidden")
+    @classmethod
+    def validate_hrefs(cls, values: list[str]) -> list[str]:
+        if any(not value.startswith("/") or len(value) > 200 for value in values):
+            raise ValueError("navigation entries must be application paths")
+        if len(values) != len(set(values)):
+            raise ValueError("navigation entries must be unique")
+        return values
+
+
+class UiPreferencesPatch(BaseModel):
+    theme: str | None = None
+    accent: str | None = None
+    custom_palette: CustomPalettePreference | None = None
+    bottom_tabs: list[str] | None = Field(default=None, min_length=4, max_length=4)
+    sidebar: SidebarPreference | None = None
+    dashboard_links: list[str] | None = Field(default=None, min_length=1, max_length=100)
+    gallery_grid_density: str | None = None
+    gallery_grid_columns: int | None = Field(default=None, ge=0, le=12)
+    font_scale: float | None = Field(default=None, ge=0.8, le=1.3)
+
+    @field_validator("theme")
+    @classmethod
+    def validate_theme(cls, value: str | None) -> str | None:
+        if value is not None and value not in {"light", "dark", "amoled", "custom", "system"}:
+            raise ValueError("unsupported theme")
+        return value
+
+    @field_validator("accent")
+    @classmethod
+    def validate_accent(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return CustomPalettePreference.validate_color(value)
+
+    @field_validator("bottom_tabs", "dashboard_links")
+    @classmethod
+    def validate_navigation_paths(cls, values: list[str] | None) -> list[str] | None:
+        if values is None:
+            return None
+        if any(not value.startswith("/") or len(value) > 200 for value in values):
+            raise ValueError("navigation entries must be application paths")
+        if len(values) != len(set(values)):
+            raise ValueError("navigation entries must be unique")
+        return values
+
+    @field_validator("gallery_grid_density")
+    @classmethod
+    def validate_grid_density(cls, value: str | None) -> str | None:
+        if value is not None and value not in {"comfortable", "compact", "spacious"}:
+            raise ValueError("unsupported gallery grid density")
+        return value
 
 
 def _avatar_url(user_id: int, username: str, email: str | None, avatar_style: str) -> str:
@@ -397,6 +473,37 @@ async def update_profile(req: UpdateProfileRequest, auth: dict = Depends(require
         )
         await session.commit()
     return {"status": "ok"}
+
+
+@router.get("/ui-preferences")
+async def get_ui_preferences(auth: dict = Depends(require_auth)):
+    """Return validated client appearance/navigation preferences for this user."""
+    async with async_session() as session:
+        preferences = (
+            await session.execute(select(User.ui_preferences).where(User.id == auth["user_id"]))
+        ).scalar_one_or_none()
+    return {"preferences": preferences or {}}
+
+
+@router.patch("/ui-preferences")
+async def update_ui_preferences(req: UiPreferencesPatch, auth: dict = Depends(require_auth)):
+    """Merge a validated partial preference update into the current user's settings."""
+    patch = req.model_dump(exclude_unset=True)
+    async with async_session() as session:
+        current = (
+            await session.execute(select(User.ui_preferences).where(User.id == auth["user_id"]))
+        ).scalar_one_or_none()
+        merged = dict(current or {})
+        for key, value in patch.items():
+            if value is None:
+                merged.pop(key, None)
+            else:
+                merged[key] = value
+        await session.execute(
+            update(User).where(User.id == auth["user_id"]).values(ui_preferences=merged)
+        )
+        await session.commit()
+    return {"status": "ok", "preferences": merged}
 
 
 _MAX_AVATAR_SIZE = 2 * 1024 * 1024  # 2 MB

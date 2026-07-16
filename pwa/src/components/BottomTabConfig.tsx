@@ -13,6 +13,7 @@ import {
   loadTabConfig,
 } from '@/components/BottomTabBar'
 import { useDragReorder } from '@/hooks/useDragReorder'
+import { persistUiPreferences } from '@/lib/uiPreferences'
 
 function loadSelectedHrefs(): string[] {
   return loadTabConfig().map((tab) => tab.href)
@@ -28,6 +29,7 @@ function saveSelectedHrefs(hrefs: string[]) {
   window.dispatchEvent(
     new StorageEvent('storage', { key: BOTTOM_TAB_CONFIG_KEY, newValue: JSON.stringify(hrefs) }),
   )
+  void persistUiPreferences({ bottom_tabs: hrefs })
 }
 
 export function BottomTabConfig() {

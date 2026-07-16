@@ -13,22 +13,25 @@ import { WsProvider } from '@/lib/ws'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { useLocale } from '@/components/LocaleProvider'
+import { UiPreferencesSync } from '@/components/UiPreferencesSync'
 
 const AUTH_PATHS = ['/login', '/setup']
+const PUBLIC_PATH_PREFIXES = ['/share/']
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   // Subscribe at the shell boundary so legacy direct t() call sites refresh.
   const { locale } = useLocale()
   const pathname = usePathname()
   const isAuth = AUTH_PATHS.includes(pathname)
+  const isPublic = PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
   const isReader = pathname.startsWith('/reader/')
   const [drawerOpen, setDrawerOpen] = useState(false)
   const handleDrawerClose = useCallback(() => setDrawerOpen(false), [])
   const handleDrawerOpen = useCallback(() => setDrawerOpen(true), [])
 
-  useSwipeBack({ enabled: !isReader && !isAuth })
+  useSwipeBack({ enabled: !isReader && !isAuth && !isPublic })
 
-  if (isAuth) {
+  if (isAuth || isPublic) {
     return (
       <>
         {children}
@@ -71,6 +74,7 @@ function LayoutShellInner({
 
   return (
     <>
+      <UiPreferencesSync />
       {/* Records per-tab last location for BottomTabBar restoration */}
       <Suspense fallback={null}>
         <NavMemoryTracker />
