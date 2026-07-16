@@ -71,8 +71,8 @@ class PluginMeta(BaseModel):
     source_id: str
     version: str
     description: str = ""
-    url_patterns: list[str]
-    credential_schema: list[FieldDef]
+    url_patterns: list[str] = []
+    credential_schema: list[FieldDef] = []
     supported_sites: list[SiteInfo] = []
     concurrency: int = 1
     semaphore_key: str | None = None
@@ -122,3 +122,23 @@ class TagResult(BaseModel):
     image_path: str
     tags: list[str]
     confidence: list[float] = []
+
+
+class ProcessResult(BaseModel):
+    status: Literal["done", "failed"]
+    output_path: str | None = None
+    width: int | None = None
+    height: int | None = None
+    metadata: dict = {}
+    error: str | None = None
+
+
+class ServiceHealth(BaseModel):
+    online: bool
+    service: str
+    version: str | None = None
+    gpu_name: str | None = None
+    vram_total_mb: int | None = None
+    vram_free_mb: int | None = None
+    models: list[str] = []
+    error: str | None = None

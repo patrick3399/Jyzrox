@@ -12,7 +12,8 @@ CREATE TABLE IF NOT EXISTS users (
     created_at      TIMESTAMPTZ DEFAULT now(),
     last_login_at   TIMESTAMPTZ,
     avatar_style    TEXT DEFAULT 'gravatar',
-    locale          TEXT
+    locale          TEXT,
+    ui_preferences  JSONB NOT NULL DEFAULT '{}'::jsonb
 );
 
 -- No default user: first-run setup is done via POST /api/auth/setup
@@ -72,6 +73,7 @@ CREATE TABLE IF NOT EXISTS images (
     filename        TEXT,
     blob_sha256     TEXT NOT NULL REFERENCES blobs(sha256),
     tags_array      TEXT[] DEFAULT '{}',
+    caption         TEXT,
     visibility      TEXT NOT NULL DEFAULT 'active',
     source_item_id  TEXT,
     source_item_url TEXT,
@@ -433,6 +435,7 @@ CREATE TABLE IF NOT EXISTS datasets (
     user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
     name            TEXT NOT NULL,
     description     TEXT,
+    tag_threshold   REAL NOT NULL DEFAULT 0.35,
     selection_spec  JSONB NOT NULL DEFAULT '{}',
     created_at      TIMESTAMPTZ NOT NULL DEFAULT now(),
     updated_at      TIMESTAMPTZ NOT NULL DEFAULT now()
@@ -451,6 +454,82 @@ CREATE TABLE IF NOT EXISTS dataset_images (
     CONSTRAINT ck_dataset_image_state CHECK (state IN ('included', 'excluded'))
 );
 CREATE INDEX IF NOT EXISTS ix_dataset_images_image_id ON dataset_images (image_id);
+
+CREATE TABLE IF NOT EXISTS lora_models (
+    id              BIGSERIAL PRIMARY KEY,
+    user_id         BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    dataset_id      BIGINT REFERENCES datasets(id) ON DELETE SET NULL,
+    name            TEXT NOT NULL,
+    file_path       TEXT NOT NULL,
+    file_size       BIGINT NOT NULL,
+    sha256          TEXT NOT NULL,
+    trigger_words   JSONB NOT NULL DEFAULT '[]',
+    training_params JSONB NOT NULL DEFAULT '{}',
+    created_at      TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_lora_models_user_created ON lora_models (user_id, created_at DESC);
+
+CREATE TABLE IF NOT EXISTS generated_image_metadata (
+    image_id      BIGINT PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+    prompt_json   JSONB,
+    workflow_json JSONB,
+    imported_at   TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+
+CREATE TABLE IF NOT EXISTS gallery_permissions (
+    gallery_id BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    can_edit BOOLEAN NOT NULL DEFAULT false,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    PRIMARY KEY (gallery_id, user_id)
+);
+
+CREATE TABLE IF NOT EXISTS gallery_share_links (
+    id BIGSERIAL PRIMARY KEY,
+    gallery_id BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    created_by_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    token_hash TEXT NOT NULL UNIQUE,
+    expires_at TIMESTAMPTZ,
+    filter_r18 BOOLEAN NOT NULL DEFAULT true,
+    revoked_at TIMESTAMPTZ,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_gallery_share_links_gallery ON gallery_share_links (gallery_id);
+
+CREATE TABLE IF NOT EXISTS gallery_versions (
+    gallery_id BIGINT PRIMARY KEY REFERENCES galleries(id) ON DELETE CASCADE,
+    group_id TEXT NOT NULL,
+    linked_by_user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    linked_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_gallery_versions_group ON gallery_versions (group_id);
+
+CREATE TABLE IF NOT EXISTS import_conflicts (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    existing_gallery_id BIGINT REFERENCES galleries(id) ON DELETE SET NULL,
+    source TEXT NOT NULL,
+    source_id TEXT NOT NULL,
+    incoming_payload JSONB NOT NULL DEFAULT '{}',
+    status TEXT NOT NULL DEFAULT 'pending',
+    resolution TEXT,
+    created_at TIMESTAMPTZ NOT NULL DEFAULT now(),
+    resolved_at TIMESTAMPTZ,
+    CONSTRAINT ck_import_conflict_status CHECK (status IN ('pending', 'resolved'))
+);
+CREATE INDEX IF NOT EXISTS ix_import_conflicts_user_status ON import_conflicts (user_id, status);
+
+CREATE TABLE IF NOT EXISTS read_events (
+    id BIGSERIAL PRIMARY KEY,
+    user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+    gallery_id BIGINT NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+    image_id BIGINT REFERENCES images(id) ON DELETE SET NULL,
+    page_num INTEGER NOT NULL,
+    duration_ms INTEGER,
+    occurred_at TIMESTAMPTZ NOT NULL DEFAULT now()
+);
+CREATE INDEX IF NOT EXISTS ix_read_events_user_time ON read_events (user_id, occurred_at DESC);
+CREATE INDEX IF NOT EXISTS ix_read_events_gallery ON read_events (gallery_id);
 
 -- ── Excluded Blobs ──────────────────────────────────────────────────
 CREATE TABLE IF NOT EXISTS excluded_blobs (
@@ -694,6 +773,7 @@ END $$;
 -- ── Novel module ───────────────────────────────────────────────────────
 -- Markdown files are the source of truth; the DB stores only per-user state.
 ALTER TABLE users ADD COLUMN IF NOT EXISTS novel_prefs JSONB NOT NULL DEFAULT '{}'::jsonb;
+ALTER TABLE users ADD COLUMN IF NOT EXISTS ui_preferences JSONB NOT NULL DEFAULT '{}'::jsonb;
 
 CREATE TABLE IF NOT EXISTS novel_read_progress (
     user_id    BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,

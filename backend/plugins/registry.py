@@ -10,6 +10,7 @@ from plugins.base import (
     Downloadable,
     HasMeta,
     Parseable,
+    Processable,
     SourcePlugin,
     Taggable,
     TaggerPlugin,
@@ -34,9 +35,10 @@ class PluginRegistry:
         self._parseable: dict[str, Any] = {}
         self._credential_providers: dict[str, Any] = {}
         self._taggable: dict[str, Any] = {}
+        self._processable: dict[str, Any] = {}
         self._site_index: dict[str, SiteInfo] = {}
 
-    def register(self, plugin: SourcePlugin | BrowsePlugin | TaggerPlugin) -> None:
+    def register(self, plugin: Any) -> None:
         """Register a plugin. A plugin may implement multiple ABCs."""
         sid = plugin.meta.source_id
 
@@ -69,6 +71,8 @@ class PluginRegistry:
             self._credential_providers[sid] = plugin
         if isinstance(plugin, Taggable):
             self._taggable[sid] = plugin
+        if isinstance(plugin, Processable):
+            self._processable[sid] = plugin
 
     async def get_handler(self, url: str) -> SourcePlugin | None:
         """Return the first non-fallback source plugin that can handle the URL."""
@@ -91,14 +95,7 @@ class PluginRegistry:
 
     def list_plugins(self) -> list[PluginMeta]:
         """Return metadata for every registered plugin (deduplicated by source_id)."""
-        seen: set[str] = set()
-        result: list[PluginMeta] = []
-        for plugins_dict in (self._sources, self._browsers, self._taggers):  # type: ignore[assignment]
-            for sid, p in plugins_dict.items():
-                if sid not in seen:
-                    seen.add(sid)
-                    result.append(p.meta)
-        return result
+        return [plugin.meta for plugin in self._plugins.values()]
 
     def list_browsers(self) -> dict[str, BrowsePlugin]:
         return dict(self._browsers)
@@ -226,6 +223,9 @@ class PluginRegistry:
 
     def get_downloader(self, source_id: str) -> Any:
         return self._downloadable.get(source_id)
+
+    def get_processor(self, source_id: str) -> Any:
+        return self._processable.get(source_id)
 
 
 plugin_registry = PluginRegistry()

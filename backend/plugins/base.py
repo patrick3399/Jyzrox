@@ -15,7 +15,9 @@ from plugins.models import (
     GalleryImportData,
     GalleryMetadata,
     PluginMeta,
+    ProcessResult,
     SearchResult,
+    ServiceHealth,
     TagResult,
 )
 
@@ -87,6 +89,15 @@ class Taggable(Protocol):
     meta: PluginMeta
 
     async def tag_images(self, image_paths: list[Path]) -> list[TagResult]: ...
+
+
+@runtime_checkable
+class Processable(Protocol):
+    meta: PluginMeta
+
+    async def process(self, input_path: Path, output_dir: Path, options: dict) -> ProcessResult: ...
+
+    async def health(self) -> ServiceHealth: ...
 
 
 # ---------------------------------------------------------------------------

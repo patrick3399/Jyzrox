@@ -47,6 +47,15 @@ class Settings(BaseSettings):
     tagger_url: str = "http://tagger:8100"
     tagger_timeout: int = 30
 
+    # Remote image processing
+    swarmui_enabled: bool = False
+    swarmui_url: str = "http://192.168.10.219:7801"
+    swarmui_timeout: int = 600
+    captioner_enabled: bool = False
+    captioner_url: str = "http://captioner:8200"
+    captioner_timeout: int = 300
+    captioner_engine: str = "florence2"
+
     # Storage paths (inside container)
     data_gallery_path: str = "/data/gallery"
     data_thumbs_path: str = "/data/thumbs"

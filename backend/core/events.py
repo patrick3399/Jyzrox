@@ -31,6 +31,12 @@ class EventType(StrEnum):
     GALLERY_DISCOVERED = "gallery.discovered"
     GALLERY_TAGGED = "gallery.tagged"
 
+    # Image processing
+    IMAGE_PROCESS_ENQUEUED = "image.process_enqueued"
+    IMAGE_PROCESS_STARTED = "image.process_started"
+    IMAGE_PROCESS_COMPLETED = "image.process_completed"
+    IMAGE_PROCESS_FAILED = "image.process_failed"
+
     # Import
     IMPORT_COMPLETED = "import.completed"
     IMPORT_FAILED = "import.failed"

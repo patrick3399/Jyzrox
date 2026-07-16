@@ -521,6 +521,7 @@ export interface DatasetFilterConfig {
   min_width: number | null
   min_height: number | null
   max_aspect_ratio: number | null
+  phash_distance: number | null
 }
 
 export interface DatasetSelectionSpec extends DatasetSelection {
@@ -537,9 +538,11 @@ export interface DatasetFilterReport {
   manual_excluded: number
   remaining: number
   unknown_dimensions: number
+  unknown_phash: number
   reasons: {
     min_resolution: number
     aspect_ratio: number
+    phash_duplicate: number
   }
   changed?: number
 }
@@ -548,6 +551,7 @@ export interface Dataset {
   id: number
   name: string
   description: string | null
+  tag_threshold: number
   selection_spec: DatasetSelectionSpec
   member_count: number
   gallery_count: number
@@ -564,10 +568,17 @@ export interface DatasetImage {
   filename: string
   width: number | null
   height: number | null
+  caption: string | null
   thumb_url: string
   state: 'included' | 'excluded'
   source: 'gallery' | 'collection' | 'manual' | 'tag_query'
-  exclusion_reason: 'manual' | 'min_resolution' | 'aspect_ratio' | string | null
+  exclusion_reason:
+    | 'manual'
+    | 'min_resolution'
+    | 'aspect_ratio'
+    | 'phash_duplicate'
+    | string
+    | null
 }
 
 export interface DatasetDetail extends Dataset {
@@ -639,9 +650,21 @@ export interface PluginInfo {
   credential_schema: FieldDef[]
   credential_flows: CredentialFlow[]
   has_browse: boolean
+  has_process: boolean
   browse_schema: BrowseSchema | null
   credential_configured: boolean
   enabled: boolean
+}
+
+export interface PluginServiceHealth {
+  online: boolean
+  service: string
+  version: string | null
+  gpu_name: string | null
+  vram_total_mb: number | null
+  vram_free_mb: number | null
+  models: string[]
+  error: string | null
 }
 
 // ── Pixiv Types ──────────────────────────────────────────────────────

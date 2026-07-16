@@ -35,6 +35,7 @@ import type {
   BlockedTag,
   CacheStats,
   PluginInfo,
+  PluginServiceHealth,
   PixivIllust,
   PixivSearchResult,
   PixivUserResult,
@@ -231,6 +232,17 @@ const auth = {
       method: 'PATCH',
       body: JSON.stringify(data),
     }),
+
+  getUiPreferences: () =>
+    apiFetch<{ preferences: import('./uiPreferences').UiPreferences }>(
+      '/api/auth/ui-preferences',
+    ),
+
+  updateUiPreferences: (data: import('./uiPreferences').UiPreferencesPatch) =>
+    apiFetch<{ status: string; preferences: import('./uiPreferences').UiPreferences }>(
+      '/api/auth/ui-preferences',
+      { method: 'PATCH', body: JSON.stringify(data) },
+    ),
 
   uploadAvatar: async (
     file: File,
@@ -460,6 +472,22 @@ const library = {
       body: JSON.stringify({ last_page }),
       ...init,
     }),
+
+  readingStats: (days = 30) =>
+    apiFetch<{
+      days: number
+      trend: Array<{ date: string; events: number; galleries: number }>
+      top_tags: Array<{ namespace: string; name: string; reads: number }>
+      unfinished: Array<{
+        gallery_id: number
+        source: string
+        source_id: string
+        title: string | null
+        last_page: number
+        pages: number
+        last_read_at: string
+      }>
+    }>(`/api/library/stats${qs({ days })}`),
 
   getGalleryTags: (source: string, sourceId: string, init?: RequestInit) =>
     apiFetch<{
@@ -1085,6 +1113,8 @@ const settings = {
       external_api_enabled: boolean
       novel_enabled: boolean
       ai_tagging_enabled: boolean
+      swarmui_enabled: boolean
+      captioner_enabled: boolean
       download_eh_enabled: boolean
       download_pixiv_enabled: boolean
       download_gallery_dl_enabled: boolean
@@ -1097,6 +1127,22 @@ const settings = {
       trash_enabled: boolean
       trash_retention_days: number
     }>('/api/settings/features'),
+
+  getSwarmUi: () => apiFetch<{ url: string }>('/api/settings/swarmui'),
+
+  setSwarmUi: (url: string) =>
+    apiFetch<{ url: string }>('/api/settings/swarmui', {
+      method: 'PATCH',
+      body: JSON.stringify({ url }),
+    }),
+
+  getCaptioner: () => apiFetch<{ url: string }>('/api/settings/captioner'),
+
+  setCaptioner: (url: string) =>
+    apiFetch<{ url: string }>('/api/settings/captioner', {
+      method: 'PATCH',
+      body: JSON.stringify({ url }),
+    }),
 
   setFeature: (feature: string, enabled: boolean) =>
     apiFetch<{ feature: string; enabled: boolean }>(`/api/settings/features/${feature}`, {
@@ -1340,6 +1386,22 @@ const tags = {
 
   healthIgnored: () => apiFetch<{ keys: string[] }>('/api/tags/health/ignored'),
 
+  anomalies: (minDifference = 0.6) =>
+    apiFetch<{
+      anomalies: Array<{
+        gallery_id: number
+        gallery_title: string | null
+        tag_id: number
+        namespace: string
+        name: string
+        ai_confidence: number
+        metadata_confidence: number
+        difference: number
+        suggestion: 'review_ai_only' | 'review_metadata_only'
+      }>
+      total: number
+    }>(`/api/tags/anomalies${qs({ min_difference: minDifference })}`),
+
   deleteTag: (tagId: number) =>
     apiFetch<{ status: string }>(`/api/tags/${tagId}`, { method: 'DELETE' }),
 }
@@ -1401,7 +1463,33 @@ const import_ = {
       failed: number
       current_gallery_id: number | null
       status: string
+      conflicts?: number
     }>(`/api/import/batch/progress/${batchId}`),
+
+  conflictMode: () => apiFetch<{ mode: string }>('/api/import/conflict-mode'),
+  setConflictMode: (mode: string) =>
+    apiFetch<{ mode: string }>('/api/import/conflict-mode', {
+      method: 'PATCH',
+      body: JSON.stringify({ mode }),
+    }),
+  conflicts: (status = 'pending') =>
+    apiFetch<{
+      conflicts: Array<{
+        id: number
+        existing_gallery_id: number | null
+        source: string
+        source_id: string
+        incoming: Record<string, unknown>
+        status: string
+        resolution: string | null
+        created_at: string
+      }>
+    }>(`/api/import/conflicts${qs({ status })}`),
+  resolveConflict: (id: number, resolution: 'overwrite' | 'merge' | 'skip') =>
+    apiFetch<{ status: string; resolution: string }>(`/api/import/conflicts/${id}/resolve`, {
+      method: 'POST',
+      body: JSON.stringify({ resolution }),
+    }),
 
   rescanLibraryPath: (libraryId: number) =>
     apiFetch<{ status: string }>(`/api/import/rescan/path/${libraryId}`, { method: 'POST' }),
@@ -1501,12 +1589,101 @@ const import_ = {
 
 const exportApi = {
   kohyaUrl: (galleryId: number): string => `/api/export/kohya/${galleryId}`,
+  datasetUrl: (
+    datasetId: number,
+    options: {
+      preset: 'kohya' | 'ai_toolkit'
+      trigger_word?: string
+      repeats: number
+      validation_percent: number
+      resolution?: number
+      precompute_buckets: boolean
+      include_metadata: boolean
+    },
+  ): string => `/api/export/dataset/${datasetId}${qs(options as Record<string, unknown>)}`,
 }
 
 // ── Plugins ──────────────────────────────────────────────────────────
 
 const plugins = {
   list: () => apiFetch<{ plugins: PluginInfo[] }>('/api/plugins/'),
+  health: () =>
+    apiFetch<{ services: Record<string, PluginServiceHealth> }>('/api/plugins/health'),
+}
+
+const processing = {
+  processImage: (imageId: number, data: { processor_id: string; model: string; scale: number }) =>
+    apiFetch<{ status: string; job_id: string; image_id: number }>(`/api/process/images/${imageId}`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+}
+
+const training = {
+  listLoras: () =>
+    apiFetch<{
+      loras: Array<{
+        id: number
+        dataset_id: number | null
+        name: string
+        file_size: number
+        sha256: string
+        trigger_words: string[]
+        training_params: Record<string, unknown>
+        created_at: string
+      }>
+    }>('/api/training/loras'),
+  uploadLora: (form: FormData) =>
+    apiFetch<{ id: number; name: string }>('/api/training/loras', { method: 'POST', body: form }),
+  deleteLora: (id: number) =>
+    apiFetch<{ status: string }>(`/api/training/loras/${id}`, { method: 'DELETE' }),
+  importComfy: (form: FormData) =>
+    apiFetch<{ status: string; gallery_id: number; image_id: number }>('/api/training/comfyui/import', {
+      method: 'POST',
+      body: form,
+    }),
+}
+
+const galleryManagement = {
+  sharing: (galleryId: number) =>
+    apiFetch<{
+      visibility: 'public' | 'private'
+      permissions: Array<{ user_id: number; username: string; can_edit: boolean }>
+      links: Array<{ id: number; expires_at: string | null; filter_r18: boolean; created_at: string }>
+    }>(`/api/gallery-management/galleries/${galleryId}/sharing`),
+  updateSharing: (
+    galleryId: number,
+    body: { visibility: 'public' | 'private'; permissions: Array<{ user_id: number; can_edit: boolean }> },
+  ) =>
+    apiFetch<{ status: string }>(`/api/gallery-management/galleries/${galleryId}/sharing`, {
+      method: 'PATCH',
+      body: JSON.stringify(body),
+    }),
+  createShare: (galleryId: number, expiresInHours: number | null, filterR18: boolean) =>
+    apiFetch<{ id: number; token: string; url: string; expires_at: string | null }>(
+      `/api/gallery-management/galleries/${galleryId}/shares`,
+      { method: 'POST', body: JSON.stringify({ expires_in_hours: expiresInHours, filter_r18: filterR18 }) },
+    ),
+  versions: (galleryId: number) =>
+    apiFetch<{
+      group_id: string | null
+      versions: Array<{ id: number; source: string; source_id: string; title: string | null; posted_at: string | null }>
+    }>(`/api/gallery-management/galleries/${galleryId}/versions`),
+  linkVersion: (galleryId: number, linkedGalleryId: number) =>
+    apiFetch<{ status: string }>(`/api/gallery-management/galleries/${galleryId}/versions`, {
+      method: 'POST',
+      body: JSON.stringify({ gallery_id: linkedGalleryId }),
+    }),
+  merge: (targetGalleryId: number, sourceGalleryId: number) =>
+    apiFetch<{ status: string; pages: number }>(`/api/gallery-management/galleries/${targetGalleryId}/merge`, {
+      method: 'POST',
+      body: JSON.stringify({ source_gallery_id: sourceGalleryId }),
+    }),
+  publicShare: (token: string) =>
+    apiFetch<{
+      gallery: { id: number; title: string | null; source: string; source_id: string; pages: number; tags: string[] }
+      images: Array<{ id: number; page_num: number; url: string }>
+    }>(`/api/gallery-management/shares/${encodeURIComponent(token)}`),
 }
 
 // ── Pixiv ─────────────────────────────────────────────────────────────
@@ -1753,7 +1930,10 @@ const datasets = {
       body: JSON.stringify(data),
     }),
 
-  update: (id: number, patch: { name?: string; description?: string | null }) =>
+  update: (
+    id: number,
+    patch: { name?: string; description?: string | null; tag_threshold?: number },
+  ) =>
     apiFetch<{ status: string }>(`/api/datasets/${id}`, {
       method: 'PATCH',
       body: JSON.stringify(patch),
@@ -1786,6 +1966,29 @@ const datasets = {
       method: 'POST',
       body: JSON.stringify(filters),
     }),
+
+  updateCaption: (id: number, imageId: number, caption: string | null) =>
+    apiFetch<{ status: string; caption: string | null }>(
+      `/api/datasets/${id}/images/${imageId}/caption`,
+      { method: 'PATCH', body: JSON.stringify({ caption }) },
+    ),
+
+  batchCaptions: (
+    id: number,
+    data:
+      | { operation: 'prepend_trigger'; trigger_word: string }
+      | { operation: 'search_replace'; search: string; replacement: string },
+  ) =>
+    apiFetch<{ status: string; changed: number }>(`/api/datasets/${id}/captions/batch`, {
+      method: 'POST',
+      body: JSON.stringify(data),
+    }),
+
+  generateCaptions: (id: number, engine: 'florence2' | 'joycaption') =>
+    apiFetch<{ status: string; job_id: string; engine: string }>(
+      `/api/datasets/${id}/captions/generate`,
+      { method: 'POST', body: JSON.stringify({ engine }) },
+    ),
 }
 
 // ── Scheduled Tasks / Backups ────────────────────────────────────────
@@ -2158,6 +2361,23 @@ const saucenao = {
       method: 'POST',
       body: JSON.stringify({ image_id: imageId }),
     }),
+  batch: (imageIds: number[], autoFillSource = true, minSimilarity = 80) =>
+    apiFetch<{
+      results: Array<{
+        image_id: number
+        gallery_id?: number
+        best?: SauceNaoResult | null
+        source_applied?: boolean
+        error?: string
+      }>
+    }>('/api/saucenao/batch', {
+      method: 'POST',
+      body: JSON.stringify({
+        image_ids: imageIds,
+        auto_fill_source: autoFillSource,
+        min_similarity: minSimilarity,
+      }),
+    }),
 }
 
 // ── Novel module ──────────────────────────────────────────────────────
@@ -2369,6 +2589,9 @@ export const api = {
   history,
   savedSearches,
   plugins,
+  processing,
+  training,
+  galleryManagement,
   pixiv,
   artists,
   collections,

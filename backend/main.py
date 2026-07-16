@@ -30,11 +30,13 @@ from routers import (
     export,
     external,
     gallery_dl_admin,
+    gallery_management,
     history,
     import_router,
     library,
     novels,
     opds,
+    process,
     queue_admin,
     rss,
     scheduled_tasks,
@@ -43,6 +45,7 @@ from routers import (
     subscriptions,
     system,
     tag,
+    training_assets,
     ws,
 )
 from routers import (
@@ -196,9 +199,12 @@ app.include_router(export.router, prefix="/api/export")
 app.include_router(external.router, prefix="/api/external/v1")
 app.include_router(history.router, prefix="/api/history")
 app.include_router(plugins_router.router, prefix="/api/plugins")
+app.include_router(process.router, prefix="/api/process")
 app.include_router(artists.router, prefix="/api/artists")
 app.include_router(collections.router, prefix="/api/collections")
 app.include_router(datasets.router, prefix="/api/datasets")
+app.include_router(training_assets.router, prefix="/api/training")
+app.include_router(gallery_management.router, prefix="/api/gallery-management")
 app.include_router(novels.router, prefix="/api/novels")
 app.include_router(opds.router, prefix="/opds")
 app.include_router(scheduled_tasks.router, prefix="/api/scheduled-tasks")

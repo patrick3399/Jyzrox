@@ -21,6 +21,20 @@ async def set_toggle(redis_key: str, enabled: bool) -> bool:
     return enabled
 
 
+async def get_string_setting(redis_key: str, default: str) -> str:
+    """Read a text setting from Redis, falling back to the configured default."""
+    val = await get_redis().get(redis_key)
+    if val is None:
+        return default
+    return val.decode() if isinstance(val, bytes) else str(val)
+
+
+async def set_string_setting(redis_key: str, value: str) -> str:
+    """Store a text setting in Redis."""
+    await get_redis().set(redis_key, value)
+    return value
+
+
 async def get_int_setting(redis_key: str, default: int) -> int:
     """Read an integer setting from Redis, falling back to default."""
     val = await get_redis().get(redis_key)

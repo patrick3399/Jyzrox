@@ -354,7 +354,8 @@ _SQLITE_SCHEMA = [
         last_login_at TIMESTAMP,
         avatar_style TEXT DEFAULT 'gravatar',
         locale TEXT,
-        novel_prefs TEXT DEFAULT '{}'
+        novel_prefs TEXT DEFAULT '{}',
+        ui_preferences JSON DEFAULT '{}'
     )
     """,
     """
@@ -468,6 +469,7 @@ _SQLITE_SCHEMA = [
         filename TEXT,
         blob_sha256 TEXT REFERENCES blobs(sha256),
         tags_array TEXT DEFAULT '[]',
+        caption TEXT,
         added_at TIMESTAMP,
         visibility TEXT DEFAULT 'active',
         source_item_id TEXT,
@@ -740,6 +742,7 @@ _SQLITE_SCHEMA = [
         user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
         name TEXT NOT NULL,
         description TEXT,
+        tag_threshold REAL NOT NULL DEFAULT 0.35,
         selection_spec TEXT NOT NULL DEFAULT '{}',
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
@@ -756,6 +759,83 @@ _SQLITE_SCHEMA = [
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         PRIMARY KEY (dataset_id, image_id),
         CHECK (state IN ('included', 'excluded'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS lora_models (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        dataset_id INTEGER REFERENCES datasets(id) ON DELETE SET NULL,
+        name TEXT NOT NULL,
+        file_path TEXT NOT NULL,
+        file_size INTEGER NOT NULL,
+        sha256 TEXT NOT NULL,
+        trigger_words TEXT NOT NULL DEFAULT '[]',
+        training_params TEXT NOT NULL DEFAULT '{}',
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS generated_image_metadata (
+        image_id INTEGER PRIMARY KEY REFERENCES images(id) ON DELETE CASCADE,
+        prompt_json TEXT,
+        workflow_json TEXT,
+        imported_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS gallery_permissions (
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        can_edit BOOLEAN NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (gallery_id, user_id)
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS gallery_share_links (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        created_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        token_hash TEXT NOT NULL UNIQUE,
+        expires_at TIMESTAMP,
+        filter_r18 BOOLEAN NOT NULL DEFAULT 1,
+        revoked_at TIMESTAMP,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS gallery_versions (
+        gallery_id INTEGER PRIMARY KEY REFERENCES galleries(id) ON DELETE CASCADE,
+        group_id TEXT NOT NULL,
+        linked_by_user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        linked_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS import_conflicts (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        existing_gallery_id INTEGER REFERENCES galleries(id) ON DELETE SET NULL,
+        source TEXT NOT NULL,
+        source_id TEXT NOT NULL,
+        incoming_payload TEXT NOT NULL DEFAULT '{}',
+        status TEXT NOT NULL DEFAULT 'pending',
+        resolution TEXT,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        resolved_at TIMESTAMP,
+        CHECK (status IN ('pending', 'resolved'))
+    )
+    """,
+    """
+    CREATE TABLE IF NOT EXISTS read_events (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        user_id INTEGER NOT NULL REFERENCES users(id) ON DELETE CASCADE,
+        gallery_id INTEGER NOT NULL REFERENCES galleries(id) ON DELETE CASCADE,
+        image_id INTEGER REFERENCES images(id) ON DELETE SET NULL,
+        page_num INTEGER NOT NULL,
+        duration_ms INTEGER,
+        occurred_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP
     )
     """,
     """

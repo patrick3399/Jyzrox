@@ -38,6 +38,9 @@ class User(Base):
     # NULL means follow the language preferences of the current browser/device.
     locale: Mapped[str | None] = mapped_column(Text, nullable=True)
     novel_prefs: Mapped[dict] = mapped_column(JSONB, nullable=False, server_default=text("'{}'::jsonb"))
+    ui_preferences: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, server_default=text("'{}'::jsonb")
+    )
 
 
 class NovelReadProgress(Base):
@@ -220,6 +223,7 @@ class Image(Base):
     filename: Mapped[str | None] = mapped_column(Text)
     blob_sha256: Mapped[str] = mapped_column(Text, ForeignKey("blobs.sha256"), nullable=False)
     tags_array: Mapped[list[str]] = mapped_column(ARRAY(Text), default=list)
+    caption: Mapped[str | None] = mapped_column(Text, nullable=True)
     added_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     visibility: Mapped[str] = mapped_column(Text, default="active", server_default="active", nullable=False)
     source_item_id: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -334,6 +338,22 @@ class ReadProgress(Base):
     last_read_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now())
 
     gallery: Mapped[Gallery] = relationship(back_populates="read_progress")
+
+
+class ReadEvent(Base):
+    __tablename__ = "read_events"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False
+    )
+    image_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("images.id", ondelete="SET NULL"), nullable=True
+    )
+    page_num: Mapped[int] = mapped_column(Integer, nullable=False)
+    duration_ms: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    occurred_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
 
 
 class GallerySourceItem(Base):
@@ -540,6 +560,7 @@ class Dataset(Base):
     user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
     name: Mapped[str] = mapped_column(Text, nullable=False)
     description: Mapped[str | None] = mapped_column(Text, nullable=True)
+    tag_threshold: Mapped[float] = mapped_column(Float, nullable=False, default=0.35, server_default="0.35")
     selection_spec: Mapped[dict] = mapped_column(
         JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default=text("'{}'::jsonb")
     )
@@ -564,6 +585,96 @@ class DatasetImage(Base):
 
     dataset: Mapped[Dataset] = relationship(back_populates="dataset_images")
     image: Mapped[Image] = relationship()
+
+
+class LoraModel(Base):
+    __tablename__ = "lora_models"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    dataset_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("datasets.id", ondelete="SET NULL"), nullable=True
+    )
+    name: Mapped[str] = mapped_column(Text, nullable=False)
+    file_path: Mapped[str] = mapped_column(Text, nullable=False)
+    file_size: Mapped[int] = mapped_column(BigInteger, nullable=False)
+    sha256: Mapped[str] = mapped_column(Text, nullable=False)
+    trigger_words: Mapped[list[str]] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=list, server_default=text("'[]'::jsonb")
+    )
+    training_params: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class GeneratedImageMetadata(Base):
+    __tablename__ = "generated_image_metadata"
+
+    image_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("images.id", ondelete="CASCADE"), primary_key=True
+    )
+    prompt_json: Mapped[dict | None] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
+    workflow_json: Mapped[dict | None] = mapped_column(JSONB().with_variant(JSON, "sqlite"), nullable=True)
+    imported_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class GalleryPermission(Base):
+    __tablename__ = "gallery_permissions"
+
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
+    )
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), primary_key=True)
+    can_edit: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False, server_default="false")
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class GalleryShareLink(Base):
+    __tablename__ = "gallery_share_links"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    gallery_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), nullable=False)
+    created_by_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    token_hash: Mapped[str] = mapped_column(Text, unique=True, nullable=False)
+    expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    filter_r18: Mapped[bool] = mapped_column(Boolean, nullable=False, default=True, server_default="true")
+    revoked_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class GalleryVersion(Base):
+    __tablename__ = "gallery_versions"
+
+    gallery_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="CASCADE"), primary_key=True
+    )
+    group_id: Mapped[str] = mapped_column(Text, nullable=False)
+    linked_by_user_id: Mapped[int] = mapped_column(
+        BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False
+    )
+    linked_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+
+
+class ImportConflict(Base):
+    __tablename__ = "import_conflicts"
+
+    id: Mapped[int] = mapped_column(BigInteger, primary_key=True, autoincrement=True)
+    user_id: Mapped[int] = mapped_column(BigInteger, ForeignKey("users.id", ondelete="CASCADE"), nullable=False)
+    existing_gallery_id: Mapped[int | None] = mapped_column(
+        BigInteger, ForeignKey("galleries.id", ondelete="SET NULL"), nullable=True
+    )
+    source: Mapped[str] = mapped_column(Text, nullable=False)
+    source_id: Mapped[str] = mapped_column(Text, nullable=False)
+    incoming_payload: Mapped[dict] = mapped_column(
+        JSONB().with_variant(JSON, "sqlite"), nullable=False, default=dict, server_default=text("'{}'::jsonb")
+    )
+    status: Mapped[str] = mapped_column(Text, nullable=False, default="pending", server_default="pending")
+    resolution: Mapped[str | None] = mapped_column(Text, nullable=True)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), server_default=func.now(), nullable=False)
+    resolved_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class ExcludedBlob(Base):

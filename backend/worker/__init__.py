@@ -17,6 +17,7 @@ from core.redis_client import close_redis
 from core.scheduled_task_catalog import CATALOG
 from core.watcher import LibraryWatcher
 from worker.backup import database_backup_job
+from worker.captioning import caption_job
 from worker.dedup_scan import dedup_scan_job
 from worker.dedup_tier1 import dedup_tier1_job
 from worker.dedup_tier2 import dedup_tier2_job
@@ -41,6 +42,7 @@ from worker.memory import after_process_hook
 from worker.novel_index import novel_index_job
 from worker.novel_sync import novel_sync_job
 from worker.pixiv_collection import pixiv_collection_job
+from worker.process import process_job
 from worker.reconciliation import reconciliation_job
 from worker.retry import retry_failed_downloads_job
 from worker.scan import (
@@ -755,7 +757,11 @@ def _make_startup_log(label: str):
 
 
 _ingest_startup = _make_startup_log("ingest")
-_render_startup = _make_startup_log("render")
+async def _render_startup(ctx: dict) -> None:
+    await _make_startup_log("render")(ctx)
+    from plugins import init_plugins
+
+    await init_plugins()
 
 
 # ── SAQ Worker Factory ───────────────────────────────────────────────
@@ -886,6 +892,8 @@ def build_workers() -> tuple:
         functions=[
             thumbnail_job,
             thumbhash_backfill_job,
+            process_job,
+            caption_job,
         ],
         concurrency=concurrency[QUEUE_RENDER],
         startup=_render_startup,
