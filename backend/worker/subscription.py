@@ -10,6 +10,7 @@ from sqlalchemy import select, update
 import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
+from core.utils import normalize_download_url
 from db.models import DownloadJob, Subscription
 from plugins.models import NewWork
 from worker.constants import GROUP_MAX_DURATION, logger
@@ -67,11 +68,12 @@ async def _enqueue_fanbox_posts(ctx: dict, sub, *, force_full_scan: bool) -> dic
     enqueued: list[tuple[uuid.UUID, NewWork]] = []
     async with AsyncSessionLocal() as session:
         for work in works:
+            canonical_url = normalize_download_url(work.url)
             active = (
                 await session.execute(
                     select(DownloadJob.id)
                     .where(
-                        DownloadJob.url == work.url,
+                        DownloadJob.canonical_url == canonical_url,
                         DownloadJob.user_id == sub.user_id,
                         DownloadJob.status.in_(["queued", "running", "paused"]),
                     )
@@ -84,7 +86,8 @@ async def _enqueue_fanbox_posts(ctx: dict, sub, *, force_full_scan: bool) -> dic
             session.add(
                 DownloadJob(
                     id=job_id,
-                    url=work.url,
+                    url=canonical_url,
+                    canonical_url=canonical_url,
                     source="fanbox",
                     status="queued",
                     progress={},
@@ -232,13 +235,15 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
         if source == "fanbox":
             return await _enqueue_fanbox_posts(ctx, sub, force_full_scan=force_full_scan)
 
+        canonical_url = normalize_download_url(sub.url)
+
         # Duplicate guard: skip if this user already has a queued/running/paused job for this URL
         async with AsyncSessionLocal() as session:
             existing = (
                 await session.execute(
                     select(DownloadJob.id)
                     .where(
-                        DownloadJob.url == sub.url,
+                        DownloadJob.canonical_url == canonical_url,
                         DownloadJob.user_id == sub.user_id,
                         DownloadJob.status.in_(["queued", "running", "paused"]),
                     )
@@ -279,7 +284,8 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
             session.add(
                 DownloadJob(
                     id=job_id,
-                    url=sub.url,
+                    url=canonical_url,
+                    canonical_url=canonical_url,
                     source=sub.source or "gallery_dl",
                     status="queued",
                     progress={},

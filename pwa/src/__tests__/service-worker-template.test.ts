@@ -72,6 +72,15 @@ describe('service worker request safety', () => {
     expect(pageDelete).toBeGreaterThan(handler)
   })
 
+  it('revalidates private media before using the offline cache', () => {
+    const mediaBranch = source.indexOf("event.request.url.includes('/media/')")
+    const network = source.indexOf("fetch(event.request, { cache: 'no-cache' })", mediaBranch)
+    const cached = source.indexOf('cache.match(event.request)', mediaBranch)
+    expect(network).toBeGreaterThan(mediaBranch)
+    expect(cached).toBeGreaterThan(network)
+    expect(source.slice(network, cached)).toContain('catch')
+  })
+
   it('caches immutable build assets so the app shell can hydrate offline', () => {
     // Regression: narrowing the fetch handler to only `mode === 'navigate'`
     // left /_next/static/* chunks uncached, so offline navigations served a

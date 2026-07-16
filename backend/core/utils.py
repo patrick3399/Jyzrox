@@ -1,5 +1,7 @@
 """Shared utility functions used across routers and workers."""
 
+from urllib.parse import urlsplit, urlunsplit
+
 from fastapi import HTTPException
 
 
@@ -21,6 +23,19 @@ def escape_like(s: str) -> str:
 def normalize_subscription_url(url: str) -> str:
     """Strip whitespace and trailing slashes for consistent duplicate detection."""
     return url.strip().rstrip("/")
+
+
+def normalize_download_url(url: str) -> str:
+    """Return the stable identity used to deduplicate download requests.
+
+    Fragments are browser-local and never affect downloaded content. Trailing
+    slashes are also ignored, while query strings remain byte-for-byte intact
+    because signed download URLs can depend on their original ordering.
+    """
+    stripped = url.strip()
+    parts = urlsplit(stripped)
+    path = parts.path.rstrip("/")
+    return urlunsplit((parts.scheme.lower(), parts.netloc.lower(), path, parts.query, ""))
 
 
 def detect_source(url: str) -> str:

@@ -313,6 +313,10 @@ async def import_job(
 
     logger.info("[import] gallery_id=%d source=%s/%s", gallery_id, source, source_id)
 
+    from services.gallery_lifecycle import invalidate_sources_cache
+
+    await invalidate_sources_cache()
+
     # Trigger thumbnail generation
     await core.queue.enqueue(
         "cover_thumbnail_job",

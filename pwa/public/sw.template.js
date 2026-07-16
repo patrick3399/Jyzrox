@@ -274,24 +274,27 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Cache-first for images/media if possible, otherwise network-first
+  // Network/auth first for private media. Cache is an offline fallback only:
+  // a 401/403 response must never be masked by a previously authorized copy.
   if (event.request.url.includes('/media/') || event.request.url.includes('/thumbs/')) {
     event.respondWith(
-      caches.open(MEDIA_CACHE_NAME).then((cache) => {
-        return cache.match(event.request).then((cached) => {
+      caches.open(MEDIA_CACHE_NAME).then(async (cache) => {
+        try {
+          const response = await fetch(event.request, { cache: 'no-cache' });
+          if (response.status >= 200 && response.status < 300) {
+            const stamped = wrapResponseWithTimestamp(response.clone());
+            await cache.put(event.request, stamped);
+            enforceMediaCacheLimit();
+          }
+          return response;
+        } catch (_) {
+          const cached = await cache.match(event.request);
           if (cached && cached.status >= 200 && cached.status < 300) {
             if (!isExpired(cached, cacheConfig.mediaCacheTTLHours)) return cached;
-            cache.delete(event.request);
+            await cache.delete(event.request);
           }
-          return fetch(event.request).then((response) => {
-            if (response.status >= 200 && response.status < 300) {
-              const stamped = wrapResponseWithTimestamp(response.clone());
-              cache.put(event.request, stamped);
-              enforceMediaCacheLimit();
-            }
-            return response;
-          });
-        });
+          return new Response('', { status: 503 });
+        }
       })
     );
   } else if (requestUrl.pathname.startsWith('/_next/static/')) {

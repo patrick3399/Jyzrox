@@ -485,6 +485,7 @@ _SQLITE_SCHEMA = [
     CREATE TABLE IF NOT EXISTS download_jobs (
         id TEXT PRIMARY KEY,
         url TEXT NOT NULL,
+        canonical_url TEXT,
         source TEXT,
         status TEXT DEFAULT 'queued',
         progress TEXT DEFAULT '{}',

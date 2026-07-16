@@ -7,13 +7,17 @@ from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import urlparse
 
-import core.queue
 from core.config import settings
 from core.events import EventType, emit_safe
 from core.redis_client import DownloadSemaphore
 from services.credential import get_credential
 from worker.constants import _IMAGE_EXTS, DISK_LOW_KEY, logger
 from worker.helpers import _set_job_progress, _set_job_status, _validate_image_magic, check_disk_space
+
+
+def _postprocess_failure_status(downloaded: int) -> str:
+    """Never report a post-processing failure as a completed download."""
+    return "partial" if downloaded > 0 else "failed"
 
 
 async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> None:
@@ -213,8 +217,12 @@ async def download_job(
     importer = ProgressiveImporter(db_job_id, import_user_id, page_num_from_filename=page_from_filename)
     importer.source_url = url
     if isinstance(existing_gallery_id, int):
-        importer.gallery_id = existing_gallery_id
-        await importer._load_gallery_state()
+        attached = await importer.attach_existing_gallery(existing_gallery_id)
+        if not attached:
+            logger.warning(
+                "[download] persisted gallery_id=%s no longer exists; resolving gallery identity again",
+                existing_gallery_id,
+            )
 
     # ── 7. Pre-download metadata (native plugins) ──────────────────
     if hasattr(plugin, "resolve_metadata"):
@@ -578,10 +586,20 @@ async def download_job(
                 )
                 logger.info("[download] progressive import finalized: gallery_id=%s", gallery_id)
             else:
-                # Safety fallback: no progressive import occurred (should be rare)
-                await core.queue.enqueue(
-                    "import_job", path=str(target_dir), db_job_id=db_job_id, user_id=import_user_id, source_url=url
+                # Safety fallback: no progressive import occurred (should be
+                # rare). Complete it in this orchestration step so the DB job
+                # cannot become "done" before ingest has committed.
+                from worker.importer import import_job
+
+                import_result = await import_job(
+                    ctx,
+                    path=str(target_dir),
+                    db_job_id=db_job_id,
+                    user_id=import_user_id,
+                    source_url=url,
                 )
+                if import_result.get("status") != "done":
+                    raise RuntimeError(import_result.get("error") or "Fallback import failed")
         elif result.downloaded == 0:
             logger.info("[download] no new files downloaded (all skipped by archive), skipping import: %s", url)
 
@@ -622,11 +640,11 @@ async def download_job(
 
     except Exception as exc:
         # Guard: post-download steps (validation, finalize, status update) must never leave
-        # a job stuck in 'running'. Files already downloaded are not lost — treat as done
-        # if any were downloaded, otherwise failed.
+        # a job stuck in 'running'. Downloaded bytes are not the same as a
+        # committed gallery: post-processing failure is partial, never done.
         logger.error("[download] post-download steps failed: %s", exc, exc_info=True)
-        fin_status = "done" if result.downloaded > 0 else "failed"
-        fin_err = f"Post-download error: {exc}" if fin_status == "failed" else None
+        fin_status = _postprocess_failure_status(result.downloaded)
+        fin_err = f"Post-download error: {exc}"
         await _set_job_status(db_job_id, fin_status, fin_err)
         await _set_subscription_result(db_job_id, fin_status, fin_err)
         return {"status": fin_status, "downloaded": result.downloaded, "error": str(exc)}

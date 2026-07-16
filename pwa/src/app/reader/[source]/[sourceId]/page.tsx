@@ -1,5 +1,5 @@
 'use client'
-import { useEffect, useRef, useState } from 'react'
+import { useEffect, useMemo, useRef, useState } from 'react'
 import { useParams, useSearchParams } from 'next/navigation'
 import { api } from '@/lib/api'
 import { decodeRouteSegment } from '@/lib/galleryRoutes'
@@ -7,6 +7,7 @@ import Reader from '@/components/Reader'
 import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { t } from '@/lib/i18n'
 import { useWsConnection, useWsJobs } from '@/lib/ws'
+import { createRequestCoalescer } from '@/lib/requestCoalescer'
 import type { Gallery, GalleryImage, ReadProgress } from '@/lib/types'
 
 interface LoadedData {
@@ -28,6 +29,34 @@ export default function ReaderPage() {
   const historyRecordedRef = useRef(false)
   const { connected } = useWsConnection()
   const { lastJobUpdate } = useWsJobs()
+
+  const refreshCoalescer = useMemo(
+    () =>
+      createRequestCoalescer(async () => {
+        if (!source || !sourceId) return
+        try {
+          const [gallery, imagesResp] = await Promise.all([
+            api.library.getGallery(source, sourceId),
+            api.library.getImages(source, sourceId),
+          ])
+          setData((prev) =>
+            prev
+              ? {
+                  ...prev,
+                  gallery,
+                  images: imagesResp.images,
+                  favoritedImageIds: imagesResp.favorited_image_ids ?? [],
+                }
+              : prev,
+          )
+        } catch {
+          // A later event or disconnected fallback poll will retry.
+        }
+      }, 1000),
+    [source, sourceId],
+  )
+
+  useEffect(() => () => refreshCoalescer.cancel(), [refreshCoalescer])
 
   useEffect(() => {
     if (!source || !sourceId) {
@@ -94,36 +123,11 @@ export default function ReaderPage() {
   useEffect(() => {
     if (data?.gallery.download_status !== 'downloading' || !source || !sourceId) return
     if (connected) return
-    let cancelled = false
-    const currentSource = source
-    const currentSourceId = sourceId
-    const interval = setInterval(async () => {
-      try {
-        const [gallery, imagesResp] = await Promise.all([
-          api.library.getGallery(currentSource, currentSourceId),
-          api.library.getImages(currentSource, currentSourceId),
-        ])
-        if (!cancelled) {
-          setData((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  gallery,
-                  images: imagesResp.images,
-                  favoritedImageIds: imagesResp.favorited_image_ids ?? [],
-                }
-              : prev,
-          )
-        }
-      } catch {
-        // silently ignore revalidation errors
-      }
-    }, 5000)
+    const interval = setInterval(() => refreshCoalescer.trigger(), 5000)
     return () => {
-      cancelled = true
       clearInterval(interval)
     }
-  }, [source, sourceId, data?.gallery.download_status, connected])
+  }, [source, sourceId, data?.gallery.download_status, connected, refreshCoalescer])
 
   // WS-driven refresh while downloading and connected: progressive import
   // sets progress.gallery_id on job_update events (see worker/download.py),
@@ -133,35 +137,8 @@ export default function ReaderPage() {
     if (!connected || !lastJobUpdate) return
     const progressGalleryId = lastJobUpdate.progress?.gallery_id
     if (progressGalleryId !== data?.gallery.id) return
-    let cancelled = false
-    const currentSource = source
-    const currentSourceId = sourceId
-    void (async () => {
-      try {
-        const [gallery, imagesResp] = await Promise.all([
-          api.library.getGallery(currentSource, currentSourceId),
-          api.library.getImages(currentSource, currentSourceId),
-        ])
-        if (!cancelled) {
-          setData((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  gallery,
-                  images: imagesResp.images,
-                  favoritedImageIds: imagesResp.favorited_image_ids ?? [],
-                }
-              : prev,
-          )
-        }
-      } catch {
-        // silently ignore revalidation errors
-      }
-    })()
-    return () => {
-      cancelled = true
-    }
-  }, [lastJobUpdate, source, sourceId, connected, data?.gallery.download_status, data?.gallery.id])
+    refreshCoalescer.trigger()
+  }, [lastJobUpdate, source, sourceId, connected, data?.gallery.download_status, data?.gallery.id, refreshCoalescer])
 
   if (error) {
     return (

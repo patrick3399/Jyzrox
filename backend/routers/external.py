@@ -10,6 +10,7 @@ import psutil
 from fastapi import APIRouter, Depends, Header, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import selectinload
 
 import core.queue
@@ -17,7 +18,7 @@ from core.auth import gallery_access_filter
 from core.config import settings
 from core.database import async_session
 from core.redis_client import get_redis
-from core.utils import detect_source
+from core.utils import detect_source, normalize_download_url
 from db.models import ApiToken, DownloadJob, Gallery, Image, Tag
 from services.cas import cas_url, resolve_blob_path
 from services.cas import thumb_url as cas_thumb_url
@@ -449,10 +450,43 @@ async def enqueue_download(
     if ROLE_HIERARCHY.get(token_data.get("role", ""), 0) < ROLE_HIERARCHY["member"]:
         raise HTTPException(status_code=403, detail="Insufficient permissions: member role required")
 
+    resolved_url = normalize_download_url(resolved_url)
     job_id = _uuid.uuid4()
     source = detect_source(resolved_url)
 
-    # 1. Enqueue job first — if this fails, no DB record is created.
+    # Persist first so workers can never observe a queue entry without its DB
+    # identity. The partial unique index closes concurrent duplicate races.
+    try:
+        async with async_session() as session:
+            session.add(
+                DownloadJob(
+                    id=job_id,
+                    url=resolved_url,
+                    canonical_url=resolved_url,
+                    source=source,
+                    status="queued",
+                    user_id=token_data["user_id"],
+                )
+            )
+            await session.commit()
+    except IntegrityError:
+        async with async_session() as session:
+            existing = (
+                await session.execute(
+                    select(DownloadJob).where(
+                        DownloadJob.user_id == token_data["user_id"],
+                        DownloadJob.canonical_url == resolved_url,
+                        DownloadJob.status.in_(("queued", "running", "paused")),
+                    )
+                )
+            ).scalar_one_or_none()
+        if existing:
+            return {"job_id": str(existing.id), "status": existing.status}
+        raise HTTPException(status_code=500, detail="Failed to persist download job to database")
+    except Exception as exc:
+        logger.error("[external/enqueue] DB insert failed: %s", exc)
+        raise HTTPException(status_code=500, detail="Failed to persist download job to database")
+
     try:
         await core.queue.enqueue(
             "download_job",
@@ -466,22 +500,13 @@ async def enqueue_download(
         )
     except Exception as exc:
         logger.error("[external/enqueue] enqueue failed: %s", exc)
-        raise HTTPException(status_code=503, detail="Failed to enqueue download job")
-
-    # 2. Persist DB record. If this fails, log a warning; the SAQ job will
-    #    eventually time out without a matching DB row.
-    try:
         async with async_session() as session:
-            session.add(
-                DownloadJob(id=job_id, url=resolved_url, source=source, status="queued", user_id=token_data["user_id"])
+            await session.execute(
+                update(DownloadJob)
+                .where(DownloadJob.id == job_id)
+                .values(status="failed", error=f"Queue unavailable: {exc}")
             )
             await session.commit()
-    except Exception as exc:
-        logger.warning(
-            "[external/enqueue] SAQ job %s enqueued but DB insert failed: %s — job will time out naturally",
-            job_id,
-            exc,
-        )
-        raise HTTPException(status_code=500, detail="Job enqueued but failed to persist to database")
+        raise HTTPException(status_code=503, detail="Failed to enqueue download job")
 
     return {"job_id": str(job_id), "status": "queued"}

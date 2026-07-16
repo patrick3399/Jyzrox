@@ -461,6 +461,56 @@ class TestProgressiveImporterPreExistingCancel:
         ).fetchone()[0]
         assert status == "complete", "a refresh that added nothing must not demote complete → partial"
 
+    async def test_retry_direct_attach_snapshots_gallery_before_cancel(
+        self, db_session, db_session_factory, tmp_path
+    ):
+        """DownloadJob.gallery_id retry attach must use the same safe rollback
+        semantics as an ensure_gallery upsert attach."""
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(db_session, download_status="complete", pages=1)
+        old_sha = "eeee01" + "0" * 58
+        new_sha = "eeee02" + "0" * 58
+        await _insert_blob(db_session, old_sha, ref_count=1)
+        await _insert_blob(db_session, new_sha, ref_count=1)
+        old_image_id = await _insert_image(db_session, gallery_id, 1, old_sha, filename="001.jpg")
+
+        importer = ProgressiveImporter(db_job_id="00000000-0000-0000-0000-000000000001", user_id=None)
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            assert await importer.attach_existing_gallery(gallery_id) is True
+
+        assert importer.pre_existing is True
+        assert importer._preexisting_image_ids == {old_image_id}
+        await _insert_image(db_session, gallery_id, 2, new_sha, filename="002.jpg")
+
+        lib_dir = tmp_path / "library" / "test_source" / "test_001"
+        lib_dir.mkdir(parents=True)
+        (lib_dir / "001.jpg").write_bytes(b"old")
+        (lib_dir / "002.jpg").write_bytes(b"new")
+
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive.library_dir", return_value=lib_dir),
+            patch("worker.progressive.thumb_dir", return_value=tmp_path / "missing-thumb"),
+        ):
+            await importer.cleanup()
+
+        remaining = (
+            await db_session.execute(
+                text("SELECT id FROM images WHERE gallery_id = :gid ORDER BY id"), {"gid": gallery_id}
+            )
+        ).scalars().all()
+        assert remaining == [old_image_id]
+        row = (
+            await db_session.execute(
+                text("SELECT download_status, pages FROM galleries WHERE id = :gid"), {"gid": gallery_id}
+            )
+        ).one()
+        assert tuple(row) == ("complete", 1)
+        assert (lib_dir / "001.jpg").exists()
+        assert not (lib_dir / "002.jpg").exists()
+
 
 # ---------------------------------------------------------------------------
 # TestProgressiveImporterTrashedGuard — edge case audit #8

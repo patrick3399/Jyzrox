@@ -5,9 +5,8 @@ Closes audit #67/#68. nginx forwards the original request URI via
 ``routers/auth.py`` delegates the URI-aware decision to this module so the
 visibility rules stay defined in exactly one place (``core.auth.gallery_access_filter``).
 
-Two media prefixes are "path-addressed" (i.e. the URI itself names a
-filesystem path rather than an opaque content-addressed hash) and therefore
-need per-request authorization instead of pure session validation:
+All private media prefixes need URI-scoped authorization in addition to pure
+session validation. The two path-addressed forms are:
 
 - ``/media/libraries/<path>`` — served straight from the external library
   root (``/mnt``). Without this check, any authenticated user could browse
@@ -17,12 +16,9 @@ need per-request authorization instead of pure session validation:
   ``/data`` directory, so an unvalidated source could read arbitrary files
   (e.g. database backups) — see #67.
 
-Content-addressed media (``local:///cas/...``, ``local:///thumbs/...`` and
-plain ``/media/cas/`` or ``/media/thumbs/`` URLs) is intentionally NOT
-gallery-ACL-checked here: those are high-entropy sha256 capability URLs that
-are only ever handed out through already-ACL-filtered API responses, and the
-revocation window is bounded (see F2). That capability-URL posture is
-deliberate and documented, not an oversight.
+Content-addressed media is resolved back to ``Image`` / ``Gallery`` rows and
+must have at least one accessible gallery reference. SHA256 remains the storage
+identity, but possession of a URL is no longer treated as authorization.
 
 Fail-closed: any internal error (DB, Redis, decode) returns False rather than
 raising, so a bug here can only ever deny access, never leak it.
@@ -32,7 +28,6 @@ from __future__ import annotations
 
 import base64
 import binascii
-import hashlib
 import logging
 from urllib.parse import unquote
 
@@ -40,14 +35,14 @@ from sqlalchemy import select
 
 from core.auth import gallery_access_filter
 from core.database import async_session
-from core.redis_client import get_redis
 from db.models import Blob, Gallery, Image
 
 logger = logging.getLogger(__name__)
 
-_CACHE_TTL_SECONDS = 60
 _LIBRARIES_PREFIX = "/media/libraries/"
 _IMAGE_PREFIX = "/media/image/"
+_CAS_PREFIX = "/media/cas/"
+_THUMBS_PREFIX = "/media/thumbs/"
 _ALLOWED_IMGPROXY_SOURCE_PREFIXES = ("local:///cas/", "local:///thumbs/")
 
 
@@ -63,7 +58,11 @@ async def authorize_media_uri(auth: dict, uri: str) -> bool:
         if uri.startswith(_LIBRARIES_PREFIX):
             return await _authorize_libraries(auth, uri)
         if uri.startswith(_IMAGE_PREFIX):
-            return _authorize_image(uri)
+            return await _authorize_image(auth, uri)
+        if uri.startswith(_CAS_PREFIX):
+            return await _authorize_content_sha(auth, _sha_from_cas_path(uri), uri)
+        if uri.startswith(_THUMBS_PREFIX):
+            return await _authorize_content_sha(auth, _sha_from_thumb_path(uri), uri)
         return True
     except Exception:
         logger.warning("authorize_media_uri: fail-closed error for uri=%r", uri, exc_info=True)
@@ -81,14 +80,6 @@ async def _authorize_libraries(auth: dict, uri: str) -> bool:
         return False
     mnt_path = f"/mnt/{path}"
 
-    user_id = auth["user_id"]
-    cache_key = f"mediaauthz:{user_id}:{hashlib.sha1(uri.encode()).hexdigest()}"
-    redis = get_redis()
-    cached = await redis.get(cache_key)
-    if cached is not None:
-        value = cached if isinstance(cached, str) else cached.decode()
-        return value == "1"
-
     async with async_session() as session:
         stmt = (
             select(Gallery.id)
@@ -99,16 +90,42 @@ async def _authorize_libraries(auth: dict, uri: str) -> bool:
         )
         allowed = (await session.execute(stmt)).first() is not None
 
-    await redis.set(cache_key, "1" if allowed else "0", ex=_CACHE_TTL_SECONDS)
     return allowed
 
 
-def _authorize_image(uri: str) -> bool:
+async def _authorize_content_sha(auth: dict, sha256: str | None, uri: str) -> bool:
+    """Authorize content-addressed media through an accessible gallery reference."""
+    if not sha256:
+        return False
+    if auth.get("role") == "admin":
+        return True
+
+    async with async_session() as session:
+        stmt = (
+            select(Gallery.id)
+            .join(Image, Image.gallery_id == Gallery.id)
+            .where(Image.blob_sha256 == sha256, gallery_access_filter(auth))
+            .limit(1)
+        )
+        allowed = (await session.execute(stmt)).first() is not None
+    return allowed
+
+
+def _sha_from_cas_path(uri: str) -> str | None:
+    filename = uri.split("?", 1)[0].rstrip("/").rsplit("/", 1)[-1]
+    return filename.rsplit(".", 1)[0] if "." in filename else None
+
+
+def _sha_from_thumb_path(uri: str) -> str | None:
+    parts = uri.split("?", 1)[0].strip("/").split("/")
+    return parts[-2] if len(parts) >= 2 else None
+
+
+async def _authorize_image(auth: dict, uri: str) -> bool:
     """Authorize a ``/media/image/...`` imgproxy request by its decoded source.
 
-    Does not consult gallery ACLs — the underlying resource is itself a
-    capability URL (see module docstring); only the source prefix is
-    validated so imgproxy cannot be used to read files outside CAS/thumbs.
+    The source prefix is constrained to CAS/thumbs, then the embedded SHA is
+    checked through the same Gallery ACL path as direct content URLs.
     """
     path = uri.split("?", 1)[0]
     last_segment = path.rstrip("/").rsplit("/", 1)[-1]
@@ -118,4 +135,10 @@ def _authorize_image(uri: str) -> bool:
         decoded = base64.urlsafe_b64decode(padded).decode("utf-8")
     except binascii.Error, UnicodeDecodeError, ValueError:
         return False
-    return decoded.startswith(_ALLOWED_IMGPROXY_SOURCE_PREFIXES)
+    if not decoded.startswith(_ALLOWED_IMGPROXY_SOURCE_PREFIXES):
+        return False
+    if decoded.startswith("local:///cas/"):
+        sha256 = _sha_from_cas_path(decoded.removeprefix("local://"))
+    else:
+        sha256 = _sha_from_thumb_path(decoded.removeprefix("local://"))
+    return await _authorize_content_sha(auth, sha256, uri)

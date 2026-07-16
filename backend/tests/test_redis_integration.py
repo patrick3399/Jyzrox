@@ -254,6 +254,36 @@ async def test_publish_job_event_delegates_job_update_to_event_bus():
     assert "abc123" in resource_ids
 
 
+async def test_publish_subscription_event_preserves_job_id():
+    """The legacy producer bridge must not drop job_id before EventBus/WS."""
+    from unittest.mock import MagicMock
+
+    from core.redis_client import publish_job_event
+
+    mock_redis = AsyncMock()
+    mock_pipe = AsyncMock()
+    mock_redis.pipeline = MagicMock(return_value=mock_pipe)
+    mock_pipe.publish = MagicMock(return_value=mock_pipe)
+    mock_pipe.lpush = MagicMock(return_value=mock_pipe)
+    mock_pipe.ltrim = MagicMock(return_value=mock_pipe)
+    mock_pipe.execute = AsyncMock(return_value=[1, 1, 1])
+
+    with patch("core.redis_client.get_redis", return_value=mock_redis):
+        await publish_job_event(
+            {
+                "type": "subscription_checked",
+                "sub_id": 42,
+                "status": "completed",
+                "job_id": "job-999",
+                "new_works": 2,
+            }
+        )
+
+    payloads = [json.loads(call.args[1]) for call in mock_pipe.publish.call_args_list]
+    event = next(payload for payload in payloads if payload["event_type"] == "subscription.checked")
+    assert event["data"]["job_id"] == "job-999"
+
+
 async def test_publish_job_event_unknown_type_falls_back_to_download_events_channel():
     """publish_job_event() with an unknown type must fall back to publishing directly
     to the legacy download:events channel."""

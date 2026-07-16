@@ -207,6 +207,39 @@ class ProgressiveImporter:
                 self._page_counter = max_page
                 logger.info("[progressive] resuming page counter at %d for gallery %d", max_page, self.gallery_id)
 
+    async def attach_existing_gallery(self, gallery_id: int) -> bool:
+        """Attach to a gallery persisted on a previous attempt without owning it.
+
+        Retry/resume reconstructs the importer from ``DownloadJob.gallery_id``
+        and therefore bypasses the normal ``ensure_gallery*`` conflict lookup.
+        Treat that row as pre-existing for this attempt: snapshot it before any
+        mutation so cancellation can roll back only this attempt's additions.
+        Returns False when the row no longer exists.
+        """
+        async with AsyncSessionLocal() as session:
+            gallery = await session.get(Gallery, gallery_id)
+            if gallery is None:
+                return False
+
+            self.gallery_id = gallery.id
+            self.source = gallery.source
+            self.source_id = gallery.source_id
+            self.title = gallery.title
+            if gallery.deleted_at is not None:
+                self.skipped_trashed = True
+            else:
+                self.pre_existing = True
+                self._prev_gallery_snapshot = {
+                    "download_status": gallery.download_status,
+                    "title": gallery.title,
+                    "tags_array": gallery.tags_array,
+                    "source_url": gallery.source_url,
+                    "artist_id": gallery.artist_id,
+                }
+
+        await self._load_gallery_state()
+        return True
+
     async def _detect_trashed_conflict(self, session, source: str, source_id: str) -> int | None:
         """Audit #8: return the id of an existing *trashed* gallery for this
         (source, source_id), or None.
@@ -714,6 +747,10 @@ class ProgressiveImporter:
                 await session.commit()
                 # Disaster-recovery sidecar (best-effort)
                 await write_gallery_sidecar(sidecar_source, sidecar_source_id, sidecar_payload)
+
+        from services.gallery_lifecycle import invalidate_sources_cache
+
+        await invalidate_sources_cache()
 
         _rmtree_staging_dir(dest_dir)
 

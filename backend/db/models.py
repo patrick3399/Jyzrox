@@ -302,6 +302,7 @@ class DownloadJob(Base):
 
     id: Mapped[uuid.UUID] = mapped_column(UUID(as_uuid=True), primary_key=True, server_default=text("uuidv7()"))
     url: Mapped[str] = mapped_column(Text, nullable=False)
+    canonical_url: Mapped[str | None] = mapped_column(Text)
     source: Mapped[str | None] = mapped_column(Text)
     status: Mapped[str] = mapped_column(Text, default="queued")
     progress: Mapped[dict] = mapped_column(JSONB, default=dict)

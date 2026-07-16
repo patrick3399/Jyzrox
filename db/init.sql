@@ -123,6 +123,7 @@ CREATE TABLE IF NOT EXISTS image_tags (
 CREATE TABLE IF NOT EXISTS download_jobs (
     id              UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     url             TEXT NOT NULL,
+    canonical_url   TEXT,
     source          TEXT,
     status          TEXT DEFAULT 'queued',
     progress        JSONB DEFAULT '{}',
@@ -238,6 +239,33 @@ CREATE INDEX IF NOT EXISTS idx_gallery_tags_tag ON gallery_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_image_tags_tag ON image_tags (tag_id);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_status ON download_jobs (status);
 CREATE INDEX IF NOT EXISTS idx_download_jobs_user_id ON download_jobs (user_id);
+ALTER TABLE download_jobs ADD COLUMN IF NOT EXISTS canonical_url TEXT;
+UPDATE download_jobs
+SET canonical_url = regexp_replace(split_part(btrim(url), '#', 1), '/+$', '')
+WHERE canonical_url IS NULL;
+WITH ranked AS (
+    SELECT id,
+           row_number() OVER (
+               PARTITION BY user_id, canonical_url
+               ORDER BY created_at, id
+           ) AS duplicate_rank
+    FROM download_jobs
+    WHERE user_id IS NOT NULL
+      AND canonical_url IS NOT NULL
+      AND status IN ('queued', 'running', 'paused')
+)
+UPDATE download_jobs AS job
+SET status = 'failed',
+    error = COALESCE(job.error, 'Superseded duplicate active job during canonical URL migration'),
+    finished_at = COALESCE(job.finished_at, now())
+FROM ranked
+WHERE job.id = ranked.id
+  AND ranked.duplicate_rank > 1;
+CREATE UNIQUE INDEX IF NOT EXISTS uq_download_jobs_active_canonical
+    ON download_jobs (user_id, canonical_url)
+    WHERE user_id IS NOT NULL
+      AND canonical_url IS NOT NULL
+      AND status IN ('queued', 'running', 'paused');
 
 -- Composite indexes for keyset pagination (sort_col DESC, id DESC)
 CREATE INDEX IF NOT EXISTS idx_galleries_added_at_id ON galleries (added_at DESC, id DESC);

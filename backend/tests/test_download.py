@@ -30,15 +30,18 @@ async def _insert_job(
     next_retry_at: str | None = None,
 ):
     """Insert a download job directly via raw SQL (SQLite-compatible)."""
+    from core.utils import normalize_download_url
+
     job_id = str(uuid.uuid4())
     await db_session.execute(
         text(
-            "INSERT INTO download_jobs (id, url, source, status, progress, user_id, gallery_id, retry_count, max_retries, next_retry_at) "
-            "VALUES (:id, :url, :source, :status, :progress, :user_id, :gallery_id, :retry_count, :max_retries, :next_retry_at)"
+            "INSERT INTO download_jobs (id, url, canonical_url, source, status, progress, user_id, gallery_id, retry_count, max_retries, next_retry_at) "
+            "VALUES (:id, :url, :canonical_url, :source, :status, :progress, :user_id, :gallery_id, :retry_count, :max_retries, :next_retry_at)"
         ),
         {
             "id": job_id,
             "url": url,
+            "canonical_url": normalize_download_url(url),
             "source": source,
             "status": status,
             "progress": "{}",
@@ -151,6 +154,15 @@ class TestDetectSource:
         assert detect_source("https://example.com/gallery/123") == "unknown"
         # danbooru is a registered plugin source — returns 'danbooru', not 'unknown'
         assert detect_source("https://danbooru.donmai.us/posts/12345") == "danbooru"
+
+
+def test_normalize_download_url_preserves_query_but_removes_non_content_identity():
+    from core.utils import normalize_download_url
+
+    assert (
+        normalize_download_url("  HTTPS://EXAMPLE.COM/gallery/123/?token=a%2Fb#reader-page-4  ")
+        == "https://example.com/gallery/123?token=a%2Fb"
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1105,6 +1117,30 @@ class TestEnqueueFailurePaths:
         # Should return the existing job — enqueue should NOT be called again
         assert result["job_id"] == job_id
         assert result["status"] == "queued"
+
+    async def test_enqueue_trailing_slash_variant_returns_existing_job(self, db_session, mock_redis):
+        from routers.download import _enqueue
+
+        job_id = await _insert_job(
+            db_session,
+            url="https://e-hentai.org/g/996/canonical/",
+            status="queued",
+            user_id=42,
+        )
+
+        with (
+            patch("routers.download._check_source_enabled", new_callable=AsyncMock),
+            patch("routers.download._credential_warning", new_callable=AsyncMock, return_value=None),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as enqueue_mock,
+        ):
+            result = await _enqueue(
+                "https://e-hentai.org/g/996/canonical#page-2",
+                db_session,
+                user_id=42,
+            )
+
+        assert result["job_id"] == job_id
+        enqueue_mock.assert_not_awaited()
 
     async def test_enqueue_duplicate_running_url_same_user_returns_existing_job(self, db_session, mock_redis):
         """When same URL + user has a running job, _enqueue returns existing running job."""

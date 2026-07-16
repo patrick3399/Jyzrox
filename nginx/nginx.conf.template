@@ -106,7 +106,7 @@ http {
 
         # ── Media: require auth via subrequest ────────────────────
         location /media/thumbs/ {
-            auth_request /_auth;
+            auth_request /_auth_media;
             alias /data/thumbs/;
             disable_symlinks on;
             expires 7d;
@@ -115,7 +115,7 @@ http {
         }
 
         location /media/cas/ {
-            auth_request /_auth;
+            auth_request /_auth_media;
             alias /data/cas/;
             disable_symlinks on;
             expires 30d;

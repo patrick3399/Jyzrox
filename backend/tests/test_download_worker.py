@@ -293,6 +293,13 @@ def _make_plugin_result(status="done", downloaded=3, total=3, error=None, failed
     return result
 
 
+def test_postprocess_failure_with_downloaded_files_is_partial_not_done():
+    from worker.download import _postprocess_failure_status
+
+    assert _postprocess_failure_status(3) == "partial"
+    assert _postprocess_failure_status(0) == "failed"
+
+
 def _make_mock_session():
     """Return a mock async context manager session."""
     session = AsyncMock()

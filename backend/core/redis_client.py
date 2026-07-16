@@ -340,6 +340,7 @@ async def publish_job_event(event: dict) -> None:
                 resource_id=event.get("sub_id"),
                 status=event.get("status"),
                 new_works=event.get("new_works", 0),
+                job_id=event.get("job_id"),
             )
         else:
             # Unknown type — publish directly to old channel as fallback

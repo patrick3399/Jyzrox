@@ -75,7 +75,6 @@ async def test_media_authz_libraries_path_of_other_users_private_gallery_denied(
 
     with (
         patch("services.media_authz.async_session", db_session_factory),
-        patch("services.media_authz.get_redis", return_value=mock_redis),
     ):
         allowed = await authorize_media_uri({"user_id": 2, "role": "member"}, "/media/libraries/otheruser/page1.jpg")
     assert allowed is False
@@ -94,7 +93,6 @@ async def test_media_authz_libraries_path_of_own_gallery_allowed(db_session, db_
 
     with (
         patch("services.media_authz.async_session", db_session_factory),
-        patch("services.media_authz.get_redis", return_value=mock_redis),
     ):
         allowed = await authorize_media_uri({"user_id": 1, "role": "member"}, "/media/libraries/mine/page1.jpg")
     assert allowed is True
@@ -104,7 +102,6 @@ async def test_media_authz_unregistered_mnt_path_denied(db_session, db_session_f
     """A /mnt path with no matching blob at all is denied (closes #68 full-tree browsing)."""
     with (
         patch("services.media_authz.async_session", db_session_factory),
-        patch("services.media_authz.get_redis", return_value=mock_redis),
     ):
         allowed = await authorize_media_uri(
             {"user_id": 2, "role": "member"}, "/media/libraries/never/registered/anywhere.jpg"
@@ -116,7 +113,6 @@ async def test_media_authz_path_traversal_rejected(db_session, db_session_factor
     """A '..' path segment is rejected outright, without ever touching the DB."""
     with (
         patch("services.media_authz.async_session", db_session_factory),
-        patch("services.media_authz.get_redis", return_value=mock_redis),
     ):
         allowed = await authorize_media_uri({"user_id": 2, "role": "member"}, "/media/libraries/../../etc/passwd")
     assert allowed is False
@@ -135,12 +131,45 @@ async def test_media_authz_imgproxy_source_outside_cas_thumbs_denied(mock_redis)
     assert allowed is False
 
 
-async def test_media_authz_imgproxy_cas_source_allowed(mock_redis):
-    """An imgproxy source under local:///cas/ is allowed (no gallery ACL check applies)."""
-    b64 = _b64_source("local:///cas/ab/cdef1234.jpg")
+async def test_media_authz_imgproxy_cas_source_requires_accessible_gallery(
+    db_session, db_session_factory, mock_redis
+):
+    """An imgproxy CAS source is allowed only through an accessible gallery."""
+    await _insert_blob(db_session, "cdef1234", "/mnt/unused.jpg")
+    await _insert_gallery_with_image(
+        db_session,
+        source_id="g_imgproxy_owned",
+        blob_sha256="cdef1234",
+        created_by_user_id=2,
+        visibility="private",
+    )
+    b64 = _b64_source("local:///cas/ab/cd/cdef1234.jpg")
     uri = f"/media/image/insecure/rs:fill:200:200/{b64}.webp"
-    allowed = await authorize_media_uri({"user_id": 2, "role": "member"}, uri)
+    with (
+        patch("services.media_authz.async_session", db_session_factory),
+    ):
+        allowed = await authorize_media_uri({"user_id": 2, "role": "member"}, uri)
     assert allowed is True
+
+
+async def test_media_authz_direct_cas_of_inaccessible_gallery_denied(
+    db_session, db_session_factory, mock_redis
+):
+    await _insert_blob(db_session, "privatecas", "/mnt/unused-private.jpg")
+    await _insert_gallery_with_image(
+        db_session,
+        source_id="g_direct_cas_private",
+        blob_sha256="privatecas",
+        created_by_user_id=1,
+        visibility="private",
+    )
+    with (
+        patch("services.media_authz.async_session", db_session_factory),
+    ):
+        allowed = await authorize_media_uri(
+            {"user_id": 2, "role": "member"}, "/media/cas/pr/iv/privatecas.jpg"
+        )
+    assert allowed is False
 
 
 # ---------------------------------------------------------------------------
@@ -168,7 +197,6 @@ async def test_auth_check_returns_403_for_unauthorized_media_uri(
 
     with (
         patch("services.media_authz.async_session", db_session_factory),
-        patch("services.media_authz.get_redis", return_value=mock_redis),
     ):
         resp = await unauthed_client.get(
             "/api/auth/check",

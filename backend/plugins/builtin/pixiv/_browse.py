@@ -19,6 +19,7 @@ from core.database import async_session
 from core.errors import api_error, parse_accept_language
 from core.events import EventType, emit_safe
 from core.rate_limit import _is_private, check_rate_limit, get_client_ip
+from core.utils import normalize_download_url
 from core.version import __version__
 from db.models import DownloadJob, Gallery, GallerySourceItem, Subscription
 from plugins.base import BrowsePlugin
@@ -716,7 +717,7 @@ async def get_user_collection(user_id: int, auth: dict = Depends(require_auth)):
                 select(DownloadJob)
                 .where(
                     DownloadJob.user_id == auth["user_id"],
-                    DownloadJob.url == url,
+                    DownloadJob.canonical_url == normalize_download_url(url),
                     DownloadJob.status.in_(("queued", "running", "paused")),
                 )
                 .order_by(DownloadJob.created_at.desc())
@@ -750,14 +751,14 @@ async def get_user_collection(user_id: int, auth: dict = Depends(require_auth)):
 
 
 async def _enqueue_collection_sync(user_id: int, owner_user_id: int, *, full_reconcile: bool, subscription_id=None):
-    url = f"https://www.pixiv.net/users/{user_id}"
+    url = normalize_download_url(f"https://www.pixiv.net/users/{user_id}")
     async with async_session() as session:
         active = (
             await session.execute(
                 select(DownloadJob.id)
                 .where(
                     DownloadJob.user_id == owner_user_id,
-                    DownloadJob.url == url,
+                    DownloadJob.canonical_url == url,
                     DownloadJob.status.in_(("queued", "running", "paused")),
                 )
                 .limit(1)
@@ -770,6 +771,7 @@ async def _enqueue_collection_sync(user_id: int, owner_user_id: int, *, full_rec
             DownloadJob(
                 id=job_id,
                 url=url,
+                canonical_url=url,
                 source="pixiv",
                 status="queued",
                 progress={},

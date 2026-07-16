@@ -11,6 +11,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query, Request, status
 from pydantic import BaseModel
 from saq.job import TERMINAL_STATUSES as SAQ_TERMINAL_STATUSES
 from sqlalchemy import delete, desc, func, select, text, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import core.queue
@@ -19,7 +20,7 @@ from core.config import settings as app_settings
 from core.database import get_db
 from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
-from core.utils import detect_source, detect_source_info, get_supported_sites
+from core.utils import detect_source, detect_source_info, get_supported_sites, normalize_download_url
 from db.models import DownloadJob, Gallery
 from services.credential import get_credential
 from worker.helpers import compute_job_key, enqueue_download_job
@@ -160,11 +161,14 @@ async def _enqueue(
 
     Returns a dict suitable for use as the HTTP response body.
     """
-    # Duplicate guard: return existing job if same URL + same user is already active
+    canonical_url = normalize_download_url(url)
+
+    # Fast-path duplicate guard. The database's partial unique index is the
+    # authoritative guard when concurrent requests race past this query.
     existing_stmt = (
         select(DownloadJob)
         .where(
-            DownloadJob.url == url,
+            DownloadJob.canonical_url == canonical_url,
             DownloadJob.user_id == user_id,
             DownloadJob.status.in_(["queued", "running", "paused"]),
         )
@@ -179,7 +183,7 @@ async def _enqueue(
             "warning": None,
         }
 
-    source = detect_source(url)
+    source = detect_source(canonical_url)
     if source == "fanbox":
         from plugins.builtin.fanbox.policy import normalized_fanbox_options
 
@@ -197,7 +201,8 @@ async def _enqueue(
     try:
         job = DownloadJob(
             id=job_id,
-            url=url,
+            url=canonical_url,
+            canonical_url=canonical_url,
             source=source,
             status="queued",
             progress=initial_progress or {},
@@ -206,6 +211,18 @@ async def _enqueue(
         )
         db.add(job)
         await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        existing_job = (await db.execute(existing_stmt)).scalar_one_or_none()
+        if existing_job:
+            return {
+                "job_id": str(existing_job.id),
+                "status": existing_job.status,
+                "source": existing_job.source,
+                "warning": None,
+            }
+        logger.exception("[enqueue] active-job uniqueness conflict without an existing row")
+        raise HTTPException(status_code=500, detail="Failed to persist download job to database")
     except Exception as exc:
         logger.error("[enqueue] DB insert failed: %s", exc)
         raise HTTPException(status_code=500, detail="Failed to persist download job to database")
@@ -216,7 +233,7 @@ async def _enqueue(
             "download_job",
             _job_id=str(job_id),
             _timeout=app_settings.download_job_timeout,
-            url=url,
+            url=canonical_url,
             source=source,
             options=options,
             db_job_id=str(job_id),
