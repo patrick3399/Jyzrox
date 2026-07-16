@@ -10,6 +10,7 @@ import { Toaster } from 'sonner'
 import { SWUpdatePrompt } from './SWUpdatePrompt'
 import { FloatingActions } from './FloatingActions'
 import { WsProvider } from '@/lib/ws'
+import { WsInvalidationBridge } from '@/lib/wsInvalidation'
 import { useSwipeBack } from '@/hooks/useSwipeBack'
 import { useDownloadStats } from '@/hooks/useDownloadQueue'
 import { useLocale } from '@/components/LocaleProvider'
@@ -43,6 +44,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
 
   return (
     <WsProvider>
+      <WsInvalidationBridge />
       <LayoutShellInner
         key={locale}
         isReader={isReader}
