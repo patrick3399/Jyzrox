@@ -560,6 +560,54 @@ class TestManualTagGallery:
     # Happy-path: add action
     # ------------------------------------------------------------------
 
+    @staticmethod
+    async def _insert_owned_gallery(db_session, source_id, owner_id):
+        await db_session.execute(
+            text(
+                "INSERT INTO galleries (source, source_id, title, created_by_user_id) "
+                "VALUES ('test', :sid, 'Owned', :owner)"
+            ),
+            {"sid": source_id, "owner": owner_id},
+        )
+        await db_session.commit()
+        return (
+            await db_session.execute(
+                text("SELECT id FROM galleries WHERE source='test' AND source_id=:sid"),
+                {"sid": source_id},
+            )
+        ).scalar()
+
+    async def test_manual_tag_non_owner_member_cannot_tag_others_gallery_returns_403(
+        self, make_client, db_session, monkeypatch
+    ):
+        """A member with only read visibility must not mutate another user's gallery tags."""
+        self._patch_worker_helpers(monkeypatch)
+        gid = await self._insert_owned_gallery(db_session, "tag_owned_by_2", owner_id=2)
+
+        async with make_client(user_id=3, role="member") as ac:
+            resp = await ac.post(
+                f"/api/tags/gallery/{gid}",
+                json={"tags": ["character:rem"], "action": "add"},
+            )
+        assert resp.status_code == 403
+
+    async def test_manual_tag_editor_collaborator_can_tag(self, make_client, db_session, monkeypatch):
+        """A can_edit=true collaborator is allowed to add manual tags."""
+        self._add_patch(monkeypatch)
+        gid = await self._insert_owned_gallery(db_session, "tag_collab_edit", owner_id=2)
+        await db_session.execute(
+            text("INSERT INTO gallery_permissions (gallery_id, user_id, can_edit) VALUES (:g, 3, 1)"),
+            {"g": gid},
+        )
+        await db_session.commit()
+
+        async with make_client(user_id=3, role="member") as ac:
+            resp = await ac.post(
+                f"/api/tags/gallery/{gid}",
+                json={"tags": ["character:rem"], "action": "add"},
+            )
+        assert resp.status_code == 200
+
     async def test_manual_tag_add_basic(self, client, db_session, monkeypatch):
         """POST with action=add and a namespaced tag should return affected=1."""
         self._add_patch(monkeypatch)

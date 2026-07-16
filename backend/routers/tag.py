@@ -16,7 +16,7 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import core.queue
-from core.auth import gallery_access_filter, require_auth, require_role
+from core.auth import gallery_access_filter, has_gallery_write_access, require_auth, require_role
 from core.database import async_session, get_db
 from core.redis_client import get_redis
 from core.utils import escape_like
@@ -683,10 +683,14 @@ async def manual_tag_gallery(
     """Add or remove manual tags on a gallery."""
     from worker.tag_helpers import rebuild_gallery_tags_array
 
-    # Verify gallery exists
+    # Verify gallery exists and the caller may modify it. Read visibility is not
+    # sufficient: gallery_access_filter matches read-only collaborators, so the
+    # write must be gated on has_gallery_write_access (admin/owner/can_edit).
     gallery = await session.get(Gallery, gallery_id)
     if not gallery:
         raise HTTPException(status_code=404, detail="Gallery not found")
+    if not await has_gallery_write_access(session, gallery.id, gallery.created_by_user_id, auth):
+        raise HTTPException(status_code=403, detail="Gallery write access is required")
 
     if body.action == "add":
         from worker.tag_helpers import parse_tag_strings
