@@ -53,6 +53,12 @@ def _event_to_ws_message(event_data: dict) -> str:
 
     Derives the legacy message type from event_type + resource_type rather than
     requiring callers to tag events with internal hints.
+
+    Every message also carries the full original event under ``event`` so the
+    translation can never drop payload fields again (the generic ``system.*``
+    branch once flattened gdl upgrade events into an empty alert, losing the
+    version/error payload). New consumers should read ``event``; the top-level
+    legacy fields exist for older consumers only.
     """
     data = event_data.get("data", {})
     actor = event_data.get("actor_user_id")
@@ -61,67 +67,58 @@ def _event_to_ws_message(event_data: dict) -> str:
     resource_id = event_data.get("resource_id")
 
     if resource_type == "download_job" and event_type.startswith("download."):
-        return json.dumps(
-            {
-                "type": "job_update",
-                "job_id": resource_id,
-                "status": data.get("status", ""),
-                "progress": data.get("progress"),
-                "user_id": actor,
-            }
-        )
+        message = {
+            "type": "job_update",
+            "job_id": resource_id,
+            "status": data.get("status", ""),
+            "progress": data.get("progress"),
+            "user_id": actor,
+        }
     elif event_type == "subscription.checked":
-        return json.dumps(
-            {
-                "type": "subscription_checked",
-                "sub_id": resource_id,
-                "status": data.get("status", ""),
-                "job_id": data.get("job_id"),
-                "new_works": data.get("new_works", 0),
-                "user_id": actor,
-            }
-        )
+        message = {
+            "type": "subscription_checked",
+            "sub_id": resource_id,
+            "status": data.get("status", ""),
+            "job_id": data.get("job_id"),
+            "new_works": data.get("new_works", 0),
+            "user_id": actor,
+        }
     elif event_type == "semaphore.changed":
-        return json.dumps(
-            {
-                "type": "semaphore_changed",
-                "source": data.get("source", ""),
-                "action": data.get("action", ""),
-                "job_id": data.get("job_id", ""),
-            }
-        )
+        message = {
+            "type": "semaphore_changed",
+            "source": data.get("source", ""),
+            "action": data.get("action", ""),
+            "job_id": data.get("job_id", ""),
+        }
     elif event_type in ("system.gdl_upgraded", "system.gdl_upgrade_failed"):
         # Structured message so the admin UI can refresh the version live and
         # surface failures — the generic system.* branch below would flatten
-        # these into an empty alert, dropping the version/error payload.
-        return json.dumps(
-            {
-                "type": "gdl_upgrade",
-                "status": "ok" if event_type == "system.gdl_upgraded" else data.get("status", "failed"),
-                "old_version": data.get("old_version"),
-                "new_version": data.get("new_version"),
-                "error": data.get("error"),
-                "rollback": data.get("rollback", False),
-            }
-        )
+        # these into an empty alert.
+        message = {
+            "type": "gdl_upgrade",
+            "status": "ok" if event_type == "system.gdl_upgraded" else data.get("status", "failed"),
+            "old_version": data.get("old_version"),
+            "new_version": data.get("new_version"),
+            "error": data.get("error"),
+            "rollback": data.get("rollback", False),
+        }
     elif event_type.startswith("system."):
-        return json.dumps(
-            {
-                "type": "alert",
-                "message": data.get("message", ""),
-            }
-        )
+        message = {
+            "type": "alert",
+            "message": data.get("message", ""),
+        }
     else:
-        return json.dumps(
-            {
-                "type": event_type or "unknown",
-                "event_type": event_type,
-                "resource_type": resource_type,
-                "resource_id": resource_id,
-                "data": data,
-                "user_id": actor,
-            }
-        )
+        message = {
+            "type": event_type or "unknown",
+            "event_type": event_type,
+            "resource_type": resource_type,
+            "resource_id": resource_id,
+            "data": data,
+            "user_id": actor,
+        }
+
+    message["event"] = event_data  # lossless passthrough
+    return json.dumps(message)
 
 
 async def _pubsub_listener(ws: WebSocket, user_id: str, role: str) -> None:

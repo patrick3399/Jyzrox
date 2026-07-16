@@ -611,6 +611,62 @@ class TestPubsubListener:
 
 
 # ---------------------------------------------------------------------------
+# Unit tests for _event_to_ws_message — lossless passthrough contract (BR-004)
+# ---------------------------------------------------------------------------
+
+
+class TestWsTranslationLossless:
+    """Every legacy translation branch must carry the full original EventBus
+    event under ``event`` so no payload field can be dropped by the
+    translation layer (the system.* branch once flattened gdl upgrade events
+    into an empty alert, losing the version/error payload)."""
+
+    _EVENTS = [
+        {
+            "event_type": "download.status_changed",
+            "resource_type": "download_job",
+            "resource_id": "job-1",
+            "actor_user_id": 7,
+            "data": {"status": "done", "progress": {"downloaded": 3}, "extra_field": "must-survive"},
+        },
+        {
+            "event_type": "subscription.checked",
+            "resource_type": "subscription",
+            "resource_id": 42,
+            "data": {"status": "ok", "job_id": "j", "new_works": 2, "note": "must-survive"},
+        },
+        {
+            "event_type": "semaphore.changed",
+            "resource_type": "system",
+            "data": {"source": "ehentai", "action": "acquire", "job_id": "j", "depth": 3},
+        },
+        {
+            "event_type": "system.gdl_upgrade_failed",
+            "resource_type": "gallery_dl",
+            "data": {"status": "failed", "error": "boom", "stage": "pip"},
+        },
+        {
+            "event_type": "system.disk_low",
+            "resource_type": "system",
+            "data": {"message": "disk low", "free_gb": 1.2},
+        },
+        {
+            "event_type": "gallery.updated",
+            "resource_type": "gallery",
+            "resource_id": 5,
+            "data": {"title": "t"},
+        },
+    ]
+
+    def test_ws_translation_preserves_full_event_in_every_branch(self):
+        from routers.ws import _event_to_ws_message
+
+        for event in self._EVENTS:
+            msg = json.loads(_event_to_ws_message(event))
+            assert msg.get("event") == event, f"branch for {event['event_type']} dropped the original event payload"
+
+
+# ---------------------------------------------------------------------------
 # Unit tests for _event_to_ws_message — gallery-dl upgrade translation
 # ---------------------------------------------------------------------------
 
@@ -690,9 +746,7 @@ class TestGdlUpgradeTranslation:
         from routers.ws import _event_to_ws_message
 
         msg = json.loads(
-            _event_to_ws_message(
-                {"event_type": "system.disk_low", "data": {"message": "disk almost full"}}
-            )
+            _event_to_ws_message({"event_type": "system.disk_low", "data": {"message": "disk almost full"}})
         )
         assert msg["type"] == "alert"
         assert msg["message"] == "disk almost full"

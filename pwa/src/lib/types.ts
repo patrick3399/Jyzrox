@@ -428,6 +428,17 @@ export interface CacheStats {
 
 // ── WebSocket ────────────────────────────────────────────────────────
 
+/** Full original EventBus event carried on every WS message (lossless
+ * passthrough). Top-level legacy fields on WsMessage are derived from this;
+ * new consumers should prefer reading `event`. */
+export interface WsEventPayload {
+  event_type: string
+  resource_type?: string | null
+  resource_id?: string | number | null
+  actor_user_id?: number | null
+  data?: Record<string, unknown>
+}
+
 export interface WsMessage {
   type: 'alert' | 'ping' | 'job_update' | 'subscription_checked' | string
   message?: string
@@ -445,6 +456,8 @@ export interface WsMessage {
   resource_type?: string
   resource_id?: number | string
   data?: Record<string, unknown>
+  // Lossless passthrough of the original EventBus event (BR-004):
+  event?: WsEventPayload
   // Log entry payload
   log?: unknown
   // gdl_upgrade fields (gallery-dl upgrade/rollback outcome):
