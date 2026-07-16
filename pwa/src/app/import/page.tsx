@@ -865,7 +865,7 @@ function ZoneC() {
 function ConflictPanel() {
   const { data, mutate } = useSWR('import/conflicts', () => api.import_.conflicts())
   const { data: modeData, mutate: mutateMode } = useSWR('import/conflict-mode', api.import_.conflictMode)
-  const resolve = async (id: number, resolution: 'overwrite' | 'merge' | 'skip') => {
+  const resolve = async (id: number, resolution: 'merge' | 'skip') => {
     try {
       await api.import_.resolveConflict(id, resolution)
       await mutate()
@@ -888,7 +888,6 @@ function ConflictPanel() {
         >
           <option value="manual">Manual review</option>
           <option value="auto_merge">Auto merge</option>
-          <option value="auto_overwrite">Auto overwrite</option>
         </select>
       </div>
       <div className="space-y-2">
@@ -898,7 +897,6 @@ function ConflictPanel() {
             <p className="break-all text-xs text-vault-text-muted">{String(conflict.incoming.path ?? '')}</p>
             <div className="mt-2 flex gap-2">
               <button className="rounded bg-vault-accent px-3 py-1 text-xs text-white" onClick={() => resolve(conflict.id, 'merge')}>Merge new files</button>
-              <button className="rounded border border-vault-border px-3 py-1 text-xs" onClick={() => resolve(conflict.id, 'overwrite')}>Overwrite</button>
               <button className="rounded border border-vault-border px-3 py-1 text-xs" onClick={() => resolve(conflict.id, 'skip')}>Skip</button>
             </div>
           </div>

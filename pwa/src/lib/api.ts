@@ -1485,7 +1485,7 @@ const import_ = {
         created_at: string
       }>
     }>(`/api/import/conflicts${qs({ status })}`),
-  resolveConflict: (id: number, resolution: 'overwrite' | 'merge' | 'skip') =>
+  resolveConflict: (id: number, resolution: 'merge' | 'skip') =>
     apiFetch<{ status: string; resolution: string }>(`/api/import/conflicts/${id}/resolve`, {
       method: 'POST',
       body: JSON.stringify({ resolution }),

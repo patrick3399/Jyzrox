@@ -312,7 +312,7 @@ async def get_conflict_mode(_: dict = Depends(_member)):
 
 @router.patch("/conflict-mode")
 async def set_conflict_mode(body: ConflictModeRequest, _: dict = Depends(_admin)):
-    if body.mode not in {"auto_overwrite", "auto_merge", "manual"}:
+    if body.mode not in {"auto_merge", "manual"}:
         raise HTTPException(status_code=400, detail="Invalid import conflict mode")
     await get_redis().set("setting:import_conflict_mode", body.mode)
     return {"mode": body.mode}
@@ -353,7 +353,7 @@ async def resolve_import_conflict(
     body: ConflictResolutionRequest,
     auth: dict = Depends(_member),
 ):
-    if body.resolution not in {"overwrite", "merge", "skip"}:
+    if body.resolution not in {"merge", "skip"}:
         raise HTTPException(status_code=400, detail="Invalid conflict resolution")
     async with async_session() as session:
         row = (

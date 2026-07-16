@@ -1817,3 +1817,38 @@ async def test_web_clip_imports_browser_authenticated_image(client, db_session, 
         )
     ).one()
     assert tuple(gallery) == ("webclip", "https://example.test/post/1", "private")
+
+
+class TestImportConflictOptions:
+    """Overwrite cannot be honored (it only appends), so the option is removed."""
+
+    async def test_resolve_conflict_overwrite_option_removed_returns_400(self, client):
+        response = await client.post(
+            "/api/import/conflicts/1/resolve",
+            json={"resolution": "overwrite"},
+        )
+        assert response.status_code == 400
+
+    async def test_resolve_conflict_still_accepts_merge_and_skip(self, client):
+        # No conflict row exists, so a valid resolution passes validation and 404s.
+        for resolution in ("merge", "skip"):
+            response = await client.post(
+                "/api/import/conflicts/999999/resolve",
+                json={"resolution": resolution},
+            )
+            assert response.status_code == 404
+
+    async def test_set_conflict_mode_rejects_auto_overwrite(self, client):
+        response = await client.patch(
+            "/api/import/conflict-mode",
+            json={"mode": "auto_overwrite"},
+        )
+        assert response.status_code == 400
+
+    async def test_set_conflict_mode_accepts_auto_merge(self, client):
+        response = await client.patch(
+            "/api/import/conflict-mode",
+            json={"mode": "auto_merge"},
+        )
+        assert response.status_code == 200
+        assert response.json()["mode"] == "auto_merge"
