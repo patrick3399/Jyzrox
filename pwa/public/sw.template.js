@@ -3,6 +3,10 @@ const OFFLINE_URL = '/offline.html';
 const MEDIA_CACHE_NAME = 'jyzrox-media';
 const PAGE_CACHE_NAME = 'jyzrox-pages';
 
+// sha256-addressed media: the same URL always denotes the same bytes.
+const CONTENT_ADDRESSED_MEDIA = /^\/media\/(cas|thumbs|image)\//;
+const MEDIA_CACHE_SWEEP_DELAY_MS = 60000;
+
 // ── Cache Config (overridable via postMessage) ──
 let cacheConfig = {
   mediaCacheTTLHours: 72,
@@ -165,6 +169,21 @@ function isExpired(cachedResponse, ttlHours) {
   return age > ttlHours * 3600 * 1000;
 }
 
+// enforceMediaCacheLimit walks the entire media cache, so it must never run
+// per response: a grid of N thumbnails against M cached entries would cost
+// N*M sequential CacheStorage reads on the SW's single thread and stall every
+// in-flight image. One coalesced sweep per window is enough — the limit is a
+// storage bound, not something that needs to hold exactly on each write.
+let mediaCacheSweepTimer;
+
+function scheduleMediaCacheLimit() {
+  if (mediaCacheSweepTimer) return;
+  mediaCacheSweepTimer = setTimeout(() => {
+    mediaCacheSweepTimer = undefined;
+    enforceMediaCacheLimit();
+  }, MEDIA_CACHE_SWEEP_DELAY_MS);
+}
+
 async function enforceMediaCacheLimit() {
   if (!cacheConfig.mediaCacheSizeMB || cacheConfig.mediaCacheSizeMB <= 0) return;
   try {
@@ -274,17 +293,36 @@ self.addEventListener('fetch', (event) => {
     return;
   }
 
-  // Network/auth first for private media. Cache is an offline fallback only:
-  // a 401/403 response must never be masked by a previously authorized copy.
+  // Media split by addressing mode:
+  //
+  // - Content-addressed (/media/cas/, /media/thumbs/, /media/image/) are sha256
+  //   capability URLs. The bytes behind one can never change, so revalidating
+  //   buys nothing and cache-first is safe. Their access posture is the bounded
+  //   revocation window documented in backend/services/media_authz.py, which
+  //   nginx already reinforces with `Cache-Control: private, immutable`.
+  // - Everything else (/media/avatars/, /media/libraries/) is path-addressed:
+  //   the same URL can change content or be revoked per-gallery, so it stays
+  //   network-first and revalidates, and a 401/403 is never masked by a
+  //   previously authorized copy.
   if (event.request.url.includes('/media/') || event.request.url.includes('/thumbs/')) {
     event.respondWith(
       caches.open(MEDIA_CACHE_NAME).then(async (cache) => {
+        const contentAddressed = CONTENT_ADDRESSED_MEDIA.test(requestUrl.pathname);
+        if (contentAddressed) {
+          const cached = await cache.match(event.request);
+          if (cached && cached.status >= 200 && cached.status < 300) {
+            if (!isExpired(cached, cacheConfig.mediaCacheTTLHours)) return cached;
+            await cache.delete(event.request);
+          }
+        }
         try {
-          const response = await fetch(event.request, { cache: 'no-cache' });
+          const response = contentAddressed
+            ? await fetch(event.request)
+            : await fetch(event.request, { cache: 'no-cache' });
           if (response.status >= 200 && response.status < 300) {
             const stamped = wrapResponseWithTimestamp(response.clone());
-            await cache.put(event.request, stamped);
-            enforceMediaCacheLimit();
+            // Not awaited: the response must not wait on a CacheStorage write.
+            cache.put(event.request, stamped).then(scheduleMediaCacheLimit, () => {});
           }
           return response;
         } catch (_) {

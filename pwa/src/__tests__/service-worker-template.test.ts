@@ -72,13 +72,52 @@ describe('service worker request safety', () => {
     expect(pageDelete).toBeGreaterThan(handler)
   })
 
-  it('revalidates private media before using the offline cache', () => {
+  it('revalidates path-addressed media, whose URL can change or be revoked', () => {
+    // /media/avatars/ and /media/libraries/ name a mutable path, and libraries
+    // is authorized per-gallery on every request (services/media_authz.py), so
+    // a 401/403 must never be masked by a previously authorized cached copy.
+    // Content-addressed media is exempt — see the cache-first test below.
     const mediaBranch = source.indexOf("event.request.url.includes('/media/')")
-    const network = source.indexOf("fetch(event.request, { cache: 'no-cache' })", mediaBranch)
-    const cached = source.indexOf('cache.match(event.request)', mediaBranch)
-    expect(network).toBeGreaterThan(mediaBranch)
-    expect(cached).toBeGreaterThan(network)
-    expect(source.slice(network, cached)).toContain('catch')
+    expect(mediaBranch).toBeGreaterThan(-1)
+    expect(source.indexOf("fetch(event.request, { cache: 'no-cache' })", mediaBranch)).toBeGreaterThan(
+      mediaBranch,
+    )
+  })
+
+  it('serves content-addressed media cache-first without revalidating', () => {
+    // Regression (91af972): flipping the whole media branch to network-first
+    // with `cache: 'no-cache'` forced every thumbnail onto the network on every
+    // render, defeating nginx's `immutable`/30d headers. cas/thumbs/image are
+    // sha256 capability URLs — the bytes behind them can never change.
+    // Behavior is covered in service-worker-media-cache.test.ts; this pins the
+    // routing predicate that decides which media is exempt from revalidation.
+    expect(source).toMatch(/const CONTENT_ADDRESSED_MEDIA = .*cas\|thumbs\|image/)
+
+    const mediaBranch = source.indexOf("event.request.url.includes('/media/')")
+    const predicate = source.indexOf('CONTENT_ADDRESSED_MEDIA.test', mediaBranch)
+    const cached = source.indexOf('cache.match(event.request)', predicate)
+    const network = source.indexOf('fetch(event.request)', predicate)
+    expect(predicate).toBeGreaterThan(mediaBranch)
+    expect(cached).toBeGreaterThan(predicate)
+    expect(network).toBeGreaterThan(cached)
+  })
+
+  it('never walks the whole media cache on the response path', () => {
+    // Regression (91af972): enforceMediaCacheLimit() ran on every media
+    // response. It does a sequential `await cache.match()` per cached entry, so
+    // N thumbnails against M entries cost N*M CacheStorage reads on the SW's
+    // single thread. It must only ever be reached via the coalescing timer.
+    const sweep = source.indexOf('function scheduleMediaCacheLimit')
+    const mediaBranch = source.indexOf("event.request.url.includes('/media/')")
+    const inlineCall = source.indexOf('enforceMediaCacheLimit()', mediaBranch)
+
+    expect(sweep).toBeGreaterThan(-1)
+    expect(source.slice(sweep)).toContain('setTimeout')
+    // The only post-branch reference may be the scheduler, never a direct call.
+    expect(inlineCall).toBe(-1)
+    expect(source.indexOf('scheduleMediaCacheLimit', mediaBranch)).toBeGreaterThan(mediaBranch)
+    // The cache write must not block the response.
+    expect(source).not.toContain('await cache.put(event.request, stamped)')
   })
 
   it('caches immutable build assets so the app shell can hydrate offline', () => {

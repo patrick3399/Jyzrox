@@ -105,8 +105,13 @@ http {
         }
 
         # ── Media: require auth via subrequest ────────────────────
+        # cas/thumbs use the session-only /_auth: routers/auth.py only applies
+        # URI authorization to /media/libraries/ and /media/image/, so keying
+        # these on $request_uri bought no authorization — it just gave every
+        # distinct sha256 URL its own auth cache entry, turning one cached
+        # session check per 30s into one API subrequest per image.
         location /media/thumbs/ {
-            auth_request /_auth_media;
+            auth_request /_auth;
             alias /data/thumbs/;
             disable_symlinks on;
             expires 7d;
@@ -115,7 +120,7 @@ http {
         }
 
         location /media/cas/ {
-            auth_request /_auth_media;
+            auth_request /_auth;
             alias /data/cas/;
             disable_symlinks on;
             expires 30d;
