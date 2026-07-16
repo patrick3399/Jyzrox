@@ -184,6 +184,8 @@ export function LibraryGalleryCard({
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
+  const [hovered, setHovered] = useState(false)
+  const [previewFailed, setPreviewFailed] = useState(false)
 
   const handleLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     e.preventDefault()
@@ -194,6 +196,7 @@ export function LibraryGalleryCard({
   const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
 
   const sourceStyle = getSourceStyle(gallery)
+  const previewUrl = thumbUrl?.replace(/thumb_160\.webp$/, 'preview.webm')
 
   const contextItems = useMemo(() => {
     if (!menuOpen) return []
@@ -252,6 +255,8 @@ export function LibraryGalleryCard({
         tabIndex={onClick ? 0 : undefined}
         onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
         {...longPressHandlers}
+        onMouseEnter={() => setHovered(true)}
+        onMouseLeave={() => setHovered(false)}
         className={`
           relative flex flex-col select-none [-webkit-touch-callout:none]
           bg-vault-card rounded-lg overflow-hidden
@@ -299,13 +304,26 @@ export function LibraryGalleryCard({
         {/* Thumbnail or gradient placeholder */}
         <div className="relative aspect-[3/4] overflow-hidden">
           {thumbUrl ? (
-            <AppImage
-              src={thumbUrl}
-              alt={gallery.title}
-              className="w-full h-full object-cover"
-              loading="lazy"
-              fallbackClassName="w-full h-full bg-vault-input"
-            />
+            <>
+              <AppImage
+                src={thumbUrl}
+                alt={gallery.title}
+                className="w-full h-full object-cover"
+                loading="lazy"
+                fallbackClassName="w-full h-full bg-vault-input"
+              />
+              {hovered && previewUrl && !previewFailed && (
+                <video
+                  src={previewUrl}
+                  className="absolute inset-0 h-full w-full object-cover"
+                  autoPlay
+                  muted
+                  loop
+                  playsInline
+                  onError={() => setPreviewFailed(true)}
+                />
+              )}
+            </>
           ) : (
             <div
               className={`w-full h-full bg-gradient-to-b ${colors.bg} flex items-center justify-center`}

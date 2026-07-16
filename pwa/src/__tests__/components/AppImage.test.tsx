@@ -22,4 +22,22 @@ describe('AppImage', () => {
 
     expect(screen.getByRole('img', { name: 'Cover' }).tagName).toBe('IMG')
   })
+
+  it('adds AVIF and WebP responsive sources for local media', () => {
+    const { container } = render(
+      <AppImage src="/media/cas/aa/bb/hash.jpg" alt="Cover" sizes="50vw" />,
+    )
+
+    const sources = container.querySelectorAll('source')
+    expect(sources).toHaveLength(2)
+    expect(sources[0]).toHaveAttribute('type', 'image/avif')
+    expect(sources[0].getAttribute('srcset')).toContain('local:///cas/aa/bb/hash.jpg@avif 320w')
+    expect(sources[0]).toHaveAttribute('sizes', '50vw')
+    expect(sources[1]).toHaveAttribute('type', 'image/webp')
+  })
+
+  it('leaves remote images unchanged', () => {
+    const { container } = render(<AppImage src="https://example.test/image.jpg" alt="Remote" />)
+    expect(container.querySelector('picture')).toBeNull()
+  })
 })

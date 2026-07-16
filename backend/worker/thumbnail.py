@@ -4,8 +4,10 @@ import asyncio
 import json
 import os
 import subprocess
+import tempfile
 import threading
 import uuid
+import zipfile
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -163,6 +165,80 @@ def _extract_video_frame(src: Path, output: Path, seek: float) -> None:
     subprocess.run(cmd, capture_output=True, timeout=30, check=True)
 
 
+def _encode_preview(src: Path, destination: Path, *, concat: bool = False) -> None:
+    temporary = destination.with_name(f".{uuid.uuid4().hex}.webm")
+    cmd = ["ffmpeg", "-y"]
+    if concat:
+        cmd.extend(["-f", "concat", "-safe", "0"])
+    cmd.extend(
+        [
+            "-i",
+            str(src),
+            "-t",
+            "3",
+            "-vf",
+            "scale='min(720,iw)':-2:force_original_aspect_ratio=decrease,fps=12",
+            "-an",
+            "-c:v",
+            "libvpx-vp9",
+            "-crf",
+            "36",
+            "-b:v",
+            "0",
+            str(temporary),
+        ]
+    )
+    try:
+        subprocess.run(cmd, capture_output=True, timeout=90, check=True)
+        os.replace(temporary, destination)
+    finally:
+        temporary.unlink(missing_ok=True)
+
+
+def _generate_zip_preview(src: Path, destination: Path) -> None:
+    with tempfile.TemporaryDirectory(prefix="jyzrox-ugoira-") as raw_dir:
+        directory = Path(raw_dir)
+        frames: list[Path] = []
+        total_size = 0
+        with zipfile.ZipFile(src) as archive:
+            for index, info in enumerate(archive.infolist()[:300]):
+                suffix = Path(info.filename).suffix.lower()
+                if info.is_dir() or suffix not in {".jpg", ".jpeg", ".png", ".webp"}:
+                    continue
+                total_size += info.file_size
+                if total_size > 1024 * 1024 * 1024:
+                    raise ValueError("Ugoira archive exceeds extraction limit")
+                frame = directory / f"{index:06d}{suffix}"
+                frame.write_bytes(archive.read(info))
+                frames.append(frame)
+        if not frames:
+            raise ValueError("Ugoira archive contains no supported frames")
+        concat = directory / "frames.txt"
+        lines: list[str] = []
+        for frame in frames:
+            escaped = str(frame).replace("'", "'\\''")
+            lines.extend([f"file '{escaped}'", "duration 0.083333"])
+        last_frame = str(frames[-1]).replace("'", "'\\''")
+        lines.append(f"file '{last_frame}'")
+        concat.write_text("\n".join(lines) + "\n", encoding="utf-8")
+        _encode_preview(concat, destination, concat=True)
+
+
+def _ensure_preview(src: Path, td: Path) -> Path | None:
+    destination = td / "preview.webm"
+    if destination.exists():
+        return destination
+    try:
+        if zipfile.is_zipfile(src):
+            _generate_zip_preview(src, destination)
+        else:
+            _encode_preview(src, destination)
+        return destination
+    except (OSError, ValueError, zipfile.BadZipFile, subprocess.SubprocessError) as exc:
+        logger.warning("[thumbnail] preview %s: %s", src, exc)
+        return None
+
+
 def _generate_single_thumbnail_sync(
     sha256: str,
     media_type: str,
@@ -174,10 +250,17 @@ def _generate_single_thumbnail_sync(
     if not src.exists():
         return None
 
+    td = thumb_dir(sha256)
+    td.mkdir(parents=True, exist_ok=True)
+    is_zip_animation = zipfile.is_zipfile(src)
+    if media_type == "video" or src.suffix.lower() == ".gif" or is_zip_animation:
+        preview = _ensure_preview(src, td)
+        if is_zip_animation and preview is not None:
+            src = preview
+            media_type = "video"
+
     # Video files: extract metadata + thumbnail frame via ffmpeg
     if media_type == "video":
-        td = thumb_dir(sha256)
-        td.mkdir(parents=True, exist_ok=True)
         tmp_frame = _unique_video_frame_path(td)
         try:
             meta = _ffprobe_metadata(src)
@@ -207,9 +290,6 @@ def _generate_single_thumbnail_sync(
             tmp_frame.unlink(missing_ok=True)
 
     # Image files
-    td = thumb_dir(sha256)
-    td.mkdir(parents=True, exist_ok=True)
-
     try:
         import imagehash
 

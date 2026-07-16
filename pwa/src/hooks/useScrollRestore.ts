@@ -2,6 +2,51 @@
 
 import { useRef, useEffect, useCallback, useState } from 'react'
 
+type ScrollPositionRestoreOptions = {
+  scrollY: number | null
+  isReady: boolean
+  restoreKey: string
+  onRestored?: () => void
+}
+
+/**
+ * Apply one scroll position per logical view identity once its content is ready.
+ *
+ * Callers keep ownership of their cached view data. This hook only owns the
+ * restore lifecycle, allowing pages with richer snapshot formats to share the
+ * same scroll application path as the simple sessionStorage helper below.
+ */
+export function useScrollPositionRestore({
+  scrollY,
+  isReady,
+  restoreKey,
+  onRestored,
+}: ScrollPositionRestoreOptions) {
+  const restoredKeyRef = useRef<string | null>(null)
+
+  useEffect(() => {
+    if (!isReady || scrollY === null || !Number.isFinite(scrollY)) return
+    if (restoredKeyRef.current === restoreKey) return
+    restoredKeyRef.current = restoreKey
+    onRestored?.()
+    requestAnimationFrame(() => window.scrollTo(0, scrollY))
+  }, [isReady, onRestored, restoreKey, scrollY])
+}
+
+function readStoredScrollY(key: string): number | null {
+  if (typeof window === 'undefined') return null
+  const raw = sessionStorage.getItem(key)
+  if (!raw) return null
+  try {
+    const parsed = JSON.parse(raw)
+    return parsed !== null && typeof parsed === 'object' && 'scrollY' in parsed
+      ? Number((parsed as { scrollY: unknown }).scrollY)
+      : Number(raw)
+  } catch {
+    return Number(raw)
+  }
+}
+
 export function useScrollRestore<T = unknown>(
   key: string,
   isReady: boolean,
@@ -35,25 +80,16 @@ export function useScrollRestore<T = unknown>(
     return null
   })
 
-  const restoredRef = useRef(false)
-
-  useEffect(() => {
-    if (!isReady || restoredRef.current) return
-    restoredRef.current = true
-    const raw = sessionStorage.getItem(key)
-    if (!raw) return
+  const storedScrollY = readStoredScrollY(key)
+  const consumeRestore = useCallback(() => {
     if (!persist) sessionStorage.removeItem(key)
-    try {
-      const parsed = JSON.parse(raw)
-      const scrollY =
-        parsed !== null && typeof parsed === 'object' && 'scrollY' in parsed
-          ? Number((parsed as { scrollY: unknown }).scrollY)
-          : Number(raw)
-      requestAnimationFrame(() => window.scrollTo(0, scrollY))
-    } catch {
-      requestAnimationFrame(() => window.scrollTo(0, Number(raw)))
-    }
-  }, [isReady, key, persist])
+  }, [key, persist])
+  useScrollPositionRestore({
+    scrollY: storedScrollY,
+    isReady,
+    restoreKey: key,
+    onRestored: consumeRestore,
+  })
 
   // Continuous scroll capture (persist + ready only). Gated on isReady so that
   // inactive instances (e.g. non-active pixiv sub-tabs) don't overwrite their

@@ -17,6 +17,7 @@ import { useCreateSubscription, useSubscriptions } from '@/hooks/useSubscription
 import useSWR from 'swr'
 import { api } from '@/lib/api'
 import { useGridKeyboard } from '@/hooks/useGridKeyboard'
+import { useScrollPositionRestore } from '@/hooks/useScrollRestore'
 
 import { LoadingSpinner } from '@/components/LoadingSpinner'
 import { VirtualGrid } from '@/components/VirtualGrid'
@@ -282,18 +283,13 @@ function BrowsePage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [seedKey, ehConfigured])
 
-  // ── Restore scroll position after the buffer renders ──
-  // Re-armed on every identity switch so an in-page tab round-trip (snapshot
-  // RESTORE without a remount) re-applies the banked scroll position too.
-  const scrollApplied = useRef(false)
-  useEffect(() => {
-    scrollApplied.current = false
-  }, [seedKey])
-  useEffect(() => {
-    if (scrollApplied.current || items.length === 0 || state.scrollY <= 0) return
-    scrollApplied.current = true
-    requestAnimationFrame(() => window.scrollTo(0, state.scrollY))
-  }, [seedKey, items.length, state.scrollY])
+  // The EH snapshot owns buffer/cursor persistence, while the shared restore
+  // hook owns the one-shot-per-identity scroll lifecycle.
+  useScrollPositionRestore({
+    scrollY: state.scrollY > 0 ? state.scrollY : null,
+    isReady: items.length > 0,
+    restoreKey: seedKey,
+  })
 
   // Load saved searches
   const refreshSavedSearches = useCallback(() => {

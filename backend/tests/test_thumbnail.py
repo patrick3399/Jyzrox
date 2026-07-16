@@ -10,6 +10,7 @@ Covers:
 
 import asyncio
 import json
+import zipfile
 from pathlib import Path
 from types import SimpleNamespace
 from unittest.mock import AsyncMock, MagicMock, patch
@@ -21,6 +22,32 @@ import pytest
 # ---------------------------------------------------------------------------
 
 SHA = "abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890"
+
+
+def test_ugoira_zip_preview_builds_bounded_concat_manifest(tmp_path):
+    from worker.thumbnail import _generate_zip_preview
+
+    archive = tmp_path / "ugoira.zip"
+    with zipfile.ZipFile(archive, "w") as output:
+        output.writestr("0001.jpg", b"frame-one")
+        output.writestr("nested/0002.png", b"frame-two")
+        output.writestr("ignore.txt", b"not-a-frame")
+    destination = tmp_path / "preview.webm"
+    captured: dict[str, str] = {}
+
+    def capture(manifest, output, *, concat=False):
+        captured["manifest"] = manifest.read_text(encoding="utf-8")
+        captured["destination"] = str(output)
+        captured["concat"] = str(concat)
+
+    with patch("worker.thumbnail._encode_preview", side_effect=capture):
+        _generate_zip_preview(archive, destination)
+
+    assert "000000.jpg" in captured["manifest"]
+    assert "000001.png" in captured["manifest"]
+    assert "duration 0.083333" in captured["manifest"]
+    assert captured["destination"] == str(destination)
+    assert captured["concat"] == "True"
 
 
 def _make_blob(media_type="image", extension=".jpg", sha256=SHA):

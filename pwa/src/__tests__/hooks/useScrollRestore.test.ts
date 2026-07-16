@@ -70,7 +70,45 @@ afterEach(() => {
 
 // ── Import hook after mocks ───────────────────────────────────────────
 
-import { useScrollRestore } from '@/hooks/useScrollRestore'
+import { useScrollPositionRestore, useScrollRestore } from '@/hooks/useScrollRestore'
+
+describe('useScrollPositionRestore', () => {
+  it('restores once per logical view identity and rearms for a new identity', () => {
+    const { rerender } = renderHook(
+      ({ scrollY, restoreKey }: { scrollY: number; restoreKey: string }) =>
+        useScrollPositionRestore({ scrollY, isReady: true, restoreKey }),
+      { initialProps: { scrollY: 120, restoreKey: 'popular' } },
+    )
+
+    expect(mockScrollTo).toHaveBeenCalledWith(0, 120)
+    rerender({ scrollY: 240, restoreKey: 'popular' })
+    expect(mockScrollTo).toHaveBeenCalledTimes(1)
+
+    rerender({ scrollY: 360, restoreKey: 'favorites' })
+    expect(mockScrollTo).toHaveBeenCalledTimes(2)
+    expect(mockScrollTo).toHaveBeenLastCalledWith(0, 360)
+  })
+
+  it('waits for content readiness before consuming the restore', () => {
+    const onRestored = vi.fn()
+    const { rerender } = renderHook(
+      ({ ready }: { ready: boolean }) =>
+        useScrollPositionRestore({
+          scrollY: 480,
+          isReady: ready,
+          restoreKey: 'search',
+          onRestored,
+        }),
+      { initialProps: { ready: false } },
+    )
+
+    expect(mockScrollTo).not.toHaveBeenCalled()
+    expect(onRestored).not.toHaveBeenCalled()
+    rerender({ ready: true })
+    expect(mockScrollTo).toHaveBeenCalledWith(0, 480)
+    expect(onRestored).toHaveBeenCalledTimes(1)
+  })
+})
 
 // ── Tests ─────────────────────────────────────────────────────────────
 
