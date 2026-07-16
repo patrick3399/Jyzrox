@@ -1,4 +1,4 @@
-"""Regression tests for F6/BR-006 — per-gallery ACL on path-addressed media URIs.
+"""Regression tests for F6/BR-006 — authorization of path-addressed media URIs.
 
 Covers `services.media_authz.authorize_media_uri` directly (unit-style, DB +
 Redis mocked) and the `/api/auth/check` router integration that consumes it
@@ -131,45 +131,20 @@ async def test_media_authz_imgproxy_source_outside_cas_thumbs_denied(mock_redis)
     assert allowed is False
 
 
-async def test_media_authz_imgproxy_cas_source_requires_accessible_gallery(
-    db_session, db_session_factory, mock_redis
-):
-    """An imgproxy CAS source is allowed only through an accessible gallery."""
-    await _insert_blob(db_session, "cdef1234", "/mnt/unused.jpg")
-    await _insert_gallery_with_image(
-        db_session,
-        source_id="g_imgproxy_owned",
-        blob_sha256="cdef1234",
-        created_by_user_id=2,
-        visibility="private",
-    )
+async def test_media_authz_imgproxy_cas_source_allowed_without_gallery_lookup():
+    """A CAS-backed imgproxy source is an authenticated capability."""
     b64 = _b64_source("local:///cas/ab/cd/cdef1234.jpg")
     uri = f"/media/image/insecure/rs:fill:200:200/{b64}.webp"
-    with (
-        patch("services.media_authz.async_session", db_session_factory),
-    ):
-        allowed = await authorize_media_uri({"user_id": 2, "role": "member"}, uri)
+    allowed = await authorize_media_uri({"user_id": 2, "role": "member"}, uri)
     assert allowed is True
 
 
-async def test_media_authz_direct_cas_of_inaccessible_gallery_denied(
-    db_session, db_session_factory, mock_redis
-):
-    await _insert_blob(db_session, "privatecas", "/mnt/unused-private.jpg")
-    await _insert_gallery_with_image(
-        db_session,
-        source_id="g_direct_cas_private",
-        blob_sha256="privatecas",
-        created_by_user_id=1,
-        visibility="private",
+async def test_media_authz_direct_cas_uses_authenticated_capability_semantics():
+    """CAS/thumb paths are session-gated by nginx, not Gallery-ACL checked here."""
+    allowed = await authorize_media_uri(
+        {"user_id": 2, "role": "member"}, "/media/cas/pr/iv/privatecas.jpg"
     )
-    with (
-        patch("services.media_authz.async_session", db_session_factory),
-    ):
-        allowed = await authorize_media_uri(
-            {"user_id": 2, "role": "member"}, "/media/cas/pr/iv/privatecas.jpg"
-        )
-    assert allowed is False
+    assert allowed is True
 
 
 # ---------------------------------------------------------------------------
@@ -219,3 +194,20 @@ async def test_auth_check_without_original_uri_still_returns_ok(unauthed_client,
     )
     assert resp.status_code == 200
     assert resp.json()["status"] == "ok"
+
+
+async def test_auth_check_cas_path_uses_session_only(unauthed_client, mock_redis):
+    """Content-addressed media must not enter the URI/Gallery ACL path."""
+    from core.auth import sign_session
+
+    session_data = sign_session(json.dumps({"user_id": 2, "role": "member"})).encode()
+    mock_redis.get.return_value = session_data
+
+    with patch("routers.auth.authorize_media_uri", side_effect=AssertionError("unexpected URI ACL lookup")):
+        resp = await unauthed_client.get(
+            "/api/auth/check",
+            cookies={"vault_session": "2:validtoken"},
+            headers={"X-Original-URI": "/media/cas/aa/bb/hash.jpg"},
+        )
+
+    assert resp.status_code == 200

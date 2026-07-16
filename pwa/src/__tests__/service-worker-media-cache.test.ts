@@ -12,6 +12,7 @@ interface Stats {
   cacheMatch: number
   cacheKeys: number
   cachePut: number
+  cacheDeletes: number
 }
 
 interface Harness {
@@ -20,6 +21,7 @@ interface Harness {
   request: (url: string) => Promise<Response>
   /** Seed the media cache as if the image had already been fetched once. */
   seedMedia: (url: string, bytes?: number) => Promise<void>
+  setStorageUsage: (bytes: number) => void
   /** Let fire-and-forget work (cache writes, eviction sweeps) settle. */
   settle: () => Promise<void>
 }
@@ -31,9 +33,11 @@ interface Harness {
  * behavioral regressions like "how many cache reads does one image cost".
  */
 function loadServiceWorker(): Harness {
-  const stats: Stats = { network: 0, cacheMatch: 0, cacheKeys: 0, cachePut: 0 }
+  const stats: Stats = { network: 0, cacheMatch: 0, cacheKeys: 0, cachePut: 0, cacheDeletes: 0 }
   const listeners = new Map<string, (event: unknown) => void>()
   const caches_ = new Map<string, FakeCache>()
+  const pendingWork: Promise<unknown>[] = []
+  let storageUsage = 0
 
   const keyOf = (req: Request | string) => (typeof req === 'string' ? req : req.url)
 
@@ -76,7 +80,10 @@ function loadServiceWorker(): Harness {
     },
     caches: {
       open: async (name: string) => getCache(name),
-      delete: async (name: string) => caches_.delete(name),
+      delete: async (name: string) => {
+        stats.cacheDeletes++
+        return caches_.delete(name)
+      },
       keys: async () => [...caches_.keys()],
     },
     fetch: async () => {
@@ -87,6 +94,7 @@ function loadServiceWorker(): Harness {
       })
     },
     indexedDB: { open: () => ({}) },
+    navigator: { storage: { estimate: async () => ({ usage: storageUsage, quota: 10 * 1024 ** 3 }) } },
     Response,
     Request,
     Headers,
@@ -112,13 +120,13 @@ function loadServiceWorker(): Harness {
         respondWith: (p: Promise<Response>) => {
           responded = p
         },
-        waitUntil: () => {},
+        waitUntil: (p: Promise<unknown>) => pendingWork.push(p),
       })
       if (!responded) throw new Error(`SW did not respondWith for ${url}`)
       return responded
     },
     async seedMedia(url: string, bytes = 10000) {
-      const cache = getCache('jyzrox-media')
+      const cache = getCache('jyzrox-media-v2')
       await cache.put(
         url,
         new Response('imagebytes', {
@@ -131,7 +139,11 @@ function loadServiceWorker(): Harness {
       )
       stats.cachePut = 0
     },
+    setStorageUsage(bytes: number) {
+      storageUsage = bytes
+    },
     async settle() {
+      await Promise.allSettled(pendingWork.splice(0))
       for (let i = 0; i < 50; i++) await Promise.resolve()
       await new Promise((r) => setTimeout(r, 0))
       for (let i = 0; i < 50; i++) await Promise.resolve()
@@ -179,6 +191,16 @@ describe('service worker media cache performance', () => {
     // One miss lookup for the requested URL is fine; walking all 40 seeded
     // entries is the bug.
     expect(sw.stats.cacheMatch).toBeLessThan(10)
+    expect(sw.stats.cacheKeys).toBe(0)
+  })
+
+  it('resets the media cache without enumerating entries when the budget is exceeded', async () => {
+    sw.setStorageUsage(9 * 1024 ** 3)
+
+    await sw.request(`${ORIGIN}/media/cas/cold/oversize.webp`)
+    await sw.settle()
+
+    expect(sw.stats.cacheDeletes).toBe(1)
     expect(sw.stats.cacheKeys).toBe(0)
   })
 

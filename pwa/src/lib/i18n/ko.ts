@@ -805,7 +805,7 @@ const ko: Record<string, string> = {
   'settings.mediaCacheTTL': '미디어 캐시 TTL',
   'settings.mediaCacheTTLDesc': '캐시된 이미지 및 썸네일 보관 기간',
   'settings.mediaCacheSizeLimit': '미디어 캐시 크기 제한',
-  'settings.mediaCacheSizeLimitDesc': '캐시된 미디어의 최대 저장 공간 (가장 오래된 항목부터 삭제)',
+  'settings.mediaCacheSizeLimitDesc': '캐시된 미디어 저장 공간 한도 (초과 시 미디어 캐시 재생성)',
   'settings.pageCacheTTL': '페이지 캐시 TTL',
   'settings.pageCacheTTLDesc': '오프라인 사용을 위해 캐시된 페이지 응답 보관 기간',
   'settings.clearBrowserCache': '브라우저 캐시 지우기',

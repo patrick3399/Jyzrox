@@ -582,7 +582,7 @@ const zhCN: Record<string, string> = {
   'settings.mediaCacheTTL': '媒体缓存有效期',
   'settings.mediaCacheTTLDesc': '已缓存图片和缩略图的保留时长',
   'settings.mediaCacheSizeLimit': '媒体缓存大小上限',
-  'settings.mediaCacheSizeLimitDesc': '缓存媒体的最大存储容量（最旧的条目优先淘汰）',
+  'settings.mediaCacheSizeLimitDesc': '缓存媒体的存储空间上限（超过时重建媒体缓存）',
   'settings.pageCacheTTL': '页面缓存有效期',
   'settings.pageCacheTTLDesc': '已缓存页面响应的离线保留时长',
   'settings.clearBrowserCache': '清除浏览器缓存',

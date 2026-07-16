@@ -102,22 +102,28 @@ describe('service worker request safety', () => {
     expect(network).toBeGreaterThan(cached)
   })
 
-  it('never walks the whole media cache on the response path', () => {
+  it('never walks the full media cache to enforce its storage budget', () => {
     // Regression (91af972): enforceMediaCacheLimit() ran on every media
-    // response. It does a sequential `await cache.match()` per cached entry, so
-    // N thumbnails against M entries cost N*M CacheStorage reads on the SW's
-    // single thread. It must only ever be reached via the coalescing timer.
-    const sweep = source.indexOf('function scheduleMediaCacheLimit')
+    // response. Normal writes must first use StorageManager.estimate(), and
+    // the background write must extend the worker lifetime without blocking
+    // respondWith.
+    const sweep = source.indexOf('function maybeEnforceMediaCacheLimit')
     const mediaBranch = source.indexOf("event.request.url.includes('/media/')")
-    const inlineCall = source.indexOf('enforceMediaCacheLimit()', mediaBranch)
 
     expect(sweep).toBeGreaterThan(-1)
-    expect(source.slice(sweep)).toContain('setTimeout')
-    // The only post-branch reference may be the scheduler, never a direct call.
-    expect(inlineCall).toBe(-1)
-    expect(source.indexOf('scheduleMediaCacheLimit', mediaBranch)).toBeGreaterThan(mediaBranch)
-    // The cache write must not block the response.
+    expect(source.slice(sweep)).toContain('navigator.storage?.estimate?.()')
+    expect(source.slice(sweep)).toContain('caches.delete(MEDIA_CACHE_NAME)')
+    expect(source.indexOf('maybeEnforceMediaCacheLimit', mediaBranch)).toBeGreaterThan(mediaBranch)
+    expect(source).not.toContain('await cache.keys()')
     expect(source).not.toContain('await cache.put(event.request, stamped)')
+    expect(source.indexOf('event.waitUntil(mediaResponse', mediaBranch)).toBeGreaterThan(mediaBranch)
+  })
+
+  it('rotates the legacy oversized media cache on activation', () => {
+    expect(source).toContain("const MEDIA_CACHE_NAME = 'jyzrox-media-v2'")
+    const activate = source.indexOf("self.addEventListener('activate'")
+    expect(activate).toBeGreaterThan(-1)
+    expect(source.slice(activate)).toContain('key !== MEDIA_CACHE_NAME')
   })
 
   it('caches immutable build assets so the app shell can hydrate offline', () => {

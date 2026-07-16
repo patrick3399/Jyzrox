@@ -753,7 +753,7 @@ const zhTW: Record<string, string> = {
   'settings.mediaCacheTTL': '媒體快取 TTL',
   'settings.mediaCacheTTLDesc': '快取圖片和縮圖的保留時間',
   'settings.mediaCacheSizeLimit': '媒體快取大小上限',
-  'settings.mediaCacheSizeLimitDesc': '快取媒體的最大儲存空間（最舊的項目優先被清除）',
+  'settings.mediaCacheSizeLimitDesc': '快取媒體的儲存空間上限（超過時重建媒體快取）',
   'settings.pageCacheTTL': '頁面快取 TTL',
   'settings.pageCacheTTLDesc': '快取頁面回應以供離線使用的保留時間',
   'settings.clearBrowserCache': '清除瀏覽器快取',

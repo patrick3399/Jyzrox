@@ -1358,7 +1358,7 @@ const ja: Record<string, string> = {
   'settings.mediaCacheTTLDesc': '画像とサムネイルのキャッシュ保持時間',
   'settings.mediaCacheSizeLimit': 'メディアキャッシュサイズ制限',
   'settings.mediaCacheSizeLimitDesc':
-    'キャッシュメディアの最大ストレージ（古いエントリから順に削除）',
+    'キャッシュメディアの上限（超過時にメディアキャッシュを再作成）',
   'settings.pageCacheTTL': 'ページキャッシュTTL',
   'settings.pageCacheTTLDesc': 'オフライン用ページレスポンスのキャッシュ保持時間',
   'settings.clearBrowserCache': 'ブラウザキャッシュをクリア',

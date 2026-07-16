@@ -1,11 +1,13 @@
 const CACHE_NAME = 'jyzrox-static-__BUILD_HASH__';
 const OFFLINE_URL = '/offline.html';
-const MEDIA_CACHE_NAME = 'jyzrox-media';
+// v2 intentionally rotates away from the legacy cache, which could grow to
+// several GB and make cache.keys() fail before eviction could run.
+const MEDIA_CACHE_NAME = 'jyzrox-media-v2';
 const PAGE_CACHE_NAME = 'jyzrox-pages';
 
 // sha256-addressed media: the same URL always denotes the same bytes.
 const CONTENT_ADDRESSED_MEDIA = /^\/media\/(cas|thumbs|image)\//;
-const MEDIA_CACHE_SWEEP_DELAY_MS = 60000;
+const MEDIA_CACHE_SWEEP_INTERVAL_MS = 10 * 60 * 1000;
 
 // ── Cache Config (overridable via postMessage) ──
 let cacheConfig = {
@@ -169,53 +171,26 @@ function isExpired(cachedResponse, ttlHours) {
   return age > ttlHours * 3600 * 1000;
 }
 
-// enforceMediaCacheLimit walks the entire media cache, so it must never run
-// per response: a grid of N thumbnails against M cached entries would cost
-// N*M sequential CacheStorage reads on the SW's single thread and stall every
-// in-flight image. One coalesced sweep per window is enough — the limit is a
-// storage bound, not something that needs to hold exactly on each write.
-let mediaCacheSweepTimer;
+// A full CacheStorage walk is expensive and can itself fail once a cache grows
+// into multiple GB. Use the browser's cheap origin estimate instead. If the
+// configured budget is exceeded, reset the content-addressed cache as one
+// background operation; individual image loads never enumerate its entries.
+let lastMediaCacheSweepAt = 0;
 
-function scheduleMediaCacheLimit() {
-  if (mediaCacheSweepTimer) return;
-  mediaCacheSweepTimer = setTimeout(() => {
-    mediaCacheSweepTimer = undefined;
-    enforceMediaCacheLimit();
-  }, MEDIA_CACHE_SWEEP_DELAY_MS);
-}
-
-async function enforceMediaCacheLimit() {
+async function maybeEnforceMediaCacheLimit() {
   if (!cacheConfig.mediaCacheSizeMB || cacheConfig.mediaCacheSizeMB <= 0) return;
+  const now = Date.now();
+  if (now - lastMediaCacheSweepAt < MEDIA_CACHE_SWEEP_INTERVAL_MS) return;
+  lastMediaCacheSweepAt = now;
+
   try {
-    const cache = await caches.open(MEDIA_CACHE_NAME);
-    const keys = await cache.keys();
-
-    // Collect entries with their timestamps and sizes
-    const entries = [];
-    for (const request of keys) {
-      const response = await cache.match(request);
-      if (!response) continue;
-      const cacheTime = Number(response.headers.get('X-Cache-Time') || '0');
-      const size = Number(response.headers.get('Content-Length') || '0');
-      entries.push({ request, cacheTime, size });
-    }
-
-    const totalSize = entries.reduce((sum, e) => sum + e.size, 0);
+    const estimate = await navigator.storage?.estimate?.();
     const limitBytes = cacheConfig.mediaCacheSizeMB * 1024 * 1024;
-
-    if (totalSize <= limitBytes) return;
-
-    // Sort oldest first
-    entries.sort((a, b) => a.cacheTime - b.cacheTime);
-
-    let currentSize = totalSize;
-    for (const entry of entries) {
-      if (currentSize <= limitBytes) break;
-      await cache.delete(entry.request);
-      currentSize -= entry.size;
-    }
-  } catch (e) {
-    // Non-critical, silently ignore
+    if (!estimate || !Number.isFinite(estimate.usage) || estimate.usage <= limitBytes) return;
+    await caches.delete(MEDIA_CACHE_NAME);
+  } catch (_) {
+    // Quota enforcement is best-effort; browser origin eviction remains the
+    // final storage bound.
   }
 }
 
@@ -297,15 +272,15 @@ self.addEventListener('fetch', (event) => {
   //
   // - Content-addressed (/media/cas/, /media/thumbs/, /media/image/) are sha256
   //   capability URLs. The bytes behind one can never change, so revalidating
-  //   buys nothing and cache-first is safe. Their access posture is the bounded
-  //   revocation window documented in backend/services/media_authz.py, which
-  //   nginx already reinforces with `Cache-Control: private, immutable`.
+  //   buys nothing and cache-first is safe in the single-user-first model.
+  //   Cached private media is cleared explicitly on logout and expires by TTL.
   // - Everything else (/media/avatars/, /media/libraries/) is path-addressed:
   //   the same URL can change content or be revoked per-gallery, so it stays
   //   network-first and revalidates, and a 401/403 is never masked by a
   //   previously authorized copy.
   if (event.request.url.includes('/media/') || event.request.url.includes('/thumbs/')) {
-    event.respondWith(
+    let backgroundMediaWork = Promise.resolve();
+    const mediaResponse =
       caches.open(MEDIA_CACHE_NAME).then(async (cache) => {
         const contentAddressed = CONTENT_ADDRESSED_MEDIA.test(requestUrl.pathname);
         if (contentAddressed) {
@@ -321,8 +296,11 @@ self.addEventListener('fetch', (event) => {
             : await fetch(event.request, { cache: 'no-cache' });
           if (response.status >= 200 && response.status < 300) {
             const stamped = wrapResponseWithTimestamp(response.clone());
-            // Not awaited: the response must not wait on a CacheStorage write.
-            cache.put(event.request, stamped).then(scheduleMediaCacheLimit, () => {});
+            // The response does not await the write, while waitUntil below
+            // keeps the worker alive long enough for it to finish reliably.
+            backgroundMediaWork = cache
+              .put(event.request, stamped)
+              .then(maybeEnforceMediaCacheLimit, () => {});
           }
           return response;
         } catch (_) {
@@ -333,8 +311,9 @@ self.addEventListener('fetch', (event) => {
           }
           return new Response('', { status: 503 });
         }
-      })
-    );
+      });
+    event.respondWith(mediaResponse);
+    event.waitUntil(mediaResponse.then(() => backgroundMediaWork, () => backgroundMediaWork));
   } else if (requestUrl.pathname.startsWith('/_next/static/')) {
     // Immutable, content-hashed build assets (JS/CSS chunks). Cache-first so
     // the app shell can still hydrate offline — without these a cached page

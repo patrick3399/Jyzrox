@@ -1165,7 +1165,7 @@ const en: Record<string, string> = {
   'settings.mediaCacheTTLDesc': 'How long to keep cached images and thumbnails',
   'settings.mediaCacheSizeLimit': 'Media Cache Size Limit',
   'settings.mediaCacheSizeLimitDesc':
-    'Maximum storage for cached media (oldest entries evicted first)',
+    'Maximum storage for cached media (the media cache resets when exceeded)',
   'settings.pageCacheTTL': 'Page Cache TTL',
   'settings.pageCacheTTLDesc': 'How long to keep cached page responses for offline use',
   'settings.clearBrowserCache': 'Clear Browser Cache',

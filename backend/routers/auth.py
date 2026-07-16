@@ -26,7 +26,11 @@ from core.redis_client import get_redis
 from db.models import User
 from services.media_authz import authorize_media_uri
 
-_MEDIA_URI_AUTHZ_PREFIXES = ("/media/libraries/", "/media/image/", "/media/cas/", "/media/thumbs/")
+# Content-addressed CAS/thumb URLs are authenticated capabilities in the
+# default single-user model. Only path-addressed media needs URI-specific
+# authorization: libraries enforce Gallery ACLs, while imgproxy validates that
+# its decoded source stays inside CAS/thumb storage.
+_MEDIA_URI_AUTHZ_PREFIXES = ("/media/libraries/", "/media/image/")
 
 router = APIRouter(tags=["auth"])
 logger = logging.getLogger(__name__)
