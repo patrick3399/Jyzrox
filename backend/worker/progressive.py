@@ -34,6 +34,33 @@ def _subscription_artist_id(data: GalleryImportData, source_url: str | None) -> 
     return None
 
 
+def _upsert_metadata_set(excluded, *, include_title_tags: bool) -> dict:
+    """ON CONFLICT SET mapping shared by the ensure_gallery* upserts (BR-007).
+
+    A re-download attaching to an existing gallery must not clobber non-empty
+    metadata with blank values: empty/NULL title and empty tag arrays keep the
+    existing row, artist_id only overwrites when the new value is non-NULL, and
+    source_url is first-wins (the URL the gallery was originally created from).
+    ``include_title_tags=False`` is for the URL-fallback path, whose title is
+    derived from the URL path and must never overwrite real metadata.
+    """
+    from sqlalchemy import case, func
+
+    set_: dict = {
+        "download_status": "downloading",
+        "artist_id": func.coalesce(excluded.artist_id, Gallery.artist_id),
+        "source_url": func.coalesce(Gallery.source_url, excluded.source_url),
+    }
+    if include_title_tags:
+        set_["title"] = func.coalesce(func.nullif(excluded.title, ""), Gallery.title)
+        # cardinality(NULL) is NULL → condition falsy → existing tags kept.
+        set_["tags_array"] = case(
+            (func.cardinality(excluded.tags_array) > 0, excluded.tags_array),
+            else_=Gallery.tags_array,
+        )
+    return set_
+
+
 def _page_num_from_name(file_path: Path) -> int | None:
     """Extract the trailing numeric run from a filename stem for stable page order."""
     if _PIXIV_USER_WORK_PAGE_RE.match(file_path.stem):
@@ -266,13 +293,7 @@ class ProgressiveImporter:
                 )
                 .on_conflict_do_update(
                     index_elements=["source", "source_id"],
-                    set_={
-                        "title": pg_insert(Gallery).excluded.title,
-                        "tags_array": pg_insert(Gallery).excluded.tags_array,
-                        "download_status": "downloading",
-                        "artist_id": pg_insert(Gallery).excluded.artist_id,
-                        "source_url": pg_insert(Gallery).excluded.source_url,
-                    },
+                    set_=_upsert_metadata_set(pg_insert(Gallery).excluded, include_title_tags=True),
                 )
                 .returning(Gallery.id)
             )
@@ -339,11 +360,7 @@ class ProgressiveImporter:
                 )
                 .on_conflict_do_update(
                     index_elements=["source", "source_id"],
-                    set_={
-                        "download_status": "downloading",
-                        "artist_id": pg_insert(Gallery).excluded.artist_id,
-                        "source_url": pg_insert(Gallery).excluded.source_url,
-                    },
+                    set_=_upsert_metadata_set(pg_insert(Gallery).excluded, include_title_tags=False),
                 )
                 .returning(Gallery.id)
             )
@@ -395,13 +412,7 @@ class ProgressiveImporter:
                 )
                 .on_conflict_do_update(
                     index_elements=["source", "source_id"],
-                    set_={
-                        "title": pg_insert(Gallery).excluded.title,
-                        "tags_array": pg_insert(Gallery).excluded.tags_array,
-                        "download_status": "downloading",
-                        "artist_id": pg_insert(Gallery).excluded.artist_id,
-                        "source_url": pg_insert(Gallery).excluded.source_url,
-                    },
+                    set_=_upsert_metadata_set(pg_insert(Gallery).excluded, include_title_tags=True),
                 )
                 .returning(Gallery.id)
             )

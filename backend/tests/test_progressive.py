@@ -249,6 +249,69 @@ class TestProgressiveImporterCleanup:
 
 
 # ---------------------------------------------------------------------------
+# TestUpsertMetadataGuard — BR-007: re-download upsert must not clobber
+# existing non-empty gallery metadata with blank values
+# ---------------------------------------------------------------------------
+
+
+def _compile_pg(expr) -> str:
+    from sqlalchemy.dialects import postgresql
+
+    return str(expr.compile(dialect=postgresql.dialect(), compile_kwargs={"literal_binds": True})).lower()
+
+
+class TestUpsertMetadataGuard:
+    """The ON CONFLICT SET mapping used by all ensure_gallery* upserts must
+    guard against sparse re-download metadata: empty title/tags keep the
+    existing row values, and source_url is first-wins."""
+
+    def test_redownload_upsert_preserves_existing_title_and_tags_when_new_metadata_is_blank(self):
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from db.models import Gallery
+        from worker.progressive import _upsert_metadata_set
+
+        excluded = pg_insert(Gallery).excluded
+        set_ = _upsert_metadata_set(excluded, include_title_tags=True)
+
+        title_sql = _compile_pg(set_["title"])
+        assert "coalesce" in title_sql, "empty excluded title must fall back to the existing row"
+        assert "nullif" in title_sql, "empty-string titles must be treated as missing"
+        assert "galleries.title" in title_sql
+
+        tags_sql = _compile_pg(set_["tags_array"])
+        assert "cardinality" in tags_sql, "tags may only overwrite when the new array is non-empty"
+        assert "galleries.tags_array" in tags_sql
+
+    def test_redownload_upsert_keeps_first_source_url(self):
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from db.models import Gallery
+        from worker.progressive import _upsert_metadata_set
+
+        excluded = pg_insert(Gallery).excluded
+        set_ = _upsert_metadata_set(excluded, include_title_tags=False)
+
+        url_sql = _compile_pg(set_["source_url"])
+        assert "coalesce" in url_sql
+        assert url_sql.index("galleries.source_url") < url_sql.index("excluded.source_url"), (
+            "source_url must be first-wins: the existing value takes precedence over the new one"
+        )
+
+    def test_url_fallback_upsert_never_touches_title_or_tags(self):
+        from sqlalchemy.dialects.postgresql import insert as pg_insert
+
+        from db.models import Gallery
+        from worker.progressive import _upsert_metadata_set
+
+        excluded = pg_insert(Gallery).excluded
+        set_ = _upsert_metadata_set(excluded, include_title_tags=False)
+
+        assert "title" not in set_, "URL-fallback upsert derives title from the URL path (junk) — never overwrite"
+        assert "tags_array" not in set_
+
+
+# ---------------------------------------------------------------------------
 # TestProgressiveImporterPreExistingCancel — edge case audit #53 / BR-001
 # ---------------------------------------------------------------------------
 
