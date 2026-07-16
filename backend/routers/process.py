@@ -6,7 +6,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 import core.queue
-from core.auth import gallery_access_filter, require_role
+from core.auth import gallery_access_filter, has_gallery_write_access, require_role
 from core.database import get_db
 from core.events import EventType, emit_safe
 from db.models import Gallery, Image
@@ -31,15 +31,18 @@ async def enqueue_image_process(
     db: AsyncSession = Depends(get_db),
 ):
     """Queue processing for an accessible active image."""
-    image = (
+    row = (
         await db.execute(
-            select(Image.id)
+            select(Image.id, Image.gallery_id, Gallery.created_by_user_id)
             .join(Gallery, Image.gallery_id == Gallery.id)
             .where(Image.id == image_id, Image.visibility == "active", gallery_access_filter(auth))
         )
-    ).scalar_one_or_none()
-    if image is None:
+    ).one_or_none()
+    if row is None:
         raise HTTPException(status_code=404, detail="Image not found")
+    _, gallery_id, created_by_user_id = row
+    if not await has_gallery_write_access(db, gallery_id, created_by_user_id, auth):
+        raise HTTPException(status_code=403, detail="Gallery write access is required")
     if plugin_registry.get_processor(req.processor_id) is None:
         raise HTTPException(status_code=400, detail="Unknown image processor")
 

@@ -84,3 +84,56 @@ async def test_process_image_requires_auth(unauthed_client):
         json={"processor_id": "swarmui", "scale": 2},
     )
     assert response.status_code == 401
+
+
+async def _grant_permission(db_session, *, user_id: int, can_edit: bool) -> None:
+    await db_session.execute(
+        text("INSERT INTO users (id, username, password_hash, role) VALUES (:id, :u, 'x', 'member')"),
+        {"id": user_id, "u": f"collab-{user_id}"},
+    )
+    await db_session.execute(
+        text(
+            "INSERT INTO gallery_permissions (gallery_id, user_id, can_edit) VALUES (9001, :id, :edit)"
+        ),
+        {"id": user_id, "edit": 1 if can_edit else 0},
+    )
+    await db_session.commit()
+
+
+async def test_process_readonly_collaborator_cannot_process_returns_403(make_client, db_session):
+    """A can_edit=false collaborator can view the gallery but must not mutate its images."""
+    await _seed_image(db_session, owner_id=2)
+    await _grant_permission(db_session, user_id=3, can_edit=False)
+
+    async with make_client(user_id=3, role="member") as reader:
+        with (
+            patch("routers.process.plugin_registry.get_processor", return_value=MagicMock()),
+            patch("core.queue.enqueue", AsyncMock(return_value=MagicMock(key="j"))),
+            patch("routers.process.emit_safe", new_callable=AsyncMock),
+        ):
+            response = await reader.post(
+                "/api/process/images/9001",
+                json={"processor_id": "swarmui", "scale": 2},
+            )
+
+    assert response.status_code == 403
+
+
+async def test_process_editor_collaborator_can_process(make_client, db_session):
+    """A can_edit=true collaborator is allowed to enqueue processing."""
+    await _seed_image(db_session, owner_id=2)
+    await _grant_permission(db_session, user_id=3, can_edit=True)
+    job = MagicMock(key="process-job")
+
+    async with make_client(user_id=3, role="member") as editor:
+        with (
+            patch("routers.process.plugin_registry.get_processor", return_value=MagicMock()),
+            patch("core.queue.enqueue", AsyncMock(return_value=job)),
+            patch("routers.process.emit_safe", new_callable=AsyncMock),
+        ):
+            response = await editor.post(
+                "/api/process/images/9001",
+                json={"processor_id": "swarmui", "scale": 2},
+            )
+
+    assert response.status_code == 202

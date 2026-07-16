@@ -11,7 +11,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from core.auth import gallery_access_filter, require_role
+from core.auth import gallery_access_filter, has_gallery_write_access, require_role
 from core.database import get_db
 from core.events import EventType, emit_safe
 from db.models import (
@@ -62,17 +62,7 @@ async def _gallery(db: AsyncSession, gallery_id: int, auth: dict) -> Gallery:
 
 
 async def _require_write(db: AsyncSession, gallery: Gallery, auth: dict) -> None:
-    if auth["role"] == "admin" or gallery.created_by_user_id in (None, auth["user_id"]):
-        return
-    allowed = (
-        await db.execute(
-            select(GalleryPermission.can_edit).where(
-                GalleryPermission.gallery_id == gallery.id,
-                GalleryPermission.user_id == auth["user_id"],
-            )
-        )
-    ).scalar_one_or_none()
-    if not allowed:
+    if not await has_gallery_write_access(db, gallery.id, gallery.created_by_user_id, auth):
         raise HTTPException(status_code=403, detail="Gallery write access is required")
 
 

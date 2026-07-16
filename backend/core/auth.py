@@ -233,3 +233,30 @@ def gallery_access_filter(auth: dict):
             Gallery.id.in_(select(GalleryPermission.gallery_id).where(GalleryPermission.user_id == user_id)),
         ),
     )
+
+
+async def has_gallery_write_access(session, gallery_id: int, created_by_user_id: int | None, auth: dict) -> bool:
+    """Whether the caller may mutate a gallery's content.
+
+    Read access (gallery_access_filter) intentionally includes read-only
+    collaborators (any GalleryPermission row); write access is stricter and
+    only admins, the owner, unowned/system galleries, or collaborators with
+    ``can_edit = true`` qualify. Callers that mutate a gallery or its images
+    must gate on this rather than on visibility alone.
+    """
+    if auth.get("role") == "admin" or created_by_user_id in (None, auth["user_id"]):
+        return True
+
+    from sqlalchemy import select
+
+    from db.models import GalleryPermission
+
+    can_edit = (
+        await session.execute(
+            select(GalleryPermission.can_edit).where(
+                GalleryPermission.gallery_id == gallery_id,
+                GalleryPermission.user_id == auth["user_id"],
+            )
+        )
+    ).scalar_one_or_none()
+    return bool(can_edit)
