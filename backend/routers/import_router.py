@@ -1,20 +1,24 @@
 """Gallery import handling (Link and Copy modes)."""
 
+import hashlib
 import json
 import os
 import re
 import uuid
+from datetime import UTC, datetime
 from pathlib import Path
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, File, Form, HTTPException, Request, UploadFile
 from pydantic import BaseModel
-from sqlalchemy import desc, func, select
+from sqlalchemy import desc, func, select, update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
+from sqlalchemy.ext.asyncio import AsyncSession
 
 import core.queue
 from core.auth import require_role
 from core.config import get_all_library_paths, settings
-from core.database import async_session
+from core.database import async_session, get_db
+from core.events import EventType, emit_safe
 from core.local_patterns import (
     DEFAULT_IMPORT_MODE,
     DEFAULT_LIBRARY_PATTERN,
@@ -25,7 +29,9 @@ from core.local_patterns import (
 )
 from core.redis_client import get_redis
 from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
-from db.models import Gallery, LibraryPath
+from db.models import Blob, Gallery, Image, ImportConflict, LibraryPath
+from services.cas import create_library_symlink, store_blob
+from worker.helpers import _validate_image_magic
 
 router = APIRouter(tags=["import"])
 
@@ -33,6 +39,7 @@ _member = require_role("member")
 _admin = require_role("admin")
 
 _SUPPORTED_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic", ".mp4", ".webm"}
+_WEB_CLIP_MAX_BYTES = 50 * 1024 * 1024
 
 
 class BatchScanRequest(BaseModel):
@@ -44,6 +51,77 @@ class BatchStartRequest(BaseModel):
     root_dir: str
     mode: str = "copy"  # "copy" | "link"
     galleries: list[dict]  # [{path, artist, title}, ...]
+
+
+class ConflictModeRequest(BaseModel):
+    mode: str
+
+
+class ConflictResolutionRequest(BaseModel):
+    resolution: str
+
+
+@router.post("/web-clip", status_code=201)
+async def import_web_clip(
+    file: UploadFile = File(...),
+    source_url: str = Form(..., min_length=1, max_length=4096),
+    title: str | None = Form(default=None, max_length=500),
+    auth: dict = Depends(_member),
+    db: AsyncSession = Depends(get_db),
+):
+    suffix = Path(file.filename or "").suffix.lower()
+    if suffix not in _SUPPORTED_EXTS - {".mp4", ".webm"}:
+        raise HTTPException(status_code=400, detail="Web clip must be a supported image")
+    temp = Path(settings.data_training_path) / "web-clips" / f".{uuid.uuid4().hex}{suffix}"
+    temp.parent.mkdir(parents=True, exist_ok=True)
+    digest = hashlib.sha256()
+    size = 0
+    try:
+        with temp.open("wb") as output:
+            while chunk := await file.read(1024 * 1024):
+                size += len(chunk)
+                if size > _WEB_CLIP_MAX_BYTES:
+                    raise HTTPException(status_code=413, detail="Web clip is too large")
+                digest.update(chunk)
+                output.write(chunk)
+        if not _validate_image_magic(temp):
+            raise HTTPException(status_code=400, detail="Web clip is not a valid image")
+        sha256 = digest.hexdigest()
+        source_id = f"{auth['user_id']}:{sha256}"
+        existing = (
+            await db.execute(select(Gallery).where(Gallery.source == "webclip", Gallery.source_id == source_id))
+        ).scalar_one_or_none()
+        if existing is not None:
+            return {"status": "exists", "gallery_id": existing.id}
+        blob = await store_blob(temp, sha256, db)
+        gallery = Gallery(
+            source="webclip",
+            source_id=source_id,
+            source_url=source_url,
+            title=(title or "").strip() or Path(file.filename or "Web clip").stem,
+            pages=1,
+            download_status="complete",
+            import_mode="copy",
+            created_by_user_id=auth["user_id"],
+            visibility="private",
+        )
+        db.add(gallery)
+        await db.flush()
+        image = Image(gallery_id=gallery.id, page_num=1, filename=file.filename, blob_sha256=sha256)
+        db.add(image)
+        await db.execute(update(Blob).where(Blob.sha256 == sha256).values(ref_count=Blob.ref_count + 1))
+        await db.commit()
+        await create_library_symlink("webclip", source_id, file.filename or f"clip{suffix}", blob)
+        await emit_safe(
+            EventType.IMPORT_COMPLETED,
+            actor_user_id=auth["user_id"],
+            resource_type="gallery",
+            resource_id=gallery.id,
+            source="webclip",
+        )
+        return {"status": "imported", "gallery_id": gallery.id}
+    finally:
+        temp.unlink(missing_ok=True)
 
 
 async def _validate_root_dir(root_dir: str) -> str:
@@ -222,6 +300,91 @@ async def batch_progress(
         if not owner or int(owner) != auth["user_id"]:
             raise HTTPException(status_code=404, detail="Not found")
     return json.loads(data)
+
+
+@router.get("/conflict-mode")
+async def get_conflict_mode(_: dict = Depends(_member)):
+    value = await get_redis().get("setting:import_conflict_mode")
+    if isinstance(value, bytes):
+        value = value.decode()
+    return {"mode": value or "manual"}
+
+
+@router.patch("/conflict-mode")
+async def set_conflict_mode(body: ConflictModeRequest, _: dict = Depends(_admin)):
+    if body.mode not in {"auto_overwrite", "auto_merge", "manual"}:
+        raise HTTPException(status_code=400, detail="Invalid import conflict mode")
+    await get_redis().set("setting:import_conflict_mode", body.mode)
+    return {"mode": body.mode}
+
+
+@router.get("/conflicts")
+async def list_import_conflicts(
+    status: str = "pending",
+    auth: dict = Depends(_member),
+):
+    if status not in {"pending", "resolved", "all"}:
+        raise HTTPException(status_code=400, detail="Invalid conflict status")
+    async with async_session() as session:
+        stmt = select(ImportConflict).where(ImportConflict.user_id == auth["user_id"])
+        if status != "all":
+            stmt = stmt.where(ImportConflict.status == status)
+        rows = (await session.execute(stmt.order_by(ImportConflict.created_at.desc()))).scalars().all()
+    return {
+        "conflicts": [
+            {
+                "id": row.id,
+                "existing_gallery_id": row.existing_gallery_id,
+                "source": row.source,
+                "source_id": row.source_id,
+                "incoming": row.incoming_payload,
+                "status": row.status,
+                "resolution": row.resolution,
+                "created_at": row.created_at.isoformat(),
+            }
+            for row in rows
+        ]
+    }
+
+
+@router.post("/conflicts/{conflict_id}/resolve")
+async def resolve_import_conflict(
+    conflict_id: int,
+    body: ConflictResolutionRequest,
+    auth: dict = Depends(_member),
+):
+    if body.resolution not in {"overwrite", "merge", "skip"}:
+        raise HTTPException(status_code=400, detail="Invalid conflict resolution")
+    async with async_session() as session:
+        row = (
+            await session.execute(
+                select(ImportConflict).where(
+                    ImportConflict.id == conflict_id,
+                    ImportConflict.user_id == auth["user_id"],
+                )
+            )
+        ).scalar_one_or_none()
+        if row is None:
+            raise HTTPException(status_code=404, detail="Import conflict not found")
+        if row.status != "pending":
+            raise HTTPException(status_code=409, detail="Import conflict is already resolved")
+        if body.resolution != "skip":
+            payload = row.incoming_payload or {}
+            path = payload.get("path")
+            mode = payload.get("mode")
+            if not isinstance(path, str) or mode not in {"copy", "link"} or row.existing_gallery_id is None:
+                raise HTTPException(status_code=409, detail="Conflict cannot be resumed")
+            await core.queue.enqueue(
+                "local_import_job",
+                source_dir=path,
+                mode=mode,
+                gallery_id=row.existing_gallery_id,
+            )
+        row.status = "resolved"
+        row.resolution = body.resolution
+        row.resolved_at = datetime.now(UTC)
+        await session.commit()
+    return {"status": "resolved", "resolution": body.resolution}
 
 
 @router.get("/progress/{gallery_id}")

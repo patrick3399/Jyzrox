@@ -11,9 +11,13 @@ The import router imports `async_session` lazily (inside the function body),
 so we patch `core.database.async_session` to redirect DB writes to the test DB.
 """
 
+import io
 import json
 from pathlib import Path
 from unittest.mock import AsyncMock, MagicMock, patch
+
+from PIL import Image as PILImage
+from sqlalchemy import text
 
 # ---------------------------------------------------------------------------
 # POST /api/import/batch/scan — scan directory with pattern
@@ -1292,9 +1296,11 @@ class TestBatchImportJob:
         # Session for INSERT of good gallery
         insert_result = MagicMock()
         insert_result.scalar_one.return_value = 77
+        no_existing_result = MagicMock()
+        no_existing_result.scalar_one_or_none.return_value = None
 
         mock_insert_sess = _make_mock_session()
-        mock_insert_sess.execute = AsyncMock(return_value=insert_result)
+        mock_insert_sess.execute = AsyncMock(side_effect=[no_existing_result, insert_result])
 
         # Three sessions for local_import_job of good gallery
         mock_lg1 = _make_mock_session()
@@ -1315,7 +1321,9 @@ class TestBatchImportJob:
         mock_bad_sess = _make_mock_session()
         err_result = MagicMock()
         err_result.scalar_one.side_effect = Exception("insert failed")
-        mock_bad_sess.execute = AsyncMock(return_value=err_result)
+        no_bad_existing_result = MagicMock()
+        no_bad_existing_result.scalar_one_or_none.return_value = None
+        mock_bad_sess.execute = AsyncMock(side_effect=[no_bad_existing_result, err_result])
 
         sessions = iter([mock_insert_sess, mock_lg1, mock_lg2, mock_lg3, mock_bad_sess])
 
@@ -1729,3 +1737,83 @@ class TestLibraries:
                 json={"path": "/nonexistent/path/that/does/not/exist"},
             )
         assert resp.status_code == 400
+
+
+class TestImportConflicts:
+    async def test_conflict_mode_round_trip(self, client, mock_redis):
+        mock_redis.get.return_value = b"manual"
+        response = await client.get("/api/import/conflict-mode")
+        updated = await client.patch("/api/import/conflict-mode", json={"mode": "auto_merge"})
+        assert response.json() == {"mode": "manual"}
+        assert updated.json() == {"mode": "auto_merge"}
+        mock_redis.set.assert_awaited_with("setting:import_conflict_mode", "auto_merge")
+
+    async def test_list_and_resolve_conflict(self, client, db_session, db_session_factory):
+        from main import app
+
+        await db_session.execute(
+            text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'owner', 'x', 'admin')")
+        )
+        await db_session.execute(
+            text("INSERT INTO galleries (id, source, source_id, title) VALUES (9301, 'local', 'same', 'Existing')")
+        )
+        await db_session.execute(
+            text(
+                "INSERT INTO import_conflicts "
+                "(id, user_id, existing_gallery_id, source, source_id, incoming_payload) VALUES "
+                '(9401, 1, 9301, \'local\', \'same\', \'{"path":"/mnt/same","mode":"link"}\')'
+            )
+        )
+        await db_session.commit()
+        with patch("routers.import_router.async_session", db_session_factory):
+            listed = await client.get("/api/import/conflicts")
+            resolved = await client.post("/api/import/conflicts/9401/resolve", json={"resolution": "merge"})
+        assert listed.status_code == 200
+        assert listed.json()["conflicts"][0]["source_id"] == "same"
+        assert resolved.json() == {"status": "resolved", "resolution": "merge"}
+        app.state.enqueue.assert_awaited_with("local_import_job", source_dir="/mnt/same", mode="link", gallery_id=9301)
+
+
+async def test_web_clip_imports_browser_authenticated_image(client, db_session, tmp_path):
+    from db.models import Blob
+
+    await db_session.execute(
+        text("INSERT OR IGNORE INTO users (id, username, password_hash, role) VALUES (1, 'owner', 'x', 'admin')")
+    )
+    await db_session.commit()
+    image = io.BytesIO()
+    PILImage.new("RGB", (8, 8), "blue").save(image, format="PNG")
+
+    async def fake_store(path, sha256, session):
+        blob = Blob(
+            sha256=sha256,
+            file_size=path.stat().st_size,
+            extension=".png",
+            media_type="image",
+            storage="external",
+            external_path=str(path),
+            ref_count=0,
+        )
+        session.add(blob)
+        await session.flush()
+        return blob
+
+    with (
+        patch("routers.import_router.settings.data_training_path", str(tmp_path)),
+        patch("routers.import_router.store_blob", side_effect=fake_store),
+        patch("routers.import_router.create_library_symlink", new_callable=AsyncMock),
+        patch("routers.import_router.emit_safe", new_callable=AsyncMock),
+    ):
+        response = await client.post(
+            "/api/import/web-clip",
+            data={"source_url": "https://example.test/post/1", "title": "Clipped"},
+            files={"file": ("clip.png", image.getvalue(), "image/png")},
+        )
+    assert response.status_code == 201, response.text
+    gallery = (
+        await db_session.execute(
+            text("SELECT source, source_url, visibility FROM galleries WHERE id=:id"),
+            {"id": response.json()["gallery_id"]},
+        )
+    ).one()
+    assert tuple(gallery) == ("webclip", "https://example.test/post/1", "private")

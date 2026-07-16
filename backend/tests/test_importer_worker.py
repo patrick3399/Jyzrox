@@ -67,6 +67,39 @@ def _create_test_gallery(tmp_path: Path, metadata: dict | None = None) -> Path:
     return gallery_dir
 
 
+async def test_batch_import_records_manual_conflict_without_reimport():
+    from db.models import Gallery, ImportConflict
+    from worker.importer import batch_import_job
+
+    redis = AsyncMock()
+    redis.get.return_value = b"manual"
+    session = AsyncMock()
+    session.add = MagicMock()
+    result = MagicMock()
+    result.scalar_one_or_none.return_value = Gallery(
+        id=77,
+        source="local",
+        source_id="duplicate",
+        title="Existing",
+    )
+    session.execute.return_value = result
+    with patch("worker.importer.AsyncSessionLocal", return_value=_mock_session_ctx(session)):
+        output = await batch_import_job(
+            {"redis": redis},
+            root_dir="/mnt/library",
+            mode="link",
+            galleries=[{"path": "/mnt/library/duplicate", "title": "Incoming"}],
+            batch_id="batch-manual",
+            user_id=1,
+        )
+
+    conflict = session.add.call_args.args[0]
+    assert isinstance(conflict, ImportConflict)
+    assert conflict.existing_gallery_id == 77
+    assert conflict.incoming_payload["path"] == "/mnt/library/duplicate"
+    assert output["conflicts"] == 1
+
+
 # ---------------------------------------------------------------------------
 # _extract_tags tests
 # ---------------------------------------------------------------------------

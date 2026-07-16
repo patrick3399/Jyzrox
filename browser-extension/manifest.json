@@ -1,0 +1,11 @@
+{
+  "manifest_version": 3,
+  "name": "Jyzrox Web Clipper",
+  "version": "1.0.0",
+  "description": "Send authenticated images and gallery links to a self-hosted Jyzrox instance.",
+  "permissions": ["contextMenus", "cookies", "notifications", "storage"],
+  "host_permissions": ["<all_urls>"],
+  "background": { "service_worker": "background.js", "type": "module" },
+  "options_page": "options.html",
+  "action": { "default_title": "Jyzrox Web Clipper" }
+}

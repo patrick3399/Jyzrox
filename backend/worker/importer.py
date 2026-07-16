@@ -16,7 +16,7 @@ import core.queue
 from core.config import settings
 from core.database import AsyncSessionLocal
 from core.social_order import reorder_social_gallery_images
-from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, Tag
+from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, ImportConflict, Tag
 from services.cas import create_library_symlink, store_blob, thumb_dir
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
 from worker.constants import (
@@ -651,6 +651,11 @@ async def batch_import_job(
     total = len(galleries)
     completed = 0
     failed = 0
+    conflicts = 0
+    raw_conflict_mode = await r.get("setting:import_conflict_mode")
+    if isinstance(raw_conflict_mode, bytes):
+        raw_conflict_mode = raw_conflict_mode.decode()
+    conflict_mode = raw_conflict_mode or "manual"
 
     for entry in galleries:
         abs_path = entry["path"]
@@ -662,26 +667,58 @@ async def batch_import_job(
 
         try:
             async with AsyncSessionLocal() as session:
-                result = await session.execute(
-                    text(
-                        "INSERT INTO galleries "
-                        "(source, source_id, title, import_mode, library_path, source_path, artist_id, uploader, created_by_user_id)"
-                        " VALUES (:source, :source_id, :title, :mode, :library_path, :source_path, :artist_id, :uploader, :user_id) "
-                        "RETURNING id"
-                    ),
-                    {
-                        "source": "local",
-                        "source_id": rel_path,
-                        "title": title,
-                        "mode": mode,
-                        "library_path": root_dir if mode == "link" else None,
-                        "source_path": os.path.realpath(abs_path) if mode == "link" else None,
-                        "artist_id": f"local:{artist}" if artist else None,
-                        "uploader": artist,
-                        "user_id": user_id,
-                    },
-                )
-                gallery_id = result.scalar_one()
+                existing = (
+                    await session.execute(
+                        select(Gallery).where(
+                            Gallery.source == "local",
+                            Gallery.source_id == rel_path,
+                            Gallery.deleted_at.is_(None),
+                        )
+                    )
+                ).scalar_one_or_none()
+                if existing is not None and conflict_mode == "manual":
+                    session.add(
+                        ImportConflict(
+                            user_id=user_id,
+                            existing_gallery_id=existing.id,
+                            source="local",
+                            source_id=rel_path,
+                            incoming_payload={
+                                "path": abs_path,
+                                "root_dir": root_dir,
+                                "mode": mode,
+                                "title": title,
+                                "artist": artist,
+                            },
+                        )
+                    )
+                    await session.commit()
+                    conflicts += 1
+                    continue
+                if existing is not None:
+                    gallery_id = existing.id
+                    existing.title = title
+                else:
+                    result = await session.execute(
+                        text(
+                            "INSERT INTO galleries "
+                            "(source, source_id, title, import_mode, library_path, source_path, artist_id, uploader, created_by_user_id)"
+                            " VALUES (:source, :source_id, :title, :mode, :library_path, :source_path, :artist_id, :uploader, :user_id) "
+                            "RETURNING id"
+                        ),
+                        {
+                            "source": "local",
+                            "source_id": rel_path,
+                            "title": title,
+                            "mode": mode,
+                            "library_path": root_dir if mode == "link" else None,
+                            "source_path": os.path.realpath(abs_path) if mode == "link" else None,
+                            "artist_id": f"local:{artist}" if artist else None,
+                            "uploader": artist,
+                            "user_id": user_id,
+                        },
+                    )
+                    gallery_id = result.scalar_one()
                 await session.commit()
 
             # Update progress with current gallery
@@ -693,6 +730,7 @@ async def batch_import_job(
                         "total": total,
                         "completed": completed,
                         "failed": failed,
+                        "conflicts": conflicts,
                         "status": "running",
                         "current_gallery_id": gallery_id,
                     }
@@ -716,6 +754,7 @@ async def batch_import_job(
                     "total": total,
                     "completed": completed,
                     "failed": failed,
+                    "conflicts": conflicts,
                     "status": "running",
                     "current_gallery_id": None,
                 }
@@ -731,18 +770,30 @@ async def batch_import_job(
                 "total": total,
                 "completed": completed,
                 "failed": failed,
+                "conflicts": conflicts,
                 "status": "done",
                 "current_gallery_id": None,
             }
         ),
     )
 
-    logger.info("[batch_import] batch_id=%s: %d completed, %d failed", batch_id, completed, failed)
+    logger.info(
+        "[batch_import] batch_id=%s: %d completed, %d failed, %d conflicts",
+        batch_id,
+        completed,
+        failed,
+        conflicts,
+    )
 
     from core.events import EventType, emit_safe
 
     await emit_safe(
-        EventType.IMPORT_COMPLETED, resource_type="system", completed=completed, failed=failed, batch_id=batch_id
+        EventType.IMPORT_COMPLETED,
+        resource_type="system",
+        completed=completed,
+        failed=failed,
+        conflicts=conflicts,
+        batch_id=batch_id,
     )
 
-    return {"status": "done", "completed": completed, "failed": failed}
+    return {"status": "done", "completed": completed, "failed": failed, "conflicts": conflicts}
