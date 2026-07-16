@@ -84,6 +84,15 @@ class ProgressiveImporter:
         # importer records the trashed gallery id here, sets this flag, and turns
         # every mutating method (import_file/finalize/abort/cleanup) into a no-op.
         self.skipped_trashed: bool = False
+        # Audit #53: when this run attaches to a pre-existing ACTIVE gallery
+        # (re-download / subscription refresh), cancellation must roll back only
+        # this run's additions instead of deleting the whole gallery. The
+        # snapshot captures the row state to restore on cancel.
+        self.pre_existing: bool = False
+        self._prev_gallery_snapshot: dict | None = None
+        self._preexisting_image_ids: set[int] = set()
+        self._preexisting_active_count = 0
+        self._preexisting_loaded = False
         self._processed: set[str] = set()
         self._page_counter = 0
         self.source_url: str | None = None
@@ -148,6 +157,14 @@ class ProgressiveImporter:
                     ).where(Image.gallery_id == self.gallery_id)
                 )
             ).all()
+            # Audit #53: remember which images pre-date this run, exactly once.
+            # A second _load_gallery_state call (e.g. metadata arriving after the
+            # URL-fallback attach) must not absorb this run's own images.
+            if not self._preexisting_loaded:
+                self._preexisting_image_ids = {row.id for row in existing_rows}
+                self._preexisting_active_count = sum(1 for row in existing_rows if row.visibility == "active")
+                self._preexisting_loaded = True
+
             self._known_sha256s = {row.blob_sha256 for row in existing_rows if row.blob_sha256}
             self._known_filenames = {row.filename for row in existing_rows if row.filename}
             self._known_source_items = {row.source_item_id for row in existing_rows if row.source_item_id}
@@ -175,9 +192,31 @@ class ProgressiveImporter:
         """
         existing = (
             await session.execute(
-                select(Gallery.id, Gallery.deleted_at).where(Gallery.source == source, Gallery.source_id == source_id)
+                select(
+                    Gallery.id,
+                    Gallery.deleted_at,
+                    Gallery.download_status,
+                    Gallery.title,
+                    Gallery.tags_array,
+                    Gallery.source_url,
+                    Gallery.artist_id,
+                    Gallery.pages,
+                ).where(Gallery.source == source, Gallery.source_id == source_id)
             )
         ).first()
+        if existing is not None and existing.deleted_at is None and self.gallery_id is None:
+            # Audit #53: this run is attaching to a pre-existing active gallery.
+            # Snapshot it so a user cancel can restore instead of delete. Only
+            # on first attach — a later ensure_gallery* call for a gallery this
+            # run itself created must not flip the run to pre-existing.
+            self.pre_existing = True
+            self._prev_gallery_snapshot = {
+                "download_status": existing.download_status,
+                "title": existing.title,
+                "tags_array": existing.tags_array,
+                "source_url": existing.source_url,
+                "artist_id": existing.artist_id,
+            }
         if existing is not None and existing.deleted_at is not None:
             self.gallery_id = existing.id
             self.skipped_trashed = True
@@ -725,7 +764,12 @@ class ProgressiveImporter:
                     )
                 ).scalar_one()
                 gallery.pages = count
-                gallery.download_status = "partial" if count > 0 else "failed"
+                if self.pre_existing and self._prev_gallery_snapshot and count == self._preexisting_active_count:
+                    # Audit #53: a cancelled/failed refresh that added nothing must
+                    # not demote the pre-existing gallery's status (complete → partial).
+                    gallery.download_status = self._prev_gallery_snapshot["download_status"]
+                else:
+                    gallery.download_status = "partial" if count > 0 else "failed"
                 await session.commit()
 
     async def cleanup(self) -> None:
@@ -752,6 +796,12 @@ class ProgressiveImporter:
             return
 
         if not self.gallery_id:
+            return
+
+        # Audit #53: a re-download attached to a pre-existing active gallery
+        # must not delete it on cancel — roll back only what this run added.
+        if self.pre_existing:
+            await self._cleanup_partial_run()
             return
 
         g_source = self.source
@@ -815,3 +865,92 @@ class ProgressiveImporter:
             await asyncio.to_thread(_delete_filesystem)
         except Exception as exc:
             logger.warning("[progressive] filesystem cleanup failed for gallery %d: %s", self.gallery_id, exc)
+
+    async def _cleanup_partial_run(self) -> None:
+        """Roll back a cancelled run that attached to a pre-existing gallery.
+
+        Audit #53: deletes only this run's images, decrements only their blob
+        refs, removes only their symlinks and now-unreferenced thumb dirs, and
+        restores the pre-run gallery snapshot. The gallery row and its prior
+        images survive.
+        """
+        import shutil
+
+        for task in self._tasks:
+            task.cancel()
+        if self._tasks:
+            await asyncio.gather(*self._tasks, return_exceptions=True)
+            self._tasks.clear()
+
+        if not self.gallery_id:
+            return
+
+        async with AsyncSessionLocal() as session:
+            from sqlalchemy import func
+
+            gallery = await session.get(Gallery, self.gallery_id)
+            if not gallery:
+                return
+
+            stmt = select(Image).where(Image.gallery_id == self.gallery_id)
+            if self._preexisting_image_ids:
+                stmt = stmt.where(Image.id.not_in(self._preexisting_image_ids))
+            new_images = (await session.execute(stmt)).scalars().all()
+
+            removed_names = [img.filename for img in new_images if img.filename]
+            removed_shas = [img.blob_sha256 for img in new_images if img.blob_sha256]
+            for img in new_images:
+                await session.delete(img)
+            for sha256 in removed_shas:
+                await decrement_ref_count(sha256, session)
+
+            snap = self._prev_gallery_snapshot or {}
+            if snap:
+                gallery.title = snap["title"]
+                gallery.tags_array = snap["tags_array"]
+                gallery.source_url = snap["source_url"]
+                gallery.artist_id = snap["artist_id"]
+                gallery.download_status = snap["download_status"]
+            count = (
+                await session.execute(
+                    select(func.count()).where(Image.gallery_id == self.gallery_id, Image.visibility == "active")
+                )
+            ).scalar_one()
+            gallery.pages = count
+            await session.commit()
+
+            zero_ref_sha256s: set[str] = set()
+            if removed_shas:
+                zero_ref_result = await session.execute(
+                    select(Blob.sha256).where(Blob.sha256.in_(removed_shas), Blob.ref_count <= 0)
+                )
+                zero_ref_sha256s = set(zero_ref_result.scalars().all())
+
+        logger.info(
+            "[progressive] partial-run cleanup: gallery_id=%d kept, removed_images=%d zero_ref=%d",
+            self.gallery_id,
+            len(removed_names),
+            len(zero_ref_sha256s),
+        )
+
+        lib_dir = library_dir(self.source, self.source_id) if self.source and self.source_id else None
+
+        def _remove_run_artifacts() -> None:
+            if lib_dir is not None:
+                for name in removed_names:
+                    try:
+                        (lib_dir / name).unlink(missing_ok=True)
+                    except OSError as exc:
+                        logger.warning("[progressive] failed to remove symlink %s: %s", lib_dir / name, exc)
+            for sha256 in zero_ref_sha256s:
+                td = thumb_dir(sha256)
+                if td.exists():
+                    try:
+                        shutil.rmtree(str(td), ignore_errors=True)
+                    except OSError as exc:
+                        logger.warning("[progressive] failed to remove thumb dir %s: %s", td, exc)
+
+        try:
+            await asyncio.to_thread(_remove_run_artifacts)
+        except Exception as exc:
+            logger.warning("[progressive] partial-run fs cleanup failed for gallery %d: %s", self.gallery_id, exc)

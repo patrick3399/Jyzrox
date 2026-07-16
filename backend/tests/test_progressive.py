@@ -249,6 +249,157 @@ class TestProgressiveImporterCleanup:
 
 
 # ---------------------------------------------------------------------------
+# TestProgressiveImporterPreExistingCancel — edge case audit #53 / BR-001
+# ---------------------------------------------------------------------------
+
+
+class TestProgressiveImporterPreExistingCancel:
+    """Audit #53: cancelling a run that attached to a pre-existing ACTIVE
+    gallery must roll back only this run's additions — never delete the
+    gallery, its prior images, or demote its download_status."""
+
+    async def _attach_importer(
+        self, db_session, db_session_factory, gallery_id, source="test_source", source_id="test_001"
+    ):
+        """Simulate the ensure_gallery attach flow for a pre-existing gallery:
+        trashed-conflict inspection (which snapshots the existing row), then
+        gallery state load (which records pre-existing image ids)."""
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.source = source
+        importer.source_id = source_id
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            trashed = await importer._detect_trashed_conflict(db_session, source, source_id)
+            assert trashed is None
+            importer.gallery_id = gallery_id
+            await importer._load_gallery_state()
+        return importer
+
+    async def test_cancel_redownload_of_existing_active_gallery_preserves_gallery_and_images(
+        self, db_session, db_session_factory, tmp_path
+    ):
+        """Cancel of a re-download must delete only images added by this run,
+        keep the gallery row and prior images/symlinks, and restore the
+        previous download_status."""
+        gallery_id = await _insert_gallery(db_session, download_status="complete", pages=2)
+        sha_old1 = "aaaa01" + "0" * 58
+        sha_old2 = "aaaa02" + "0" * 58
+        sha_new = "bbbb01" + "0" * 58
+        await _insert_blob(db_session, sha_old1, ref_count=1)
+        await _insert_blob(db_session, sha_old2, ref_count=1)
+        await _insert_blob(db_session, sha_new, ref_count=1)
+        img_old1 = await _insert_image(db_session, gallery_id, 1, sha_old1, filename="001.jpg")
+        img_old2 = await _insert_image(db_session, gallery_id, 2, sha_old2, filename="002.jpg")
+
+        importer = await self._attach_importer(db_session, db_session_factory, gallery_id)
+        assert importer.pre_existing is True
+
+        # This run imports one new page before the user cancels
+        await _insert_image(db_session, gallery_id, 3, sha_new, filename="003.jpg")
+
+        lib_dir = tmp_path / "library" / "test_source" / "test_001"
+        lib_dir.mkdir(parents=True)
+        for name in ("001.jpg", "002.jpg", "003.jpg"):
+            (lib_dir / name).write_bytes(b"fake")
+        thumb_directory = tmp_path / "thumbs" / sha_new[:2] / sha_new[2:4] / sha_new
+        thumb_directory.mkdir(parents=True)
+        (thumb_directory / "thumb_160.webp").write_bytes(b"fake_thumb")
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive.library_dir", return_value=lib_dir),
+            patch("worker.progressive.thumb_dir", return_value=thumb_directory),
+        ):
+            await importer.cleanup()
+
+        row = (
+            await db_session.execute(
+                text("SELECT download_status, pages FROM galleries WHERE id = :id"), {"id": gallery_id}
+            )
+        ).fetchone()
+        assert row is not None, "pre-existing gallery must not be deleted on cancel"
+        assert row[0] == "complete", "previous download_status must be restored"
+        assert row[1] == 2, "pages must be restored to the pre-run image count"
+
+        remaining = {
+            r[0]
+            for r in (
+                await db_session.execute(text("SELECT id FROM images WHERE gallery_id = :id"), {"id": gallery_id})
+            ).fetchall()
+        }
+        assert remaining == {img_old1, img_old2}, "only images added by this run may be removed"
+
+        for sha, expected in ((sha_old1, 1), (sha_old2, 1), (sha_new, 0)):
+            ref = (
+                await db_session.execute(text("SELECT ref_count FROM blobs WHERE sha256 = :sha"), {"sha": sha})
+            ).fetchone()[0]
+            assert ref == expected, f"blob {sha[:6]} ref_count should be {expected}"
+
+        assert (lib_dir / "001.jpg").exists(), "pre-existing symlinks must survive"
+        assert (lib_dir / "002.jpg").exists(), "pre-existing symlinks must survive"
+        assert not (lib_dir / "003.jpg").exists(), "this run's symlink must be removed"
+        assert lib_dir.exists(), "library dir of a pre-existing gallery must not be rmtree'd"
+        assert not thumb_directory.exists(), "thumb dir of the now-unreferenced new blob must be removed"
+
+    async def test_cancel_fresh_download_still_fully_deletes_gallery(self, db_session, db_session_factory):
+        """Regression guard: full-delete behavior must survive for galleries
+        created by this run (pre_existing stays False)."""
+        from worker.progressive import ProgressiveImporter
+
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        trashed = await importer._detect_trashed_conflict(db_session, "test_source", "fresh_001")
+        assert trashed is None
+        assert importer.pre_existing is False, "no gallery existed, so this run is not pre-existing"
+
+        gallery_id = await _insert_gallery(db_session, source_id="fresh_001")
+        sha = "cccc01" + "0" * 58
+        await _insert_blob(db_session, sha, ref_count=1)
+        await _insert_image(db_session, gallery_id, 1, sha)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "fresh_001"
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        with (
+            patch("worker.progressive.AsyncSessionLocal", fake_factory),
+            patch("worker.progressive.library_dir", return_value=Path("/nonexistent/lib")),
+            patch("worker.progressive.thumb_dir", return_value=Path("/nonexistent/thumb")),
+        ):
+            await importer.cleanup()
+
+        row = (await db_session.execute(text("SELECT id FROM galleries WHERE id = :id"), {"id": gallery_id})).fetchone()
+        assert row is None, "a gallery created by this run must still be fully deleted on cancel"
+
+    async def test_abort_of_zero_new_image_refresh_does_not_demote_complete_status(
+        self, db_session, db_session_factory
+    ):
+        """abort() on a pre-existing complete gallery whose run imported nothing
+        new must restore 'complete', not force 'partial'."""
+        gallery_id = await _insert_gallery(db_session, download_status="complete", pages=2)
+        sha_a = "dddd01" + "0" * 58
+        sha_b = "dddd02" + "0" * 58
+        await _insert_blob(db_session, sha_a)
+        await _insert_blob(db_session, sha_b)
+        await _insert_image(db_session, gallery_id, 1, sha_a)
+        await _insert_image(db_session, gallery_id, 2, sha_b)
+
+        importer = await self._attach_importer(db_session, db_session_factory, gallery_id)
+
+        fake_factory = _make_session_factory_cm(db_session_factory)
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            await importer.abort()
+
+        status = (
+            await db_session.execute(text("SELECT download_status FROM galleries WHERE id = :id"), {"id": gallery_id})
+        ).fetchone()[0]
+        assert status == "complete", "a refresh that added nothing must not demote complete → partial"
+
+
+# ---------------------------------------------------------------------------
 # TestProgressiveImporterTrashedGuard — edge case audit #8
 # ---------------------------------------------------------------------------
 
