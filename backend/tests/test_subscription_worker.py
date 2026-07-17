@@ -665,3 +665,101 @@ class TestNextCheckAtAdvances:
         vals = _capture_success_update_values(execute_calls)
         assert vals is not None
         assert "next_check_at" not in vals, "grouped sub should not write next_check_at"
+
+
+class TestDiscoveredWorksDispatch:
+    """risk #8: subscription strategy is registry-dispatched, not source-hard-coded."""
+
+    async def test_subscriber_source_routes_to_discovery(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from plugins.models import DiscoveredWorks, NewWork
+        from worker.subscription import _enqueue_for_subscription
+
+        sub = _make_sub(source="fanbox")
+        subscriber = MagicMock()
+        subscriber.discover_new_works = AsyncMock(
+            return_value=DiscoveredWorks(
+                works=[NewWork(url="https://www.fanbox.cc/@artist/posts/9", source_id="9")],
+                latest_id="9",
+                job_options={"fanbox": {"content": "accessible"}},
+            )
+        )
+        subscriber.subscription_identity = MagicMock(return_value="artist")
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        session = _make_mock_session(scalar_result=None)
+
+        with (
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
+            patch("services.download_policy.get_credential_policy", new_callable=AsyncMock) as pol,
+            patch("plugins.registry.plugin_registry.get_subscriber", return_value=subscriber),
+            patch("services.credential.get_credential", new_callable=AsyncMock, return_value="cred"),
+            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            pol.return_value = MagicMock(missing_required=False)
+            result = await _enqueue_for_subscription(_make_ctx(), sub)
+
+        assert result["status"] == "ok"
+        assert result["enqueued"] == 1
+        subscriber.discover_new_works.assert_awaited_once()
+        mock_enqueue.assert_awaited_once()
+
+    async def test_no_subscriber_falls_back_to_url_enqueue(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from worker.subscription import _enqueue_for_subscription
+
+        sub = _make_sub()  # non-subscriber source
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        session = _make_mock_session(scalar_result=None)
+
+        with (
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
+            patch("services.download_policy.get_credential_policy", new_callable=AsyncMock) as pol,
+            patch("plugins.registry.plugin_registry.get_subscriber", return_value=None),
+            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
+            patch("core.queue.enqueue", new_callable=AsyncMock) as mock_enqueue,
+        ):
+            pol.return_value = MagicMock(missing_required=False)
+            result = await _enqueue_for_subscription(_make_ctx(), sub)
+
+        assert result["status"] == "ok"
+        assert "job_id" in result
+        mock_enqueue.assert_awaited_once()  # single URL job, not per-work
+
+    async def test_discovery_failure_marks_subscription_failed(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from worker.subscription import _enqueue_for_subscription
+
+        sub = _make_sub(source="fanbox")
+        subscriber = MagicMock()
+        subscriber.discover_new_works = AsyncMock(side_effect=RuntimeError("api down"))
+        subscriber.subscription_identity = MagicMock(return_value="artist")
+
+        mock_redis = AsyncMock()
+        mock_redis.set = AsyncMock(return_value=True)
+        session = _make_mock_session()
+
+        with (
+            patch("core.redis_client.get_redis", return_value=mock_redis),
+            patch("services.source_health.is_source_enabled", new_callable=AsyncMock, return_value=True),
+            patch("services.download_policy.get_credential_policy", new_callable=AsyncMock) as pol,
+            patch("plugins.registry.plugin_registry.get_subscriber", return_value=subscriber),
+            patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("worker.subscription.AsyncSessionLocal", return_value=session),
+            patch("core.redis_client.publish_job_event", new_callable=AsyncMock),
+        ):
+            pol.return_value = MagicMock(missing_required=False)
+            result = await _enqueue_for_subscription(_make_ctx(), sub)
+
+        assert result["status"] == "failed"
+        session.commit.assert_awaited()

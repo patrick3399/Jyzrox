@@ -32,39 +32,32 @@ def _compute_next_check(cron_expr: str | None, base: datetime) -> datetime | Non
         return None
 
 
-async def _enqueue_fanbox_posts(ctx: dict, sub, *, force_full_scan: bool) -> dict:
-    """Discover Fanbox creator posts and queue each post as its own gallery job."""
+async def _enqueue_discovered_works(ctx: dict, sub, subscriber, *, force_full_scan: bool) -> dict:
+    """Discover a subscription's new works via the registry subscriber and queue each as its own gallery job."""
     from core.redis_client import publish_job_event
-    from plugins.builtin.fanbox.policy import fanbox_policy_from_options
-    from plugins.builtin.fanbox.source import FanboxSourcePlugin
     from services.credential import get_credential
 
+    source = sub.source or subscriber.meta.source_id
+
     try:
-        policy = fanbox_policy_from_options(sub.download_options if isinstance(sub.download_options, dict) else {})
-        plugin = FanboxSourcePlugin()
-        credential = await get_credential("fanbox")
-        # Without a logged-in session, an "all accessible" creator sync means
-        # public/free content only. Avoid enqueueing a noisy job for every paid
-        # post merely to discover that the account has no entitlement.
-        selection_policy = policy
-        if not credential and policy.content != "free_only":
-            selection_policy = policy.model_copy(update={"content": "free_only"})
-        works, latest_id = await plugin.discover_posts(
+        credential = await get_credential(source)
+        result = await subscriber.discover_new_works(
             sub.url,
             None if force_full_scan else sub.last_item_id,
-            selection_policy,
+            sub.download_options if isinstance(sub.download_options, dict) else {},
             credential,
         )
     except Exception as exc:
-        logger.warning("[subscription] Fanbox discovery failed for sub=%d: %s", sub.id, exc)
+        logger.warning("[subscription] %s discovery failed for sub=%d: %s", source, sub.id, exc)
         async with AsyncSessionLocal() as session:
             await session.execute(
                 update(Subscription).where(Subscription.id == sub.id).values(last_status="failed", last_error=str(exc))
             )
             await session.commit()
         return {"status": "failed", "error": str(exc)}
+    works, latest_id = result.works, result.latest_id
 
-    options = {"job_context": "subscription", "fanbox": policy.model_dump(mode="json")}
+    options = {"job_context": "subscription", **result.job_options}
     enqueued: list[tuple[uuid.UUID, NewWork]] = []
     async with AsyncSessionLocal() as session:
         for work in works:
@@ -88,7 +81,7 @@ async def _enqueue_fanbox_posts(ctx: dict, sub, *, force_full_scan: bool) -> dic
                     id=job_id,
                     url=canonical_url,
                     canonical_url=canonical_url,
-                    source="fanbox",
+                    source=source,
                     status="queued",
                     progress={},
                     options=options,
@@ -105,7 +98,7 @@ async def _enqueue_fanbox_posts(ctx: dict, sub, *, force_full_scan: bool) -> dic
             _job_id=str(job_id),
             _timeout=settings.download_job_timeout,
             url=work.url,
-            source="fanbox",
+            source=source,
             options=options,
             db_job_id=str(job_id),
             total=None,
@@ -119,7 +112,7 @@ async def _enqueue_fanbox_posts(ctx: dict, sub, *, force_full_scan: bool) -> dic
         "last_item_id": latest_id or sub.last_item_id,
         "last_status": "queued" if enqueued else "up_to_date",
         "last_error": None,
-        "source_id": FanboxSourcePlugin.creator_id_from_url(sub.url),
+        "source_id": subscriber.subscription_identity(sub.url),
     }
     if sub.group_id is None:
         next_check = _compute_next_check(sub.cron_expr, now)
@@ -225,11 +218,16 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
                 await session.commit()
             return {"status": "skipped", "reason": "credentials_required"}
 
-        # Fanbox creator URLs are collection endpoints. Discovering first and
-        # enqueueing individual post URLs keeps each post as one gallery and
-        # lets the per-subscription policy apply before a paid post is fetched.
-        if source == "fanbox":
-            return await _enqueue_fanbox_posts(ctx, sub, force_full_scan=force_full_scan)
+        # Subscribable sources support per-work incremental discovery: fetching
+        # first and enqueueing individual work URLs keeps each work as one
+        # gallery and lets the per-subscription policy apply before a paid or
+        # gated work is fetched. Sources without the capability fall back to
+        # enqueueing the subscription URL as one archive-refresh job below.
+        from plugins.registry import plugin_registry
+
+        subscriber = plugin_registry.get_subscriber(source)
+        if subscriber is not None:
+            return await _enqueue_discovered_works(ctx, sub, subscriber, force_full_scan=force_full_scan)
 
         canonical_url = normalize_download_url(sub.url)
 
