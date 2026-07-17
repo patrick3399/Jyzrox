@@ -14,6 +14,7 @@ from core.auth import gallery_access_filter, require_auth, require_role
 from core.database import async_session
 from core.utils import detect_source, normalize_subscription_url, validate_cron
 from db.models import DownloadJob, Gallery, Subscription
+from services.download_policy import normalize_source_options
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["subscriptions"])
@@ -222,13 +223,10 @@ async def create_subscription(
 
     cron_expr = req.cron_expr or "0 */2 * * *"
     download_options = req.download_options or {}
-    if source == "fanbox":
-        from plugins.builtin.fanbox.policy import normalized_fanbox_options
-
-        try:
-            download_options = normalized_fanbox_options(download_options)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
+    try:
+        download_options = normalize_source_options(source, download_options)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
     from datetime import datetime
 
     from croniter import croniter
@@ -383,15 +381,10 @@ async def update_subscription(
                     select(Subscription.source).where(Subscription.id == sub_id, Subscription.user_id == user_id)
                 )
             ).scalar_one_or_none()
-        if source == "fanbox":
-            from plugins.builtin.fanbox.policy import normalized_fanbox_options
-
-            try:
-                updates["download_options"] = normalized_fanbox_options(req.download_options)
-            except ValueError as exc:
-                raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
-        else:
-            updates["download_options"] = req.download_options
+        try:
+            updates["download_options"] = normalize_source_options(source or "", req.download_options)
+        except ValueError as exc:
+            raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
 
     if not updates:
         raise HTTPException(status_code=400, detail="No fields to update")

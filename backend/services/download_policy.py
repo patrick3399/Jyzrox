@@ -53,3 +53,18 @@ async def get_credential_policy(source: str) -> CredentialPolicy:
         has_credential=bool(cred),
         warning_code=cfg.credential_warning_code if missing_recommended else None,
     )
+
+
+def normalize_source_options(source: str, options: dict | None) -> dict | None:
+    """Apply source-specific download-option policy before persisting a job.
+
+    Raises ValueError when the options are invalid for the source. The fanbox
+    dispatch is hard-coded for now; the long-term home is a plugin-registry
+    capability (architecture risk #2), but routers should already go through
+    this seam instead of importing plugins.builtin internals.
+    """
+    if source == "fanbox":
+        from plugins.builtin.fanbox.policy import normalized_fanbox_options
+
+        return normalized_fanbox_options(options)
+    return options

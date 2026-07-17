@@ -479,7 +479,7 @@ async def set_site_credential(req: SiteCredentialRequest, _: dict = Depends(_adm
 
     fragment: dict = {}
     if req.cookies:
-        from plugins.builtin.gallery_dl._credentials import parse_cookie_input
+        from services.credential import parse_cookie_input
 
         parsed = parse_cookie_input(req.cookies)
         if not parsed:

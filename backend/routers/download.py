@@ -22,7 +22,7 @@ from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites, normalize_download_url
 from db.models import DownloadJob, Gallery
-from services.download_policy import get_credential_policy
+from services.download_policy import get_credential_policy, normalize_source_options
 from services.download_presenter import serialize_download_job
 from worker.helpers import compute_job_key, enqueue_download_job
 
@@ -178,13 +178,10 @@ async def _enqueue(
         }
 
     source = detect_source(canonical_url)
-    if source == "fanbox":
-        from plugins.builtin.fanbox.policy import normalized_fanbox_options
-
-        try:
-            options = normalized_fanbox_options(options)
-        except ValueError as exc:
-            raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
+    try:
+        options = normalize_source_options(source, options)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=f"Invalid Fanbox download policy: {exc}") from exc
     job_id = uuid.uuid4()
     initial_progress = {"total": total} if total is not None else {}
 

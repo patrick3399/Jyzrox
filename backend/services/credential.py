@@ -66,3 +66,14 @@ async def list_credentials() -> list[dict]:
             {"source": c.source, "credential_type": c.credential_type, "configured": True}
             for c in result.scalars().all()
         ]
+
+
+def parse_cookie_input(raw: str) -> dict[str, str]:
+    """Parse user-pasted cookie text into a name→value dict.
+
+    Thin wrapper over the gallery-dl plugin's parser so routers do not import
+    plugins.builtin internals (pre-commit gate 2 / architecture risk #2).
+    """
+    from plugins.builtin.gallery_dl._credentials import parse_cookie_input as _parse
+
+    return _parse(raw)
