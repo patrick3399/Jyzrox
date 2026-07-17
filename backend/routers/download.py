@@ -22,7 +22,7 @@ from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites, normalize_download_url
 from db.models import DownloadJob, Gallery
-from services.credential import get_credential
+from services.download_policy import get_credential_policy
 from services.download_presenter import serialize_download_job
 from worker.helpers import compute_job_key, enqueue_download_job
 
@@ -117,20 +117,13 @@ async def _credential_warning(source: str) -> str | None:
 
     Raises HTTPException for sources that strictly require credentials (e.g. Pixiv).
     """
-    from plugins.builtin.gallery_dl._sites import get_site_config
-
-    cfg = get_site_config(source)
-    if cfg.credential_requirement == "none":
-        return None
-    cred = await get_credential(cfg.source_id)
-    if cfg.credential_requirement == "required" and not cred:
+    policy = await get_credential_policy(source)
+    if policy.missing_required:
         raise HTTPException(
             status_code=400,
-            detail=f"{cfg.name} credentials not configured. Go to Settings → Credentials to set up.",
+            detail=f"{policy.source_name} credentials not configured. Go to Settings → Credentials to set up.",
         )
-    if cfg.credential_requirement == "recommended" and not cred:
-        return cfg.credential_warning_code
-    return None
+    return policy.warning_code
 
 
 async def _check_source_enabled(source: str) -> None:

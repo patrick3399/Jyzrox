@@ -177,7 +177,7 @@ class TestCredentialWarning:
         """EH source with no credential should return 'eh_credentials_recommended'."""
         from routers.download import _credential_warning
 
-        with patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None):
+        with patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None):
             result = await _credential_warning("ehentai")
 
         assert result == "eh_credentials_recommended"
@@ -186,7 +186,7 @@ class TestCredentialWarning:
         """exhentai source with no credential should return 'eh_credentials_recommended'."""
         from routers.download import _credential_warning
 
-        with patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None):
+        with patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None):
             result = await _credential_warning("exhentai")
 
         assert result == "eh_credentials_recommended"
@@ -196,7 +196,7 @@ class TestCredentialWarning:
         from routers.download import _credential_warning
 
         fake_cred = '{"ipb_member_id": "12345", "ipb_pass_hash": "abc"}'
-        with patch("routers.download.get_credential", new_callable=AsyncMock, return_value=fake_cred):
+        with patch("services.credential.get_credential", new_callable=AsyncMock, return_value=fake_cred):
             result = await _credential_warning("ehentai")
 
         assert result is None
@@ -208,7 +208,7 @@ class TestCredentialWarning:
 
         from routers.download import _credential_warning
 
-        with patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None):
+        with patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None):
             with pytest.raises(HTTPException) as exc_info:
                 await _credential_warning("pixiv")
 
@@ -219,7 +219,7 @@ class TestCredentialWarning:
         """Pixiv source with credential configured should return None (no warning)."""
         from routers.download import _credential_warning
 
-        with patch("routers.download.get_credential", new_callable=AsyncMock, return_value="my_refresh_token"):
+        with patch("services.credential.get_credential", new_callable=AsyncMock, return_value="my_refresh_token"):
             result = await _credential_warning("pixiv")
 
         assert result is None
@@ -263,7 +263,7 @@ class TestEnqueueDownload:
         mock_redis.get = AsyncMock(return_value=b"1")  # source enabled
 
         with (
-            patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await client.post(
@@ -285,7 +285,7 @@ class TestEnqueueDownload:
         fake_cred = '{"ipb_member_id": "99999", "ipb_pass_hash": "hashval"}'
 
         with (
-            patch("routers.download.get_credential", new_callable=AsyncMock, return_value=fake_cred),
+            patch("services.credential.get_credential", new_callable=AsyncMock, return_value=fake_cred),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await client.post(
@@ -302,7 +302,7 @@ class TestEnqueueDownload:
     async def test_enqueue_pixiv_url_no_credential_returns_warning(self, client):
         """Enqueue Pixiv URL without credentials raises 400 (credentials required)."""
         with (
-            patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await client.post(
@@ -322,7 +322,7 @@ class TestEnqueueDownload:
     async def test_enqueue_response_includes_warning_field(self, client):
         """The enqueue response dict always includes a 'warning' key."""
         with (
-            patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await client.post(
@@ -841,7 +841,7 @@ class TestQuickDownload:
         accepted as known SQLite limitations.
         """
         with (
-            patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await member_client.post(
@@ -873,7 +873,7 @@ class TestEnqueueDuplicateGuard:
         """Enqueueing a URL already in queued/running state should return the existing job_id."""
         await _insert_job(db_session, url="https://e-hentai.org/g/555/dupe/", status="queued", user_id=1)
         with (
-            patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await member_client.post(
@@ -979,7 +979,7 @@ class TestEnqueueOptions:
     async def test_enqueue_with_total_field(self, member_client):
         """Providing total field should not cause a validation error."""
         with (
-            patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await member_client.post(
@@ -991,7 +991,7 @@ class TestEnqueueOptions:
     async def test_enqueue_with_filesize_options(self, member_client):
         """filesize_min and filesize_max should be passed to enqueue without error."""
         with (
-            patch("routers.download.get_credential", new_callable=AsyncMock, return_value=None),
+            patch("services.credential.get_credential", new_callable=AsyncMock, return_value=None),
             patch("routers.download._check_source_enabled", new_callable=AsyncMock),
         ):
             resp = await member_client.post(

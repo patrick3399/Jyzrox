@@ -208,26 +208,22 @@ async def _enqueue_for_subscription(ctx: dict, sub, force_full_scan: bool = Fals
             return {"status": "skipped", "reason": "source_disabled"}
 
         # Credential check — skip if required credentials are missing
-        from plugins.builtin.gallery_dl._sites import get_site_config
+        from services.download_policy import get_credential_policy
 
-        cfg = get_site_config(source)
-        if cfg.credential_requirement == "required":
-            from services.credential import get_credential
-
-            cred = await get_credential(cfg.source_id)
-            if not cred:
-                logger.warning("[subscription] sub=%d source '%s' requires credentials, skipping", sub.id, source)
-                async with AsyncSessionLocal() as session:
-                    await session.execute(
-                        update(Subscription)
-                        .where(Subscription.id == sub.id)
-                        .values(
-                            last_status="failed",
-                            last_error=f"{cfg.name} credentials not configured",
-                        )
+        policy = await get_credential_policy(source)
+        if policy.missing_required:
+            logger.warning("[subscription] sub=%d source '%s' requires credentials, skipping", sub.id, source)
+            async with AsyncSessionLocal() as session:
+                await session.execute(
+                    update(Subscription)
+                    .where(Subscription.id == sub.id)
+                    .values(
+                        last_status="failed",
+                        last_error=f"{policy.source_name} credentials not configured",
                     )
-                    await session.commit()
-                return {"status": "skipped", "reason": "credentials_required"}
+                )
+                await session.commit()
+            return {"status": "skipped", "reason": "credentials_required"}
 
         # Fanbox creator URLs are collection endpoints. Discovering first and
         # enqueueing individual post URLs keeps each post as one gallery and
