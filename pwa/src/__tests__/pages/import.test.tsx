@@ -23,7 +23,10 @@ vi.mock('@/components/LoadingSpinner', () => ({
 
 vi.mock('@/hooks/useImport', () => ({
   useBrowseFs: () => ({ data: { parent: null, entries: [] }, isLoading: false }),
-  useMountPoints: () => ({ data: { mounts: [] }, isLoading: false }),
+  useMountPoints: () => ({
+    data: { mounts: [{ name: 'media', path: '/mnt/media', type: 'disk' }] },
+    isLoading: false,
+  }),
   useBatchScan: () => ({ trigger: mockBatchScanTrigger, isMutating: false }),
   useBatchStart: () => ({ trigger: mockBatchStartTrigger }),
   useBatchProgress: () => ({ data: undefined }),
@@ -43,7 +46,7 @@ describe('ImportPage', () => {
       matches: [
         {
           rel_path: 'Alice/Gallery',
-          abs_path: '/mnt/ssd-data/images/Alice/Gallery',
+          abs_path: '/mnt/media/Alice/Gallery',
           artist: 'Alice',
           title: 'Gallery',
           file_count: 3,
@@ -69,7 +72,7 @@ describe('ImportPage', () => {
     render(<ImportPage />)
 
     fireEvent.click(screen.getByText('import.zoneB.selectFolder'))
-    fireEvent.click(screen.getByText('/mnt/ssd-data/images/{artist}/{_}/{title}'))
+    fireEvent.click(screen.getByText('/mnt/media/{artist}/{_}/{title}'))
     fireEvent.click(screen.getByText('import.folderPicker.select'))
 
     fireEvent.click(screen.getByText('import.batch.scan'))
@@ -78,10 +81,22 @@ describe('ImportPage', () => {
 
     await waitFor(() => {
       expect(mockBatchStartTrigger).toHaveBeenCalledWith({
-        rootDir: '/mnt/ssd-data/images/{artist}/{_}/{title}',
+        rootDir: '/mnt/media/{artist}/{_}/{title}',
         mode: 'copy',
-        galleries: [{ path: '/mnt/ssd-data/images/Alice/Gallery', artist: 'Alice', title: 'Gallery' }],
+        galleries: [{ path: '/mnt/media/Alice/Gallery', artist: 'Alice', title: 'Gallery' }],
       })
     })
+  })
+
+  it('roots the folder picker pattern example in a real mount, not a baked-in path', async () => {
+    const { default: ImportPage } = await import('@/app/import/page')
+    render(<ImportPage />)
+
+    fireEvent.click(screen.getByText('import.zoneB.selectFolder'))
+
+    // The example must be built from the host's own mount points; a hardcoded
+    // path would name a directory that exists on one developer's machine only.
+    expect(screen.getByText('/mnt/media/{artist}/{_}/{title}')).toBeInTheDocument()
+    expect(screen.queryByText(/ssd-data/)).toBeNull()
   })
 })

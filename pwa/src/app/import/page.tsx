@@ -95,6 +95,12 @@ function FolderPicker({
   const isLoading = showMounts ? mountsLoading : fsLoading
   const displayPath = currentPath ?? t('import.folderPicker.mountPoints')
 
+  // Root the pattern example in a path that exists on THIS host: wherever the
+  // user has browsed to, else their first real mount point.
+  const patternBase =
+    currentPath && currentPath !== '/' ? currentPath : (mountData?.mounts?.[0]?.path ?? '')
+  const patternExample = `${patternBase}/{artist}/{_}/{title}`
+
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
       <div className="bg-vault-card border border-vault-border rounded-xl w-full max-w-lg mx-4 max-h-[80vh] flex flex-col">
@@ -138,7 +144,7 @@ function FolderPicker({
                 onBlur={handlePathSubmit}
                 autoFocus
                 className="flex-1 bg-vault-input border border-vault-accent rounded px-2 py-1 text-xs font-mono text-vault-text focus:outline-none"
-                placeholder="/mnt/ssd-data/images/{artist}/{_}/{title}"
+                placeholder={patternExample}
               />
             ) : (
               <button
@@ -220,12 +226,12 @@ function FolderPicker({
         <div className="px-4 py-3 border-t border-vault-border">
           <button
             onClick={() => {
-              setEditingPath('/mnt/ssd-data/images/{artist}/{_}/{title}')
+              setEditingPath(patternExample)
               setIsEditing(true)
             }}
-            className="w-full mb-2 px-3 py-2 text-xs border border-vault-border text-vault-text rounded hover:border-vault-accent transition-colors font-mono"
+            className="w-full mb-2 px-3 py-2 text-xs border border-vault-border text-vault-text rounded hover:border-vault-accent transition-colors font-mono truncate"
           >
-            /mnt/ssd-data/images/{'{artist}'}/{'{_}'}/{'{title}'}
+            {patternExample}
           </button>
           <button
             onClick={() => onSelect(editingPath.trim() || currentPath || '/')}
