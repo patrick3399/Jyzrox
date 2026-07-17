@@ -16,6 +16,12 @@ class TestCapabilityModels:
         r = RemoteMetadataResult(status="error", reason="fetch_failed")
         assert r.status == "error" and r.reason == "fetch_failed"
 
+    def test_discovered_works_defaults(self):
+        from plugins.models import DiscoveredWorks
+
+        d = DiscoveredWorks()
+        assert d.works == [] and d.latest_id is None and d.job_options == {}
+
 
 class TestRegistryCapabilityMaps:
     def test_fresh_registry_has_no_capabilities(self):
@@ -27,7 +33,7 @@ class TestRegistryCapabilityMaps:
         assert r.get_subscriber("ehentai") is None
         assert r.list_previewable() == []
 
-    def test_builtin_eh_and_pixiv_register_subscribable(self):
+    def test_subscribable_requires_discovery_contract(self):
         from plugins.builtin.ehentai.source import EhSourcePlugin
         from plugins.builtin.pixiv.source import PixivSourcePlugin
         from plugins.registry import PluginRegistry
@@ -35,8 +41,9 @@ class TestRegistryCapabilityMaps:
         r = PluginRegistry()
         r.register(EhSourcePlugin())
         r.register(PixivSourcePlugin())
-        assert r.get_subscriber("ehentai") is not None
-        assert r.get_subscriber("pixiv") is not None
+        # legacy check_new_works alone no longer qualifies as Subscribable
+        assert r.get_subscriber("ehentai") is None
+        assert r.get_subscriber("pixiv") is None
 
     def test_builtin_eh_registers_previewable_and_refreshable(self):
         from plugins.builtin.ehentai.source import EhSourcePlugin

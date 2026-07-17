@@ -11,10 +11,10 @@ from plugins.models import (
     BrowseSchema,
     CredentialFlow,
     CredentialStatus,
+    DiscoveredWorks,
     DownloadResult,
     GalleryImportData,
     GalleryMetadata,
-    NewWork,
     PluginMeta,
     PreviewData,
     ProcessResult,
@@ -119,14 +119,24 @@ class Refreshable(Protocol):
 
 @runtime_checkable
 class Subscribable(Protocol):
+    """Incremental subscription discovery.
+
+    Plugins that register this capability get per-work incremental checks from
+    the subscription worker; sources without it fall back to enqueueing the
+    subscription URL as one archive-refresh download job (risk #8).
+    """
+
     meta: PluginMeta
 
-    async def check_new_works(
+    def subscription_identity(self, url: str) -> str | None: ...
+
+    async def discover_new_works(
         self,
-        artist_id: str,
+        url: str,
         last_known: str | None,
-        credentials: dict | None,
-    ) -> list[NewWork]: ...
+        options: dict,
+        credentials: dict | str | None,
+    ) -> DiscoveredWorks: ...
 
 
 # ---------------------------------------------------------------------------

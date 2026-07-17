@@ -66,6 +66,19 @@ class NewWork(BaseModel):
     posted_at: datetime | None = None
 
 
+class DiscoveredWorks(BaseModel):
+    """Result of a subscription discovery pass (Subscribable capability).
+
+    latest_id is the new boundary independent of per-subscription policy, so a
+    filtered subscription can advance past skipped items; None means keep the
+    previous boundary. job_options are merged into every enqueued job's options.
+    """
+
+    works: list[NewWork] = []
+    latest_id: str | None = None
+    job_options: dict = {}
+
+
 class PreviewData(BaseModel):
     """Metadata preview for a URL before downloading (Previewable capability)."""
 
