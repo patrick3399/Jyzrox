@@ -7,19 +7,37 @@ from sqlalchemy.dialects.postgresql import insert as pg_insert
 
 from core.database import async_session
 from core.redis_client import get_redis
+from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
 from db.models import Blob, BlobRelationship
 from worker.dedup_helpers import _now_iso, _scan_candidates
+from worker.helpers import _cron_record, _cron_should_run
 
 logger = logging.getLogger("worker.dedup_tier1")
 
 
-async def dedup_tier1_job(ctx: dict) -> dict:
+async def dedup_tier1_job(ctx: dict, force: bool = False) -> dict:
     """Scan all blobs for similar pairs using perceptual hashing.
 
     Writes matching pairs into blob_relationships with relationship='needs_t2'.
     Uses a pigeonhole pre-filter on pHash quadrants (q0+q1) to skip obviously
     dissimilar pairs before computing the full 64-bit Hamming distance.
     """
+    defn = CONFIGURABLE_TASK_DEFS["dedup_tier1"]
+    if not force and not await _cron_should_run(ctx, defn.task_id, defn.default_cron, defn.default_enabled):
+        logger.info("cron gate not reached — skip")
+        return {"status": "skipped", "reason": "cron_gate"}
+    await _cron_record(ctx, defn.task_id, "running")
+    try:
+        result = await _scan_all_blobs()
+    except Exception as exc:
+        await _cron_record(ctx, defn.task_id, "failed", str(exc))
+        raise
+    status = result.get("status", "ok")
+    await _cron_record(ctx, defn.task_id, "ok" if status == "ok" else result.get("reason", status))
+    return result
+
+
+async def _scan_all_blobs() -> dict:
     r = get_redis()
 
     enabled = await r.get("setting:dedup_phash_enabled")

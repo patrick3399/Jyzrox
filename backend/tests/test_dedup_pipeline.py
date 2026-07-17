@@ -98,6 +98,11 @@ async def _insert_relationship(
     return result.fetchone()[0]
 
 
+def _make_ctx() -> dict:
+    """SAQ-style ctx with a mocked redis for the cron gate/record calls."""
+    return {"redis": _make_redis()}
+
+
 def _make_redis(overrides: dict | None = None) -> AsyncMock:
     r = AsyncMock()
     r.get = AsyncMock(return_value=None)
@@ -131,7 +136,7 @@ class TestDedupTier1:
         r.get = AsyncMock(return_value=b"0")
 
         with patch("worker.dedup_tier1.get_redis", return_value=r):
-            result = await dedup_tier1_job({})
+            result = await dedup_tier1_job(_make_ctx(), force=True)
 
         assert result["status"] == "skipped"
         assert result["reason"] == "disabled"
@@ -148,7 +153,7 @@ class TestDedupTier1:
             patch("worker.dedup_tier1.get_redis", return_value=r),
             patch("worker.dedup_tier1.async_session", fake_db),
         ):
-            result = await dedup_tier1_job({})
+            result = await dedup_tier1_job(_make_ctx(), force=True)
 
         assert result["status"] == "ok"
         assert result["inserted"] == 0
@@ -183,7 +188,7 @@ class TestDedupTier1:
             patch("worker.dedup_tier1.get_redis", return_value=r),
             patch("worker.dedup_tier1.async_session", fake_db),
         ):
-            result = await dedup_tier1_job({})
+            result = await dedup_tier1_job(_make_ctx(), force=True)
 
         # With threshold=0 even hamming dist=0 would be accepted (0 <= 0)
         # Both blobs have identical phash_int so dist=0 which passes threshold=0
@@ -213,7 +218,7 @@ class TestDedupTier1:
             patch("worker.dedup_tier1.get_redis", return_value=r),
             patch("worker.dedup_tier1.async_session", fake_db),
         ):
-            result = await dedup_tier1_job({})
+            result = await dedup_tier1_job(_make_ctx(), force=True)
 
         assert result["status"] == "ok"
         # The pair with high q0 difference must have been skipped
@@ -249,7 +254,7 @@ class TestDedupTier1:
             patch("worker.dedup_tier1.get_redis", return_value=r),
             patch("worker.dedup_tier1.async_session", fake_db),
         ):
-            result = await dedup_tier1_job({})
+            result = await dedup_tier1_job(_make_ctx(), force=True)
 
         assert result["status"] == "ok"
         count = (
@@ -280,8 +285,8 @@ class TestDedupTier1:
             patch("worker.dedup_tier1.get_redis", return_value=r),
             patch("worker.dedup_tier1.async_session", fake_db),
         ):
-            await dedup_tier1_job({})
-            await dedup_tier1_job({})
+            await dedup_tier1_job(_make_ctx(), force=True)
+            await dedup_tier1_job(_make_ctx(), force=True)
 
         count = (
             await db_session.execute(
@@ -309,7 +314,7 @@ class TestDedupTier1:
             patch("worker.dedup_tier1.get_redis", return_value=r),
             patch("worker.dedup_tier1.async_session", fake_db),
         ):
-            await dedup_tier1_job({})
+            await dedup_tier1_job(_make_ctx(), force=True)
 
         set_calls = [call.args[0] for call in r.set.call_args_list]
         assert any("last_run" in k for k in set_calls)
@@ -323,7 +328,7 @@ class TestDedupTier1:
         r.get = AsyncMock(return_value=None)
 
         with patch("worker.dedup_tier1.get_redis", return_value=r):
-            result = await dedup_tier1_job({})
+            result = await dedup_tier1_job(_make_ctx(), force=True)
 
         assert result["status"] == "skipped"
 
@@ -351,7 +356,7 @@ class TestDedupTier1:
             patch("worker.dedup_tier1.get_redis", return_value=r),
             patch("worker.dedup_tier1.async_session", fake_db),
         ):
-            await dedup_tier1_job({})
+            await dedup_tier1_job(_make_ctx(), force=True)
 
         count = (
             await db_session.execute(
@@ -378,7 +383,7 @@ class TestDedupTier2:
         r.get = AsyncMock(return_value=b"0")
 
         with patch("worker.dedup_tier2.get_redis", return_value=r):
-            result = await dedup_tier2_job({})
+            result = await dedup_tier2_job(_make_ctx(), force=True)
 
         assert result["status"] == "skipped"
         assert result["reason"] == "disabled"
@@ -395,7 +400,7 @@ class TestDedupTier2:
             patch("worker.dedup_tier2.get_redis", return_value=r),
             patch("worker.dedup_tier2.async_session", fake_db),
         ):
-            result = await dedup_tier2_job({})
+            result = await dedup_tier2_job(_make_ctx(), force=True)
 
         assert result["status"] == "ok"
         assert result["processed"] == 0
@@ -427,7 +432,7 @@ class TestDedupTier2:
             patch("worker.dedup_tier2.get_redis", return_value=r),
             patch("worker.dedup_tier2.async_session", fake_db),
         ):
-            result = await dedup_tier2_job({})
+            result = await dedup_tier2_job(_make_ctx(), force=True)
 
         assert result["status"] == "ok"
         assert result["processed"] >= 1
@@ -469,7 +474,7 @@ class TestDedupTier2:
             patch("worker.dedup_tier2.get_redis", return_value=r),
             patch("worker.dedup_tier2.async_session", fake_db),
         ):
-            await dedup_tier2_job({})
+            await dedup_tier2_job(_make_ctx(), force=True)
 
         row = (
             await db_session.execute(
@@ -507,7 +512,7 @@ class TestDedupTier2:
             patch("worker.dedup_tier2.get_redis", return_value=r),
             patch("worker.dedup_tier2.async_session", fake_db),
         ):
-            await dedup_tier2_job({})
+            await dedup_tier2_job(_make_ctx(), force=True)
 
         row = (
             await db_session.execute(
@@ -544,7 +549,7 @@ class TestDedupTier2:
             patch("worker.dedup_tier2.get_redis", return_value=r),
             patch("worker.dedup_tier2.async_session", fake_db),
         ):
-            await dedup_tier2_job({})
+            await dedup_tier2_job(_make_ctx(), force=True)
 
         row = (
             await db_session.execute(
@@ -584,7 +589,7 @@ class TestDedupTier2:
             patch("worker.dedup_tier2.get_redis", return_value=r),
             patch("worker.dedup_tier2.async_session", fake_db),
         ):
-            result = await dedup_tier2_job({})
+            result = await dedup_tier2_job(_make_ctx(), force=True)
 
         assert result["processed"] >= 3
 
@@ -600,7 +605,7 @@ class TestDedupTier2:
             patch("worker.dedup_tier2.get_redis", return_value=r),
             patch("worker.dedup_tier2.async_session", fake_db),
         ):
-            await dedup_tier2_job({})
+            await dedup_tier2_job(_make_ctx(), force=True)
 
         set_calls = [call.args[0] for call in r.set.call_args_list]
         assert any("last_run" in k for k in set_calls)
@@ -614,7 +619,7 @@ class TestDedupTier2:
         r.get = AsyncMock(return_value=None)
 
         with patch("worker.dedup_tier2.get_redis", return_value=r):
-            result = await dedup_tier2_job({})
+            result = await dedup_tier2_job(_make_ctx(), force=True)
 
         assert result["status"] == "skipped"
 
@@ -635,7 +640,7 @@ class TestDedupTier3:
         r.get = AsyncMock(return_value=b"0")
 
         with patch("worker.dedup_tier3.get_redis", return_value=r):
-            result = await dedup_tier3_job({})
+            result = await dedup_tier3_job(_make_ctx(), force=True)
 
         assert result["status"] == "skipped"
         assert result["reason"] == "disabled"
@@ -652,7 +657,7 @@ class TestDedupTier3:
             patch("worker.dedup_tier3.get_redis", return_value=r),
             patch("worker.dedup_tier3.async_session", fake_db),
         ):
-            result = await dedup_tier3_job({})
+            result = await dedup_tier3_job(_make_ctx(), force=True)
 
         assert result["status"] == "ok"
         assert result["processed"] == 0
@@ -691,7 +696,7 @@ class TestDedupTier3:
                 return_value=(0.95, "compression_noise"),
             ),
         ):
-            result = await dedup_tier3_job({})
+            result = await dedup_tier3_job(_make_ctx(), force=True)
 
         assert result["status"] == "ok"
         assert result["processed"] >= 1
@@ -738,7 +743,7 @@ class TestDedupTier3:
                 return_value=(0.40, "localized_diff"),
             ),
         ):
-            await dedup_tier3_job({})
+            await dedup_tier3_job(_make_ctx(), force=True)
 
         row = (
             await db_session.execute(
@@ -791,7 +796,7 @@ class TestDedupTier3:
             patch("worker.dedup_tier3.resolve_blob_path", return_value=MagicMock(__str__=lambda self: "/fake.jpg")),
             patch("worker.dedup_tier3._opencv_pixel_diff", side_effect=_failing_diff),
         ):
-            result = await dedup_tier3_job({})
+            result = await dedup_tier3_job(_make_ctx(), force=True)
 
         # First pair failed → marked quality_conflict; second pair succeeded → processed
         assert result["status"] == "ok"
@@ -818,7 +823,7 @@ class TestDedupTier3:
             patch("worker.dedup_tier3.get_redis", return_value=r),
             patch("worker.dedup_tier3.async_session", fake_db),
         ):
-            await dedup_tier3_job({})
+            await dedup_tier3_job(_make_ctx(), force=True)
 
         set_calls = [call.args[0] for call in r.set.call_args_list]
         assert any("last_run" in k for k in set_calls)
@@ -832,7 +837,7 @@ class TestDedupTier3:
         r.get = AsyncMock(return_value=None)
 
         with patch("worker.dedup_tier3.get_redis", return_value=r):
-            result = await dedup_tier3_job({})
+            result = await dedup_tier3_job(_make_ctx(), force=True)
 
         assert result["status"] == "skipped"
 
@@ -867,7 +872,7 @@ class TestDedupTier3:
                 return_value=(0.9, "compression_noise"),
             ),
         ):
-            await dedup_tier3_job({})
+            await dedup_tier3_job(_make_ctx(), force=True)
 
         row = (
             await db_session.execute(
@@ -878,3 +883,79 @@ class TestDedupTier3:
         # score 0.9 >= threshold 0.9 → confirmed similar
         assert row is not None
         assert row[0] in ("quality_conflict", "variant")
+
+
+# ---------------------------------------------------------------------------
+# TestDedupTierCronGate — edge case #25 regression
+# ---------------------------------------------------------------------------
+
+
+class TestDedupTierCronGate:
+    """Edge case #25: scheduled-task UI enable/cron controls were dead for the
+    dedup tiers — the jobs never consulted the cron:{task_id}:* namespace."""
+
+    @staticmethod
+    def _tier(n: int):
+        import worker.dedup_tier1 as t1
+        import worker.dedup_tier2 as t2
+        import worker.dedup_tier3 as t3
+
+        return {
+            1: (t1.dedup_tier1_job, "worker.dedup_tier1"),
+            2: (t2.dedup_tier2_job, "worker.dedup_tier2"),
+            3: (t3.dedup_tier3_job, "worker.dedup_tier3"),
+        }[n]
+
+    @staticmethod
+    def _cron_redis(values: dict[str, bytes | None]) -> AsyncMock:
+        r = _make_redis()
+
+        async def _get(key):
+            return values.get(key)
+
+        r.get = AsyncMock(side_effect=_get)
+        return r
+
+    async def test_cron_invocation_with_default_disabled_skips_without_running(self):
+        """default_enabled=False + no UI override → cron firing must not run the scan."""
+        for n in (1, 2, 3):
+            job, module = self._tier(n)
+            ctx = {"redis": self._cron_redis({})}
+            with patch(f"{module}.get_redis") as body_redis:
+                result = await job(ctx)
+
+            assert result == {"status": "skipped", "reason": "cron_gate"}, f"tier{n}"
+            body_redis.assert_not_called()
+
+    async def test_cron_invocation_with_ui_disabled_skips_even_when_dedup_toggle_on(self):
+        """UI 'Enabled=off' must win even while setting:dedup_*_enabled is on."""
+        for n in (1, 2, 3):
+            job, module = self._tier(n)
+            ctx = {"redis": self._cron_redis({f"cron:dedup_tier{n}:enabled": b"0"})}
+            body = _make_redis()
+            body.get = AsyncMock(return_value=b"1")  # global dedup toggles all on
+            with patch(f"{module}.get_redis", return_value=body):
+                result = await job(ctx)
+
+            assert result == {"status": "skipped", "reason": "cron_gate"}, f"tier{n}"
+            body.get.assert_not_called()
+
+    async def test_cron_invocation_with_ui_enabled_reaches_job_body(self):
+        """UI 'Enabled=on' must let the cron firing proceed into the tier body."""
+        for n in (1, 2, 3):
+            job, module = self._tier(n)
+            ctx = {"redis": self._cron_redis({f"cron:dedup_tier{n}:enabled": b"1"})}
+            body = _make_redis()
+            body.get = AsyncMock(return_value=b"0")  # body sees dedup toggle off
+            with patch(f"{module}.get_redis", return_value=body):
+                result = await job(ctx)
+
+            # Reaching the body's own toggle check proves the gate opened.
+            assert result == {"status": "skipped", "reason": "disabled"}, f"tier{n}"
+
+    async def test_manual_run_kwargs_force_bypass_cron_gate(self):
+        """Scheduled-task 'Run Now' must enqueue the tiers with force=True (BE-T8)."""
+        from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
+
+        for task_id in ("dedup_tier1", "dedup_tier2", "dedup_tier3"):
+            assert CONFIGURABLE_TASK_DEFS[task_id].manual_kwargs == {"force": True}, task_id

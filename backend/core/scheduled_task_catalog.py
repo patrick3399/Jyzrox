@@ -97,6 +97,7 @@ CATALOG: list[ScheduledTaskDef] = [
         default_cron="0 8 * * *",
         default_enabled=False,
         saq_timeout=14400,
+        manual_kwargs={"force": True},
     ),
     ScheduledTaskDef(
         task_id="dedup_tier2",
@@ -106,6 +107,7 @@ CATALOG: list[ScheduledTaskDef] = [
         default_cron="0 9 * * *",
         default_enabled=False,
         saq_timeout=3600,
+        manual_kwargs={"force": True},
     ),
     ScheduledTaskDef(
         task_id="dedup_tier3",
@@ -115,6 +117,7 @@ CATALOG: list[ScheduledTaskDef] = [
         default_cron="0 2 * * *",
         default_enabled=False,
         saq_timeout=7200,
+        manual_kwargs={"force": True},
     ),
     ScheduledTaskDef(
         task_id="retry_downloads",

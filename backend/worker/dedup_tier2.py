@@ -6,19 +6,37 @@ from sqlalchemy import select, update
 
 from core.database import async_session
 from core.redis_client import get_redis
+from core.scheduled_task_catalog import CONFIGURABLE_TASK_DEFS
 from db.models import Blob, BlobRelationship, Image
 from worker.dedup_helpers import _classify_pair, _now_iso
+from worker.helpers import _cron_record, _cron_should_run
 
 logger = logging.getLogger("worker.dedup_tier2")
 
 
-async def dedup_tier2_job(ctx: dict) -> dict:
+async def dedup_tier2_job(ctx: dict, force: bool = False) -> dict:
     """Classify needs_t2 pairs using resolution/file-size heuristics.
 
     Reads pairs with relationship='needs_t2' and moves them to:
     - 'needs_t3'       if OpenCV is enabled (defer to Tier 3 for pixel validation)
     - 'quality_conflict' / 'variant'  otherwise (send directly to review queue)
     """
+    defn = CONFIGURABLE_TASK_DEFS["dedup_tier2"]
+    if not force and not await _cron_should_run(ctx, defn.task_id, defn.default_cron, defn.default_enabled):
+        logger.info("cron gate not reached — skip")
+        return {"status": "skipped", "reason": "cron_gate"}
+    await _cron_record(ctx, defn.task_id, "running")
+    try:
+        result = await _classify_pending_pairs()
+    except Exception as exc:
+        await _cron_record(ctx, defn.task_id, "failed", str(exc))
+        raise
+    status = result.get("status", "ok")
+    await _cron_record(ctx, defn.task_id, "ok" if status == "ok" else result.get("reason", status))
+    return result
+
+
+async def _classify_pending_pairs() -> dict:
     r = get_redis()
 
     enabled = await r.get("setting:dedup_phash_enabled")
