@@ -1552,21 +1552,18 @@ class TestSwarmUiSettings:
         mock_redis.set = AsyncMock(return_value=True)
 
         get_response = await client.get("/api/settings/swarmui")
-        patch_response = await client.patch(
-            "/api/settings/swarmui", json={"url": "http://192.168.10.219:7801/"}
-        )
+        patch_response = await client.patch("/api/settings/swarmui", json={"url": "http://swarmui.example.com:7801/"})
 
         assert get_response.status_code == 200
-        assert get_response.json()["url"].startswith("http")
+        # Unset means unset — the endpoint must not hand back a fallback host.
+        assert get_response.json()["url"] == ""
         assert patch_response.status_code == 200
-        assert patch_response.json() == {"url": "http://192.168.10.219:7801"}
-        mock_redis.set.assert_awaited_with("setting:swarmui_url", "http://192.168.10.219:7801")
+        assert patch_response.json() == {"url": "http://swarmui.example.com:7801"}
+        mock_redis.set.assert_awaited_with("setting:swarmui_url", "http://swarmui.example.com:7801")
 
     async def test_patch_swarmui_rejects_credentials(self, client, db_session):
         await _insert_user(db_session)
-        response = await client.patch(
-            "/api/settings/swarmui", json={"url": "http://user:secret@swarm.local:7801"}
-        )
+        response = await client.patch("/api/settings/swarmui", json={"url": "http://user:secret@swarm.local:7801"})
         assert response.status_code == 422
 
     async def test_get_and_patch_captioner_url(self, client, db_session, mock_redis):
@@ -1575,9 +1572,7 @@ class TestSwarmUiSettings:
         mock_redis.set = AsyncMock(return_value=True)
 
         get_response = await client.get("/api/settings/captioner")
-        patch_response = await client.patch(
-            "/api/settings/captioner", json={"url": "http://captioner:8200/"}
-        )
+        patch_response = await client.patch("/api/settings/captioner", json={"url": "http://captioner:8200/"})
 
         assert get_response.status_code == 200
         assert patch_response.json() == {"url": "http://captioner:8200"}

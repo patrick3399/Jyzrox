@@ -134,7 +134,7 @@ export default function FeaturesSettingsPage() {
                   type="url"
                   value={swarmUiUrl}
                   onChange={(event) => setSwarmUiUrl(event.target.value)}
-                  placeholder="http://192.168.10.219:7801"
+                  placeholder="http://swarmui.example.com:7801"
                   className="min-w-0 flex-1 rounded-lg border border-vault-border bg-vault-input px-3 py-2 text-sm text-vault-text"
                 />
                 <button

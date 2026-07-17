@@ -49,7 +49,7 @@ class Settings(BaseSettings):
 
     # Remote image processing
     swarmui_enabled: bool = False
-    swarmui_url: str = "http://192.168.10.219:7801"
+    swarmui_url: str = ""  # No default host — admin sets it via SWARMUI_URL or the settings UI
     swarmui_timeout: int = 600
     captioner_enabled: bool = False
     captioner_url: str = "http://captioner:8200"

@@ -33,6 +33,38 @@ async def test_swarmui_health_reports_disabled_without_network():
     assert health.error == "SwarmUI is disabled"
 
 
+async def test_swarmui_health_enabled_with_empty_url_reports_not_configured():
+    """Enabling the toggle before setting a URL must not fire a request anywhere."""
+    plugin = SwarmUiPlugin()
+    with (
+        patch("plugins.builtin.swarmui.plugin.get_toggle", new=AsyncMock(return_value=True)),
+        patch("plugins.builtin.swarmui.plugin.get_string_setting", new=AsyncMock(return_value="")),
+        patch("plugins.builtin.swarmui.plugin.httpx.AsyncClient") as mock_client,
+    ):
+        health = await plugin.health()
+
+    assert health.online is False
+    assert health.error == "SwarmUI URL is not configured"
+    mock_client.assert_not_called()
+
+
+async def test_swarmui_process_enabled_with_empty_url_reports_not_configured(tmp_path):
+    """The process path must fail the job cleanly rather than raise a protocol error."""
+    input_path = tmp_path / "in.png"
+    PILImage.new("RGB", (4, 4), "red").save(input_path)
+    plugin = SwarmUiPlugin()
+    with (
+        patch("plugins.builtin.swarmui.plugin.get_toggle", new=AsyncMock(return_value=True)),
+        patch("plugins.builtin.swarmui.plugin.get_string_setting", new=AsyncMock(return_value="  ")),
+        patch("plugins.builtin.swarmui.plugin.httpx.AsyncClient") as mock_client,
+    ):
+        result = await plugin.process(input_path, tmp_path / "out", {"scale": 2})
+
+    assert result.status == "failed"
+    assert result.error == "SwarmUI URL is not configured"
+    mock_client.assert_not_called()
+
+
 async def test_process_job_preserves_original_as_replacement_history(
     db_session,
     db_session_factory,

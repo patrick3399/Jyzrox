@@ -22,7 +22,12 @@ class SwarmUiPlugin:
 
     async def _base_url(self) -> str:
         value = await get_string_setting("setting:swarmui_url", settings.swarmui_url)
-        return value.rstrip("/")
+        base = value.strip().rstrip("/")
+        # Ships with no default host, so the toggle can be on before a URL exists.
+        # Callers turn this into a readable status instead of an httpx protocol error.
+        if not base:
+            raise ValueError("SwarmUI URL is not configured")
+        return base
 
     async def _session(self, client: httpx.AsyncClient, base_url: str) -> str:
         response = await client.post(f"{base_url}/API/GetNewSession", json={})
@@ -43,9 +48,7 @@ class SwarmUiPlugin:
                 resource_response = await client.post(
                     f"{base_url}/API/GetServerResourceInfo", json={"session_id": session_id}
                 )
-                params_response = await client.post(
-                    f"{base_url}/API/ListT2IParams", json={"session_id": session_id}
-                )
+                params_response = await client.post(f"{base_url}/API/ListT2IParams", json={"session_id": session_id})
                 resource_response.raise_for_status()
                 params_response.raise_for_status()
 
