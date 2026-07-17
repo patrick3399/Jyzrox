@@ -37,3 +37,61 @@ class TestRegistryCapabilityMaps:
         r.register(PixivSourcePlugin())
         assert r.get_subscriber("ehentai") is not None
         assert r.get_subscriber("pixiv") is not None
+
+    def test_builtin_eh_registers_previewable_and_refreshable(self):
+        from plugins.builtin.ehentai.source import EhSourcePlugin
+        from plugins.registry import PluginRegistry
+
+        r = PluginRegistry()
+        r.register(EhSourcePlugin())
+        assert r.get_previewer("ehentai") is not None
+        assert r.get_refresher("ehentai") is not None
+
+
+class TestEhCapabilities:
+    async def test_eh_preview_url_non_gallery_url_returns_none(self):
+        from plugins.builtin.ehentai.source import EhSourcePlugin
+
+        assert await EhSourcePlugin().preview_url("https://e-hentai.org/tag/foo") is None
+
+    async def test_eh_preview_url_gallery_url_returns_preview_data(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from plugins.builtin.ehentai.source import EhSourcePlugin
+
+        client = MagicMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_gallery_metadata = AsyncMock(
+            return_value={
+                "title": "T",
+                "pages": 20,
+                "tags": ["a"],
+                "uploader": "u",
+                "rating": "4.5",
+                "thumb": "http://t",
+                "category": "Doujinshi",
+            }
+        )
+        with patch("plugins.builtin.ehentai.browse._make_client", AsyncMock(return_value=client)):
+            data = await EhSourcePlugin().preview_url("https://e-hentai.org/g/123/abcdef1234/")
+        assert data is not None and data.source == "ehentai" and data.pages == 20 and data.rating == 4.5
+
+    async def test_eh_fetch_remote_metadata_expunged_maps_status(self):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from plugins.builtin.ehentai.source import EhSourcePlugin
+
+        client = MagicMock()
+        client.__aenter__ = AsyncMock(return_value=client)
+        client.__aexit__ = AsyncMock(return_value=False)
+        client.get_gallery_metadata = AsyncMock(side_effect=ValueError("gallery expunged"))
+        with patch("plugins.builtin.ehentai.browse._make_client", AsyncMock(return_value=client)):
+            r = await EhSourcePlugin().fetch_remote_metadata("123", "https://e-hentai.org/g/123/abcdef1234/")
+        assert r.status == "expunged"
+
+    async def test_eh_fetch_remote_metadata_no_source_url_skips(self):
+        from plugins.builtin.ehentai.source import EhSourcePlugin
+
+        r = await EhSourcePlugin().fetch_remote_metadata("123", None)
+        assert r.status == "skipped" and r.reason == "no_source_url"

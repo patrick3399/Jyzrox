@@ -22,6 +22,8 @@ from plugins.models import (
     GalleryMetadata,
     NewWork,
     PluginMeta,
+    PreviewData,
+    RemoteMetadataResult,
     SiteInfo,
 )
 
@@ -341,3 +343,58 @@ class EhSourcePlugin(SourcePlugin):
         from plugins.builtin.ehentai._subscribe import check_eh_new_works
 
         return await check_eh_new_works(artist_id, last_known, credentials)
+
+    # ------------------------------------------------------------------
+    # Previewable / Refreshable protocol methods
+    # ------------------------------------------------------------------
+
+    _GALLERY_URL_RE = re.compile(r"https?://e[-x]hentai\.org/g/(\d+)/([a-f0-9]{10})/?")
+    _REFRESH_URL_RE = re.compile(r"/g/(\d+)/([a-f0-9]+)/")
+
+    async def preview_url(self, url: str) -> PreviewData | None:
+        m = self._GALLERY_URL_RE.match(url)
+        if not m:
+            return None
+        from plugins.builtin.ehentai.browse import _make_client
+
+        async with await _make_client() as client:
+            meta = await client.get_gallery_metadata(int(m.group(1)), m.group(2))
+        return PreviewData(
+            source="ehentai",
+            title=meta.get("title") or meta.get("title_jpn") or None,
+            pages=meta.get("pages"),
+            tags=(meta.get("tags") or [])[:30] or None,
+            uploader=meta.get("uploader") or None,
+            rating=float(meta["rating"]) if meta.get("rating") else None,
+            thumb_url=meta.get("thumb") or None,
+            category=meta.get("category") or None,
+        )
+
+    async def fetch_remote_metadata(self, source_id: str, source_url: str | None) -> RemoteMetadataResult:
+        if not source_url:
+            return RemoteMetadataResult(status="skipped", reason="no_source_url")
+        m = self._REFRESH_URL_RE.search(source_url)
+        if not m:
+            return RemoteMetadataResult(status="skipped", reason="no_source_url")
+        from plugins.builtin.ehentai.browse import _make_client
+
+        try:
+            async with await _make_client() as client:
+                meta = await client.get_gallery_metadata(int(m.group(1)), m.group(2))
+        except ValueError as exc:
+            if "expunged" in str(exc).lower():
+                return RemoteMetadataResult(status="expunged")
+            return RemoteMetadataResult(status="error", reason="invalid_metadata")
+        except Exception:
+            return RemoteMetadataResult(status="error", reason="fetch_failed")
+        return RemoteMetadataResult(
+            scalar_values={
+                "title": meta.get("title"),
+                "title_jpn": meta.get("title_jpn"),
+                "category": meta.get("category"),
+                "uploader": meta.get("uploader"),
+                "pages": meta.get("pages"),
+                "rating": int(round(meta["rating"])) if meta.get("rating") is not None else None,
+            },
+            tags=meta.get("tags"),
+        )
