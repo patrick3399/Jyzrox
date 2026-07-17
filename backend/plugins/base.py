@@ -14,8 +14,11 @@ from plugins.models import (
     DownloadResult,
     GalleryImportData,
     GalleryMetadata,
+    NewWork,
     PluginMeta,
+    PreviewData,
     ProcessResult,
+    RemoteMetadataResult,
     SearchResult,
     ServiceHealth,
     TagResult,
@@ -98,6 +101,32 @@ class Processable(Protocol):
     async def process(self, input_path: Path, output_dir: Path, options: dict) -> ProcessResult: ...
 
     async def health(self) -> ServiceHealth: ...
+
+
+@runtime_checkable
+class Previewable(Protocol):
+    meta: PluginMeta
+
+    async def preview_url(self, url: str) -> PreviewData | None: ...
+
+
+@runtime_checkable
+class Refreshable(Protocol):
+    meta: PluginMeta
+
+    async def fetch_remote_metadata(self, source_id: str, source_url: str | None) -> RemoteMetadataResult: ...
+
+
+@runtime_checkable
+class Subscribable(Protocol):
+    meta: PluginMeta
+
+    async def check_new_works(
+        self,
+        artist_id: str,
+        last_known: str | None,
+        credentials: dict | None,
+    ) -> list[NewWork]: ...
 
 
 # ---------------------------------------------------------------------------

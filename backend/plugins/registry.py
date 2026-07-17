@@ -10,8 +10,11 @@ from plugins.base import (
     Downloadable,
     HasMeta,
     Parseable,
+    Previewable,
     Processable,
+    Refreshable,
     SourcePlugin,
+    Subscribable,
     Taggable,
     TaggerPlugin,
 )
@@ -36,6 +39,9 @@ class PluginRegistry:
         self._credential_providers: dict[str, Any] = {}
         self._taggable: dict[str, Any] = {}
         self._processable: dict[str, Any] = {}
+        self._previewable: dict[str, Any] = {}
+        self._refreshable: dict[str, Any] = {}
+        self._subscribable: dict[str, Any] = {}
         self._site_index: dict[str, SiteInfo] = {}
 
     def register(self, plugin: Any) -> None:
@@ -73,6 +79,12 @@ class PluginRegistry:
             self._taggable[sid] = plugin
         if isinstance(plugin, Processable):
             self._processable[sid] = plugin
+        if isinstance(plugin, Previewable):
+            self._previewable[sid] = plugin
+        if isinstance(plugin, Refreshable):
+            self._refreshable[sid] = plugin
+        if isinstance(plugin, Subscribable):
+            self._subscribable[sid] = plugin
 
     async def get_handler(self, url: str) -> SourcePlugin | None:
         """Return the first non-fallback source plugin that can handle the URL."""
@@ -226,6 +238,18 @@ class PluginRegistry:
 
     def get_processor(self, source_id: str) -> Any:
         return self._processable.get(source_id)
+
+    def get_previewer(self, source_id: str) -> Any:
+        return self._previewable.get(source_id)
+
+    def list_previewable(self) -> list[Any]:
+        return list(self._previewable.values())
+
+    def get_refresher(self, source_id: str) -> Any:
+        return self._refreshable.get(source_id)
+
+    def get_subscriber(self, source_id: str) -> Any:
+        return self._subscribable.get(source_id)
 
 
 plugin_registry = PluginRegistry()
