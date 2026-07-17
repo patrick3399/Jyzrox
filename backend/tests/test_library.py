@@ -3989,7 +3989,7 @@ class TestCheckGalleryUpdate:
         async def _make_client():
             return _Client()
 
-        with patch("routers.library._make_eh_client", _make_client):
+        with patch("plugins.builtin.ehentai.browse._make_client", _make_client):
             resp = await client.post("/api/library/galleries/ehentai/555555/check-update")
 
         assert resp.status_code == 200

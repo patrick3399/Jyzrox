@@ -56,7 +56,6 @@ from db.models import (
     UserRating,
     UserReadingList,
 )
-from plugins.builtin.ehentai.browse import _make_client as _make_eh_client
 from services.cas import (
     cas_url,
     library_dir,
@@ -2649,56 +2648,28 @@ async def check_gallery_update(
     """Auto-check and update gallery metadata from source."""
     g = await _get_or_404_by_source(db, source, source_id, auth)
 
-    if source == "ehentai":
-        return await _check_update_ehentai(g, db, auth)
-    if source == "pixiv":
-        return await _check_update_pixiv(g, db, auth)
-    return {"status": "skipped", "reason": "unsupported_source"}
+    from plugins.registry import plugin_registry
 
+    refresher = plugin_registry.get_refresher(source)
+    if refresher is None:
+        return {"status": "skipped", "reason": "unsupported_source"}
 
-async def _check_update_ehentai(g, db: AsyncSession, auth: dict) -> dict:
-    """Fetch fresh EH metadata and update gallery record."""
-    if not g.source_url:
-        return {"status": "skipped", "reason": "no_source_url"}
+    result = await refresher.fetch_remote_metadata(g.source_id, g.source_url)
 
-    match = _re.search(r"/g/(\d+)/([a-f0-9]+)/", g.source_url)
-    if not match:
-        return {"status": "skipped", "reason": "no_source_url"}
-
-    gid, token = int(match.group(1)), match.group(2)
-
-    try:
-        async with await _make_eh_client() as client:
-            meta = await client.get_gallery_metadata(gid, token)
-    except ValueError as exc:
-        err_msg = str(exc)
-        if "expunged" in err_msg.lower():
-            g.metadata_updated_at = func.now()
-            await db.commit()
-            await db.refresh(g)
-            return {"status": "expunged"}
-        return {"status": "error", "reason": "invalid_metadata"}
-    except Exception:
-        return {"status": "error", "reason": "fetch_failed"}
+    if result.status == "expunged":
+        g.metadata_updated_at = func.now()
+        await db.commit()
+        await db.refresh(g)
+        return {"status": "expunged"}
+    if result.status in ("skipped", "error"):
+        return {"status": result.status, "reason": result.reason}
 
     old_pages = g.pages
 
     from services.workbench_metadata import apply_source_scalar_metadata, apply_source_tags
 
-    scalar_values = {
-        "title": meta.get("title"),
-        "title_jpn": meta.get("title_jpn"),
-        "category": meta.get("category"),
-        "uploader": meta.get("uploader"),
-        "pages": meta.get("pages"),
-        "rating": int(round(meta["rating"])) if meta.get("rating") is not None else None,
-    }
-    changed_fields, pending_source_changes = await apply_source_scalar_metadata(db, g, scalar_values)
-    tags_changed = False
-    if meta.get("tags") is not None:
-        tags_changed = await apply_source_tags(db, g, meta["tags"])
-
-    if tags_changed:
+    changed_fields, pending_source_changes = await apply_source_scalar_metadata(db, g, result.scalar_values)
+    if result.tags is not None and await apply_source_tags(db, g, result.tags):
         changed_fields.append("tags")
 
     pages_diff = {"old": old_pages, "new": g.pages} if "pages" in changed_fields else None
@@ -2709,53 +2680,8 @@ async def _check_update_ehentai(g, db: AsyncSession, auth: dict) -> dict:
 
     if not changed_fields and not pending_source_changes:
         return {"status": "unchanged"}
-
     if not changed_fields:
         return {"status": "source_diff", "pending_source_changes": pending_source_changes}
-
-    return await _build_updated_response(
-        g, db, auth, changed_fields, pages_diff, pending_source_changes=pending_source_changes
-    )
-
-
-async def _check_update_pixiv(g, db: AsyncSession, auth: dict) -> dict:
-    """Fetch fresh Pixiv illust metadata and update gallery record."""
-    from services.credential import get_credential
-    from services.pixiv_client import PixivClient
-
-    refresh_token = await get_credential("pixiv")
-    if not refresh_token:
-        return {"status": "skipped", "reason": "credentials_required"}
-
-    try:
-        illust_id = int(g.source_id)
-    except ValueError, TypeError:
-        return {"status": "skipped", "reason": "invalid_source_id"}
-
-    try:
-        async with PixivClient(refresh_token=refresh_token) as client:
-            detail = await client.illust_detail(illust_id)
-    except Exception:
-        return {"status": "error", "reason": "fetch_failed"}
-
-    old_pages = g.pages
-    new_pages = detail.get("page_count", 1)
-
-    from services.workbench_metadata import apply_source_scalar_metadata
-
-    changed_fields, pending_source_changes = await apply_source_scalar_metadata(db, g, {"pages": new_pages})
-    pages_diff = {"old": old_pages, "new": g.pages} if "pages" in changed_fields else None
-
-    g.metadata_updated_at = func.now()
-    await db.commit()
-    await db.refresh(g)
-
-    if not changed_fields and not pending_source_changes:
-        return {"status": "unchanged"}
-
-    if not changed_fields:
-        return {"status": "source_diff", "pending_source_changes": pending_source_changes}
-
     return await _build_updated_response(
         g, db, auth, changed_fields, pages_diff, pending_source_changes=pending_source_changes
     )
