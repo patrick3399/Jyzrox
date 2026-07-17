@@ -18,7 +18,7 @@ import { api } from '@/lib/api'
 import { t } from '@/lib/i18n'
 import { useLocale } from '@/components/LocaleProvider'
 import { useProfile } from '@/hooks/useProfile'
-import type { Credentials, EhAccount, PluginInfo, CredentialFlow } from '@/lib/types'
+import type { Credentials, EhAccount, PluginInfo, CredentialFlow, FieldDef } from '@/lib/types'
 
 // ── Shared style constants ─────────────────────────────────────────────────
 
@@ -401,6 +401,110 @@ function PixivCookieFlow({ onSaved }: { onSaved: (username: string) => void }) {
   )
 }
 
+// ── GenericFieldsFlow: renders any plugin's `fields` flow from its schema ──
+
+function GenericField({
+  field,
+  value,
+  onChange,
+}: {
+  field: FieldDef
+  value: string
+  onChange: (v: string) => void
+}) {
+  const [revealed, setRevealed] = useState(false)
+  const isPassword = field.field_type === 'password'
+
+  return (
+    <div>
+      <label className="block text-xs text-vault-text-muted mb-1">{field.label}</label>
+      {field.field_type === 'textarea' ? (
+        <textarea
+          value={value}
+          onChange={(e) => onChange(e.target.value)}
+          placeholder={field.placeholder}
+          rows={4}
+          className={`${inputClass} resize-none font-mono text-xs leading-relaxed`}
+        />
+      ) : (
+        <div className="relative">
+          <input
+            type={isPassword && !revealed ? 'password' : 'text'}
+            value={value}
+            onChange={(e) => onChange(e.target.value)}
+            placeholder={field.placeholder}
+            className={`${inputClass}${isPassword ? ' pr-10' : ''}`}
+          />
+          {isPassword && (
+            <button
+              type="button"
+              onClick={() => setRevealed((v) => !v)}
+              aria-label={revealed ? t('credentials.hideValue') : t('credentials.showValue')}
+              className="absolute right-2 top-1/2 -translate-y-1/2 text-vault-text-muted hover:text-vault-text transition-colors px-1"
+            >
+              {revealed ? <EyeOff size={14} /> : <Eye size={14} />}
+            </button>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
+function GenericFieldsFlow({
+  plugin,
+  flow,
+  onSaved,
+}: {
+  plugin: PluginInfo
+  flow: CredentialFlow
+  onSaved: () => void
+}) {
+  const [values, setValues] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+
+  // Only non-empty fields are submitted; optional fields may be left blank.
+  const filled: Record<string, string> = {}
+  for (const field of flow.fields) {
+    const v = values[field.name]?.trim()
+    if (v) filled[field.name] = v
+  }
+
+  const canSave =
+    Object.keys(filled).length > 0 && flow.fields.every((f) => !f.required || filled[f.name])
+
+  const handleSave = async () => {
+    if (!canSave) return
+    setSaving(true)
+    try {
+      await api.settings.setGenericCookie(plugin.source_id, filled)
+      toast.success(t('credentials.savedSite', { source: plugin.name }))
+      setValues({})
+      onSaved()
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : t('credentials.saveFailed'))
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      {flow.fields.map((field) => (
+        <GenericField
+          key={field.name}
+          field={field}
+          value={values[field.name] ?? ''}
+          onChange={(v) => setValues((prev) => ({ ...prev, [field.name]: v }))}
+        />
+      ))}
+      <button onClick={handleSave} disabled={saving || !canSave} className={btnPrimary}>
+        {saving ? t('credentials.saving') : t('credentials.save')}
+      </button>
+    </div>
+  )
+}
+
 // ── FlowLabel: human-readable flow type label ────────────────────────────
 
 function flowLabel(flow: CredentialFlow): string {
@@ -485,6 +589,35 @@ function PluginCredentialSection({
 
   const currentFlow = flows[activeFlow] ?? null
 
+  // Plugins whose flow needs more than field entry (account probing, OAuth
+  // exchange, cookie->token conversion) supply a bespoke component here.
+  let specialFlow: React.ReactNode = null
+  if (currentFlow && isEh && currentFlow.flow_type === 'fields') {
+    specialFlow = (
+      <EhFieldsFlow
+        onSaved={(account) => {
+          setEhAccount(account)
+          onDeleted() // re-check configured status via parent refresh
+        }}
+      />
+    )
+  } else if (currentFlow && isPixiv) {
+    const onPixivSaved = (username: string) => {
+      setPixivUsername(username)
+      onDeleted()
+    }
+    if (currentFlow.flow_type === 'oauth') specialFlow = <PixivOAuthFlow onSaved={onPixivSaved} />
+    else if (currentFlow.flow_type === 'fields')
+      specialFlow = <PixivTokenFlow onSaved={onPixivSaved} />
+    else if (currentFlow.flow_type === 'login')
+      specialFlow = <PixivCookieFlow onSaved={onPixivSaved} />
+  }
+
+  // A non-fields flow with no bespoke component has no UI to offer.
+  if (!specialFlow && currentFlow && currentFlow.fields.length === 0) {
+    specialFlow = <p className="text-xs text-vault-text-muted">{t('credentials.flowUnavailable')}</p>
+  }
+
   return (
     <div className="bg-vault-card border border-vault-border rounded-xl overflow-hidden">
       {/* Header */}
@@ -535,43 +668,12 @@ function PluginCredentialSection({
             </div>
           )}
 
-          {/* Flow content */}
+          {/* Flow content — specialised components are opt-in overrides; every
+              other plugin renders from the `fields` its flow declares. */}
           {currentFlow && (
-            <div className={flows.length > 1 ? 'mt-4' : 'mt-4'}>
-              {/* EH-specific flows */}
-              {isEh && currentFlow.flow_type === 'fields' && (
-                <EhFieldsFlow
-                  onSaved={(account) => {
-                    setEhAccount(account)
-                    onDeleted() // re-check configured status via parent refresh
-                  }}
-                />
-              )}
-
-              {/* Pixiv-specific flows */}
-              {isPixiv && currentFlow.flow_type === 'oauth' && (
-                <PixivOAuthFlow
-                  onSaved={(username) => {
-                    setPixivUsername(username)
-                    onDeleted()
-                  }}
-                />
-              )}
-              {isPixiv && currentFlow.flow_type === 'fields' && (
-                <PixivTokenFlow
-                  onSaved={(username) => {
-                    setPixivUsername(username)
-                    onDeleted()
-                  }}
-                />
-              )}
-              {isPixiv && currentFlow.flow_type === 'login' && (
-                <PixivCookieFlow
-                  onSaved={(username) => {
-                    setPixivUsername(username)
-                    onDeleted()
-                  }}
-                />
+            <div className="mt-4">
+              {specialFlow ?? (
+                <GenericFieldsFlow plugin={plugin} flow={currentFlow} onSaved={onDeleted} />
               )}
             </div>
           )}
@@ -598,7 +700,7 @@ function PluginCredentialSection({
                   ? t('settings.clearCookie')
                   : isPixiv
                     ? t('settings.clearToken')
-                    : t('credentials.clearFailed')}
+                    : t('credentials.clearCredential')}
             </button>
           )}
         </div>

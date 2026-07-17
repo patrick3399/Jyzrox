@@ -42,24 +42,26 @@ _IMAGE_EXTS = {".jpg", ".jpeg", ".png", ".gif", ".webp", ".avif", ".heic"}
 
 
 def _cookies(credentials: dict | str | None) -> dict[str, str]:
-    if isinstance(credentials, dict):
-        if credentials.get("fanboxsessid"):
-            return {"FANBOXSESSID": str(credentials["fanboxsessid"])}
-        raw = credentials.get("cookies", credentials)
-        return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
-    if not isinstance(credentials, str) or not credentials.strip():
+    if isinstance(credentials, str):
+        if not credentials.strip():
+            return {}
+        try:
+            parsed = json.loads(credentials)
+        except json.JSONDecodeError:
+            parsed = None
+        if not isinstance(parsed, dict):
+            # Accept a browser-style single cookie value as a convenience for
+            # the dedicated Fanbox credential flow.
+            return {"FANBOXSESSID": credentials.strip()}
+        credentials = parsed
+    if not isinstance(credentials, dict):
         return {}
-    try:
-        parsed = json.loads(credentials)
-    except json.JSONDecodeError:
-        parsed = None
-    if isinstance(parsed, dict):
-        raw = parsed.get("cookies", parsed)
-        if isinstance(raw, dict):
-            return {str(k): str(v) for k, v in raw.items()}
-    # Accept a browser-style single cookie value as a convenience for the
-    # dedicated Fanbox credential flow.
-    return {"FANBOXSESSID": credentials.strip()}
+    # The credential form posts the `fanboxsessid` field declared by
+    # credential_flows(); the cookie itself is upper-case.
+    if credentials.get("fanboxsessid"):
+        return {"FANBOXSESSID": str(credentials["fanboxsessid"])}
+    raw = credentials.get("cookies", credentials)
+    return {str(k): str(v) for k, v in raw.items()} if isinstance(raw, dict) else {}
 
 
 def _extension(url: str, content_type: str | None) -> str:

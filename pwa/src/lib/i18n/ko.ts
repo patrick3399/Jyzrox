@@ -1390,6 +1390,10 @@ const ko: Record<string, string> = {
   'credentials.cookiesMultiFormat':
     '브라우저 DevTools에서 붙여넣기, 또는 key=value 한 줄씩, 또는 JSON',
   'credentials.savedSite': '{source} 인증 정보 저장됨',
+  'credentials.clearCredential': '인증 정보 지우기',
+  'credentials.flowUnavailable': '이 로그인 방식은 아직 사용할 수 없습니다.',
+  'credentials.showValue': '값 표시',
+  'credentials.hideValue': '값 숨기기',
   'credentials.orTypeManually': '또는 사이트 이름 직접 입력',
 
   // ── Plugins ──

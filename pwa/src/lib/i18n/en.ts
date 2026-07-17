@@ -1310,6 +1310,10 @@ const en: Record<string, string> = {
   'credentials.cookiesMultiFormat':
     'Paste from browser DevTools, or enter as key=value per line, or JSON',
   'credentials.savedSite': 'Credentials saved for {source}',
+  'credentials.clearCredential': 'Clear Credentials',
+  'credentials.flowUnavailable': 'This login method is not available yet.',
+  'credentials.showValue': 'Show value',
+  'credentials.hideValue': 'Hide value',
   'credentials.orTypeManually': 'Or type the site name manually',
   'credentials.ehLoginTitle': 'Login with Username & Password',
   'credentials.ehUsername': 'Username',

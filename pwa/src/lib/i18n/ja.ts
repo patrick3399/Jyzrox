@@ -1550,6 +1550,10 @@ const ja: Record<string, string> = {
   'credentials.cookiesMultiFormat':
     'ブラウザのDevToolsから貼り付け、またはkey=value形式で1行ずつ、もしくはJSON形式で入力',
   'credentials.savedSite': '{source}の認証情報を保存しました',
+  'credentials.clearCredential': '認証情報をクリア',
+  'credentials.flowUnavailable': 'このログイン方法はまだ利用できません。',
+  'credentials.showValue': '値を表示',
+  'credentials.hideValue': '値を隠す',
   'credentials.orTypeManually': 'またはサイト名を手動で入力',
 
   // ── Plugins ──

@@ -30,6 +30,25 @@ def test_cookie_parser_accepts_stored_fragment_and_plain_session():
     assert _cookies("session") == {"FANBOXSESSID": "session"}
 
 
+def test_cookie_parser_maps_stored_fanboxsessid_field_to_upper_case_cookie():
+    """The credentials form saves the declared `fanboxsessid` field as a JSON
+    blob; reading it back must yield the upper-case cookie the API expects."""
+    field_name = FanboxSourcePlugin().credential_flows()[0].fields[0].name
+    stored = json.dumps({field_name: "session"})
+
+    assert _cookies(stored) == {"FANBOXSESSID": "session"}
+    # The dict form (in-process callers) must agree with the stored form.
+    assert _cookies({field_name: "session"}) == {"FANBOXSESSID": "session"}
+
+
+async def test_verify_credential_accepts_the_field_the_flow_declares():
+    plugin = FanboxSourcePlugin()
+    field_name = plugin.credential_flows()[0].fields[0].name
+
+    assert (await plugin.verify_credential({field_name: "session"})).valid
+    assert not (await plugin.verify_credential({})).valid
+
+
 def test_media_selection_honors_media_policy():
     post = {
         "coverImageUrl": "https://cdn.test/cover.jpg",
