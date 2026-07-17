@@ -43,7 +43,7 @@ async def test_status_reports_clean_head(repos):
 
 
 async def test_reset_to_origin_defaults_to_current_branch_not_main(tmp_path):
-    """The 214 repo uses `master`; reset_to_origin() with no branch must target it."""
+    """A hub repo may use `master`; reset_to_origin() with no branch must target it."""
     bare = tmp_path / "origin.git"
     bare.mkdir()
     _run(bare, "init", "--bare", "-b", "master")

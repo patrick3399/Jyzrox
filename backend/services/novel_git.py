@@ -145,7 +145,7 @@ async def commit_and_push(repo: str | Path, rel_path: str, message: str) -> dict
         raise NovelLocked(rel_path)
     if await push(repo):
         return {"head": await head_sha(repo), "pushed": True}
-    return {"head": await head_sha(repo), "pushed": False}  # 214 offline etc.
+    return {"head": await head_sha(repo), "pushed": False}  # remote hub offline etc.
 
 
 async def log_file(repo: str | Path, rel_path: str, limit: int = 50) -> list[dict]:
@@ -171,7 +171,7 @@ async def diff_file(repo: str | Path, rel_path: str, rev: str) -> str:
 
 
 async def reset_to_origin(repo: str | Path, branch: str | None = None) -> None:
-    # Default to the clone's actual branch — the 214 repo uses `master`, so a
+    # Default to the clone's actual branch — a hub repo may use `master`, so a
     # hardcoded `main` would reset to a non-existent origin/main and fail.
     if branch is None:
         branch = await _current_branch(repo)

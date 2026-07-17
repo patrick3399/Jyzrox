@@ -50,7 +50,7 @@ async def test_sync_job_skips_pull_when_locked(monkeypatch):
 
 async def test_sync_job_records_failure_but_does_not_raise(monkeypatch):
     monkeypatch.setattr(novel_sync, "get_toggle", AsyncMock(return_value=True), raising=False)
-    monkeypatch.setattr(novel_sync.novel_git, "fetch", AsyncMock(side_effect=RuntimeError("214 down")))
+    monkeypatch.setattr(novel_sync.novel_git, "fetch", AsyncMock(side_effect=RuntimeError("hub down")))
     recorded = []
     monkeypatch.setattr(
         novel_sync,

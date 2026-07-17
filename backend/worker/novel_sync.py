@@ -1,6 +1,6 @@
-"""SAQ cron job: keep the novel working clone synced with the 214 bare hub.
+"""SAQ cron job: keep the novel working clone synced with the bare hub remote.
 
-Fetch + fast-forward pull when clean; retry unpushed commits (214 recovery).
+Fetch + fast-forward pull when clean; retry unpushed commits (hub recovery).
 Never merges — a non-ff situation is left for a user edit to trigger the
 locked-state path in services.novel_git.
 
@@ -43,7 +43,7 @@ async def novel_sync_job(ctx: dict, force: bool = False) -> None:
         elif st["clean"] and st["behind"] > 0:
             pulled = await novel_git.pull_ff(repo)
         if st["ahead"] > 0:
-            await novel_git.push(repo)  # retry unpushed (214 was offline)
+            await novel_git.push(repo)  # retry unpushed (hub was offline)
         await _cron_record(ctx, TASK_ID, "ok")
     except Exception as exc:  # noqa: BLE001 — cron job must never crash the worker
         logger.warning("[novel-sync] failed: %s", exc)
