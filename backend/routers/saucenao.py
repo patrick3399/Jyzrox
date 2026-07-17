@@ -14,7 +14,7 @@ from core.database import async_session
 from db.models import Blob, Gallery, Image
 from services.cas import resolve_blob_path
 from services.credential import get_credential
-from services.saucenao import RateLimitError, SauceNaoError, search_by_image
+from services.saucenao import InvalidApiKeyError, RateLimitError, SauceNaoError, search_by_image
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["saucenao"])
@@ -80,6 +80,9 @@ async def saucenao_search(body: SearchRequest, auth: dict = Depends(require_role
         )
     except RateLimitError:
         raise HTTPException(status_code=429, detail="rate_limit")
+    except InvalidApiKeyError as exc:
+        logger.warning("SauceNAO API key rejected: %s", exc)
+        raise HTTPException(status_code=403, detail="saucenao_api_key_invalid")
     except SauceNaoError as exc:
         logger.warning("SauceNAO error: %s", exc)
         raise HTTPException(status_code=502, detail="saucenao_error")

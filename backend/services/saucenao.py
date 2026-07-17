@@ -55,6 +55,8 @@ async def search_by_image(
             params=params,
             files={"file": (filename, image_bytes)},
         )
+        if resp.status_code in (401, 403):
+            raise InvalidApiKeyError(f"SauceNAO rejected the API key (HTTP {resp.status_code})")
         resp.raise_for_status()
 
     elapsed = time.monotonic() - start
@@ -66,6 +68,8 @@ async def search_by_image(
     header = data.get("header", {})
     if header.get("status", 0) < 0:
         msg = header.get("message", "Unknown SauceNAO error")
+        if "api key" in msg.lower():
+            raise InvalidApiKeyError(msg)
         raise SauceNaoError(msg)
 
     results = []
@@ -122,3 +126,7 @@ class SauceNaoError(Exception):
 
 class RateLimitError(SauceNaoError):
     """Rate limit exceeded."""
+
+
+class InvalidApiKeyError(SauceNaoError):
+    """SauceNAO rejected the configured API key (invalid or expired)."""

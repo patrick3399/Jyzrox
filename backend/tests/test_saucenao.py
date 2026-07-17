@@ -16,7 +16,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 
 import httpx
 
-from services.saucenao import RateLimitError, SauceNaoError
+from services.saucenao import InvalidApiKeyError, RateLimitError, SauceNaoError
 
 # ---------------------------------------------------------------------------
 # Helpers
@@ -212,6 +212,73 @@ async def test_saucenao_search_rate_limit_error_returns_429(client):
 
     assert resp.status_code == 429
     assert resp.json()["detail"] == "rate_limit"
+
+
+async def test_saucenao_search_invalid_api_key_returns_403_not_generic_502(client):
+    """InvalidApiKeyError must surface as 403 saucenao_api_key_invalid, not 502 (edge case #135)."""
+    blob = _make_blob()
+    mock_session = _make_mock_session(blob=blob)
+    path_mock = _make_path_mock(exists=True, size=1024)
+
+    with (
+        patch("routers.saucenao.get_credential", AsyncMock(return_value="api-key")),
+        patch("routers.saucenao.async_session", mock_session),
+        patch("routers.saucenao.resolve_blob_path", return_value=path_mock),
+        patch(
+            "routers.saucenao.search_by_image",
+            AsyncMock(side_effect=InvalidApiKeyError("Invalid API key provided")),
+        ),
+    ):
+        resp = await client.post("/api/saucenao/search", json={"image_id": 1})
+
+    assert resp.status_code == 403
+    assert resp.json()["detail"] == "saucenao_api_key_invalid"
+
+
+async def test_search_by_image_http_403_raises_invalid_api_key_error(monkeypatch):
+    """An upstream HTTP 403 must raise InvalidApiKeyError instead of httpx.HTTPStatusError."""
+    import pytest
+
+    from services import saucenao as sn
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = 403
+
+    fake_client = AsyncMock()
+    fake_client.post = AsyncMock(return_value=fake_resp)
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("services.saucenao._check_rate_limit", AsyncMock(return_value=True)),
+        patch("services.saucenao.httpx.AsyncClient", return_value=fake_client),
+    ):
+        with pytest.raises(InvalidApiKeyError):
+            await sn.search_by_image(b"bytes", "bad-key")
+
+
+async def test_search_by_image_header_api_key_message_raises_invalid_api_key_error():
+    """A 200 response whose header reports an API key problem must raise InvalidApiKeyError."""
+    import pytest
+
+    from services import saucenao as sn
+
+    fake_resp = MagicMock()
+    fake_resp.status_code = 200
+    fake_resp.raise_for_status = MagicMock()
+    fake_resp.json = MagicMock(return_value={"header": {"status": -1, "message": "Invalid API key"}})
+
+    fake_client = AsyncMock()
+    fake_client.post = AsyncMock(return_value=fake_resp)
+    fake_client.__aenter__ = AsyncMock(return_value=fake_client)
+    fake_client.__aexit__ = AsyncMock(return_value=False)
+
+    with (
+        patch("services.saucenao._check_rate_limit", AsyncMock(return_value=True)),
+        patch("services.saucenao.httpx.AsyncClient", return_value=fake_client),
+    ):
+        with pytest.raises(InvalidApiKeyError):
+            await sn.search_by_image(b"bytes", "expired-key")
 
 
 async def test_saucenao_search_saucenao_error_returns_502(client):
