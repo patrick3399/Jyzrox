@@ -23,6 +23,7 @@ from plugins.builtin.fanbox.policy import FanboxDownloadPolicy, fanbox_policy_fr
 from plugins.models import (
     CredentialFlow,
     CredentialStatus,
+    DiscoveredWorks,
     DownloadResult,
     FieldDef,
     GalleryImportData,
@@ -205,6 +206,32 @@ class FanboxSourcePlugin(SourcePlugin):
                     break
                 await asyncio.sleep(await get_typed_download_delay("fanbox", "pagination", 1000))
         return works, latest_id
+
+    def subscription_identity(self, url: str) -> str | None:
+        return self.creator_id_from_url(url)
+
+    async def discover_new_works(
+        self,
+        url: str,
+        last_known: str | None,
+        options: dict,
+        credentials: dict | str | None,
+    ) -> DiscoveredWorks:
+        from plugins.builtin.fanbox.policy import fanbox_policy_from_options
+
+        policy = fanbox_policy_from_options(options if isinstance(options, dict) else {})
+        # Without a logged-in session, an "all accessible" creator sync means
+        # public/free content only. Avoid enqueueing a noisy job for every paid
+        # post merely to discover that the account has no entitlement.
+        selection_policy = policy
+        if not credentials and policy.content != "free_only":
+            selection_policy = policy.model_copy(update={"content": "free_only"})
+        works, latest_id = await self.discover_posts(url, last_known, selection_policy, credentials)
+        return DiscoveredWorks(
+            works=works,
+            latest_id=latest_id,
+            job_options={"fanbox": policy.model_dump(mode="json")},
+        )
 
     def requires_credentials(self) -> bool:
         # Free posts remain useful without a logged-in account.

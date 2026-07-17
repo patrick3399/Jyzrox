@@ -139,3 +139,41 @@ class TestPixivCapabilities:
         with patch("services.credential.get_credential", AsyncMock(return_value="tok")):
             r = await PixivSourcePlugin().fetch_remote_metadata("not-a-number", None)
         assert r.status == "skipped" and r.reason == "invalid_source_id"
+
+
+class TestFanboxSubscribable:
+    def test_fanbox_registers_subscribable(self):
+        from plugins.builtin.fanbox.source import FanboxSourcePlugin
+        from plugins.registry import PluginRegistry
+
+        r = PluginRegistry()
+        r.register(FanboxSourcePlugin())
+        assert r.get_subscriber("fanbox") is not None
+
+    def test_subscription_identity_extracts_creator(self):
+        from plugins.builtin.fanbox.source import FanboxSourcePlugin
+
+        p = FanboxSourcePlugin()
+        assert p.subscription_identity("https://www.fanbox.cc/@artist") == "artist"
+        assert p.subscription_identity("https://example.com/") is None
+
+    async def test_discover_new_works_downgrades_policy_without_credentials(self):
+        from unittest.mock import patch
+
+        from plugins.builtin.fanbox.source import FanboxSourcePlugin
+        from plugins.models import NewWork
+
+        p = FanboxSourcePlugin()
+        seen = {}
+
+        async def _fake_discover(url, last_known, policy, credentials):
+            seen["policy"] = policy
+            return ([NewWork(url="https://www.fanbox.cc/@artist/posts/1", source_id="1")], "1")
+
+        with patch.object(FanboxSourcePlugin, "discover_posts", side_effect=_fake_discover):
+            result = await p.discover_new_works(
+                "https://www.fanbox.cc/@artist", None, {"fanbox": {"content": "accessible"}}, None
+            )
+        assert seen["policy"].content == "free_only"  # downgraded for selection
+        assert result.job_options["fanbox"]["content"] == "accessible"  # original policy recorded
+        assert result.latest_id == "1" and len(result.works) == 1
