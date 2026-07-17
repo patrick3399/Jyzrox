@@ -66,6 +66,33 @@ class NewWork(BaseModel):
     posted_at: datetime | None = None
 
 
+class PreviewData(BaseModel):
+    """Metadata preview for a URL before downloading (Previewable capability)."""
+
+    source: str
+    title: str | None = None
+    pages: int | None = None
+    tags: list[str] | None = None
+    uploader: str | None = None
+    rating: float | None = None
+    thumb_url: str | None = None
+    category: str | None = None
+
+
+class RemoteMetadataResult(BaseModel):
+    """Result of fetching fresh source metadata (Refreshable capability).
+
+    scalar_values keys must be understood by
+    services.workbench_metadata.apply_source_scalar_metadata; tags=None means
+    the source provides no tag data (do not touch tags).
+    """
+
+    status: Literal["ok", "expunged", "skipped", "error"] = "ok"
+    reason: str | None = None
+    scalar_values: dict = {}
+    tags: list[str] | None = None
+
+
 class PluginMeta(BaseModel):
     name: str
     source_id: str
