@@ -1794,3 +1794,41 @@ class TestJobSerializerGalleryFields:
 
         assert "gallery_source" not in result
         assert "gallery_source_id" not in result
+
+
+class TestPreviewViaRegistry:
+    """Preview endpoint must route through plugin_registry, not hard-coded sources."""
+
+    async def test_preview_uses_registry_previewer(self, client):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        from plugins.models import PreviewData
+
+        plugin = MagicMock()
+        plugin.preview_url = AsyncMock(return_value=PreviewData(source="ehentai", title="T", pages=5))
+        with (
+            patch("routers.download.detect_source", return_value="ehentai"),
+            patch("plugins.registry.plugin_registry.list_previewable", return_value=[plugin]),
+        ):
+            resp = await client.get("/api/download/preview", params={"url": "https://e-hentai.org/g/1/aaaaaaaaaa/"})
+        assert resp.status_code == 200
+        body = resp.json()
+        assert body["preview_available"] is True and body["title"] == "T" and body["pages"] == 5
+
+    async def test_preview_plugin_failure_falls_back_to_site_info(self, client):
+        from unittest.mock import AsyncMock, MagicMock, patch
+
+        plugin = MagicMock()
+        plugin.preview_url = AsyncMock(side_effect=RuntimeError("boom"))
+        with (
+            patch("routers.download.detect_source", return_value="ehentai"),
+            patch("plugins.registry.plugin_registry.list_previewable", return_value=[plugin]),
+        ):
+            resp = await client.get("/api/download/preview", params={"url": "https://e-hentai.org/g/1/aaaaaaaaaa/"})
+        assert resp.status_code == 200
+        assert resp.json()["preview_available"] is False
+
+    async def test_preview_no_hardcoded_source_regexes_remain(self):
+        import routers.download as rd
+
+        assert not hasattr(rd, "_EH_URL_RE") and not hasattr(rd, "_PIXIV_URL_RE")
