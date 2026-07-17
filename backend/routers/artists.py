@@ -22,7 +22,7 @@ router = APIRouter(tags=["artists"])
 
 def _artist_url(source: str, artist_id: str) -> str:
     """Generate a canonical URL for an artist."""
-    from plugins.builtin.gallery_dl._sites import get_site_config
+    from services.site_catalog import get_site_config
 
     cfg = get_site_config(source)
     if cfg.artist_url_tpl:

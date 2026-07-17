@@ -57,7 +57,6 @@ from db.models import (
     UserReadingList,
 )
 from plugins.builtin.ehentai.browse import _make_client as _make_eh_client
-from plugins.builtin.gallery_dl._sites import get_site_config as _get_gdl_site_config
 from services.cas import (
     cas_url,
     library_dir,
@@ -72,6 +71,7 @@ from services.gallery_lifecycle import (
 )
 from services.library_sidecar import SIDECAR_FILENAME
 from services.settings_store import get_toggle as _get_toggle
+from services.site_catalog import get_site_config as _get_gdl_site_config
 
 logger = logging.getLogger(__name__)
 router = APIRouter(tags=["library"])

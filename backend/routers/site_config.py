@@ -16,7 +16,7 @@ from pydantic import BaseModel
 from core.auth import require_role
 from core.site_config import DownloadParams, site_config_service
 from db.models import SiteConfig
-from plugins.builtin.gallery_dl._sites import get_site_config
+from services.site_catalog import get_site_config
 
 router = APIRouter(tags=["admin-sites"])
 _admin = require_role("admin")

@@ -506,7 +506,7 @@ async def detect_site_from_url(url: str = Query(...), _: dict = Depends(_admin))
         if not ex or not getattr(ex, "category", None):
             return {"detected": False}
         category = ex.category
-        from plugins.builtin.gallery_dl._sites import get_site_config
+        from services.site_catalog import get_site_config
 
         cfg = get_site_config(category)
         display_name = cfg.name if cfg.source_id != "gallery_dl" else category.capitalize()
