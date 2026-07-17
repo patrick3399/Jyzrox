@@ -1728,7 +1728,7 @@ class TestRetryJobBranches:
 
 
 # ---------------------------------------------------------------------------
-# _j serializer — gallery fields (lines 496-498)
+# serialize_download_job — gallery fields (services/download_presenter.py)
 # ---------------------------------------------------------------------------
 
 
@@ -1740,7 +1740,7 @@ class TestJobSerializerGalleryFields:
         from datetime import datetime
         from unittest.mock import MagicMock
 
-        from routers.download import _j
+        from services.download_presenter import serialize_download_job as _j
 
         job = MagicMock()
         job.id = uuid.uuid4()
@@ -1773,7 +1773,7 @@ class TestJobSerializerGalleryFields:
         from datetime import datetime
         from unittest.mock import MagicMock
 
-        from routers.download import _j
+        from services.download_presenter import serialize_download_job as _j
 
         job = MagicMock()
         job.id = uuid.uuid4()

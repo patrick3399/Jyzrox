@@ -321,7 +321,7 @@ async def get_subscription_jobs(
 ):
     """Get download jobs linked to a subscription."""
     from db.models import DownloadJob, Gallery
-    from routers.download import _j
+    from services.download_presenter import serialize_download_job
 
     user_id = auth["user_id"]
     async with async_session() as session:
@@ -350,7 +350,7 @@ async def get_subscription_jobs(
             gs = (await session.execute(select(Gallery).where(Gallery.id.in_(gallery_ids)))).scalars().all()
             gallery_map = {g.id: g for g in gs}
 
-    return {"jobs": [_j(j, gallery_map.get(j.gallery_id)) for j in jobs]}
+    return {"jobs": [serialize_download_job(j, gallery_map.get(j.gallery_id)) for j in jobs]}
 
 
 @router.patch("/{sub_id}")

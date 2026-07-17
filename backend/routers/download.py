@@ -23,6 +23,7 @@ from core.redis_client import get_redis
 from core.utils import detect_source, detect_source_info, get_supported_sites, normalize_download_url
 from db.models import DownloadJob, Gallery
 from services.credential import get_credential
+from services.download_presenter import serialize_download_job
 from worker.helpers import compute_job_key, enqueue_download_job
 
 logger = logging.getLogger(__name__)
@@ -332,7 +333,7 @@ async def list_jobs(
         gs = (await db.execute(select(Gallery).where(Gallery.id.in_(gallery_ids)))).scalars().all()
         gallery_map = {g.id: g for g in gs}
 
-    return {"total": total, "jobs": [_j(j, gallery_map.get(j.gallery_id)) for j in jobs]}
+    return {"total": total, "jobs": [serialize_download_job(j, gallery_map.get(j.gallery_id)) for j in jobs]}
 
 
 @router.delete("/jobs")
@@ -540,7 +541,7 @@ async def get_job(
     gallery = None
     if job.gallery_id:
         gallery = await db.get(Gallery, job.gallery_id)
-    return _j(job, gallery)
+    return serialize_download_job(job, gallery)
 
 
 @router.patch("/jobs/{job_id}")
@@ -844,8 +845,8 @@ async def get_dashboard(auth: dict = Depends(_admin), db: AsyncSession = Depends
         disk_ok, free_gb = check_disk_space("/data")
 
     result = {
-        "active_jobs": [_j(j) for j in active_jobs],
-        "queued_jobs": [_j(j) for j in queued_jobs],
+        "active_jobs": [serialize_download_job(j) for j in active_jobs],
+        "queued_jobs": [serialize_download_job(j) for j in queued_jobs],
         "site_stats": site_stats,
         "global": {
             "boost_mode": boost,
@@ -861,26 +862,3 @@ async def get_dashboard(auth: dict = Depends(_admin), db: AsyncSession = Depends
 
     await r.set("dashboard:snapshot", _json.dumps(result, default=str), ex=3)
     return result
-
-
-def _j(j: DownloadJob, gallery: Gallery | None = None) -> dict:
-    d = {
-        "id": str(j.id),
-        "url": j.url,
-        "source": j.source,
-        "status": j.status,
-        "progress": j.progress,
-        "options": j.options or {},
-        "error": j.error,
-        "created_at": j.created_at.isoformat() if j.created_at else None,
-        "finished_at": j.finished_at.isoformat() if j.finished_at else None,
-        "retry_count": j.retry_count,
-        "max_retries": j.max_retries,
-        "next_retry_at": j.next_retry_at.isoformat() if j.next_retry_at else None,
-        "gallery_id": j.gallery_id,
-        "subscription_id": j.subscription_id,
-    }
-    if gallery:
-        d["gallery_source"] = gallery.source
-        d["gallery_source_id"] = gallery.source_id
-    return d
