@@ -47,6 +47,15 @@ class TestRegistryCapabilityMaps:
         assert r.get_previewer("ehentai") is not None
         assert r.get_refresher("ehentai") is not None
 
+    def test_builtin_pixiv_registers_previewable_and_refreshable(self):
+        from plugins.builtin.pixiv.source import PixivSourcePlugin
+        from plugins.registry import PluginRegistry
+
+        r = PluginRegistry()
+        r.register(PixivSourcePlugin())
+        assert r.get_previewer("pixiv") is not None
+        assert r.get_refresher("pixiv") is not None
+
 
 class TestEhCapabilities:
     async def test_eh_preview_url_non_gallery_url_returns_none(self):
@@ -95,3 +104,31 @@ class TestEhCapabilities:
 
         r = await EhSourcePlugin().fetch_remote_metadata("123", None)
         assert r.status == "skipped" and r.reason == "no_source_url"
+
+
+class TestPixivCapabilities:
+    async def test_pixiv_preview_url_without_token_returns_none(self):
+        from unittest.mock import AsyncMock, patch
+
+        from plugins.builtin.pixiv.source import PixivSourcePlugin
+
+        with patch("services.credential.get_credential", AsyncMock(return_value=None)):
+            assert await PixivSourcePlugin().preview_url("https://www.pixiv.net/artworks/123") is None
+
+    async def test_pixiv_fetch_remote_metadata_without_token_skips(self):
+        from unittest.mock import AsyncMock, patch
+
+        from plugins.builtin.pixiv.source import PixivSourcePlugin
+
+        with patch("services.credential.get_credential", AsyncMock(return_value=None)):
+            r = await PixivSourcePlugin().fetch_remote_metadata("123", None)
+        assert r.status == "skipped" and r.reason == "credentials_required"
+
+    async def test_pixiv_fetch_remote_metadata_bad_source_id_skips(self):
+        from unittest.mock import AsyncMock, patch
+
+        from plugins.builtin.pixiv.source import PixivSourcePlugin
+
+        with patch("services.credential.get_credential", AsyncMock(return_value="tok")):
+            r = await PixivSourcePlugin().fetch_remote_metadata("not-a-number", None)
+        assert r.status == "skipped" and r.reason == "invalid_source_id"

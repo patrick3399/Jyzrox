@@ -23,6 +23,8 @@ from plugins.models import (
     GalleryMetadata,
     NewWork,
     PluginMeta,
+    PreviewData,
+    RemoteMetadataResult,
     SiteInfo,
 )
 
@@ -286,6 +288,52 @@ class PixivSourcePlugin(SourcePlugin):
         from plugins.builtin.pixiv._subscribe import check_pixiv_new_works
 
         return await check_pixiv_new_works(artist_id, last_known, credentials)
+
+    # ── Previewable / Refreshable protocol methods ────────────────────
+
+    _ARTWORK_URL_RE = re.compile(r"https?://(?:www\.)?pixiv\.net/(?:\w+/)?artworks/(\d+)")
+
+    async def preview_url(self, url: str) -> PreviewData | None:
+        m = self._ARTWORK_URL_RE.search(url)
+        if not m:
+            return None
+        from services.credential import get_credential
+        from services.pixiv_client import PixivClient
+
+        refresh_token = await get_credential("pixiv")
+        if not refresh_token:
+            return None
+        async with PixivClient(refresh_token=refresh_token) as client:
+            illust = await client.illust_detail(int(m.group(1)))
+        tags = [t.get("name", "") for t in (illust.get("tags") or []) if t.get("name")]
+        user = illust.get("user") or {}
+        image_urls = illust.get("image_urls") or {}
+        return PreviewData(
+            source="pixiv",
+            title=illust.get("title") or None,
+            pages=illust.get("page_count"),
+            tags=tags[:30] or None,
+            uploader=user.get("name") or None,
+            thumb_url=image_urls.get("square_medium") or None,
+        )
+
+    async def fetch_remote_metadata(self, source_id: str, source_url: str | None) -> RemoteMetadataResult:
+        from services.credential import get_credential
+        from services.pixiv_client import PixivClient
+
+        refresh_token = await get_credential("pixiv")
+        if not refresh_token:
+            return RemoteMetadataResult(status="skipped", reason="credentials_required")
+        try:
+            illust_id = int(source_id)
+        except ValueError, TypeError:
+            return RemoteMetadataResult(status="skipped", reason="invalid_source_id")
+        try:
+            async with PixivClient(refresh_token=refresh_token) as client:
+                detail = await client.illust_detail(illust_id)
+        except Exception:
+            return RemoteMetadataResult(status="error", reason="fetch_failed")
+        return RemoteMetadataResult(scalar_values={"pages": detail.get("page_count", 1)})
 
     # ── Legacy SourcePlugin abstract method ───────────────────────────
 
