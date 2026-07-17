@@ -7,11 +7,13 @@
 #
 #   Edit crontab with:  crontab -e
 #
+#   Use the absolute path to this script in your checkout.
+#
 #   Daily at 03:00:
-#     0 3 * * * /home/patrick339/Jyzrox/scripts/backup-cron.sh
+#     0 3 * * * /path/to/Jyzrox/scripts/backup-cron.sh
 #
 #   Or weekly on Sunday at 02:30:
-#     30 2 * * 0 /home/patrick339/Jyzrox/scripts/backup-cron.sh
+#     30 2 * * 0 /path/to/Jyzrox/scripts/backup-cron.sh
 #
 # ── systemd timer setup (alternative to cron) ──────────────────────────────
 #
@@ -25,8 +27,8 @@
 #
 #   [Service]
 #   Type=oneshot
-#   User=patrick339
-#   ExecStart=/home/patrick339/Jyzrox/scripts/backup-cron.sh
+#   User=<the user who owns the checkout and can run docker>
+#   ExecStart=/path/to/Jyzrox/scripts/backup-cron.sh
 #
 #   /etc/systemd/system/jyzrox-backup.timer
 #   -----------------------------------------
