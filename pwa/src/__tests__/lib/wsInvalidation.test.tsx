@@ -98,6 +98,41 @@ describe('resolveInvalidationFilter', () => {
     expect(filter!(['library/gallery', 'ehentai', '123'])).toBe(true)
   })
 
+  it('test_resolveInvalidationFilter_collectionUpdated_matchesCollectionsKeys', () => {
+    // Regression: collection.updated had no rule, so with page polling demoted
+    // to a WS-disconnect fallback the collections list stayed stale until the
+    // user navigated away and back.
+    const filter = resolveInvalidationFilter('collection.updated')
+    expect(filter).not.toBeNull()
+    expect(filter!('collections')).toBe(true)
+    expect(filter!(['collections', 5])).toBe(true)
+    expect(filter!('subscriptions')).toBe(false)
+    expect(filter!(['library/gallery', 'local', 'a'])).toBe(false)
+  })
+
+  it('test_resolveInvalidationFilter_datasetUpdated_matchesDatasetKeys', () => {
+    // Regression: the datasets hooks use revalidateOnFocus:false, so without a
+    // rule the captioning worker's dataset.updated never surfaced live.
+    const filter = resolveInvalidationFilter('dataset.updated')
+    expect(filter).not.toBeNull()
+    expect(filter!('datasets')).toBe(true)
+    expect(filter!(['dataset', 3])).toBe(true)
+    expect(filter!('collections')).toBe(false)
+  })
+
+  it('test_resolveInvalidationFilter_tagsUpdated_matchesTagAndAffectedGalleryKeys', () => {
+    // Regression: tags.updated had no rule, so tag add/remove/rename did not
+    // refresh the tags admin page or the open gallery's tag display live.
+    const filter = resolveInvalidationFilter('tags.updated')
+    expect(filter).not.toBeNull()
+    expect(filter!('tags')).toBe(true)
+    expect(filter!('tags/autocomplete')).toBe(true)
+    expect(filter!('tag-anomalies')).toBe(true)
+    expect(filter!(['library/gallery', 'ehentai', '123'])).toBe(true)
+    expect(filter!(['gallery/images', 'ehentai', '123'])).toBe(true)
+    expect(filter!('subscriptions')).toBe(false)
+  })
+
   it('test_resolveInvalidationFilter_unmappedEventType_returnsNull', () => {
     expect(resolveInvalidationFilter('dedup.scan_started')).toBeNull()
     expect(resolveInvalidationFilter('thumbnails.generated')).toBeNull()

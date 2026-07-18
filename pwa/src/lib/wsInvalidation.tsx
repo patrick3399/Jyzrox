@@ -77,6 +77,31 @@ const RULES: InvalidationRule[] = [
     matchesEvent: (eventType) => eventType.startsWith('subscription') && eventType !== 'subscription.checked',
     keyFilter: (key) => keyHasPrefix(key, 'subscriptions') || keyHasPrefix(key, 'subscription-groups'),
   },
+  {
+    // collection.* — collections list + the open collection's gallery members
+    // (both keyed under 'collections'). Emitted by routers/collections.py on
+    // create/rename/reorder/membership changes.
+    matchesEvent: (eventType) => eventType.startsWith('collection.'),
+    keyFilter: (key) => keyHasPrefix(key, 'collections'),
+  },
+  {
+    // dataset.* — dataset list + the open dataset's members/captions (keyed
+    // under 'dataset'/'datasets'). The datasets hooks set revalidateOnFocus:
+    // false, so without this rule the captioning worker's dataset.updated would
+    // not surface until a manual reload.
+    matchesEvent: (eventType) => eventType.startsWith('dataset.'),
+    keyFilter: (key) => keyHasPrefix(key, 'dataset'),
+  },
+  {
+    // tags.* — the tags admin page (tags / tag-anomalies / translations) plus
+    // the affected gallery's detail/images tag display. TAGS_UPDATED carries
+    // resource_type "gallery" on add/remove and "tag" on rename/merge.
+    matchesEvent: (eventType) => eventType.startsWith('tags.'),
+    keyFilter: (key) =>
+      keyHasPrefix(key, 'tag') ||
+      keyHasPrefix(key, 'library/gallery') ||
+      keyHasPrefix(key, 'gallery/'),
+  },
 ]
 
 /** Returns the SWR key filter for a given EventBus `event_type`, or null if unmapped. */
