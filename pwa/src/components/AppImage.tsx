@@ -34,10 +34,7 @@ function imgproxyUrl(src: string, width: number, format: 'avif' | 'webp'): strin
   return `/media/image/insecure/rs:fit:${width}:0:0/${source}.${format}`
 }
 
-export function responsiveImageSrcSet(
-  src: string,
-  format: 'avif' | 'webp',
-): string | undefined {
+export function responsiveImageSrcSet(src: string, format: 'avif' | 'webp'): string | undefined {
   const variants = RESPONSIVE_WIDTHS.map((width) => {
     const url = imgproxyUrl(src, width, format)
     return url ? `${url} ${width}w` : null
@@ -55,8 +52,12 @@ export function AppImage({
   ...props
 }: AppImageProps) {
   const [failed, setFailed] = useState(false)
+  const [optimizedFailed, setOptimizedFailed] = useState(false)
 
-  useEffect(() => setFailed(false), [src])
+  useEffect(() => {
+    setFailed(false)
+    setOptimizedFailed(false)
+  }, [src])
 
   if (!src || failed) {
     return (
@@ -73,6 +74,7 @@ export function AppImage({
 
   const avifSrcSet = responsiveImageSrcSet(src, 'avif')
   const webpSrcSet = responsiveImageSrcSet(src, 'webp')
+  const hasOptimizedSources = Boolean(avifSrcSet || webpSrcSet)
   const image = (
     <img
       {...props}
@@ -81,18 +83,26 @@ export function AppImage({
       className={className}
       decoding={props.decoding ?? 'async'}
       onError={(event) => {
+        if (hasOptimizedSources && !optimizedFailed) {
+          setOptimizedFailed(true)
+          return
+        }
         setFailed(true)
         onError?.(event)
       }}
     />
   )
 
-  if (!avifSrcSet || !webpSrcSet) return image
+  if (!hasOptimizedSources || optimizedFailed) return image
 
   return (
     <picture>
-      <source type="image/avif" srcSet={avifSrcSet} sizes={props.sizes ?? '100vw'} />
-      <source type="image/webp" srcSet={webpSrcSet} sizes={props.sizes ?? '100vw'} />
+      {avifSrcSet && (
+        <source type="image/avif" srcSet={avifSrcSet} sizes={props.sizes ?? '100vw'} />
+      )}
+      {webpSrcSet && (
+        <source type="image/webp" srcSet={webpSrcSet} sizes={props.sizes ?? '100vw'} />
+      )}
       {image}
     </picture>
   )

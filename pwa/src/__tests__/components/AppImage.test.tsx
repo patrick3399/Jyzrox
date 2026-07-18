@@ -52,6 +52,29 @@ describe('AppImage', () => {
     expect(decoded).toBe('local:///cas/aa/bb/hash.jpg')
   })
 
+  // imgproxy can be cold, misconfigured, or unable to encode a given original.
+  // A failed <source> must degrade to the untransformed image before the shared
+  // fallback takes over, so a transcode failure never hides an image that exists.
+  it('falls back to the original source before showing the shared fallback', () => {
+    const { container } = render(
+      <AppImage
+        src="/media/cas/aa/bb/hash.jpg"
+        alt="Thumbnail"
+        fallback={<span>Unavailable</span>}
+      />,
+    )
+
+    fireEvent.error(screen.getByRole('img', { name: 'Thumbnail' }))
+    expect(container.querySelector('picture')).toBeNull()
+    expect(screen.getByRole('img', { name: 'Thumbnail' })).toHaveAttribute(
+      'src',
+      '/media/cas/aa/bb/hash.jpg',
+    )
+
+    fireEvent.error(screen.getByRole('img', { name: 'Thumbnail' }))
+    expect(screen.getByText('Unavailable')).toBeInTheDocument()
+  })
+
   it('leaves remote images unchanged', () => {
     const { container } = render(<AppImage src="https://example.test/image.jpg" alt="Remote" />)
     expect(container.querySelector('picture')).toBeNull()
