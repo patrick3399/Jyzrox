@@ -2,8 +2,10 @@ import useSWR from 'swr'
 import useSWRMutation from 'swr/mutation'
 import { api } from '@/lib/api'
 
-export function useCollections() {
-  return useSWR('collections', () => api.collections.list())
+export function useCollections(enabled = true) {
+  return useSWR(enabled ? 'collections' : null, () => api.collections.list(), {
+    revalidateOnFocus: false,
+  })
 }
 
 export function useCollection(id: number | null, params: { page?: number; limit?: number } = {}) {

@@ -106,17 +106,23 @@ export default function GalleryDetailPage() {
     revalidateOnFocus: false,
     dedupingInterval: 300000, // 5 min cache
   })
-  const { data: pluginHealth } = useSWR('plugins/health', () => api.plugins.health(), {
-    revalidateOnFocus: false,
-    dedupingInterval: 60000,
-  })
-  const { data: sharingData, mutate: mutateSharing } = useSWR(
-    gallery?.id ? ['gallery-sharing', gallery.id] : null,
-    () => api.galleryManagement.sharing(gallery!.id),
+  // Plugin health, sharing, and version data are only read by panels the user has
+  // to open first. Fetching them on mount cost three requests on every gallery
+  // view for data most views never showed.
+  const [upscaleOpen, setUpscaleOpen] = useState(false)
+  const { data: pluginHealth, isLoading: pluginHealthLoading } = useSWR(
+    upscaleOpen ? 'plugins/health' : null,
+    () => api.plugins.health(),
+    {
+      revalidateOnFocus: false,
+      dedupingInterval: 60000,
+    },
   )
+  const [versionsOpen, setVersionsOpen] = useState(false)
   const { data: versionData, mutate: mutateVersions } = useSWR(
-    gallery?.id ? ['gallery-versions', gallery.id] : null,
+    gallery?.id && versionsOpen ? ['gallery-versions', gallery.id] : null,
     () => api.galleryManagement.versions(gallery!.id),
+    { revalidateOnFocus: false },
   )
   const [isCheckingUpdate, setIsCheckingUpdate] = useState(false)
   const [pagesOutdated, setPagesOutdated] = useState<{ old: number; new: number } | null>(null)
@@ -143,7 +149,6 @@ export default function GalleryDetailPage() {
   const [showExcluded, setShowExcluded] = useState(false)
   const [restoringHash, setRestoringHash] = useState<string | null>(null)
   const [restoringImageId, setRestoringImageId] = useState<number | null>(null)
-  const [upscaleOpen, setUpscaleOpen] = useState(false)
   const [upscaleImageId, setUpscaleImageId] = useState<number | null>(null)
   const [upscaleModel, setUpscaleModel] = useState('')
   const [upscaleScale, setUpscaleScale] = useState(2)
@@ -1035,12 +1040,8 @@ export default function GalleryDetailPage() {
                     setUpscaleImageId(images[0]?.id ?? null)
                     setUpscaleOpen(true)
                   }}
-                  disabled={images.length === 0 || !pluginHealth?.services.swarmui?.online}
-                  title={
-                    pluginHealth?.services.swarmui?.online
-                      ? t('library.aiUpscale')
-                      : t('library.aiUpscaleOffline')
-                  }
+                  disabled={images.length === 0}
+                  title={t('library.aiUpscale')}
                   className="flex items-center gap-1.5 rounded border border-purple-600/60 bg-purple-900/30 px-4 py-2 text-sm font-medium text-purple-300 transition-colors hover:bg-purple-900/50 disabled:cursor-not-allowed disabled:opacity-50"
                 >
                   <Sparkles size={16} />
@@ -1057,7 +1058,6 @@ export default function GalleryDetailPage() {
                     const absolute = `${window.location.origin}${result.url}`
                     await navigator.clipboard.writeText(absolute)
                     toast.success('Share link copied (expires in 7 days, R18 filtered)')
-                    await mutateSharing()
                   } catch (error) {
                     toast.error(error instanceof Error ? error.message : String(error))
                   }
@@ -1070,32 +1070,41 @@ export default function GalleryDetailPage() {
                 className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
                 onClick={async () => {
                   if (!gallery) return
-                  const raw = window.prompt('User IDs to grant read access (comma separated)', sharingData?.permissions.map((item) => item.user_id).join(',') ?? '')
+                  const sharing = await api.galleryManagement.sharing(gallery.id)
+                  const raw = window.prompt('User IDs to grant read access (comma separated)', sharing.permissions.map((item) => item.user_id).join(','))
                   if (raw === null) return
                   const permissions = raw.split(',').map((value) => Number(value.trim())).filter(Number.isInteger).map((user_id) => ({ user_id, can_edit: false }))
                   const visibility = window.confirm('Use private visibility? Choose Cancel for public visibility.') ? 'private' : 'public'
                   await api.galleryManagement.updateSharing(gallery.id, { visibility, permissions })
-                  await mutateSharing()
                   toast.success('Gallery access updated')
                 }}
               >
-                {sharingData?.visibility === 'private' ? 'Private access' : 'Public access'}
+                Manage access
               </button>
               <button
                 type="button"
                 className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
-                onClick={async () => {
-                  if (!gallery) return
-                  const value = window.prompt('Gallery ID to link as another version')
-                  const linkedId = Number(value)
-                  if (!Number.isInteger(linkedId)) return
-                  await api.galleryManagement.linkVersion(gallery.id, linkedId)
-                  await mutateVersions()
-                  toast.success('Version linked')
-                }}
+                onClick={() => setVersionsOpen((open) => !open)}
               >
-                <History size={16} /> Link version
+                <History size={16} /> Versions
               </button>
+              {versionsOpen && (
+                <button
+                  type="button"
+                  className="flex items-center gap-1.5 rounded border border-vault-border bg-vault-input px-4 py-2 text-sm text-vault-text-secondary hover:border-vault-accent"
+                  onClick={async () => {
+                    if (!gallery) return
+                    const value = window.prompt('Gallery ID to link as another version')
+                    const linkedId = Number(value)
+                    if (!Number.isInteger(linkedId)) return
+                    await api.galleryManagement.linkVersion(gallery.id, linkedId)
+                    await mutateVersions()
+                    toast.success('Version linked')
+                  }}
+                >
+                  <History size={16} /> Link version
+                </button>
+              )}
               <button
                 type="button"
                 className="flex items-center gap-1.5 rounded border border-red-700/50 bg-red-900/20 px-4 py-2 text-sm text-red-300 hover:bg-red-900/40"
@@ -1112,7 +1121,7 @@ export default function GalleryDetailPage() {
                 <GitMerge size={16} /> Merge
               </button>
             </div>
-            {versionData?.versions && versionData.versions.length > 1 && (
+            {versionsOpen && versionData?.versions && versionData.versions.length > 1 && (
               <div className="mt-3 flex flex-wrap items-center gap-2 text-sm">
                 <span className="text-vault-text-muted">Versions:</span>
                 {versionData.versions.map((version) => (
@@ -1198,7 +1207,12 @@ export default function GalleryDetailPage() {
               </label>
               <button
                 type="button"
-                disabled={!upscaleImageId || upscaleSubmitting}
+                disabled={
+                  !upscaleImageId ||
+                  upscaleSubmitting ||
+                  pluginHealthLoading ||
+                  !pluginHealth?.services.swarmui?.online
+                }
                 onClick={async () => {
                   if (!upscaleImageId) return
                   setUpscaleSubmitting(true)

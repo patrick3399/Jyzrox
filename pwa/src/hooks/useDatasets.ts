@@ -4,7 +4,9 @@ import { api } from '@/lib/api'
 import type { DatasetFilterConfig, DatasetSelection } from '@/lib/types'
 
 export function useDatasets(enabled = true) {
-  return useSWR(enabled ? 'datasets' : null, () => api.datasets.list())
+  return useSWR(enabled ? 'datasets' : null, () => api.datasets.list(), {
+    revalidateOnFocus: false,
+  })
 }
 
 export function useDataset(

@@ -141,10 +141,14 @@ function LibraryContent() {
     return () => window.removeEventListener('resize', onResize)
   }, [])
 
+  // Collections stay eager because they also populate the normal filter panel.
   const { data: collectionsData } = useCollections()
   const { data: profile } = useProfile()
   const canManageDatasets = profile?.role === 'member' || profile?.role === 'admin'
-  const { data: datasetsData } = useDatasets(canManageDatasets)
+  // Datasets are only ever read by the batch-action bar, so don't pay for the
+  // request until that bar is actually on screen.
+  const batchActionsVisible = selectMode && selectedIds.size > 0
+  const { data: datasetsData } = useDatasets(canManageDatasets && batchActionsVisible)
   const { trigger: addDatasetMembers } = useAddDatasetMembers()
 
   // Derive sort from parsed filters (default 'added_at')
