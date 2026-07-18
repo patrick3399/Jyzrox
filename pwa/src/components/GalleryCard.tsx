@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
+import { useState, useCallback, useMemo } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   BookOpen,
@@ -18,10 +18,6 @@ import { getSourceStyle, getEventPosition } from '@/lib/galleryUtils'
 import { galleryHref, readerHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { AppImage } from './AppImage'
-
-// Pointer must rest on a card this long before the animated preview loads,
-// so sweeping across the grid doesn't trigger a webm fetch per card.
-const HOVER_PREVIEW_DELAY_MS = 180
 
 // ── Category colours ──────────────────────────────────────────────────
 
@@ -188,22 +184,6 @@ export function LibraryGalleryCard({
 
   const [menuOpen, setMenuOpen] = useState(false)
   const [menuPos, setMenuPos] = useState({ x: 0, y: 0 })
-  const [hovered, setHovered] = useState(false)
-  const [previewFailed, setPreviewFailed] = useState(false)
-
-  // Delay the animated preview so merely sweeping the pointer across a grid of
-  // cards doesn't kick off a webm fetch + decode per card. Only a deliberate
-  // hover (pointer resting past the delay) mounts the <video>.
-  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
-  const startHover = useCallback(() => {
-    clearTimeout(hoverTimerRef.current)
-    hoverTimerRef.current = setTimeout(() => setHovered(true), HOVER_PREVIEW_DELAY_MS)
-  }, [])
-  const endHover = useCallback(() => {
-    clearTimeout(hoverTimerRef.current)
-    setHovered(false)
-  }, [])
-  useEffect(() => () => clearTimeout(hoverTimerRef.current), [])
 
   const handleLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     e.preventDefault()
@@ -214,7 +194,6 @@ export function LibraryGalleryCard({
   const longPressHandlers = useLongPress({ onLongPress: handleLongPress })
 
   const sourceStyle = getSourceStyle(gallery)
-  const previewUrl = thumbUrl?.replace(/thumb_160\.webp$/, 'preview.webm')
 
   const contextItems = useMemo(() => {
     if (!menuOpen) return []
@@ -273,8 +252,6 @@ export function LibraryGalleryCard({
         tabIndex={onClick ? 0 : undefined}
         onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
         {...longPressHandlers}
-        onMouseEnter={startHover}
-        onMouseLeave={endHover}
         className={`
           relative flex flex-col select-none [-webkit-touch-callout:none]
           bg-vault-card rounded-lg overflow-hidden
@@ -322,26 +299,13 @@ export function LibraryGalleryCard({
         {/* Thumbnail or gradient placeholder */}
         <div className="relative aspect-[3/4] overflow-hidden">
           {thumbUrl ? (
-            <>
-              <AppImage
-                src={thumbUrl}
-                alt={gallery.title}
-                className="w-full h-full object-cover"
-                loading="lazy"
-                fallbackClassName="w-full h-full bg-vault-input"
-              />
-              {hovered && previewUrl && !previewFailed && (
-                <video
-                  src={previewUrl}
-                  className="absolute inset-0 h-full w-full object-cover"
-                  autoPlay
-                  muted
-                  loop
-                  playsInline
-                  onError={() => setPreviewFailed(true)}
-                />
-              )}
-            </>
+            <AppImage
+              src={thumbUrl}
+              alt={gallery.title}
+              className="w-full h-full object-cover"
+              loading="lazy"
+              fallbackClassName="w-full h-full bg-vault-input"
+            />
           ) : (
             <div
               className={`w-full h-full bg-gradient-to-b ${colors.bg} flex items-center justify-center`}
