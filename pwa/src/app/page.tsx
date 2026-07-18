@@ -180,7 +180,10 @@ export default function Dashboard() {
   // Quick links config — user-customisable via Settings > Dashboard Quick Links
   // loadDashboardConfig() is SSR-safe (returns ALL_DASHBOARD_LINKS when window is undefined)
   const [quickLinks, setQuickLinks] = useState(() => loadDashboardConfig())
-  const { data: features } = useSWR('feature-toggles', () => api.settings.getFeatures())
+  const { data: features } = useSWR('settings/features', () => api.settings.getFeatures(), {
+    revalidateOnFocus: false,
+    dedupingInterval: 300000,
+  })
   const visibleQuickLinks = quickLinks.filter((link) => passesFeatureFlag(link, features))
 
   useEffect(() => {

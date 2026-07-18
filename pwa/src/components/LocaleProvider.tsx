@@ -1,6 +1,6 @@
 'use client'
 
-import { createContext, useContext, useState, useEffect, useCallback } from 'react'
+import { createContext, useContext, useState, useEffect, useCallback, useRef } from 'react'
 import {
   detectBrowserLocale,
   loadLocale,
@@ -9,6 +9,7 @@ import {
   type Locale,
 } from '@/lib/i18n'
 import { api } from '@/lib/api'
+import { useProfile } from '@/hooks/useProfile'
 
 type LocaleContextType = {
   locale: Locale
@@ -44,6 +45,8 @@ export function LocaleProvider({
   const [locale, setLocaleState] = useState<Locale>(() => initialLocale ?? detectLocale())
   const [isAutomatic, setIsAutomatic] = useState(true)
   const [dictionaryVersion, setDictionaryVersion] = useState(0)
+  const { data: profile } = useProfile()
+  const profileSyncedRef = useRef(false)
 
   useEffect(() => {
     let active = true
@@ -82,43 +85,39 @@ export function LocaleProvider({
     api.auth.updateProfile({ locale: newLocale }).catch(() => {})
   }, [])
 
-  // On mount: sync locale from server profile (server wins for cross-device sync)
+  // Sync once from the shared profile request. Navigation and other consumers
+  // use the same SWR key, so a hard navigation no longer fetches the profile twice.
   useEffect(() => {
-    api.auth
-      .getProfile()
-      .then((profile) => {
-        if (profile.locale && SUPPORTED_LOCALES.includes(profile.locale as Locale)) {
-          const serverLocale = profile.locale as Locale
-          if (serverLocale !== locale) {
-            void loadLocale(serverLocale)
-              .then(() => {
-                setI18nLocale(serverLocale)
-                setLocaleState(serverLocale)
-              })
-              .catch(() => {
-                setI18nLocale('en')
-                setLocaleState('en')
-              })
-          }
-          setIsAutomatic(false)
-          localStorage.setItem(OVERRIDE_STORAGE_KEY, serverLocale)
-        } else {
-          const automaticLocale = detectBrowserLocale()
-          void loadLocale(automaticLocale)
-            .then(() => {
-              setI18nLocale(automaticLocale)
-              setLocaleState(automaticLocale)
-            })
-            .catch(() => {
-              setI18nLocale('en')
-              setLocaleState('en')
-            })
-          setIsAutomatic(true)
-          localStorage.removeItem(OVERRIDE_STORAGE_KEY)
-        }
-      })
-      .catch(() => {}) // Not logged in or network error — use localStorage fallback
-  }, []) // eslint-disable-line react-hooks/exhaustive-deps
+    if (!profile || profileSyncedRef.current) return
+    profileSyncedRef.current = true
+    if (profile.locale && SUPPORTED_LOCALES.includes(profile.locale as Locale)) {
+      const serverLocale = profile.locale as Locale
+      void loadLocale(serverLocale)
+        .then(() => {
+          setI18nLocale(serverLocale)
+          setLocaleState(serverLocale)
+        })
+        .catch(() => {
+          setI18nLocale('en')
+          setLocaleState('en')
+        })
+      setIsAutomatic(false)
+      localStorage.setItem(OVERRIDE_STORAGE_KEY, serverLocale)
+    } else {
+      const automaticLocale = detectBrowserLocale()
+      void loadLocale(automaticLocale)
+        .then(() => {
+          setI18nLocale(automaticLocale)
+          setLocaleState(automaticLocale)
+        })
+        .catch(() => {
+          setI18nLocale('en')
+          setLocaleState('en')
+        })
+      setIsAutomatic(true)
+      localStorage.removeItem(OVERRIDE_STORAGE_KEY)
+    }
+  }, [profile])
 
   useEffect(() => {
     document.documentElement.lang = locale

@@ -40,7 +40,10 @@ export function useNavigation() {
   const { theme, setTheme } = useTheme()
   const { logout } = useAuth()
   const { data: profile } = useProfile()
-  const { data: features } = useSWR('feature-toggles', () => api.settings.getFeatures())
+  const { data: features } = useSWR('settings/features', () => api.settings.getFeatures(), {
+    revalidateOnFocus: false,
+    dedupingInterval: 300000,
+  })
   const [mounted, setMounted] = useState(false)
 
   // Sidebar config with cross-tab sync
