@@ -48,6 +48,33 @@ export function LocaleProvider({
   const { data: profile } = useProfile()
   const profileSyncedRef = useRef(false)
 
+  // The server can only seed the locale from Accept-Language. Reconcile that
+  // seed with the browser-side override immediately after hydration so a hard
+  // refresh still honours a saved manual choice even when the profile request
+  // is slow or unavailable. A profile that has already arrived remains the
+  // authority for cross-device sync.
+  useEffect(() => {
+    const override = localStorage.getItem(OVERRIDE_STORAGE_KEY)
+    const hasValidOverride = override !== null && SUPPORTED_LOCALES.includes(override as Locale)
+    if (override !== null && !hasValidOverride) {
+      localStorage.removeItem(OVERRIDE_STORAGE_KEY)
+    }
+    setIsAutomatic(!hasValidOverride)
+
+    const detectedLocale = hasValidOverride ? (override as Locale) : detectBrowserLocale()
+    void loadLocale(detectedLocale)
+      .then(() => {
+        if (profileSyncedRef.current) return
+        setI18nLocale(detectedLocale)
+        setLocaleState(detectedLocale)
+      })
+      .catch(() => {
+        if (profileSyncedRef.current) return
+        setI18nLocale('en')
+        setLocaleState('en')
+      })
+  }, [])
+
   useEffect(() => {
     let active = true
     void loadLocale(locale)

@@ -22,8 +22,9 @@ import { describe, expect, it } from 'vitest'
 import babel from '@babel/core'
 import reactCompiler from 'babel-plugin-react-compiler'
 
-const source = readFileSync(
-  resolve(process.cwd(), 'src/components/LocaleProvider.tsx'),
+const source = readFileSync(resolve(process.cwd(), 'src/components/LocaleProvider.tsx'), 'utf8')
+const layoutShellSource = readFileSync(
+  resolve(process.cwd(), 'src/components/LayoutShell.tsx'),
   'utf8',
 )
 
@@ -62,5 +63,10 @@ describe('LocaleProvider under React Compiler', () => {
     expect(source).not.toMatch(/\[\s*,\s*setDictionaryVersion\s*\]/)
     expect(source).toMatch(/const \[dictionaryVersion, setDictionaryVersion\] = useState\(0\)/)
     expect(source).toContain('dictionaryVersion }')
+  })
+
+  it('invalidates the app shell when a lazy dictionary finishes loading', () => {
+    expect(layoutShellSource).toMatch(/const \{\s*locale,\s*dictionaryVersion\s*\} = useLocale\(\)/)
+    expect(layoutShellSource).toContain('key={`${locale}:${dictionaryVersion}`}')
   })
 })

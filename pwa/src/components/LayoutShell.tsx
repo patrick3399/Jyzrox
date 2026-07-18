@@ -21,7 +21,9 @@ const PUBLIC_PATH_PREFIXES = ['/share/']
 
 export function LayoutShell({ children }: { children: React.ReactNode }) {
   // Subscribe at the shell boundary so legacy direct t() call sites refresh.
-  const { locale } = useLocale()
+  // The locale value can stay unchanged while its lazy dictionary finishes
+  // loading, so dictionaryVersion must also invalidate the shell.
+  const { locale, dictionaryVersion } = useLocale()
   const pathname = usePathname()
   const isAuth = AUTH_PATHS.includes(pathname)
   const isPublic = PUBLIC_PATH_PREFIXES.some((prefix) => pathname.startsWith(prefix))
@@ -46,7 +48,7 @@ export function LayoutShell({ children }: { children: React.ReactNode }) {
     <WsProvider>
       <WsInvalidationBridge />
       <LayoutShellInner
-        key={locale}
+        key={`${locale}:${dictionaryVersion}`}
         isReader={isReader}
         drawerOpen={drawerOpen}
         onDrawerClose={handleDrawerClose}
