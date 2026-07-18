@@ -102,6 +102,52 @@ class TestCasUrl:
         assert result.startswith("/media/cas/")
 
 
+class TestLibraryUrl:
+    """Unit tests for library_url(external_path) -> str."""
+
+    def test_hash_in_filename_is_percent_encoded_not_left_raw(self):
+        """A '#' in the filename must be encoded so the browser doesn't treat it
+        as a URL fragment and truncate the <img src> request (the image never
+        loads otherwise — ~half the shamakho library filenames carry a '#')."""
+        from services.cas import library_url
+
+        ext_path = "/mnt/ssd-data/images/shamakho/2023-05-26-#健全彼女（線ラフver）.jpeg"
+        url = library_url(ext_path)
+
+        assert "#" not in url
+        assert "%23" in url
+
+    def test_question_mark_in_filename_is_percent_encoded(self):
+        """A '?' would otherwise be parsed as the query delimiter."""
+        from services.cas import library_url
+
+        url = library_url("/mnt/ssd-data/images/foo/what?.jpeg")
+
+        assert "?" not in url
+        assert "%3F" in url
+
+    def test_prefix_and_slashes_preserved(self):
+        """The /media/libraries/ prefix and path separators stay literal."""
+        from services.cas import library_url
+
+        url = library_url("/mnt/ssd-data/images/foo/bar.jpg")
+
+        assert url == "/media/libraries/ssd-data/images/foo/bar.jpg"
+
+    def test_encoded_url_round_trips_through_unquote_to_media_path(self):
+        """media_authz unquotes X-Original-URI and nginx alias decodes for the
+        filesystem; unquoting the URL must recover the /media/libraries/ path
+        so the external_path ACL lookup still matches."""
+        from urllib.parse import unquote
+
+        from services.cas import library_url
+
+        ext_path = "/mnt/ssd-data/images/shamakho/2023-#健全（＋線ラフver）.jpeg"
+        url = library_url(ext_path)
+
+        assert unquote(url) == "/media/libraries/ssd-data/images/shamakho/2023-#健全（＋線ラフver）.jpeg"
+
+
 # ---------------------------------------------------------------------------
 # TestSafeSourceId
 # ---------------------------------------------------------------------------

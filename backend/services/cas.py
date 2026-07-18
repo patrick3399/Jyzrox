@@ -3,6 +3,7 @@
 import os
 import shutil
 from pathlib import Path
+from urllib.parse import quote
 
 from sqlalchemy import update
 from sqlalchemy.dialects.postgresql import insert as pg_insert
@@ -23,6 +24,22 @@ def cas_path(sha256: str, ext: str) -> Path:
 def cas_url(sha256: str, ext: str) -> str:
     """Return the nginx-served URL for a CAS blob."""
     return f"/media/cas/{sha256[:2]}/{sha256[2:4]}/{sha256}{ext}"
+
+
+def library_url(external_path: str) -> str:
+    """Return the nginx-served ``/media/libraries/`` URL for an external blob.
+
+    ``external_path`` is a raw filesystem path under ``/mnt`` whose final
+    segment is an arbitrary source filename. Such names routinely contain
+    characters that are reserved in a URL — most damagingly ``#`` and ``?``,
+    which a browser interprets as the fragment/query delimiter and *truncates*
+    the ``<img src>`` request at, so the image never loads (roughly half of the
+    shamakho library filenames carry a ``#``). Percent-encode every segment so
+    the URL the browser receives is well-formed; ``media_authz`` unquotes it
+    back to match ``Blob.external_path`` and nginx's ``alias`` decodes it for
+    the filesystem lookup, so the round-trip is preserved.
+    """
+    return quote(external_path.replace("/mnt/", "/media/libraries/", 1), safe="/")
 
 
 def safe_source_id(source_id: str) -> str:

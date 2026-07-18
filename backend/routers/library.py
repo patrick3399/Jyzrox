@@ -59,6 +59,7 @@ from db.models import (
 from services.cas import (
     cas_url,
     library_dir,
+    library_url,
     thumb_dir,
 )
 from services.cas import thumb_url as cas_thumb_url
@@ -2561,7 +2562,7 @@ async def find_similar_images(
 
     def _row_to_url(r) -> str:
         if r.storage == "external" and r.external_path:
-            return r.external_path.replace("/mnt/", "/media/libraries/", 1)
+            return library_url(r.external_path)
         return cas_url(r.sha256, r.extension)
 
     return {
@@ -2715,7 +2716,7 @@ def _to_url(blob) -> str | None:
     if not blob:
         return None
     if blob.storage == "external" and blob.external_path:
-        return blob.external_path.replace("/mnt/", "/media/libraries/", 1)
+        return library_url(blob.external_path)
     return cas_url(blob.sha256, blob.extension)
 
 
