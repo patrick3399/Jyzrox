@@ -8,6 +8,12 @@ import { ErrorBoundary } from '@/components/ErrorBoundary'
 import { t } from '@/lib/i18n'
 import { useWsConnection, useWsJobs } from '@/lib/ws'
 import { createRequestCoalescer } from '@/lib/requestCoalescer'
+import {
+  numberSetsEqual,
+  readerGalleryStateEqual,
+  readerImagesEqual,
+  READER_DOWNLOAD_REFRESH_INTERVAL_MS,
+} from '@/lib/readerRefresh'
 import type { Gallery, GalleryImage, ReadProgress } from '@/lib/types'
 
 interface LoadedData {
@@ -39,20 +45,27 @@ export default function ReaderPage() {
             api.library.getGallery(source, sourceId),
             api.library.getImages(source, sourceId),
           ])
-          setData((prev) =>
-            prev
-              ? {
-                  ...prev,
-                  gallery,
-                  images: imagesResp.images,
-                  favoritedImageIds: imagesResp.favorited_image_ids ?? [],
-                }
-              : prev,
-          )
+          setData((prev) => {
+            if (!prev) return prev
+            const nextFavorites = imagesResp.favorited_image_ids ?? []
+            if (
+              readerGalleryStateEqual(prev.gallery, gallery) &&
+              readerImagesEqual(prev.images, imagesResp.images) &&
+              numberSetsEqual(prev.favoritedImageIds, nextFavorites)
+            ) {
+              return prev
+            }
+            return {
+              ...prev,
+              gallery,
+              images: imagesResp.images,
+              favoritedImageIds: nextFavorites,
+            }
+          })
         } catch {
           // A later event or disconnected fallback poll will retry.
         }
-      }, 1000),
+      }, READER_DOWNLOAD_REFRESH_INTERVAL_MS),
     [source, sourceId],
   )
 
@@ -123,7 +136,10 @@ export default function ReaderPage() {
   useEffect(() => {
     if (data?.gallery.download_status !== 'downloading' || !source || !sourceId) return
     if (connected) return
-    const interval = setInterval(() => refreshCoalescer.trigger(), 5000)
+    const interval = setInterval(
+      () => refreshCoalescer.trigger(),
+      READER_DOWNLOAD_REFRESH_INTERVAL_MS,
+    )
     return () => {
       clearInterval(interval)
     }
@@ -165,7 +181,7 @@ export default function ReaderPage() {
   const { gallery, images, progress } = data
 
   // Downloading but no images imported yet — show waiting screen.
-  // The 5s polling effect above will keep refreshing until images arrive.
+  // The bounded polling/WS refresh above will keep refreshing until images arrive.
   if (images.length === 0 && gallery.download_status === 'downloading') {
     return (
       <div className="flex h-screen w-full items-center justify-center bg-black text-white">
