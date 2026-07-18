@@ -1,5 +1,5 @@
 'use client'
-import { useState, useCallback, useMemo } from 'react'
+import { useState, useCallback, useEffect, useMemo, useRef } from 'react'
 import { useRouter } from 'next/navigation'
 import {
   BookOpen,
@@ -18,6 +18,10 @@ import { getSourceStyle, getEventPosition } from '@/lib/galleryUtils'
 import { galleryHref, readerHref } from '@/lib/galleryRoutes'
 import { t } from '@/lib/i18n'
 import { AppImage } from './AppImage'
+
+// Pointer must rest on a card this long before the animated preview loads,
+// so sweeping across the grid doesn't trigger a webm fetch per card.
+const HOVER_PREVIEW_DELAY_MS = 180
 
 // ── Category colours ──────────────────────────────────────────────────
 
@@ -187,6 +191,20 @@ export function LibraryGalleryCard({
   const [hovered, setHovered] = useState(false)
   const [previewFailed, setPreviewFailed] = useState(false)
 
+  // Delay the animated preview so merely sweeping the pointer across a grid of
+  // cards doesn't kick off a webm fetch + decode per card. Only a deliberate
+  // hover (pointer resting past the delay) mounts the <video>.
+  const hoverTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
+  const startHover = useCallback(() => {
+    clearTimeout(hoverTimerRef.current)
+    hoverTimerRef.current = setTimeout(() => setHovered(true), HOVER_PREVIEW_DELAY_MS)
+  }, [])
+  const endHover = useCallback(() => {
+    clearTimeout(hoverTimerRef.current)
+    setHovered(false)
+  }, [])
+  useEffect(() => () => clearTimeout(hoverTimerRef.current), [])
+
   const handleLongPress = useCallback((e: React.TouchEvent | React.MouseEvent) => {
     e.preventDefault()
     setMenuPos(getEventPosition(e))
@@ -255,8 +273,8 @@ export function LibraryGalleryCard({
         tabIndex={onClick ? 0 : undefined}
         onKeyDown={onClick ? (e) => e.key === 'Enter' && onClick() : undefined}
         {...longPressHandlers}
-        onMouseEnter={() => setHovered(true)}
-        onMouseLeave={() => setHovered(false)}
+        onMouseEnter={startHover}
+        onMouseLeave={endHover}
         className={`
           relative flex flex-col select-none [-webkit-touch-callout:none]
           bg-vault-card rounded-lg overflow-hidden
