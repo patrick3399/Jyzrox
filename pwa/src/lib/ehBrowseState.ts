@@ -51,7 +51,6 @@ export const CATEGORY_BITMASK: Record<string, number> = {
 export const ALL_CATS = Object.keys(CATEGORY_BITMASK)
 export const ALL_CATS_MASK = Object.values(CATEGORY_BITMASK).reduce((a, b) => a + b, 0)
 export const EH_PAGE_SIZE = 25
-export const SNAPSHOT_CAP = 300
 
 export const EH_ADVANCED_SEARCH_BITS = {
   name: 0x1,
@@ -270,17 +269,22 @@ type Snapshot = {
   scrollY: number
 }
 
-// The store keeps one snapshot per query identity (MRU-first) so in-page tab /
-// filter switches can bring back the previous view instead of reseeding. Capped
-// so a long session hopping across identities doesn't grow sessionStorage.
-type SnapshotStore = { snaps: Snapshot[] }
+// The active snapshot must keep its item buffer, cursor, and scroll position as
+// one consistent unit. The former 300-item slice paired an early item buffer
+// with a later cursor/scroll offset, which could skip results after back-nav.
+// Keep the current view whole and evict older identities to stay within a
+// conservative sessionStorage budget.
+type SnapshotStore = { version: 2; snaps: Snapshot[] }
 export const SNAPSHOT_HISTORY_CAP = 5
+export const SNAPSHOT_STORE_CHAR_CAP = 2_000_000
 
 function parseStore(raw: string | null): Snapshot[] {
   if (!raw) return []
   try {
     const parsed = JSON.parse(raw) as SnapshotStore
-    if (!parsed || !Array.isArray(parsed.snaps)) return []
+    // Version 1 snapshots may contain the inconsistent 300-item head + latest
+    // cursor combination. Discard them rather than restoring a view that can skip.
+    if (!parsed || parsed.version !== 2 || !Array.isArray(parsed.snaps)) return []
     return parsed.snaps.filter((x) => x && typeof x.queryKey === 'string' && Array.isArray(x.items))
   } catch {
     return []
@@ -291,14 +295,37 @@ function parseStore(raw: string | null): Snapshot[] {
 export function serializeSnapshot(s: EhBrowseState, prevRaw: string | null = null): string {
   const snap: Snapshot = {
     queryKey: queryKey(s),
-    items: s.items.slice(0, SNAPSHOT_CAP),
+    items: s.items,
     total: s.total,
     cursor: s.cursor,
     hasMore: s.hasMore,
     scrollY: s.scrollY,
   }
   const rest = parseStore(prevRaw).filter((x) => x.queryKey !== snap.queryKey)
-  return JSON.stringify({ snaps: [snap, ...rest].slice(0, SNAPSHOT_HISTORY_CAP) })
+  const selected: Snapshot[] = []
+  for (const candidate of [snap, ...rest].slice(0, SNAPSHOT_HISTORY_CAP)) {
+    const next = [...selected, candidate]
+    const serialized = JSON.stringify({ version: 2, snaps: next } satisfies SnapshotStore)
+    if (serialized.length <= SNAPSHOT_STORE_CHAR_CAP) {
+      selected.push(candidate)
+      continue
+    }
+    if (selected.length === 0) {
+      // An exceptionally large active view cannot be saved safely. Restarting
+      // from page one is preferable to restoring stale cursor/scroll metadata.
+      const reset: Snapshot = {
+        ...candidate,
+        items: [],
+        total: null,
+        cursor: null,
+        hasMore: true,
+        scrollY: 0,
+      }
+      return JSON.stringify({ version: 2, snaps: [reset] } satisfies SnapshotStore)
+    }
+    break
+  }
+  return JSON.stringify({ version: 2, snaps: selected } satisfies SnapshotStore)
 }
 
 /** Returns the view slice to RESTORE for `currentKey`, or null when absent / malformed. */

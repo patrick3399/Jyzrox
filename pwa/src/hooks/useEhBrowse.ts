@@ -173,9 +173,20 @@ export function useEhBrowse() {
     try {
       sessionStorage.setItem(SNAPSHOT_KEY, serializeSnapshot({ ...s, scrollY }, prev))
     } catch {
-      // quota — keep only this identity, without the buffer, so cursor/scroll survive
+      // Quota fallback must reset cursor and scroll together with the buffer.
+      // Keeping a late cursor beside an empty item list would skip results.
       try {
-        sessionStorage.setItem(SNAPSHOT_KEY, serializeSnapshot({ ...s, items: [], scrollY }))
+        sessionStorage.setItem(
+          SNAPSHOT_KEY,
+          serializeSnapshot({
+            ...s,
+            items: [],
+            total: null,
+            cursor: null,
+            hasMore: true,
+            scrollY: 0,
+          }),
+        )
       } catch {
         /* give up silently */
       }
@@ -267,17 +278,17 @@ export function useEhBrowse() {
     // our restore's scrollTo, or the browser's popstate restoration).
     lastScrollYRef.current = 0
     const write = () => persistView(stateRef.current)
-    let raf = 0
+    let persistTimer: ReturnType<typeof setTimeout> | undefined
     const onScroll = () => {
       lastScrollYRef.current = window.scrollY
-      if (raf) return
-      raf = requestAnimationFrame(() => {
-        raf = 0
-        write()
-      })
+      clearTimeout(persistTimer)
+      persistTimer = setTimeout(write, 250)
     }
     const onHide = () => {
-      if (document.visibilityState === 'hidden') write()
+      if (document.visibilityState === 'hidden') {
+        clearTimeout(persistTimer)
+        write()
+      }
     }
     window.addEventListener('scroll', onScroll, { passive: true })
     window.addEventListener('pagehide', write)
@@ -288,7 +299,7 @@ export function useEhBrowse() {
       window.removeEventListener('scroll', onScroll)
       window.removeEventListener('pagehide', write)
       document.removeEventListener('visibilitychange', onHide)
-      if (raf) cancelAnimationFrame(raf)
+      clearTimeout(persistTimer)
     }
   }, [persistView])
 

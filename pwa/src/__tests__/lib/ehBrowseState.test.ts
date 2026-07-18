@@ -187,14 +187,25 @@ describe('ehBrowseState — buildParams', () => {
 
 describe('ehBrowseState — snapshot', () => {
   const g = (gid: number) => ({ gid, token: `t${gid}` }) as never
-  it('caps items at 300 (keeps head)', () => {
+  it('keeps the full item buffer aligned with its cursor and scroll after 300 items', () => {
     let s = reducer(initialState, { type: 'SET_TAB', tab: 'search' })
     const many = Array.from({ length: 500 }, (_, i) => g(i))
-    s = reducer(s, { type: 'SEED', items: many, total: 500, cursor: null, hasMore: false })
+    s = reducer(s, {
+      type: 'SEED',
+      items: many,
+      total: 1000,
+      cursor: { kind: 'gid', nextGid: 500 },
+      hasMore: true,
+    })
+    s = reducer(s, { type: 'SET_SCROLL', scrollY: 24000 })
     const store = JSON.parse(serializeSnapshot(s))
+    expect(store.version).toBe(2)
     expect(store.snaps).toHaveLength(1)
-    expect(store.snaps[0].items).toHaveLength(300)
+    expect(store.snaps[0].items).toHaveLength(500)
     expect(store.snaps[0].items[0].gid).toBe(0)
+    expect(store.snaps[0].items[499].gid).toBe(499)
+    expect(store.snaps[0].cursor).toEqual({ kind: 'gid', nextGid: 500 })
+    expect(store.snaps[0].scrollY).toBe(24000)
     expect(store.snaps[0].queryKey).toBe(queryKey(s))
   })
 
@@ -247,6 +258,21 @@ describe('ehBrowseState — snapshot', () => {
   it('parseSnapshot tolerates malformed JSON', () => {
     expect(parseSnapshot('{not json', 'k')).toBeNull()
     expect(parseSnapshot('', 'k')).toBeNull()
+  })
+
+  it('rejects legacy snapshots that may mix a truncated buffer with a later cursor', () => {
+    const legacy = JSON.stringify({
+      snaps: [
+        {
+          queryKey: 'search',
+          items: [g(1)],
+          cursor: { kind: 'gid', nextGid: 999 },
+          hasMore: true,
+          scrollY: 50000,
+        },
+      ],
+    })
+    expect(parseSnapshot(legacy, 'search')).toBeNull()
   })
 })
 
@@ -301,3 +327,4 @@ describe('ehBrowseState — URL identity', () => {
     expect(str).not.toMatch(/gid|scroll|items|cursor/i)
   })
 })
+
