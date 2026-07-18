@@ -122,6 +122,26 @@ describe('ReaderImg transient error auto-retry', () => {
     })
     expect((screen.getByAltText('Page 2') as HTMLImageElement).src).not.toContain('_r=')
   })
+
+  // Auto-retry exists for the EH image proxy, whose upstream fetches fail
+  // transiently. Local media under /media/ has no such upstream: a failure there
+  // is permanent, so burning the retry budget only delays the error UI.
+  it('fails local media immediately without entering the EH auto-retry loop', () => {
+    const onError = vi.fn()
+    const localImage: ReaderImage = {
+      pageNum: 2,
+      url: '/media/cas/aa/bb/x.jpg',
+      isLocal: true,
+      mediaType: 'image',
+    }
+    render(<ReaderImg image={localImage} onError={onError} />)
+
+    fireEvent.error(screen.getByAltText('Page 2'))
+
+    expect(onError).toHaveBeenCalledTimes(1)
+    expect(screen.getByRole('button', { name: /retry/i })).toBeInTheDocument()
+    expect(screen.queryByRole('status')).not.toBeInTheDocument()
+  })
 })
 
 describe('ReaderImg has no thumbhash blur-up placeholder (perf/UX regression)', () => {

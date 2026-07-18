@@ -182,6 +182,7 @@ export function ReaderImg({
   // Cache-buster forces a real network re-request on retry.
   const src =
     attempt > 0 && url ? `${url}${url.includes('?') ? '&' : '?'}_r=${attempt}` : (url ?? '')
+  const canAutoRetry = Boolean(url?.startsWith('/api/eh/image-proxy/'))
 
   return (
     <img
@@ -193,11 +194,9 @@ export function ReaderImg({
       draggable={draggable}
       loading={loading}
       data-page={dataPage}
-      onLoad={() => {
-        onLoad?.()
-      }}
+      onLoad={onLoad}
       onError={() => {
-        if (autoRetriesUsed < AUTO_RETRY_DELAYS_MS.length) {
+        if (canAutoRetry && autoRetriesUsed < AUTO_RETRY_DELAYS_MS.length) {
           const delay = AUTO_RETRY_DELAYS_MS[autoRetriesUsed]
           setAutoRetriesUsed(autoRetriesUsed + 1)
           setRetryWait(true)
