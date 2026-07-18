@@ -56,4 +56,21 @@ describe('AppImage', () => {
     const { container } = render(<AppImage src="https://example.test/image.jpg" alt="Remote" />)
     expect(container.querySelector('picture')).toBeNull()
   })
+
+  it('does not route pre-generated /media/thumbs/ thumbnails through imgproxy', () => {
+    // Regression: thumb_160.webp is already a tiny optimized thumbnail. Routing
+    // it through imgproxy bought negligible bytes while adding a cold-cache AVIF
+    // encode and a /media/image auth subrequest per tile — the overhead that
+    // made the library grid load slower than serving the static thumb. It must
+    // render as a plain <img> pointing at the original thumb, with no <picture>
+    // srcset variants.
+    const { container } = render(
+      <AppImage src="/media/thumbs/aa/bb/hash/thumb_160.webp" alt="Thumb" sizes="50vw" />,
+    )
+    expect(container.querySelector('picture')).toBeNull()
+    expect(container.querySelector('source')).toBeNull()
+    const img = container.querySelector('img')
+    expect(img).not.toBeNull()
+    expect(img).toHaveAttribute('src', '/media/thumbs/aa/bb/hash/thumb_160.webp')
+  })
 })

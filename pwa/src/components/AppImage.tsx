@@ -21,7 +21,14 @@ function encodeImgproxySource(source: string): string {
 }
 
 function imgproxyUrl(src: string, width: number, format: 'avif' | 'webp'): string | null {
-  if (!src.startsWith('/media/cas/') && !src.startsWith('/media/thumbs/')) return null
+  // Only full-size originals under /media/cas/ are worth routing through
+  // imgproxy: they are large enough that on-the-fly AVIF/WebP + downscaling pays
+  // for itself. /media/thumbs/ is deliberately excluded — those are already
+  // pre-generated 160px WebP thumbnails, so transcoding them buys negligible
+  // bytes while adding a cold-cache AVIF encode and an extra /media/image auth
+  // subrequest per tile. That overhead is exactly what made the library grid
+  // slower than serving the static thumb directly.
+  if (!src.startsWith('/media/cas/')) return null
   const localPath = src.slice('/media/'.length)
   const source = encodeImgproxySource(`local:///${localPath}`)
   return `/media/image/insecure/rs:fit:${width}:0:0/${source}.${format}`
