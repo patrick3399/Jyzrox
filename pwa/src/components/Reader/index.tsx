@@ -22,7 +22,6 @@ import {
 import VideoPlayer from './VideoPlayer'
 import { ImageContextMenu } from './ImageContextMenu'
 import { LazySauceNaoModal } from '@/components/LazyDialogs'
-import { useThumbhash } from '@/hooks/useThumbhash'
 import { HelpOverlay, StatusBar } from './ReaderChrome'
 
 // ── URL resolver ──────────────────────────────────────────────────────
@@ -89,7 +88,7 @@ function getScaleImageClass(scaleMode: ScaleMode): string {
   }
 }
 
-// ── ReaderImg (blur-up placeholder + load-error handling) ─────────────
+// ── ReaderImg (load-error handling + auto-retry) ─────────────────────
 
 interface ReaderImgProps {
   image: ReaderImage
@@ -124,10 +123,9 @@ export function ReaderImg({
   const [retryWait, setRetryWait] = useState(false)
   const [attempt, setAttempt] = useState(0)
   const [autoRetriesUsed, setAutoRetriesUsed] = useState(0)
-  const [loaded, setLoaded] = useState(false)
   const retryTimerRef = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
 
-  // Reset error/retry/loaded state whenever the underlying image changes.
+  // Reset error/retry state whenever the underlying image changes.
   const url = image.url
   useEffect(() => {
     clearTimeout(retryTimerRef.current)
@@ -136,16 +134,10 @@ export function ReaderImg({
     setRetryWait(false)
     setAttempt(0)
     setAutoRetriesUsed(0)
-    setLoaded(false)
   }, [url])
 
   // Cancel any pending auto-retry on unmount.
   useEffect(() => () => clearTimeout(retryTimerRef.current), [])
-
-  // Decode the thumbhash (if any) into a data URL for the blur-up placeholder.
-  const hashes = useMemo(() => (image.thumbhash ? [image.thumbhash] : []), [image.thumbhash])
-  const thumbhashUrls = useThumbhash(hashes)
-  const placeholderUrl = image.thumbhash ? (thumbhashUrls.get(image.thumbhash) ?? null) : null
 
   if (failed) {
     return (
@@ -191,34 +183,17 @@ export function ReaderImg({
   const src =
     attempt > 0 && url ? `${url}${url.includes('?') ? '&' : '?'}_r=${attempt}` : (url ?? '')
 
-  // Show the blurred placeholder as the element's background until the real image loads.
-  const showPlaceholder = !loaded && placeholderUrl != null
-  const aspectRatio = image.width && image.height ? `${image.width} / ${image.height}` : undefined
-  const imgStyle: React.CSSProperties = {
-    ...style,
-    ...(showPlaceholder
-      ? {
-          backgroundImage: `url(${placeholderUrl})`,
-          backgroundSize: 'cover',
-          backgroundPosition: 'center',
-          backgroundRepeat: 'no-repeat',
-          ...(aspectRatio ? { aspectRatio } : {}),
-        }
-      : {}),
-  }
-
   return (
     <img
       ref={innerRef}
       src={src}
       alt={`Page ${image.pageNum}`}
       className={className}
-      style={imgStyle}
+      style={style}
       draggable={draggable}
       loading={loading}
       data-page={dataPage}
       onLoad={() => {
-        setLoaded(true)
         onLoad?.()
       }}
       onError={() => {

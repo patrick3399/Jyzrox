@@ -17,16 +17,6 @@ import { render, screen, fireEvent, act } from '@testing-library/react'
 import { ReaderImg } from '@/components/Reader'
 import type { ReaderImage } from '@/components/Reader/types'
 
-// useThumbhash relies on a Worker; stub it with a controllable map.
-const thumbhashMap = new Map<string, string | null>()
-vi.mock('@/hooks/useThumbhash', () => ({
-  useThumbhash: (hashes: string[]) => {
-    const m = new Map<string, string | null>()
-    for (const h of hashes) if (thumbhashMap.has(h)) m.set(h, thumbhashMap.get(h) ?? null)
-    return m
-  },
-}))
-
 const img: ReaderImage = {
   pageNum: 1,
   url: '/api/eh/image-proxy/1/1',
@@ -134,9 +124,14 @@ describe('ReaderImg transient error auto-retry', () => {
   })
 })
 
-describe('ReaderImg blur-up', () => {
-  it('paints the decoded thumbhash as background until the image loads, then clears it on load', () => {
-    thumbhashMap.set('HASH', 'data:image/png;base64,PLACEHOLDER')
+describe('ReaderImg has no thumbhash blur-up placeholder (perf/UX regression)', () => {
+  // The reader used to paint the decoded thumbhash as a `background-size: cover`
+  // background behind the object-contain <img>. In the letterbox margins of a
+  // portrait page that upscaled ~32px hash bled through as colored fringes, and
+  // decoding it added per-page work on every turn. The reader must now render
+  // the page image plainly, with no background placeholder — even when the
+  // image carries a thumbhash.
+  it('never paints a background even when the image carries a thumbhash', () => {
     const withHash: ReaderImage = {
       pageNum: 2,
       url: '/media/cas/aa/bb/x.jpg',
@@ -148,21 +143,22 @@ describe('ReaderImg blur-up', () => {
     }
     render(<ReaderImg image={withHash} />)
     const el = screen.getByAltText('Page 2') as HTMLImageElement
-    expect(el.style.backgroundImage).toContain('PLACEHOLDER')
-
-    fireEvent.load(el)
-    expect(el.style.backgroundImage).toBe('')
+    expect(el.style.backgroundImage === '' || el.style.backgroundImage === 'none').toBe(true)
   })
 
-  it('renders no placeholder background when thumbhash is absent', () => {
+  it('passes the caller style through untouched (no injected aspect-ratio/background)', () => {
     const noHash: ReaderImage = {
       pageNum: 3,
       url: '/media/cas/aa/bb/y.jpg',
       isLocal: true,
+      width: 800,
+      height: 1200,
       mediaType: 'image',
     }
-    render(<ReaderImg image={noHash} />)
+    render(<ReaderImg image={noHash} style={{ maxWidth: '500px' }} />)
     const el = screen.getByAltText('Page 3') as HTMLImageElement
     expect(el.style.backgroundImage === '' || el.style.backgroundImage === 'none').toBe(true)
+    expect(el.style.aspectRatio === '' || el.style.aspectRatio === 'auto').toBe(true)
+    expect(el.style.maxWidth).toBe('500px')
   })
 })
