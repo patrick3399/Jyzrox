@@ -50,6 +50,17 @@ export const CATEGORY_BITMASK: Record<string, number> = {
 }
 export const ALL_CATS = Object.keys(CATEGORY_BITMASK)
 export const ALL_CATS_MASK = Object.values(CATEGORY_BITMASK).reduce((a, b) => a + b, 0)
+
+/**
+ * Toggle one category in the browse filter, using positive-selection semantics:
+ * an empty list means "all", and the first explicit pick from that state narrows
+ * to just that category rather than deselecting it out of a full set. Selecting
+ * every category collapses back to the empty "all" representation.
+ */
+export function toggleSelectedCategory(current: string[], val: string): string[] {
+  const next = current.includes(val) ? current.filter((c) => c !== val) : [...current, val]
+  return next.length === ALL_CATS.length ? [] : next
+}
 export const EH_PAGE_SIZE = 25
 
 export const EH_ADVANCED_SEARCH_BITS = {

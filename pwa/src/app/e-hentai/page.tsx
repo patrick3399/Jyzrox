@@ -8,6 +8,7 @@ import {
   parseEhSavedSearch,
   queryKey,
   serializeEhSavedSearchParams,
+  toggleSelectedCategory,
 } from '@/lib/ehBrowseState'
 import {
   applyEhAutocompleteSuggestion,
@@ -434,13 +435,8 @@ function BrowsePage() {
         actions.setFilter({ selectedCats: [] }) // "All"
         return
       }
-      const cur = state.filters.selectedCats
-      // Empty === all; first explicit pick starts from "all selected" minus none.
-      const base = cur.length === 0 ? [...Object.keys(CATEGORY_META)] : cur
-      const next = base.includes(val) ? base.filter((c) => c !== val) : [...base, val]
-      // Selecting everything collapses back to "all" (empty).
       actions.setFilter({
-        selectedCats: next.length === Object.keys(CATEGORY_META).length ? [] : next,
+        selectedCats: toggleSelectedCategory(state.filters.selectedCats, val),
       })
     },
     [actions, state.filters.selectedCats],

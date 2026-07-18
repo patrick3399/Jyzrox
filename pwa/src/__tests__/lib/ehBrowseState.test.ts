@@ -12,6 +12,7 @@ import {
   identityToUrlParams,
   parseEhSavedSearch,
   serializeEhSavedSearchParams,
+  toggleSelectedCategory,
 } from '@/lib/ehBrowseState'
 
 describe('ehBrowseState — queryKey & identity reset', () => {
@@ -328,3 +329,28 @@ describe('ehBrowseState — URL identity', () => {
   })
 })
 
+describe('ehBrowseState — toggleSelectedCategory', () => {
+  // Regression: the toggle used to expand the empty "all" state into the full
+  // category list and then subtract the clicked one, so the first pick selected
+  // nine categories — the exact opposite of what the user clicked.
+  it('selects only the clicked category when starting from the empty all state', () => {
+    expect(toggleSelectedCategory([], 'manga')).toEqual(['manga'])
+  })
+
+  it('adds to an existing explicit selection', () => {
+    expect(toggleSelectedCategory(['manga'], 'doujinshi')).toEqual(['manga', 'doujinshi'])
+  })
+
+  it('removes an already-selected category', () => {
+    expect(toggleSelectedCategory(['manga', 'doujinshi'], 'manga')).toEqual(['doujinshi'])
+  })
+
+  it('collapses back to the empty all state once every category is selected', () => {
+    const allButOne = ALL_CATS.filter((c) => c !== 'misc')
+    expect(toggleSelectedCategory(allButOne, 'misc')).toEqual([])
+  })
+
+  it('deselecting the only selected category yields an empty list, not a full one', () => {
+    expect(toggleSelectedCategory(['manga'], 'manga')).toEqual([])
+  })
+})
