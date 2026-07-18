@@ -63,6 +63,7 @@ describe('dataset hooks', () => {
   it('lists datasets and loads a state-specific detail page', async () => {
     useDatasets()
     expect(swrCalls[0].key).toBe('datasets')
+    expect(swrCalls[0].options.revalidateOnFocus).toBe(true)
     await swrCalls[0].fetcher?.()
     expect(apiMocks.list).toHaveBeenCalledOnce()
 

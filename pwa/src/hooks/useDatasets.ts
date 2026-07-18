@@ -5,7 +5,8 @@ import type { DatasetFilterConfig, DatasetSelection } from '@/lib/types'
 
 export function useDatasets(enabled = true) {
   return useSWR(enabled ? 'datasets' : null, () => api.datasets.list(), {
-    revalidateOnFocus: false,
+    // WebSocket events are best-effort and are not replayed after reconnect.
+    revalidateOnFocus: true,
   })
 }
 

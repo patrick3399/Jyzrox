@@ -135,6 +135,16 @@ describe('useCollections', () => {
     expect(lastSwrCall().key).toBe('collections')
   })
 
+  it('test_useCollections_disabled_passesNullKeyToSwr', () => {
+    useCollections(false)
+    expect(lastSwrCall().key).toBeNull()
+  })
+
+  it('test_useCollections_keepsFocusRevalidationAsMissedEventFallback', () => {
+    useCollections()
+    expect(lastSwrCall().options.revalidateOnFocus).toBe(true)
+  })
+
   it('test_useCollections_fetcher_callsApiCollectionsList', async () => {
     useCollections()
     await lastSwrCall().fetcher!()

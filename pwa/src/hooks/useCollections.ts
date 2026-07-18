@@ -4,7 +4,8 @@ import { api } from '@/lib/api'
 
 export function useCollections(enabled = true) {
   return useSWR(enabled ? 'collections' : null, () => api.collections.list(), {
-    revalidateOnFocus: false,
+    // WebSocket events are best-effort and are not replayed after reconnect.
+    revalidateOnFocus: true,
   })
 }
 

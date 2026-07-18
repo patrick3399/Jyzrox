@@ -79,16 +79,16 @@ const RULES: InvalidationRule[] = [
   },
   {
     // collection.* — collections list + the open collection's gallery members
-    // (both keyed under 'collections'). Emitted by routers/collections.py on
-    // create/rename/reorder/membership changes.
+    // (keyed under 'collections' and 'collection'). Emitted by
+    // routers/collections.py on create/rename/reorder/membership changes.
     matchesEvent: (eventType) => eventType.startsWith('collection.'),
-    keyFilter: (key) => keyHasPrefix(key, 'collections'),
+    keyFilter: (key) =>
+      keyHasPrefix(key, 'collections') || keyHasPrefix(key, 'collection'),
   },
   {
     // dataset.* — dataset list + the open dataset's members/captions (keyed
-    // under 'dataset'/'datasets'). The datasets hooks set revalidateOnFocus:
-    // false, so without this rule the captioning worker's dataset.updated would
-    // not surface until a manual reload.
+    // under 'dataset'/'datasets'). Focus revalidation remains a missed-event
+    // fallback, while this rule surfaces captioning updates immediately.
     matchesEvent: (eventType) => eventType.startsWith('dataset.'),
     keyFilter: (key) => keyHasPrefix(key, 'dataset'),
   },

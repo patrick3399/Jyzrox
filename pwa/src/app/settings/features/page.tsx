@@ -7,6 +7,7 @@ import { BackButton } from '@/components/BackButton'
 import { ToggleRow } from '@/components/settings/SettingsShared'
 import { toast } from 'sonner'
 import { api } from '@/lib/api'
+import { setFeatureAndSyncCache } from '@/lib/featureSettings'
 import { t } from '@/lib/i18n'
 
 export default function FeaturesSettingsPage() {
@@ -47,7 +48,7 @@ export default function FeaturesSettingsPage() {
 
   const handleToggle = useCallback(async (feature: string, enabled: boolean) => {
     try {
-      await api.settings.setFeature(feature, enabled)
+      await setFeatureAndSyncCache(feature, enabled)
       setFeatures((prev) => ({ ...prev, [feature]: enabled }))
       toast.success(t('common.saved'))
     } catch (err) {

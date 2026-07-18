@@ -106,6 +106,7 @@ describe('resolveInvalidationFilter', () => {
     expect(filter).not.toBeNull()
     expect(filter!('collections')).toBe(true)
     expect(filter!(['collections', 5])).toBe(true)
+    expect(filter!(['collection', 5, 0])).toBe(true)
     expect(filter!('subscriptions')).toBe(false)
     expect(filter!(['library/gallery', 'local', 'a'])).toBe(false)
   })
