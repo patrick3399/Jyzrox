@@ -978,6 +978,23 @@ class TestProgressiveImporterEnsureGallery:
         assert importer.source_id == "gallery"
         assert importer.source is not None
 
+    async def test_ensure_gallery_from_url_on_eh_url_uses_gid_not_route_prefix(self):
+        """Regression: e-hentai.org had no url_path_id_index, so /g/{gid}/{token}
+        yielded source_id "g" — a constant. Every EH gallery reaching this fallback
+        would upsert onto the same (source, source_id) row and overwrite each other.
+        """
+        from worker.progressive import ProgressiveImporter
+
+        fake_factory, _ = _make_mock_session_for_ensure(gallery_id=99)
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+
+        with patch("worker.progressive.AsyncSessionLocal", fake_factory):
+            await importer.ensure_gallery_from_url("https://e-hentai.org/g/3238806/00f58dcf94", Path("/tmp/dest_eh"))
+
+        assert importer.source == "ehentai"
+        assert importer.source_id == "3238806"
+        assert importer.title == "3238806"
+
     async def test_ensure_gallery_from_url_duplicate_upserts_without_error(self):
         """Calling ensure_gallery_from_url twice with the same URL must not raise."""
         from worker.progressive import ProgressiveImporter

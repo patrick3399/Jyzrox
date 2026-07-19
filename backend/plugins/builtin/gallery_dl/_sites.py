@@ -88,6 +88,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         retries=5,
         http_timeout=45,
         inactivity_timeout=600,
+        url_path_id_index=1,
     ),
     GdlSiteConfig(
         domain="exhentai.org",
@@ -108,6 +109,7 @@ GDL_SITES: tuple[GdlSiteConfig, ...] = (
         retries=5,
         http_timeout=45,
         inactivity_timeout=600,
+        url_path_id_index=1,
     ),
     GdlSiteConfig(
         domain="pixiv.net",

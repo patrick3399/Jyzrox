@@ -27,6 +27,55 @@ def _http_mock(client: Any) -> AsyncMock:
 
 
 # ---------------------------------------------------------------------------
+# GALLERY_URL_RE
+# ---------------------------------------------------------------------------
+
+
+class TestGalleryUrlRe:
+    """Shared gallery-URL pattern — used both to validate user-supplied URLs and
+    to scrape hrefs out of listing HTML, so it must tolerate a missing trailing
+    slash without loosening token identity.
+    """
+
+    def test_matches_url_without_trailing_slash(self):
+        """Regression: a mandatory trailing slash meant normalize_download_url()
+        (which rstrips it) produced URLs this pattern rejected, sending every
+        manually queued EH gallery to the gallery-dl fallback.
+        """
+        from services.eh_client import GALLERY_URL_RE
+
+        m = GALLERY_URL_RE.search("https://e-hentai.org/g/3238806/00f58dcf94")
+        assert m is not None
+        assert m.group(1) == "3238806"
+        assert m.group(2) == "00f58dcf94"
+
+    def test_still_matches_url_with_trailing_slash(self):
+        from services.eh_client import GALLERY_URL_RE
+
+        m = GALLERY_URL_RE.search("https://exhentai.org/g/3238806/00f58dcf94/")
+        assert m is not None
+        assert m.group(2) == "00f58dcf94"
+
+    def test_does_not_truncate_over_length_token(self):
+        """An 11+ char hex token is not a valid gallery token; the optional
+        trailing slash must not let the first 10 chars match by truncation.
+        """
+        from services.eh_client import GALLERY_URL_RE
+
+        assert GALLERY_URL_RE.search("https://e-hentai.org/g/3238806/00f58dcf94ab") is None
+
+    def test_findall_over_listing_html_is_unchanged(self):
+        """Listing/scrape call sites rely on findall over href attributes."""
+        from services.eh_client import GALLERY_URL_RE
+
+        html = (
+            '<a href="https://e-hentai.org/g/111/aaaaaaaaaa/">one</a>'
+            '<a href="https://exhentai.org/g/222/bbbbbbbbbb/">two</a>'
+        )
+        assert GALLERY_URL_RE.findall(html) == [("111", "aaaaaaaaaa"), ("222", "bbbbbbbbbb")]
+
+
+# ---------------------------------------------------------------------------
 # _check_auth
 # ---------------------------------------------------------------------------
 

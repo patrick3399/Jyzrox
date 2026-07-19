@@ -96,7 +96,11 @@ CATEGORY_MASK: dict[str, int] = {
 }
 ALL_CATS = sum(CATEGORY_MASK.values())  # 1023
 
-GALLERY_URL_RE = re.compile(r"e[x\-]hentai\.org/g/(\d+)/([a-f0-9]{10})/")
+# The trailing slash is optional: scraped hrefs carry it, but user-supplied URLs
+# reach the worker via normalize_download_url(), which rstrips it. The negative
+# lookahead keeps token identity exact (10 hex chars) now that the slash no
+# longer delimits the match.
+GALLERY_URL_RE = re.compile(r"e[x\-]hentai\.org/g/(\d+)/([a-f0-9]{10})(?![a-f0-9])/?")
 _GALLERY_URL_RE = GALLERY_URL_RE  # backward-compatible private alias
 _TOTAL_COUNT_RE = re.compile(r"Showing .+? of ([\d,]+)")
 # Cursor-based pagination: extract next/prev gid from searchnav links

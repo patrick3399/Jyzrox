@@ -85,6 +85,32 @@ class TestEhSourceCanHandle:
         plugin = _make_plugin()
         assert await plugin.can_handle("https://exhentai.org/favorites.php") is False
 
+    async def test_can_handle_gallery_url_without_trailing_slash(self):
+        """Regression: GALLERY_URL_RE required a trailing slash, but every manual
+        download job stores normalize_download_url(url), which rstrips it. The EH
+        plugin therefore never claimed manually queued galleries — they fell through
+        to the gallery-dl fallback and were titled from the URL path prefix ("g").
+        """
+        plugin = _make_plugin()
+        assert await plugin.can_handle("https://e-hentai.org/g/3238806/00f58dcf94") is True
+        assert await plugin.can_handle("https://exhentai.org/g/3238806/00f58dcf94") is True
+
+    async def test_can_handle_survives_download_url_normalization(self):
+        """The exact URL the worker receives must be claimable by this plugin."""
+        from core.utils import normalize_download_url
+
+        plugin = _make_plugin()
+        normalized = normalize_download_url("https://e-hentai.org/g/3238806/00f58dcf94/")
+        assert normalized == "https://e-hentai.org/g/3238806/00f58dcf94"
+        assert await plugin.can_handle(normalized) is True
+
+    async def test_can_handle_rejects_over_length_token(self):
+        """Making the trailing slash optional must not let a longer hex token match
+        by truncation — token identity has to stay exactly 10 hex chars.
+        """
+        plugin = _make_plugin()
+        assert await plugin.can_handle("https://e-hentai.org/g/3238806/00f58dcf94ab") is False
+
 
 # ---------------------------------------------------------------------------
 # download() with no credentials
