@@ -19,7 +19,7 @@ from starlette import status
 from core.audit import log_audit
 from core.auth import _DUMMY_HASH, _checkpw_async, _hashpw_async, _sign_session, _verify_session, require_auth
 from core.config import settings
-from core.database import async_session
+from core.database import advisory_xact_lock, async_session
 from core.errors import api_error, parse_accept_language
 from core.rate_limit import check_rate_limit, get_client_ip
 from core.redis_client import get_redis
@@ -36,6 +36,12 @@ router = APIRouter(tags=["auth"])
 logger = logging.getLogger(__name__)
 
 _SESSION_TTL = 30 * 24 * 3600  # 30 days
+
+# Advisory lock key serializing first-run setup() requests so concurrent
+# calls can't both observe an empty `users` table and both insert an admin
+# (HR-008). Distinct from users.py's _ADMIN_INVARIANT_LOCK_KEY (different
+# invariant, different table state being protected).
+_SETUP_LOCK_KEY = 771_008
 
 
 def _is_https(request: Request) -> bool:
@@ -156,13 +162,25 @@ async def setup(req: LoginRequest, request: Request):
     """Create the first admin user. Only works when no users exist."""
     await check_rate_limit(f"setup:{get_client_ip(request)}", max_requests=3, window=3600)
 
+    # Hash the password before taking the lock — bcrypt is comparatively slow
+    # and doesn't touch the DB, so there's no reason to hold the advisory lock
+    # while it runs.
+    password_hash = (await _hashpw_async(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12))).decode("utf-8")
+
     async with async_session() as session:
+        # Serialize concurrent first-run setup requests: under READ COMMITTED,
+        # two different requests could both see an empty `users` table and
+        # both pass `WHERE NOT EXISTS` before either commits, creating two
+        # admin accounts (HR-008). The advisory lock forces the count
+        # re-check and insert to happen one request at a time; the
+        # `WHERE NOT EXISTS` clause remains as a second line of defense.
+        await advisory_xact_lock(session, _SETUP_LOCK_KEY)
+
         result = await session.execute(text("SELECT COUNT(*) FROM users"))
         if result.scalar() > 0:
             locale = parse_accept_language(request.headers.get("accept-language"))
             raise api_error(403, "setup_completed", locale)
 
-        password_hash = (await _hashpw_async(req.password.encode("utf-8"), bcrypt.gensalt(rounds=12))).decode("utf-8")
         result = await session.execute(
             text("""
                 INSERT INTO users (username, password_hash, role)

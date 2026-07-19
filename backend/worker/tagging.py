@@ -10,8 +10,8 @@ from core.database import AsyncSessionLocal
 from db.models import GalleryTag, Image, ImageTag, Tag
 from services.cas import resolve_blob_path
 from services.settings_store import get_float_setting, get_toggle
+from services.tag_helpers import clear_ai_tags, rebuild_gallery_tags_array
 from worker.constants import _IMAGE_EXTS, logger
-from worker.tag_helpers import clear_ai_tags, rebuild_gallery_tags_array
 
 
 async def _tagger_available(client: httpx.AsyncClient) -> bool:

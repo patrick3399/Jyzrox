@@ -399,6 +399,7 @@ def _make_mock_session():
     # scalar_one returns a gallery_id by default
     scalar_result = MagicMock()
     scalar_result.scalar_one.return_value = 42
+    scalar_result.scalar_one_or_none.return_value = 42
     scalar_result.scalars.return_value.all.return_value = []
     session.execute = AsyncMock(return_value=scalar_result)
     session.flush = AsyncMock()
@@ -482,6 +483,7 @@ class TestImportJob:
 
         gallery_scalar = MagicMock()
         gallery_scalar.scalar_one.return_value = 99
+        gallery_scalar.scalar_one_or_none.return_value = 99
 
         call_count = [0]
 
@@ -531,6 +533,7 @@ class TestImportJob:
         mock_session = _make_mock_session()
         gallery_scalar = MagicMock()
         gallery_scalar.scalar_one.return_value = 7
+        gallery_scalar.scalar_one_or_none.return_value = 7
         excl_result = MagicMock()
         excl_result.scalars.return_value.all.return_value = []
 
@@ -602,6 +605,7 @@ class TestImportJob:
         mock_session = _make_mock_session()
         gallery_scalar = MagicMock()
         gallery_scalar.scalar_one.return_value = 55
+        gallery_scalar.scalar_one_or_none.return_value = 55
         excl_result = MagicMock()
         excl_result.scalars.return_value.all.return_value = []
 
@@ -660,6 +664,7 @@ class TestImportJob:
         mock_session = _make_mock_session()
         gallery_scalar = MagicMock()
         gallery_scalar.scalar_one.return_value = 88
+        gallery_scalar.scalar_one_or_none.return_value = 88
         excl_result = MagicMock()
         excl_result.scalars.return_value.all.return_value = []
 
@@ -718,6 +723,7 @@ class TestImportJob:
         mock_session = _make_mock_session()
         gallery_scalar = MagicMock()
         gallery_scalar.scalar_one.return_value = 33
+        gallery_scalar.scalar_one_or_none.return_value = 33
         excl_result = MagicMock()
         excl_result.scalars.return_value.all.return_value = []
 
@@ -776,6 +782,7 @@ class TestImportJob:
         mock_session = _make_mock_session()
         gallery_scalar = MagicMock()
         gallery_scalar.scalar_one.return_value = 21
+        gallery_scalar.scalar_one_or_none.return_value = 21
         excl_result = MagicMock()
         excl_result.scalars.return_value.all.return_value = []
 
@@ -883,6 +890,7 @@ class TestLocalImportJob:
         mock_gallery = MagicMock()
         mock_gallery.source = "local"
         mock_gallery.source_id = "test_src"
+        mock_gallery.deleted_at = None
 
         mock_session = _make_mock_session()
         mock_session.get = AsyncMock(return_value=mock_gallery)
@@ -908,6 +916,7 @@ class TestLocalImportJob:
         mock_gallery = MagicMock()
         mock_gallery.source = "local"
         mock_gallery.source_id = "copy_src"
+        mock_gallery.deleted_at = None
 
         fixed_hash = "aaccee00" * 8
         mock_blob = MagicMock()
@@ -966,6 +975,7 @@ class TestLocalImportJob:
         mock_gallery = MagicMock()
         mock_gallery.source = "local"
         mock_gallery.source_id = "link_src"
+        mock_gallery.deleted_at = None
 
         fixed_hash = "11223344" * 8
         mock_blob = MagicMock()
@@ -1021,6 +1031,7 @@ class TestLocalImportJob:
         mock_gallery = MagicMock()
         mock_gallery.source = "local"
         mock_gallery.source_id = "excl_src"
+        mock_gallery.deleted_at = None
 
         fixed_hash = "excluded0" * 7 + "1234567"
 
@@ -1070,6 +1081,7 @@ class TestLocalImportJob:
         mock_gallery = MagicMock()
         mock_gallery.source = "local"
         mock_gallery.source_id = "existing_src"
+        mock_gallery.deleted_at = None
         mock_gallery.import_mode = "link"
         mock_gallery.source_path = str(src)
 
@@ -1145,6 +1157,7 @@ class TestLocalImportJob:
         mock_gallery = MagicMock()
         mock_gallery.source = "local"
         mock_gallery.source_id = "progress_src"
+        mock_gallery.deleted_at = None
 
         fixed_hash = "00112233" * 8
         mock_blob = MagicMock()
@@ -1292,6 +1305,7 @@ class TestBatchImportJob:
         mock_gallery = MagicMock()
         mock_gallery.source = "local"
         mock_gallery.source_id = "good_gallery"
+        mock_gallery.deleted_at = None
 
         # Session for INSERT of good gallery
         insert_result = MagicMock()

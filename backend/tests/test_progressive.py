@@ -461,9 +461,7 @@ class TestProgressiveImporterPreExistingCancel:
         ).fetchone()[0]
         assert status == "complete", "a refresh that added nothing must not demote complete → partial"
 
-    async def test_retry_direct_attach_snapshots_gallery_before_cancel(
-        self, db_session, db_session_factory, tmp_path
-    ):
+    async def test_retry_direct_attach_snapshots_gallery_before_cancel(self, db_session, db_session_factory, tmp_path):
         """DownloadJob.gallery_id retry attach must use the same safe rollback
         semantics as an ensure_gallery upsert attach."""
         from worker.progressive import ProgressiveImporter
@@ -497,10 +495,14 @@ class TestProgressiveImporterPreExistingCancel:
             await importer.cleanup()
 
         remaining = (
-            await db_session.execute(
-                text("SELECT id FROM images WHERE gallery_id = :gid ORDER BY id"), {"gid": gallery_id}
+            (
+                await db_session.execute(
+                    text("SELECT id FROM images WHERE gallery_id = :gid ORDER BY id"), {"gid": gallery_id}
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert remaining == [old_image_id]
         row = (
             await db_session.execute(
@@ -836,6 +838,63 @@ class TestProgressiveImporterFinalize:
         assert row is not None
         assert row[0] == "partial", "Gallery download_status should be 'partial' after finalize(partial=True)"
         assert row[1] == 1, "Gallery pages should reflect actual image count"
+
+    async def test_finalize_file_failure_after_success_sets_partial(self, db_session, db_session_factory, tmp_path):
+        """A swallowed per-file error must make the terminal gallery status partial."""
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(db_session, pages=0)
+        sha = "ab" * 32
+        await _insert_blob(db_session, sha)
+        await _insert_image(db_session, gallery_id, 1, sha)
+
+        dest_dir = tmp_path / "gallery_dl_failure"
+        dest_dir.mkdir()
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "test_001"
+        importer._import_success_count = 1
+        importer._import_failures.append({"filename": "002.jpg", "error_type": "OSError", "error": "disk read failed"})
+
+        with (
+            patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)),
+            patch("core.config.settings", MagicMock(tag_model_enabled=False)),
+        ):
+            await importer.finalize(dest_dir)
+
+        status = (
+            await db_session.execute(text("SELECT download_status FROM galleries WHERE id = :id"), {"id": gallery_id})
+        ).scalar_one()
+        assert status == "partial"
+        assert importer.download_status == "partial"
+        assert importer.import_success_count == 1
+        assert importer.import_failures[0]["filename"] == "002.jpg"
+
+    async def test_finalize_all_file_imports_failed_sets_failed(self, db_session, db_session_factory, tmp_path):
+        """A run with failures and no successful imports must never report complete."""
+        from worker.progressive import ProgressiveImporter
+
+        gallery_id = await _insert_gallery(db_session, pages=0)
+        dest_dir = tmp_path / "gallery_dl_all_failed"
+        dest_dir.mkdir()
+        importer = ProgressiveImporter(db_job_id=None, user_id=None)
+        importer.gallery_id = gallery_id
+        importer.source = "test_source"
+        importer.source_id = "test_001"
+        importer._import_failures.append({"filename": "001.jpg", "error_type": "OSError", "error": "disk read failed"})
+
+        with (
+            patch("worker.progressive.AsyncSessionLocal", _make_session_factory_cm(db_session_factory)),
+            patch("core.config.settings", MagicMock(tag_model_enabled=False)),
+        ):
+            await importer.finalize(dest_dir)
+
+        status = (
+            await db_session.execute(text("SELECT download_status FROM galleries WHERE id = :id"), {"id": gallery_id})
+        ).scalar_one()
+        assert status == "failed"
+        assert importer.download_status == "failed"
 
     async def test_finalize_no_gallery_returns_none(self, tmp_path):
         """finalize() with no gallery_id must return None without raising."""

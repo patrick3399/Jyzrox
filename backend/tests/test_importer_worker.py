@@ -43,8 +43,12 @@ def _make_mock_session():
 
     result = MagicMock()
     result.scalar_one = MagicMock(return_value=1)
+    result.scalar_one_or_none = MagicMock(return_value=1)
     result.scalars = MagicMock(return_value=MagicMock(all=MagicMock(return_value=[])))
+    result.all = MagicMock(return_value=[])
     session.execute = AsyncMock(return_value=result)
+    session.get = AsyncMock(return_value=MagicMock())
+    session.rollback = AsyncMock()
     session.flush = AsyncMock()
     session.commit = AsyncMock()
     return session
@@ -601,6 +605,69 @@ class TestImportJob:
 
         assert result["status"] == "done"
 
+    async def test_trashed_conflict_is_not_mutated_and_staging_is_preserved(self, tmp_path):
+        """HR-017: the guarded upsert returning no row must skip all ingest work."""
+        from worker.importer import import_job
+
+        gallery_dir = _create_test_gallery(tmp_path)
+        session = _make_mock_session()
+        session.execute.return_value.scalar_one_or_none.return_value = None
+        store_spy = AsyncMock()
+        site_cfg = MagicMock(source_id="gallery_dl", source_id_fields=(), category="gallery")
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", return_value=_mock_session_ctx(session)),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer._normalize_tags", side_effect=lambda tags, source: tags),
+            patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=site_cfg),
+            patch("plugins.registry.plugin_registry.get_parser", return_value=None),
+            patch("plugins.builtin.gallery_dl._metadata._extract_artist", return_value=None),
+            patch("worker.importer.store_blob", store_spy),
+        ):
+            result = await import_job(_make_ctx(), path=str(gallery_dir))
+
+        assert result["status"] == "skipped_trashed"
+        assert gallery_dir.exists()
+        store_spy.assert_not_awaited()
+        session.rollback.assert_awaited_once()
+
+    async def test_hash_failure_sets_partial_and_preserves_staging(self, tmp_path):
+        """HR-016: a dropped file must be visible in status and remain recoverable."""
+        from worker.importer import import_job
+
+        gallery_dir = tmp_path / "hash_partial"
+        gallery_dir.mkdir()
+        good = gallery_dir / "001.jpg"
+        bad = gallery_dir / "002.jpg"
+        good.write_bytes(b"\xff\xd8\xff\xe0good")
+        bad.write_bytes(b"\xff\xd8\xff\xe0bad")
+        session = _make_mock_session()
+        site_cfg = MagicMock(source_id="gallery_dl", source_id_fields=(), category="gallery")
+
+        def _hash(path):
+            if path.name == "002.jpg":
+                raise OSError("unreadable")
+            return "aa" * 32
+
+        with (
+            patch("worker.importer.AsyncSessionLocal", return_value=_mock_session_ctx(session)),
+            patch("worker.importer._sha256", side_effect=_hash),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer._normalize_tags", side_effect=lambda tags, source: tags),
+            patch("plugins.builtin.gallery_dl._sites.get_site_config", return_value=site_cfg),
+            patch("plugins.registry.plugin_registry.get_parser", return_value=None),
+            patch("plugins.builtin.gallery_dl._metadata._extract_artist", return_value=None),
+            patch("worker.importer.store_blob", AsyncMock(return_value=MagicMock())),
+            patch("worker.importer.create_library_symlink", AsyncMock()),
+            patch("worker.importer.rebuild_gallery_tags_array", AsyncMock()),
+            patch("worker.importer.settings", MagicMock(tag_model_enabled=False)),
+        ):
+            result = await import_job(_make_ctx(), path=str(gallery_dir))
+
+        assert result["status"] == "partial"
+        assert result["import_failures"][0]["filename"] == "002.jpg"
+        assert gallery_dir.exists()
+
 
 # ---------------------------------------------------------------------------
 # TestLocalImportJob  (STAB-005 regression)
@@ -617,6 +684,7 @@ def _make_local_import_sessions(test_sha: str):
     mock_gallery.source = "local"
     mock_gallery.source_id = "g1"
     mock_gallery.source_path = None
+    mock_gallery.deleted_at = None
 
     s1 = AsyncMock()
     s1.get = AsyncMock(return_value=mock_gallery)
@@ -726,6 +794,25 @@ class TestLocalImportJob:
             _job_id="thumbnail:1",
         )
 
+    async def test_trashed_gallery_is_a_noop(self, tmp_path):
+        """HR-014: a stale local import job must not touch a trashed gallery."""
+        from worker.importer import local_import_job
+
+        gallery_dir = _create_test_gallery(tmp_path)
+        session = AsyncMock()
+        gallery = MagicMock(source="local", source_id="trashed")
+        gallery.deleted_at = datetime.now(UTC)
+        session.get.return_value = gallery
+        with (
+            patch("worker.importer.AsyncSessionLocal", return_value=_mock_session_ctx(session)),
+            patch("worker.importer._validate_image_magic", return_value=True),
+            patch("worker.importer._sha256") as hash_spy,
+        ):
+            result = await local_import_job(_make_ctx(), str(gallery_dir), "copy", 9)
+
+        assert result == {"status": "skipped_trashed", "gallery_id": 9}
+        hash_spy.assert_not_called()
+
 
 # ---------------------------------------------------------------------------
 # local_import_job — symlink guard (edge case #48)
@@ -746,6 +833,7 @@ class TestLocalImportSymlinkGuard:
         gallery = MagicMock()
         gallery.source = "local"
         gallery.source_id = "guard_test"
+        gallery.deleted_at = None
         s1.get = AsyncMock(return_value=gallery)
 
         # session 2: excluded blobs
@@ -983,6 +1071,7 @@ class TestLocalImportSidecar:
         gallery_lookup = MagicMock()
         gallery_lookup.source = "local"
         gallery_lookup.source_id = "sidecar_test"
+        gallery_lookup.deleted_at = None
         s1.get = AsyncMock(return_value=gallery_lookup)
 
         s2 = AsyncMock()

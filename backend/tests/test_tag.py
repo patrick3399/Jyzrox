@@ -510,33 +510,13 @@ class TestManualTagGallery:
     @staticmethod
     def _patch_worker_helpers(monkeypatch):
         """
-        Inject a fake worker.tag_helpers module into sys.modules so that
-        ``from worker.tag_helpers import rebuild_gallery_tags_array``
-        inside the endpoint resolves without importing the real worker
-        package (which pulls in saq and heavy deps unavailable in tests).
+        Patch the shared service helpers used by the endpoint.
         """
-        import sys
-        import types
         from unittest.mock import AsyncMock
 
-        if "worker" not in sys.modules:
-            monkeypatch.setitem(sys.modules, "worker", types.ModuleType("worker"))
-        _fake_th = types.ModuleType("worker.tag_helpers")
-        _fake_th.rebuild_gallery_tags_array = AsyncMock(return_value=[])
-        _fake_th.upsert_tag_translations = AsyncMock()
+        import services.tag_helpers as tag_helpers
 
-        # Real pure function — no heavy deps, safe to use directly
-        def _parse_tag_strings(tags):
-            seen, result = set(), []
-            for tag_str in tags:
-                ns, name = tag_str.split(":", 1) if ":" in tag_str else ("general", tag_str)
-                if (ns, name) not in seen:
-                    seen.add((ns, name))
-                    result.append((ns, name))
-            return result
-
-        _fake_th.parse_tag_strings = _parse_tag_strings
-        monkeypatch.setitem(sys.modules, "worker.tag_helpers", _fake_th)
+        monkeypatch.setattr(tag_helpers, "rebuild_gallery_tags_array", AsyncMock(return_value=[]))
 
     @staticmethod
     def _add_patch(monkeypatch):
@@ -1163,7 +1143,7 @@ class TestRetagEndpoints:
         )
         await db_session.commit()
 
-        with patch("worker.tag_helpers.rebuild_gallery_tags_array", new=AsyncMock(return_value=[])):
+        with patch("services.tag_helpers.rebuild_gallery_tags_array", new=AsyncMock(return_value=[])):
             resp = await client.post(f"/api/tags/clear-ai/{gid}")
 
         assert resp.status_code == 200
@@ -1520,27 +1500,11 @@ class TestManualTagRemoveEdgeCases:
 
     @staticmethod
     def _patch_worker_helpers(monkeypatch):
-        import sys
-        import types
         from unittest.mock import AsyncMock
 
-        if "worker" not in sys.modules:
-            monkeypatch.setitem(sys.modules, "worker", types.ModuleType("worker"))
-        _fake_th = types.ModuleType("worker.tag_helpers")
-        _fake_th.rebuild_gallery_tags_array = AsyncMock(return_value=[])
-        _fake_th.upsert_tag_translations = AsyncMock()
+        import services.tag_helpers as tag_helpers
 
-        def _parse_tag_strings(tags):
-            seen, result = set(), []
-            for tag_str in tags:
-                ns, name = tag_str.split(":", 1) if ":" in tag_str else ("general", tag_str)
-                if (ns, name) not in seen:
-                    seen.add((ns, name))
-                    result.append((ns, name))
-            return result
-
-        _fake_th.parse_tag_strings = _parse_tag_strings
-        monkeypatch.setitem(sys.modules, "worker.tag_helpers", _fake_th)
+        monkeypatch.setattr(tag_helpers, "rebuild_gallery_tags_array", AsyncMock(return_value=[]))
 
     async def test_remove_bare_name_defaults_to_general_namespace(self, client, db_session, monkeypatch):
         """A bare tag name (no colon) in a remove action should resolve to general:<name>.

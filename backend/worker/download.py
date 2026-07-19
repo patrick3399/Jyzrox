@@ -20,6 +20,40 @@ def _postprocess_failure_status(downloaded: int) -> str:
     return "partial" if downloaded > 0 else "failed"
 
 
+def _import_outcome(importer) -> tuple[tuple[dict[str, str], ...], int]:
+    """Read the public progressive-import outcome without trusting loose mocks."""
+    failures = getattr(importer, "import_failures", ())
+    success_count = getattr(importer, "import_success_count", 0)
+    if not isinstance(failures, tuple):
+        failures = ()
+    if type(success_count) is not int:
+        success_count = 0
+    return failures, success_count
+
+
+async def _is_job_cancelled_in_db(db_job_id: str | None) -> bool:
+    """Read the authoritative DB status for a DownloadJob.
+
+    Used immediately before finalization (HR-005): the Redis cancel flag
+    used by the earlier post-download guards can be evicted (Redis runs
+    allkeys-lru in this deployment), so the last check before mutating the
+    gallery must consult the DB row directly. DB `cancelled` always wins
+    over a completed download.
+    """
+    if not db_job_id:
+        return False
+    from core.database import AsyncSessionLocal
+    from db.models import DownloadJob
+
+    try:
+        async with AsyncSessionLocal() as session:
+            job = await session.get(DownloadJob, uuid.UUID(db_job_id))
+            return bool(job and job.status == "cancelled")
+    except Exception as exc:  # noqa: BLE001 - defensive, must never block finalize on lookup error
+        logger.error("[download] failed to read job status for cancel check: %s", exc)
+        return False
+
+
 async def _writeback_cookies(credentials: dict | str | None, job_id: str) -> None:
     """Read cookie update files written by gallery-dl's cookies-update PP and save to DB."""
     import http.cookiejar
@@ -312,9 +346,9 @@ async def download_job(
         # Progressive importer skip counters (different from gallery-dl's
         # archive skips — these fire post-download for excluded/duplicate/invalid).
         importer_skip = {
-            "duplicate": importer._skip_duplicate,
-            "excluded": importer._skip_excluded,
-            "invalid": importer._skip_invalid,
+            "duplicate": importer.skipped_duplicate_count,
+            "excluded": importer.skipped_excluded_count,
+            "invalid": importer.skipped_invalid_count,
         }
         if any(importer_skip.values()):
             progress["import_skipped"] = importer_skip
@@ -564,9 +598,9 @@ async def download_job(
         if diagnostic_ctx.get("source_summary"):
             final_progress["source_summary"] = dict(diagnostic_ctx["source_summary"])
         importer_skip = {
-            "duplicate": importer._skip_duplicate,
-            "excluded": importer._skip_excluded,
-            "invalid": importer._skip_invalid,
+            "duplicate": importer.skipped_duplicate_count,
+            "excluded": importer.skipped_excluded_count,
+            "invalid": importer.skipped_invalid_count,
         }
         if any(importer_skip.values()):
             final_progress["import_skipped"] = importer_skip
@@ -579,12 +613,34 @@ async def download_job(
         await _set_job_progress(db_job_id, final_progress)
 
         # ── 15. Finalize ────────────────────────────────────────────────
+        # Last-chance cancel check against the authoritative DB status,
+        # immediately before mutating the gallery. This closes the race
+        # where the Redis cancel flag was evicted (allkeys-lru) or set
+        # after the earlier post-download guards already passed (HR-005).
+        if await _is_job_cancelled_in_db(db_job_id):
+            await importer.cleanup()
+            await _set_job_status(db_job_id, "cancelled")
+            await _set_subscription_result(db_job_id, "cancelled")
+            logger.info("[download] cancelled (pre-finalize DB guard): %s", url)
+            return {"status": "cancelled"}
+
         if target_dir.exists() and result.downloaded > 0:
             if importer.gallery_id:
                 gallery_id = await importer.finalize(
                     target_dir, partial=bool(all_failed) or result.status in ("failed", "partial")
                 )
                 logger.info("[download] progressive import finalized: gallery_id=%s", gallery_id)
+                # HR-002: record per-file import failures in the structured
+                # progress payload so a "done" job that silently dropped
+                # files is visible, not just logged.
+                import_failures, import_success_count = _import_outcome(importer)
+                if import_failures:
+                    final_progress["import_failures"] = {
+                        "count": len(import_failures),
+                        "success": import_success_count,
+                        "details": list(import_failures[:10]),
+                    }
+                    await _set_job_progress(db_job_id, final_progress)
             else:
                 # Safety fallback: no progressive import occurred (should be
                 # rare). Complete it in this orchestration step so the DB job
@@ -603,9 +659,32 @@ async def download_job(
         elif result.downloaded == 0:
             logger.info("[download] no new files downloaded (all skipped by archive), skipping import: %s", url)
 
-        is_partial = bool(all_failed) or result.status in ("failed", "partial")
+        # HR-002: if every file the importer attempted in this run failed and
+        # none succeeded, the run is a genuine failure — not "done" and not
+        # merely "partial" — regardless of what gallery-dl itself reported.
+        import_failures, import_success_count = _import_outcome(importer)
+        if importer.download_status == "failed":
+            import_failure_count = len(import_failures)
+            err = "All downloaded files failed to import"
+            if import_failures:
+                first = import_failures[0]
+                err = f"{err}: {first['filename']} ({first['error_type']}: {first['error']})"
+            await _set_job_status(db_job_id, "failed", err)
+            await _set_subscription_result(db_job_id, "failed", err)
+            logger.error(
+                "[download] all imported files failed: %s failures=%d",
+                url,
+                import_failure_count,
+            )
+            return {"status": "failed", "error": err, "import_failures": import_failure_count}
+
+        is_partial = bool(all_failed) or result.status in ("failed", "partial") or bool(import_failures)
         if is_partial:
-            if all_failed:
+            if import_failures and not all_failed and result.status not in ("failed", "partial"):
+                partial_msg = (
+                    f"Partial — {len(import_failures)} file(s) failed to import ({import_success_count} succeeded)"
+                )
+            elif all_failed:
                 partial_msg = f"Partial — {len(all_failed)} pages failed"
                 if result.error:
                     partial_msg = f"{partial_msg}; {result.error}"

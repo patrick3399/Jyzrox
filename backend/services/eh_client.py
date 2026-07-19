@@ -96,7 +96,8 @@ CATEGORY_MASK: dict[str, int] = {
 }
 ALL_CATS = sum(CATEGORY_MASK.values())  # 1023
 
-_GALLERY_URL_RE = re.compile(r"e[x\-]hentai\.org/g/(\d+)/([a-f0-9]{10})/")
+GALLERY_URL_RE = re.compile(r"e[x\-]hentai\.org/g/(\d+)/([a-f0-9]{10})/")
+_GALLERY_URL_RE = GALLERY_URL_RE  # backward-compatible private alias
 _TOTAL_COUNT_RE = re.compile(r"Showing .+? of ([\d,]+)")
 # Cursor-based pagination: extract next/prev gid from searchnav links
 _NEXT_RE = re.compile(r'id="unext"[^>]*href="[^"]*[?&](?:amp;)?next=(\d+)')
@@ -176,7 +177,7 @@ def _parse_gmetadata(g: dict) -> dict:
     }
 
 
-def _detect_media_type(data: bytes) -> str:
+def detect_media_type(data: bytes) -> str:
     if data[:8] == b"\x89PNG\r\n\x1a\n":
         return "image/png"
     if data[:6] in (b"GIF87a", b"GIF89a"):
@@ -184,6 +185,9 @@ def _detect_media_type(data: bytes) -> str:
     if data[:4] == b"RIFF" and data[8:12] == b"WEBP":
         return "image/webp"
     return "image/jpeg"
+
+
+_detect_media_type = detect_media_type  # backward-compatible private alias
 
 
 class EhClient:

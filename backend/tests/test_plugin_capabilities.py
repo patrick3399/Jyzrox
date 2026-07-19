@@ -1,5 +1,9 @@
 """Tests for plugin capability protocols, models, and registry maps (risk #2)."""
 
+from types import SimpleNamespace
+
+import pytest
+
 from plugins.models import PreviewData, RemoteMetadataResult
 
 
@@ -62,6 +66,59 @@ class TestRegistryCapabilityMaps:
         r.register(PixivSourcePlugin())
         assert r.get_previewer("pixiv") is not None
         assert r.get_refresher("pixiv") is not None
+
+    def test_duplicate_source_id_with_different_contract_is_rejected(self):
+        from plugins.models import PluginMeta
+        from plugins.registry import PluginRegistry
+
+        registry = PluginRegistry()
+        registry.register(SimpleNamespace(meta=PluginMeta(name="First", source_id="same", version="1")))
+
+        with pytest.raises(ValueError, match="Duplicate source_id='same'"):
+            registry.register(SimpleNamespace(meta=PluginMeta(name="Second", source_id="same", version="1")))
+
+    def test_identical_split_plugin_contract_is_allowed(self):
+        from plugins.models import PluginMeta
+        from plugins.registry import PluginRegistry
+
+        meta = PluginMeta(name="Split", source_id="split", version="1")
+        registry = PluginRegistry()
+        registry.register(SimpleNamespace(meta=meta))
+        registry.register(SimpleNamespace(meta=meta.model_copy(deep=True)))
+
+        assert [item.source_id for item in registry.list_plugins()] == ["split"]
+
+    def test_site_domain_collision_between_sources_is_rejected(self):
+        from plugins.models import PluginMeta, SiteInfo
+        from plugins.registry import PluginRegistry
+
+        registry = PluginRegistry()
+        registry.register(
+            SimpleNamespace(
+                meta=PluginMeta(
+                    name="First",
+                    source_id="first",
+                    version="1",
+                    supported_sites=[
+                        SiteInfo(domain="example.test", name="Example", source_id="first", category="gallery")
+                    ],
+                )
+            )
+        )
+
+        with pytest.raises(ValueError, match="Site domain conflict"):
+            registry.register(
+                SimpleNamespace(
+                    meta=PluginMeta(
+                        name="Second",
+                        source_id="second",
+                        version="1",
+                        supported_sites=[
+                            SiteInfo(domain="example.test", name="Example", source_id="second", category="gallery")
+                        ],
+                    )
+                )
+            )
 
 
 class TestEhCapabilities:

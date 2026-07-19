@@ -167,7 +167,7 @@ class EhBrowsePlugin(BrowsePlugin):
         credentials: dict | None = None,
     ) -> tuple[bytes, str]:
         """Fetch image bytes via EhClient for proxying."""
-        from services.eh_client import _detect_media_type
+        from services.eh_client import detect_media_type
 
         cookies: dict = {}
         if credentials:
@@ -183,7 +183,7 @@ class EhBrowsePlugin(BrowsePlugin):
             resp = await http.get(url)
             resp.raise_for_status()
             data = resp.content
-            media_type = _detect_media_type(data)
+            media_type = detect_media_type(data)
             return data, media_type
 
     # ------------------------------------------------------------------
@@ -961,11 +961,11 @@ async def image_proxy(
     # 1. Cache hit
     cached_bytes = await cache.get_proxied_image(gid, page)
     if cached_bytes:
-        from services.eh_client import _detect_media_type
+        from services.eh_client import detect_media_type
 
         return Response(
             content=cached_bytes,
-            media_type=_detect_media_type(cached_bytes),
+            media_type=detect_media_type(cached_bytes),
             headers={"Cache-Control": "private, max-age=86400"},  # 24h
         )
 

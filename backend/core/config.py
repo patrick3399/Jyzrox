@@ -1,6 +1,9 @@
 from functools import lru_cache
 
+from pydantic import field_validator
 from pydantic_settings import BaseSettings
+
+_KEYGEN_HINT = 'python3 -c "import secrets,base64; print(base64.b64encode(secrets.token_bytes(32)).decode())"'
 
 
 class Settings(BaseSettings):
@@ -15,6 +18,16 @@ class Settings(BaseSettings):
     cors_origin: str = ""  # e.g. "https://vault.example.com" — empty = same-origin only
     cookie_secure: bool = True  # Set to False only for local HTTP dev
     trusted_proxies: str = "172.16.0.0/12,10.0.0.0/8,192.168.0.0/16"  # comma-separated CIDRs/IPs
+
+    @field_validator("credential_encrypt_key")
+    @classmethod
+    def validate_credential_encrypt_key(cls, value: str) -> str:
+        if "CHANGE_ME" in value or len(value) < 32:
+            raise ValueError(
+                "CREDENTIAL_ENCRYPT_KEY must be a real generated secret (at least 32 characters); "
+                f"generate one with: {_KEYGEN_HINT}"
+            )
+        return value
 
     # Rate limiting
     rate_limit_enabled: bool = True

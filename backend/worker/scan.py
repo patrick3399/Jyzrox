@@ -77,13 +77,7 @@ async def _get_library_specs(session, *, monitored_only: bool = False) -> list[_
     filters = [LibraryPath.enabled == True]  # noqa: E712
     if monitored_only:
         filters.append(LibraryPath.monitor == True)  # noqa: E712
-    rows = (
-        (
-            await session.execute(select(LibraryPath).where(*filters))
-        )
-        .scalars()
-        .all()
-    )
+    rows = (await session.execute(select(LibraryPath).where(*filters))).scalars().all()
     specs = [
         _LibrarySpec(
             path=row.path,
@@ -137,6 +131,12 @@ async def _discover_single_library_dir(session, spec: _LibrarySpec, current: Pat
     artist = groups.get("artist")
     source_path = os.path.realpath(current)
 
+    # NOTE: the `WHERE galleries.deleted_at IS NULL` guard on the DO UPDATE
+    # branch is required so this upsert never mutates/resurrects a trashed
+    # gallery (HR-014). When the conflict target row is trashed, the WHERE
+    # condition fails, no row is updated, and RETURNING yields nothing —
+    # callers must treat a None result as "skip enqueue" (already the case
+    # at all call sites).
     stmt = text(
         "INSERT INTO galleries "
         "(source, source_id, title, artist_id, uploader, library_path, source_path, import_mode, download_status) "
@@ -148,6 +148,7 @@ async def _discover_single_library_dir(session, spec: _LibrarySpec, current: Pat
         "library_path = EXCLUDED.library_path, "
         "source_path = EXCLUDED.source_path, "
         "import_mode = EXCLUDED.import_mode "
+        "WHERE galleries.deleted_at IS NULL "
         "RETURNING id"
     )
     result = await session.execute(
@@ -164,6 +165,10 @@ async def _discover_single_library_dir(session, spec: _LibrarySpec, current: Pat
     )
     gallery_id = result.scalar_one_or_none()
     if gallery_id is None:
+        logger.debug(
+            "[discover] skipping %s: upsert returned no row (likely conflicts with a trashed gallery)",
+            rel_path,
+        )
         return None
     return _ImportRequest(gallery_id=gallery_id, source_dir=source_path, mode=spec.import_mode)
 

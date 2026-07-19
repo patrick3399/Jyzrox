@@ -118,6 +118,28 @@ def _make_session(
 # ---------------------------------------------------------------------------
 
 
+class TestLibraryDiscoveryTrashedGuard:
+    async def test_conflict_with_trashed_gallery_returns_none_and_keeps_update_guard(self, tmp_path):
+        from worker.scan import _discover_single_library_dir, _LibrarySpec
+
+        current = tmp_path / "gallery"
+        current.mkdir()
+        session = AsyncMock()
+        result = MagicMock()
+        result.scalar_one_or_none.return_value = None
+        session.execute.return_value = result
+
+        request = await _discover_single_library_dir(
+            session,
+            _LibrarySpec(path=str(tmp_path), pattern="{title}", import_mode="copy"),
+            current,
+        )
+
+        assert request is None
+        statement = str(session.execute.await_args.args[0])
+        assert "WHERE galleries.deleted_at IS NULL" in statement
+
+
 class TestRescanLibraryJob:
     """Tests for rescan_library_job(ctx)."""
 

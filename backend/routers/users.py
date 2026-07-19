@@ -11,7 +11,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from starlette import status
 
 from core.auth import _hashpw_async, _sign_session, _verify_session, require_role
-from core.database import get_db
+from core.database import advisory_xact_lock, get_db
 from core.errors import api_error, parse_accept_language
 from core.redis_client import get_redis
 from db.models import User
@@ -20,6 +20,13 @@ router = APIRouter(tags=["users"])
 logger = logging.getLogger(__name__)
 
 _admin = require_role("admin")
+
+# Advisory lock key serializing admin-count invariant checks (role change +
+# delete) against each other, so concurrent requests can't both observe
+# "more than one admin" and both proceed to remove the last admin (HR-007).
+# Arbitrary constant — any stable int64 works as long as it's unique within
+# the app's advisory lock namespace.
+_ADMIN_INVARIANT_LOCK_KEY = 771_007
 
 
 class CreateUserRequest(BaseModel):
@@ -114,8 +121,12 @@ async def update_user(
     if req.role is not None:
         if req.role not in ("admin", "member", "viewer"):
             raise api_error(status.HTTP_400_BAD_REQUEST, "invalid_request", locale)
-        # Prevent demoting the last admin
+        # Prevent demoting the last admin. Serialize against concurrent
+        # demote/delete requests via a transaction-scoped advisory lock so two
+        # requests can't both observe "more than one admin" and both proceed
+        # (HR-007). The lock is released automatically at commit/rollback.
         if user.role == "admin" and req.role != "admin":
+            await advisory_xact_lock(db, _ADMIN_INVARIANT_LOCK_KEY)
             result = await db.execute(select(func.count()).select_from(User).where(User.role == "admin"))
             if result.scalar() <= 1:
                 raise api_error(status.HTTP_400_BAD_REQUEST, "cannot_delete_last_admin", locale)
@@ -205,8 +216,12 @@ async def delete_user(
     if not user:
         raise api_error(status.HTTP_404_NOT_FOUND, "user_not_found", locale)
 
-    # Check if this is the last admin
+    # Check if this is the last admin. Serialize against concurrent
+    # demote/delete requests via the same transaction-scoped advisory lock
+    # used in update_user() so demote+delete combinations can't race past the
+    # invariant either (HR-007).
     if user.role == "admin":
+        await advisory_xact_lock(db, _ADMIN_INVARIANT_LOCK_KEY)
         result = await db.execute(select(func.count()).select_from(User).where(User.role == "admin"))
         admin_count = result.scalar()
         if admin_count <= 1:

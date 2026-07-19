@@ -44,6 +44,48 @@ class PluginRegistry:
         self._subscribable: dict[str, Any] = {}
         self._site_index: dict[str, SiteInfo] = {}
 
+    @staticmethod
+    def _owner_signature(plugin: Any) -> tuple:
+        """Return the stable identity shared by split capability implementations."""
+        meta = plugin.meta
+        return (
+            meta.name,
+            meta.source_id,
+            meta.version,
+            tuple(sorted(meta.url_patterns)),
+            tuple(sorted((site.domain, site.source_id) for site in meta.supported_sites)),
+            tuple(sorted(field.name for field in meta.credential_schema)),
+            meta.semaphore_key,
+        )
+
+    def _claim(self, bucket: dict[str, Any], sid: str, plugin: Any, capability_name: str) -> None:
+        """Assign ``plugin`` to ``bucket[sid]``, guarding against silent overwrite.
+
+        Two plugin objects legitimately share a source_id when a single logical
+        source is split across a SourcePlugin/BrowsePlugin pair (e.g.
+        ``EhBrowsePlugin`` + ``EhSourcePlugin``, both ``source_id="ehentai"``,
+        both delegating to the same credential helpers). That pattern is
+        detected via a stable owner signature (name, version, URL/site,
+        credential-field, and semaphore identity) and tolerated as an
+        idempotent re-claim. Descriptions and presentation-only field metadata
+        may differ between the browse and source halves.
+        What must never happen silently is a genuinely different plugin
+        reusing an existing source_id and clobbering the capability that was
+        already registered for it (HR-009).
+        """
+        existing = bucket.get(sid)
+        if (
+            existing is not None
+            and existing is not plugin
+            and self._owner_signature(existing) != self._owner_signature(plugin)
+        ):
+            raise ValueError(
+                f"Duplicate source_id={sid!r} for {capability_name}: "
+                f"{type(existing).__name__} ({existing.meta.name!r}) is already registered; "
+                f"{type(plugin).__name__} ({plugin.meta.name!r}) attempted to overwrite it"
+            )
+        bucket[sid] = plugin
+
     def register(self, plugin: Any) -> None:
         """Register a plugin. A plugin may implement multiple ABCs."""
         sid = plugin.meta.source_id
@@ -52,39 +94,48 @@ class PluginRegistry:
         if isinstance(plugin, SourcePlugin):
             if sid == "gallery_dl":
                 self._fallback = plugin
-            self._sources[sid] = plugin
+            self._claim(self._sources, sid, plugin, "SourcePlugin")
             logger.info("Registered source plugin: %s", sid)
         if isinstance(plugin, BrowsePlugin):
-            self._browsers[sid] = plugin
+            self._claim(self._browsers, sid, plugin, "BrowsePlugin")
             logger.info("Registered browse plugin: %s", sid)
         if isinstance(plugin, TaggerPlugin):
-            self._taggers[sid] = plugin
+            self._claim(self._taggers, sid, plugin, "TaggerPlugin")
             logger.info("Registered tagger plugin: %s", sid)
 
         # Protocol capability probing — each maps sid → the specific plugin object
         if isinstance(plugin, HasMeta):
-            self._plugins[sid] = plugin
-            # Build site index from supported_sites
+            self._claim(self._plugins, sid, plugin, "HasMeta")
+            # Build site index from supported_sites, rejecting domain hijacks:
+            # a domain already claimed by a *different* source_id indicates a
+            # real registration conflict, not an intentional split-plugin pair.
             for site in plugin.meta.supported_sites:
+                existing_site = self._site_index.get(site.domain)
+                if existing_site is not None and existing_site.source_id != site.source_id:
+                    raise ValueError(
+                        f"Site domain conflict for {site.domain!r}: already mapped to "
+                        f"source_id={existing_site.source_id!r}; {type(plugin).__name__} "
+                        f"attempted to remap it to source_id={site.source_id!r}"
+                    )
                 self._site_index[site.domain] = site
         if isinstance(plugin, Downloadable):
-            self._downloadable[sid] = plugin
+            self._claim(self._downloadable, sid, plugin, "Downloadable")
         if isinstance(plugin, Browsable):
-            self._browsable[sid] = plugin
+            self._claim(self._browsable, sid, plugin, "Browsable")
         if isinstance(plugin, Parseable):
-            self._parseable[sid] = plugin
+            self._claim(self._parseable, sid, plugin, "Parseable")
         if isinstance(plugin, CredentialProvider):
-            self._credential_providers[sid] = plugin
+            self._claim(self._credential_providers, sid, plugin, "CredentialProvider")
         if isinstance(plugin, Taggable):
-            self._taggable[sid] = plugin
+            self._claim(self._taggable, sid, plugin, "Taggable")
         if isinstance(plugin, Processable):
-            self._processable[sid] = plugin
+            self._claim(self._processable, sid, plugin, "Processable")
         if isinstance(plugin, Previewable):
-            self._previewable[sid] = plugin
+            self._claim(self._previewable, sid, plugin, "Previewable")
         if isinstance(plugin, Refreshable):
-            self._refreshable[sid] = plugin
+            self._claim(self._refreshable, sid, plugin, "Refreshable")
         if isinstance(plugin, Subscribable):
-            self._subscribable[sid] = plugin
+            self._claim(self._subscribable, sid, plugin, "Subscribable")
 
     async def get_handler(self, url: str) -> SourcePlugin | None:
         """Return the first non-fallback source plugin that can handle the URL."""

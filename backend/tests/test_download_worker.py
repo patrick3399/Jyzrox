@@ -75,16 +75,19 @@ def _make_mock_proc(
     proc.pid = 12345
     proc.returncode = returncode
     proc.stdout = _make_async_iter(stdout_lines, delay=stdout_delay)
-    proc.stderr = _make_async_iter(stderr_lines or [])
+    proc.stderr = MagicMock()
+    stderr_chunks = list(stderr_lines or [])
+    proc.stderr.read = AsyncMock(side_effect=stderr_chunks + [b""])
 
     if block_wait:
         _kill_event = asyncio.Event()
 
-        def _do_kill():
-            proc.returncode = -9
+        def _finish_process():
+            proc.returncode = -15
             _kill_event.set()
 
-        proc.kill = MagicMock(side_effect=_do_kill)
+        proc.terminate = MagicMock(side_effect=_finish_process)
+        proc.kill = MagicMock(side_effect=_finish_process)
 
         async def _blocking_wait():
             await _kill_event.wait()
@@ -92,6 +95,7 @@ def _make_mock_proc(
 
         proc.wait = _blocking_wait
     else:
+        proc.terminate = MagicMock()
         proc.kill = MagicMock()
         proc.wait = AsyncMock(return_value=returncode)
 
@@ -162,7 +166,7 @@ class TestGalleryDlCancel:
             )
 
         assert result.status == "cancelled"
-        mock_proc.kill.assert_called()
+        mock_proc.terminate.assert_called()
 
     async def test_cancel_skips_last_pending_file(self):
         """When cancelled, the last pending file is not imported (state.cancelled guard)."""
@@ -207,7 +211,7 @@ class TestGalleryDlCancel:
         # With instant stdout (no delay), all lines may be read before cancel fires,
         # so image001 might be imported but image002 (last pending) should be skipped.
         # The key invariant: result.status is "cancelled" and process was killed.
-        mock_proc.kill.assert_called()
+        mock_proc.terminate.assert_called()
 
 
 # ---------------------------------------------------------------------------
@@ -298,6 +302,25 @@ def test_postprocess_failure_with_downloaded_files_is_partial_not_done():
 
     assert _postprocess_failure_status(3) == "partial"
     assert _postprocess_failure_status(0) == "failed"
+
+
+class TestAuthoritativeDatabaseCancelGuard:
+    async def test_cancelled_database_row_wins(self):
+        from worker.download import _is_job_cancelled_in_db
+
+        session = _make_mock_session()
+        session.get.return_value = MagicMock(status="cancelled")
+        with patch("core.database.AsyncSessionLocal", return_value=session):
+            assert await _is_job_cancelled_in_db("b225fc4c-c550-4c19-a741-93d5ef915c4e") is True
+
+    async def test_non_cancelled_or_missing_row_does_not_cancel(self):
+        from worker.download import _is_job_cancelled_in_db
+
+        session = _make_mock_session()
+        session.get.return_value = MagicMock(status="running")
+        with patch("core.database.AsyncSessionLocal", return_value=session):
+            assert await _is_job_cancelled_in_db("b225fc4c-c550-4c19-a741-93d5ef915c4e") is False
+        assert await _is_job_cancelled_in_db(None) is False
 
 
 def _make_mock_session():

@@ -19,13 +19,13 @@ from core.social_order import reorder_social_gallery_images
 from db.models import Blob, ExcludedBlob, Gallery, GalleryTag, Image, ImportConflict, Tag
 from services.cas import create_library_symlink, store_blob, thumb_dir
 from services.library_sidecar import sidecar_payload_from_gallery, write_gallery_sidecar
+from services.tag_helpers import rebuild_gallery_tags_array, upsert_tag_translations
 from worker.constants import (
     _MEDIA_EXTS,
     _VIDEO_EXTS,
     logger,
 )
 from worker.helpers import _sha256, _validate_image_magic
-from worker.tag_helpers import rebuild_gallery_tags_array, upsert_tag_translations
 
 _NATURAL_SORT_RE = re.compile(r"(\d+)")
 
@@ -149,10 +149,10 @@ async def import_job(
                 "title_jpn": import_data.title_jpn,
                 "category": import_data.category,
                 "language": import_data.language,
-                "pages": len(media_files),
+                "pages": 0,
                 "posted_at": import_data.posted_at,
                 "uploader": import_data.uploader,
-                "download_status": "complete",
+                "download_status": "importing",
                 "metadata_updated_at": func.now(),
                 "tags_array": import_data.tags,
                 "artist_id": _subscription_artist_id(
@@ -164,7 +164,8 @@ async def import_job(
             tags = import_data.tags
             source_id = import_data.source_id
         else:
-            gallery_values = _build_gallery(source, source_id, metadata, tags, len(media_files))
+            gallery_values = _build_gallery(source, source_id, metadata, tags, 0)
+            gallery_values["download_status"] = "importing"
             gallery_values["created_by_user_id"] = user_id
             gallery_values["source_url"] = source_url
             gallery_values["artist_id"] = _subscription_artist_id(
@@ -181,16 +182,29 @@ async def import_job(
                 set_={
                     "title": pg_insert(Gallery).excluded.title,
                     "tags_array": pg_insert(Gallery).excluded.tags_array,
-                    "download_status": "complete",
+                    "download_status": "importing",
                     "metadata_updated_at": func.now(),
-                    "pages": pg_insert(Gallery).excluded.pages,
+                    "pages": Gallery.pages,
                     "artist_id": pg_insert(Gallery).excluded.artist_id,
                     "source_url": pg_insert(Gallery).excluded.source_url,
                 },
+                where=Gallery.deleted_at.is_(None),
             )
             .returning(Gallery.id)
         )
-        gallery_id = (await session.execute(stmt)).scalar_one()
+        gallery_id = (await session.execute(stmt)).scalar_one_or_none()
+        if gallery_id is None:
+            await session.rollback()
+            logger.warning(
+                "[import] refusing to mutate trashed gallery for source=%s source_id=%s",
+                gallery_values["source"],
+                gallery_values["source_id"],
+            )
+            return {
+                "status": "skipped_trashed",
+                "source": gallery_values["source"],
+                "source_id": gallery_values["source_id"],
+            }
 
         # Load excluded blob hashes for this gallery
         excluded_rows = (
@@ -203,12 +217,21 @@ async def import_job(
         # Compute hashes with bounded concurrency to avoid thread pool exhaustion
         _hash_sem = asyncio.Semaphore(10)
 
+        hash_failures: list[dict[str, str]] = []
+
         async def _sha256_limited(f):
             async with _hash_sem:
                 try:
                     return await asyncio.to_thread(_sha256, f)
                 except (FileNotFoundError, OSError) as exc:
                     logger.warning("[import] skipping deleted file %s: %s", f.name, exc)
+                    hash_failures.append(
+                        {
+                            "filename": f.name,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        }
+                    )
                     return None
 
         hashes = await asyncio.gather(*[_sha256_limited(f) for f in media_files])
@@ -253,6 +276,7 @@ async def import_job(
                 zip(allowed_pairs, library_names, strict=True), start=1
             )
         ]
+        inserted_rows = []
         if image_values:
             img_stmt = (
                 pg_insert(Image).values(image_values).on_conflict_do_nothing().returning(Image.id, Image.blob_sha256)
@@ -267,6 +291,22 @@ async def import_job(
                     await session.execute(
                         update(Blob).where(Blob.sha256 == sha).values(ref_count=Blob.ref_count + count)
                     )
+
+        actual_pages = (
+            await session.execute(
+                select(func.count(Image.id)).where(Image.gallery_id == gallery_id, Image.visibility == "active")
+            )
+        ).scalar_one()
+        if hash_failures and not allowed_pairs:
+            terminal_status = "failed"
+        elif hash_failures:
+            terminal_status = "partial"
+        else:
+            terminal_status = "complete"
+        gallery = await session.get(Gallery, gallery_id)
+        if gallery:
+            gallery.pages = actual_pages
+            gallery.download_status = terminal_status
 
         # Upsert tags + gallery_tags
         await _upsert_tags(session, gallery_id, tags)
@@ -298,18 +338,21 @@ async def import_job(
             "language": gallery_values.get("language"),
             "uploader": gallery_values.get("uploader"),
             "artist_id": gallery_values.get("artist_id"),
-            "pages": gallery_values.get("pages"),
+            "pages": actual_pages,
             "source_url": source_url,
             "tags": list(tags),
             "posted_at": _posted_at.isoformat() if _posted_at is not None else None,
         },
     )
 
-    # Delete the temporary download directory
-    try:
-        _shutil.rmtree(str(gallery_path), ignore_errors=True)
-    except Exception as exc:
-        logger.warning("[import] failed to remove temp dir %s: %s", gallery_path, exc)
+    # Preserve staging whenever a file could not be ingested so an operator can
+    # retry or recover it. A fully successful import may remove the temporary
+    # download directory as before.
+    if not hash_failures:
+        try:
+            _shutil.rmtree(str(gallery_path), ignore_errors=True)
+        except Exception as exc:
+            logger.warning("[import] failed to remove temp dir %s: %s", gallery_path, exc)
 
     logger.info("[import] gallery_id=%d source=%s/%s", gallery_id, source, source_id)
 
@@ -339,11 +382,16 @@ async def import_job(
         EventType.IMPORT_COMPLETED,
         resource_type="gallery",
         resource_id=gallery_id,
-        pages=len(allowed_pairs),
+        pages=actual_pages,
         source=source,
     )
 
-    return {"status": "done", "gallery_id": gallery_id}
+    return {
+        "status": "done" if terminal_status == "complete" else terminal_status,
+        "gallery_id": gallery_id,
+        "pages": actual_pages,
+        "import_failures": hash_failures,
+    }
 
 
 def _extract_tags(gallery_path: Path, metadata: dict) -> list[str]:
@@ -488,6 +536,7 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     total = len(files)
     processed = 0  # actual new Image rows inserted (used for gallery.pages)
     attempted = 0  # files attempted regardless of conflict (used for progress display)
+    import_failures: list[dict[str, str]] = []
     r = ctx["redis"]
 
     # Load gallery to get source/source_id for library symlink creation
@@ -496,6 +545,12 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         if not _gallery:
             logger.error("[local_import] gallery_id=%d not found in DB", gallery_id)
             return {"status": "failed", "error": "gallery not found"}
+        if _gallery.deleted_at is not None:
+            # HR-014: never mutate a trashed gallery. This job may have been
+            # enqueued before the gallery was trashed, or raced with a
+            # concurrent trash operation — treat it as a no-op.
+            logger.warning("[local_import] gallery_id=%d is trashed, skipping import (no-op)", gallery_id)
+            return {"status": "skipped_trashed", "gallery_id": gallery_id}
         gallery_source = _gallery.source
         gallery_source_id = _gallery.source_id
 
@@ -523,6 +578,14 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
                 sha256 = await asyncio.to_thread(_sha256, f)
             except (FileNotFoundError, OSError) as exc:
                 logger.warning("[local_import] gallery_id=%d: skipping deleted file %s: %s", gallery_id, f.name, exc)
+                import_failures.append(
+                    {
+                        "filename": f.name,
+                        "error_type": type(exc).__name__,
+                        "error": str(exc),
+                    }
+                )
+                attempted += 1
                 continue
 
             if sha256 in excluded_set:
@@ -594,7 +657,13 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
             ).scalar_one()
             final_pages = image_count
             gallery.pages = image_count
-            gallery.download_status = "complete"
+            if import_failures and attempted == len(import_failures):
+                terminal_status = "failed"
+            elif import_failures:
+                terminal_status = "partial"
+            else:
+                terminal_status = "complete"
+            gallery.download_status = terminal_status
             if mode == "link" and not gallery.source_path:
                 gallery.source_path = os.path.realpath(src_path)
             gallery.metadata_updated_at = func.now()
@@ -611,7 +680,14 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
     await r.setex(
         f"import:progress:{gallery_id}",
         30,
-        _json.dumps({"processed": processed, "total": total, "status": "done"}),
+        _json.dumps(
+            {
+                "processed": processed,
+                "total": total,
+                "status": "done" if terminal_status == "complete" else terminal_status,
+                "import_failures": import_failures[:10],
+            }
+        ),
     )
 
     logger.info("[local_import] gallery_id=%d: %d files imported", gallery_id, processed)
@@ -642,7 +718,11 @@ async def local_import_job(ctx: dict, source_dir: str, mode: str, gallery_id: in
         EventType.IMPORT_COMPLETED, resource_type="gallery", resource_id=gallery_id, pages=final_pages, source="local"
     )
 
-    return {"status": "done", "processed": processed}
+    return {
+        "status": "done" if terminal_status == "complete" else terminal_status,
+        "processed": processed,
+        "import_failures": import_failures,
+    }
 
 
 async def batch_import_job(

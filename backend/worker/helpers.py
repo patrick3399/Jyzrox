@@ -13,7 +13,8 @@ from croniter import croniter as _croniter_cls
 from core.database import AsyncSessionLocal
 from core.redis_client import publish_job_event
 from db.models import DownloadJob
-from worker.constants import _IMAGE_MAGIC, logger
+from services.image_magic import validate_image_magic as _validate_image_magic  # noqa: F401
+from worker.constants import logger
 
 
 def env_int(name: str, default: int) -> int:
@@ -24,37 +25,9 @@ def env_int(name: str, default: int) -> int:
         return default
 
 
-def _validate_image_magic(file_path: Path) -> bool:
-    """Validate that a file's content matches expected image magic bytes.
-
-    Returns True if the file appears to be a valid image based on its
-    magic bytes matching its file extension. Returns False for mismatches.
-    """
-    try:
-        with open(file_path, "rb") as f:
-            header = f.read(12)
-    except OSError:
-        return False
-
-    if len(header) < 3:
-        return False
-
-    ext = file_path.suffix.lower()
-
-    for magic, valid_exts in _IMAGE_MAGIC.items():
-        if header.startswith(magic):
-            return ext in valid_exts
-
-    # Special case: WebP needs RIFF + WEBP check
-    if header[:4] == b"RIFF" and header[8:12] == b"WEBP":
-        return ext == ".webp"
-
-    # Special case: AVIF/HEIC ftyp box (offset 4 = 'ftyp')
-    if len(header) >= 8 and header[4:8] == b"ftyp":
-        return ext in {".avif", ".heic"}
-
-    # Unknown magic — reject
-    return False
+# _validate_image_magic is aliased above from services.image_magic (single
+# source of truth); kept as a private name here for backward compatibility
+# with existing worker callers and tests that patch "worker.helpers._validate_image_magic".
 
 
 def _sha256(path: Path) -> str:

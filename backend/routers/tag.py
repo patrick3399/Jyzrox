@@ -681,7 +681,7 @@ async def manual_tag_gallery(
     session: AsyncSession = Depends(get_db),
 ):
     """Add or remove manual tags on a gallery."""
-    from worker.tag_helpers import rebuild_gallery_tags_array
+    from services.tag_helpers import rebuild_gallery_tags_array
 
     # Verify gallery exists and the caller may modify it. Read visibility is not
     # sufficient: gallery_access_filter matches read-only collaborators, so the
@@ -693,7 +693,7 @@ async def manual_tag_gallery(
         raise HTTPException(status_code=403, detail="Gallery write access is required")
 
     if body.action == "add":
-        from worker.tag_helpers import parse_tag_strings
+        from services.tag_helpers import parse_tag_strings
 
         parsed = parse_tag_strings(body.tags)
 
@@ -748,7 +748,7 @@ async def manual_tag_gallery(
         return {"status": "ok", "affected": len(tag_ids)}
 
     else:  # remove
-        from worker.tag_helpers import parse_tag_strings
+        from services.tag_helpers import parse_tag_strings
 
         parsed = parse_tag_strings(body.tags)
 
@@ -850,7 +850,7 @@ async def clear_gallery_ai_tags(
     db: AsyncSession = Depends(get_db),
 ):
     """Remove all AI-derived tags from a gallery, keeping manual/metadata tags (AIT-006)."""
-    from worker.tag_helpers import clear_ai_tags, rebuild_gallery_tags_array
+    from services.tag_helpers import clear_ai_tags, rebuild_gallery_tags_array
 
     gallery = await db.get(Gallery, gallery_id)
     if not gallery:

@@ -111,6 +111,11 @@ def _previous_version_dir() -> Path | None:
     return None
 
 
+def get_previous_version_dir() -> Path | None:
+    """Public wrapper for callers outside the worker package (e.g. routers)."""
+    return _previous_version_dir()
+
+
 def _swap_active_symlink(target_dir: Path) -> None:
     """Atomically swap the 'active' symlink to point at target_dir."""
     tmp_link = VENV_BASE / "active.tmp"

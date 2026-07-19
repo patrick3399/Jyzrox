@@ -645,6 +645,7 @@ class TestImporterJobEmitsEvent:
             # execute().scalar_one() → gallery_id=42
             execute_result_gallery = MagicMock()
             execute_result_gallery.scalar_one = MagicMock(return_value=42)
+            execute_result_gallery.scalar_one_or_none = MagicMock(return_value=42)
 
             # execute().scalars().all() → [] (no excluded blobs)
             scalars_mock = MagicMock()

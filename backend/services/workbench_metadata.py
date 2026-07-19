@@ -85,10 +85,10 @@ async def load_accessible_galleries(
     if not ordered_ids:
         raise HTTPException(status_code=400, detail="At least one gallery is required")
     rows = (
-        await db.execute(
-            select(Gallery).where(Gallery.id.in_(ordered_ids), gallery_access_filter(auth))
-        )
-    ).scalars().all()
+        (await db.execute(select(Gallery).where(Gallery.id.in_(ordered_ids), gallery_access_filter(auth))))
+        .scalars()
+        .all()
+    )
     by_id = {gallery.id: gallery for gallery in rows}
     if len(by_id) != len(ordered_ids):
         raise HTTPException(status_code=404, detail="One or more galleries were not found")
@@ -219,7 +219,7 @@ async def apply_source_scalar_metadata(
 
 async def apply_source_tags(db: AsyncSession, gallery: Gallery, tag_strings: Sequence[str]) -> bool:
     """Replace source-owned tags while preserving manual and AI relationships."""
-    from worker.tag_helpers import parse_tag_strings
+    from services.tag_helpers import parse_tag_strings
 
     parsed = parse_tag_strings(list(tag_strings))
     tags: list[Tag] = []
@@ -244,11 +244,7 @@ async def apply_source_tags(db: AsyncSession, gallery: Gallery, tag_strings: Seq
             by_value[(namespace, name)] = tag
 
     desired_ids = {tag.id for tag in by_value.values()}
-    existing = (
-        (await db.execute(select(GalleryTag).where(GalleryTag.gallery_id == gallery.id)))
-        .scalars()
-        .all()
-    )
+    existing = (await db.execute(select(GalleryTag).where(GalleryTag.gallery_id == gallery.id))).scalars().all()
     source_rows = {row.tag_id: row for row in existing if row.source == "metadata"}
     affected_ids = set(source_rows) | desired_ids
     for tag_id, row in source_rows.items():

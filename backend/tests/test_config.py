@@ -11,10 +11,42 @@ Covers:
 from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
+from pydantic import ValidationError
 
 # ---------------------------------------------------------------------------
 # Settings — defaults
 # ---------------------------------------------------------------------------
+
+
+class TestCredentialEncryptKeyValidation:
+    def test_missing_key_is_rejected(self, monkeypatch):
+        from core.config import Settings
+
+        monkeypatch.delenv("CREDENTIAL_ENCRYPT_KEY", raising=False)
+        with pytest.raises(ValidationError, match="credential_encrypt_key"):
+            Settings(database_url="sqlite+aiosqlite:///:memory:", _env_file=None)
+
+    @pytest.mark.parametrize("key", ["CHANGE_ME", "prefix_CHANGE_ME_suffix", "too-short"])
+    def test_placeholder_or_short_key_is_rejected(self, key):
+        from core.config import Settings
+
+        with pytest.raises(ValidationError, match="real generated secret"):
+            Settings(
+                database_url="sqlite+aiosqlite:///:memory:",
+                credential_encrypt_key=key,
+                _env_file=None,
+            )
+
+    def test_generated_length_key_is_accepted(self):
+        from core.config import Settings
+
+        key = "0123456789abcdef0123456789abcdef"
+        settings = Settings(
+            database_url="sqlite+aiosqlite:///:memory:",
+            credential_encrypt_key=key,
+            _env_file=None,
+        )
+        assert settings.credential_encrypt_key == key
 
 
 class TestSettingsDefaults:

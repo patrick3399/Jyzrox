@@ -10,6 +10,7 @@ import json
 import logging
 import os
 import re
+import signal
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass, field
 from datetime import datetime
@@ -509,6 +510,69 @@ async def _read_stderr(
             _sync_diagnostic(state, diagnostic_ctx)
 
 
+async def _terminate_process_tree(proc: asyncio.subprocess.Process, *, grace: float = 5.0) -> None:
+    """Terminate the process AND all of its descendants (HR-011).
+
+    gallery-dl spawns child/grandchild processes (e.g. ffmpeg for video
+    post-processing). Killing only the top-level process leaves those
+    orphaned. The process is spawned with ``start_new_session=True`` so its
+    pid is also its process group id — signalling the group takes down the
+    whole tree.
+
+    Sends SIGTERM to the group first and waits up to ``grace`` seconds for
+    a clean exit, then escalates to SIGKILL. Always reaps the process
+    (``await proc.wait()``) before returning. Safe to call multiple times
+    or after the process has already exited (``ProcessLookupError`` is
+    swallowed at every step).
+    """
+    pid = getattr(proc, "pid", None)
+    pgid: int | None = None
+    if type(pid) is int and pid > 1:
+        try:
+            candidate = os.getpgid(pid)
+            # start_new_session=True guarantees pgid == pid. Never signal a
+            # caller/shared group if that invariant is unexpectedly false.
+            if candidate == pid:
+                pgid = candidate
+            else:
+                logger.error(
+                    "[gallery_dl] refusing to signal process group %s for pid %s: expected an isolated session",
+                    candidate,
+                    pid,
+                )
+        except ProcessLookupError:
+            pass
+    else:
+        logger.error("[gallery_dl] refusing process-group signal for invalid pid: %r", pid)
+
+    try:
+        if pgid is not None:
+            os.killpg(pgid, signal.SIGTERM)
+        else:
+            proc.terminate()
+    except ProcessLookupError:
+        pass
+
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace)
+        return
+    except TimeoutError:
+        pass
+
+    try:
+        if pgid is not None:
+            os.killpg(pgid, signal.SIGKILL)
+        else:
+            proc.kill()
+    except ProcessLookupError:
+        pass
+
+    try:
+        await asyncio.wait_for(proc.wait(), timeout=grace)
+    except TimeoutError:
+        logger.error("[gallery_dl] process pid=%r pgid=%r did not exit after SIGKILL", pid, pgid)
+
+
 async def _heartbeat_loop(
     state: _DownloadState,
     proc: asyncio.subprocess.Process,
@@ -525,10 +589,7 @@ async def _heartbeat_loop(
             if not alive:
                 logger.error("[gallery_dl] semaphore eviction — killing process")
                 state.cancelled = True
-                try:
-                    proc.kill()
-                except ProcessLookupError:
-                    pass
+                await _terminate_process_tree(proc)
                 return "evicted"
         except Exception as exc:
             logger.warning("[gallery_dl] heartbeat callback error: %s", exc)
@@ -547,10 +608,7 @@ async def _inactivity_watchdog(
         elapsed = asyncio.get_running_loop().time() - state.last_activity
         if elapsed >= timeout:
             logger.error("[gallery_dl] inactivity timeout (%ds) — killing process", timeout)
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            await _terminate_process_tree(proc)
             return "inactivity_timeout"
 
 
@@ -571,16 +629,11 @@ async def _pause_cancel_watcher(
             state.gdl_state = GDL_STATE_CANCELLED
             _sync_diagnostic(state, diagnostic_ctx)
             logger.info("[gallery_dl] cancel detected, killing process")
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            await _terminate_process_tree(proc)
             return "cancelled"
 
         # Pause: suspend reading by sending SIGSTOP, resume with SIGCONT
         if pause_check is not None and await pause_check():
-            import signal
-
             pause_start = asyncio.get_running_loop().time()
             prev_state = state.gdl_state
             state.gdl_state = GDL_STATE_PAUSED
@@ -598,9 +651,9 @@ async def _pause_cancel_watcher(
                     _sync_diagnostic(state, diagnostic_ctx)
                     try:
                         proc.send_signal(signal.SIGCONT)
-                        proc.kill()
                     except ProcessLookupError, OSError:
                         pass
+                    await _terminate_process_tree(proc)
                     return "cancelled"
                 await asyncio.sleep(0.5)
 
@@ -660,10 +713,7 @@ async def _on_file_with_validation(
                 state.html_response_count,
             )
             state.cancelled = True
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            await _terminate_process_tree(proc)
         elif state.html_response_count >= 3:
             from core.events import EventType, emit_safe
 
@@ -817,6 +867,11 @@ class GalleryDlPlugin(SourcePlugin):
                 stdout=asyncio.subprocess.PIPE,
                 stderr=asyncio.subprocess.PIPE,
                 env={**os.environ, "PYTHONUNBUFFERED": "1"},
+                # HR-011: start a new session so proc.pid == its process
+                # group id. This lets every kill path below terminate the
+                # whole descendant tree (ffmpeg, etc.) via os.killpg instead
+                # of leaving orphans when only the top-level pid is killed.
+                start_new_session=True,
             )
         except OSError as exc:
             err = f"Failed to start gallery-dl: {exc}"
@@ -924,10 +979,7 @@ class GalleryDlPlugin(SourcePlugin):
         try:
             await asyncio.wait_for(proc.wait(), timeout=10)
         except TimeoutError:
-            try:
-                proc.kill()
-            except ProcessLookupError:
-                pass
+            await _terminate_process_tree(proc)
 
         # Capture unsupported + error URLs
         unsupported_urls: list[str] = []

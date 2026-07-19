@@ -153,7 +153,7 @@ async def _resolve_bulk_selection(
         raw = raw.decode("utf-8")
     try:
         payload = json.loads(raw)
-    except (TypeError, ValueError):
+    except TypeError, ValueError:
         raise HTTPException(status_code=404, detail="Selection expired or was not found")
     if payload.get("user_id") != auth["user_id"]:
         raise HTTPException(status_code=404, detail="Selection expired or was not found")
@@ -180,12 +180,8 @@ async def query_explorer(
         auth,
     )
     statement = build_explorer_gallery_query(spec, auth)
-    total = (
-        await db.execute(select(func.count()).select_from(statement.order_by(None).subquery()))
-    ).scalar_one()
-    galleries = (
-        (await db.execute(statement.offset(request.offset).limit(request.limit))).scalars().all()
-    )
+    total = (await db.execute(select(func.count()).select_from(statement.order_by(None).subquery()))).scalar_one()
+    galleries = (await db.execute(statement.offset(request.offset).limit(request.limit))).scalars().all()
     gallery_ids = [gallery.id for gallery in galleries]
     cover_map = await build_cover_map(db, gallery_ids, {gallery.id: gallery.source for gallery in galleries})
     favorite_set = await get_favorite_set(db, auth["user_id"], gallery_ids)
@@ -217,8 +213,9 @@ async def query_explorer(
             row.gallery_id: int(row.size)
             for row in (
                 await db.execute(
-                    select(unique_rows.c.gallery_id, func.sum(unique_rows.c.size).label("size"))
-                    .group_by(unique_rows.c.gallery_id)
+                    select(unique_rows.c.gallery_id, func.sum(unique_rows.c.size).label("size")).group_by(
+                        unique_rows.c.gallery_id
+                    )
                 )
             ).all()
         }
@@ -314,9 +311,7 @@ async def explorer_roots(
         row.source: row.count
         for row in (
             await db.execute(
-                select(Gallery.source, func.count(Gallery.id).label("count"))
-                .where(accessible)
-                .group_by(Gallery.source)
+                select(Gallery.source, func.count(Gallery.id).label("count")).where(accessible).group_by(Gallery.source)
             )
         ).all()
     }
@@ -344,8 +339,9 @@ async def explorer_roots(
         row.source: int(row.size)
         for row in (
             await db.execute(
-                select(unique_rows.c.source, func.coalesce(func.sum(unique_rows.c.size), 0).label("size"))
-                .group_by(unique_rows.c.source)
+                select(unique_rows.c.source, func.coalesce(func.sum(unique_rows.c.size), 0).label("size")).group_by(
+                    unique_rows.c.source
+                )
             )
         ).all()
     }
@@ -361,9 +357,7 @@ async def explorer_roots(
     ]
 
     owner_filter = True if auth["role"] == "admin" else Collection.user_id == auth["user_id"]
-    collection_count = (
-        await db.execute(select(func.count()).select_from(Collection).where(owner_filter))
-    ).scalar_one()
+    collection_count = (await db.execute(select(func.count()).select_from(Collection).where(owner_filter))).scalar_one()
     collection_rows = (
         await db.execute(
             select(Collection.id, Collection.name, func.count(CollectionGallery.gallery_id).label("count"))
@@ -375,9 +369,7 @@ async def explorer_roots(
         )
     ).all()
     saved_search_count = (
-        await db.execute(
-            select(func.count()).select_from(SavedSearch).where(SavedSearch.user_id == auth["user_id"])
-        )
+        await db.execute(select(func.count()).select_from(SavedSearch).where(SavedSearch.user_id == auth["user_id"]))
     ).scalar_one()
     saved_search_rows = (
         await db.execute(
@@ -403,17 +395,23 @@ async def explorer_roots(
     ).all()
     missing_metadata_count = (
         await db.execute(
-            select(func.count()).select_from(Gallery).where(accessible, or_(Gallery.title.is_(None), Gallery.pages.is_(None)))
+            select(func.count())
+            .select_from(Gallery)
+            .where(accessible, or_(Gallery.title.is_(None), Gallery.pages.is_(None)))
         )
     ).scalar_one()
     empty_count = (
         await db.execute(
-            select(func.count()).select_from(Gallery).where(accessible, ~exists(select(Image.id).where(Image.gallery_id == Gallery.id)))
+            select(func.count())
+            .select_from(Gallery)
+            .where(accessible, ~exists(select(Image.id).where(Image.gallery_id == Gallery.id)))
         )
     ).scalar_one()
     duplicate_count = (
         await db.execute(
-            select(func.count()).select_from(BlobRelationship).where(BlobRelationship.relationship.in_(("needs_t2", "potential")))
+            select(func.count())
+            .select_from(BlobRelationship)
+            .where(BlobRelationship.relationship.in_(("needs_t2", "potential")))
         )
     ).scalar_one()
 
@@ -446,22 +444,17 @@ async def explorer_roots(
             "sources": sources,
             "collections": {
                 "count": collection_count,
-                "items": [
-                    {"id": row.id, "name": row.name, "gallery_count": row.count} for row in collection_rows
-                ],
+                "items": [{"id": row.id, "name": row.name, "gallery_count": row.count} for row in collection_rows],
             },
             "artists": {
                 "count": artist_count,
                 "items": [
-                    {"id": row.artist_id, "name": row.artist_id, "gallery_count": row.count}
-                    for row in artist_rows
+                    {"id": row.artist_id, "name": row.artist_id, "gallery_count": row.count} for row in artist_rows
                 ],
             },
             "saved_searches": {
                 "count": saved_search_count,
-                "items": [
-                    {"id": row.id, "name": row.name, "query": row.query} for row in saved_search_rows
-                ],
+                "items": [{"id": row.id, "name": row.name, "query": row.query} for row in saved_search_rows],
             },
             "smart_views": {
                 "missing_metadata": missing_metadata_count,
@@ -540,7 +533,9 @@ async def physical_entries(
             if stats is None:
                 enqueue_tasks.append(_enqueue_folder_stats(library_id, relative))
             try:
-                has_children = any(entry.is_dir() or entry.suffix.lower() in MEDIA_EXTENSIONS for entry in resolved.iterdir())
+                has_children = any(
+                    entry.is_dir() or entry.suffix.lower() in MEDIA_EXTENSIONS for entry in resolved.iterdir()
+                )
             except OSError:
                 has_children = False
             result.append(
@@ -640,9 +635,7 @@ async def import_physical_folder(
     directory = resolve_library_relative(root, path, require_directory=True)
     canonical_path = relative_posix(root, directory)
     try:
-        has_media = any(
-            entry.is_file() and entry.suffix.lower() in MEDIA_EXTENSIONS for entry in directory.iterdir()
-        )
+        has_media = any(entry.is_file() and entry.suffix.lower() in MEDIA_EXTENSIONS for entry in directory.iterdir())
     except OSError:
         raise HTTPException(status_code=403, detail="Library directory is not readable")
     if not has_media:
@@ -781,7 +774,7 @@ async def bulk_gallery_action(
     """Apply tag, collection, rating, favorite, or read-later changes."""
     from datetime import UTC, datetime
 
-    from worker.tag_helpers import parse_tag_strings
+    from services.tag_helpers import parse_tag_strings
 
     gallery_ids = await _resolve_bulk_selection(request, auth)
     if not gallery_ids:
@@ -895,9 +888,7 @@ async def bulk_gallery_action(
                 if gallery_id not in existing:
                     position += 1
                     db.add(
-                        CollectionGallery(
-                            collection_id=request.collection_id, gallery_id=gallery_id, position=position
-                        )
+                        CollectionGallery(collection_id=request.collection_id, gallery_id=gallery_id, position=position)
                     )
                     affected += 1
         else:
@@ -912,7 +903,9 @@ async def bulk_gallery_action(
         tags = (
             (
                 await db.execute(
-                    select(Tag).where(or_(*[(Tag.namespace == namespace) & (Tag.name == name) for namespace, name in parsed]))
+                    select(Tag).where(
+                        or_(*[(Tag.namespace == namespace) & (Tag.name == name) for namespace, name in parsed])
+                    )
                 )
             )
             .scalars()
@@ -930,9 +923,7 @@ async def bulk_gallery_action(
         existing_rows = (
             (
                 await db.execute(
-                    select(GalleryTag).where(
-                        GalleryTag.gallery_id.in_(gallery_ids), GalleryTag.tag_id.in_(tag_ids)
-                    )
+                    select(GalleryTag).where(GalleryTag.gallery_id.in_(gallery_ids), GalleryTag.tag_id.in_(tag_ids))
                 )
             )
             .scalars()
@@ -943,11 +934,7 @@ async def bulk_gallery_action(
             for gallery_id in gallery_ids:
                 for tag_id in tag_ids:
                     if (gallery_id, tag_id) not in existing:
-                        db.add(
-                            GalleryTag(
-                                gallery_id=gallery_id, tag_id=tag_id, confidence=1.0, source="manual"
-                            )
-                        )
+                        db.add(GalleryTag(gallery_id=gallery_id, tag_id=tag_id, confidence=1.0, source="manual"))
                         affected += 1
         else:
             for row in existing_rows:

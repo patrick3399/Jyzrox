@@ -83,7 +83,7 @@ class EhSourcePlugin(SourcePlugin):
         # Claim only gallery URLs download() can actually parse. Other EH URLs
         # (tag search, favorites, /s/ pages) must fall through to the
         # gallery-dl fallback plugin, which has extractors for them.
-        from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
+        from services.eh_client import GALLERY_URL_RE as EH_GALLERY_URL_RE
 
         return EH_GALLERY_URL_RE.search(url) is not None
 
@@ -93,7 +93,7 @@ class EhSourcePlugin(SourcePlugin):
         credentials: dict | str | None,
     ) -> GalleryImportData | None:
         """Resolve EH gallery metadata before download via API."""
-        from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
+        from services.eh_client import GALLERY_URL_RE as EH_GALLERY_URL_RE
 
         m = EH_GALLERY_URL_RE.search(url)
         if not m:
@@ -168,7 +168,7 @@ class EhSourcePlugin(SourcePlugin):
     ) -> DownloadResult:
         """Download an EH gallery using the native EhClient downloader."""
         from core.config import settings
-        from services.eh_client import _GALLERY_URL_RE as EH_GALLERY_URL_RE
+        from services.eh_client import GALLERY_URL_RE as EH_GALLERY_URL_RE
         from services.eh_downloader import download_eh_gallery
 
         m = EH_GALLERY_URL_RE.search(url)

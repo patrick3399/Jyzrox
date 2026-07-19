@@ -1342,7 +1342,7 @@ async def batch_galleries(
     elif body.action == "add_tags":
         if not body.tags:
             raise HTTPException(status_code=400, detail="tags required for add_tags action")
-        from worker.tag_helpers import parse_tag_strings, rebuild_gallery_tags_array
+        from services.tag_helpers import parse_tag_strings, rebuild_gallery_tags_array
 
         parsed = parse_tag_strings(body.tags)
         if not parsed:
@@ -1406,7 +1406,7 @@ async def batch_galleries(
     elif body.action == "remove_tags":
         if not body.tags:
             raise HTTPException(status_code=400, detail="tags required for remove_tags action")
-        from worker.tag_helpers import parse_tag_strings, rebuild_gallery_tags_array
+        from services.tag_helpers import parse_tag_strings, rebuild_gallery_tags_array
 
         parsed = parse_tag_strings(body.tags)
         if not parsed:

@@ -135,6 +135,15 @@ class ProgressiveImporter:
         self._skip_duplicate = 0
         self._skip_excluded = 0
         self._skip_invalid = 0
+        # HR-002: per-file import failures (exception raised while importing a
+        # downloaded file), plus a count of files that imported successfully
+        # in this run. Used by finalize() to decide the terminal status
+        # (complete / partial / failed) instead of always reporting complete.
+        self._import_failures: list[dict[str, str]] = []
+        self._import_success_count = 0
+        # Set by finalize() to the resolved gallery.download_status; callers
+        # (worker/download.py) read this to decide the DB DownloadJob status.
+        self.download_status: str | None = None
 
     async def _load_gallery_state(self) -> None:
         """Load excluded blobs and current max page_num for the gallery.
@@ -239,6 +248,28 @@ class ProgressiveImporter:
 
         await self._load_gallery_state()
         return True
+
+    @property
+    def import_failures(self) -> tuple[dict[str, str], ...]:
+        """Return an immutable snapshot of per-file import failures."""
+        return tuple(dict(item) for item in self._import_failures)
+
+    @property
+    def import_success_count(self) -> int:
+        """Return the number of files committed successfully in this run."""
+        return self._import_success_count
+
+    @property
+    def skipped_duplicate_count(self) -> int:
+        return self._skip_duplicate
+
+    @property
+    def skipped_excluded_count(self) -> int:
+        return self._skip_excluded
+
+    @property
+    def skipped_invalid_count(self) -> int:
+        return self._skip_invalid
 
     async def _detect_trashed_conflict(self, session, source: str, source_id: str) -> int | None:
         """Audit #8: return the id of an existing *trashed* gallery for this
@@ -495,7 +526,21 @@ class ProgressiveImporter:
 
         async def _do_import():
             async with self._sem:
-                await self._import_single(file_path, page_num, sha256=sha256)
+                try:
+                    await self._import_single(file_path, page_num, sha256=sha256)
+                except Exception as exc:
+                    # Defensive: _import_single already catches its own errors
+                    # and records them below. This is a backstop for anything
+                    # that escapes it (e.g. semaphore/session-teardown bugs)
+                    # so finalize()'s gather never silently swallows a failure.
+                    logger.warning("[progressive] task error importing %s: %s", file_path.name, exc)
+                    self._import_failures.append(
+                        {
+                            "filename": file_path.name,
+                            "error_type": type(exc).__name__,
+                            "error": str(exc),
+                        }
+                    )
 
         task = asyncio.create_task(_do_import())
         self._tasks.append(task)
@@ -609,10 +654,19 @@ class ProgressiveImporter:
                     await create_library_symlink(self.source, self.source_id, file_path.name, blob)
                 await session.commit()
 
+            if inserted is not None:
+                self._import_success_count += 1
             logger.info("[progressive] imported: %s (page %d)", file_path.name, page_num)
 
         except Exception as exc:
             logger.warning("[progressive] failed to import %s: %s", file_path.name, exc)
+            self._import_failures.append(
+                {
+                    "filename": file_path.name,
+                    "error_type": type(exc).__name__,
+                    "error": str(exc),
+                }
+            )
 
     async def _touch_existing_source_item(self, image_id: int, visibility: str, page_num: int | None) -> None:
         """Refresh seen metadata for a source item that was already imported."""
@@ -726,6 +780,19 @@ class ProgressiveImporter:
         if not self.gallery_id:
             return None
 
+        # HR-002: derive the terminal status from actual per-file outcomes
+        # instead of always reporting "complete". Any recorded failure makes
+        # the run "partial"; if every attempted file failed and none
+        # succeeded in this run, it is "failed" outright — this overrides a
+        # caller-requested "partial" since it is a worse outcome.
+        if self._import_failures and self._import_success_count == 0:
+            resolved_status = "failed"
+        elif partial or self._import_failures:
+            resolved_status = "partial"
+        else:
+            resolved_status = "complete"
+        self.download_status = resolved_status
+
         async with AsyncSessionLocal() as session:
             from sqlalchemy import func
 
@@ -738,7 +805,7 @@ class ProgressiveImporter:
                     )
                 ).scalar_one()
                 gallery.pages = count
-                gallery.download_status = "partial" if partial else "complete"
+                gallery.download_status = resolved_status
                 gallery.metadata_updated_at = func.now()
                 await self._link_archive_entries(session)
                 # Capture before commit: attributes expire on commit

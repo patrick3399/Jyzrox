@@ -8,13 +8,60 @@ partial success, can_handle, resolve_output_dir, parse_metadata.
 
 import asyncio
 import json
+import signal
 from pathlib import Path
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, call, patch
 
 import pytest
 
 from core.site_config import DownloadParams
 from tests.helpers import make_mock_site_config_svc
+
+
+class TestProcessTreeTermination:
+    async def test_invalid_mock_pid_never_signals_process_group(self):
+        """A loose subprocess mock must not coerce its pid to process group 1."""
+        from plugins.builtin.gallery_dl.source import _terminate_process_tree
+
+        proc = MagicMock()
+        proc.wait = AsyncMock(return_value=0)
+        with (
+            patch("plugins.builtin.gallery_dl.source.os.getpgid") as getpgid,
+            patch("plugins.builtin.gallery_dl.source.os.killpg") as killpg,
+        ):
+            await _terminate_process_tree(proc, grace=0.01)
+
+        getpgid.assert_not_called()
+        killpg.assert_not_called()
+        proc.terminate.assert_called_once()
+        proc.wait.assert_awaited_once()
+
+    async def test_terminate_signals_process_group_and_reaps_child(self):
+        from plugins.builtin.gallery_dl.source import _terminate_process_tree
+
+        proc = MagicMock(pid=4321)
+        proc.wait = AsyncMock(return_value=0)
+        with (
+            patch("plugins.builtin.gallery_dl.source.os.getpgid", return_value=4321),
+            patch("plugins.builtin.gallery_dl.source.os.killpg") as killpg,
+        ):
+            await _terminate_process_tree(proc, grace=0.01)
+
+        killpg.assert_called_once_with(4321, signal.SIGTERM)
+        proc.wait.assert_awaited_once()
+
+    async def test_terminate_escalates_to_sigkill_after_grace_timeout(self):
+        from plugins.builtin.gallery_dl.source import _terminate_process_tree
+
+        proc = MagicMock(pid=4321)
+        proc.wait = AsyncMock(side_effect=[TimeoutError, 0])
+        with (
+            patch("plugins.builtin.gallery_dl.source.os.getpgid", return_value=4321),
+            patch("plugins.builtin.gallery_dl.source.os.killpg") as killpg,
+        ):
+            await _terminate_process_tree(proc, grace=0.01)
+
+        assert killpg.call_args_list == [call(4321, signal.SIGTERM), call(4321, signal.SIGKILL)]
 
 
 @pytest.fixture(autouse=True)
@@ -386,9 +433,11 @@ class TestGalleryDlDownloadErrors:
         """When SiteConfigService returns non-default retries, --retries flag is added."""
         proc = _make_fake_process([], returncode=0)
         captured_cmd = []
+        captured_kwargs = {}
 
         async def _capture_exec(*cmd, **kwargs):
             captured_cmd.extend(cmd)
+            captured_kwargs.update(kwargs)
             return proc
 
         mock_site_config_for_source.get_effective_download_params = AsyncMock(
@@ -419,6 +468,7 @@ class TestGalleryDlDownloadErrors:
         assert "--http-timeout" in captured_cmd
         idx2 = captured_cmd.index("--http-timeout")
         assert captured_cmd[idx2 + 1] == "60"
+        assert captured_kwargs["start_new_session"] is True
 
 
 # ---------------------------------------------------------------------------
@@ -565,21 +615,24 @@ class TestProcessLifecycle:
     """Tests for heartbeat loop, pause/cancel watcher, and skip counting."""
 
     async def test_heartbeat_loop_eviction_kills_process(self):
-        """_heartbeat_loop returns 'evicted' and kills the process when heartbeat returns False."""
+        """_heartbeat_loop returns 'evicted' and delegates safe tree termination."""
         from plugins.builtin.gallery_dl.source import _DownloadState, _heartbeat_loop
 
         state = _DownloadState()
         proc = MagicMock()
-        proc.kill = MagicMock()
+        terminate_tree = AsyncMock()
 
         async def lost_heartbeat():
             return False  # semaphore eviction immediately
 
-        with patch("asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch("plugins.builtin.gallery_dl.source._terminate_process_tree", terminate_tree),
+        ):
             result = await _heartbeat_loop(state, proc, lost_heartbeat, interval=0.01)
 
         assert result == "evicted"
-        proc.kill.assert_called_once()
+        terminate_tree.assert_awaited_once_with(proc)
         assert state.cancelled is True
 
     async def test_pause_cancel_watcher_sends_sigstop_and_sigcont(self):
@@ -591,7 +644,7 @@ class TestProcessLifecycle:
         state = _DownloadState()
         proc = MagicMock()
         proc.send_signal = MagicMock()
-        proc.kill = MagicMock()
+        terminate_tree = AsyncMock()
 
         # pause_check: True (pause), then False (unpause)
         pause_seq = [True, False]
@@ -605,12 +658,16 @@ class TestProcessLifecycle:
             cancel_calls += 1
             return cancel_calls > 4  # allow a few iterations before ending
 
-        with patch("asyncio.sleep", new_callable=AsyncMock):
+        with (
+            patch("asyncio.sleep", new_callable=AsyncMock),
+            patch("plugins.builtin.gallery_dl.source._terminate_process_tree", terminate_tree),
+        ):
             await _pause_cancel_watcher(state, proc, cancel_check, pause_check)
 
         # SIGSTOP sent during pause, SIGCONT sent on resume
         proc.send_signal.assert_any_call(signal.SIGSTOP)
         proc.send_signal.assert_any_call(signal.SIGCONT)
+        terminate_tree.assert_awaited_once_with(proc)
 
     async def test_skipped_files_counted_in_download_total(self, tmp_path):
         """JYZROX_SKIP lines should increment skipped_count and be included in result.total."""

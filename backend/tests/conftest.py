@@ -262,6 +262,13 @@ _fake_db_mod.async_session = _placeholder_factory
 _fake_db_mod.Base = _PlaceholderBase
 _fake_db_mod.AsyncSession = AsyncSession
 _fake_db_mod.get_db = _fake_get_db
+
+
+async def _fake_advisory_xact_lock(session, key):  # SQLite tests: advisory locks are a PG-only no-op
+    return None
+
+
+_fake_db_mod.advisory_xact_lock = _fake_advisory_xact_lock
 sys.modules["core.database"] = _fake_db_mod
 
 # ---------------------------------------------------------------------------

@@ -31,7 +31,7 @@ from core.redis_client import get_redis
 from core.utils import MOUNT_EXCLUDE_FS, MOUNT_EXCLUDE_PATHS
 from db.models import Blob, Gallery, Image, ImportConflict, LibraryPath
 from services.cas import create_library_symlink, store_blob
-from worker.helpers import _validate_image_magic
+from services.image_magic import validate_image_magic
 
 router = APIRouter(tags=["import"])
 
@@ -84,7 +84,7 @@ async def import_web_clip(
                     raise HTTPException(status_code=413, detail="Web clip is too large")
                 digest.update(chunk)
                 output.write(chunk)
-        if not _validate_image_magic(temp):
+        if not validate_image_magic(temp):
             raise HTTPException(status_code=400, detail="Web clip is not a valid image")
         sha256 = digest.hexdigest()
         source_id = f"{auth['user_id']}:{sha256}"
