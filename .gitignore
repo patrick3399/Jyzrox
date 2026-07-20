@@ -55,8 +55,10 @@ AGENTS.md
 # Codex session artifacts
 .codex
 
-# Refer specs
+# Local-only docs (durable via operator backup, see docs/ref/INDEX.md)
 docs/ref/
+docs/adr/
+docs/security-model.md
 
 # Project meta (not needed for build)
 TODO.md
@@ -70,6 +72,3 @@ screenshots/
 # Original icon sources (moved to pwa/public/)
 /icon.png
 /icon_clean.png
-
-# Superpowers skill docs
-docs/superpowers/
